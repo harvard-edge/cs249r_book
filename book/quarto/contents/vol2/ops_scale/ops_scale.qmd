@@ -1669,19 +1669,12 @@ Your organization needs to train `{python} TcoDecisionExercise.models_per_year_s
 
 \index{Infrastructure Planning}
 
-Infrastructure planning requires considering all levels of the stack simultaneously, because decisions at one level constrain choices at every other level. Selecting an accelerator determines the TDP, which determines the cooling architecture, which constrains the rack density, which constrains the pod layout, which determines the TCO. A systematic methodology integrates these interdependent decisions into a coherent process.
+Infrastructure planning begins when a workload requirement becomes a facility requirement. A frontier training run does not merely ask for more GPUs: the model size fixes the memory pressure, the token budget fixes the compute budget, the desired calendar time fixes aggregate throughput, and the communication pattern fixes the fabric that can make the cluster useful. Once an accelerator is chosen, its TDP constrains cooling, rack density, pod layout, facility power, and ultimately total cost of ownership. Planning is therefore a causal chain, not a purchasing checklist.
 
-The planning process begins with the **workload characterization**\index{Workload Characterization}, which records the constraints that determine cluster size:
+The first step is **workload characterization**\index{Workload Characterization}. Target model size determines the minimum accelerator count and memory strategy. Dataset size, target throughput, and acceptable training time turn the training objective into a FLOP-hour requirement. Communication pattern then changes the network answer: dense models stress AllReduce, mixture-of-experts models stress AllToAll, and pipeline-parallel models introduce more point-to-point traffic. Inference requirements add another constraint because the hardware that trains a model efficiently may not be the hardware that serves it economically.
 
-- **Target model size**: Determines the memory requirements and therefore the minimum number of accelerators.
-- **Training dataset size and target throughput**: Determines the total compute budget (in FLOP-hours) and, combined with the hardware's sustained throughput, the required cluster size.
-- **Acceptable training time**: Determines the minimum aggregate throughput and therefore the minimum cluster size.
-- **Dominant communication pattern**: AllReduce (dense models), AllToAll (MoE models), or point-to-point (pipeline parallelism) drives the network topology selection.
-- **Inference serving requirement**: If the trained model will be served at scale, the inference hardware may differ from the training hardware.
+With those constraints explicit, **bottom-up sizing**\index{Bottom-Up Sizing} works from the accelerator outward. Roofline analysis distinguishes compute-bound training from memory-bound serving. Compute-bound training optimizes for sustained TFLOP/s per dollar, while memory-bound inference often optimizes for bandwidth per dollar and latency per watt.
 
-With the workload characterized, the planning follows a **bottom-up sizing**\index{Bottom-Up Sizing} approach:
-
-- **Accelerator selection**: Based on the Roofline analysis of the workload (compute-bound or memory-bound), select the accelerator type. For compute-bound training, optimize for TFLOP/s per dollar; for memory-bound inference, optimize for bandwidth per dollar.
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1692,12 +1685,7 @@ class InfraFrontierTcoNodeRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-- **Node sizing**: Determine the number of accelerators per node and the memory tier allocation. For our `{python} InfraFrontierTcoNodeRecap.frontier_params_b_str` model, eight GPUs per node with tensor parallelism, 2 TB host DRAM for optimizer state offloading.
-- **Cluster sizing**: Divide the total compute budget by the per-node sustained throughput (accounting for MFU) to determine the number of nodes. Add 5--10 percent overhead for maintenance pool and spares.
-- **Network design**: Based on the communication pattern and cluster size, select the network topology (fat-tree, torus, or rail-optimized) and size the switch fabric. Calculate the expected scaling efficiency using @eq-distributed-training-scaling-efficiency to verify that the cluster size is within the efficient scaling regime.
-- **Power and cooling**: Calculate the total facility power requirement (IT load $\times$ PUE) using @tbl-rack-power as a reference for per-rack power budgets. Verify that the target facility (existing or planned) can deliver this power and cooling capacity.
-- **TCO analysis**: Compute the 3-year total cost of ownership, including hardware CapEx, facility CapEx, electricity OpEx, and staffing OpEx. Compare against cloud alternatives at the expected utilization rate.
-- **Timeline and risk assessment**: Map the procurement, construction, and deployment timelines to the project schedule. Identify the longest-lead items (typically electrical infrastructure and GPU procurement) and start those procurement processes first.
+Node sizing then decides how many accelerators share a host and which memory tier carries optimizer state, activations, and data staging. For our `{python} InfraFrontierTcoNodeRecap.frontier_params_b_str` model, that points toward eight GPUs per node with tensor parallelism and roughly 2 TB of host DRAM for optimizer-state offload. Cluster sizing divides the total compute budget by sustained per-node throughput after MFU losses, then adds 5--10 percent for a maintenance pool and spares. Network design follows the dominant collective and validates expected scaling with @eq-distributed-training-scaling-efficiency. Power and cooling translate the IT load through PUE, using @tbl-rack-power as the per-rack sanity check. The final step is not a spreadsheet afterthought: the 3-year TCO and the procurement timeline determine whether the cluster can arrive in time to matter, especially when GPU supply and electrical work dominate lead time.
 
 ```{python}
 #| echo: false
@@ -1771,7 +1759,9 @@ class RackPowerPlanningRecap:
     rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
 ```
 
-To illustrate this methodology concretely, consider planning the infrastructure for training our `{python} InfraFrontierTcoPlanningRecap.frontier_params_b_str` model. The training workload at large batch sizes is compute-bound, so the design optimizes for TFLOP/s per dollar and selects the H100 as the highest available TFLOP/s at reasonable cost. The 2.2 TB training state requires tensor parallelism within each node plus optimizer sharding, activation checkpointing, and offload across the wider data-parallel group, yielding a DGX H100 configuration. Sizing the cluster follows from the compute budget: at 6 FLOPs per parameter-token over 175 billion parameters and 300 billion tokens, the run requires `{python} PlanningThroughputScenario.total_flops_str`. Using a conservative BF16/FP16 planning basis rather than the FP8 headline peak, each H100 delivers `{python} PlanningThroughputScenario.h100_peak_tflop_per_s_str` peak and `{python} PlanningThroughputScenario.per_gpu_sustained_tflop_per_s_str` sustained at `{python} PlanningThroughputScenario.mfu_pct_str` MFU; with `{python} PlanningThroughputScenario.gpus_str`, the cluster reaches roughly `{python} PlanningThroughputScenario.cluster_sustained_pflop_per_s_str` sustained and completes the run in about `{python} PlanningThroughputScenario.ideal_days_str` days of idealized compute time, or 2--4 weeks with operational overhead. The TP-8, PP-4, DP-32 configuration generates structured AllReduce traffic suited to a rail-optimized InfiniBand fabric.
+The same chain becomes concrete for the `{python} InfraFrontierTcoPlanningRecap.frontier_params_b_str` training plan. Large-batch training is compute-bound, so the design optimizes for sustained TFLOP/s per dollar and selects H100s rather than a bandwidth-optimized inference accelerator. The 2.2 TB training state cannot live on one device, which forces tensor parallelism inside each node plus optimizer sharding, activation checkpointing, and offload across the wider data-parallel group. That memory constraint produces the DGX H100 node shape before the facility planner ever reaches the power spreadsheet.
+
+Cluster size then follows from the compute budget. At 6 FLOPs per parameter-token over 175 billion parameters and 300 billion tokens, the run requires `{python} PlanningThroughputScenario.total_flops_str`. Using a conservative BF16/FP16 planning basis rather than the FP8 headline peak, each H100 delivers `{python} PlanningThroughputScenario.h100_peak_tflop_per_s_str` peak and `{python} PlanningThroughputScenario.per_gpu_sustained_tflop_per_s_str` sustained at `{python} PlanningThroughputScenario.mfu_pct_str` MFU. With `{python} PlanningThroughputScenario.gpus_str`, the cluster reaches roughly `{python} PlanningThroughputScenario.cluster_sustained_pflop_per_s_str` sustained and completes the run in about `{python} PlanningThroughputScenario.ideal_days_str` days of idealized compute time, or 2--4 weeks with operational overhead. The TP-8, PP-4, DP-32 configuration generates structured AllReduce traffic suited to a rail-optimized InfiniBand fabric.
 
 The 128 nodes draw `{python} RackPowerPlanningRecap.rack_power_kw_str` per 4-node rack across 32 racks at approximately 1.1 MW of facility-relevant load, necessitating liquid cooling. The 3-year TCO comes to approximately \$63M on-premises; renting the six-runs-per-year workload in the cloud is roughly \$24--48M depending on whether each run lasts 2 or 4 weeks, while continuous cloud use is more expensive. The break-even depends on sustained utilization beyond the initial training run. GPU procurement (6--12 months) and facility preparation must begin immediately, with phased deployment targeting initial capacity within 3 months.
 
@@ -3734,49 +3724,19 @@ The abstraction-level decision\index{Level of Abstraction} is how much operation
 
 #### Level 1: Bare infrastructure {#sec-ml-operations-scale-level-1-bare-infrastructure-97d0}
 
-At the lowest level, platforms provide access to raw compute resources:
-
-- GPU allocations
-- Storage volumes
-- Network connectivity
-- Basic orchestration (Kubernetes namespaces)
-
-Model teams handle all ML-specific concerns: training code, serving infrastructure, monitoring, and deployment. This level offers maximum flexibility but requires deep infrastructure expertise on every model team.
+At the lowest level, the platform owns allocation rather than ML workflow. It provides GPU capacity, storage volumes, network connectivity, and basic orchestration such as Kubernetes namespaces. Model teams still build the training code, serving stack, monitoring, and deployment path themselves. This is the right abstraction when workloads are unusual and teams have strong infrastructure expertise; it becomes costly when many teams repeat the same operational work.
 
 #### Level 2: Container orchestration {#sec-ml-operations-scale-level-2-container-orchestration-ee8a}
 
-The next level adds containerization and orchestration:
-
-- Standardized container images for common frameworks
-- Kubernetes integration with ML-aware scheduling
-- Persistent volume management for datasets and artifacts
-- Basic service mesh for model-to-model communication
-
-Model teams package their code in containers but manage ML-specific workflows independently. This level reduces infrastructure burden while maintaining flexibility.
+The next boundary moves packaging and runtime concerns into the platform. Standardized container images, ML-aware Kubernetes integration, persistent volume management, and basic service-mesh support give teams a common execution substrate. Model teams still decide how experiments, training jobs, serving releases, and monitoring workflows fit together. The duplication tax falls, but operational correctness still depends heavily on each team.
 
 #### Level 3: ML-aware scheduling {#sec-ml-operations-scale-level-3-mlaware-scheduling-4895}
 
-Specialized ML orchestration adds:
-
-- Training job scheduling with GPU awareness
-- Hyperparameter tuning infrastructure
-- Distributed training coordination
-- Model serving with autoscaling
-
-Platforms at this level include Kubeflow, Ray, and similar frameworks. Model teams focus on model code while the platform handles operational complexity.
+At the third level, the platform starts owning ML-specific control loops. Training job scheduling understands GPU topology, hyperparameter tuning runs as shared infrastructure, distributed training coordination becomes repeatable, and model serving includes autoscaling rather than only a container target. Systems such as Kubeflow and Ray occupy this level. Model teams retain modeling judgment, but the platform absorbs the parts of ML operations that fail in similar ways across teams.
 
 #### Level 4: Full platform {#sec-ml-operations-scale-level-4-full-platform-424c}
 
-Complete ML platforms provide end-to-end capabilities:
-
-- Integrated development environments
-- Feature store integration
-- Experiment tracking and model registry
-- Automated CI/CD for models
-- Monitoring and alerting
-- Cost attribution and governance
-
-Platforms at this level include Vertex AI, SageMaker, and internal platforms at major technology companies such as TFX[^fn-tfx-production] at Google [@baylor2017] and MLflow [@zaharia2018accelerating]. Model teams interact through high-level APIs while the platform manages all operational concerns.
+The highest level treats the ML lifecycle as a governed internal product. Integrated development environments, feature stores, experiment tracking, model registries, CI/CD, monitoring, alerting, cost attribution, and governance appear behind high-level APIs. Platforms such as Vertex AI, SageMaker, TFX[^fn-tfx-production] at Google [@baylor2017], and MLflow [@zaharia2018accelerating] represent this end of the spectrum. The trade-off is explicit: teams gain speed and consistency by giving up some low-level control, while the platform team accepts responsibility for policy, reliability, and economic visibility.
 
 [^fn-tfx-production]: **TensorFlow Extended (TFX)**: Google's production ML platform. TFX's key architectural insight is that data validation via TensorFlow Data Validation (TFDV) gates the pipeline before training begins, catching schema violations and distribution drift that would otherwise produce silently degraded models. This "fail before training" philosophy prevents the most expensive class of ML waste: GPU-hours spent training on corrupted data. \index{TFX!data validation}
 
@@ -4743,48 +4703,23 @@ Feature definitions are production interfaces, so changing one without versionin
 
 #### Version schema {#sec-ml-operations-scale-version-schema-178c}
 
-A version schema must separate the parts of a feature that change for different reasons:
-
-- Definition version: The computation logic version
-- Data version: The source data version
-- Schema version: The output schema version
-
-Changes to any component create a new version, and models declare which feature versions they depend on. This declaration lets the platform block unsafe updates instead of discovering incompatible feature semantics in production.
+A version schema must separate the parts of a feature that change for different reasons. The definition version identifies the computation logic, the data version identifies the source snapshot or stream contract, and the schema version identifies the output type and shape. A change to any one of these can preserve API compatibility while changing model semantics, so dependent models declare the exact feature versions they consume. That declaration gives the platform a place to block unsafe updates before incompatible feature meanings reach production.
 
 #### Lineage tracking {#sec-ml-operations-scale-lineage-tracking-1265}
 
-Feature lineage records the complete provenance of each feature value so the platform can trace a bad prediction back through data, code, time, and validation state:
-
-- Source data tables and their versions
-- Transformation code and its version
-- Computation timestamp and environment
-- Quality metrics at computation time
-
-That provenance supports three operational actions:
-
-- Debugging unexpected feature behavior by tracing to sources
-- Impact analysis when source data changes
-- Reproducibility for auditing and compliance
+Feature lineage records enough provenance to make that version declaration actionable. Each feature value needs a path back to the source tables and their versions, the transformation code, the computation timestamp and environment, and the quality metrics observed when the value was produced. Without that path, a bad prediction leaves the operator comparing symptoms. With it, the platform can trace unexpected feature behavior to its source, estimate the blast radius of an upstream data change, and reproduce historical values for audit or compliance.
 
 ### Backfill procedures {#sec-ml-operations-scale-backfill-procedures-eb66}
 
-A backfill is a production migration over history: changing a feature definition rewrites the training record for every model that depends on it, so the platform must bound the compute cost, validate that recomputed values match, and preserve a path back. The challenges below follow from treating the backfill as a migration rather than a one-time recomputation.
+A backfill is a production migration over history: changing a feature definition rewrites the training record for every model that depends on it, so the platform must bound the compute cost, validate that recomputed values match, and preserve a path back. Treating the backfill as a migration changes the operational question from whether the computation can run once to whether history can be rewritten without corrupting future training data.
 
 #### Backfill challenges {#sec-ml-operations-scale-backfill-challenges-e4ee}
 
-Backfilling features at scale involves:
-
-- Computing features over historical data that may be in cold storage
-- Managing compute resources for potentially massive historical periods
-- Validating backfilled features against original computations
-- Coordinating with dependent pipelines during backfill\index{Backfill}
+At scale, historical data may have moved into cold storage, so recomputation first becomes a data-placement problem. The long historical window then competes with production workloads for compute. Even after the job finishes, the platform cannot simply trust the new values: it must compare overlapping periods against the original computation and coordinate with dependent pipelines so training jobs do not mix old and new semantics mid-run.\index{Backfill}
 
 #### Backfill best practices {#sec-ml-operations-scale-backfill-best-practices-d6aa}
 
-1. Incremental backfill: Process historical data in date partitions, validating each before proceeding
-2. Dual-write period: Run old and new feature computations in parallel before cutover
-3. Validation checks: Compare backfilled features against production features for overlapping periods
-4. Rollback capability: Maintain ability to revert to previous feature versions if issues emerge
+The practical pattern is incremental. Historical data is processed in date partitions, and each partition is validated before the next one starts. During a dual-write period, old and new computations run in parallel, which gives the platform overlapping values for comparison before cutover. Rollback remains possible because the previous feature version and its lineage stay available until dependent models have been retrained, evaluated, and redeployed.
 
 ### Scale challenges {#sec-ml-operations-scale-scale-challenges-b84b}
 
@@ -4792,32 +4727,15 @@ Feature stores at recommendation system scale face a coupled systems problem: re
 
 #### Request volume {#sec-ml-operations-scale-request-volume-603c}
 
-Major recommendation systems process billions of feature requests daily:
-
-- 1 billion daily recommendations
-- 100 features per recommendation
-- 100 billion feature lookups per day
-- 1.1 million lookups per second average, 5--10$\times$ peaks
+The arithmetic behind a large recommender explains why feature stores become serving infrastructure rather than a metadata convenience. One billion daily recommendations with 100 features per recommendation produces 100 billion feature lookups per day. That average load is roughly 1.1 million lookups per second before peak traffic, which commonly reaches 5--10$\times$ the mean.
 
 #### Latency requirements {#sec-ml-operations-scale-latency-requirements-5265}
 
-Feature retrieval must fit inside the overall latency budget because every extra lookup millisecond steals time from ranking:
-
-- Total recommendation latency budget: 50 ms
-- Feature retrieval allocation: 5-10 ms
-- Network overhead: 1-2 ms
-- Remaining for store lookup: 3-8 ms
-
-Meeting these budgets requires in-memory stores with geographic distribution to minimize network latency.
+Feature retrieval must fit inside the overall latency budget because every extra lookup millisecond steals time from ranking. If the recommendation budget is 50 ms, the feature store may receive only 5--10 ms. Network overhead can consume 1--2 ms of that allocation, leaving roughly 3--8 ms for the store lookup itself. Meeting this budget requires in-memory storage, careful batching, and geographic placement close enough to the serving fleet that network latency does not dominate.
 
 #### Storage scale {#sec-ml-operations-scale-storage-scale-28a3}
 
-Production feature stores also preserve enough state to serve current requests and reconstruct historical training data:
-
-- Billions of entities (users, items)
-- Thousands of features per entity
-- Terabytes of online data, petabytes of historical data
-- Multi-region replication for availability and latency
+Production feature stores also carry two time horizons at once. The online path keeps current values for billions of entities and thousands of features per entity, usually in the terabyte range before replication. The offline path keeps enough historical state to reconstruct training examples, which can push retained feature history into petabytes. Multi-region replication then serves both availability and latency, but it also makes freshness and consistency visible operational concerns.
 
 ### Data quality operations {#sec-ml-operations-scale-data-quality-operations-e77b}
 
@@ -4825,12 +4743,9 @@ Data quality\index{Data Quality} issues are a major source of production ML prob
 
 #### Data quality metrics {#sec-ml-operations-scale-data-quality-metrics-b0bd}
 
-Data quality must be quantified in dimensions that map directly to prevention gates:
+Data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce 10 million user events but delivering only 8.2 million is 82 percent complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than 5 percent of validation rules because allowing corrupt data through is more expensive than delaying a batch.
 
-1. **Completeness**: The percentage of expected records and fields that are present. For instance, a daily data pipeline expected to produce 10 million user events that delivers only 8.2 million indicates 82 percent completeness. Alert thresholds typically trigger if completeness drops below 95 percent for two consecutive hours, as this indicates pipeline failures or upstream data source issues.
-2. **Consistency**: Schema compliance and referential integrity. Features should conform to expected types and ranges. For example, an `age` feature should fall between 0 and 120; values of 999 or -1 suggest sentinel values or data errors. Production systems reject batches failing more than 5 percent of validation rules to prevent corrupt data from reaching models.
-3. **Timeliness**: Data freshness relative to SLO requirements. Fraud detection systems might require features less than 100 milliseconds old, while demographic features can tolerate staleness measured in days. Alerts trigger when feature freshness exceeds the SLO plus a 50 percent safety margin.
-4. **Accuracy**: Correctness of data values within expected distributions. Temperature sensor readings that drift after calibration lapses represent accuracy violations. Statistical tests including Kolmogorov-Smirnov for continuous features, chi-square for categorical features, and Maximum Mean Discrepancy for high-dimensional data detect distribution shifts on hourly aggregations.
+Timeliness measures freshness against the SLO of the consuming model. Fraud detection may need features less than 100 milliseconds old, while demographic features can tolerate staleness measured in days; the alert threshold should therefore be tied to the feature's use, not a global constant. Accuracy asks whether values remain correct within expected distributions. Sensor drift after calibration lapses, for example, can leave values well-typed but wrong. Statistical tests such as Kolmogorov-Smirnov for continuous features, chi-square for categorical features, and Maximum Mean Discrepancy for high-dimensional data turn those accuracy checks into recurring gates.
 
 #### Data validation patterns {#sec-ml-operations-scale-data-validation-patterns-9377}
 
@@ -4852,17 +4767,7 @@ A recommendation model's click-through rate (CTR) drops 8 percent over five days
 *Every minute of delayed detection compounds the cost.*
 :::
 
-The investigation proceeds through five steps:
-
-1. **Model metrics**\index{Model Metrics}: CTR degradation confirmed, declining from 4.2 percent to 3.87 percent
-
-2. **Data freshness**\index{Data!data freshness}: Feature freshness within SLO (< 1 hour)
-
-3. **Distribution analysis**: `user_engagement_score` mean shifted from 0.42 to 0.31 (26 percent decline)
-
-4. **Lineage tracking**\index{Lineage Tracking}: Upstream pipeline version change deployed five days prior
-
-5. **Root cause**\index{Root Cause}: Feature computation bug in new pipeline version
+The investigation starts with the model symptom and then works backward through the data path. Model metrics confirm that CTR declined from 4.2 percent to 3.87 percent, but freshness checks show that features still arrive within the 1-hour SLO. That rules out a stale pipeline and points to semantic change. Distribution analysis then shows the `user_engagement_score` mean shifting from 0.42 to 0.31, a 26 percent decline, and lineage tracking ties the shift to an upstream pipeline version deployed five days earlier. The root cause is not model drift but a feature computation bug in the new pipeline version.\index{Model Metrics}\index{Data!data freshness}\index{Lineage Tracking}\index{Root Cause}
 
 The quantitative impact is:
 
@@ -4880,41 +4785,21 @@ Data contracts\index{Data Contract} establish formal agreements between data pro
 
 Continuous validation\index{Continuous Validation} integrates checks throughout data pipelines: preingestion validation at source before accepting data, posttransformation verification of transformation logic correctness, and preserving validation as final checks before features reach models. Each stage acts as a quality gate.
 
-Incident response\index{Incident Response} procedures activate when quality degrades:
-
-1. Automated alerting to on-call team with degradation severity and affected systems
-2. Circuit breaker activation to prevent bad data reaching models
-3. Fallback to last-known-good data or cached features
-4. Quarantine bad batches for forensic analysis
-5. Root cause analysis and pipeline remediation
+Incident response\index{Incident Response} procedures activate when quality degrades. Automated alerts page the on-call team with severity and affected systems, while circuit breakers prevent known-bad data from reaching models. The serving path falls back to last-known-good data or cached features, and bad batches are quarantined for forensic analysis. Root-cause analysis then repairs the pipeline rather than only clearing the current alert.
 
 #### Feature monitoring at scale {#sec-ml-operations-scale-feature-monitoring-scale-1ea6}
 
-At enterprise scale with thousands of features, monitoring must aggregate by likely shared failure mode. Individual feature monitoring creates alert fatigue; hierarchical monitoring groups features by:
-
-Source system groups features that likely share upstream failure modes. An outage in the payment processing system affects all payment-related features simultaneously.
-
-Computation pipeline groups features that share transformation code and dependencies. Pipeline configuration errors or dependency issues affect entire feature groups.
-
-Update frequency separates real-time streaming features from daily batch features because staleness thresholds and alerting sensitivity vary by update pattern.
-
-Business domain groups user demographics, product catalog, and interaction features by their consumers, enabling targeted alerting.
+At enterprise scale with thousands of features, monitoring must aggregate by likely shared failure mode. Individual feature monitoring creates alert fatigue, while hierarchical monitoring preserves signal by grouping features along operational boundaries. Source-system grouping catches shared upstream failures, such as a payment-processing outage that affects all payment-related features simultaneously. Computation-pipeline grouping catches errors in transformation code or dependencies. Update-frequency grouping separates streaming features from daily batch features because staleness thresholds and alert sensitivity vary by update pattern. Business-domain grouping then routes user demographic, product catalog, and interaction-feature alerts to the teams that understand the affected models.
 
 #### Freshness tracking at scale {#sec-ml-operations-scale-freshness-tracking-scale-58a2}
 
-Feature freshness monitoring becomes computationally intensive at scale. For 10,000 features updated at different frequencies, continuous freshness checking generates substantial overhead, so efficient implementations reduce the number of checks without losing systemic signal.
-
-Sampling monitors freshness for representative samples rather than every feature value. For features with millions of entities (users, items), sampling 1 percent provides sufficient signal for detecting systemic freshness issues.
-
-Aggregation windows track freshness at the pipeline level rather than individual features. If a pipeline updates 500 features, monitoring the pipeline's update timestamp suffices.
-
-Threshold stratification reflects different freshness requirements. Revenue-critical features warrant per-feature monitoring; less critical features can use aggregated monitoring.
+Feature freshness monitoring becomes computationally intensive at scale. For 10,000 features updated at different frequencies, continuous freshness checking generates substantial overhead, so efficient implementations reduce the number of checks without losing systemic signal. Sampling representative entities rather than every feature value is usually enough to detect systemic freshness failures. Pipeline-level aggregation is even cheaper when one pipeline updates hundreds of features, because the pipeline update timestamp captures the freshness state of the group. Threshold stratification reserves per-feature monitoring for revenue-critical features and uses aggregated monitoring for features whose staleness has lower immediate impact.
 
 The computational overhead of freshness monitoring scales with the number of distinct features, not the volume of feature values. Efficient implementations maintain $\mathcal{O}(F)$ overhead where $F$ is the feature count, even when feature values scale to billions of entities.
 
 ### Organizational patterns {#sec-ml-operations-scale-organizational-patterns-e2e8}
 
-Technical infrastructure alone is insufficient for ML operations at scale. Organizational structure determines whether platform capabilities become shared infrastructure or another bottleneck.
+Technical infrastructure alone is insufficient for ML operations at scale. Organizational structure determines whether platform capabilities become shared infrastructure or another bottleneck. The central question is where an organization places invariants: deployment safety, observability, compliance, cost control, and feature consistency can either be enforced once by a platform or rediscovered differently by every model team.
 
 ### Centralized platform team {#sec-ml-operations-scale-centralized-platform-team-16fc}
 
@@ -4991,83 +4876,27 @@ A centralized ML platform team maximizes consistency by building and maintaining
 
 :::
 
-#### Advantages {#sec-ml-operations-scale-advantages-916f}
+Centralization works when the same operational mistakes would otherwise recur across the organization. A shared team can enforce consistent deployment, monitoring, and governance practices; invest once in training, serving, and observability infrastructure; and concentrate deep ML systems expertise that would be hard to replicate across many product teams. It also gives infrastructure engineers a visible career path rather than scattering them as one-person support functions.
 
-- **Consistency**: Centralized teams enforce standards across the organization. All models use consistent deployment, monitoring, and governance practices.
-- **Efficiency**: Platform investments benefit all model teams. Improvements to training infrastructure or serving systems immediately help everyone.
-- **Expertise concentration**: Platform engineers develop deep infrastructure expertise that would be difficult to replicate across many teams.
-- **Career paths**: Centralized teams provide clear career progression for ML infrastructure engineers.
-
-#### Disadvantages {#sec-ml-operations-scale-disadvantages-b3a1}
-
-- **Bottleneck risk**: All platform requests route through one team, which can become overwhelmed with competing priorities.
-- **Distance from problems**: Platform engineers may not fully understand model team requirements, leading to suboptimal solutions.
-- **Prioritization conflicts**: With many consuming teams, platform prioritization inevitably leaves some teams unsatisfied.
+The same structure can become a queue. If every platform request routes through one team, model teams wait on prioritization decisions they do not control. Distance from product context can also produce abstractions that are technically elegant but poorly matched to the consuming team's constraints. Centralization is therefore strongest when common invariants dominate local variation, and weakest when model teams need rapid domain-specific changes.
 
 ### Embedded ML engineers {#sec-ml-operations-scale-embedded-ml-engineers-35e2}
 
-The embedded pattern maximizes responsiveness by placing ML infrastructure expertise within model teams, with coordination through communities of practice rather than organizational structure.
-
-#### Advantages {#sec-ml-operations-scale-advantages-1a10}
-
-- **Responsiveness**: Platform expertise is directly available to model teams without cross-team coordination.
-- **Context**: Embedded engineers deeply understand their team's specific requirements and constraints.
-- **Ownership**: Teams own their full stack, enabling rapid iteration without external dependencies.
-
-#### Disadvantages {#sec-ml-operations-scale-disadvantages-a6a7}
-
-- **Fragmentation**: Without strong coordination, teams develop incompatible solutions to common problems.
-- **Duplication**: Each team may solve the same problems independently, wasting organization-wide effort.
-- **Career isolation**: Embedded platform engineers may lack career growth opportunities without a larger team context.
-- **Inconsistency**: Platform quality varies across teams based on embedded engineer skill and attention.
+The embedded pattern chooses proximity over uniformity by placing ML infrastructure expertise inside model teams, with coordination through communities of practice rather than a single reporting line. The benefit is responsiveness: the infrastructure engineer sees the team's data, model behavior, release pressure, and incident history directly, so local changes do not wait for cross-team scheduling. The cost appears later, when each team has solved deployment, monitoring, and feature management slightly differently. Fragmentation wastes engineering effort, complicates integration, and makes platform quality depend on the skill and bandwidth of whoever happens to be embedded with a given team.
 
 ### Hybrid models {#sec-ml-operations-scale-hybrid-models-237b}
 
-Most mature organizations adopt hybrid approaches because neither pure centralization nor pure embedding handles both shared infrastructure and domain-specific needs well.
+Most mature organizations adopt hybrid approaches because neither pure centralization nor pure embedding handles both shared infrastructure and domain-specific needs well. The core platform team owns compute, storage, networking, common training and serving systems, monitoring, security, compliance, and cost controls. Domain platform engineers then stay close to recommendation, language, vision, fraud, or search teams, where workload-specific requirements change faster than the shared substrate should.
 
-#### Tiered platform model {#sec-ml-operations-scale-tiered-platform-model-ac81}
-
-Core infrastructure is centralized while domain-specific components are distributed:
-
-```text
-Central Platform Team
-├── Core infrastructure (compute, storage, networking)
-├── Common ML systems (training, serving, monitoring)
-└── Cross-cutting concerns (security, compliance, cost)
-
-Domain Platform Teams
-├── Recommendation team: RecSys-specific infrastructure
-├── NLP team: LLM-specific infrastructure
-├── Vision team: Vision-specific infrastructure
-```
-
-The hybrid model recognizes that generic infrastructure benefits from centralization while domain-specific components require proximity to model teams.
-
-#### Federated platform model {#sec-ml-operations-scale-federated-platform-model-edf7}
-
-Multiple teams contribute to a shared platform with coordinated governance:
-
-```text
-Platform Governance Board
-├── Representatives from major contributing teams
-├── Architectural decisions and standards
-└── Prioritization of shared components
-
-Contributing Teams
-├── Team A: Maintains feature store components
-├── Team B: Maintains serving infrastructure
-├── Team C: Maintains monitoring systems
-```
-
-The federated model distributes platform work while maintaining coordination through governance structures.
+A federated version of the same idea distributes implementation work without giving up architectural control. Major contributing teams help maintain platform components, but standards, ownership boundaries, and prioritization are coordinated explicitly. This works only when governance has real authority: otherwise federation degenerates into embedding with more meetings.
 
 ### Organizational pattern selection {#sec-ml-operations-scale-organizational-pattern-selection-56a9}
 
-The appropriate organizational pattern depends on where standardization creates more value than local autonomy. @Tbl-ops-scale-org-factors maps five decision criteria to organizational recommendations: higher model counts (100+), stricter regulatory requirements, and earlier infrastructure maturity favor centralized platforms, while heterogeneous model portfolios and smaller organizations may benefit from distributed expertise:
+The appropriate organizational pattern depends on where standardization creates more value than local autonomy. @Tbl-ops-scale-org-factors summarizes the decision pressure: higher model counts, stricter regulatory requirements, and immature infrastructure favor centralized platforms, while heterogeneous model portfolios and smaller organizations may benefit from distributed expertise:
 
 | **Factor**                  | **Favors Centralized** | **Favors Distributed** |
 |:----------------------------|:----------------------:|:----------------------:|
-| **Model count**             |     Higher (100+)      |     Lower (10-20)      |
+| **Model count**             |     Higher (100+)      |     Lower (10--20)     |
 | **Model similarity**        |      Homogeneous       |     Heterogeneous      |
 | **Organization size**       |         Larger         |        Smaller         |
 | **Regulatory requirements** |        Stricter        |        Lighter         |
@@ -5077,26 +4906,9 @@ The appropriate organizational pattern depends on where standardization creates 
 
 #### Worked example: Organizational design {#sec-ml-operations-scale-worked-example-organizational-design-a02d}
 
-A technology company with 50 ML engineers across 8 teams is evaluating organizational structure. Current state:
+A technology company with 50 ML engineers across 8 teams illustrates the trade-off. It operates 80 production models across recommendation, fraud, search, and ads. Each team maintains its own deployment and monitoring, which has created duplicated infrastructure work and inconsistent integration practices. The model count is high enough that shared platform investment should pay off, but the domain diversity is real enough that a purely centralized team would struggle to understand every workload.
 
-- 80 production models across diverse domains (recommendation, fraud, search, ads)
-- Each team maintains its own deployment and monitoring
-- Significant duplication of infrastructure work
-- Inconsistent practices create integration challenges
-
-Analysis:
-
-- Model count (80) suggests centralization benefits
-- Domain diversity suggests some distributed expertise needed
-- Current duplication indicates centralization opportunity
-- Integration challenges require standardization
-
-Recommendation: Hybrid model with:
-
-- Central platform team (12–15 engineers) for core infrastructure
-- Domain-specific platform leads embedded in major teams
-- Community of practice for coordination
-- Shared contribution model for domain-specific components
+The resulting design is hybrid. A central platform team of roughly 12--15 engineers owns core infrastructure, while domain-specific platform leads remain embedded with the largest model teams. A community of practice coordinates standards and a shared contribution model lets domain teams upstream reusable components instead of maintaining permanent forks.
 
 By establishing shared contribution models and domain-specific platform leads, organizations can maintain a unified feature store that serves the entire enterprise without becoming a bottleneck. The same platform engineering and feature management concepts become more concrete in the hyper-scale systems built by large technology companies.
 
@@ -5244,6 +5056,8 @@ A runbook earns its place when it preserves diagnostic order under time pressure
 
 #### Structure for ML runbooks {#sec-ml-operations-scale-structure-ml-runbooks-5520}
 
+The runbook below encodes that order for a recommendation engagement drop. The symptom establishes the user-visible failure, the diagnostic steps move from business metrics to shared feature infrastructure to recent model changes, and the decision tree keeps mitigation tied to evidence. Escalation thresholds matter because an ML incident can look deceptively quiet: latency may be normal while revenue or engagement falls.
+
 ```markdown
 ### Runbook: Recommendation engagement drop
 
@@ -5279,15 +5093,11 @@ IF no_obvious_cause:
 
 #### Runbook anti-patterns {#sec-ml-operations-scale-runbook-antipatterns-e63d}
 
-Runbook anti-patterns break diagnostic order in three common ways:
-
-- Too specific: "If BERT model fails, restart container" does not generalize
-- Too vague: "Investigate the issue" provides no actionable guidance
-- Outdated: References deprecated systems or contacts
+Runbook anti-patterns break diagnostic order in three common ways. A too-specific instruction such as "If BERT model fails, restart container" encodes one historical fix rather than a reusable investigation. A vague instruction such as "Investigate the issue" transfers all judgment back to the responder at the worst possible time. An outdated runbook is worse than no runbook when it points responders toward deprecated systems, dead dashboards, or obsolete contacts.
 
 ### Post-incident reviews {#sec-ml-operations-scale-postincident-reviews-a8f5}
 
-Post-incident reviews (PIRs) transform incidents into organizational learning only when they turn one failure into a stronger platform control:
+Post-incident reviews (PIRs) transform incidents into organizational learning only when they turn one failure into a stronger platform control. The incident record should connect duration and user impact to the timeline of detection, attribution, mitigation, and recovery. Root causes should identify the control that failed or did not exist, and corrective actions should name owners and deadlines so the review changes the platform rather than only documenting the outage.
 
 #### PIR template for ML incidents {#sec-ml-operations-scale-pir-template-ml-incidents-d630}
 
