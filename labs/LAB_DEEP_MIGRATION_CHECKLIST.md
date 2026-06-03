@@ -169,15 +169,15 @@ Current status:
 - [x] Baseline track/report panel installed.
 
 Deep migration tasks:
-- [ ] Define track-specific data source, data rate, retention, and privacy assumptions.
-- [ ] Move reusable data-rate or storage assumptions to shared registries/helpers.
-- [ ] Add evidence for where data should be processed:
+- [x] Define track-specific data source, data rate, retention, and privacy assumptions.
+- [x] Move reusable data-rate or storage assumptions to shared registries/helpers.
+- [x] Add evidence for where data should be processed:
   - iPhone: local preprocessing vs upload.
   - Oura Ring: summary features vs raw sensor streams.
   - RoboTaxi: local sensor fusion vs fleet upload.
   - Cloud Fleet: warehouse/lake/feature-store placement.
-- [ ] Update plots/tables to show storage, bandwidth, or freshness tradeoffs.
-- [ ] Update report evidence with selected data placement and residual data risk.
+- [x] Update plots/tables to show storage, bandwidth, or freshness tradeoffs.
+- [x] Update report evidence with selected data placement and residual data risk.
 
 ### V1-05 - Activation Tax
 

@@ -144,6 +144,23 @@ def test_v1_03_variants_define_workflow_defaults():
         assert variant.assumptions["report_artifact"] == "workflow policy memo"
 
 
+def test_v1_04_variants_define_data_pipeline_defaults():
+    for variant in list_lab_variants("v1_04_data_gravity"):
+        assert "data_source" in variant.defaults
+        assert "data_rate_mb_s" in variant.defaults
+        assert "burst_multiplier" in variant.defaults
+        assert "ingest_capacity_mb_s" in variant.defaults
+        assert "preprocess_capacity_mb_s" in variant.defaults
+        assert "storage_capacity_mb_s" in variant.defaults
+        assert "upload_capacity_mb_s" in variant.defaults
+        assert "retention_days" in variant.defaults
+        assert "local_storage_mb" in variant.defaults
+        assert "privacy_stance" in variant.defaults
+        assert "movement_strategies" in variant.defaults
+        assert "retention_options" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "data pipeline architecture memo"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults

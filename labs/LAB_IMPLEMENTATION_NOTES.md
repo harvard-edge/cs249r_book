@@ -1511,3 +1511,52 @@ Plan updates needed in other labs:
 Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_03_ml_workflow.py labs/mlsysbook_labs/workflow.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_03_ml_workflow" -q`
+
+### 2026-06-03 - V1-04 Data Gravity Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_04_data_engr.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/data_pipeline.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_data_pipeline_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_04_data_engr.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.data_pipeline`, a shared helper layer for data source/rate profiles, stage utilization, bottleneck detection, movement frontier estimates, and pipeline architecture memos.
+- Added hand-authored V1-04 variants with track-specific data sources, data rates, stage capacities, local storage/retention policies, privacy stance, movement strategies, and report artifact metadata.
+- Replaced the old A100/SSD/egress-only notebook with a selected-track data pipeline lab: bottleneck prediction, stage utilization chart, movement strategy comparison, retention policy choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/data_pipeline.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific data rates, retention goals, stage capacities, and movement strategy assumptions live in typed V1-04 variants.
+
+Notebook-local constants removed:
+- A100/SSD/ResNet/DS-CNN fixed data examples, local egress formulas, cascade formulas, and false-positive trap constants were removed from V1-04.
+- Displayed data rates, stage utilizations, movement costs, quality retention, and residual data risk now come from `mlsysbook_labs.data_pipeline`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.data_pipeline` can be reused by V2 data storage/pipeline labs and by any lab that needs data-rate, movement, retention, or pipeline bottleneck evidence.
+
+Plan updates needed in other labs:
+- V1-09 data selection should reuse the movement/retention risk language when selection discards rare evidence.
+- V2-04 Data Pipeline Wall should reuse or extend `data_pipeline.py` rather than introducing a second pipeline model.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_04_data_engr.py labs/mlsysbook_labs/data_pipeline.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_04_data_engr" -q`
