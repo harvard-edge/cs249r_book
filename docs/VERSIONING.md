@@ -92,6 +92,7 @@ wrong — file an issue.
 | Kits | B | Hardware deployment labs, iterate fast, not formally cited |
 | Labs | B | Marimo notebooks, evolve constantly |
 | Instructors | B | Instructor guide, lower citation stakes |
+| Slides | B | Lecture decks, iterate with the book, not formally cited |
 
 Tier A and Tier B share the workflow UX. They differ in:
 
