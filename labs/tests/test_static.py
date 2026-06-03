@@ -247,6 +247,7 @@ class TestWheelConsistency:
             names = set(zf.namelist())
         required = {
             "mlsysbook_labs/__init__.py",
+            "mlsysbook_labs/architecture.py",
             "mlsysbook_labs/benchmarking.py",
             "mlsysbook_labs/capstone.py",
             "mlsysbook_labs/data_pipeline.py",

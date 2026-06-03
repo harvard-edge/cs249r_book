@@ -203,15 +203,15 @@ Deep migration tasks:
 Path: `labs/vol1/lab_06_nn_arch.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware architecture migration installed.
 
 Deep migration tasks:
-- [ ] Connect architecture choices to device and service constraints.
-- [ ] Add or reuse model architecture descriptors in `mlsysbook_labs`.
-- [ ] Compare track-appropriate model families instead of one generic model list.
-- [ ] Show why a model that is accurate in one track fails in another.
-- [ ] Add report fields for architecture choice, rejected alternatives, and dominant constraint.
-- [ ] Add tests for model-family registry lookups if introduced.
+- [x] Connect architecture choices to device and service constraints.
+- [x] Add or reuse model architecture descriptors in `mlsysbook_labs`.
+- [x] Compare track-appropriate model families instead of one generic model list.
+- [x] Show why a model that is accurate in one track fails in another.
+- [x] Add report fields for architecture choice, rejected alternatives, and dominant constraint.
+- [x] Add tests for model-family registry lookups if introduced.
 
 ### V1-07 - Framework Tax
 

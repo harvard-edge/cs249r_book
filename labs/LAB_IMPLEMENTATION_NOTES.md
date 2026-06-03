@@ -1609,3 +1609,52 @@ Plan updates needed in other labs:
 Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_05_nn_compute.py labs/mlsysbook_labs/neural_compute.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_05_nn_compute" -q`
+
+### 2026-06-03 - V1-06 Architecture Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_06_nn_arch.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/architecture.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_architecture_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_06_nn_arch.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.architecture`, a shared helper layer for architecture candidate descriptors, signature evaluation, scaling curves, failure boundaries, and recommendation memos.
+- Added hand-authored V1-06 variants with track-specific architecture stories, scaling variables, resource budgets, quality/kernel floors, validation tests, and candidate architecture families.
+- Replaced the old architecture notebook with a selected-track Architecture Tax lab: architecture-risk prediction, candidate signature table, scaling-shape curve, recommendation choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/architecture.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific architecture candidates, budgets, quality floors, and validation requirements live in typed V1-06 variants.
+
+Notebook-local constants removed:
+- Fixed H100/Jetson/iPhone constants, MLP/CNN/attention formulas, and generic architecture lists were removed from V1-06.
+- Displayed parameters, operations, activation memory, latency, power, kernel support, feasibility, scaling failures, and residual risk now come from `mlsysbook_labs.architecture`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.architecture` can be reused by V1-10 compression, V1-11 roofline, V2-10 inference, and any lab that needs architecture-family comparisons or scaling-failure curves.
+
+Plan updates needed in other labs:
+- V1-07 framework/runtime choices should reuse architecture kernel-support language when deciding whether a runtime is viable.
+- V1-10 compression should reference architecture-family residual risk when a compression method changes not only size but kernel support or inductive bias.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_06_nn_arch.py labs/mlsysbook_labs/architecture.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_06_nn_arch" -q`

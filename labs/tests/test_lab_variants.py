@@ -183,6 +183,25 @@ def test_v1_05_variants_define_neural_compute_defaults():
         assert variant.assumptions["report_artifact"] == "operator budget note"
 
 
+def test_v1_06_variants_define_architecture_defaults():
+    for variant in list_lab_variants("v1_06_architecture_tax"):
+        assert "architecture_story" in variant.defaults
+        assert "workload_label" in variant.defaults
+        assert "scaling_variable" in variant.defaults
+        assert "scaling_unit" in variant.defaults
+        assert "default_scale" in variant.defaults
+        assert "scale_min" in variant.defaults
+        assert "scale_max" in variant.defaults
+        assert "memory_budget_mb" in variant.defaults
+        assert "latency_budget_ms" in variant.defaults
+        assert "power_budget_w" in variant.defaults
+        assert "quality_floor_pct" in variant.defaults
+        assert "kernel_support_floor_pct" in variant.defaults
+        assert "candidate_architectures" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "architecture recommendation memo"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults
