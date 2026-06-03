@@ -146,7 +146,7 @@ Five architectural families define modern neural computation, each optimized for
 | **Transformers** | Relational (language)         | Dynamic attention              | Memory capacity $(S^2)$ |
 | **DLRM**         | Categorical (recommendations) | Embedding tables               | Memory capacity (TB+)   |
 
-: **Neural Architecture Families**: Each family targets a distinct data structure and exposes a distinct system bottleneck. The bottleneck column reads directly from the iron law: MLPs stress memory bandwidth through dense activations, CNNs stress compute throughput through high arithmetic intensity, RNNs stress sequential dependencies that prevent parallelism, transformers stress memory capacity through quadratic attention, and DLRM stresses memory capacity at terabyte scale through embedding tables. {#tbl-architecture-families}
+: **Neural Architecture Families**: Each family targets a distinct data structure and exposes a distinct system bottleneck. The bottleneck column reads directly from the iron law: MLPs stress memory bandwidth through dense activations, CNNs stress compute throughput because convolution reuses filters across many pixels, RNNs stress sequential dependencies that prevent parallelism, transformers stress memory capacity through quadratic attention, and DLRM stresses memory capacity at terabyte scale through embedding tables. {#tbl-architecture-families}
 
 Each architectural choice creates distinct computational signatures that propagate through every level of the implementation stack.
 
@@ -347,7 +347,7 @@ We choose these specific models because they isolate distinct system bottlenecks
 *   MobileNetV2 isolates edge latency (Efficient Convolution).
 *   KWS isolates always-on power (Tiny Inference).
 
-By studying these "Lighthouses," we learn engineering principles (roofline analysis, arithmetic intensity, memory hierarchies) that remain valid even as the specific "State of the Art" model architectures evolve.
+By studying these "Lighthouses," we learn engineering principles about math, memory movement, and locality that remain valid even as the specific "State of the Art" model architectures evolve. The next section gives those intuitions a quantitative name: arithmetic intensity.
 
 :::
 
@@ -407,17 +407,17 @@ class AutoregressiveInferenceCost:
     intensity_fp16_str = fmt(intensity_fp16, precision=0, commas=False)
 ```
 
-[^fn-autoregressive-inference]: **Autoregressive Generation**: A decoding strategy where each output token is conditioned on all previously generated tokens, requiring a full model forward pass per token. For a `{python} AutoregressiveInferenceCost.params_b_str`-parameter model in FP16, generating one token loads about `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of weights from HBM yet performs only a matrix-vector multiply, yielding an arithmetic intensity of about `{python} AutoregressiveInferenceCost.intensity_fp16_str` FLOP/byte. This token-by-token serial dependency is what makes LLM inference fundamentally bandwidth-bound rather than compute bound, and why the KV cache, which stores prior key-value vectors to avoid recomputation, becomes the dominant memory consumer during generation. \index{Autoregressive Generation!bandwidth bottleneck}
+[^fn-autoregressive-inference]: **Autoregressive Generation**: A decoding strategy where each output token is conditioned on all previously generated tokens, requiring a full model forward pass per token. For a `{python} AutoregressiveInferenceCost.params_b_str`-parameter model in FP16, generating one token loads about `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of weights from HBM yet performs only a matrix-vector multiply, yielding a work-to-byte ratio of about `{python} AutoregressiveInferenceCost.intensity_fp16_str` FLOP/byte. This token-by-token serial dependency is what makes LLM inference fundamentally bandwidth-bound rather than compute bound. During generation, serving systems also keep compact attention state from earlier tokens; the attention section later names this state the key-value cache. \index{Autoregressive Generation!bandwidth bottleneck}
 
 DLRM [@naumov2019deep]
 The Deep Learning Recommendation Model (DLRM) was open-sourced by Meta to expose a workload that differs from CNNs and transformers in a critical way. While vision and language models are compute-heavy, recommendation systems are memory-heavy. They must look up user and item preferences in massive embedding tables that can reach terabytes in size, creating unique challenges for latency-critical serving (@sec-model-serving). DLRM is the standard benchmark for memory capacity and sparse memory access patterns in the data center.
 
 \index{Depthwise Separable Convolution!MobileNet}
 MobileNet [@howard2017mobilenets]\index{MobileNet}
-MobileNet challenged the trend of ever-larger models by prioritizing efficiency. It popularized depthwise separable convolutions for efficient vision models, an architectural innovation that reduced computational cost (FLOPs) by 8--9$\times$ for $3{\times}3$ kernels with minimal accuracy loss, making it a prime candidate for quantization techniques covered in @sec-model-compression. It proved that model architecture could be co-designed with hardware constraints, becoming the standard for running vision models on smartphones and embedded devices where battery life and latency are critical.
+MobileNet challenged the trend of ever-larger models by prioritizing efficiency. It popularized depthwise separable convolutions for efficient vision models, an architectural innovation that reduced computational cost (FLOPs) by 8--9$\times$ for $3{\times}3$ kernels with minimal accuracy loss. That smaller compute footprint made MobileNet a natural fit for later compression and lower-precision deployment techniques covered in @sec-model-compression. It proved that model architecture could be co-designed with hardware constraints, becoming the standard for running vision models on smartphones and embedded devices where battery life and latency are critical.
 
 Keyword Spotting (KWS) [@warden2018speech]\index{Keyword Spotting}
-Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represent the extreme end of efficiency. Designed to run on "always-on" microcontrollers with kilobyte-scale memory and milliwatt power budgets, these models (often Depthwise Separable CNNs) exemplify the constraints of TinyML. They force engineers to count every byte and cycle, driving innovations in extreme quantization (INT8/INT4) and specialized hardware.
+Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represent the extreme end of efficiency. Designed to run on "always-on" microcontrollers with kilobyte-scale memory and milliwatt power budgets, these models (often Depthwise Separable CNNs) exemplify the constraints of TinyML. They force engineers to count every byte and cycle, driving later techniques for very low-precision representation and specialized hardware.
 
 ### Arithmetic intensity spectrum {#sec-network-architectures-understanding-arithmetic-intensity-ade5}
 
@@ -608,13 +608,13 @@ class LighthouseSpecs:
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=True)
 ```
 
-| **Model**        | **Domain**  |                       **Params**                      |                    **FLOPs/Inf**                    |                     **Memory**                    | **Bottleneck** | **Role in Textbook**                     |
-|:-----------------|:------------|:-----------------------------------------------------:|:---------------------------------------------------:|:-------------------------------------------------:|:---------------|:-----------------------------------------|
-| **ResNet-50**    | Vision      |     `{python} LighthouseSpecs.resnet_params_m_str`    |     `{python} LighthouseSpecs.resnet_gflop_str`     |   `{python} LighthouseSpecs.resnet_fp32_mb_str`   | Compute        | Parallelism, quantization, and batching  |
-| **GPT-2 XL**     | Language    |      `{python} LighthouseSpecs.gpt2_params_b_str`     | `{python} LighthouseSpecs.gpt2_gflop_per_token_str` |    `{python} LighthouseSpecs.gpt2_fp32_gb_str`    | Mem. Bandwidth | Autoregressive generation and KV caching |
-| **DLRM**         | Recommender | `{python} LighthouseSpecs.dlrm_entries_b_str` billion |                         Low                         | `{python} LighthouseSpecs.dlrm_model_size_gb_str` | Mem. Capacity  | Embedding tables and scale-out systems   |
-| **MobileNetV2**  | Edge Vision |   `{python} LighthouseSpecs.mobilenet_params_m_str`   |    `{python} LighthouseSpecs.mobilenet_mflop_str`   |  `{python} LighthouseSpecs.mobilenet_fp32_mb_str` | Latency        | Depthwise convolutions and efficiency    |
-| **KWS (DS-CNN)** | Audio       |      `{python} LighthouseSpecs.kws_params_k_str`      |       `{python} LighthouseSpecs.kws_mflop_str`      |     `{python} LighthouseSpecs.kws_fp32_kb_str`    | Power          | Extreme quantization and always-on ops   |
+| **Model**        | **Domain**  |                       **Params**                      |                    **FLOPs/Inf**                    |                     **Memory**                    | **Bottleneck** | **Role in Textbook**                   |
+|:-----------------|:------------|:-----------------------------------------------------:|:---------------------------------------------------:|:-------------------------------------------------:|:---------------|:---------------------------------------|
+| **ResNet-50**    | Vision      |     `{python} LighthouseSpecs.resnet_params_m_str`    |     `{python} LighthouseSpecs.resnet_gflop_str`     |   `{python} LighthouseSpecs.resnet_fp32_mb_str`   | Compute        | Dense vision throughput                |
+| **GPT-2 XL**     | Language    |      `{python} LighthouseSpecs.gpt2_params_b_str`     | `{python} LighthouseSpecs.gpt2_gflop_per_token_str` |    `{python} LighthouseSpecs.gpt2_fp32_gb_str`    | Mem. Bandwidth | Token-by-token serving                 |
+| **DLRM**         | Recommender | `{python} LighthouseSpecs.dlrm_entries_b_str` billion |                         Low                         | `{python} LighthouseSpecs.dlrm_model_size_gb_str` | Mem. Capacity  | Embedding tables and scale-out systems |
+| **MobileNetV2**  | Edge Vision |   `{python} LighthouseSpecs.mobilenet_params_m_str`   |    `{python} LighthouseSpecs.mobilenet_mflop_str`   |  `{python} LighthouseSpecs.mobilenet_fp32_mb_str` | Latency        | Depthwise convolutions and efficiency  |
+| **KWS (DS-CNN)** | Audio       |      `{python} LighthouseSpecs.kws_params_k_str`      |       `{python} LighthouseSpecs.kws_mflop_str`      |     `{python} LighthouseSpecs.kws_fp32_kb_str`    | Power          | Always-on power budget                 |
 
 : **Lighthouse Model Comparison**: Quantitative characteristics and pedagogical roles of the five canonical workloads. Parameters and memory represent model weights at FP32 precision. FLOPs measured per single inference. The bottleneck column indicates the primary system constraint each model reveals: compute-bound models like ResNet stress arithmetic throughput, while bandwidth-bound models like GPT-2 stress memory transfer rates. {#tbl-lighthouse-comparison tbl-colwidths="[17,14,8,15,9,11,26]"}
 
@@ -1074,7 +1074,7 @@ Consider a simplified 4-pixel image processed by a 3-neuron hidden layer:
 
 The MNIST example makes this scale concrete. The 784-dimensional input connects to every neuron in the first hidden layer. A hidden layer with 100 neurons requires a $784{\times}100$ weight matrix (78,400 parameters), where each weight represents a learnable relationship between an input pixel and a hidden feature. This single layer anchors the computational analysis throughout this chapter.
 
-This algorithmic structure enables arbitrary feature relationships while creating specific computational patterns that computer systems must accommodate. Dense connectivity provides the universal approximation capability established earlier but introduces computational redundancy: while the theoretical power of MLPs enables modeling of any continuous function given sufficient width, this flexibility requires numerous parameters to learn relatively simple patterns. Every input feature influences every output, yielding maximum expressiveness at the cost of maximum computational expense. These trade-offs motivate optimization techniques that reduce computational demands while preserving model capability. Strategies including pruning and quantization are examined in @sec-model-compression, with @sec-hardware-acceleration exploring hardware-specific implementations that exploit regular matrix operation structure.
+This algorithmic structure enables arbitrary feature relationships while creating specific computational patterns that computer systems must accommodate. Dense connectivity provides the universal approximation capability established earlier but introduces computational redundancy: while the theoretical power of MLPs enables modeling of any continuous function given sufficient width, this flexibility requires numerous parameters to learn relatively simple patterns. Every input feature influences every output, yielding maximum expressiveness at the cost of maximum computational expense. These trade-offs motivate later compression strategies that reduce computational demands while preserving model capability, and @sec-hardware-acceleration explores hardware-specific implementations that exploit regular matrix operation structure.
 
 ### Computational mapping {#sec-network-architectures-computational-mapping-cf30}
 
@@ -1155,7 +1155,7 @@ This translation from mathematical abstraction to concrete computation exposes h
 
 [^fn-mac]: **Multiply-Accumulate (MAC)**\index{MAC!definition}: The atomic operation of neural networks: multiply two values and add to a running sum. Data center accelerators sustain $10^{14}$--$10^{15}$ MAC/s on dense kernels, while mobile chips reach $10^{12}$--$10^{13}$ MAC/s. The critical systems insight: a MAC itself costs ~1 pJ, but fetching its operands from off-chip DRAM costs ~200 pJ, a 200$\times$ energy gap that makes data movement, not arithmetic, the dominant constraint in ML system design. \index{MAC!energy cost}
 
-In our reference MNIST layer, each output neuron requires `{python} MLPLayerStats.mnist_mlp_macs_str` divided by 100, or 784, multiply-accumulate operations and at least `{python} MLPLayerStats.mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). While actual implementations use optimizations through libraries like Basic Linear Algebra Subprograms (BLAS)[^fn-dnn-blas] or cuBLAS, these patterns drive key system design decisions. The hardware architectures that accelerate these matrix operations, including GPU Tensor Cores[^fn-tensor-cores] and specialized AI accelerators, are covered in @sec-hardware-acceleration.
+In our reference MNIST layer, each output neuron requires `{python} MLPLayerStats.mnist_mlp_macs_str` divided by 100, or 784, multiply-accumulate operations and at least `{python} MLPLayerStats.mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). Production implementations call optimized matrix libraries such as Basic Linear Algebra Subprograms (BLAS)[^fn-dnn-blas], but the same nested-loop pattern still determines the system design problem. The hardware architectures that accelerate these matrix operations, including GPU Tensor Cores[^fn-tensor-cores] and specialized AI accelerators, are covered in @sec-hardware-acceleration.
 
 ::: {#lst-mlp_layer_compute lst-cap="**Dense Layer Computation**: Nested loops reveal $\mathcal{O}(B \times d_{\text{out}} \times d_{\text{in}})$ complexity where each output neuron requires num_inputs multiply-accumulate operations, explaining why MNIST classification demands 78,400 MACs per layer."}
 
@@ -3027,11 +3027,7 @@ class AttentionMemory:
 2.  **Elements**: `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.seq_len_str` $\times$ 12 heads = `{python} AttentionMemory.elements_str` elements.
 3.  **Memory**: At FP16 (`{python} AttentionMemory.bytes_per_element_value_str` bytes/element): `{python} AttentionMemory.elements_str` $\times$ `{python} AttentionMemory.bytes_per_element_value_str` bytes = `{python} AttentionMemory.single_layer_gb_str`.
 
-**Systems insight**: A single layer's attention matrix consumes `{python} AttentionMemory.single_layer_gb_str` of HBM. A `{python} AttentionMemory.num_layers_str`-layer model would require `{python} AttentionMemory.total_gb_str` just for transient attention scores, far exceeding any single GPU's capacity.
-This AI memory wall, introduced in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9, forces the use of:
-
-*   **FlashAttention**\index{FlashAttention!tiling strategy} (tiling to avoid materializing the full matrix).
-*   **Sparse Attention**\index{Attention Mechanism!sparse attention} (computing only a subset of scores).
+**Systems insight**: A single layer's attention matrix consumes `{python} AttentionMemory.single_layer_gb_str` of HBM. A `{python} AttentionMemory.num_layers_str`-layer model would require `{python} AttentionMemory.total_gb_str` just for transient attention scores, far exceeding any single GPU's capacity. This memory wall motivates two broad implementation strategies developed later: avoid materializing the full matrix by tiling the computation, or reduce the number of scores computed in the first place.
 
 :::
 
@@ -4167,11 +4163,7 @@ Gating mechanisms were born in RNNs, where early sequence models hit a "temporal
 
 [^fn-gru]: **GRU (Gated Recurrent Unit)**\index{GRU!efficiency}: @cho2014 describes a gated hidden unit for encoder-decoder translation that uses reset and update gates to control how the hidden state is updated. Relative to an LSTM's input, forget, and output gates plus candidate cell update, this gives a simpler gated recurrence. The broader systems lesson: architectural simplification can reduce state and matrix operations when it preserves task performance, a principle that recurs in efficiency-oriented designs from MobileNet to distilled transformers. \index{GRU!parameter efficiency}
 
-The key insight is that gating is not an RNN-specific technique—it is a general principle of using neural networks to modulate other neural networks. This concept has since migrated well beyond sequence processing:
-
-- **Transformers**: The softmax attention weights are themselves a gating mechanism, dynamically controlling how much each position contributes to the output. Mixture-of-Experts (MoE) routing uses learned gates to select which expert sub-networks process each token.
-- **Highway Networks**: Apply gating to feedforward layers, letting the network learn whether to transform or pass through input at each layer—a precursor to skip connections.
-- **Attention as gating**: Encoder-decoder\index{Encoder-Decoder!definition} attention\index{Architecture!encoder-decoder} [@bahdanau2014neural], originally introduced for machine translation, is a gating mechanism that learns which source positions to attend to. This building block became the foundation of the transformer architecture.
+The key insight is that gating is not an RNN-specific technique. It is a general principle of using one learned signal to modulate another learned signal. Highway Networks applied the idea to feedforward layers, letting the network decide whether to transform an input or pass it through, which made them an important precursor to skip connections. Attention uses the same principle at the sequence level: encoder-decoder\index{Encoder-Decoder!definition} attention\index{Architecture!encoder-decoder} [@bahdanau2014neural], originally introduced for machine translation, learns which source positions should influence each output position. In transformers, the softmax attention weights become the routing signal that controls how much each position contributes to the output, while later large-scale variants extend the same idea to explicit expert routing.
 
 The portability of gating reinforces the central theme: the building blocks that matter most are not tied to any single architecture but solve universal problems—in this case, the problem of selectively routing information through deep, complex networks.
 
@@ -4255,7 +4247,7 @@ This portability is the central lesson. Recent innovations continue the same pat
 
 : **Primitive Utilization Across Architectures**: Every architecture uses GEMM, but they differ in memory access patterns (sequential to random), data movement (broadcast to gather+reduce), and parallelism. Transformers combine elements from all previous families while introducing attention-specific patterns. {#tbl-primitive-comparison}
 
-For systems engineers, this building-block perspective answers a practical question: *which optimizations transfer?* GEMM tiling and mixed-precision compute benefit every architecture. Skip connection memory management applies to any residual network. Normalization kernel fusion helps CNNs and transformers alike. Only attention-specific optimizations (FlashAttention, sparse attention) remain architecture-specific—and even those build on the same underlying GEMM and memory-access primitives. @Sec-ml-frameworks shows how frameworks like PyTorch encapsulate these building blocks as composable `nn.Module` abstractions, while @sec-hardware-acceleration details how hardware exploits their shared computational patterns.
+For systems engineers, this building-block perspective separates portable optimizations from architecture-specific ones. GEMM tiling and mixed-precision compute benefit every architecture. Skip connection memory management applies to any residual network. Normalization kernel fusion helps CNNs and transformers alike. Attention-specific optimizations remain tied to attention's memory pattern, but even those build on the same underlying GEMM and memory-access primitives. @Sec-ml-frameworks shows how software frameworks encapsulate these building blocks as composable layer abstractions, while @sec-hardware-acceleration details how hardware exploits their shared computational patterns.
 
 With the architectural building blocks established, we now examine the lower-level computational, memory access, and data movement primitives that these building blocks compile down to on actual hardware.
 
@@ -4386,7 +4378,7 @@ Structured and unstructured sparsity are treated in @sec-model-compression-pruni
 
 The im2col[^fn-im2col] (image to column) technique is the bridge that turns sliding-window locality into the matrix-multiply path. It unfolds overlapping image patches into columns of a matrix (@fig-im2col-diagram). Each sliding window position in the convolution becomes a column in the transformed matrix, while the filter kernels are arranged as rows. This allows the convolution operation to be expressed as a standard GEMM (general matrix multiply) operation.
 
-The optimization trade-off is pragmatic: im2col spends memory to buy mature GEMM throughput. Decades of engineering effort have produced extraordinarily optimized GEMM implementations (cuBLAS, MKL, OpenBLAS), while convolution-specific code would need to be written from scratch for each target. The transformation duplicates data where windows overlap, but it enables CNNs to use these mature BLAS libraries and achieve 5--10$\times$ speedups on CPUs. In modern systems, these matrix multiplications map to specific hardware and software implementations. Data center accelerators can deliver on the order of hundreds of TFLOP/s on mixed-precision matrix operations, and software frameworks like PyTorch and TensorFlow automatically map these high-level operations to optimized matrix libraries (for example, NVIDIA cuBLAS and Intel oneMKL) that exploit available hardware capabilities.
+The optimization trade-off is pragmatic: im2col spends memory to buy mature GEMM throughput. Decades of engineering effort have produced extraordinarily optimized GEMM implementations (cuBLAS, MKL, OpenBLAS), while convolution-specific code would need to be written from scratch for each target. The transformation duplicates data where windows overlap, but it enables CNNs to use these mature BLAS libraries and achieve 5--10$\times$ speedups on CPUs. In modern systems, these matrix multiplications map to specific hardware and software implementations. Data center accelerators can deliver on the order of hundreds of TFLOP/s on mixed-precision matrix operations, and software frameworks automatically lower high-level convolution operations to optimized matrix libraries that exploit available hardware capabilities.
 
 [^fn-im2col]: **im2col (Image to Column)**\index{im2col!memory trade-off}: Rather than being a new learning algorithm, im2col-style lowering is an implementation technique used by CNN frameworks and libraries such as Caffe and cuDNN [@jia2014; @chetlur2014cudnn]: it converts convolutions into standard GEMM calls by unfolding overlapping patches into matrix columns. The trade-off is memory: in a simple fully materialized stride-1 $K{\times}K$ transform, interior input elements can appear in up to $K^2$ columns (9 times for $3{\times}3$ filters), though borders, stride, padding, tiling, and direct-convolution algorithms reduce the realized expansion. This memory-for-simplicity exchange explains why mobile frameworks (TFLite, NNAPI) prefer direct convolution, while data center GPUs with abundant HBM may use GEMM-oriented lowering when it improves throughput. \index{im2col!data center vs. mobile}
 
@@ -4395,7 +4387,7 @@ Sliding window operations are the local-reuse path. They compute local relations
 
 [^fn-systolic-array]: **Systolic Array**: Named for the heart's rhythmic contraction, the array's lockstep "pulse" of data through a grid of processors directly implements the efficient data reuse required by sliding window operations.\index{Systolic Array!etymology} By passing input values between neighboring processors, an expensive round-trip to off-chip DRAM is avoided for every single multiplication in the convolution. This is critical for efficiency, as a single off-chip memory access can cost over 100$\times$ more energy than a floating-point multiply-accumulate, and still more relative to low-precision arithmetic.\index{Systolic Array!TPU}
 
-Dynamic computation is the adaptive-routing path. The operation itself depends on the input data, a capability that emerged prominently with attention mechanisms but applies to adaptive processing more broadly. In transformer attention, each query dynamically determines its interaction weights with all keys; for a sequence of length 512, 512 different weight patterns must be computed on the fly. Unlike fixed patterns where the computation graph is known in advance, dynamic computation requires runtime decisions. This creates specific implementation challenges: hardware must provide flexible data routing (modern GPUs employ dynamic scheduling) and support variable computation patterns, while software frameworks require efficient mechanisms for handling data-dependent execution paths (PyTorch's dynamic computation graphs, TensorFlow's dynamic control flow).
+Dynamic computation is the adaptive-routing path. The operation itself depends on the input data, a capability that emerged prominently with attention mechanisms but applies to adaptive processing more broadly. In transformer attention, each query dynamically determines its interaction weights with all keys; for a sequence of length 512, 512 different weight patterns must be computed on the fly. Unlike fixed patterns where the computation graph is known in advance, dynamic computation requires runtime decisions. This creates specific implementation challenges: hardware must provide flexible data routing and support variable computation patterns, while software frameworks require efficient mechanisms for handling data-dependent execution paths.
 
 Real architectures combine these paths, which is why primitive-level reasoning is a design tool rather than a taxonomy. A transformer layer processing a sequence of 512 tokens uses matrix multiplications for feature projections ($512{\times}512$ operations implemented through Tensor Cores), may employ sliding windows for efficient attention over long sequences (using specialized memory access patterns for local regions), and requires dynamic computation for attention weights (computing $512{\times}512$ attention patterns at runtime). The interaction between primitives creates specific demands on system design, from memory hierarchy organization to computation scheduling.
 
@@ -4818,7 +4810,7 @@ The preceding sections analyzed each architecture through the four-part lens of 
 
 Production deployment introduces constraints beyond algorithmic performance: latency requirements, memory limitations, energy budgets, and fault tolerance needs. These are not four independent scorecards. Each family's production behavior traces back to the single structural property that defined it: dense connectivity, spatial locality, sequential dependence, or all-to-all attention. The same property that set a family's accuracy also governs how it parallelizes, how its latency scales, and how much memory it consumes.
 
-Parallelization characteristics diverge sharply across families. MLPs and CNNs scale well across multiple devices through data parallelism, achieving near-linear speedups with proper batch size scaling. RNNs face parallelization challenges due to sequential dependencies, requiring pipeline parallelism or other specialized techniques. Transformers achieve excellent parallelization across sequence positions but face the quadratic memory bottleneck (@sec-network-architectures-system-implications-05a3) that limits batch sizes and effective utilization. The distributed training strategies that implement these parallelization approaches (data, model, pipeline, and expert parallelism) are detailed in @sec-model-training.
+Parallelization characteristics diverge sharply across families. MLPs and CNNs scale well across multiple devices when independent examples can be split across the hardware. RNNs face parallelization challenges because time steps depend on earlier time steps, so extra hardware cannot remove the sequence's critical path. Transformers achieve excellent parallelization across sequence positions but face the quadratic memory bottleneck (@sec-network-architectures-system-implications-05a3) that limits batch sizes and effective utilization. @Sec-model-training later formalizes these strategies as data, model, pipeline, and expert parallelism.
 
 Latency profiles similarly reflect architectural assumptions. MLPs provide predictable latency proportional to layer size, making them suitable for real-time applications with strict service level agreement (SLA) requirements. CNNs exhibit variable latency depending on implementation strategy and hardware capabilities, with optimized implementations achieving sub-millisecond inference. RNNs create latency dependencies on sequence length, making them challenging for interactive applications. Transformers provide excellent throughput for batch processing but struggle with single-inference latency due to attention overhead.
 
@@ -4830,7 +4822,7 @@ Architectural differences also affect operational concerns such as fault toleran
 
 Different architectural patterns require distinct optimization strategies for efficient hardware mapping. Understanding these patterns allows systematic performance tuning and hardware selection decisions.
 
-Dense matrix operations in MLPs map naturally to tensor processing units and GPU Tensor Cores (@sec-hardware-acceleration details how these map to specific silicon implementations). These operations benefit from several key optimizations: matrix tiling to fit cache hierarchies, mixed-precision computation to double throughput, and operation fusion to reduce memory traffic. Optimal tile sizes depend on cache hierarchy, typically $64{\times}64$ for L1 cache and $256{\times}256$ for L2, while Tensor Cores achieve peak efficiency with specific dimension multiples such as $16{\times}16$ blocks for Volta architecture. @Sec-ml-frameworks examines how frameworks like PyTorch and JAX translate these high-level operations into optimized kernel launches on specific hardware.
+Dense matrix operations in MLPs map naturally to tensor processing units and GPU Tensor Cores (@sec-hardware-acceleration details how these map to specific silicon implementations). These operations benefit from three recurring optimizations: matrix tiling keeps active blocks close to the compute units, mixed-precision computation increases useful operations per second when accuracy allows it, and operation fusion reduces memory traffic by combining adjacent steps. @Sec-ml-frameworks later examines how frameworks translate these high-level operations into optimized kernel launches on specific hardware.
 
 ```{python}
 #| echo: false
@@ -4878,7 +4870,7 @@ CNNs benefit from specialized convolution algorithms and data layout optimizatio
 
 RNNs require different optimization approaches due to their temporal dependencies. Loop unrolling reduces control overhead but increases memory usage. State vectorization allows SIMD operations across multiple sequences. Wavefront parallelization exploits independence across timesteps for bidirectional processing.
 
-Transformer attention demands specialized optimizations that reduce memory usage and complexity. @Sec-model-training-flash-attention-ioaware-attention-optimization-3da0 examines FlashAttention[^fn-flashattention], while sparse attention patterns remain a model-structure optimization.
+Transformer attention demands specialized optimizations that reduce memory usage and complexity. The common theme is to keep attention scores close to the compute units or to avoid computing scores that the model structure does not need. @Sec-model-training-flash-attention-ioaware-attention-optimization-3da0 examines FlashAttention[^fn-flashattention] as a concrete tiling example, while sparse attention patterns remain a model-structure optimization.
 
 [^fn-flashattention]: **FlashAttention**\index{FlashAttention!IO-aware}: An IO-aware algorithm [@dao2022] that avoids materializing the full $S{\times}S$ attention matrix in HBM by fusing computation into a single kernel tiled to fit in SRAM. The result: 2--4$\times$ wall-clock speedup and memory reduction from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$, enabling training on sequences 4--16$\times$ longer than standard attention. FlashAttention demonstrates that algorithmic optimization of data movement $(D_{\text{vol}})$ can yield larger speedups than increasing raw compute $(R_{\text{peak}})$ -- a concrete validation of the iron law's data term. \index{FlashAttention!memory reduction}
 
@@ -5184,26 +5176,26 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 
 **Step 2**: Constraint analysis. @Tbl-nn-architectures-wildlife-constraints catalogs the five deployment constraints and the architectural choices each forces:
 
-| **Constraint**   | **Requirement**                | **Implication**                                    |
-|:-----------------|:-------------------------------|:---------------------------------------------------|
-| **Connectivity** | None (offline)                 | All inference must run on-device                   |
-| **Power**        | ~2 W average (solar + battery) | Rules out GPUs; must use low-power MCU or edge NPU |
-| **Latency**      | <500 ms per detection          | Allows batch size 1, no real-time streaming        |
-| **Memory**       | 512 MB RAM, 2 GB storage       | Model must fit in ~100 MB after quantization       |
-| **Accuracy**     | 90 percent+ on 50 species      | Requires sufficient model capacity                 |
+| **Constraint**   | **Requirement**                | **Implication**                                         |
+|:-----------------|:-------------------------------|:--------------------------------------------------------|
+| **Connectivity** | None (offline)                 | All inference must run on-device                        |
+| **Power**        | ~2 W average (solar + battery) | Rules out GPUs; must use low-power MCU or edge NPU      |
+| **Latency**      | <500 ms per detection          | Allows batch size 1, no real-time streaming             |
+| **Memory**       | 512 MB RAM, 2 GB storage       | Model must fit in ~100 MB after lower-precision storage |
+| **Accuracy**     | 90 percent+ on 50 species      | Requires sufficient model capacity                      |
 
-: **Wildlife monitoring constraints**: Five deployment constraints and the architectural choices they force for the camera-trap scenario. Each row eliminates a class of solutions: no connectivity rules out the cloud, the 2 W power envelope rules out GPUs, and the 100 MB memory budget forces aggressive quantization before any model search begins. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[16,33,51]"}
+: **Wildlife monitoring constraints**: Five deployment constraints and the architectural choices they force for the camera-trap scenario. Each row eliminates a class of solutions: no connectivity rules out the cloud, the 2 W power envelope rules out GPUs, and the 100 MB memory budget forces aggressive lower-precision storage before any model search begins. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[16,33,51]"}
 
 **Step 3**: Architecture evaluation using lighthouse benchmarks.
 Compare candidates against our Lighthouse models:
 
-- **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` params, `{python} WildlifeModelSizing.resnet_gflop_str`): Too compute- and power-heavy for this device. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` FP32, it is also marginal against the `{python} WildlifeModelSizing.model_budget_mb_str` model budget before quantization, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
-- **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` params, `{python} WildlifeModelSizing.mnv1_mflop_str`): Promising. `{python} WildlifeModelSizing.mnv1_fp32_mb_str` at FP32, `{python} WildlifeModelSizing.mnv1_int8_mb_str` quantized to INT8. Power-efficient depthwise separable convolutions.
+- **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` params, `{python} WildlifeModelSizing.resnet_gflop_str`): Too compute- and power-heavy for this device. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` FP32, it is also marginal against the `{python} WildlifeModelSizing.model_budget_mb_str` model budget before lower-precision weights, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
+- **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` params, `{python} WildlifeModelSizing.mnv1_mflop_str`): Promising. It needs `{python} WildlifeModelSizing.mnv1_fp32_mb_str` at FP32, or `{python} WildlifeModelSizing.mnv1_int8_mb_str` when each weight is stored as an 8-bit integer (INT8). Its depthwise separable convolutions are power-efficient.
 - **KWS DS-CNN** (`{python} WildlifeModelSizing.kws_example_params_str` params, `{python} WildlifeModelSizing.kws_example_mflop_str`): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
 
 **Architecture selection**: MobileNetV2 variant with width multiplier 0.75
 
-- **Parameters**: ~`{python} WildlifeModelSizing.mnv2_params_str` (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` INT8)
+- **Parameters**: ~`{python} WildlifeModelSizing.mnv2_params_str` (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights)
 - **FLOPs**: ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$
 - **Rationale**: Sufficient capacity for 50-class problem; fits memory budget with margin; depthwise separable convolutions are power-efficient
 
@@ -5232,7 +5224,7 @@ At `{python} WildlifeModelSizing.inferences_per_day_str`: `{python} WildlifeMode
 
 : **Wildlife camera deployment risks**: Top accuracy, thermal, and species-coverage risks for the MobileNetV2 deployment, paired with the engineering mitigation chosen for each. {#tbl-nn-architectures-wildlife-risks}
 
-**Final decision**: MobileNetV2 (`{python} WildlifeModelSizing.width_mult_str` width) with INT8 quantization, deployed on Cortex-A53 system on chip (SoC) with `{python} WildlifeModelSizing.edge_ram_mb_str` RAM.
+**Final decision**: MobileNetV2 (`{python} WildlifeModelSizing.width_mult_str` width) with INT8 weight storage, deployed on Cortex-A53 system on chip (SoC) with `{python} WildlifeModelSizing.edge_ram_mb_str` RAM.
 
 **Systems insight**: This architecture achieves the accuracy target while operating within the 2 W power envelope, processing images in about `{python} WildlifeModelSizing.compute_latency_ms_str` under the stated throughput assumption, and leaving sufficient memory headroom for system operations. The decision was driven by matching the CNN inductive bias to spatial data characteristics, then validating against hardware constraints using quantitative analysis.
 
@@ -5381,11 +5373,10 @@ class A100ClusterMemory:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = 8
-    a100_single_gb = 80  # marketed 80 GB HBM per A100 (pedagogical nominal)
     edge_device_mem_gb = 4
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_single = a100_single_gb * GB
+    a100_single = Hardware.Cloud.A100.memory.capacity
     edge_device_mem = edge_device_mem_gb * GB
     a100_8x_mem = a100_single * n_gpus
     memory_reduction = (a100_8x_mem / edge_device_mem).to("").magnitude
@@ -5402,7 +5393,7 @@ class A100ClusterMemory:
 
 Deployment mismatch creates another pitfall: optimizing architectural decisions for training hardware without considering deployment constraints.
 
-Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy to edge devices with `{python} A100ClusterMemory.edge_mem_gb_str`—the `{python} A100ClusterMemory.memory_reduction_mult_str` reduction requires architectural changes, not just quantization. As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack. Edge deployment compounds constraints: models must fit 10–100 MB storage, execute in 50–200 ms, and operate within 2–5 W power. Organizations deferring deployment considerations to "optimize later" encounter mismatches requiring costly redesigns that delay products by months.
+Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy to edge devices with `{python} A100ClusterMemory.edge_mem_gb_str`—the `{python} A100ClusterMemory.memory_reduction_mult_str` reduction requires architectural changes, not merely smaller weight formats. As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack. Edge deployment compounds constraints: models must fit 10–100 MB storage, execute in 50–200 ms, and operate within 2–5 W power. Organizations deferring deployment considerations to "optimize later" encounter mismatches requiring costly redesigns that delay products by months.
 
 The final pitfall is ignoring KV cache growth when estimating transformer serving costs.
 
