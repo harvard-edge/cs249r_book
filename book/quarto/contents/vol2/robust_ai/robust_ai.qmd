@@ -1255,7 +1255,7 @@ The vulnerability reflects core properties of how neural networks represent and 
 
 #### Attack categories and mechanisms {#sec-robust-ai-attack-categories-mechanisms-fed5}
 
-The attacker's available information and perturbation budget determine which category of adversarial attack applies. Each category tells the defender what the attacker can measure and which cost the defense must raise.
+The useful axis is not the attack name by itself but the attacker's access. Each mechanism reveals a different cost that the defense must raise: gradient access, optimization time, surrogate-model construction, or physical control over the sensor environment.
 
 The most direct case is white-box gradient access. Neural networks compute gradients to learn how parameter changes reduce loss; an attacker with access to gradients can run that logic against the input instead. For an image classifier that correctly identifies a cat, the gradient with respect to the input image reveals which pixel-level changes would most increase prediction error. The **Fast Gradient Sign Method**\index{Fast Gradient Sign Method}[^fn-fgsm-attack] turns that idea into a single-step attack by moving each input feature in the direction that increases loss fastest.
 
@@ -1309,7 +1309,7 @@ Physical-world attackers face the hardest constraint: the perturbation must surv
 
 :::
 
-The point of @Tbl-attack_types is defense selection, not vocabulary. The rows identify what the attacker uses to cross the decision boundary: gradients, optimization, surrogate transfer, or physical sensor manipulation. Each mechanism targets a specific relationship between the model's decision boundaries, the input data, and the attacker's objectives, producing incorrect predictions whose severity depends on the attack's sophistication and the defense measures in place.
+The point of @Tbl-attack_types is defense selection, not vocabulary. A model that fails a white-box PGD test has no credible worst-case robustness claim; an API-facing model must budget for surrogate transfer and probing; a safety-critical vision system must test the full sensor loop rather than only saved images. The rows therefore identify what the attacker uses to cross the decision boundary: gradients, optimization, surrogate transfer, or physical sensor manipulation.
 
 | **Category**     | **Method**      | **Mechanism**                                             |
 |:-----------------|:----------------|:----------------------------------------------------------|
@@ -1325,9 +1325,7 @@ The point of @Tbl-attack_types is defense selection, not vocabulary. The rows id
 
 : **Adversarial Attack Categories**\index{Adversarial Attack!categories}: Input perturbation attacks categorized by mechanism. {#tbl-attack_types tbl-colwidths="[15,18,67]"}
 
-Defending against adversarial attacks requires the multifaceted defense strategies detailed in @sec-robust-ai-defense-strategies-cb2d, including adversarial training, defensive distillation, input preprocessing, and ensemble methods.
-
-The arms race between attackers and defenders drives continuous development of new attack mechanisms and more effective defenses. Developing robust ML models requires understanding the specific mechanisms each attack exploits, because defenses designed for one attack category may offer no protection against another.
+The defense cannot be chosen generically. Adversarial training raises the cost of gradient-based attacks, input transformation disrupts some small perturbations before inference, ensembles make transfer less reliable, and physical evaluation exposes failures that digital tests miss. The next step is to trace what these attacks do to deployed systems before deciding which defense budget is worth paying.
 
 #### Impact on ML {#sec-robust-ai-impact-ml-7c6f}
 
@@ -1659,15 +1657,9 @@ fill=magenta!05,fit=(BRAIN1)(7-CH1)(5-CH3),line width=0.5pt](BB1){};
 
 :::
 
-Another mechanism involves modifying the input features of training examples without changing the labels. This might include imperceptible pixel-level changes in images, subtle perturbations in structured data, or embedding fixed patterns that act as triggers for backdoor attacks. These alterations are often designed using optimization techniques that maximize their influence on the model while minimizing detectability.
+After label modification, the attacker can keep the label intact and corrupt the features instead. Imperceptible image perturbations, subtle shifts in structured fields, and fixed trigger patterns all aim for the same outcome: the training example still appears legitimate, but it bends the learned decision boundary toward a future failure. Generative methods and data-synthesis tools raise the same risk at larger scale because they can create natural-looking examples whose only purpose is to distort what the model learns.
 
-More sophisticated attacks generate entirely new, malicious training examples. Adversarial methods, generative models, and data synthesis tools can all produce these synthetic samples. The attacker carefully crafts inputs that distort the model's decision boundary when incorporated into the training set. Such inputs appear natural and legitimate but are engineered to introduce vulnerabilities.
-
-Other attackers exploit weaknesses in data collection and preprocessing. When training data is sourced from web scraping, social media, or untrusted user submissions, poisoned samples can be introduced upstream. These samples pass through insufficient cleaning or validation checks and reach the model in a “trusted” form. Automated pipelines where human review is limited or absent are particularly vulnerable.
-
-In physically deployed systems, attackers can manipulate data at the source by altering the environment captured by a sensor. A self-driving car that sees visual markers on a road sign during deployment is experiencing a physical adversarial attack at inference time. If fleet-learning systems harvest those altered road-sign images and include them in future training, the same sensor manipulation becomes data poisoning because the compromised examples enter the training set.
-
-Online learning systems present another unique attack surface. Because these systems continuously adapt to new data streams, an attacker can introduce malicious samples incrementally, causing slow but steady shifts in model behavior that evade detection (@fig-poisoning-attack-example).\index{Data Poisoning!attack}
+Whether those examples become poisoning depends on the data boundary. Web scraping, social media feeds, crowdsourced annotation, and untrusted user submissions all allow poisoned records to enter upstream and pass through weak cleaning checks in a "trusted" form. Physical systems add a second path: a sticker on a road sign is an inference-time adversarial attack when the car sees it, but it becomes training-time poisoning if a fleet-learning pipeline later harvests that image and folds it into the corpus. Online learning systems tighten the feedback loop further, allowing an attacker to introduce small increments of malicious data until model behavior drifts without a single obvious anomaly (@fig-poisoning-attack-example).\index{Data Poisoning!attack}
 
 ::: {#fig-poisoning-attack-example fig-env="figure" fig-pos="htb" fig-cap="**Data Poisoning Attack**: Adversarial manipulation of training data introduces subtle perturbations that compromise model integrity; incremental poisoning gradually shifts model behavior over time, making detection challenging in online learning systems. This attack surface differs from adversarial examples because it targets the model during *training* rather than at *inference*." fig-alt="Diagram of a poisoned model aggregation workflow: attackers contribute updates that flow into a central aggregator, producing a poisoned aggregated model shown as interlocking gears."}
 
@@ -2069,19 +2061,15 @@ class RandomizedSmoothingRadius:
 
 ##### Detection techniques {#sec-robust-ai-detection-techniques-0e7e}
 
-Detecting adversarial examples before they reach the model forms the first line of defense only when the signal reaches a serving decision: reject, transform, route, or audit. Multiple techniques identify and flag suspicious inputs at different points in the inference pipeline.
-
-Statistical methods detect adversarial examples by analyzing the distributional properties of input data. The detector compares the input data distribution to a reference distribution, such as the training data distribution or a known benign distribution. Techniques like the Kolmogorov-Smirnov test[^fn-ks-test-adversarial] [@berger2014kolmogorov] or the Anderson-Darling test can measure the discrepancy between distributions and flag inputs that deviate significantly from the expected distribution.
+Detecting adversarial examples before they reach the model forms the first line of defense only when the signal reaches a serving decision: reject, transform, route, or audit. The cheapest signal asks whether the current input population still resembles the reference population. Statistical tests such as the Kolmogorov-Smirnov test[^fn-ks-test-adversarial] [@berger2014kolmogorov] or the Anderson-Darling test measure distributional discrepancy and can flag inputs that deviate from a known benign baseline.
 
 [^fn-ks-test-adversarial]: **Kolmogorov-Smirnov (K-S) Test**: Non-parametric test comparing two probability distributions, computationally efficient at $\mathcal{O}(n \log n)$ but limited to univariate distributions. For adversarial detection, K-S tests compare per-feature input distributions against training baselines, flagging deviations at $p$-values $< 0.05$. The critical limitation for ML systems: adversarial perturbations often preserve marginal distributions while corrupting joint structure, so K-S tests may miss attacks that MMD or embedding-space metrics would catch. \index{K-S Test!adversarial detection}
 
-Beyond distributional analysis, input transformation methods offer an alternative detection strategy. **Feature squeezing**\index{Feature Squeezing}[^fn-feature-squeeze-defense] [@xu2018] reduces input space complexity through dimensionality reduction or discretization, eliminating the small, imperceptible perturbations that adversarial examples typically rely on.
+That signal is weak against attacks that preserve marginal distributions, so production defenses often add a perturbation-destroying check. Feature squeezing\index{Feature Squeezing}[^fn-feature-squeeze-defense] [@xu2018] reduces input-space complexity through dimensionality reduction or discretization, then compares the model's prediction before and after the transformation. A large prediction change is evidence that the original input relied on brittle high-frequency detail.
 
 [^fn-feature-squeeze-defense]: **Feature Squeezing**: Defense proposed by @xu2018 that reduces input precision (for example, 256 to 16 color levels) or spatial resolution (median filtering) to destroy the fine-grained perturbations adversarial examples depend on. Eliminating 70--90 percent of adversarial examples while maintaining 95 percent+ clean accuracy, feature squeezing is practical for real-time serving. The detection mechanism compares predictions on original vs. squeezed inputs: large divergence flags adversarial manipulation at negligible latency cost. \index{Feature Squeezing!adversarial defense}
 
-Model uncertainty estimation provides a complementary detection mechanism by quantifying the confidence associated with predictions. Adversarial examples often exploit regions of high uncertainty in the model's decision boundary, so the system flags inputs with elevated uncertainty as suspicious. Several approaches exist for uncertainty estimation, each with distinct trade-offs between accuracy and computational cost.
-
-**Bayesian neural networks**\index{Bayesian Neural Networks!uncertainty estimation} provide the most principled uncertainty estimates by treating model weights as probability distributions, capturing both aleatoric (data-inherent) and epistemic (model) uncertainty through approximate inference methods. Ensemble methods (detailed further in @sec-robust-ai-defense-strategies-cb2d) achieve uncertainty estimation by combining predictions from multiple independently trained models and using prediction variance as an uncertainty measure. Both approaches deliver robust uncertainty quantification but incur significant computational overhead [@lakshminarayanan2017].
+The most expensive signal asks whether the model is uncertain about its own answer. Adversarial examples often sit near unstable regions of the decision boundary, so uncertainty can route an input for rejection, human review, or a more robust model. Bayesian neural networks\index{Bayesian Neural Networks!uncertainty estimation} estimate uncertainty by treating weights as distributions, while ensemble methods compare predictions from independently trained models and use disagreement as the warning signal [@lakshminarayanan2017]. Both improve detection quality but spend extra inference compute, which makes them easier to justify for batch scoring or safety interlocks than for every low-latency request.
 
 Dropout[^fn-dropout-robustness], originally designed as a regularization technique to prevent overfitting during training [@hinton2012improvingneuralnetworkspreventing], randomly deactivates a fraction of neurons during each training iteration, forcing the network to avoid over-reliance on specific neurons and improving generalization. The same mechanism can be repurposed for uncertainty estimation through **Monte Carlo dropout**\index{Monte Carlo Dropout}[^fn-mc-dropout-inference] at inference time, where multiple forward passes with different dropout masks approximate the uncertainty distribution. The resulting estimates are less precise than Bayesian methods because dropout was designed for regularization, not uncertainty quantification. Hybrid approaches that combine dropout with lightweight ensemble methods or Bayesian approximations balance computational efficiency with estimation quality, making uncertainty-based detection more practical for production deployment.
 
@@ -2125,13 +2113,7 @@ def adversarial_training_step(model, data, labels, epsilon=0.1):
 
 The implementation in @lst-adversarial-training generates adversarial examples on-the-fly during training by computing gradients with respect to input data via `requires_grad_` and the standard backward pass, applying the sign function to extract perturbation direction (`data.grad.sign()`), and mixing the resulting adversarial examples with clean training data through `torch.cat`. The `torch.clamp()` operation ensures pixel values remain valid, while the final concatenation doubles the effective batch size by combining clean and adversarial examples. This approach requires careful tuning of the perturbation budget $\epsilon$; optimized variants can reduce adversarial-training overhead by reusing gradient computations [@shafahi2019adversarial].
 
-Once adversarial examples are part of the training loop, deployment must coordinate robustness techniques with MLOps pipelines, monitoring strategies, and distributed training infrastructure that synchronizes updates across multiple nodes.
-
-The remaining strategies spend the defense budget at different layers of the pipeline. Defensive distillation\index{Defensive Distillation} [@papernot2016] trains a second model (the student) to mimic the behavior of the original model (the teacher). The student trains on the soft labels produced by the teacher, which are less sensitive to small perturbations. Because the student learns to generalize better and is less sensitive to adversarial noise, using it for inference reduces the impact of adversarial perturbations.
-
-Input preprocessing and transformation techniques remove or mitigate adversarial perturbations before the input reaches the ML model. Image denoising, JPEG compression, random resizing, padding, and random transformations all reduce the impact of adversarial perturbations and improve the model's robustness.
-
-Ensemble methods combine multiple models with different architectures, training data, or hyperparameters to make more robust predictions. Adversarial examples that fool one model rarely fool all models in the ensemble, leading to more reliable predictions. Diversification techniques such as varying preprocessing methods or feature representations for each ensemble member further enhance robustness.
+Once adversarial examples are part of the training loop, deployment must coordinate robustness techniques with MLOps pipelines, monitoring strategies, and distributed training infrastructure that synchronizes updates across multiple nodes. The remaining strategies move the spending point rather than eliminating the cost. Defensive distillation\index{Defensive Distillation} [@papernot2016] spends it during training by teaching a student model from the teacher's soft labels, which can smooth decision behavior but must still be evaluated against stronger attacks. Input preprocessing spends it at serving time: image denoising, JPEG compression, random resizing, padding, and random transformations try to erase perturbations before the model sees them. Ensembles spend it through redundancy, combining models with different architectures, training data, or preprocessing paths so that a perturbation that fools one member is less likely to fool all of them.
 
 ##### Evaluation and testing {#sec-robust-ai-evaluation-testing-4b54}
 
@@ -2477,11 +2459,11 @@ Influence functions\index{Influence Functions!data sanitization} [@koh2017unders
 # │ How: MSE loss scales as e^2; the residual term in the MSE gradient scales
 # │      linearly with e.
 # │
-# │ Imports: mlsysim.fmt (check, fmt)
+# │ Imports: mlsysim.fmt (check, fmt_multiple)
 # │ Exports: normal_error_mult_str, squared_loss_mult_str,
 # │          residual_gradient_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt
+from mlsysim.fmt import check, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HuberOutlierScaling:
@@ -2538,15 +2520,13 @@ Beyond detecting and correcting shifts after they occur (@sec-robust-ai-environm
 
 #### Self-supervised learning for robustness {#sec-robust-ai-selfsupervised-learning-robustness-0c94}
 
-Self-supervised learning\index{Self-Supervised Learning!robustness} (SSL) offers the potential for representations that are inherently more resilient to distribution shifts and adversarial perturbations. Unlike supervised learning that relies on labeled examples, SSL methods discover representations by solving pretext tasks that require understanding underlying data patterns and relationships.
+Self-supervised learning\index{Self-Supervised Learning!robustness} (SSL) changes the source of supervision. Instead of relying only on task labels, the model learns by solving pretext tasks that require structure in the data itself. This matters for robustness because many brittle models overfit to whichever labeled shortcut is easiest to exploit: a background texture, an annotation artifact, or a narrow phrasing pattern. A pretraining task that rewards stable structure across views, missing tokens, or masked image patches gives the representation a chance to learn signals that survive more deployment variation.
 
-Self-supervised approaches address several core limitations that contribute to neural network brittleness. SSL methods learn representations from environmental regularities and data structure, capturing invariant features that remain consistent across different conditions. Contrastive learning\index{Contrastive Learning} techniques, exemplified by SimCLR [@chen2020simclr], encourage representations that capture invariant features across different views of the same data, promoting robustness to transformations and perturbations. Masked language modeling\index{Masked Language Modeling}, as demonstrated by BERT [@devlin2019], and similar techniques in vision like Masked Autoencoders [@he2022] learn to predict based on context rather than surface patterns, developing more generalizable internal representations.
+Contrastive learning\index{Contrastive Learning} methods such as SimCLR [@chen2020simclr] make this idea concrete by pushing different views of the same example toward a shared representation. The model is rewarded for treating a crop, color shift, or augmentation as the same underlying object rather than as a new class-specific cue. Masked language modeling\index{Masked Language Modeling} in BERT [@devlin2019] and masked autoencoding in vision [@he2022] use a different route: they hide part of the input and force the model to reconstruct or predict it from context. Both families reduce dependence on a single supervised label signal, which is why SSL representations often transfer better when the deployment distribution differs from the labeled training set.
 
-Self-supervised representations demonstrate superior transfer capabilities compared to supervised counterparts, suggesting they capture more essential aspects of data structure. Learning from data structure rather than labels is inherently more robust because it relies on consistent patterns present across domains and conditions. SSL approaches can also use larger amounts of unlabeled data, improving generalization by exposing models to broader ranges of natural variation and building representations more resilient to the distribution shifts encountered in deployment.
+That transfer benefit is the main systems reason to use SSL in a robustness pipeline. Larger unlabeled corpora expose the model to domains, transformations, and rare cases that would be too expensive to label exhaustively. In production, SSL usually acts as a foundation rather than a complete defense: pretrain on broad unlabeled data, fine-tune on the supervised task, then apply the adversarial, drift, and poisoning defenses from @sec-robust-ai-input-attack-detection-defense-19d3 and @sec-robust-ai-data-poisoning-defenses-d070 to the task-specific model. Multi-task training can preserve some of this benefit by keeping a self-supervised objective active while the supervised task pulls the representation toward the deployment metric.
 
-Several strategies incorporate self-supervised learning into robust system design. Pretraining with self-supervised objectives before fine-tuning for specific tasks provides a robust foundation that transfers better across domains. Multi-task approaches that combine self-supervised and supervised objectives during training balance representation learning with task performance. SSL-learned representations also serve as a foundation for subsequent robust fine-tuning, often requiring fewer labeled examples to achieve robustness.
-
-Self-supervised learning for robustness remains an active research area with important limitations. Current SSL methods are still vulnerable to adversarial attacks, particularly when attackers understand the pretext tasks. The theoretical understanding of why and when SSL improves robustness remains incomplete, and computational overhead for SSL pretraining can be substantial, requiring careful consideration of resource constraints.
+The limitation is that SSL is not a robustness guarantee. A contrastive or masked-pretraining objective can still learn brittle shortcuts, and an attacker who understands the pretext task can target those shortcuts directly. The theory explaining when SSL improves robustness remains incomplete, and the compute cost can be substantial because pretraining moves work earlier in the lifecycle. The systems decision is therefore whether broader representation learning lowers the expected cost of drift, relabeling, and robust fine-tuning enough to justify the added pretraining budget.
 
 ## Fallacies and Pitfalls {#sec-robust-ai-fallacies-pitfalls-087e}
 
@@ -2619,7 +2599,7 @@ class RobustnessTaxRecap:
 
 ::: {.callout-chapter-connection title="From resilience to sustainability"}
 
-We have made our systems robust against the operational chaos of distribution drift, adversarial perturbation, and software faults. Yet a system that survives every failure while consuming a city's worth of power is not a viable long-term solution. In @sec-sustainable-ai, we confront the efficiency limits of the ML fleet, examining how lifecycle carbon accounting, carbon-aware scheduling, and algorithmic efficiency determine whether our systems remain economically and environmentally viable as they scale.
+Robustness protects the fleet against distribution drift, adversarial perturbation, and software faults. Yet a system that survives every failure while consuming a city's worth of power is not a viable long-term solution. The next chapter, @sec-sustainable-ai, turns to the efficiency limits of the ML fleet, examining how lifecycle carbon accounting, carbon-aware scheduling, and algorithmic efficiency determine whether these systems remain economically and environmentally viable as they scale.
 
 :::
 
