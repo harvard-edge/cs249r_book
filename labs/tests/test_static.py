@@ -253,6 +253,7 @@ class TestWheelConsistency:
             "mlsysbook_labs/data_pipeline.py",
             "mlsysbook_labs/deployment.py",
             "mlsysbook_labs/edge.py",
+            "mlsysbook_labs/frameworks.py",
             "mlsysbook_labs/inference.py",
             "mlsysbook_labs/schemas.py",
             "mlsysbook_labs/tracks.py",

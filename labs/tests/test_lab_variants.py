@@ -202,6 +202,25 @@ def test_v1_06_variants_define_architecture_defaults():
         assert variant.assumptions["report_artifact"] == "architecture recommendation memo"
 
 
+def test_v1_07_variants_define_framework_defaults():
+    for variant in list_lab_variants("v1_07_framework_tax"):
+        assert "runtime_story" in variant.defaults
+        assert "workload_label" in variant.defaults
+        assert "op_count" in variant.defaults
+        assert "compute_us_per_op" in variant.defaults
+        assert "transfer_us" in variant.defaults
+        assert "sync_us" in variant.defaults
+        assert "memory_us" in variant.defaults
+        assert "shape_dynamism_pct" in variant.defaults
+        assert "default_reuse_count" in variant.defaults
+        assert "latency_budget_ms" in variant.defaults
+        assert "memory_budget_mb" in variant.defaults
+        assert "kernel_support_floor_pct" in variant.defaults
+        assert "runtime_options" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "runtime deployment recommendation"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults

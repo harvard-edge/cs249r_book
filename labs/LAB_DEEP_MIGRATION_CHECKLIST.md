@@ -218,18 +218,18 @@ Deep migration tasks:
 Path: `labs/vol1/lab_07_ml_frameworks.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware framework/runtime migration installed.
 
 Deep migration tasks:
-- [ ] Make framework/runtime choice track-specific.
-- [ ] Add shared runtime/deployment-target catalog if needed.
-- [ ] Track examples:
+- [x] Make framework/runtime choice track-specific.
+- [x] Add shared runtime/deployment-target catalog if needed.
+- [x] Track examples:
   - iPhone: Core ML style deployment and operator support.
   - Oura Ring: TFLite Micro or MCU-oriented runtime.
   - RoboTaxi: TensorRT/accelerated edge runtime.
   - Cloud Fleet: server runtime with batching and observability.
-- [ ] Display operator coverage, packaging, and portability tradeoffs from shared facts.
-- [ ] Update report with selected runtime and deployment risk.
+- [x] Display operator coverage, packaging, and portability tradeoffs from shared facts.
+- [x] Update report with selected runtime and deployment risk.
 
 ### V1-08 - Training Gauntlet
 

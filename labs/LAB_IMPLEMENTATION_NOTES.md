@@ -1658,3 +1658,52 @@ Plan updates needed in other labs:
 Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_06_nn_arch.py labs/mlsysbook_labs/architecture.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_06_nn_arch" -q`
+
+### 2026-06-03 - V1-07 Framework Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_07_ml_frameworks.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/frameworks.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_framework_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_07_ml_frameworks.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.frameworks`, a shared helper layer for runtime/delegate options, dispatch stack decomposition, compile break-even, and runtime recommendation memos.
+- Added hand-authored V1-07 variants with track-specific runtime stories, operation profiles, latency/memory/kernel budgets, runtime options, unsupported-op consequences, validation tests, and report artifact metadata.
+- Replaced the old H100/ESP32 framework table notebook with a selected-track Framework Tax lab: overhead prediction, dispatch-stack chart, compile break-even chart, runtime recommendation, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/frameworks.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific runtime options, operation profiles, delegate/fallback assumptions, and validation requirements live in typed V1-07 variants.
+
+Notebook-local constants removed:
+- Fixed H100/ESP32 constants, framework footprint tables, latency multipliers, and generic dispatch/fusion/compile formulas were removed from V1-07.
+- Displayed dispatch stack components, runtime footprints, kernel support, compile break-even, unsupported-op warnings, and residual runtime risk now come from `mlsysbook_labs.frameworks`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.frameworks` can be reused by deployment, serving, edge, and fleet labs that need runtime/delegate support, graph-break, compile-amortization, or unsupported-op evidence.
+
+Plan updates needed in other labs:
+- V1-10 compression should use framework/runtime kernel-support checks when a compression recipe changes operator coverage.
+- V2-10 inference and V2-11 edge labs should reuse dispatch-stack and compile-amortization concepts rather than adding notebook-local runtime math.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_07_ml_frameworks.py labs/mlsysbook_labs/frameworks.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_07_ml_frameworks" -q`
