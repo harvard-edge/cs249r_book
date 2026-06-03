@@ -80,7 +80,7 @@ For each lab:
 - [x] 1. V2-11 Edge Intelligence: closest to device-specific constraints.
 - [x] 2. V1-11 Hardware Roofline: pressure-tests hardware registry and roofline plots.
 - [x] 3. V2-10 Inference Economy: connects latency, cost, batching, and deployment target.
-- [ ] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
+- [x] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
 - [ ] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
 - [ ] 6. V1-14 Silent Degradation: adds monitoring and drift evidence.
 - [ ] 7. V2-06 Collective Communication: upgrade existing rich wrapper to canonical tracks.
@@ -313,15 +313,17 @@ Deep migration tasks:
 Path: `labs/vol1/lab_12_perf_bench.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware notebook migration installed.
+- [x] Track selector, track context, source trace, and local report export installed.
+- [x] Shared benchmarking helper backs Amdahl, sustained benchmark, multi-metric, and tail-latency evidence.
 
 Deep migration tasks:
-- [ ] Standardize benchmark modalities for latency, throughput, memory, energy, and cost.
-- [ ] Add shared benchmark-result schema if needed.
-- [ ] Give each track a different "bad benchmark" trap.
-- [ ] Add track-specific benchmark plots and failure states.
-- [ ] Ensure report captures benchmark setup, misleading metric, corrected metric, and conclusion.
-- [ ] Add tests for benchmark schema/report serialization.
+- [x] Standardize benchmark modalities for latency, throughput, memory, energy, and cost.
+- [x] Add shared benchmark-result schema if needed.
+- [x] Give each track a different "bad benchmark" trap.
+- [x] Add track-specific benchmark plots and failure states.
+- [x] Ensure report captures benchmark setup, misleading metric, corrected metric, and conclusion.
+- [x] Add tests for benchmark schema/report serialization.
 
 ### V1-13 - Tail Latency Trap
 

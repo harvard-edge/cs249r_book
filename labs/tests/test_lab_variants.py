@@ -109,3 +109,26 @@ def test_v2_10_variants_define_inference_economy_defaults():
         assert "qps_per_slot" in variant.defaults
         assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "inference serving plan"
+
+
+def test_v1_12_variants_define_benchmarking_defaults():
+    for variant in list_lab_variants("v1_12_benchmarking_trap"):
+        assert "benchmark_claim" in variant.defaults
+        assert "hidden_failure_metric" in variant.defaults
+        assert "component_label" in variant.defaults
+        assert "metric_unit" in variant.defaults
+        assert "burst_value" in variant.defaults
+        assert "component_speedup" in variant.defaults
+        assert "serial_pct" in variant.defaults
+        assert "duration_s" in variant.defaults
+        assert "ambient_c" in variant.defaults
+        assert "cooling" in variant.defaults
+        assert "accuracy_min_pct" in variant.defaults
+        assert "p99_max_ms" in variant.defaults
+        assert "power_max_w" in variant.defaults
+        assert "throughput_min" in variant.defaults
+        assert "tail_base_ms" in variant.defaults
+        assert "tail_sigma" in variant.defaults
+        assert "tail_slo_ms" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "benchmark protocol memo"

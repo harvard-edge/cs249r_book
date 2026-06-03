@@ -33,41 +33,100 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
-    from mlsysim import Hardware, Models
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-
-    H100_TFLOPS = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW     = Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
-    H100_TDP    = Hardware.Cloud.H100.tdp.m_as("W")
-
-    A100_TFLOPS = Hardware.Cloud.A100.compute.peak_flops.m_as("TFLOPs/s")
-    A100_BW     = Hardware.Cloud.A100.memory.bandwidth.m_as("GB/s")
-
-    JETSON_TFLOPS = Hardware.Edge.JetsonOrinNX.compute.peak_flops.m_as("TFLOPs/s")
-    JETSON_TDP    = Hardware.Edge.JetsonOrinNX.tdp.m_as("W")
-
-    RESNET50_FLOPS = Models.Vision.ResNet50.inference_flops.m_as("flop")
-    RESNET50_PARAMS = Models.Vision.ResNet50.parameters.m_as("count")
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        amdahl_speedup,
+        benchmark_track_profile,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        metric_gate,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        sustained_benchmark,
+        tail_latency,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        A100_BW, A100_TFLOPS,
-        COLORS, H100_BW, H100_TDP, H100_TFLOPS,
-        JETSON_TDP, JETSON_TFLOPS,
-        LAB_CSS, RESNET50_FLOPS, RESNET50_PARAMS,
-        apply_plotly_theme, go, ledger, math, mo, np,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, amdahl_speedup,
+        apply_plotly_theme, benchmark_track_profile, build_lab_report,
+        get_lab_metadata, get_lab_track_variant, get_track_profile, go,
+        ledger, math, metric_gate, mo, np, report_export_panel,
+        resolve_mlsysim_ref, source_trace, sustained_benchmark,
+        tail_latency, track_context, track_selector,
+    )
+
+
+@app.cell
+def _(get_lab_metadata):
+    v1_12_metadata = get_lab_metadata("vol1/lab_12_perf_bench.py")
+    return (v1_12_metadata,)
+
+
+@app.cell(hide_code=True)
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v1_12_track_picker = track_selector(default=_default_track)
+    v1_12_track_picker
+    return (v1_12_track_picker,)
+
+
+@app.cell
+def _(
+    benchmark_track_profile,
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v1_12_track_picker,
+):
+    v1_12_track_id = v1_12_track_picker.value
+    v1_12_profile = get_track_profile(v1_12_track_id)
+    v1_12_variant = get_lab_track_variant("v1_12_benchmarking_trap", v1_12_profile.track_id)
+    v1_12_hardware = resolve_mlsysim_ref(v1_12_variant.hardware_ref)
+    v1_12_model = resolve_mlsysim_ref(v1_12_variant.model_ref)
+    v1_12_benchmark = benchmark_track_profile(
+        v1_12_profile,
+        v1_12_variant,
+        v1_12_hardware,
+        v1_12_model,
+    )
+    return (
+        v1_12_benchmark,
+        v1_12_hardware,
+        v1_12_model,
+        v1_12_profile,
+        v1_12_track_id,
+        v1_12_variant,
     )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 1: HEADER
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    v1_12_benchmark,
+    v1_12_metadata,
+    v1_12_profile,
+    v1_12_variant,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
@@ -76,7 +135,7 @@ def _(LAB_CSS, mo):
                 Machine Learning Systems &middot; Volume I &middot; Lab 12
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
+                       color: #f8fafc; line-height: 1.1;">
                 The Benchmarking Trap
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
@@ -85,9 +144,9 @@ def _(LAB_CSS, mo):
             </p>
             <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
                       max-width: 680px; line-height: 1.65;">
-                Vendor benchmarks are designed to make hardware look good. Your job is to
-                make hardware look honest &mdash; and the gap between the two is where
-                millions of dollars disappear.
+                {v1_12_variant.workload_summary} Your job is to make the benchmark
+                honest: expose {v1_12_benchmark.hidden_failure_metric}, not only
+                the headline claim.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
@@ -98,7 +157,12 @@ def _(LAB_CSS, mo):
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 12: Performance Benchmarking
+                    {v1_12_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v1_12_benchmark.hardware_ref}
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
@@ -108,6 +172,20 @@ def _(LAB_CSS, mo):
             </div>
         </div>
         """),
+        track_context(v1_12_profile),
+        source_trace(
+            {
+                "lab_id": v1_12_metadata.lab_id,
+                "track_id": v1_12_profile.track_id,
+                "hardware_ref": v1_12_variant.hardware_ref,
+                "model_ref": v1_12_variant.model_ref,
+                "shared_helper": "mlsysbook_labs.benchmarking",
+                "benchmark_claim": v1_12_benchmark.benchmark_claim,
+                "hidden_failure_metric": v1_12_benchmark.hidden_failure_metric,
+                "source_policy": v1_12_profile.source_policy,
+            },
+            summary="V1-12 resolves benchmark scenarios through MLSysIM refs and mlsysbook_labs.benchmarking calculations.",
+        ),
     ])
     return
 
@@ -201,10 +279,7 @@ def _(mo):
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
 def _(
-    COLORS, H100_BW, H100_TDP, H100_TFLOPS,
-    JETSON_TDP, JETSON_TFLOPS,
-    RESNET50_FLOPS, RESNET50_PARAMS,
-    apply_plotly_theme, go, math, mo, np,
+    apply_plotly_theme, go, mo, v1_12_benchmark,
 ):
     # ── Widgets ───────────────────────────────────────────────────────────
     pA_pred = mo.ui.radio(
@@ -214,15 +289,31 @@ def _(
             "C) ~2.0x (Amdahl's Law caps the gain)": "2x",
             "D) ~1.5x (even worse than expected)": "1_5x",
         },
-        label="Replace inference GPU with 10x faster. Pipeline: 45% preprocessing + 55% inference. "
-              "End-to-end speedup?",
+        label=(
+            f"Replace {v1_12_benchmark.component_label} with a "
+            f"{v1_12_benchmark.default_speedup:g}x faster implementation. "
+            f"{v1_12_benchmark.default_serial_pct:g}% of the pipeline is outside that component. "
+            "End-to-end speedup?"
+        ),
     )
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo):
-    pA_speedup = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Inference speedup (x)")
-    pA_serial = mo.ui.slider(start=5, stop=80, value=45, step=5, label="Non-inference fraction (%)")
+def _(mo, v1_12_benchmark):
+    pA_speedup = mo.ui.slider(
+        start=1,
+        stop=100,
+        value=int(v1_12_benchmark.default_speedup),
+        step=1,
+        label=f"{v1_12_benchmark.component_label} speedup (x)",
+    )
+    pA_serial = mo.ui.slider(
+        start=5,
+        stop=80,
+        value=int(v1_12_benchmark.default_serial_pct),
+        step=5,
+        label="Unchanged pipeline fraction (%)",
+    )
 
     pB_pred = mo.ui.radio(
         options={
@@ -231,18 +322,20 @@ def _(mo):
             "C) ~15 FPS (thermal throttle halves performance)": "15",
             "D) ~8 FPS (severe throttling)": "8",
         },
-        label="Edge device benchmarks at 30 FPS (1-min vendor test). "
-              "Sustained FPS after 10 min in fanless enclosure at 35C?",
+        label=(
+            f"{v1_12_benchmark.benchmark_claim}. What sustained "
+            f"{v1_12_benchmark.metric_unit} do you expect after the full benchmark protocol?"
+        ),
     )
     return (pA_serial, pA_speedup, pB_pred)
 
 @app.cell(hide_code=True)
-def _(mo):
-    pB_time = mo.ui.slider(start=0, stop=600, value=0, step=10, label="Time (seconds)")
-    pB_ambient = mo.ui.slider(start=20, stop=45, value=35, step=1, label="Ambient temp (C)")
+def _(mo, v1_12_benchmark):
+    pB_time = mo.ui.slider(start=0, stop=900, value=v1_12_benchmark.default_duration_s, step=10, label="Benchmark duration (seconds)")
+    pB_ambient = mo.ui.slider(start=20, stop=45, value=int(v1_12_benchmark.default_ambient_c), step=1, label="Ambient temp (C)")
     pB_cooling = mo.ui.dropdown(
         options={"Active fan": "active", "Passive heatsink": "passive", "Fanless": "fanless"},
-        value="Fanless",
+        value={"active": "Active fan", "passive": "Passive heatsink", "fanless": "Fanless"}[v1_12_benchmark.default_cooling],
         label="Cooling type",
     )
 
@@ -253,12 +346,15 @@ def _(mo):
             "C) No -- violates latency SLO (p99 > 100 ms)": "no_latency",
             "D) No -- violates power budget (> 5 W)": "no_power",
         },
-        label="Config A has highest accuracy (94%). Is it deployable?",
+        label=(
+            f"Config A has the best headline metric for {v1_12_benchmark.label}. "
+            f"Is it deployable under {v1_12_benchmark.guardrail_metric}?"
+        ),
     )
     return (pB_ambient, pB_cooling, pB_time, pC_pred)
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v1_12_benchmark):
     pC_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
     pC_precision = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
@@ -273,23 +369,28 @@ def _(mo):
             "C) No -- p99 ~500 ms due to heavy tail": "no",
             "D) Cannot determine": "unknown",
         },
-        label="Inference service: 50 ms average latency. SLO: 200 ms p99. Is the SLO satisfied?",
+        label=(
+            f"{v1_12_benchmark.label}: average latency looks acceptable. "
+            f"Does it satisfy {v1_12_benchmark.tail_slo_ms:g} ms p99?"
+        ),
     )
     return (pC_batch, pC_precision, pD_pred)
 
 # ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo):
-    pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=0.8, step=0.05, label="Tail heaviness (sigma)")
-    pD_slo = mo.ui.slider(start=50, stop=500, value=200, step=10, label="SLO threshold (ms)")
+def _(mo, v1_12_benchmark):
+    pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=v1_12_benchmark.tail_sigma, step=0.05, label="Tail heaviness (sigma)")
+    pD_slo = mo.ui.slider(start=10, stop=500, value=int(v1_12_benchmark.tail_slo_ms), step=10, label="SLO threshold (ms)")
     return (pD_sigma, pD_slo)
 
 @app.cell(hide_code=True)
 def _(
-    mo, pA_pred, pA_serial, pA_speedup,
+    COLORS, amdahl_speedup, apply_plotly_theme, go, math, metric_gate,
+    mo, np, pA_pred, pA_serial, pA_speedup,
     pB_ambient, pB_cooling, pB_pred, pB_time,
     pC_batch, pC_precision, pC_pred, pD_pred,
-    pD_sigma, pD_slo,
+    pD_sigma, pD_slo, sustained_benchmark, tail_latency,
+    v1_12_benchmark, v1_12_profile, v1_12_variant,
 ):
 
     # ─────────────────────────────────────────────────────────────────────
@@ -302,12 +403,12 @@ def _(
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
             <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; CFO, VisionStack AI
+                Incoming Message &middot; {v1_12_variant.stakeholder}
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Engineering wants a $30K GPU upgrade that is 10x faster for inference.
-                They claim it will make the whole pipeline 10x faster. Finance wants to know
-                the actual end-to-end speedup before approving the budget.&rdquo;
+                &ldquo;The benchmark claim is: {v1_12_benchmark.benchmark_claim}. The team says a
+                faster {v1_12_benchmark.component_label} makes the whole system faster. What
+                end-to-end speedup should we actually expect?&rdquo;
             </div>
         </div>
         """))
@@ -319,10 +420,10 @@ def _(
         ```
 
         Where f_serial is the fraction of time NOT affected by the speedup.
-        A 10x inference speedup with 45% preprocessing overhead yields:
+        The selected track's default component speedup and unchanged-pipeline fraction yield:
 
         ```
-        Speedup = 1 / (0.45 + 0.55/10) = 1 / 0.505 = 1.98x
+        Speedup = 1 / (serial_fraction + accelerated_fraction / component_speedup)
         ```
 
         The other 8x of hardware investment is wasted on a bottleneck that has already moved.
@@ -335,10 +436,11 @@ def _(
         items.append(mo.hstack([pA_speedup, pA_serial], justify="start"))
 
         _S = pA_speedup.value
-        _f = pA_serial.value / 100.0
-        _system_speedup = 1.0 / (_f + (1 - _f) / _S)
-        _asymptote = 1.0 / _f if _f > 0 else float('inf')
-        _wasted = (_S - _system_speedup) / _S * 100  # % of component speedup wasted
+        _amdahl = amdahl_speedup(component_speedup=_S, serial_pct=pA_serial.value)
+        _f = _amdahl.serial_fraction
+        _system_speedup = _amdahl.system_speedup
+        _asymptote = _amdahl.asymptote
+        _wasted = _amdahl.wasted_speedup_pct
 
         # Amdahl curve
         _speeds = np.arange(1, 101)
@@ -386,7 +488,7 @@ def _(
         apply_plotly_theme(_fig2)
         items.append(mo.as_html(_fig2))
 
-        _new_pre_frac = _t_pre / _total_after * 100
+        _new_pre_frac = _amdahl.new_serial_pct
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
@@ -419,7 +521,7 @@ S        = {_S}x (inference speedup)
 System   = 1 / ({_f:.2f} + {1-_f:.2f}/{_S}) = 1 / {_f + (1-_f)/_S:.3f} = {_system_speedup:.2f}x
 Asymptote = 1 / {_f:.2f} = {_asymptote:.1f}x (cannot exceed this regardless of S)
 ```
-*Source: Chapter 12, Amdahl's Law applied to ML pipelines*
+*Source: `mlsysbook_labs.amdahl_speedup`, applied to `{v1_12_benchmark.component_label}`.*
         """))
 
         if pA_pred.value == "2x":
@@ -462,12 +564,12 @@ With 45% serial overhead, even infinite inference speedup caps at $1/0.45 = 2.2\
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
             <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Edge Deployment Manager
+                Incoming Message &middot; {v1_12_variant.stakeholder}
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;The vendor demo showed 30 FPS. Our deployed units in outdoor enclosures
-                average 16 FPS after the first hour. The vendor says our hardware is defective.
-                Is it?&rdquo;
+                &ldquo;The benchmark says {v1_12_benchmark.benchmark_claim}. In production we see
+                {v1_12_benchmark.hidden_failure_metric}. Is the benchmark wrong, or is the
+                deployment defective?&rdquo;
             </div>
         </div>
         """))
@@ -494,24 +596,25 @@ With 45% serial overhead, even infinite inference speedup caps at $1/0.45 = 2.2\
         _t = pB_time.value  # seconds
         _t_amb = pB_ambient.value
         _cooling = pB_cooling.value
-        _tdp = 25  # Jetson-class TDP
+        _tdp = v1_12_benchmark.tdp_w
 
         # Thermal conductance by cooling type (W/K)
         _g_thermal = {"active": 5.0, "passive": 2.0, "fanless": 0.8}[_cooling]
         _tau = {"active": 120, "passive": 60, "fanless": 30}[_cooling]  # thermal time constant (s)
         _t_throttle = 85  # throttle threshold (C)
 
-        # Piecewise thermal model
-        _t_junction = _t_amb + (_tdp / _g_thermal) * (1 - math.exp(-_t / _tau))
-        _throttled = _t_junction > _t_throttle
-        _peak_fps = 30.0
-
-        if _throttled:
-            # Throttle: reduce FPS proportionally to how far over threshold
-            _throttle_factor = max(0.3, 1.0 - (_t_junction - _t_throttle) / 50.0)
-            _sustained_fps = _peak_fps * _throttle_factor
-        else:
-            _sustained_fps = _peak_fps
+        _peak_fps = v1_12_benchmark.burst_value
+        _thermal = sustained_benchmark(
+            peak_value=_peak_fps,
+            tdp_w=_tdp,
+            duration_s=_t,
+            ambient_c=_t_amb,
+            cooling=_cooling,
+            throttle_c=_t_throttle,
+        )
+        _t_junction = _thermal.junction_temp_c
+        _throttled = _thermal.throttled
+        _sustained_fps = _thermal.sustained_value
 
         # Time series
         _times = np.linspace(0, 600, 200)
@@ -564,7 +667,7 @@ With 45% serial overhead, even infinite inference speedup caps at $1/0.45 = 2.2\
                         text-align:center; background:white; border-top:3px solid {_fps_color}; flex:1;">
                 <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Sustained FPS</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{_fps_color};">{_sustained_fps:.0f} FPS</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">vendor claimed 30 FPS</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">claim: {_peak_fps:g} {v1_12_benchmark.metric_unit}</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
@@ -583,7 +686,7 @@ T_junction = {_t_amb} + ({_tdp} / {_g_thermal:.1f}) x (1 - exp(-{_t} / {_tau}))
            = {_t_junction:.1f}C  {"(> 85C = THROTTLING)" if _throttled else "(< 85C = normal)"}
 FPS        = {_sustained_fps:.0f} (vendor peak: {_peak_fps:.0f})
 ```
-*Source: Chapter 12, thermal throttling model*
+*Source: `mlsysbook_labs.sustained_benchmark`, using `{v1_12_benchmark.hardware_ref}` TDP.*
         """))
 
         if pB_pred.value == "15":
@@ -627,12 +730,12 @@ Vendor benchmarks run for $t \\ll \\tau$, never reaching thermal equilibrium. Su
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
             <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Production SRE
+                Incoming Message &middot; {v1_12_variant.stakeholder}
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We picked the configuration with the highest accuracy (94%). It passed QA.
-                But production shows SLO violations on latency and power. How did 94% accuracy
-                not translate to a deployable system?&rdquo;
+                &ldquo;We picked the configuration with the best headline metric. It passed the easy
+                benchmark, but production exposes {v1_12_benchmark.hidden_failure_metric}.
+                Which guardrail did the benchmark fail to measure?&rdquo;
             </div>
         </div>
         """))
@@ -645,10 +748,10 @@ Vendor benchmarks run for $t \\ll \\tau$, never reaching thermal equilibrium. Su
 
         | SLO Gate | Threshold |
         |----------|-----------|
-        | Accuracy | > 90% |
-        | P99 Latency | < 100 ms |
-        | Power | < 5 W |
-        | Throughput | > 500 QPS |
+        | Accuracy | > {v1_12_benchmark.accuracy_min_pct:g}% |
+        | P99 Latency | < {v1_12_benchmark.p99_max_ms:g} ms |
+        | Power | < {v1_12_benchmark.power_max_w:g} W |
+        | Throughput | > {v1_12_benchmark.throughput_min:g} {v1_12_benchmark.metric_unit} |
         """))
         items.append(pC_pred)
         if pC_pred.value is None:
@@ -665,27 +768,35 @@ Vendor benchmarks run for $t \\ll \\tau$, never reaching thermal equilibrium. Su
         _acc_map = {"fp32": 94.0, "fp16": 93.8, "int8": 91.0}
         _acc = _acc_map[_prec]
 
-        # Latency (simplified roofline)
-        _model_gb = RESNET50_PARAMS * _bpp[_prec] / 1e9
-        _eta = 0.5
-        _t_mem = (_model_gb / H100_BW) * 1000  # ms
-        _t_comp = (RESNET50_FLOPS * _batch / (H100_TFLOPS * 1e12 * _eta)) * 1000  # ms
-        _latency = max(_t_mem, _t_comp) + 0.5  # + overhead
-        _p99 = _latency * 3.5  # log-normal tail approximation
+        _precision_latency = {"fp32": 1.25, "fp16": 1.0, "int8": 0.75}[_prec]
+        _latency = (v1_12_benchmark.tail_base_ms * _precision_latency / max(1, _batch ** 0.35)) + 0.5
+        _p99 = _latency * (1 + 2.5 * v1_12_benchmark.tail_sigma)
 
         # Throughput
         _qps = _batch / (_latency / 1000) if _latency > 0 else 0
 
         # Power (scales with batch and precision)
-        _base_power = 3.0  # W for edge inference
+        _base_power = max(0.001, min(v1_12_benchmark.power_max_w * 0.75, v1_12_benchmark.tdp_w))
         _power = _base_power * (1 + 0.3 * math.log2(max(_batch, 1))) * _bpp[_prec] / 2
 
         # SLO checks
-        _slo_acc = _acc > 90
-        _slo_lat = _p99 < 100
-        _slo_power = _power < 5
-        _slo_qps = _qps > 500
-        _all_pass = _slo_acc and _slo_lat and _slo_power and _slo_qps
+        _gate = metric_gate(
+            accuracy_pct=_acc,
+            p99_latency_ms=_p99,
+            power_w=_power,
+            throughput=_qps,
+            thresholds={
+                "accuracy_min_pct": v1_12_benchmark.accuracy_min_pct,
+                "p99_max_ms": v1_12_benchmark.p99_max_ms,
+                "power_max_w": v1_12_benchmark.power_max_w,
+                "throughput_min": v1_12_benchmark.throughput_min,
+            },
+        )
+        _slo_acc = _acc > v1_12_benchmark.accuracy_min_pct
+        _slo_lat = _p99 < v1_12_benchmark.p99_max_ms
+        _slo_power = _power < v1_12_benchmark.power_max_w
+        _slo_qps = _qps > v1_12_benchmark.throughput_min
+        _all_pass = _gate.all_pass
 
         # Radar chart
         _radar_r = [
@@ -720,14 +831,7 @@ Vendor benchmarks run for $t \\ll \\tau$, never reaching thermal equilibrium. Su
 
         if not _all_pass:
             _violations = []
-            if not _slo_acc:
-                _violations.append(f"Accuracy {_acc:.1f}% < 90%")
-            if not _slo_lat:
-                _violations.append(f"P99 Latency {_p99:.0f} ms > 100 ms")
-            if not _slo_power:
-                _violations.append(f"Power {_power:.1f} W > 5 W")
-            if not _slo_qps:
-                _violations.append(f"Throughput {_qps:.0f} QPS < 500 QPS")
+            _violations = list(_gate.violations)
             items.append(mo.callout(mo.md(
                 f"**DEPLOYMENT BLOCKED.** Violated SLOs: {', '.join(_violations)}."
             ), kind="danger"))
@@ -800,12 +904,12 @@ The highest-accuracy configuration often violates latency or power constraints. 
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
             <div style="font-size:0.72rem; font-weight:700; color:#6366f1;
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Reliability Engineer
+                Incoming Message &middot; {v1_12_variant.stakeholder}
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our inference service reports 50 ms average latency. Our SLO is 200 ms p99.
-                The ops team says we are fine. But users are complaining about slow responses.
-                What is the actual p99?&rdquo;
+                &ldquo;The benchmark reports a healthy average for {v1_12_benchmark.label}. But the
+                production claim depends on p99. What does the tail say about
+                {v1_12_benchmark.guardrail_metric}?&rdquo;
             </div>
         </div>
         """))
@@ -832,21 +936,21 @@ The highest-accuracy configuration often violates latency or power constraints. 
 
         _sigma = pD_sigma.value
         _slo = pD_slo.value
-        _base = 50.0  # ms base latency (median)
+        _base = v1_12_benchmark.tail_base_ms
 
         # Generate log-normal distribution
         np.random.seed(42)
         _n_samples = 10000
         _samples = _base * np.exp(np.random.normal(0, _sigma, _n_samples))
 
-        _mean = float(np.mean(_samples))
-        _p50 = float(np.percentile(_samples, 50))
-        _p95 = float(np.percentile(_samples, 95))
-        _p99 = float(np.percentile(_samples, 99))
-        _p999 = float(np.percentile(_samples, 99.9))
-
-        _violation_pct = float(np.sum(_samples > _slo) / len(_samples) * 100)
-        _slo_ok = _p99 <= _slo
+        _tail = tail_latency(base_ms=_base, sigma=_sigma, slo_ms=_slo)
+        _mean = _tail.mean_ms
+        _p50 = _tail.p50_ms
+        _p95 = _tail.p95_ms
+        _p99 = _tail.p99_ms
+        _p999 = _tail.p999_ms
+        _violation_pct = _tail.violation_pct
+        _slo_ok = _tail.slo_ok
 
         _fig = go.Figure()
         _fig.add_trace(go.Histogram(
@@ -913,7 +1017,7 @@ P99:           {_p99:.0f} ms  ({_p99/_mean:.1f}x mean)
 P99.9:         {_p999:.0f} ms
 SLO ({_slo} ms): {"PASS" if _slo_ok else "FAIL"} ({_violation_pct:.1f}% violations)
 ```
-*Source: Chapter 12, latency distributions and tail behavior*
+*Source: `mlsysbook_labs.tail_latency`, using `{v1_12_benchmark.hidden_failure_metric}` scenario defaults.*
         """))
 
         if pD_pred.value == "no":
@@ -1030,10 +1134,14 @@ At $\\sigma = 0.8$ (typical for inference), $P_{99}/\\text{Mean} \\approx 5\\tex
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred):
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, v1_12_benchmark, v1_12_profile, v1_12_variant):
     if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None:
         ledger.save(chapter=12, design={
             "lab": "perf_bench",
+            "track_id": v1_12_profile.track_id,
+            "scenario_id": v1_12_variant.scenario_id,
+            "hardware_ref": v1_12_benchmark.hardware_ref,
+            "model_ref": v1_12_benchmark.model_ref,
             "completed": True,
             "amdahl_speedup_prediction": pA_pred.value,
             "thermal_sustained_fps": pB_pred.value,
@@ -1044,6 +1152,8 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred):
     <div class="lab-hud">
         <span class="hud-label">LAB</span>
         <span class="hud-value">12 &middot; Performance Benchmarking</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_12_profile.label}</span>
         <span style="flex:1;"></span>
         <span class="hud-label">CH</span>
         <span class="hud-value">12</span>
@@ -1054,25 +1164,163 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred):
     return
 
 
-# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
+# ─── DOWNLOADABLE TRACK REPORT ──────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(ledger, mo):
-    from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        legacy_migration_panel,
+def _(
+    amdahl_speedup,
+    build_lab_report,
+    math,
+    metric_gate,
+    mo,
+    pA_pred,
+    pA_serial,
+    pA_speedup,
+    pB_ambient,
+    pB_cooling,
+    pB_pred,
+    pB_time,
+    pC_batch,
+    pC_precision,
+    pC_pred,
+    pD_pred,
+    pD_sigma,
+    pD_slo,
+    report_export_panel,
+    sustained_benchmark,
+    tail_latency,
+    v1_12_benchmark,
+    v1_12_metadata,
+    v1_12_profile,
+    v1_12_variant,
+):
+    _amdahl = amdahl_speedup(component_speedup=pA_speedup.value, serial_pct=pA_serial.value)
+    _thermal = sustained_benchmark(
+        peak_value=v1_12_benchmark.burst_value,
+        tdp_w=v1_12_benchmark.tdp_w,
+        duration_s=pB_time.value,
+        ambient_c=pB_ambient.value,
+        cooling=pB_cooling.value,
+    )
+    _bpp = {"fp32": 4, "fp16": 2, "int8": 1}
+    _acc_map = {"fp32": 94.0, "fp16": 93.8, "int8": 91.0}
+    _precision_latency = {"fp32": 1.25, "fp16": 1.0, "int8": 0.75}
+    _prec = pC_precision.value
+    _batch = pC_batch.value
+    _latency = (v1_12_benchmark.tail_base_ms * _precision_latency[_prec] / max(1, _batch ** 0.35)) + 0.5
+    _p99 = _latency * (1 + 2.5 * v1_12_benchmark.tail_sigma)
+    _throughput = _batch / (_latency / 1000) if _latency > 0 else 0
+    _base_power = max(0.001, min(v1_12_benchmark.power_max_w * 0.75, v1_12_benchmark.tdp_w))
+    _power = _base_power * (1 + 0.3 * math.log2(max(_batch, 1))) * _bpp[_prec] / 2
+    _gate = metric_gate(
+        accuracy_pct=_acc_map[_prec],
+        p99_latency_ms=_p99,
+        power_w=_power,
+        throughput=_throughput,
+        thresholds={
+            "accuracy_min_pct": v1_12_benchmark.accuracy_min_pct,
+            "p99_max_ms": v1_12_benchmark.p99_max_ms,
+            "power_max_w": v1_12_benchmark.power_max_w,
+            "throughput_min": v1_12_benchmark.throughput_min,
+        },
+    )
+    _tail = tail_latency(base_ms=v1_12_benchmark.tail_base_ms, sigma=pD_sigma.value, slo_ms=pD_slo.value)
+
+    _incomplete = []
+    if pA_pred.value is None:
+        _incomplete.append("Part A Amdahl prediction")
+    if pB_pred.value is None:
+        _incomplete.append("Part B sustained benchmark prediction")
+    if pC_pred.value is None:
+        _incomplete.append("Part C multi-metric prediction")
+    if pD_pred.value is None:
+        _incomplete.append("Part D tail-latency prediction")
+
+    _report = build_lab_report(
+        v1_12_metadata,
+        track=v1_12_profile.label,
+        scenario=v1_12_variant.workload_summary,
+        learning_objectives=(
+            "Explain why component benchmark speedup does not equal system speedup.",
+            "Compare burst benchmark claims with sustained deployment behavior.",
+            "Design a benchmark protocol with multi-metric guardrails and tail latency.",
+        ),
+        predictions={
+            "amdahl_speedup": pA_pred.value,
+            "sustained_benchmark": pB_pred.value,
+            "multi_metric_gate": pC_pred.value,
+            "tail_latency": pD_pred.value,
+        },
+        knob_settings={
+            "component_speedup": pA_speedup.value,
+            "serial_pct": pA_serial.value,
+            "duration_s": pB_time.value,
+            "ambient_c": pB_ambient.value,
+            "cooling": pB_cooling.value,
+            "batch": pC_batch.value,
+            "precision": pC_precision.value,
+            "tail_sigma": pD_sigma.value,
+            "tail_slo_ms": pD_slo.value,
+        },
+        evidence_summary={
+            "hardware_ref": v1_12_benchmark.hardware_ref,
+            "model_ref": v1_12_benchmark.model_ref,
+            "benchmark_claim": v1_12_benchmark.benchmark_claim,
+            "hidden_failure_metric": v1_12_benchmark.hidden_failure_metric,
+            "system_speedup": round(_amdahl.system_speedup, 3),
+            "sustained_value": round(_thermal.sustained_value, 3),
+            "sustained_loss_pct": round(_thermal.loss_pct, 3),
+            "multi_metric_pass": _gate.all_pass,
+            "multi_metric_violations": _gate.violations,
+            "p99_ms": round(_tail.p99_ms, 3),
+            "tail_slo_ok": _tail.slo_ok,
+            "tail_violation_pct": round(_tail.violation_pct, 3),
+        },
+        final_decision=(
+            f"Accept the benchmark claim only if the protocol includes {v1_12_benchmark.hidden_failure_metric} "
+            f"and passes {v1_12_variant.guardrail_metric}."
+        ),
+        big_takeaways=(
+            "A benchmark claim is only valid for the workload and duration it measured.",
+            "Single-metric wins can fail production guardrails.",
+            "Tail and sustained behavior must be measured, not inferred from averages or bursts.",
+        ),
+        reflections={
+            "benchmark_scope": v1_12_variant.assumptions.get("protocol_scope", "production-like benchmark"),
+            "moved_bottleneck": f"Amdahl system speedup is {_amdahl.system_speedup:.2f}x.",
+            "residual_risk": "Benchmark protocol still needs real workload traces and hardware counters.",
+        },
+        residual_risk=(
+            "Teaching estimates must be validated with production workload traces, thermal steady-state runs, "
+            "p99/p999 latency, quality regression, and cost or battery measurements."
+        ),
+        source_trace={
+            "track_id": v1_12_profile.track_id,
+            "scenario_id": v1_12_variant.scenario_id,
+            "hardware_ref": v1_12_variant.hardware_ref,
+            "model_ref": v1_12_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.benchmarking",
+            "source_policy": v1_12_profile.source_policy,
+        },
+        result_snapshot={
+            "benchmark_profile": v1_12_benchmark,
+            "amdahl": _amdahl,
+            "sustained": _thermal,
+            "metric_gate": _gate,
+            "tail_latency": _tail,
+        },
+        incomplete_fields=tuple(_incomplete),
     )
 
-    _metadata = get_lab_metadata("vol1/lab_12_perf_bench.py")
-    _saved_track = ledger.get_track()
-    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    _profile = get_track_profile(_track_id)
-    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
     mo.vstack([
-        ACADEMIC_LAB_CSS,
-        legacy_migration_panel(_metadata, _profile, _variant),
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V1-12 report is generated locally from the selected track, MLSysIM hardware/model refs, "
+                "and shared `mlsysbook_labs.benchmarking` calculations."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
     ])
     return
 

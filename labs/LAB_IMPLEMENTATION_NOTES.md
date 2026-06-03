@@ -1028,3 +1028,49 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_inference_helpers.py labs/tests/test_lab_variants.py -q`
 - `python3 -m pytest labs/tests/test_engine.py -k "vol2/lab_10 or lab_10_inference" -q`
 - `python3 -m pytest labs/tests/test_inference_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py::TestWheelConsistency -q`
+
+### 2026-06-03 - V1-12 Benchmarking Trap Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_12_perf_bench.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/benchmarking.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_benchmarking_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_12_perf_bench.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.benchmarking` with source-traced helpers for Amdahl speedup, sustained/burst benchmark behavior, multi-metric SLO gates, and log-normal tail latency.
+- Added hand-authored V1-12 variants with track-specific bad benchmark claims, hidden failure metrics, benchmark durations, cooling/ambient defaults, SLO gates, tail-latency defaults, and validation tests.
+- Replaced the baseline migration shell with track selector, track context, source trace, selected-track widget defaults, ledger metadata, and local report export.
+- Removed notebook-local H100/A100/Jetson/ResNet benchmark constants from setup and routed displayed evidence through selected MLSysIM hardware/model refs plus `mlsysbook_labs.benchmarking`.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/benchmarking.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves the same canonical track hardware refs and model refs from the V1-12 variants.
+- Track-specific benchmark protocol assumptions live in typed variant defaults, not notebook-local constants.
+
+Notebook-local constants removed:
+- H100/A100 peak and bandwidth constants, Jetson TDP/TFLOPS, and ResNet-50 FLOP/parameter constants were removed from the V1-12 notebook setup path.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.benchmarking` can be reused by V1-13 tail latency, V2-09 performance engineering, and any lab that needs benchmark claims, guardrail gates, or tail-distribution evidence.
+
+Plan updates needed in other labs:
+- V1-13 should reuse `tail_latency` and add queueing-specific helpers rather than duplicating tail distribution code.
+- V2-09 should reuse `amdahl_speedup` and `metric_gate` for optimization-trap evidence.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/benchmarking.py`
+- `python3 -m py_compile labs/vol1/lab_12_perf_bench.py`
+- `python3 -m pytest labs/tests/test_benchmarking_helpers.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol1/lab_12 or lab_12_perf" -q`
