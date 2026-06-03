@@ -83,3 +83,13 @@ def test_v1_10_variants_define_compression_guardrails():
         assert "require_hardware_support" in variant.defaults
         assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "compression deployment recipe"
+
+
+def test_v1_11_variants_define_roofline_defaults():
+    for variant in list_lab_variants("v1_11_hardware_roofline"):
+        assert "matrix_dim" in variant.defaults
+        assert "precision" in variant.defaults
+        assert "compare_tracks" in variant.defaults
+        assert "move_the_point" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "hardware acceleration diagnosis"
