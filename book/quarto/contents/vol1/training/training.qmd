@@ -433,7 +433,7 @@ To illustrate the scale of these operations concretely, consider the attention l
 # │          n_layers_gpt2_str, training_steps_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_time, fmt_flops, fmt_flop_rate
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_ratio, check, fmt_time, fmt_flops, fmt_flop_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Compute:
@@ -520,7 +520,7 @@ class GPT2Compute:
     head_dim_str = fmt(head_dim, precision=0, commas=False)
     n_layers_gpt2_str = fmt(layers, precision=0, commas=False)
     training_steps_str = fmt_count(steps, label="step")
-    mac_factor_str = fmt(mac_factor, precision=0, commas=False)
+    mac_factor_str = fmt_ratio(mac_factor, precision=0, commas=False)
     n_projections_str = fmt(n_projections, precision=0, commas=False)
     ffn_coeff_str = fmt(ffn_coeff, precision=0, commas=False)
 ```
@@ -623,7 +623,7 @@ Matrix multiplications dominate training compute, but neural networks require mo
 ```{python}
 #| echo: false
 #| label: activation-benchmarks-calc
-from mlsysim.fmt import fmt_time
+from mlsysim.fmt import fmt_multiple_range, fmt_time
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ACTIVATION FUNCTION BENCHMARKS + GELU OVERHEAD
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -661,8 +661,9 @@ class ActivationBenchmarks:
     relu_peak_flops_pct           = 95
     sigmoid_peak_flops_pct_min    = 30
     sigmoid_peak_flops_pct_max    = 40
-    sigmoid_slower_factor_min_str = fmt(sigmoid_slower_factor_min, precision=0, commas=False)
-    sigmoid_slower_factor_max_str = fmt(sigmoid_slower_factor_max, precision=0, commas=False)
+    sigmoid_slower_factor_range_str = fmt_multiple_range(
+        sigmoid_slower_factor_min, sigmoid_slower_factor_max, precision=0, commas=False
+    )
     relu_peak_flops_pct_str = fmt_percent(relu_peak_flops_pct/100, precision=0, commas=False, style='symbol')
     sigmoid_peak_flops_pct_min_str = fmt_percent(sigmoid_peak_flops_pct_min/100, precision=0, commas=False, style='symbol')
     sigmoid_peak_flops_pct_max_str = fmt_percent(sigmoid_peak_flops_pct_max/100, precision=0, commas=False, style='symbol')
@@ -680,8 +681,9 @@ class ActivationBenchmarks:
     gelu_cost_factor_max       = 4
     gelu_overhead_pct_min      = 10
     gelu_overhead_pct_max      = 20
-    gelu_cost_factor_min_str  = fmt(gelu_cost_factor_min, precision=0, commas=False)
-    gelu_cost_factor_max_str  = fmt(gelu_cost_factor_max, precision=0, commas=False)
+    gelu_cost_factor_range_str = fmt_multiple_range(
+        gelu_cost_factor_min, gelu_cost_factor_max, precision=0, commas=False
+    )
     gelu_approx_cost_factor_str = fmt_multiple(1.5, precision=1, commas=False)
     gelu_overhead_pct_min_str = fmt_percent(gelu_overhead_pct_min/100, precision=0, commas=False, style='symbol')
     gelu_overhead_pct_max_str = fmt_percent(gelu_overhead_pct_max/100, precision=0, commas=False, style='symbol')
@@ -745,7 +747,7 @@ Because activation functions execute millions of times per training step, even s
 :::
 
 \index{Sigmoid!computational cost}\index{Tanh!computational cost}\index{Sparsity!ReLU optimization}\index{Softmax!global normalization}
-In production environments, modern hardware accelerators alter these relative characteristics, but the underlying cost hierarchy remains. Functions requiring transcendental operations are significantly more expensive than simple thresholding: in software, GELU `exp()` evaluation takes `{python} ActivationBenchmarks.exp_cycles_min_str`--`{python} ActivationBenchmarks.exp_cycles_max_str` clock cycles compared to `{python} ActivationBenchmarks.arith_cycles_str` cycle for basic arithmetic. Modern GPUs and TPUs mitigate this through lookup tables or piece-wise linear approximations, but even optimized hardware-based sigmoid/tanh remains `{python} ActivationBenchmarks.sigmoid_slower_factor_min_str`--`{python} ActivationBenchmarks.sigmoid_slower_factor_max_str`$\times$ slower than ReLU. ReLU's $\max(0,x)$ requires only a single comparison and conditional set---a simple multiplexer checking the sign bit---enabling it to run at `{python} ActivationBenchmarks.relu_peak_flops_pct_str`+ of peak FLOP/s, while sigmoid achieves only `{python} ActivationBenchmarks.sigmoid_peak_flops_pct_min_str`--`{python} ActivationBenchmarks.sigmoid_peak_flops_pct_max_str` hardware utilization. Beyond raw throughput, ReLU's characteristic of producing roughly 50 percent zeros enables system-level sparsity optimizations---sparse matrix operations and gradient compression---that reduce memory bandwidth requirements, the primary bottleneck in large-scale training. In contrast, global normalization functions like Softmax[^fn-softmax-training] require access to the entire input vector simultaneously to compute the denominator, preventing the independent element-wise parallelization possible with Sigmoid or ReLU.
+In production environments, modern hardware accelerators alter these relative characteristics, but the underlying cost hierarchy remains. Functions requiring transcendental operations are significantly more expensive than simple thresholding: in software, GELU `exp()` evaluation takes `{python} ActivationBenchmarks.exp_cycles_min_str`--`{python} ActivationBenchmarks.exp_cycles_max_str` clock cycles compared to `{python} ActivationBenchmarks.arith_cycles_str` cycle for basic arithmetic. Modern GPUs and TPUs mitigate this through lookup tables or piece-wise linear approximations, but even optimized hardware-based sigmoid/tanh remains `{python} ActivationBenchmarks.sigmoid_slower_factor_range_str`$\times$ slower than ReLU. ReLU's $\max(0,x)$ requires only a single comparison and conditional set---a simple multiplexer checking the sign bit---enabling it to run at `{python} ActivationBenchmarks.relu_peak_flops_pct_str`+ of peak FLOP/s, while sigmoid achieves only `{python} ActivationBenchmarks.sigmoid_peak_flops_pct_min_str`--`{python} ActivationBenchmarks.sigmoid_peak_flops_pct_max_str` hardware utilization. Beyond raw throughput, ReLU's characteristic of producing roughly 50 percent zeros enables system-level sparsity optimizations---sparse matrix operations and gradient compression---that reduce memory bandwidth requirements, the primary bottleneck in large-scale training. In contrast, global normalization functions like Softmax[^fn-softmax-training] require access to the entire input vector simultaneously to compute the denominator, preventing the independent element-wise parallelization possible with Sigmoid or ReLU.
 
 [^fn-softmax-training]: **Softmax**: A "soft" (differentiable) approximation to the argmax function---re&shy;turn&shy;ing a probability dis&shy;tri&shy;bution rather than a hard one-hot vector. The systems cost is its global normalization: computing the denominator $\sum e^{x_i}$ requires reading the entire input vector, preventing the element-wise parallelization that makes ReLU fast. This memory-access pattern is precisely what FlashAttention restructures via tiling. \index{Softmax!memory access pattern}
 
@@ -793,7 +795,7 @@ where $\Phi(x)$ is the cumulative distribution function of the standard normal d
 
 **System Performance Trade-off**
 
-- Computational cost: ~`{python} ActivationBenchmarks.gelu_cost_factor_min_str`--`{python} ActivationBenchmarks.gelu_cost_factor_max_str`$\times$ more expensive than ReLU (requires erf function evaluation)
+- Computational cost: ~`{python} ActivationBenchmarks.gelu_cost_factor_range_str`$\times$ more expensive than ReLU (requires erf function evaluation)
 - Memory: Same as ReLU (element-wise operation)
 - Training time impact: For GPT-2's `{python} ActivationBenchmarks.gpt2_layers_str`, GELU adds ~`{python} ActivationBenchmarks.gelu_overhead_pct_min_str` to `{python} ActivationBenchmarks.gelu_overhead_pct_max_str` to total forward pass time
 - Justified by results: The improved model quality (lower perplexity) offsets the computational overhead
@@ -1812,7 +1814,7 @@ class AcceleratorSpecs:
     h100_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     h100_ridge_flops_per_byte_str = fmt_arithmetic_intensity(h100_ridge, commas=False)
     a100_fp16_speedup_str = fmt_multiple(a100_fp16_speedup, precision=0, commas=False)
-    h100_fp8_speedup_vs_fp16_str = fmt_int(round(h100_fp8_speedup_vs_fp16), commas=False)
+    h100_fp8_speedup_vs_fp16_str = fmt_multiple(round(h100_fp8_speedup_vs_fp16), commas=False, precision=0)
 ```
 
 \index{Arithmetic Intensity!attention layer}
@@ -2644,7 +2646,7 @@ class NetworkWall:
 **Math**: For a `{python} NetworkWall.model_params_b_str`-parameter model with FP16 gradients:
 
 1. **Gradient size** (FP16): `{python} NetworkWall.gradient_size_gb_str` per step.
-2. **AllReduce cost**: Ring AllReduce sends `{python} NetworkWall.allreduce_factor_str`$\times$ the gradient per worker, because $2(N_{\text{GPU}}-1)/N_{\text{GPU}}$ equals `{python} NetworkWall.allreduce_factor_str`$\times$ for `{python} NetworkWall.n_gpus_str`. That gives `{python} NetworkWall.allreduce_factor_str`$\times$ `{python} NetworkWall.gradient_size_gb_str` = `{python} NetworkWall.allreduce_gb_str` total.
+2. **AllReduce cost**: Ring AllReduce sends `{python} NetworkWall.allreduce_factor_str`$\times$ the gradient per worker, because $2(N_{\text{GPU}}-1)/N_{\text{GPU}}$ equals `{python} NetworkWall.allreduce_factor_str`$\times$ for `{python} NetworkWall.n_gpus_str`. That gives `{python} NetworkWall.allreduce_factor_str` $\times$ `{python} NetworkWall.gradient_size_gb_str` = `{python} NetworkWall.allreduce_gb_str` total.
 3. **Network time**: At `{python} NetworkWall.network_bw_gb_s_str` InfiniBand (100 Gbps): `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_s_str` = `{python} NetworkWall.network_time_s_str`.
 4. **Compute time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
 
@@ -2837,8 +2839,8 @@ class TrainingDimensions:
     wave_warps_65_str = fmt(wave_warps_65, precision=0, commas=False)
     wave_util_33_str = fmt_percent(wave_util_33/100, precision=1, commas=False, style='symbol')
     wave_util_65_str = fmt_percent(wave_util_65/100, precision=1, commas=False, style='symbol')
-    wave_time_33_str  = fmt(wave_time_33, precision=0, commas=False)
-    wave_time_65_str  = fmt(wave_time_65, precision=1, commas=False)
+    wave_time_33_factor_str  = fmt_multiple(wave_time_33, precision=0, commas=False)
+    wave_time_65_factor_str  = fmt_multiple(wave_time_65, precision=1, commas=False)
 
     # MD Math strings
     layer_dims_math       = fmt_math(f"{layer_dim_h} \\times {layer_dim_w}")
@@ -2887,12 +2889,12 @@ Understanding these tail effects is the difference between a practitioner who tu
 
 :::
 
-|                  **Batch Size**                 |                 **Warps Needed**                |                **Utilization**                 |                    **Relative Time**                    |
-|:-----------------------------------------------:|:-----------------------------------------------:|:----------------------------------------------:|:-------------------------------------------------------:|
-| `{python} TrainingDimensions.wave_batch_32_str` | `{python} TrainingDimensions.wave_warps_32_str` |                  100 percent                   |                        1$\times$                        |
-| `{python} TrainingDimensions.wave_batch_33_str` | `{python} TrainingDimensions.wave_warps_33_str` | `{python} TrainingDimensions.wave_util_33_str` | ~`{python} TrainingDimensions.wave_time_33_str`$\times$ |
-| `{python} TrainingDimensions.wave_batch_64_str` | `{python} TrainingDimensions.wave_warps_64_str` |                  100 percent                   |                        1$\times$                        |
-| `{python} TrainingDimensions.wave_batch_65_str` | `{python} TrainingDimensions.wave_warps_65_str` | `{python} TrainingDimensions.wave_util_65_str` | ~`{python} TrainingDimensions.wave_time_65_str`$\times$ |
+|                  **Batch Size**                 |                 **Warps Needed**                |                **Utilization**                 |                       **Relative Time**                        |
+|:-----------------------------------------------:|:-----------------------------------------------:|:----------------------------------------------:|:--------------------------------------------------------------:|
+| `{python} TrainingDimensions.wave_batch_32_str` | `{python} TrainingDimensions.wave_warps_32_str` |                  100 percent                   |                           1$\times$                            |
+| `{python} TrainingDimensions.wave_batch_33_str` | `{python} TrainingDimensions.wave_warps_33_str` | `{python} TrainingDimensions.wave_util_33_str` | ~`{python} TrainingDimensions.wave_time_33_factor_str`$\times$ |
+| `{python} TrainingDimensions.wave_batch_64_str` | `{python} TrainingDimensions.wave_warps_64_str` |                  100 percent                   |                           1$\times$                            |
+| `{python} TrainingDimensions.wave_batch_65_str` | `{python} TrainingDimensions.wave_warps_65_str` | `{python} TrainingDimensions.wave_util_65_str` | ~`{python} TrainingDimensions.wave_time_65_factor_str`$\times$ |
 
 : **Wave quantization tax on NVIDIA GPUs**: Batch sizes that straddle the 32-thread warp boundary launch additional partially-filled warps, dropping utilization sharply while leaving step time nearly unchanged. A batch of 33 launches the same two warps as a batch of 64 but uses only half the hardware; the next quantum boundary repeats at 65. This is why batch sizes should be multiples of 32 or 64, not values that look "close enough." {#tbl-training-wave-quantization tbl-colwidths="[25,25,25,25]"}
 
@@ -3470,7 +3472,7 @@ Production systems typically achieve 30–50 percent MFU\index{Model FLOPs Utili
 ```{python}
 #| echo: false
 #| label: mfu-example-calc
-from mlsysim.fmt import fmt, check, fmt_flop_rate, fmt_params, fmt_time
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_params, fmt_percent, fmt_ratio, fmt_time, check
 
 class MFUExampleCalc:
     """MFU example for a 7-billion-parameter transformer processing 1024 tokens per step."""
@@ -3499,7 +3501,7 @@ class MFUExampleCalc:
     flops_per_param_token_str = fmt(flops_per_param_token, precision=0, commas=False)
     step_time_s_str = fmt_time(step_time, second, precision=1, commas=False, style="word", attributive=True)
     a100_tflops_str = fmt_flop_rate(a100_flops, unit=TFLOP / second, precision=0, commas=False)
-    mfu_str = fmt(mfu, precision=2, commas=False)
+    mfu_str = fmt_ratio(mfu, precision=2, commas=False)
     mfu_pct_str = fmt_percent(mfu, precision=1, commas=False, style='symbol')
     lost_pct_str = fmt_percent(lost_fraction, precision=1, commas=False, style='symbol')
 ```
@@ -4456,7 +4458,7 @@ class MixedPrecisionSpeedup:
     check(speedup >= 2.0, f"Speedup ({speedup:.1f}x) is too small to justify mixed precision complexity.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_mp_speedup_str = fmt(speedup, precision=1, commas=False)
+    v100_mp_speedup_str = fmt_multiple(speedup, precision=1, commas=False)
     throughput_fp32_str = fmt(throughput_fp32, precision=0, commas=False)
     throughput_fp16_str = fmt(throughput_fp16, precision=0, commas=False)
 ```
@@ -6942,8 +6944,8 @@ class FallaciesPitfallsSetup:
     )
     fp_gpu_count_str = fmt_count(fp_gpu_count, commas=False, label="GPU")
     fp_gpu_ideal_speedup_str = fmt_multiple(fp_gpu_count, precision=0, commas=False)
-    fp_sync_overhead_range_str = MarkdownStr(f"{fp_sync_overhead_min} to {fp_sync_overhead_max}%")
-    fp_actual_speedup_range_str = MarkdownStr(f"{fp_actual_speedup_min} to {fp_actual_speedup_max}×")
+    fp_sync_overhead_range_str = fmt_percent_range(fp_sync_overhead_min / 100, fp_sync_overhead_max / 100, precision=0, commas=False, style="prose")
+    fp_actual_speedup_range_str = fmt_multiple_range(fp_actual_speedup_min, fp_actual_speedup_max, precision=0, commas=False)
     fp_single_gpu_hours_str = fmt_time(fp_single_gpu_hours, 'hour', precision=0, commas=False, style='word')
     fp_cluster_hours_str = fmt_time(fp_cluster_hours, 'hour', precision=0, commas=False, style='word')
     fp_batch_small_str = fmt(fp_batch_small, precision=0, commas=False)
@@ -6955,15 +6957,15 @@ class FallaciesPitfallsSetup:
     fp_training_hours_str = fmt_time(fp_training_hours, 'hour', precision=0, commas=False, style='word')
     fp_divergence_step_str = fmt(fp_divergence_step, precision=0, commas=True)
     fp_util_batch_256_str = fmt_percent(fp_util_batch_256/100, precision=0, commas=False, style='symbol')
-    fp_util_batch_16_range_str = MarkdownStr(f"{fp_util_batch_16_min}-{fp_util_batch_16_max}%")
+    fp_util_batch_16_range_str = fmt_percent_range(fp_util_batch_16_min / 100, fp_util_batch_16_max / 100, precision=0, commas=False, style="prose")
     fp_effective_batch_str = fmt(fp_effective_batch, precision=0, commas=False)
     fp_physical_batch_str = fmt(fp_physical_batch, precision=0, commas=False)
     fp_util_diff_str = fmt_percent(fp_util_diff/100, precision=0, commas=False, style='symbol')
     fp_memory_reduction_str = fmt_multiple(fp_memory_reduction, precision=0, commas=False)
     fp_overfit_degrade_min_str = fmt_percent(fp_overfit_degrade_min/100, precision=0, commas=False, style='symbol')
     fp_overfit_degrade_max_str = fmt_percent(fp_overfit_degrade_max/100, precision=0, commas=False, style='symbol')
-    fp_time_extension_range_str = MarkdownStr(f"{fp_time_extension_min} to {fp_time_extension_max}%")
-    fp_io_idle_range_str = MarkdownStr(f"{fp_io_idle_min} to {fp_io_idle_max}%")
+    fp_time_extension_range_str = fmt_percent_range(fp_time_extension_min / 100, fp_time_extension_max / 100, precision=0, commas=False, style="prose")
+    fp_io_idle_range_str = fmt_percent_range(fp_io_idle_min / 100, fp_io_idle_max / 100, precision=0, commas=False, style="prose")
     fp_prefetch_time_before_str = fmt(fp_prefetch_time_before, precision=0, commas=False)
     fp_prefetch_time_after_str = fmt(fp_prefetch_time_after, precision=0, commas=False)
     fp_prefetch_reduction_str = fmt_percent(fp_prefetch_reduction/100, precision=0, commas=False, style='symbol')
@@ -6981,7 +6983,7 @@ Teams treat scale as a monotonic lever: if a 7B-parameter model works well, a 20
 
 **Pitfall**: *Assuming distributed training automatically accelerates development.*
 
-More accelerators should mean faster training---but the communication tax (@sec-model-training-scaling-training-systems-adfd) often eats the gains. Small models on `{python} FallaciesPitfallsSetup.fp_gpu_count_str` spend `{python} FallaciesPitfallsSetup.fp_sync_overhead_range_str` of time synchronizing gradients, achieving only `{python} FallaciesPitfallsSetup.fp_actual_speedup_range_str` speedup instead of the ideal `{python} FallaciesPitfallsSetup.fp_gpu_ideal_speedup_str`$\times$. A well-optimized single A100 completing training in `{python} FallaciesPitfallsSetup.fp_single_gpu_hours_str` can outperform a poorly configured `{python} FallaciesPitfallsSetup.fp_gpu_count_str` cluster taking `{python} FallaciesPitfallsSetup.fp_cluster_hours_str`. The overhead of debugging distributed configurations, managing gradient synchronization, and handling stragglers often exceeds the time saved. Always profile and exhaust single-machine optimizations before distributing.
+More accelerators should mean faster training---but the communication tax (@sec-model-training-scaling-training-systems-adfd) often eats the gains. Small models on `{python} FallaciesPitfallsSetup.fp_gpu_count_str` spend `{python} FallaciesPitfallsSetup.fp_sync_overhead_range_str` of time synchronizing gradients, achieving only `{python} FallaciesPitfallsSetup.fp_actual_speedup_range_str`$\times$ speedup instead of the ideal `{python} FallaciesPitfallsSetup.fp_gpu_ideal_speedup_str`$\times$. A well-optimized single A100 completing training in `{python} FallaciesPitfallsSetup.fp_single_gpu_hours_str` can outperform a poorly configured `{python} FallaciesPitfallsSetup.fp_gpu_count_str` cluster taking `{python} FallaciesPitfallsSetup.fp_cluster_hours_str`. The overhead of debugging distributed configurations, managing gradient synchronization, and handling stragglers often exceeds the time saved. Always profile and exhaust single-machine optimizations before distributing.
 
 **Fallacy**: *Hyperparameters transfer directly from small-scale experiments to large-scale training.*
 
@@ -7042,8 +7044,8 @@ class GPT2SummaryChapterRecap:
     o_total_mem = 2 * o_param + b_param + 2 * b_param + (act_fp16_gb / checkpoint_factor)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    b_total_mem_gb_str = f"{fmt(b_total_mem, precision=1, commas=False)} GB"
-    o_total_mem_gb_str = f"{fmt(o_total_mem, precision=1, commas=False)} GB"
+    b_total_mem_gb_str = fmt_qty(b_total_mem * GB, GB, precision=1, commas=False)
+    o_total_mem_gb_str = fmt_qty(o_total_mem * GB, GB, precision=1, commas=False)
 ```
 
 * **The iron law governs training**: $T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$. Every optimization affects one of these terms. Identifying which term is affected is essential for effective optimization.

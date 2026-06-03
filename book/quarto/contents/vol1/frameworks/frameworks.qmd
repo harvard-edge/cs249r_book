@@ -1258,7 +1258,7 @@ class GraphOptimizationStats:
           "Graph optimization FLOP reduction range must be increasing.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    flop_reduction_range_str = MarkdownStr(f"{flop_reduction_min_pct}-{flop_reduction_max_pct}%")
+    flop_reduction_range_str = fmt_percent_range(flop_reduction_min_pct / 100, flop_reduction_max_pct / 100, precision=0, commas=False, style="prose")
 ```
 
 These optimizations map directly to iron law terms: kernel fusion reduces $D_{\text{vol}}$ by eliminating intermediate memory writes, constant folding reduces $O$ by computing values once, memory preallocation reduces $L_{\text{lat}}$ by avoiding runtime allocation overhead, and dead code elimination reduces both $O$ and $D_{\text{vol}}$. Concretely, in large transformer models, constant folding and dead code elimination can reduce total FLOPs by `{python} GraphOptimizationStats.flop_reduction_range_str` before the first batch even arrives.
@@ -1874,15 +1874,22 @@ The decision rule is to compile when $\text{Compilation Benefit} > 1$. The ratio
 # │ How:     Tabulate per-model throughputs, derive ratios, and solve the
 # │          breakeven equation for ResNet-50 at a reference compile cost.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
+# │ Imports: mlsysim.fmt typed formatters and check
 # │ Exports: CompilationBenchmark.resnet_eager_str, resnet_compile_str,
-# │          torch_compile_speedup_min_str,
-# │          torch_compile_speedup_max_str, tensorrt_speedup_min_str,
-# │          tensorrt_speedup_max_str, resnet_compile_speedup_pct_str,
+# │          torch_compile_speedup_range_str, tensorrt_speedup_range_str,
+# │          resnet_compile_speedup_pct_str,
 # │          resnet_tensorrt_speedup_str, compile_time_ref_s_str,
 # │          resnet_breakeven_images_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_time, fmt_rate
+from mlsysim.fmt import (
+    check,
+    fmt_count,
+    fmt_multiple,
+    fmt_multiple_range,
+    fmt_percent,
+    fmt_rate,
+    fmt_time,
+)
 
 class CompilationBenchmark:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -1924,10 +1931,12 @@ class CompilationBenchmark:
     resnet_eager_str = fmt_rate(resnet["eager"], 'img/s', precision=0, commas=True)
     resnet_compile_str = fmt_rate(resnet["compile"], 'img/s', precision=0, commas=True)
 
-    torch_compile_speedup_min_str = fmt(min(torch_compile_speedups), precision=1, commas=False)
-    torch_compile_speedup_max_str = fmt(max(torch_compile_speedups), precision=1, commas=False)
-    tensorrt_speedup_min_str = fmt(min(tensorrt_speedups), precision=1, commas=False)
-    tensorrt_speedup_max_str = fmt(max(tensorrt_speedups), precision=1, commas=False)
+    torch_compile_speedup_range_str = fmt_multiple_range(
+        min(torch_compile_speedups), max(torch_compile_speedups), precision=1, commas=False
+    )
+    tensorrt_speedup_range_str = fmt_multiple_range(
+        min(tensorrt_speedups), max(tensorrt_speedups), precision=1, commas=False
+    )
 
     resnet_compile_speedup_pct_str = fmt_percent(resnet_compile_speedup_pct/100, precision=1, commas=False, style='symbol')
     resnet_tensorrt_speedup_str = fmt_multiple(resnet_tensorrt_speedup, precision=1, commas=False)
@@ -1944,7 +1953,7 @@ class CompilationBenchmark:
 | **ViT-B/16**     |             620              |                 950                  |              1,650              |             25--45             |
 | **GPT-2 (124M)** |             180              |                 260                  |               420               |             45--90             |
 
-: **Training and Inference Throughput**: Representative throughput comparison across execution modes for common model architectures on NVIDIA A100 GPU with batch size 32. The table values imply torch.compile speedups of `{python} CompilationBenchmark.torch_compile_speedup_min_str`--`{python} CompilationBenchmark.torch_compile_speedup_max_str`$\times$ over eager mode, while TensorRT implies `{python} CompilationBenchmark.tensorrt_speedup_min_str`--`{python} CompilationBenchmark.tensorrt_speedup_max_str`$\times$ speedups but requires longer compilation and is inference only. Compile times vary based on model complexity and optimization level. {#tbl-training-benchmark tbl-colwidths="[20,20,20,20,20]"}
+: **Training and Inference Throughput**: Representative throughput comparison across execution modes for common model architectures on NVIDIA A100 GPU with batch size 32. The table values imply torch.compile speedups of `{python} CompilationBenchmark.torch_compile_speedup_range_str`$\times$ over eager mode, while TensorRT implies `{python} CompilationBenchmark.tensorrt_speedup_range_str`$\times$ speedups but requires longer compilation and is inference only. Compile times vary based on model complexity and optimization level. {#tbl-training-benchmark tbl-colwidths="[20,20,20,20,20]"}
 
 These throughput differences across execution modes raise a practical question—which framework execution strategy best serves each workload archetype.
 
@@ -2591,10 +2600,10 @@ Every activation saved for the backward pass persists in memory until consumed b
 # │          mlsysim.book (fmt, check)
 # │ Exports: resnet_params_m_str, resnet_fp32_mb_str, resnet_adam_mb_str,
 # │          resnet_training_min_gb_str, resnet_training_max_gb_str,
-# │          resnet_training_ratio_min_str, resnet_training_ratio_max_str
+# │          resnet_training_ratio_range_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_qty, check, fmt_count
+from mlsysim.fmt import fmt_count, fmt_multiple_range, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetMemory:
@@ -2625,8 +2634,9 @@ class ResNetMemory:
 
     resnet_training_min_gb_str = fmt_qty(training_min, GB, precision=0, commas=False)
     resnet_training_max_gb_str = fmt_qty(training_max, GB, precision=0, commas=False)
-    resnet_training_ratio_min_str = fmt(training_ratio_min, precision=1, commas=False)
-    resnet_training_ratio_max_str = fmt(training_ratio_max, precision=1, commas=False)
+    resnet_training_ratio_range_str = fmt_multiple_range(
+        training_ratio_min, training_ratio_max, precision=1, commas=False
+    )
 ```
 
 For a network with $N_L$ layers, the system must save approximately $N_L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` in FP32) and processes batch size 64 with $224{\times}224$ images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} ResNetMemory.resnet_fp32_mb_str` (the same size as the parameters themselves), and Adaptive Moment Estimation (Adam) optimizer state contributes ~`{python} ResNetMemory.resnet_adam_mb_str` for its two momentum buffers per parameter. The total training footprint reaches `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str`, compared to just ~`{python} ResNetMemory.resnet_fp32_mb_str` for inference alone.
@@ -2637,7 +2647,7 @@ For a network with $N_L$ layers, the system must save approximately $N_L$ activa
 *Training memory dwarfs inference memory.*
 :::
 
-This `{python} ResNetMemory.resnet_training_ratio_min_str`--`{python} ResNetMemory.resnet_training_ratio_max_str`$\times$ ratio between training and inference memory quantifies why the Data Movement $(D_{\text{vol}})$ term dominates training latency in the iron law. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone. For a complete derivation of the four-component training memory equation ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$) and worked examples at larger model scales, see @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
+This `{python} ResNetMemory.resnet_training_ratio_range_str`$\times$ ratio between training and inference memory quantifies why the Data Movement $(D_{\text{vol}})$ term dominates training latency in the iron law. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone. For a complete derivation of the four-component training memory equation ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$) and worked examples at larger model scales, see @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
 
 Frameworks provide two primary mechanisms to manage this trade-off. Gradient checkpointing\index{Gradient Checkpointing!recomputation strategy} [@chen2016training] trades recomputation for memory: instead of saving all activations, the framework saves only a subset and recomputes the rest during the backward pass. This typically reduces activation memory by 50--90 percent at the cost of 20--33 percent additional compute (with optimal $\sqrt{N_L}$ checkpoint placement). In iron law terms, checkpointing increases the $O$ term (recomputation) to reduce the $D_{\text{vol}}$ term (memory traffic). Tensor detachment provides a complementary mechanism: calling `.detach()` on a tensor removes it from the computation graph entirely, preventing the framework from saving activations through that path. This is essential for transfer learning, where pretrained layers should not accumulate gradients, and reduces the $D_{\text{vol}}$ term by eliminating unnecessary activation storage.
 
@@ -3213,10 +3223,9 @@ class AdminTax:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: ResNet-50 training/inference memory ratio for admin-tax callout.
-# │ Exports: ResNetAdminTaxRatio.resnet_training_ratio_min_str,
-# │          ResNetAdminTaxRatio.resnet_training_ratio_max_str
+# │ Exports: ResNetAdminTaxRatio.resnet_training_ratio_range_str
 from mlsysim import Models
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt_multiple_range
 
 class ResNetAdminTaxRatio:
     """ResNet-50 training vs. inference memory ratio for administrative-tax callout."""
@@ -3232,13 +3241,14 @@ class ResNetAdminTaxRatio:
     training_ratio_max = (training_max / fp32).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    resnet_training_ratio_min_str = fmt(training_ratio_min, precision=1, commas=False)
-    resnet_training_ratio_max_str = fmt(training_ratio_max, precision=1, commas=False)
+    resnet_training_ratio_range_str = fmt_multiple_range(
+        training_ratio_min, training_ratio_max, precision=1, commas=False
+    )
 ```
 
 ::: {#nbk-frameworks-administrative-tax .callout-notebook title="The administrative tax"}
 
-The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2 showed a concrete ~`{python} ResNetAdminTaxRatio.resnet_training_ratio_min_str`--`{python} ResNetAdminTaxRatio.resnet_training_ratio_max_str`$\times$ ratio between training and inference memory. Here we generalize that analysis to reveal the full administrative overhead at billion-parameter scale.
+The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2 showed a concrete ~`{python} ResNetAdminTaxRatio.resnet_training_ratio_range_str`$\times$ ratio between training and inference memory. Here we generalize that analysis to reveal the full administrative overhead at billion-parameter scale.
 
 **Problem**: Why does GPU utilization drop when training small models?
 

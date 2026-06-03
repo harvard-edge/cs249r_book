@@ -196,8 +196,15 @@ def _audit_file(path: Path) -> list[Violation]:
         if in_fence:
             continue
 
-        alt_intervals = _attribute_intervals(line, ("fig-alt", "tbl-alt", "alt"))
-        if "×" in line and not _all_positions_in_intervals(line, "×", alt_intervals):
+        # LaTeX is NOT processed in these attributes, so Unicode × is the correct
+        # (and only) choice there: fig-alt/tbl-alt/alt (screen-reader text) and
+        # title=/page-title (callout titles, HTML <title>, PDF bookmarks). Every
+        # context that DOES render (body prose, fig-cap/tbl-cap, table cells) must
+        # use $\times$, so × outside these attributes is still flagged.
+        noproc_intervals = _attribute_intervals(
+            line, ("fig-alt", "tbl-alt", "alt", "title", "page-title")
+        )
+        if "×" in line and not _all_positions_in_intervals(line, "×", noproc_intervals):
             violations.append(
                 Violation(
                     file=str(path),
@@ -222,17 +229,17 @@ def _audit_file(path: Path) -> list[Violation]:
             op_end = op_start + len(marker)
             search_from = op_end
 
-            right = _next_nonspace(line, op_end)
-            if right is None or not _is_right_product_operand(right[1]):
+            # A genuine arithmetic product glues an operand IMMEDIATELY after the
+            # operator (e.g. `a_str`$\times$`b_str`, or $a$$\times$$b$). A compact
+            # multiplier always leaves a space after the operator ("N$\times$
+            # faster", "N$\times$ (clarification)") and is valid prose, not a
+            # product — so a space (or end of line) after $\times$ means skip.
+            after = line[op_end] if op_end < len(line) else ""
+            if after == "" or after.isspace() or not _is_right_product_operand(after):
                 continue
 
             left = _prev_nonspace(line, op_start)
             if left is None:
-                continue
-
-            before = line[op_start - 1] if op_start > 0 else ""
-            after = line[op_end] if op_end < len(line) else ""
-            if before.isspace() and after.isspace():
                 continue
 
             context = line[max(0, op_start - 30) : min(len(line), op_end + 30)].strip()

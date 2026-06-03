@@ -915,7 +915,7 @@ class FlashAttentionSavings:
     from mlsysim.fmt import fmt, fmt_int, fmt_qty
     naive_mb_str = fmt_qty(naive_attn_bytes_total, MB, precision=1, commas=False)
     flash_mb_str = fmt_qty(flash_attn_bytes_total, MB, precision=1, commas=False)
-    savings_str = fmt_int(savings_ratio, commas=False)
+    savings_str = fmt_multiple(round(savings_ratio), commas=False, precision=0)
 
     head_n_str = fmt_int(seq_len, commas=False)
     head_d_str = fmt_int(head_dim, commas=False)
@@ -1236,7 +1236,7 @@ class KVCacheAnalysis:
     kv_int8_per_gpu_gb_str = fmt_memory(kv_cache_qty_i8 / tensor_parallel_degree, unit=GB, precision=2, commas=False)
     max_batch_fp16_str = fmt_int(max_batch_fp16_val, commas=False)
     max_batch_int8_str = fmt_int(max_batch_int8_val, commas=False)
-    batch_ratio_str = fmt(batch_ratio, precision=1, commas=False)
+    batch_ratio_str = fmt_multiple(batch_ratio, precision=1, commas=False)
     avail_fp16_gb_str = fmt_memory(avail_fp16, unit=GB, precision=0, commas=False)
     weight_int4_gb_str = fmt_memory(weight_int4_shard, unit=GB, precision=2, commas=False)
     avail_int8_gb_str = fmt_memory(avail_int8, unit=GB, precision=2, commas=False)
@@ -1475,7 +1475,7 @@ class CompilationDividend:
     launch_ms_str = fmt_time(launch_ms, 'millisecond', precision=2, commas=False)
     new_time_ms_str = fmt_time(new_time_ms, 'millisecond', precision=2, commas=False)
     new_tps_str = fmt_int(new_tps, commas=False)
-    speedup_str = fmt(speedup, precision=2, commas=False)
+    speedup_str = fmt_multiple(speedup, precision=2, commas=False)
     gemm_share_str = fmt_percent(round(gemm_share_post)/100, precision=0, commas=False, style='prose')
     base_tps_str = fmt_int(base_tps, commas=False)
     elementwise_share_pct_str = fmt_percent(round(elementwise_share * 100)/100, precision=0, commas=False, style='prose')
@@ -1655,20 +1655,20 @@ class OverlapCalc:
     check(overlap_speedup > 1.0, f"Overlap should provide speedup, got {overlap_speedup:.2f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_int, MarkdownStr, fmt_time, fmt_qty, fmt_qty_int
+    from mlsysim.fmt import fmt_int, fmt_multiple, MarkdownStr, fmt_time, fmt_qty, fmt_qty_int
     gradient_gb_str = fmt_qty(gradient_qty, GB, precision=1, commas=False)
-    ring_allreduce_factor_str = fmt(ring_allreduce_factor, precision=2, commas=False)
+    ring_allreduce_factor_str = fmt_multiple(ring_allreduce_factor, precision=2, commas=False)
     allreduce_ms_str = fmt_time(allreduce_time, ms, precision=1, commas=False)
     backward_ms_str = fmt_time(backward_time, ms, precision=1, commas=False)
     step_no_overlap_ms_str = fmt_time(step_no_overlap, ms, precision=1, commas=False)
     step_overlap_ms_str = fmt_time(step_with_overlap, ms, precision=1, commas=False)
-    overlap_speedup_str = fmt(overlap_speedup, precision=2, commas=False)
+    overlap_speedup_str = fmt_multiple(overlap_speedup, precision=2, commas=False)
     overlap_status_str = MarkdownStr("fully hidden" if can_overlap else "partially hidden")
     num_gpus_str = fmt_int(num_gpus, commas=False)
     nvlink_bw_gbs_str = fmt_qty_int(nvlink_bw, GB/second, commas=False)
 ```
 
-Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gbs_str`. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_str` times this volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization, takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gbs_str`. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_str`$\times$ this volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization, takes approximately `{python} OverlapCalc.backward_ms_str`.
 
 Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str`, a `{python} OverlapCalc.overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
@@ -2431,7 +2431,7 @@ class FlashAttentionSummaryRecap:
     flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem
     savings_ratio = (naive_attn_bytes_per_head / flash_attn_bytes_per_head).to("").magnitude
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    savings_str = fmt_int(savings_ratio, commas=False)
+    savings_str = fmt_multiple(savings_ratio, commas=False, precision=0)
 ```
 Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, avoiding the quadratic attention intermediates that dominate long sequences through tiling and online softmax. In the 8K example above, this is a `{python} FlashAttentionSummaryRecap.savings_str`$\times$ reduction in materialized attention state. Ring Attention extends this principle across GPUs for extreme sequence lengths.
 

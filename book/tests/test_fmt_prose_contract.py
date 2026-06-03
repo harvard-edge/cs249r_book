@@ -101,3 +101,36 @@ def test_multiple_literal_x_flagged(tmp_path):
         assigns="speedup_str = fmt_multiple(6)",
         prose="is `{python} C.speedup_str`× faster than baseline"))
     assert any(x.code == "mult_literal_x" for x in check_file(p))
+
+
+def test_generic_fmt_with_compact_times_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="speedup_str = fmt(6)",
+        prose="is `{python} C.speedup_str`$\\times$ faster than baseline"))
+    assert any(x.code == "mult_wrong_formatter" for x in check_file(p))
+
+
+def test_generic_fmt_arithmetic_product_not_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="nodes_str = fmt(6)\n    cost_str = fmt_usd(1500)",
+        prose="cost is `{python} C.nodes_str` $\\times$ `{python} C.cost_str`"))
+    assert check_file(p) == []
+
+
+def test_hardware_count_idiom_not_flagged(tmp_path):
+    # "N× H100" / "N× A100 node" is a count of accelerators, not a multiplier:
+    # a generic fmt_int GPU count followed by a compact $\times$ + device name
+    # is the established house idiom and must not be flagged.
+    p = _write(tmp_path, CELL.format(
+        assigns="node_gpus_str = fmt_int(8)",
+        prose="on an `{python} C.node_gpus_str`$\\times$ H100 node (640 GB HBM)"))
+    assert check_file(p) == []
+
+
+def test_hardware_idiom_does_not_mask_real_multiplier(tmp_path):
+    # the exemption must be narrow: "× improvement" is still a real multiplier
+    # bug even though "× H100" next to it would be exempt.
+    p = _write(tmp_path, CELL.format(
+        assigns="imp_str = fmt_int(4)",
+        prose="a `{python} C.imp_str`$\\times$ improvement over the baseline"))
+    assert any(x.code == "mult_wrong_formatter" for x in check_file(p))

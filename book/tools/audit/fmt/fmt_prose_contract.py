@@ -125,6 +125,20 @@ _PERCENT_RE = re.compile(r"^\s*(%|percent|percentage)", re.IGNORECASE)
 _PP_RE = re.compile(r"^\s*(percentage points?|pp)\b", re.IGNORECASE)
 _SCALE_RE = re.compile(r"^\s*(K|M|B|T|million|billion|thousand|trillion)\b")
 _MULT_AFTER_RE = re.compile(r"^\s*(\$\\times\$|\\times|×|x\b)")
+_COMPACT_MULT_AFTER_RE = re.compile(r"^(\$\\times\$|\\times|×|x\b)")
+
+# The "N× <device>" hardware-count idiom (e.g. "8× H100", "4× A100 node",
+# "`{python} node_gpus_str`× H100 GPUs") is a count of accelerators, not a
+# multiplier: prose supplies × as shorthand for "N of". A GPU count must NOT be
+# rebuilt via fmt_multiple. This is established book-wide convention (see
+# compute_infrastructure, performance_engineering, inference), so a generic
+# fmt/fmt_int export used this way is correct and is not flagged.
+_HW_AFTER_MULT_RE = re.compile(
+    r"^(?:\$\\times\$|\\times|×|x\b) *"
+    r"(?:H100|H200|H800|A100|A800|A10|A30|A40|V100|B100|B200|GB200|GH200|"
+    r"L4|L40S?|T4|MI\d{3}X?|TPU\w*|GPUs?|accelerators?)\b",
+    re.IGNORECASE,
+)
 
 
 def check_file(path: Path) -> list[Violation]:
@@ -155,7 +169,14 @@ def check_file(path: Path) -> list[Violation]:
             # backtick — a space-separated '$' is a math delimiter (e.g. $\times$).
             prefix = line[max(0, m.start() - 2):m.start()]
 
-            if fname in {"fmt_percent", "fmt_percent_range"}:
+            if (fname in {"fmt", "fmt_int"} and _COMPACT_MULT_AFTER_RE.match(after)
+                    and not _HW_AFTER_MULT_RE.match(after)):
+                out.append(Violation("mult_wrong_formatter", rel, lineno, ref,
+                    f"{fname} is a generic number formatter, but prose uses it "
+                    f"as a compact multiplier with $\\times$. Use fmt_multiple "
+                    f"for the export, or add spaces around $\\times$ if this is "
+                    f"an arithmetic product."))
+            elif fname in {"fmt_percent", "fmt_percent_range"}:
                 style = kwargs.get("style") or "number"
                 if style in ("prose", "symbol") and _PERCENT_RE.match(after):
                     out.append(Violation("percent_dup", rel, lineno, ref,
