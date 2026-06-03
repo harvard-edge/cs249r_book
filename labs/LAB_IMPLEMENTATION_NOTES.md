@@ -1176,3 +1176,47 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_14_ml_ops" -q`
 - `python3 -m pytest labs/tests/test_ops_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
 - `git diff --check`
+
+### 2026-06-03 - V2-06 Collective Communication Deep Track Migration
+
+Lab:
+- `labs/vol2/lab_06_collective_communication.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added hand-authored V2-06 variants with track-specific operations, payload sizes, participants, fabric/link analogies, topology assumptions, overlap, compression, residual risk, and validation tests.
+- Replaced the previous cloud-only wrapper with a canonical track selector, track context, source trace, selected-track widget defaults, ledger payload, and local report export.
+- Kept the core timing calculations in MLSysIM physics (`calc_ring_allreduce_time`, `calc_tree_allreduce_time`, `calc_hierarchical_allreduce_time`) instead of duplicating collective formulas in `mlsysbook_labs`.
+- Converted the lab narrative from GPU-only collectives to a track-aware communication design review: mobile federated aggregation, wearable intermittent sync, RoboTaxi depot hierarchy, and Cloud Fleet GPU collectives.
+- Rebuilt the browser helper wheel so the new V2-06 variants are available in WASM.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves canonical track hardware/model refs through variants and uses MLSysIM collective physics plus existing fabric entries:
+  - `Systems.Fabrics.InfiniBand_NDR`
+  - `Systems.Fabrics.Ethernet_100G`
+  - `Hardware.Cloud.H100.nvlink`
+
+Notebook-local constants removed:
+- Manual H100/Jetson/NVLink/IB/Ethernet constants and hard-coded Cloud Fleet report fields were removed from the V2-06 setup and report path. Track payload/topology defaults now live in typed variants.
+
+Reusable component or modality improved:
+- V2-06 demonstrates the "use MLSysIM physics directly when it already owns the equations" pattern. `mlsysbook_labs` owns track variants, source trace, report structure, and UI composition.
+
+Plan updates needed in other labs:
+- V2-07 and V2-08 should follow the same pattern when MLSysIM already has the underlying solver/fact surface: add variants first, then keep notebook code as composition and reporting.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol2/lab_06_collective_communication.py labs/mlsysbook_labs/variants.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_06_collective_communication" -q`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`

@@ -83,7 +83,7 @@ For each lab:
 - [x] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
 - [x] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
 - [x] 6. V1-14 Silent Degradation: adds monitoring and drift evidence.
-- [ ] 7. V2-06 Collective Communication: upgrade existing rich wrapper to canonical tracks.
+- [x] 7. V2-06 Collective Communication: upgrade existing rich wrapper to canonical tracks.
 - [ ] 8. Finish remaining Volume I labs by dependency order.
 - [ ] 9. Finish remaining Volume II labs by dependency order.
 - [ ] 10. Run catalog-wide QA and final cleanup.
@@ -491,16 +491,16 @@ Current status:
 - [x] MLSysIM collective communication physics functions are already used.
 
 Deep migration tasks:
-- [ ] Upgrade the existing rich wrapper to canonical track variants.
-- [ ] Decide which tracks use true collectives and which use communication analogs.
-- [ ] Track examples:
+- [x] Upgrade the existing rich wrapper to canonical track variants.
+- [x] Decide which tracks use true collectives and which use communication analogs.
+- [x] Track examples:
   - iPhone: federated update aggregation payloads.
   - Oura Ring: tiny update/sensor summaries through a phone relay.
   - RoboTaxi: fleet update synchronization and map/model rollout.
   - Cloud Fleet: GPU collective algorithms.
-- [ ] Add source-of-truth communication payload assumptions if displayed.
-- [ ] Ensure the report uses canonical track profile and variant fields.
-- [ ] Add tests for track-specific communication scenario selection.
+- [x] Add source-of-truth communication payload assumptions if displayed.
+- [x] Ensure the report uses canonical track profile and variant fields.
+- [x] Add tests for track-specific communication scenario selection.
 
 ### V2-07 - When Failure Is Routine
 

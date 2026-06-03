@@ -176,3 +176,19 @@ def test_v1_14_variants_define_ops_defaults():
         assert "base_loss_pp" in variant.defaults
         assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "operations policy memo"
+
+
+def test_v2_06_variants_define_collective_defaults():
+    for variant in list_lab_variants("v2_06_collective_communication"):
+        assert "operation" in variant.defaults
+        assert "message_gb" in variant.defaults
+        assert "participants" in variant.defaults
+        assert "fabric" in variant.defaults
+        assert "gpus_per_node" in variant.defaults
+        assert "overlap_pct" in variant.defaults
+        assert "compression_ratio" in variant.defaults
+        assert "topology" in variant.defaults
+        assert "optimization_choices" in variant.defaults
+        assert "residual_risk" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "communication design review"
