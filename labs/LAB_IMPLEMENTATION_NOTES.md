@@ -340,3 +340,58 @@ Tests or checks run:
 Follow-up:
 - Start the Lab Variant Registry pass.
 - Then migrate V1-10 Compression as the first content-heavy pilot.
+
+### 2026-06-03 - Pilot Lab Variant Registry
+
+Lab:
+- V1-00 The Architect's Portal.
+- V1-10 Compression Paradox.
+- V2-11 Edge Thermodynamics.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/variants.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added typed `LabTrackVariant` entries for the first three pilot labs.
+- Each pilot lab now has one scenario variant per canonical track.
+- Variants carry stakeholder, workload summary, objective, primary metric, guardrail metric, hardware ref, optional system ref, model ref, defaults, and assumptions.
+- Added lookup helpers: `list_lab_variants()`, `get_lab_track_variant()`, `variant_coverage()`, and `canonical_track_ids()`.
+- Exported the variant registry from `mlsysbook_labs`.
+- Updated the wheel contract test so browser wheels must include `tracks.py` and `variants.py`.
+- Rebuilt the `mlsysbook_labs` browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new hardware or model facts. Variants reference existing MLSysIM model paths:
+  - `Models.Vision.MobileNetV2`
+  - `Models.Tiny.DS_CNN`
+  - `Models.Tiny.AnomalyDetector`
+  - `Models.Vision.YOLOv8_Nano`
+  - `Models.Language.BERT_Base`
+
+Notebook-local constants removed:
+- None. This was a metadata foundation pass before notebook migration.
+
+Reusable component or modality improved:
+- Scenario defaults and assumptions now have a typed home before V1-10 and V2-11 implementation.
+
+Plan updates needed in other labs:
+- After V1-10 and V2-11 prove the registry shape, extend `variants.py` or split it into per-volume modules for the remaining labs.
+- Add source-trace rendering from `LabTrackVariant` during notebook migration.
+
+Tests or checks run:
+- `python3 -m pytest labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_track_profiles.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `mlsysbook_labs/tracks.py` and `mlsysbook_labs/variants.py`.
+
+Follow-up:
+- Implement shared modality helpers needed by V1-10.
+- Begin V1-10 Compression pilot migration using `get_lab_track_variant()`.

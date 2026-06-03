@@ -248,6 +248,8 @@ class TestWheelConsistency:
         required = {
             "mlsysbook_labs/__init__.py",
             "mlsysbook_labs/schemas.py",
+            "mlsysbook_labs/tracks.py",
+            "mlsysbook_labs/variants.py",
             "mlsysbook_labs/ui.py",
             "mlsysbook_labs/reports.py",
             "mlsysbook_labs/versions.py",

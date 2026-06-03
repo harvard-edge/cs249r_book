@@ -49,6 +49,14 @@ from .ui import (
     track_context,
     track_selector,
 )
+from .variants import (
+    LAB_TRACK_VARIANTS,
+    PILOT_LAB_IDS,
+    canonical_track_ids,
+    get_lab_track_variant,
+    list_lab_variants,
+    variant_coverage,
+)
 from .versions import LEDGER_SCHEMA_VERSION, MLSYSBOOK_LABS_VERSION, REPORT_SCHEMA_VERSION, STABLE_RELEASE_CHANNEL
 
 __all__ = [
@@ -90,6 +98,12 @@ __all__ = [
     "get_track_profile",
     "track_options",
     "track_profile_map",
+    "LAB_TRACK_VARIANTS",
+    "PILOT_LAB_IDS",
+    "canonical_track_ids",
+    "get_lab_track_variant",
+    "list_lab_variants",
+    "variant_coverage",
     "lab_header",
     "chapter_recap",
     "scenario_brief",
