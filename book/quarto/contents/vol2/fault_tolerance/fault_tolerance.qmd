@@ -3140,54 +3140,15 @@ Horovod Elastic extends Horovod's [@sergeev2018horovod] data parallel training w
 
 ### Model-specific training fault tolerance {#sec-fault-tolerance-reliability-reliability-modelspecific-training-fault-tolerance-4b70}
 
-The checkpoint and recovery strategies developed above require adaptation because each model type places a different state variable at risk: LLMs protect optimizer state and curriculum position, recommendation systems protect embedding freshness, vision models protect augmentation state, and scientific workloads protect exploration or simulator state.
+The checkpoint and recovery strategies developed above require adaptation because workloads lose different kinds of state when they fail. The design question is therefore not simply how often to checkpoint, but which state variable would make a restart mathematically or economically wrong. LLMs protect optimizer state and curriculum position, recommendation systems protect embedding freshness, vision models protect augmentation and normalization state, and scientific workloads protect exploration or simulator state.
 
-#### Large language models {#sec-fault-tolerance-reliability-reliability-large-language-models-5637}
+LLM training puts the greatest pressure on checkpoint I/O because optimizer state and long training duration make each restart expensive. Mixed-precision checkpoints reduce the bytes written for weights while preserving FP32 optimizer state where precision matters; ZeRO/FSDP sharding spreads writes across workers; asynchronous checkpointing moves serialization off the critical path; and incremental checkpointing records only changed state. These mechanisms solve different parts of the same bottleneck, so the durable requirement is that recovery preserve both optimizer state and the model's position in the data schedule. Curriculum learning, document position, and long-context schedules must be included in the checkpoint, because resuming with the wrong data order can change the optimization trajectory even when the weights reload correctly.
 
-LLM training presents the most demanding fault tolerance requirements due to massive checkpoint sizes and extended training durations.
+Recommendation training reverses the priority. A full snapshot of trillion-parameter embedding tables may be too large to write frequently, while stale embeddings can degrade revenue-sensitive ranking quality within hours. The checkpoint design therefore favors freshness over full-state exactness: **incremental checkpointing**\index{Checkpointing!incremental} records only embeddings that changed since the last checkpoint, **tiered checkpointing**\index{Checkpointing!tiered} saves dense parameters more often than sparse tables, and **embedding versioning**\index{Embedding!versioning} stores compact deltas that let recovery reconstruct recent user and item state. Because many RecSys models train continuously on streaming data, recovery must also record feature-store versions so that model state and training features remain semantically aligned after restart.
 
-The governing decision for LLMs is how to preserve optimizer and curriculum state without making checkpoint I/O the training bottleneck. Existing strategies attack different parts of that cost:
+Vision workloads usually have smaller checkpoints, but reproducibility depends on state outside the model weights. Data augmentation seeds, current augmentation parameters, shuffling order, synchronized batch-normalization statistics, and progressive-resizing schedules all shape the training trajectory. A recovered vision run that reloads weights but changes augmentation or normalization state may still produce a different model, so checkpoint design must capture the stochastic and schedule state that controls the input stream.
 
-- Use mixed-precision checkpoints (FP16/BF16 for weights, FP32 for optimizer critical state)
-- Use ZeRO/FSDP sharding to distribute checkpoint writes
-- Implement asynchronous checkpointing to minimize training disruption
-- Use incremental checkpoints that store only changed state
-
-Curriculum and position tracking add further state requirements. LLM training often uses curriculum learning (training on different data distributions over time) and position tracking (which documents have been processed). Checkpoint state must include curriculum position to ensure correct data presentation after recovery.
-
-Long-context models (32K, 128K tokens) have larger activation memory and correspondingly larger per-step state. Checkpoint frequency may need adjustment to balance recovery granularity against checkpoint overhead.
-
-#### Recommendation systems {#sec-fault-tolerance-reliability-reliability-recommendation-systems-41d6}
-
-Recommendation models with trillion-parameter embedding tables present unique checkpoint challenges. Embedding tables can be multiple terabytes, making full checkpointing at high frequency impractical. The checkpoint design therefore favors freshness over full-state exactness:
-
-- **Incremental checkpointing**\index{Checkpointing!incremental}: Only save embeddings that changed since last checkpoint
-- **Tiered checkpointing**\index{Checkpointing!tiered}: Frequent checkpoints for model parameters, infrequent for embeddings
-- **Embedding versioning**\index{Embedding!versioning}: Maintain embedding versions with efficient delta storage
-
-RecSys models often train continuously on streaming data, so the concept of "training completion" does not apply. Fault tolerance focuses on minimizing data loss and maintaining embedding freshness rather than protecting a single long training run.
-
-RecSys training also depends on feature stores for user and item features. Checkpoint state must include feature versions to ensure consistency between model state and features used for training.
-
-#### Vision models {#sec-fault-tolerance-reliability-reliability-vision-models-b394}
-
-Vision models have moderate checkpoint sizes but present unique considerations:
-
-Reproducible training requires capturing data augmentation state (random seeds, augmentation parameters). Recovery should produce identical training trajectories to minimize variance.
-
-Batch normalization synchronization requires care during recovery. Running statistics must be consistent across workers, and synchronized batch norm requires explicit coordination of statistics during recovery.
-
-Some vision training uses progressive resizing or multi-scale inputs, and the checkpoint must capture current scale configuration and schedule position.
-
-#### Scientific and specialized models {#sec-fault-tolerance-reliability-reliability-scientific-specialized-models-40e4}
-
-Scientific models (protein structure prediction, molecular dynamics, climate simulation) often have domain-specific state:
-
-Models exploring large search spaces (protein conformations, molecular configurations) must track what has been explored. Losing this exploration state causes redundant exploration.
-
-Models coupled with simulations must checkpoint both ML model state and simulation state for consistent recovery.
-
-Scientific applications often require exact reproducibility for validation. Checkpoint and recovery must preserve complete determinism, requiring careful handling of all random state.
+Scientific and specialized workloads push this requirement even further because the ML model is often coupled to a search or simulation process. Protein-structure, molecular-design, and climate-modeling runs may need to remember which configurations have already been explored, which simulator state produced the current examples, and which random seeds support reproducible validation. Losing that domain state creates duplicate exploration or invalid comparisons, so recovery must treat the model, simulator, search frontier, and random state as one consistency unit.
 
 Elasticity and checkpointing provide the necessary resilience for long-running batch training jobs, but the operational calculus changes completely once the model is deployed to users. The challenge shifts from protecting *weeks of batch computation* to protecting *milliseconds of real-time latency*.
 
@@ -3201,37 +3162,13 @@ Serving fault tolerance operates under constraints that training never faces. Wh
 
 The first serving decision is where request state lives, because that choice determines whether failover is a retry or a state-reconstruction problem.
 
-#### Stateless serving {#sec-fault-tolerance-reliability-reliability-stateless-serving-5842}
-
 In stateless serving, each request is independent. The serving system maintains no per-session state; all information needed to process a request is contained in the request itself plus the static model weights.
 
-The stateless pattern appears when the input itself carries all context:
-
-- **Image classification**: Each image is classified independently
-- **Object detection**: Each frame is processed independently
-- **Single-turn text classification**: Each text snippet is classified without context
-- **Embedding generation**: Each input is embedded independently
-
-The required mechanisms therefore target replica health and request routing rather than state preservation:
-
-- **Redundant replicas**\index{Redundant Replicas}: Multiple copies of the model serve requests in parallel
-- **Load balancing**\index{Load Balancing}: Requests are distributed across healthy replicas
-- **Health checks**\index{Health Check}: Failed replicas are removed from the load balancer
-- **Automatic replacement**: Failed replicas are restarted or replaced
-
-When a replica fails, in-flight requests to that replica fail but can be retried on another replica. No state is lost. Recovery requires only starting a new replica and loading model weights, typically completing in seconds to minutes depending on model size.
-
-#### Stateful serving {#sec-fault-tolerance-reliability-reliability-stateful-serving-5761}
+The stateless pattern appears when the input itself carries all context: an image classifier processes one image, an object detector processes one frame, a single-turn text classifier processes one snippet, and an embedding service maps one input to one vector. Fault tolerance can then focus on replica health and request routing. **Redundant replicas**\index{Redundant Replicas} serve requests in parallel, **load balancing**\index{Load Balancing} sends traffic only to healthy replicas, **health checks**\index{Health Check} remove failed replicas from rotation, and automatic replacement starts a new replica when capacity falls. When a replica fails, in-flight requests to that replica can be retried elsewhere, because no quality-bearing session state has been lost.
 
 The simplicity of stateless serving makes it the preferred architecture whenever possible. However, many ML applications inherently require state across requests. Consider a chatbot: a single-turn question-answering system can operate statelessly, processing each question independently. A conversational assistant that remembers previous exchanges, however, must maintain conversation history, transforming fault tolerance from simple retry to state preservation.
 
-Stateful serving maintains state across requests within a session. Subsequent requests depend on state accumulated from previous requests.
-
-Stateful serving appears wherever the current request depends on earlier requests. LLM conversations accumulate KV cache across turns, streaming speech recognition maintains context from previous audio, recommendation sessions accumulate user context, and interactive editing maintains document state across edits.
-
-The fault-tolerance consequence is that failure loses quality-bearing state, not just serving capacity. KV cache loss requires reprocessing previous turns, session context loss forces users to repeat previous interactions, and accumulated user state loss degrades quality when context is unavailable.
-
-The mitigation choice follows the size, update rate, and quality value of that state. Session affinity routes requests within a session to the same replica, state checkpointing periodically saves session state for recovery, state replication maintains copies for high availability, and graceful degradation allows service to continue with reduced quality if state is lost.
+Stateful serving appears wherever the current request depends on earlier requests. LLM conversations accumulate KV cache across turns, streaming speech recognition maintains context from previous audio, recommendation sessions accumulate user context, and interactive editing maintains document state across edits. The fault-tolerance consequence is that failure loses quality-bearing state, not just serving capacity. KV cache loss requires reprocessing previous turns, session context loss forces users to repeat previous interactions, and accumulated user state loss degrades quality when context is unavailable. The mitigation choice follows the size, update rate, and quality value of that state: session affinity routes a session to the same replica, state checkpointing periodically saves session state, state replication maintains a standby copy, and graceful degradation keeps the service available at reduced quality if state cannot be recovered.
 
 @Tbl-stateless-stateful-comparison contrasts how the fundamental difference between stateless and stateful serving manifests in every aspect of fault tolerance design, from request routing to recovery complexity.
 
@@ -3342,11 +3279,7 @@ The choice depends on state size, update frequency, and the quality impact of st
 
 ### Model-specific serving fault tolerance {#sec-fault-tolerance-reliability-reliability-modelspecific-serving-fault-tolerance-3245}
 
-Model-specific serving differences follow from what state is expensive to lose and how quickly the user needs a response.
-
-#### LLM serving fault tolerance {#sec-fault-tolerance-reliability-reliability-llm-serving-fault-tolerance-462b}
-
-The binding state in LLM serving is conversational context, especially the KV cache:
+Model-specific serving differences follow from what state is expensive to lose and how quickly the user needs a response. The extremes are LLM sessions that carry large live context, recommendation systems that depend on fresh user and item features, and vision services that are often stateless but sensitive to preprocessing and device health.
 
 The KV cache[^fn-kv-cache-serving-ft] can be substantial (gigabytes for long contexts across attention layers). Losing the KV cache requires regenerating all previous turns, which can take seconds to minutes.
 
@@ -3358,33 +3291,13 @@ The KV cache[^fn-kv-cache-serving-ft] can be substantial (gigabytes for long con
 *A long conversation carries tens of GB of live state.*
 :::
 
-LLM serving choices trade KV-cache recovery latency against memory and storage overhead. Accepting regeneration cost means regenerating KV cache from conversation history on failure. This approach is simple but can significantly increase latency for long conversations. KV cache checkpointing periodically saves KV cache state, enabling partial recovery but introducing storage overhead and latency for checkpointing. KV cache replication duplicates KV cache to standby, providing fast failover but doubling memory requirements. **Prefix caching**\index{Prefix Caching} stores common prefixes separately. System prompts and shared context are cached. On failure, common prefixes restore quickly. Only session-specific state requires regeneration.
+LLM serving choices trade KV-cache recovery latency against memory and storage overhead. The simplest strategy is to accept regeneration cost by rebuilding KV cache from conversation history after failure, but this can turn a long conversation into a multi-second or multi-minute restart. KV-cache checkpointing saves live state periodically and bounds the amount of regeneration, while KV-cache replication keeps a standby copy for fast failover at the cost of extra memory. **Prefix caching**\index{Prefix Caching} narrows the state that must be recovered by storing common system prompts and shared context separately, so only session-specific state requires regeneration.
 
 Prompt caching\index{Prompt Caching} services like those offered by cloud providers store and reuse KV cache for common prefixes, reducing both cost and recovery time for failures.
 
-#### Recommendation serving fault tolerance {#sec-fault-tolerance-reliability-reliability-recommendation-serving-fault-tolerance-1a91}
+Recommendation serving protects freshness rather than conversational continuity. Recommendations depend on user and item features from feature stores, so feature-store unavailability can either degrade ranking quality or block recommendations entirely. The serving decision is the staleness budget: replicated feature stores keep recent features available across zones, local caches cover hot features, fallback to stale features accepts measured quality loss, and default features let the service return a lower-quality result when lookup fails. Real-time features such as recent user actions make freshness monitoring part of fault tolerance, because a pipeline that keeps serving old features is available operationally but wrong semantically. Large embedding tables may also sit behind dedicated embedding services, which need their own replication and failover plan.
 
-Recommendation systems have unique fault tolerance requirements centered on feature stores and real-time updates:
-
-Recommendations depend on user and item features from feature stores, and feature store unavailability degrades recommendation quality or blocks recommendations entirely.
-
-The serving decision is how stale the system may become before it should block or degrade. Replicated feature stores span availability zones. Local caching stores frequently accessed features. Fallback to stale features accepts quality degradation. Default features activate when feature lookup fails.
-
-Some features update in real-time. Recent user actions exemplify real-time features. Failure of real-time feature pipelines causes recommendations to use stale data. Monitoring feature freshness and alerting on staleness is essential.
-
-Large embedding tables may be served from dedicated embedding services, which require their own fault tolerance through replication and failover.
-
-#### Vision serving fault tolerance {#sec-fault-tolerance-reliability-reliability-vision-serving-fault-tolerance-56b5}
-
-Vision model serving is typically stateless, simplifying fault tolerance:
-
-The primary mechanism is simple redundancy: multiple model replicas sit behind a load balancer, and failure of one replica routes requests to others.
-
-GPU health monitoring is essential because vision inference is GPU-intensive. GPU failures (thermal issues, memory errors) should trigger replica restart. NVIDIA's DCGM provides GPU health monitoring.
-
-Vision models depend on preprocessing. Resize and normalize operations must execute correctly. Preprocessing failures should be detected and handled gracefully. Returning errors is preferable to incorrect predictions.
-
-Vision models deployed on edge devices face different fault tolerance challenges. Device failures, network disconnection, and local storage limitations create unique problems. Edge fault tolerance often involves graceful degradation when cloud connectivity is lost.
+Vision serving is usually closer to the stateless end of the spectrum because each image or frame can be retried on another replica. That simplicity does not eliminate fault tolerance work; it changes where the checks belong. GPU health monitoring must remove replicas with thermal throttling or memory errors before they return corrupted results, and preprocessing must fail closed when resize, crop, color conversion, or normalization stages malfunction. For edge vision, the main failure mode may be disconnection rather than a data-center replica crash, so the system often degrades by using a smaller local model, delaying nonurgent predictions, or returning a lower-confidence result until cloud connectivity returns.
 
 When full redundancy fails (such as when an edge device loses connectivity, or a massive traffic spike overwhelms the available data center replicas), the system cannot simply crash. Instead, it must actively trade output quality for continued availability, a strategy known as graceful degradation.
 
