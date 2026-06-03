@@ -298,11 +298,11 @@ Performance engineering is the art of minimizing trips to the basement.
 The memory wall is not static; it grows wider with each hardware generation. Compute throughput has scaled exponentially, roughly doubling every two years with new GPU architectures. Memory bandwidth has improved more slowly, because the physics of off-chip signaling and the economics of HBM manufacturing limit how fast data can leave the chip.
 
 | **GPU**\index{GPU} | **Year** | **Peak FP16 (TFLOP/s)** | **HBM BW (TB/s)** | **Ridge Point (FLOP/byte)** |
-|:-------------------|:---------|:------------------------|:------------------|:----------------------------|
-| **V100**           | 2017     | 125                     | 0.9               | 139                         |
-| **A100**           | 2020     | 312                     | 2.04              | 153                         |
-| **H100**           | 2022     | 989                     | 3.35              | 295                         |
-| **B200**           | 2024     | 2,250                   | 8.0               | 281                         |
+|:-------------------|:--------:|:-----------------------:|:-----------------:|:---------------------------:|
+| **V100**           |   2017   |           125           |        0.9        |             139             |
+| **A100**           |   2020   |           312           |        2.04       |             153             |
+| **H100**           |   2022   |           989           |        3.35       |             295             |
+| **B200**           |   2024   |          2,250          |        8.0        |             281             |
 
 : **The Widening Memory Wall**: Compute throughput has increased 18$\times$ from V100 to B200 over seven years, while memory bandwidth has increased only 8.9$\times$. The ridge point has increased 2$\times$, meaning more workloads fall into the memory-bound regime with each generation. {#tbl-widening-gap}
 
@@ -318,7 +318,7 @@ The Roofline Model[^fn-roofline-origin] provides a quantitative framework for di
 
 ::: {#dfn-performance-engineering-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
 
-***Arithmetic Intensity***\index{Arithmetic Intensity!definition} $(I)$ is the ratio of floating-point operations performed to the number of bytes transferred from memory (FLOP per byte).
+***Arithmetic Intensity***\index{Arithmetic Intensity!definition} $(I)$ is the ML workload ratio of floating-point operations performed to the number of bytes transferred from memory (FLOP per byte).
 
 1.  **Significance (quantitative)**: It characterizes the Computational Density of a workload. It is the independent variable in the Roofline Model, determining whether a system operates in the Bandwidth-Bound ($\text{BW}$) or Compute-Bound\index{Compute-Bound} ($R_{\text{peak}}$) regime.
 2.  **Distinction (durable)**: Unlike peak throughput (a hardware property), arithmetic intensity is an algorithmic property that measures how effectively a workload reuses data once it is loaded into the processor.
@@ -611,11 +611,11 @@ Element-wise operations tell the opposite story. A Gaussian Error Linear Unit (G
 Autoregressive LLM decoding at batch size one represents the extreme case. Each decoding step reads the entire weight matrix (gigabytes of data) to produce a single output token. With a hidden dimension of 4096 and batch size 1, the arithmetic intensity is approximately `{python} WorkloadIntensityCalc.decode_intensity_str` FLOP/byte, deep in the memory-bound regime. The arithmetic intensity explains why LLM token generation achieves a tiny fraction of peak FLOP/s: the GPU spends nearly all its time reading weights, not multiplying them.
 
 | **Operation**                      | **Arithmetic Intensity** | **H100 FP16 Regime** | **Primary Bottleneck** |
-|:-----------------------------------|:-------------------------|:---------------------|:-----------------------|
-| **GEMM ($4096{\times}4096$)**      | ~1,365 FLOP/byte         | Compute-bound        | Tensor core throughput |
-| **Self-Attention (seq=2048)**      | ~50--200 FLOP/byte       | Memory-bound         | HBM bandwidth          |
-| **Element-wise (GELU, LayerNorm)** | ~1--3 FLOP/byte          | Memory-bound         | HBM bandwidth          |
-| **LLM Decode (batch=1)**           | ~1--2 FLOP/byte          | Memory-bound         | HBM bandwidth          |
+|:-----------------------------------|:------------------------:|:--------------------:|:----------------------:|
+| **GEMM ($4096{\times}4096$)**      |     ~1,365 FLOP/byte     |    Compute-bound     | Tensor core throughput |
+| **Self-Attention (seq=2048)**      |    ~50--200 FLOP/byte    |     Memory-bound     |     HBM bandwidth      |
+| **Element-wise (GELU, LayerNorm)** |     ~1--3 FLOP/byte      |     Memory-bound     |     HBM bandwidth      |
+| **LLM Decode (batch=1)**           |     ~1--2 FLOP/byte      |     Memory-bound     |     HBM bandwidth      |
 
 : **Arithmetic Intensity of Common ML Operations**: Most operations in transformer inference, aside from large batched GEMMs, fall below the H100's ridge point and are therefore memory-bound. Performance engineering focuses on reducing the memory traffic of these operations. {#tbl-arithmetic-intensity}
 
@@ -964,7 +964,11 @@ The original breakthrough was a change in how engineers understood the bottlenec
 
 ::: {#exmp-performance-engineering-flashattention-breakthrough .callout-example title="The FlashAttention breakthrough"}
 
-In 2022, Tri Dao challenged the prevailing wisdom that the attention mechanism's $\mathcal{O}(S^2)$ complexity required better matrix multiplication kernels. His insight was that the bottleneck was not compute, but memory hierarchy. Standard attention materialized the massive $S{\times}S$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $\mathcal{O}(S)$ and wall-clock time by 2--4$\times$ on relevant attention workloads. It quickly influenced the attention kernels used across major ML frameworks and serving stacks.
+**Context**: In 2022, Tri Dao and coauthors introduced FlashAttention [@dao2022], challenging the prevailing wisdom that the attention mechanism's $\mathcal{O}(S^2)$ complexity required better matrix multiplication kernels.
+
+**System**: The bottleneck was memory hierarchy, not compute. Standard attention materialized the massive $S{\times}S$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $\mathcal{O}(S)$ and wall-clock time by 2--4$\times$ on relevant attention workloads.
+
+**Systems lesson**: FlashAttention matters because it changes where the attention state lives. The durable optimization is not "a faster kernel" but a data-movement reduction that keeps quadratic intermediates out of HBM.
 
 :::
 
@@ -1100,7 +1104,7 @@ Applying uniform per-tensor INT8 quantization clips these outliers, destroying t
 
 ::: {#dfn-performance-engineering-block-wise-quantization .callout-definition title="Block-wise quantization"}
 
-***Block-wise Quantization***\index{Quantization!block-wise, definition} is a quantization scheme that partitions a weight tensor into nonoverlapping groups of $G_{\text{block}}$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
+***Block-wise Quantization***\index{Block-wise quantization!definition}\index{Quantization!block-wise} is an ML quantization scheme that partitions a weight tensor into nonoverlapping groups of $G_{\text{block}}$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
 
 1.  **Significance (quantitative)**: With block size $G_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits (a 4$\times$ memory reduction) while each FP16 scale adds $16/64 = 0.25$ bits per weight. This yields an effective bit-width of $4.25$ bits per weight: 6.25 percent overhead relative to the INT4 payload, or about 1.6 percent of the original FP16 weight size.
 2.  **Distinction (durable)**: Unlike Per-Tensor Quantization\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix and forces that scale to accommodate outlier values at the cost of wasting precision on the majority of near-zero weights, Block-wise Quantization contains outlier damage within individual blocks, preventing a single extreme value from degrading quantization fidelity for the whole tensor.
@@ -2161,7 +2165,7 @@ class FleetEfficiencyCalc:
 
 With MFU defined as useful work rather than raw busyness, the next calculation shows how distributed overhead turns a strong single-node number into a weaker fleet-wide result.
 
-::: {#nbk-performance-engineering-scaling-tax .callout-notebook title="The scaling tax"}
+:::: {#nbk-performance-engineering-scaling-tax .callout-notebook title="The scaling tax"}
 
 **Problem**: A `{python} FleetEfficiencyCalc.fleet_params_b_str` parameter model achieves `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU on a single 8-GPU node. When training scales to `{python} FleetEfficiencyCalc.fleet_nodes_str` H100 GPUs, how much MFU does inter-node communication overhead consume?
 
@@ -2176,17 +2180,17 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 
 **Systems insight**: The `{python} FleetEfficiencyCalc.fleet_scaling_tax_str` scaling tax represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**\index{Scaling!regression}, typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
 
-:::
+::::
 
 ### Detecting scaling regressions {#sec-performance-engineering-detecting-scaling-regressions-7c11}
 
 At scale, the system is nonlinear. A code change that introduces a minor memory overhead on a single GPU can trigger a catastrophic performance collapse at 1,000 GPUs due to increased garbage collection pauses or exhausted InfiniBand credit buffers. Detecting these scaling regressions requires a tiered testing strategy:
 
-1.  **Small-Scale Canaries**\index{Small-Scale Canaries}: Running the model on 8 and 64 GPUs to establish a scaling efficiency curve.
-2.  **Fleet Baseline Comparison**\index{Fleet Baseline Comparison}: Continuously comparing every production run's MFU against the gold-standard baseline for that model architecture.
-3.  **Gray Failure Detection**\index{Gray Failure Detection}: Monitoring the distribution of step times across the fleet. A single "straggler" node that is 10 percent slower due to thermal throttling can reduce the entire cluster's MFU by 10 percent in a synchronous data-parallel workload.
+1.  **Small-scale canaries**\index{Small-Scale Canaries}: Running the model on 8 and 64 GPUs to establish a scaling efficiency curve.
+2.  **Fleet baseline comparison**\index{Fleet Baseline Comparison}: Continuously comparing every production run's MFU against the gold-standard baseline for that model architecture.
+3.  **Gray failure detection**\index{Gray Failure Detection}: Monitoring the distribution of step times across the fleet. A single "straggler" node that is 10 percent slower due to thermal throttling can reduce the entire cluster's MFU by 10 percent in a synchronous data-parallel workload.
 
-::: {.callout-warning title="Benchmark vs. reality: The hero run tax"}
+::: {#psp-performance-engineering-hero-run-tax .callout-perspective title="Benchmark vs. reality: The hero run tax"}
 
 Industry benchmarks like **MLPerf**\index{MLPerf} are often "hero runs"—highly tuned configurations where logging is disabled, safety checks are bypassed, and the hardware is freshly rebooted.
 
@@ -2210,11 +2214,11 @@ Consider a raw, unoptimized 70-billion parameter PyTorch model that must serve 1
 
 When approaching a new ML workload for optimization, follow this sequence:
 
-1. **Baseline Measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU) as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
+1. **Baseline measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU) as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
 
-2. **Roofline Classification**\index{Roofline Classification}: For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
+2. **Roofline classification**\index{Roofline Classification}: For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
 
-3. **Selecting the Primary Bottleneck**\index{Bottleneck!primary selection}: The primary bottleneck falls into one of three categories, each with a different optimization path:
+3. **Selecting the primary bottleneck**\index{Bottleneck!primary selection}: The primary bottleneck falls into one of three categories, each with a different optimization path:
 
 For **memory-bound workloads**\index{Memory-Bound!optimization path} (the common case for inference):
 
@@ -2458,6 +2462,10 @@ The case study in @sec-performance-engineering-case-study demonstrated how these
 
 The unifying principle is that performance engineering is not about making hardware faster; it is about making software match the physics of the hardware it runs on. The memory wall is a physical constraint that grows wider with each hardware generation. The techniques in this chapter are the engineer's response: not fighting the physics but working within it, keeping data close to compute, reducing precision to the minimum that preserves quality, and restructuring algorithms to avoid unnecessary work. As models grow larger and hardware grows faster but not more bandwidth-rich, these skills become essential.
 
+The central lesson of performance engineering is that it is an iterative, measurement-driven discipline, not a one-shot transformation. Every optimization shifts the bottleneck: fusing attention kernels may move the constraint from HBM bandwidth to compute throughput, and reducing precision may free enough memory to increase batch size, which in turn changes the arithmetic intensity and demands a different optimization entirely. The practitioner who masters this profile-optimize-reprofile loop can extract 2 to 10 times more throughput from the same hardware than one who applies optimizations blindly. *Profiling is not merely the first step; it is every step.*
+
+This iterative mindset also determines which skills endure as hardware evolves. Individual techniques will change as new accelerator generations shift the ridge point of the Roofline Model and as new architectures alter the dominant computational patterns. What will not change is the fundamental discipline: measure the system, identify the binding constraint, apply the optimization that addresses that specific constraint, and then measure again. Engineers who internalize this cycle treat performance engineering as a continuous practice rather than a checklist, and that practice is what separates systems that merely run from systems that run efficiently at scale.
+
 ::: {.callout-takeaways title="Match the software to the silicon"}
 
 * **The memory wall defines performance engineering**: Most transformer operations are memory-bound, with arithmetic intensity far below the hardware ridge point. Performance engineering is primarily about reducing bytes moved, not operations computed.
@@ -2469,10 +2477,6 @@ The unifying principle is that performance engineering is not about making hardw
 * **Always profile before optimizing**: The dominant bottleneck is often not where intuition suggests, and applying the wrong optimization wastes engineering effort while leaving the actual bottleneck untouched.
 
 :::
-
-The central lesson of performance engineering is that it is an iterative, measurement-driven discipline, not a one-shot transformation. Every optimization shifts the bottleneck: fusing attention kernels may move the constraint from HBM bandwidth to compute throughput, and reducing precision may free enough memory to increase batch size, which in turn changes the arithmetic intensity and demands a different optimization entirely. The practitioner who masters this profile-optimize-reprofile loop can extract 2 to 10 times more throughput from the same hardware than one who applies optimizations blindly. *Profiling is not merely the first step; it is every step.*
-
-This iterative mindset also determines which skills endure as hardware evolves. Individual techniques will change as new accelerator generations shift the ridge point of the Roofline Model and as new architectures alter the dominant computational patterns. What will not change is the fundamental discipline: measure the system, identify the binding constraint, apply the optimization that addresses that specific constraint, and then measure again. Engineers who internalize this cycle treat performance engineering as a continuous practice rather than a checklist, and that practice is what separates systems that merely run from systems that run efficiently at scale.
 
 ::: {.callout-chapter-connection title="From optimization to serving"}
 

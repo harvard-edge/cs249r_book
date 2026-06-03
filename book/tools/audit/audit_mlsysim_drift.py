@@ -90,6 +90,15 @@ CANONICAL = [
     ("llama2_70b_heads",    64, 0.05, "Models.Language.Llama2_70B.heads"),
     ("llama2_70b_kv_heads", 8,  0.05, "Models.Language.Llama2_70B.kv_heads"),
     ("gpt2_params_m",       1500, 0.05, "Models.Language.GPT2.parameters (in M)"),
+    ("mobilenetv2_alpha10_params", 3504872, 0.001, "Models.Vision.MobileNetV2.parameters"),
+    ("mobilenetv2_alpha05_total_params", 1968680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5.parameters"),
+    ("mobilenetv2_alpha05_feature_params", 687680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters"),
+
+    # Case-study reference anchors
+    ("accel_only_accuracy", 0.57, 0.001, "ReferenceStats.OuraSleepStudy.AccelOnlyAccuracy"),
+    ("enhanced_accuracy",   0.79, 0.001, "ReferenceStats.OuraSleepStudy.EnhancedAccuracy"),
+    ("scorer_agreement_low", 0.82, 0.001, "ReferenceStats.OuraSleepStudy.PsgScorerAgreementLow"),
+    ("scorer_agreement_high", 0.83, 0.001, "ReferenceStats.OuraSleepStudy.PsgScorerAgreementHigh"),
 
     # GPT-3 training (energy + ops)
     ("gpt3_train_energy_mwh", 1287, 0.05, "Models.Language.GPT3.training_energy_mwh"),

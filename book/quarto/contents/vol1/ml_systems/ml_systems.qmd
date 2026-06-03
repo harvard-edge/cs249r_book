@@ -101,7 +101,7 @@ To navigate these operating regimes, we anchor our engineering decisions in a fo
 
 Every chapter in the first half of this text interrogates one or more of these layers. Mastery of this single-node regime establishes the "silicon contract" that governs all subsequent optimization and scaling efforts.
 
-These physical constraints interact with the iron law of ML systems (@sec-introduction-iron-law-ml-systems-c32a), which decomposes end-to-end latency into data movement, computation, and overhead. Different deployment environments stress different terms of this equation: cloud systems are typically compute bound, mobile systems hit power walls, and TinyML devices are memory-capacity-limited. By pairing the physical constraints with the iron law, we develop a quantitative vocabulary for reasoning about which paradigm fits a given workload and *why*. To anchor this analysis concretely, the chapter introduces five Lighthouse Models\index{Lighthouse Model!reference workloads} (ResNet-50, GPT-2, Deep Learning Recommendation Model (DLRM), MobileNet, and a Keyword Spotter) that span the deployment spectrum and isolate distinct system bottlenecks. These reference workloads recur throughout the book, providing a consistent basis for comparing optimization techniques across chapters.
+These physical constraints interact with the iron law of ML systems (@sec-introduction-iron-law-ml-systems-c32a), which decomposes end-to-end latency into data movement, computation, and overhead. Different deployment environments stress different terms of this equation: cloud systems are typically compute bound, mobile systems hit power walls, and TinyML devices are memory-capacity-limited. By pairing the physical constraints with the iron law, we develop a quantitative vocabulary for reasoning about which paradigm fits a given workload and *why*. To anchor this analysis concretely, the chapter introduces five Lighthouse Models\index{Lighthouse Model!reference workloads} (ResNet-50, GPT-2, Deep Learning Recommendation Model (DLRM), MobileNetV2, and a Keyword Spotter) that span the deployment spectrum and isolate distinct system bottlenecks. These reference workloads recur throughout the book, providing a consistent basis for comparing optimization techniques across chapters.
 
 The physics that creates these paradigm boundaries comes first, followed by the analytical tools (iron law, bottleneck principle, workload archetypes) for mapping workloads to deployment targets. Each paradigm then receives an in-depth treatment covering infrastructure, trade-offs, and representative applications. @Fig-cloud-edge-TinyML-comparison orients the discussion by showing where each paradigm sits along the centralization spectrum. The chapter closes with a comparative decision framework and the hybrid architectures that combine paradigms when no single deployment target satisfies all requirements.
 
@@ -572,7 +572,7 @@ from mlsysim.fmt import fmt_percent, fmt, check, fmt_qty
 class EnergyTransmission:
     """
     Namespace for Energy of Transmission vs Compute.
-    Scenario: Cost of sending 1 MB to cloud vs running MobileNet locally.
+    Scenario: Cost of sending 1 MB to cloud vs running MobileNetV2 locally.
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
@@ -611,7 +611,7 @@ class EnergyTransmission:
 <!-- lego-ok-block: 1 MB is a round illustrative payload for the transmission-vs-compute ratio, not a literal audio bitrate -->
 *   **Data $(D_{\text{vol}})$**: `{python} EnergyTransmission.data_mb_str` (illustrative payload volume).
 *   **Transmission energy $(E_{\text{tx}})$**: `{python} EnergyTransmission.tx_energy_mj_per_mb_str` (Wi-Fi/LTE).
-*   **Compute energy $(E_{\text{op}})$**: `{python} EnergyTransmission.compute_energy_mj_str` (MobileNet on NPU).
+*   **Compute energy $(E_{\text{op}})$**: `{python} EnergyTransmission.compute_energy_mj_str` (MobileNetV2 on NPU).
 
 **Math**:
 
@@ -661,7 +661,9 @@ The second archetype, the **Bandwidth Hog**\index{Autoregressive Generation!memo
 
 The third archetype, the **Sparse Scatter**\index{Embedding Table!memory capacity bound}\index{Sparse Scatter!definition}, describes workloads with irregular memory access patterns and poor cache locality. Memory capacity and access latency constrain performance. Recommendation systems with massive embedding tables are canonical examples.
 
-These archetypes map naturally to deployment paradigms: compute beasts and sparse scatter workloads gravitate toward cloud ML where resources are abundant. Bandwidth hogs span cloud and edge depending on latency requirements. Tiny constraint workloads are exclusively TinyML territory. To make these abstractions concrete, we anchor each archetype to a specific model that recurs throughout this book as one of five reference workloads.
+The fourth archetype, the **Tiny Constraint**\index{Energy per Inference!binding constraint}\index{Always-On Sensing!power constraints}\index{Tiny Constraint!definition}, describes workloads operating under extreme power envelopes ($< 1$ mW) and memory limits ($< 256$ KB). The binding constraint is energy per inference—efficiency, not raw speed. Always-on sensing operates in this regime.
+
+These archetypes map naturally to deployment paradigms: Compute Beast and Sparse Scatter workloads gravitate toward cloud ML where resources are abundant. Bandwidth Hog workloads span cloud and edge depending on latency requirements. Tiny Constraint workloads are exclusively TinyML territory. To make these abstractions concrete, we anchor each archetype to a specific model that recurs throughout this book as one of five reference workloads.
 
 [^fn-archetype-bottleneck]: **Workload Archetype**: A classification of ML workloads by their dominant iron law bottleneck rather than their model family. The distinction matters because the optimization strategy differs fundamentally: a compute-bound workload benefits from faster arithmetic $(R_{\text{peak}})$, while a bandwidth-bound workload benefits only from wider memory buses $(\text{BW})$. Misidentifying the archetype wastes optimization effort on the wrong term of the iron law, as when teams add accelerator FLOP/s to a memory-bound inference pipeline and observe zero speedup. \index{Archetype!workload classification}
 
@@ -691,10 +693,10 @@ Throughout this book, we use the five Lighthouse Models summarized in @tbl-ml-sy
 | **ResNet-50**              | Compute Beast             | Cloud training, edge inference |
 | **GPT-2/Llama**            | Bandwidth Hog             | Cloud inference                |
 | **DLRM**                   | Sparse Scatter            | Cloud only (distributed)       |
-| **MobileNet**              | Compute Beast (efficient) | Mobile, edge                   |
+| **MobileNetV2**            | Compute Beast (efficient) | Mobile, edge                   |
 | **Keyword Spotting (KWS)** | Tiny Constraint           | TinyML, always-on              |
 
-: **Five Lighthouse Models**: Recurring workloads used throughout the book to ground the iron law in concrete practice. Each lighthouse pairs an archetype (Compute Beast, Bandwidth Hog, Sparse Scatter, Tiny Constraint) with the deployment paradigm where it predominantly runs, isolating a distinct systems bottleneck. {#tbl-ml-systems-lighthouse-archetypes}
+: **Five lighthouse models**: Recurring workloads used throughout the book to ground the iron law in concrete practice. Each lighthouse pairs an archetype (Compute Beast, Bandwidth Hog, Sparse Scatter, Tiny Constraint) with the deployment paradigm where it predominantly runs, isolating a distinct systems bottleneck. {#tbl-ml-systems-lighthouse-archetypes}
 
 ```{=latex}
 \endgroup
@@ -702,11 +704,9 @@ Throughout this book, we use the five Lighthouse Models summarized in @tbl-ml-sy
 
 :::
 
-The fourth archetype, the **Tiny Constraint**\index{Energy per Inference!binding constraint}\index{Always-On Sensing!power constraints}\index{Tiny Constraint!definition}, describes workloads operating under extreme power envelopes ($< 1$ mW) and memory limits ($< 256$ KB). The binding constraint is energy per inference—efficiency, not raw speed. Always-on sensing operates in this regime.
-
 To ground the abstract interdependencies of the iron law in concrete practice, we analyze these five Lighthouse Models in turn. The following summaries recap each workload from a systems perspective, connecting them to the specific iron law bottlenecks they exemplify, as visualized in the scorecard for our central Smart Doorbell narrative (@fig-doorbell-scorecard).
 
-::: {#fig-doorbell-scorecard fig-env="figure" fig-pos="htb" fig-cap="**The Hierarchy of Constraints: Smart Doorbell Scorecard**: This visual evaluation of the Smart Doorbell lighthouse reveals the fundamental systems trade-off. While the model successfully fits within the kilobyte-scale memory budget (Level 1: PASS), its 101 ms baseline latency exceeds a strict 50 ms real-time response target on the ESP32-S3 (Level 2: FAIL). This indicates that further optimization—such as quantization or architectural pruning—is mandatory before deployment in this tighter interaction budget." fig-alt="A horizontal bar chart showing two levels of constraints. Level 1: Memory (RAM) shows a green bar (PASS). Level 2: Latency (SLA) shows a red bar (FAIL), exceeding the limit line."}
+::: {#fig-doorbell-scorecard fig-env="figure" fig-pos="htb" fig-cap="**The Hierarchy of Constraints: Smart Doorbell Scorecard**: This visual evaluation of the Smart Doorbell scenario reveals the fundamental systems trade-off. While the model successfully fits within the kilobyte-scale memory budget (Level 1: PASS), its 101 ms baseline latency exceeds a strict 50 ms real-time response target on the ESP32-S3 (Level 2: FAIL). This indicates that further optimization—such as quantization or architectural pruning—is mandatory before deployment in this tighter interaction budget." fig-alt="A horizontal bar chart showing two levels of constraints. Level 1: Memory (RAM) shows a green bar (PASS). Level 2: Latency (SLA) shows a red bar (FAIL), exceeding the limit line."}
 
 ```{python}
 #| echo: false
@@ -847,7 +847,7 @@ The language models **GPT-2/Llama**\index{GPT-2!autoregressive bottleneck}\index
 
 The recommendation lighthouse, **DLRM**\index{DLRM!memory capacity bound}\index{Recommendation Systems!DLRM} (Deep Learning Recommendation Model), powers the "You might also like" recommendations on platforms like Meta and Netflix. It maps users and items to embedding vectors stored in tables that can exceed `{python} LighthouseModels.dlrm_embedding_gb_str` of embeddings, making memory capacity rather than computation the binding constraint.
 
-The mobile lighthouse, **MobileNet**\index{MobileNet!depthwise separable convolutions}\index{MobileNet!efficiency gains}, runs in smartphone camera apps for real-time photo categorization and on-device visual search. It performs the same image classification task as ResNet but uses depthwise separable convolutions to reduce computation by `{python} LighthouseModels.mobilenet_flops_reduction_mult_str`, enabling real-time inference on smartphones at `{python} LighthouseModels.mobile_tdp_range_str`.
+The mobile lighthouse, **MobileNetV2**\index{MobileNetV2!depthwise separable convolutions}\index{MobileNetV2!efficiency gains}, runs in smartphone camera apps for real-time photo categorization and on-device visual search. It performs the same image classification task as ResNet but uses depthwise separable convolutions to reduce computation by `{python} LighthouseModels.mobilenet_flops_reduction_mult_str`, enabling real-time inference on smartphones at `{python} LighthouseModels.mobile_tdp_range_str`.
 
 The TinyML lighthouse, **Keyword Spotting (KWS)**\index{Keyword Spotting!TinyML archetype}, represents the always-on sensing archetype. Used in applications like Smart Doorbells, it detects wake words ("Ding Dong", "Hello") using depthwise separable convolutional neural networks for resource-constrained microcontrollers [@zhang2017hello]. In this book's lighthouse setup, the workload has approximately `{python} LighthouseModels.kws_params_str` and fits in about `{python} LighthouseModels.kws_size_kb_str`, placing it in the kilobyte-memory, milliwatt-budget TinyML regime.
 
@@ -894,7 +894,7 @@ class LatencyConstants:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Custom unit suffixes → MarkdownStr per recipe Rule 1 escape-hatch
     lat_compute_str = MarkdownStr("~1 ns")                                # GPU matrix multiply (per op)
-    lat_npu_str = MarkdownStr("5–20 ms")                                  # NPU inference (MobileNet)
+    lat_npu_str = MarkdownStr("5–20 ms")                                  # NPU inference (MobileNetV2)
     lat_llm_str = MarkdownStr("20–100 ms")                                # LLM token generation
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -920,7 +920,7 @@ These latencies, organized by category in @tbl-latency-numbers, span eight order
 |:---------------------------------|:----------------------------------------------:|:-----------------------------------|
 | **Compute**                      |                                                |                                    |
 | **GPU matrix multiply (per op)** |  `{python} LatencyConstants.lat_compute_str`   | Compute is rarely the bottleneck   |
-| **NPU inference (MobileNet)**    |    `{python} LatencyConstants.lat_npu_str`     | Mobile can do real-time vision     |
+| **NPU inference (MobileNetV2)**  |    `{python} LatencyConstants.lat_npu_str`     | Mobile can do real-time vision     |
 | **LLM token generation**         |    `{python} LatencyConstants.lat_llm_str`     | Perceived as "typing speed"        |
 | **Memory**                       |                                                |                                    |
 | **L1 cache hit**                 |     `{python} LatencyConstants.lat_l1_str`     | Keep hot data in registers         |
@@ -1416,7 +1416,7 @@ class GPT3TrainingScale:
 \index{Cloud ML!workload archetypes}
 Consider what it took to train GPT-3: `{python} GPT3TrainingScale.gpt3_pflop_days_str` of computation, `{python} GPT3TrainingScale.gpt3_v100_count_str` running for approximately `{python} GPT3TrainingScale.gpt3_days_str`, consuming megawatts of power—at an estimated cost of ~`{python} GPT3TrainingScale.gpt3_cost_m_str`[^fn-nlp-training-scale]. No smartphone, no edge server, no single machine on Earth could have performed this computation. Only a data center, with its virtually unlimited compute, memory, and storage, could aggregate enough resources to make this possible. This is the defining proposition of cloud ML: when latency can be tolerated, it offers computational scale that no other paradigm can match.
 
-Cloud ML aggregates computational resources in data centers[^fn-cloud-utility-model] to handle computationally intensive tasks: large-scale data processing, collaborative model development, and advanced analytics. This infrastructure serves as the natural home for three of the four workload archetypes: compute beasts like ResNet training that demand sustained TFLOP/s across thousands of accelerators, bandwidth hogs like large language model inference that benefit from TB/s HBM bandwidth, and sparse scatter workloads like recommendation systems that require terabytes of embedding tables and high-bandwidth interconnects for all-to-all communication patterns.
+Cloud ML aggregates computational resources in data centers[^fn-cloud-utility-model] to handle computationally intensive tasks: large-scale data processing, collaborative model development, and advanced analytics. This infrastructure serves as the natural home for three of the four workload archetypes: Compute Beast workloads like ResNet training that demand sustained TFLOP/s across thousands of accelerators, Bandwidth Hog workloads like large language model inference that benefit from TB/s HBM bandwidth, and Sparse Scatter workloads like recommendation systems that require terabytes of embedding tables and high-bandwidth interconnects for all-to-all communication patterns.
 
 Cloud deployments range from single-machine instances (workstations, multi-GPU servers, DGX systems) to large-scale distributed systems spanning multiple data centers. This book focuses on single-machine cloud systems, where the reader learns to build and optimize ML systems on individual powerful machines. Future studies can address distributed cloud infrastructure, where systems coordinate computation across multiple networked machines. This follows the principle of establishing foundations before adding complexity.
 
@@ -1558,7 +1558,7 @@ class DistancePenalty:
 
 **Physics**:
 
-1.  **Light in Fiber**: ~`{python} DistancePenalty.sol_km_per_s_str`.
+1.  **Light in fiber**: ~`{python} DistancePenalty.sol_km_per_s_str`.
 2.  **Round-trip propagation**: (`{python} DistancePenalty.distance_km_str` $\times$ 2)/`{python} DistancePenalty.sol_km_per_s_str` = `{python} DistancePenalty.rtt_formatted_ms_str`.
 3.  **Result**: Round-trip propagation alone requires `{python} DistancePenalty.rtt_formatted_ms_str`, exceeding the `{python} DistancePenalty.safety_budget_ms_str` end-to-end budget (`{python} DistancePenalty.deficit_ms_str` headroom) before the model performs any inference.
 
@@ -1919,7 +1919,7 @@ These applications share a common thread: they trade latency for scale, acceptin
 
 \index{Edge ML!distance penalty} \index{Edge ML!data sovereignty}When latency budgets drop below 100 ms, cloud infrastructure hits a hard physical wall. The Distance Penalty means the speed of light alone imposes minimum latencies of 40--150 ms for cross-region requests—before any computation begins. When an autonomous vehicle needs to decide whether to brake, or an industrial robot needs to stop before hitting an obstacle, 100 ms is an eternity. The logical engineering response is to move the computation closer to the data source.
 
-Edge ML emerged from this constraint, trading unlimited computational resources for sub-100 ms latency and local data retention. In archetype terms, edge deployment transforms the optimization target: a bandwidth hog workload like LLM inference that is *memory bound* in the cloud becomes *latency-bound* at the edge, where the 50–100 ms network penalty dominates the 10–20 ms compute time. Edge hardware with sufficient local memory can eliminate this penalty entirely, shifting the bottleneck back to the underlying memory bandwidth constraint. Recall the iron law from @eq-iron-law-extended: by processing locally, edge deployment eliminates the $D_{\text{vol}}/\text{BW}_{\text{IO}}$ (network I/O) term entirely, collapsing the latency to $\max(D_{\text{vol}}/\text{BW}, O/(R_{\text{peak}} \cdot \eta_{\text{hw}})) + L_{\text{lat}}$—the same memory-vs.-compute trade-off, but without the network penalty that dominates cloud inference.
+Edge ML emerged from this constraint, trading unlimited computational resources for sub-100 ms latency and local data retention. In archetype terms, edge deployment transforms the optimization target: a Bandwidth Hog workload like LLM inference that is *memory bound* in the cloud becomes *latency-bound* at the edge, where the 50–100 ms network penalty dominates the 10–20 ms compute time. Edge hardware with sufficient local memory can eliminate this penalty entirely, shifting the bottleneck back to the underlying memory bandwidth constraint. Recall the iron law from @eq-iron-law-extended: by processing locally, edge deployment eliminates the $D_{\text{vol}}/\text{BW}_{\text{IO}}$ (network I/O) term entirely, collapsing the latency to $\max(D_{\text{vol}}/\text{BW}, O/(R_{\text{peak}} \cdot \eta_{\text{hw}})) + L_{\text{lat}}$—the same memory-vs.-compute trade-off, but without the network penalty that dominates cloud inference.
 
 This paradigm shift is essential for applications where cloud's 100--500 ms round-trip delays are unacceptable. Autonomous systems requiring split-second decisions and industrial IoT[^fn-iiot-edge-latency] applications demanding real-time response cannot tolerate network delays. Similarly, applications subject to strict data privacy regulations must process information locally rather than transmitting it to remote data centers. Edge devices (gateways and IoT hubs) occupy a middle ground in the deployment spectrum, maintaining acceptable performance while operating under intermediate resource constraints.
 
@@ -2166,7 +2166,7 @@ class EdgeEnergyTransmissionRecap:
 
 The preceding bandwidth calculation reveals why edge processing is mandatory for high-volume sensor deployments. For battery-powered edge devices (wireless cameras, drones, wearables), the constraint is even more severe: as "The Energy of Transmission" (@sec-ml-systems-bottleneck-principle-3514) established, radio transmission costs `{python} EdgeEnergyTransmissionRecap.ratio_mult_str` more energy than local inference, making cloud offloading physically impossible for battery-powered devices regardless of available bandwidth. @Fig-energy-per-inference quantifies this asymmetry across deployment tiers.
 
-::: {#fig-energy-per-inference fig-env="figure" fig-pos="htb" fig-cap="**Energy Per Inference Across Deployment Paradigms**: Full-system energy consumption per inference spans eight orders of magnitude, from ~10 µJ for TinyML keyword spotting to ~1 kJ for a cloud LLM query. This gap is not an engineering shortcoming—it reflects the physics of data movement, cooling, and network overhead that separates deployment tiers. The 100,000,000$\times$ difference explains why always-on sensing is only feasible at the TinyML tier." fig-alt="Horizontal log-scale bar chart showing energy per inference for five workloads across four deployment paradigms. TinyML keyword spotting at 10 microjoules, Mobile MobileNet at 50 millijoules, Edge ResNet-50 at 500 millijoules, Cloud ResNet-50 at 10 joules, and Cloud GPT-4 query at 1 kilojoule."}
+::: {#fig-energy-per-inference fig-env="figure" fig-pos="htb" fig-cap="**Energy Per Inference Across Deployment Paradigms**: Full-system energy consumption per inference spans eight orders of magnitude, from ~10 µJ for TinyML keyword spotting to ~1 kJ for a cloud LLM query. This gap is not an engineering shortcoming—it reflects the physics of data movement, cooling, and network overhead that separates deployment tiers. The 100,000,000$\times$ difference explains why always-on sensing is only feasible at the TinyML tier." fig-alt="Horizontal log-scale bar chart showing energy per inference for five workloads across four deployment paradigms. TinyML keyword spotting at 10 microjoules, Mobile MobileNetV2 at 50 millijoules, Edge ResNet-50 at 500 millijoules, Cloud ResNet-50 at 10 joules, and Cloud GPT-4 query at 1 kilojoule."}
 
 ```{python}
 #| echo: false
@@ -2198,7 +2198,7 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.5))
 #—Data (energy per inference, full-system estimates) ---
 workloads = [
     "TinyML\nKeyword Spotting",
-    "Mobile\nMobileNet (NPU)",
+    "Mobile\nMobileNetV2 (NPU)",
     "Edge\nResNet-50 (Jetson)",
     "Cloud\nResNet-50 (A100)",
     "Cloud\nGPT-4 Query",
@@ -2425,7 +2425,7 @@ class EdgeSizingThroughput:
 | **Model compute**        |                             YOLOv8-nano: `{python} EdgeSizingThroughput.yolo_gflop_per_inference_str`                             |   `{python} EdgeSizingThroughput.sustained_gflop_per_s_str`    |
 | **Required throughput**  | `{python} EdgeSizingThroughput.sustained_gflop_per_s_str` $\times$ `{python} EdgeSizingThroughput.headroom_factor_str` (headroom) | ~`{python} EdgeSizingThroughput.req_tops_equiv_str` equivalent |
 
-: **Edge Inference Sizing Requirements**: Per-store throughput target for the smart-retail person-detection scenario. {#tbl-ml-systems-edge-sizing-requirements tbl-colwidths="[33,41,25]"}
+: **Edge inference sizing requirements**: Per-store throughput target for the smart-retail person-detection scenario. {#tbl-ml-systems-edge-sizing-requirements tbl-colwidths="[33,41,25]"}
 
 \index{Edge Accelerator!deployment selection}
 \index{Embedded GPU Accelerators!edge deployment}
@@ -2537,7 +2537,7 @@ class EdgeSizingFleetTCO:
 | **Intel NUC + Movidius**                                                       |                                                `{python} EdgeSizingFleetTCO.nuc_tops_str`                                                |      `{python} EdgeSizingFleetTCO.nuc_power_w_str`      |         `{python} EdgeSizingFleetTCO.nuc_cost_str`        |      `{python} EdgeSizingFleetTCO.nuc_fleet_usd_str`      |
 | **Google Coral Dev (`{python} EdgeSizingFleetTCO.coral_units_per_store_str`)** | peak `{python} EdgeSizingFleetTCO.coral_cluster_peak_tops_str`<br>derated `{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` | `{python} EdgeSizingFleetTCO.coral_cluster_power_w_str` | `{python} EdgeSizingFleetTCO.coral_cluster_unit_cost_str` | `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` |
 
-: **Edge Accelerator Options**: Throughput, power, and cost for three candidate edge accelerators at fleet scale. {#tbl-ml-systems-edge-hardware-options tbl-colwidths="[40,15,15,15,15]"}
+: **Edge accelerator options**: Throughput, power, and cost for three candidate edge accelerators at fleet scale. {#tbl-ml-systems-edge-hardware-options tbl-colwidths="[40,15,15,15,15]"}
 
 ```{=latex}
 \endgroup
@@ -2620,7 +2620,7 @@ class MobileEfficiencyRecap:
 ```
 
 \index{Depthwise Separable Convolution!power reduction}
-The mobile environment introduces a critical constraint absent from stationary deployments: energy per inference becomes a first-order design parameter. Under the iron law in @eq-iron-law-extended, cloud and edge systems optimize for minimizing $T$, total latency. Mobile systems face an additional constraint: $\text{Energy} = \text{Power} \times T$, and the power wall described by @eq-power-scaling caps sustained power at `{python} MobileEfficiencyRecap.mobile_tdp_range_str`. In archetype terms, a compute beast workload like image classification must be transformed through architectural efficiency (for example, depthwise separable convolutions[^fn-depthwise-mobile-efficiency] in MobileNet) into an efficient variant, reducing FLOPs by `{python} MobileEfficiencyRecap.mobilenet_flops_reduction_mult_str`, preserving accuracy. This is not merely optimization; it represents a qualitative shift in the arithmetic intensity trade-off, accepting lower peak throughput in exchange for sustainable operation within a `{python} MobileEfficiencyRecap.mobile_tdp_range_str` thermal envelope.
+The mobile environment introduces a critical constraint absent from stationary deployments: energy per inference becomes a first-order design parameter. Under the iron law in @eq-iron-law-extended, cloud and edge systems optimize for minimizing $T$, total latency. Mobile systems face an additional constraint: $\text{Energy} = \text{Power} \times T$, and the power wall described by @eq-power-scaling caps sustained power at `{python} MobileEfficiencyRecap.mobile_tdp_range_str`. In archetype terms, a Compute Beast workload like image classification must be transformed through architectural efficiency (for example, depthwise separable convolutions[^fn-depthwise-mobile-efficiency] in MobileNetV2) into an efficient variant, reducing FLOPs by `{python} MobileEfficiencyRecap.mobilenet_flops_reduction_mult_str`, preserving accuracy. This is not merely optimization; it represents a qualitative shift in the arithmetic intensity trade-off, accepting lower peak throughput in exchange for sustainable operation within a `{python} MobileEfficiencyRecap.mobile_tdp_range_str` thermal envelope.
 
 [^fn-computational-photo-ml]: **Computational Photography**: Uses ML algorithms (for example, multi-frame fusion, neural denoising) to overcome the physical limits of small mobile camera sensors. This exemplifies the mobile computing trade-off, as a pipeline of 10–15 models must execute within the user's perceived shutter delay (~200 ms) while adhering to a strict, shared `{python} MobileEfficiencyRecap.mobile_tdp_range_str` thermal budget. \index{Computational Photography!pipeline constraint}
 
@@ -2630,7 +2630,7 @@ This battery-and-thermal boundary gives the mobile paradigm its defining shape.
 
 ::: {#dfn-ml-systems-mobile-ml .callout-definition title="Mobile ML"}
 
-***Mobile Machine Learning***\index{Mobile Machine Learning|see{Mobile ML}}\index{Mobile ML!definition} is the deployment paradigm bounded by Thermal Design Power (TDP)\index{Thermal Design Power!mobile constraint} and battery energy.
+***Mobile Machine Learning***\index{Mobile ML!definition}\index{Mobile Machine Learning|see{Mobile ML}} is the deployment paradigm bounded by Thermal Design Power (TDP)\index{Thermal Design Power!mobile constraint} and battery energy.
 
 1.  **Significance (quantitative)**: It is constrained by the few-watt heat dissipation capacity of passive cooling, requiring architectures that prioritize sustained energy efficiency over peak throughput $(R_{\text{peak}})$.
 2.  **Distinction (durable)**: Unlike Edge ML, which may have active cooling, mobile ML must operate within a Personal Energy Budget. Unlike TinyML, it still provides a rich OS and multi-watt compute capacity.
@@ -2775,7 +2775,7 @@ class BatteryTax:
 **Physics**:
 
 1.  **Ideal runtime**: `{python} BatteryTax.runtime_frac`
-2.  **The reality**: A user expects their phone to last `{python} BatteryTax.phone_day_hours_str`. Running this single feature continuously for a day would require `{python} BatteryTax.budget_pct_str` of the phone's daily energy budget.
+2.  **Reality**: A user expects their phone to last `{python} BatteryTax.phone_day_hours_str`. Running this single feature continuously for a day would require `{python} BatteryTax.budget_pct_str` of the phone's daily energy budget.
 
 **Systems insight**: The model cannot simply be "deployed." The techniques in @sec-model-compression (quantization, duty-cycling) must reduce power to <100 mW for the feature to stay on all day.
 
@@ -3057,7 +3057,7 @@ Mobile ML demonstrates that useful intelligence can operate within a `{python} M
 
 \index{Coin-Cell Battery!deployment longevity}
 \index{Ubiquitous Computing!etymology}
-TinyML [@janapa_reddi2022] completes the deployment spectrum by pushing intelligence to its physical limits. Devices costing less than \$10 and consuming less than one milliwatt[^fn-milliwatt-threshold] of power make ubiquitous[^fn-ubiquitous-computing] sensing economically practical at massive scale. This is the exclusive domain of the tiny constraint archetype, where the optimization objective shifts from maximizing throughput to minimizing energy per inference. A keyword spotting model consuming 10 µJ per inference can operate for years on a coin-cell battery, achieving million-fold improvements in energy efficiency by trading model capacity for operational longevity.
+TinyML [@janapa_reddi2022] completes the deployment spectrum by pushing intelligence to its physical limits. Devices costing less than \$10 and consuming less than one milliwatt[^fn-milliwatt-threshold] of power make ubiquitous[^fn-ubiquitous-computing] sensing economically practical at massive scale. This is the exclusive domain of the Tiny Constraint archetype, where the optimization objective shifts from maximizing throughput to minimizing energy per inference. A keyword spotting model consuming 10 µJ per inference can operate for years on a coin-cell battery, achieving million-fold improvements in energy efficiency by trading model capacity for operational longevity.
 
 [^fn-milliwatt-threshold]: **The 1 mW Threshold**: Below approximately one milliwatt, a device can be powered indefinitely by ambient energy harvesting---solar cells the size of a thumbnail (~10 mW outdoors, ~10 µW indoors), thermoelectric generators on warm pipes (~100 µW), or RF energy from nearby transmitters (~10 µW). This crossover transforms the deployment model from "battery-limited lifetime" to "deploy and forget," which is why 1 mW is not an arbitrary target but the physical boundary that makes TinyML a distinct paradigm rather than merely a scaled-down edge device. \index{Energy Harvesting!milliwatt threshold}
 
@@ -3078,13 +3078,13 @@ The scale of these constraints becomes tangible when we see the hardware. @Fig-T
 
 :::
 
-[^fn-ubiquitous-computing]: **Ubiquitous Computing**: Mark Weiser's vision of "invisible" technology is achieved when the cost and power of an intelligent sensor become so low that the economic barrier to mass deployment vanishes. This forces the optimization objective to shift from performance (throughput) to power (energy per inference), the central trade-off of the tiny constraint archetype. A keyword spotter achieving a million-fold energy efficiency gain can thus operate for years on a coin-cell battery, making ubiquitous intelligence practical. \index{Ubiquitous Computing!TinyML realization}
+[^fn-ubiquitous-computing]: **Ubiquitous Computing**: Mark Weiser's vision of "invisible" technology is achieved when the cost and power of an intelligent sensor become so low that the economic barrier to mass deployment vanishes. This forces the optimization objective to shift from performance (throughput) to power (energy per inference), the central trade-off of the Tiny Constraint archetype. A keyword spotter achieving a million-fold energy efficiency gain can thus operate for years on a coin-cell battery, making ubiquitous intelligence practical. \index{Ubiquitous Computing!TinyML realization}
 
 At this endpoint, the deployment target is defined by always-on sensing under kilobyte and milliwatt budgets.
 
 ::: {#dfn-ml-systems-tinyml .callout-definition title="TinyML"}
 
-***TinyML***\index{TinyML!definition} is the domain of Always-On Sensing constrained by Kilobyte-Scale Memory and Milliwatt-Scale Power.
+***TinyML***\index{TinyML!definition} is the machine learning domain of Always-On Sensing constrained by Kilobyte-Scale Memory and Milliwatt-Scale Power.
 
 1.  **Significance (quantitative)**: It necessitates models small enough to reside entirely in On-Chip SRAM, avoiding the high energy cost (100$\times$ higher) of DRAM access to enable continuous inference on milliwatt power budgets.
 2.  **Distinction (durable)**: Unlike Mobile ML, which uses multi-watt processors and a full OS, TinyML runs on Microcontrollers (MCUs) with no operating system abstraction.
@@ -3179,7 +3179,7 @@ class EnergyInference:
 | **Mobile**   | MobileNet (NPU)      |  `{python} EnergyInference.e_mobilenet_mj_str`   |                                                               `{python} EnergyInference.q_mobilenet_str` |
 | **TinyML**   | Keyword spotting     |       `{python} EnergyInference.e_kws_str`       |                                                                     `{python} EnergyInference.q_kws_str` |
 
-: **Energy per Inference Across Paradigms**: Representative full-system energy per inference and resulting smartphone-battery query counts for cloud, edge, mobile, and TinyML workloads, illustrating the eight-order-of-magnitude span that makes always-on sensing feasible only at the TinyML tier. {#tbl-ml-systems-energy-per-inference tbl-colwidths="[22,25,25,28]"}
+: **Energy per inference across paradigms**: Representative full-system energy per inference and resulting smartphone-battery query counts for cloud, edge, mobile, and TinyML workloads, illustrating the eight-order-of-magnitude span that makes always-on sensing feasible only at the TinyML tier. {#tbl-ml-systems-energy-per-inference tbl-colwidths="[22,25,25,28]"}
 
 <!-- lego-ok-block: full-system vs. isolated-compute narrative contrast, not cell operands -->
 Energy values represent *full-system energy* (including server CPUs, memory, networking, and cooling overhead), not *isolated accelerator compute energy*. For example, the A100 GPU alone executes ResNet-50 inference in under 1 ms (~0.3 J), but the full server draws ~1 kW when amortized across queuing, preprocessing, and idle power.
@@ -3735,7 +3735,7 @@ The decision framework (@fig-mlsys-playbook-flowchart) helps select the best sin
 
 ::: {#dfn-ml-systems-hybrid-ml .callout-definition title="Hybrid ML"}
 
-***Hybrid Machine Learning***\index{Hybrid Machine Learning|see{Hybrid ML}}\index{Hybrid ML!definition} is the deployment strategy that splits an ML pipeline across cloud and edge tiers, assigning latency-critical stages to local hardware and compute-intensive stages to remote data centers.
+***Hybrid Machine Learning***\index{Hybrid ML!definition}\index{Hybrid Machine Learning|see{Hybrid ML}} is the deployment strategy that splits an ML pipeline across cloud and edge tiers, assigning latency-critical stages to local hardware and compute-intensive stages to remote data centers.
 
 1.  **Significance (quantitative)**: Hybrid architectures exploit the iron law's additive structure: the edge tier minimizes $L_{\text{lat}}$ for time-sensitive preprocessing and inference, while the cloud tier provides the $R_{\text{peak}}$ needed for training, retraining, and heavy batch inference. The split is governed by the data locality invariant: stages where $D_{\text{vol}}/\text{BW}_{\text{network}}$ exceeds the remote compute benefit run locally; stages where cloud $R_{\text{peak}}$ dominates run remotely.
 2.  **Distinction (durable)**: Unlike cloud-only deployment (which accepts the distance penalty for all stages) or edge-only deployment (which accepts limited $R_{\text{peak}}$ for all stages), hybrid ML dynamically assigns each pipeline stage to the tier where its binding iron law term is minimized.
@@ -4314,9 +4314,9 @@ Hybrid architectures work when you partition work across tiers—not when you co
 
 **Integration Patterns**
 
-- [ ] **Train-Serve Split**: Can you explain why training in the cloud and serving on edge/mobile is often economically optimal, even when the model runs locally?
-- [ ] **Hierarchical Processing**: Can you describe what each tier does in a sensor → edge → cloud pipeline, and why pushing some decisions down reduces both latency and bandwidth?
-- [ ] **Progressive Deployment**: Can you explain how one model family becomes multiple deployed artifacts (cloud, edge, mobile, tiny) through systematic compression?
+- [ ] **Train-serve split**: Can you explain why training in the cloud and serving on edge/mobile is often economically optimal, even when the model runs locally?
+- [ ] **Hierarchical processing**: Can you describe what each tier does in a sensor → edge → cloud pipeline, and why pushing some decisions down reduces both latency and bandwidth?
+- [ ] **Progressive deployment**: Can you explain how one model family becomes multiple deployed artifacts (cloud, edge, mobile, tiny) through systematic compression?
 
 **Design Sanity Checks**
 
@@ -4581,11 +4581,13 @@ Teams build a single model artifact and deploy it identically to every target de
 
 Physical constraints explain why the same model demands fundamentally different engineering on a phone and in a data center. Three immutable constraints (the speed of light, the power wall, and the memory wall) carve the deployment landscape into four distinct paradigms spanning about nine orders of magnitude in power and memory. No single paradigm suffices for production systems; hybrid architectures that partition work across Cloud, Edge, Mobile, and TinyML tiers define the state of the art.
 
+The analytical tools developed here (the iron law, bottleneck principle, workload archetypes, and lighthouse models) recur throughout the remainder of this book. Every subsequent chapter, from data engineering to model compression to serving, operates within the deployment constraints established here. The decision framework (@fig-mlsys-playbook-flowchart) and the quantitative comparison (@tbl-big_vs_tiny) provide the reference points for those discussions. Knowing *where* to deploy is only the beginning. Every deployed model faces system entropy: accuracy degradation as the world drifts from its training distribution, making the operational infrastructure for monitoring and retraining as important as the deployment decision itself.
+
 ::: {.callout-takeaways title="Same model, different engineering"}
 
 * **Physical constraints are permanent**: Speed of light (~36 ms cross-country round-trip), power wall\index{Physical Constraints!permanent boundaries}, and memory wall create hard boundaries that engineering cannot overcome, only navigate.
 * **Identify bottlenecks before optimizing**: The same model is compute bound in training but memory bound in inference. The iron law and Bottleneck Principle pinpoint which constraint dominates; optimizing the wrong term yields zero speedup.
-* **Workload archetypes determine deployment feasibility**: A compute beast (ResNet-50 training) requires cloud scale; a tiny constraint (keyword spotting) requires microcontroller efficiency. The same optimization strategy cannot serve both—match the archetype to the paradigm.
+* **Workload archetypes determine deployment feasibility**: A Compute Beast (ResNet-50 training) requires cloud scale; a Tiny Constraint (keyword spotting) requires microcontroller efficiency. The same optimization strategy cannot serve both—match the archetype to the paradigm.
 * **The deployment spectrum spans about nine orders of magnitude in power**: Cloud data-center infrastructure operates at megawatt scale, while TinyML systems target milliwatts. This gap enables entirely different application classes rather than representing a limitation.
 * **Hybrid architectures are prevalent in production systems**: Voice assistants\index{Hybrid Architecture!voice assistant example} span TinyML (wake-word), Mobile (speech-to-text), and Cloud (language understanding). Rarely does one paradigm suffice; integration patterns (Train-Serve Split, Hierarchical Processing, Progressive Deployment) formalize how paradigms combine.
 * **Latency budgets reveal feasibility**: 100 ms round-trip to cloud\index{Latency Budget!feasibility analysis} eliminates real-time applications; 10 ms edge inference enables them. Apply the decision framework (@fig-mlsys-playbook-flowchart) to filter paradigms by privacy, latency, compute, and cost.
@@ -4593,8 +4595,6 @@ Physical constraints explain why the same model demands fundamentally different 
 * **Universal system principles transfer across paradigms**: Data pipelines, resource management, and system architecture recur at every scale, which is why optimization ideas can migrate from cloud to edge and back again.
 
 :::
-
-The analytical tools developed here (the iron law, bottleneck principle, workload archetypes, and lighthouse models) recur throughout the remainder of this book. Every subsequent chapter, from data engineering to model compression to serving, operates within the deployment constraints established here. The decision framework (@fig-mlsys-playbook-flowchart) and the quantitative comparison (@tbl-big_vs_tiny) provide the reference points for those discussions. Knowing *where* to deploy is only the beginning. Every deployed model faces system entropy: accuracy degradation as the world drifts from its training distribution, making the operational infrastructure for monitoring and retraining as important as the deployment decision itself.
 
 ::: {.callout-chapter-connection title="From theory to process"}
 
