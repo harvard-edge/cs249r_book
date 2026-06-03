@@ -433,12 +433,12 @@ The exception to this uniformity is multi-task or curriculum learning\index{Curr
 
 The third inversion is **write pattern**\index{Write Pattern}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional massive writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str` parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. These bursts are the **checkpoint storms**\index{Checkpoint Storm!definition} that parallel file systems must absorb without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which must complete before the training pipeline can resume.
 
-| **Workload Pattern** | **Traditional Assumption**                        | **ML Reality**                 |
-|:---------------------|:--------------------------------------------------|:-------------------------------|
-| **Access pattern**   | Random access                                     | Sequential streaming           |
-| **Working set**      | Fits in cache                                     | Exceeds all cache levels       |
-| **Write pattern**    | Continuous small writes                           | Bursty large writes            |
-| **Read/write ratio** | Balanced                                          | Phase-dependent (100:1 to 1:0) |
+| **Workload Pattern** |             **Traditional Assumption**            |         **ML Reality**         |
+|:---------------------|:-------------------------------------------------:|:------------------------------:|
+| **Access pattern**   |                   Random access                   |      Sequential streaming      |
+| **Working set**      |                   Fits in cache                   |    Exceeds all cache levels    |
+| **Write pattern**    |              Continuous small writes              |      Bursty large writes       |
+| **Read/write ratio** |                      Balanced                     | Phase-dependent (100:1 to 1:0) |
 | **Locality**         | Strong temporal locality\index{Locality!temporal} | No locality (uniform sampling) |
 
 : **ML Workloads Invert Traditional Storage Assumptions**: Where databases optimize for random IOPS with cacheable working sets, ML training streams sequentially through datasets that exceed all cache levels. {#tbl-storage-assumptions}
@@ -500,14 +500,14 @@ class StorageHierarchyTable:
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
 
-| **Storage Tier**         | **Typical Capacity** |                        **Bandwidth**\index{Bandwidth} | **Latency**\index{Latency} | **Cost (\$/GB)** |
-|:-------------------------|:---------------------|------------------------------------------------------:|---------------------------:|-----------------:|
-| **GPU HBM**              | 80 GB                | `{python} StorageHierarchyTable.h100_bw_tb_per_s_str` |                    ~100 ns |           ~15.00 |
-| **Host DRAM**            | 512 GB–2 TB          |                                              200 GB/s |                    ~100 ns |            ~3.00 |
-| **Local NVMe SSD**       | 4–30 TB              |                                             7–25 GB/s |                     ~10 μs |            ~0.10 |
-| **Parallel File System** | 100+ PB              |                                     1+ TB/s aggregate |                      ~1 ms |            ~0.03 |
-| **Object Storage**       | Unlimited            |                                    100 GB/s aggregate |                     ~50 ms |            ~0.02 |
-| **Archive/Cold Storage** | Unlimited            |                                                1 GB/s |           Minutes to hours |           ~0.004 |
+| **Storage Tier**         | **Typical Capacity** |             **Bandwidth**\index{Bandwidth}            | **Latency**\index{Latency} | **Cost (\$/GB)** |
+|:-------------------------|:--------------------:|:-----------------------------------------------------:|:--------------------------:|:----------------:|
+| **GPU HBM**              |        80 GB         | `{python} StorageHierarchyTable.h100_bw_tb_per_s_str` |          ~100 ns           |      ~15.00      |
+| **Host DRAM**            |     512 GB–2 TB      |                        200 GB/s                       |          ~100 ns           |      ~3.00       |
+| **Local NVMe SSD**       |       4–30 TB        |                       7–25 GB/s                       |           ~10 μs           |      ~0.10       |
+| **Parallel File System** |       100+ PB        |                   1+ TB/s aggregate                   |           ~1 ms            |      ~0.03       |
+| **Object Storage**       |      Unlimited       |                   100 GB/s aggregate                  |           ~50 ms           |      ~0.02       |
+| **Archive/Cold Storage** |      Unlimited       |                         1 GB/s                        |      Minutes to hours      |      ~0.004      |
 
 : **Extended Memory Hierarchy for ML Systems**\index{Storage Hierarchy!extended memory hierarchy}: The roughly 30$\times$ aggregate-to-aggregate bandwidth gap between HBM and object storage (and a much larger per-client gap once a single inference instance pulls from a shared object endpoint) drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
 
@@ -798,14 +798,14 @@ class HbmMemoryBudget:
     )
 ```
 
-| **Component**                               |                                    **Size per GPU** |
-|:--------------------------------------------|----------------------------------------------------:|
-| Model Weights (FP16, tensor-parallel)       |    `{python} HbmMemoryBudget.weight_per_gpu_gb_str` |
+| **Component**                               |                   **Size per GPU**                  |
+|:--------------------------------------------|:---------------------------------------------------:|
+| Model Weights (FP16, tensor-parallel)       |   `{python} HbmMemoryBudget.weight_per_gpu_gb_str`  |
 | Optimizer State (ZeRO-3 partitioned)        | `{python} HbmMemoryBudget.optimizer_per_gpu_gb_str` |
-| Activations (variable by sequence length)   |     `{python} HbmMemoryBudget.activation_range_str` |
+| Activations (variable by sequence length)   |   `{python} HbmMemoryBudget.activation_range_str`   |
 | Gradient Buffers (FP16, ZeRO-3 partitioned) |  `{python} HbmMemoryBudget.gradient_per_gpu_gb_str` |
-| Communication Buffers (NCCL)                |           `{python} HbmMemoryBudget.comm_range_str` |
-| **Total Occupied**                          |      **`{python} HbmMemoryBudget.total_range_str`** |
+| Communication Buffers (NCCL)                |      `{python} HbmMemoryBudget.comm_range_str`      |
+| **Total Occupied**                          |    **`{python} HbmMemoryBudget.total_range_str`**   |
 
 : **HBM Memory Budget for 175B-Parameter Training**: Per-GPU allocation when partitioning a 175B model with 8-way tensor parallelism inside the node and ZeRO-3 across 256 nodes. The optimizer and gradient rows are per-GPU shards after both the tensor-parallel and data-parallel partitions. The resulting budget occupies most of an 80 GB HBM device, leaving limited buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator. {#tbl-hbm-memory-budget}
 
@@ -1340,13 +1340,13 @@ Compression integration\index{Data Format!compression integration} also varies a
 
 For our running example, the 1.5 trillion token dataset is stored as roughly `{python} ObjectStreamContext.tokenized_shard_count_str` shards of approximately `{python} ObjectStreamContext.tokenized_shard_gb_str` each in a custom binary format. Each shard contains a small header (token count, vocabulary size, byte order) followed by a contiguous array of 4-byte token IDs. When staged on POSIX storage such as local NVMe or a parallel file system, the data loader memory-maps the shard and indexes directly into the token array by position, achieving near-peak read bandwidth with zero per-sample metadata overhead. When the same shards are read directly from object storage, the loader uses HTTP ranged GET streaming and an explicit local buffer rather than memory mapping.
 
-| **Format**          | **Overhead/Sample**      | **Random Access** | **Streaming** | **Compression** |
-|:--------------------|:-------------------------|:------------------|:--------------|:----------------|
-| Individual files    | ~50 μs (open/stat/close) | Yes               | Poor          | Per-file        |
-| Parquet             | ~1 μs (row group seek)   | Yes (row group)   | Good          | Column-level    |
-| TFRecord            | ~0.1 μs (index lookup)   | With index        | Excellent     | Per-record      |
-| WebDataset (`tar`)  | ~0 (sequential)          | No                | Excellent     | Per-sample      |
-| Raw binary (tokens) | 0                        | Yes (byte offset) | Excellent     | None needed     |
+| **Format**          |   **Overhead/Sample**    | **Random Access** | **Streaming** | **Compression** |
+|:--------------------|:------------------------:|:-----------------:|:-------------:|:---------------:|
+| Individual files    | ~50 μs (open/stat/close) |        Yes        |      Poor     |     Per-file    |
+| Parquet             |  ~1 μs (row group seek)  |  Yes (row group)  |      Good     |   Column-level  |
+| TFRecord            |  ~0.1 μs (index lookup)  |     With index    |   Excellent   |    Per-record   |
+| WebDataset (`tar`)  |     ~0 (sequential)      |         No        |   Excellent   |    Per-sample   |
+| Raw binary (tokens) |            0             | Yes (byte offset) |   Excellent   |   None needed   |
 
 : **Data Format Comparison for ML Training**: Per-sample overhead determines whether the storage hardware's bandwidth is realized or wasted on metadata operations. {#tbl-data-formats}
 
@@ -2621,13 +2621,13 @@ class StorageFootprintTable:
 
 @Tbl-data-storage-175b-footprint assembles the complete storage picture for our running example, a 30-day training run of a 175B-parameter model on `{python} StorageFootprintTable.training_nodes_str`:
 
-| **Category**                               |                                               **Volume** | **Primary Tier**                                           |
-|:-------------------------------------------|---------------------------------------------------------:|:-----------------------------------------------------------|
-| Training dataset (compressed source)       |  `{python} StorageFootprintTable.compressed_text_tb_str` | Object Storage                                             |
-| Training dataset (tokenized, per epoch)    |   `{python} StorageFootprintTable.tokenized_text_tb_str` | Object Storage $\to$ NVMe cache $\to$ Host DRAM            |
-| Model weights (FP16)                       |                                                   350 GB | GPU HBM (distributed)                                      |
-| Optimizer state (FP32)                     |                                                 1,400 GB | GPU HBM (ZeRO-partitioned)                                 |
-| Single checkpoint (full)                   |                                                 1,750 GB | NVMe $\to$ PFS $\to$ Object Storage                        |
+| **Category**                               |                        **Volume**                        | **Primary Tier**                                           |
+|:-------------------------------------------|:--------------------------------------------------------:|:-----------------------------------------------------------|
+| Training dataset (compressed source)       | `{python} StorageFootprintTable.compressed_text_tb_str`  | Object Storage                                             |
+| Training dataset (tokenized, per epoch)    |  `{python} StorageFootprintTable.tokenized_text_tb_str`  | Object Storage $\to$ NVMe cache $\to$ Host DRAM            |
+| Model weights (FP16)                       |                          350 GB                          | GPU HBM (distributed)                                      |
+| Optimizer state (FP32)                     |                         1,400 GB                         | GPU HBM (ZeRO-partitioned)                                 |
+| Single checkpoint (full)                   |                         1,750 GB                         | NVMe $\to$ PFS $\to$ Object Storage                        |
 | All checkpoints (30 days, 10-min interval) | `{python} StorageFootprintTable.ckpt_fleet_total_pb_str` | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
 | Archive (retained checkpoints + dataset)   | ~`{python} StorageFootprintTable.archive_lineage_tb_str` | Glacier                                                    |
 

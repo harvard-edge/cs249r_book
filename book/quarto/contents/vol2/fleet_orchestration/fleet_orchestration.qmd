@@ -597,12 +597,12 @@ Slurm's architecture consists of a central controller daemon (`slurmctld`) that 
 
 A typical ML cluster configuration defines partitions by accelerator type and interconnect:
 
-| **Partition** | **GPUs/Node**  | **Interconnect** | **Typical Use**    |
-|:--------------|:---------------|:-----------------|:-------------------|
+| **Partition** | **GPUs/Node**  | **Interconnect** |  **Typical Use**   |
+|:--------------|:--------------:|:----------------:|:------------------:|
 | **dgx-a100**  | 8$\times$ A100 | NVLink + IB NDR  | Large LLM training |
-| **a100-pcie** | 4$\times$ A100 | PCIe + IB HDR    | Medium training    |
-| **inference** | 2$\times$ A10G | Ethernet         | Model serving      |
-| **debug**     | 1$\times$ V100 | Ethernet         | Development        |
+| **a100-pcie** | 4$\times$ A100 |  PCIe + IB HDR   |  Medium training   |
+| **inference** | 2$\times$ A10G |     Ethernet     |   Model serving    |
+| **debug**     | 1$\times$ V100 |     Ethernet     |    Development     |
 
 : **Slurm Partition Configuration**\index{Slurm!partition configuration}: Partitions organize heterogeneous accelerators into logical pools matched to workload characteristics. NVLink-connected partitions support tensor parallelism, while PCIe partitions serve workloads that rely primarily on data parallelism. Separating inference and debug partitions prevents experimental workloads from impacting production serving. {#tbl-fleet-orchestration-slurm-partitions}
 
@@ -684,11 +684,11 @@ class ClusterEconomicsMigRecap:
 [^fn-mig-isolation]: **Multi-Instance GPU (MIG)**: Introduced with the A100 (2020), MIG partitions a single GPU into up to 7 hardware-isolated instances with dedicated memory controllers, L2 cache slices, and compute units. The isolation is enforced at the hardware level, not by time-slicing, eliminating the noisy-neighbor interference that degrades P99 latency by 10 to 20 percent under software sharing. The trade-off is rigidity: partition profiles cannot change without draining all workloads, making MIG poorly suited for clusters with rapidly shifting workload mixes. \index{MIG!GPU isolation}
 
 | **MIG Profile** | **GPU Memory** | **SM Count** | **Typical Workload** |
-|:----------------|:---------------|:-------------|:---------------------|
-| **1g.10gb**     | 10 GB          | 14 SMs       | Small inference      |
-| **2g.20gb**     | 20 GB          | 28 SMs       | Medium inference     |
-| **3g.40gb**     | 40 GB          | 42 SMs       | Large inference      |
-| **7g.80gb**     | 80 GB          | 98 SMs       | Training             |
+|:----------------|:--------------:|:------------:|:--------------------:|
+| **1g.10gb**     |     10 GB      |    14 SMs    |   Small inference    |
+| **2g.20gb**     |     20 GB      |    28 SMs    |   Medium inference   |
+| **3g.40gb**     |     40 GB      |    42 SMs    |   Large inference    |
+| **7g.80gb**     |     80 GB      |    98 SMs    |       Training       |
 
 : **A100 MIG Profiles**\index{MIG!A100 profiles}: Multi-Instance GPU configurations trade GPU memory and compute resources for increased sharing density. Each profile provides hardware-isolated resources, making MIG suitable for multi-tenant inference clusters where workloads from different teams or customers must not interfere. The SM (Streaming Multiprocessor) count determines compute throughput within each instance. {#tbl-fleet-orchestration-mig-profiles}
 
@@ -1576,12 +1576,12 @@ This co-optimization of scheduling and hyperparameters achieves 37 to 50 percent
 
 Custom ML schedulers represent a progressive trade-off between implementation complexity and scheduling precision, so the comparison matters as a deployment filter rather than a ranking. While general-purpose schedulers treat jobs as opaque boxes, these research systems open the box to exploit specific characteristics of deep learning workloads: their iterative nature, their malleability (elasticity), and their predictability.
 
-| **Scheduler** | **Key Insight**                            | **Scheduling Signal** | **Optimization Target**  | **Overhead**                | **Production Readiness**    |
-|:--------------|:-------------------------------------------|:----------------------|:-------------------------|:----------------------------|:----------------------------|
-| **Tiresias**  | Attained service predicts remaining time   | GPU-hours consumed    | Minimize avg JCT         | Low (no profiling)          | Medium                      |
-| **Gandiva**   | Iteration boundaries are preemption points | Iteration timing      | Maximize utilization     | Medium (profiling)          | Medium                      |
-| **Themis**    | Sunk cost matters for fairness             | Completion percentage | Minimize max slowdown    | Low (job metadata)          | Low (auction complexity)    |
-| **Pollux**    | Batch size and allocation are coupled      | Goodput (stat + sys)  | Maximize cluster goodput | High (continuous profiling) | Low (framework integration) |
+| **Scheduler** | **Key Insight**                            | **Scheduling Signal** | **Optimization Target**  |         **Overhead**        |   **Production Readiness**  |
+|:--------------|:-------------------------------------------|:---------------------:|:------------------------:|:---------------------------:|:---------------------------:|
+| **Tiresias**  | Attained service predicts remaining time   |   GPU-hours consumed  |     Minimize avg JCT     |      Low (no profiling)     |            Medium           |
+| **Gandiva**   | Iteration boundaries are preemption points |    Iteration timing   |   Maximize utilization   |      Medium (profiling)     |            Medium           |
+| **Themis**    | Sunk cost matters for fairness             | Completion percentage |  Minimize max slowdown   |      Low (job metadata)     |   Low (auction complexity)  |
+| **Pollux**    | Batch size and allocation are coupled      |  Goodput (stat + sys) | Maximize cluster goodput | High (continuous profiling) | Low (framework integration) |
 
 : **Custom ML Scheduler Comparison**: A taxonomy of research schedulers based on the specific workload characteristic they exploit. Tiresias and Themis optimize for queuing metrics (JCT, fairness) using external signals, while Gandiva and Pollux optimize for efficiency using internal profiling data. {#tbl-fleet-orchestration-scheduler-comparison}
 
@@ -1642,12 +1642,12 @@ The serving infrastructure analyzed in @sec-inference-scale provides the archite
 
 Kubernetes **Horizontal Pod Autoscaling (HPA)**\index{Horizontal Pod Autoscaling}\index{HPA} adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. The metric choice is therefore the first scheduling decision for serving: effective ML autoscaling uses custom signals that predict user-facing degradation before it occurs.
 
-| **Metric**                                 | **Target Range**  | **Considerations**                                             |
-|:-------------------------------------------|:------------------|:---------------------------------------------------------------|
-| **GPU utilization**\index{GPU Utilization} | 60 to 80 percent  | Varies by model batch efficiency                               |
+| **Metric**                                 |  **Target Range** | **Considerations**                                             |
+|:-------------------------------------------|:-----------------:|:---------------------------------------------------------------|
+| **GPU utilization**\index{GPU Utilization} |  60 to 80 percent | Varies by model batch efficiency                               |
 | **Request queue depth**                    | 10 to 50 requests | Prevents latency spikes before they manifest in P99 metrics    |
-| **P99 latency**                            | Below SLO target  | Reactive metric that lags demand changes by seconds to minutes |
-| **Pending tokens**                         | Model-specific    | LLM-specific metric that accounts for KV cache memory growth   |
+| **P99 latency**                            |  Below SLO target | Reactive metric that lags demand changes by seconds to minutes |
+| **Pending tokens**                         |   Model-specific  | LLM-specific metric that accounts for KV cache memory growth   |
 
 : **Inference Autoscaling Metrics**\index{Inference!autoscaling metrics}: Custom metrics for GPU inference workloads capture the relationship between load and user-facing performance more accurately than default CPU utilization. Queue depth provides a leading indicator of latency degradation, while pending tokens captures the memory pressure unique to autoregressive LLM serving. {#tbl-fleet-orchestration-autoscaling-metrics}
 
@@ -2354,11 +2354,11 @@ class FleetDebugNvlinkRecap:
     nvlink_a100_gb_per_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0)
 ```
 
-| **GPU Type**   | **Count** | **Memory**  | **Interconnect**                                                   | **Nodes**                |
-|:---------------|----------:|:------------|:-------------------------------------------------------------------|:-------------------------|
-| **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_per_s_str`) | 50 nodes $\times$ 8 GPUs |
-| **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_per_s_str`) | 50 nodes $\times$ 8 GPUs |
-| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (16 GB/s)                                                | 50 nodes $\times$ 4 GPUs |
+| **GPU Type**   | **Count** |  **Memory** |                          **Interconnect**                          |        **Nodes**         |
+|:---------------|:---------:|:-----------:|:------------------------------------------------------------------:|:------------------------:|
+| **A100-80 GB** |    400    | 80 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_per_s_str`) | 50 nodes $\times$ 8 GPUs |
+| **A100-40 GB** |    400    | 40 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_per_s_str`) | 50 nodes $\times$ 8 GPUs |
+| **V100-32 GB** |    200    |  32 GB HBM2 |                        PCIe Gen3 (16 GB/s)                         | 50 nodes $\times$ 4 GPUs |
 
 : **Cluster Hardware Inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
@@ -2392,12 +2392,12 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 
 **Quantified Impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:
 
-| **Pool**         | **Before**                                 | **After**                                  | **Change**                |
-|:-----------------|:-------------------------------------------|:-------------------------------------------|:--------------------------|
-| **A100-80 GB**   | 95 percent allocated, 72 percent effective | 89 percent allocated, 94 percent effective | +22 percentage points     |
-| **A100-40 GB**   | 64 percent allocated                       | 88 percent allocated                       | +24 percentage points     |
-| **V100**         | 0 percent allocated                        | 71 percent allocated                       | +71 percentage points     |
-| **Cluster-wide** | **60 percent**                             | **84 percent**                             | **+24 percentage points** |
+| **Pool**         |                 **Before**                 |                 **After**                  |         **Change**        |
+|:-----------------|:------------------------------------------:|:------------------------------------------:|:-------------------------:|
+| **A100-80 GB**   | 95 percent allocated, 72 percent effective | 89 percent allocated, 94 percent effective |   +22 percentage points   |
+| **A100-40 GB**   |            64 percent allocated            |            88 percent allocated            |   +24 percentage points   |
+| **V100**         |            0 percent allocated             |            71 percent allocated            |   +71 percentage points   |
+| **Cluster-wide** |               **60 percent**               |               **84 percent**               | **+24 percentage points** |
 
 : **Utilization Recovery Results**: The distinction between "allocated" and "effective" utilization captures the policy-induced utilization gap: before the fix, A100-80 GB GPUs showed high allocation in Slurm but lower actual compute utilization, while strict job templates stranded other capable hardware pools. {#tbl-fleet-orchestration-debug-results}
 
