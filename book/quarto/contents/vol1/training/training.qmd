@@ -2540,46 +2540,12 @@ class StorageBandwidthNvme:
 
 ::: {#exmp-training-gpt-2-language-model-data-pipeline .callout-example title="GPT-2 language model data pipeline"}
 
-Training language models like GPT-2 requires a specialized data pipeline optimized for text processing.
+Training language models like GPT-2 requires a data pipeline whose main question is not whether the text can be read from disk, but whether CPU tokenization can keep the accelerator supplied with complete batches. The OpenWebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from an NVMe SSD can reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`, but language-model training samples across documents, so the effective random-access bandwidth falls to roughly `{python} GPT2DataPipeline.random_access_gb_per_s_str` when the effective-access factor is about `{python} GPT2DataPipeline.f_access_str`. At GPT-2 scale, that storage cost is not yet the binding term; it is the first gate in a staged pipeline whose slowest gate determines accelerator utilization.
 
-**Pipeline Stages**
-
-1. Raw Text Storage (Storage Zone)
-   - OpenWebText dataset: ~`{python} GPT2DataPipeline.dataset_gb_str` raw text files
-   - Stored on NVMe SSD: `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str` sequential read bandwidth
-   - Random access to different documents: ~`{python} GPT2DataPipeline.random_access_gb_per_s_str` effective (F_access ≈ `{python} GPT2DataPipeline.f_access_str`)
-2. Tokenization (CPU Preprocessing Zone)
 \index{BPE!tokenization}
+BPE tokenization is the next gate. A tokenizer with a `{python} GPT2DataPipeline.bpe_vocab_str` vocabulary converts raw text into subword token IDs, so a word such as "unbreakable" becomes the sequence ["un", "break", "able"]. With batch size $B=32$ and sequence length $S=1024$, each training step needs `{python} GPT2DataPipeline.tokens_per_batch_str`. At an approximate processing rate of `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core, one core spends `{python} GPT2DataPipeline.tokenization_ms_str` preparing a batch. That timing is already close to the 80 ms accelerator forward pass, which means tokenization is no longer a background preprocessing detail; it is a throughput term in the training system. On a faster accelerator, the same CPU tokenizer would become the visible bottleneck.
 
-   - BPE (Byte-Pair Encoding) tokenizer (`{python} GPT2DataPipeline.bpe_vocab_str` vocabulary) converts text to token IDs
-   - BPE segments text into subword units (for example, "unbreakable" → ["un", "break", "able"])
-   - Processing rate: ~`{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core
-   - For batch size $B=32$ and sequence length $S=1024$: need `{python} GPT2DataPipeline.tokens_per_batch_str`
-   - Single core: `{python} GPT2DataPipeline.tokens_per_batch_str` ÷ `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` = `{python} GPT2DataPipeline.tokenization_ms_str` per batch
-   - Bottleneck: GPU forward pass only takes 80 ms
-3. Batching & Padding (CPU)
-   - Pad sequences to uniform length (1024 tokens)
-   - Pack into tensors: [32, 1024] int64 = `{python} GPT2DataPipeline.batch_kb_str` per batch
-   - Trivial time: <5 ms
-4. GPU Transfer (PCIe)
-   - PCIe Gen3 x16: `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` theoretical
-   - `{python} GPT2DataPipeline.batch_kb_str` per batch ÷ `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` = `{python} GPT2DataPipeline.transfer_ms_str` (negligible)
-
-**Bottleneck Analysis**
-
-- Tokenization: `{python} GPT2DataPipeline.tokenization_ms_str`
-- accelerator compute: 80 ms
-- Transfer: <1 ms
-
-System is balanced (tokenization ≈ accelerator compute), but tokenization becomes bottleneck with faster accelerators (A100: 45 ms compute means tokenization limits throughput).
-
-**Optimization Applied**
-
-- Multi-worker dataloading: `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers tokenize in parallel → `{python} GPT2DataPipeline.tokenization_ms_str` ÷ `{python} GPT2DataPipeline.n_cpu_workers_str` = `{python} GPT2DataPipeline.parallel_tokenization_ms_str`
-- Prefetching: Tokenize next batch while GPU processes current batch
-- Result: accelerator utilization >`{python} GPT2DataPipeline.utilization_pct_str`, training throughput: `{python} GPT2DataPipeline.throughput_samples_str` samples/second on `{python} GPT2DataPipeline.n_v100_gpus_str` $\times$ V100
-
-Text tokenization is CPU-bound (unlike image preprocessing, which is I/O-bound). Language model training requires different pipeline optimizations than vision models.
+The remaining gates are smaller but still have to be staged correctly. Padding and packing convert the token stream into a uniform `[32, 1024]` int64 tensor of `{python} GPT2DataPipeline.batch_kb_str`, and PCIe transfer moves that tensor across a Gen3 x16 link with `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` of theoretical bandwidth. The transfer itself takes only `{python} GPT2DataPipeline.transfer_ms_str`, so optimizing the PCIe copy would not materially improve this pipeline. The useful intervention is to parallelize and overlap tokenization: `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers reduce the tokenization service time to about `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching prepares the next batch during the current accelerator step. The result is accelerator utilization above `{python} GPT2DataPipeline.utilization_pct_str` and throughput of `{python} GPT2DataPipeline.throughput_samples_str` samples per second on `{python} GPT2DataPipeline.n_v100_gpus_str` $\times$ V100. Text workloads therefore differ from many vision pipelines: the critical preprocessing stage is CPU-bound tokenization rather than image I/O, so the right fix is chosen only after following one batch through the stages.
 
 :::
 
@@ -5553,67 +5519,34 @@ class GPT2WalkthroughCalc:
 
 ::: {#exmp-training-gpt-2-optimization-v100 .callout-example title="GPT-2 optimization on V100"}
 
-**Initial Configuration** (Naive Implementation):
+The naive starting point is GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: it is small enough to discuss on one V100, but large enough that the first failure is immediate and unambiguous.
 
-- Model: GPT-2 XL (1.5 billion parameters)
-- Batch size: 4, Sequence length: 1024
-- Precision: FP32 throughout
-- Data loading: Single-threaded, synchronous
+This walkthrough uses batch size 4; the mixed-precision callout earlier uses batch 32, and @Tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized). The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. At batch size 4, the FP32 baseline requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the Machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_gib_str` V100 before throughput matters. Mixed precision changes the first term in the memory budget and reduces the footprint to `{python} GPT2WalkthroughCalc.total_amp_gb_str`, a `{python} GPT2WalkthroughCalc.amp_reduction_str` reduction, but it still does not fit. Gradient checkpointing changes a different term by storing fewer activations and recomputing them during backpropagation. Checkpointing every four layers reduces activation storage by `{python} GPT2WalkthroughCalc.checkpoint_factor_mult_str` and brings total memory to `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`, which fits at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_str` additional compute.
 
-**Steps 1--3: Solve the memory problem.**
+Fitting the model is only the first diagnostic pass. The next profile asks whether the accelerator is doing useful work once the run can start. The answer is no: utilization is only `{python} GPT2WalkthroughCalc.util_naive_str`, with data loading consuming `{python} GPT2WalkthroughCalc.data_naive_str` of iteration time, compute consuming `{python} GPT2WalkthroughCalc.compute_naive_str`, and memory transfers consuming `{python} GPT2WalkthroughCalc.mem_xfer_naive_str`. This profile moves the bottleneck from Machine capacity to the Data axis in D·A·M terms. Additional memory optimization would not improve wall-clock time, because the accelerator is waiting for batches.
 
-This walkthrough uses batch size 4 (a memory-constrained setting); the mixed-precision callout earlier uses batch 32, and @Tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized). The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. At batch size 4 (see initial configuration above), baseline FP32 requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, an immediate OOM on a `{python} GPT2WalkthroughCalc.v100_mem_gib_str` V100 (Machine constraint in D·A·M terms). Applying mixed precision (AMP) reduces this to `{python} GPT2WalkthroughCalc.total_amp_gb_str` (`{python} GPT2WalkthroughCalc.amp_reduction_str` memory reduction), but still exceeds `{python} GPT2WalkthroughCalc.v100_mem_gib_str`. Adding gradient checkpointing (every four layers) reduces activations by `{python} GPT2WalkthroughCalc.checkpoint_factor_mult_str`, bringing the total to `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`. It fits, at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_str` more compute for activation recomputation.
-
-With memory solved, the next step is determining whether throughput is acceptable.
-
-**Step 4**: Profile for throughput bottlenecks.
-With memory solved, profile shows:
-
-- accelerator utilization: `{python} GPT2WalkthroughCalc.util_naive_str`
-- Data loading: `{python} GPT2WalkthroughCalc.data_naive_str` of iteration time
-- Compute: `{python} GPT2WalkthroughCalc.compute_naive_str` of iteration time
-- Memory transfers: `{python} GPT2WalkthroughCalc.mem_xfer_naive_str` of iteration time
-
-Bottleneck identified: data-bound---a Data constraint in D·A·M terms. GPU starving for data.
-
-**Step 5**: Apply prefetching and data pipeline optimization.
-Configure DataLoader with eight workers, pin_memory = True, prefetch_factor = 2:
-
-```{.text}
-After optimization:
-
-- accelerator utilization: 85 percent  ← +40 percentage points
-- Data loading: 5 percent of iteration time (overlapped)
-- Compute: 75 percent of iteration time
-- Memory transfers: 20 percent of iteration time
-```
+The targeted fix is to overlap input preparation with accelerator execution. Configuring the data loader with eight workers, pinned memory, and a prefetch factor of 2 changes the pipeline schedule rather than the model. Data loading becomes mostly hidden behind computation, accelerator utilization rises to `{python} GPT2WalkthroughCalc.util_optim_str`, and the remaining overhead is dominated by synchronization, loss scaling, memory transfers, and kernel launch latency rather than batch starvation.
 
 ```{=latex}
 \tcbbreak
 ```
 
-**Step 6**: Final profile and results. @Tbl-training-gpt2-final-profile contrasts the naive baseline against the optimized configuration:
+@Tbl-training-gpt2-final-profile contrasts the naive baseline against the optimized configuration:
 
 | **Metric**                  |                    **Naive**                     |                  **Optimized**                   |                          **Improvement**                           |
 |:----------------------------|:------------------------------------------------:|:------------------------------------------------:|:------------------------------------------------------------------:|
 | **Memory**                  | `{python} GPT2WalkthroughCalc.total_fp32_gb_str` | `{python} GPT2WalkthroughCalc.total_ckpt_gb_str` | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` reduction |
-| **Accelerator utilization** |                       N/A                        |                    85 percent                    |                             Trainable                              |
+| **Accelerator utilization** |                       N/A                        |  `{python} GPT2WalkthroughCalc.util_optim_str`   |                             Trainable                              |
 | **Throughput**              |                       N/A                        |                  1,200 tokens/s                  |                                 —                                  |
 | **Time per epoch**          |                       N/A                        |                    8.3 hours                     |                                 —                                  |
 
 : **GPT-2 Optimization Final Profile**: Batch-4 memory figures from the walkthrough (`{python} GPT2WalkthroughCalc.total_fp32_gb_str` → `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`); @tbl-gpt2-summary reports batch-32 totals. {#tbl-training-gpt2-final-profile tbl-colwidths="[31,23,23,23]"}
 
-Remaining bottleneck: compute-bound---an Algorithm constraint in D·A·M terms (as desired). The `{python} GPT2WalkthroughCalc.util_optim_str` utilization indicates good efficiency; remaining `{python} GPT2WalkthroughCalc.overhead_str` is overhead from gradient synchronization, loss scaling, and kernel launch latency.
+The final profile is compute-bound, an Algorithm constraint in D·A·M terms, which is the desired endpoint for this single-device exercise. The run is now limited by useful training work rather than by avoidable memory capacity or input-pipeline failures.
 
 :::
 
-Three key principles emerge from this analysis:
-
-1. **Profile before optimizing**: Each optimization targeted a specific bottleneck revealed by profiling
-2. **Techniques compose**: Mixed precision alone was not enough; combining it with checkpointing and prefetching achieved the goal
-3. **Trade-offs are explicit**: We accepted `{python} GPT2WalkthroughCalc.recompute_overhead_str` more compute (checkpointing) to gain `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` memory reduction
-
-The systematic framework of profile, identify bottleneck, apply targeted technique, and re-profile transforms optimization from trial-and-error into engineering practice.
+The case study illustrates why training optimization is an iterative diagnostic discipline rather than a menu of tricks. Each intervention answers the bottleneck exposed by the previous measurement: mixed precision reduces tensor storage but does not solve capacity alone, checkpointing accepts `{python} GPT2WalkthroughCalc.recompute_overhead_str` additional compute to gain `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` memory reduction, and prefetching matters only after the model can run and profiling reveals data starvation. The systematic loop of profile, identify the bottleneck, apply a targeted technique, and re-profile transforms optimization from trial-and-error into engineering practice.
 
 ### Optimization impact summary {#sec-model-training-optimization-impact-summary-0213}
 
