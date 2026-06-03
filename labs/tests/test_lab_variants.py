@@ -102,6 +102,27 @@ def test_v1_01_variants_define_triad_defaults():
         assert variant.assumptions["report_artifact"] == "triad diagnosis memo"
 
 
+def test_v1_02_variants_define_deployment_envelopes():
+    for variant in list_lab_variants("v1_02_physics_of_deployment"):
+        assert "envelope_story" in variant.defaults
+        assert "workload_knob" in variant.defaults
+        assert "workload_unit" in variant.defaults
+        assert "knob_min" in variant.defaults
+        assert "knob_max" in variant.defaults
+        assert "knob_step" in variant.defaults
+        assert "default_knob" in variant.defaults
+        assert "memory_budget_mb" in variant.defaults
+        assert "flash_budget_mb" in variant.defaults
+        assert "latency_budget_ms" in variant.defaults
+        assert "energy_budget_mj" in variant.defaults
+        assert "power_budget_w" in variant.defaults
+        assert "bandwidth_budget_gbs" in variant.defaults
+        assert "cost_budget_per_1k" in variant.defaults
+        assert "placement_options" in variant.defaults
+        assert "mitigation_options" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "physics-of-deployment memo"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults

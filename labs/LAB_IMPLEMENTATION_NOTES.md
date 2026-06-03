@@ -1412,3 +1412,53 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_01_ml_intro" -q`
 - `python3 -m pytest labs/tests/test_triad_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
 - `git diff --check`
+
+### 2026-06-03 - V1-02 Physics Of Deployment Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_02_ml_systems.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/deployment.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_deployment_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_02_ml_systems.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.deployment`, a shared helper layer for deployment envelope profiles, unitful constraint checks, workload sweeps, first-wall detection, and mitigation notes.
+- Added hand-authored V1-02 variants with track-specific workload knobs, budgets, placement choices, mitigation options, and report artifact metadata.
+- Replaced the old H100/A100/Jetson/iPhone/ESP32 fixed notebook with a selected-track physics-of-deployment flow: first-wall prediction, workload sweep, placement comparison, ledger save, and local report export.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/deployment.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific envelope thresholds, workload knobs, and placement risk text live in typed V1-02 variants.
+
+Notebook-local constants removed:
+- H100/A100/Jetson/iPhone/ESP32 hardware constants, ResNet-50 constants, speed-of-light examples, and energy constants were removed from V1-02.
+- Displayed memory, flash, latency, energy, power, bandwidth, and cost evidence now comes from `mlsysbook_labs.deployment` results.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.deployment` can be reused by V1-03, V1-04, V1-05, V1-07, and Volume II placement labs whenever a track needs source-traced physical envelope evidence.
+
+Plan updates needed in other labs:
+- V1-03 should refer back to the V1-02 first wall as the constraint tax that appears when deployment physics is discovered late.
+- V1-05 can reuse the memory/activation budget pattern while adding neural activation formulas.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_02_ml_systems.py labs/mlsysbook_labs/deployment.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_02_ml_systems" -q`
+- `python3 -m pytest labs/tests/test_deployment_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`

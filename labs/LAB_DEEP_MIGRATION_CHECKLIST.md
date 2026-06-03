@@ -135,16 +135,16 @@ Current status:
 - [x] Baseline track/report panel installed.
 
 Deep migration tasks:
-- [ ] Tie the deployment physics lesson to track-specific resource budgets.
-- [ ] Add a source-of-truth helper for deployment envelope summaries if one does not exist.
-- [ ] Compute or display memory, latency, energy, or cost only through shared APIs.
-- [ ] Give each track a different binding constraint:
+- [x] Tie the deployment physics lesson to track-specific resource budgets.
+- [x] Add a source-of-truth helper for deployment envelope summaries if one does not exist.
+- [x] Compute or display memory, latency, energy, or cost only through shared APIs.
+- [x] Give each track a different binding constraint:
   - iPhone: thermal/latency envelope.
   - Oura Ring: battery and memory envelope.
   - RoboTaxi: deterministic latency and sensor throughput.
   - Cloud Fleet: cost, utilization, and failure domain.
-- [ ] Update parts so the same conceptual lesson produces different track conclusions.
-- [ ] Add report fields for binding physical constraint and mitigation.
+- [x] Update parts so the same conceptual lesson produces different track conclusions.
+- [x] Add report fields for binding physical constraint and mitigation.
 
 ### V1-03 - Constraint Tax
 

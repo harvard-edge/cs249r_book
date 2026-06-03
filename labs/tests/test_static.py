@@ -249,6 +249,7 @@ class TestWheelConsistency:
             "mlsysbook_labs/__init__.py",
             "mlsysbook_labs/benchmarking.py",
             "mlsysbook_labs/capstone.py",
+            "mlsysbook_labs/deployment.py",
             "mlsysbook_labs/edge.py",
             "mlsysbook_labs/inference.py",
             "mlsysbook_labs/schemas.py",
