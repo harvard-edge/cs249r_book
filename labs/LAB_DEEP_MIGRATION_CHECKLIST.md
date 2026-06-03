@@ -115,17 +115,17 @@ Current status:
 - [x] Baseline track/report panel installed.
 
 Deep migration tasks:
-- [ ] Map Data, Algorithm, and Machine axes to each canonical track.
-- [ ] Add track-specific D-A-M examples:
+- [x] Map Data, Algorithm, and Machine axes to each canonical track.
+- [x] Add track-specific D-A-M examples:
   - iPhone: on-device vision or text classification under memory and latency limits.
   - Oura Ring: always-on sensing under energy and SRAM/flash limits.
   - RoboTaxi: perception stack under safety and real-time latency limits.
   - Cloud Fleet: hosted model service under throughput, cost, and reliability limits.
-- [ ] Move any displayed device/model facts to shared registries.
-- [ ] Replace generic baseline scenario text with per-track narrative.
-- [ ] Add a small track-specific constraint table.
-- [ ] Update report evidence to include the selected D-A-M bottleneck.
-- [ ] Add tests for any new helper that summarizes track constraints.
+- [x] Move any displayed device/model facts to shared registries.
+- [x] Replace generic baseline scenario text with per-track narrative.
+- [x] Add a small track-specific constraint table.
+- [x] Update report evidence to include the selected D-A-M bottleneck.
+- [x] Add tests for any new helper that summarizes track constraints.
 
 ### V1-02 - Physics of Deployment
 

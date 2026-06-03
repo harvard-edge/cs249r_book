@@ -1362,3 +1362,53 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_00_introduction" -q`
 - `python3 -m pytest labs/tests/test_track_profiles.py labs/tests/test_ui_helpers.py labs/tests/test_static.py -q`
 - `git diff --check`
+
+### 2026-06-03 - V1-01 AI Triad Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_01_ml_intro.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/triad.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_triad_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_01_ml_intro.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.triad`, a shared helper layer for Data-Algorithm-Machine track profiles, binding-axis diagnosis, and fixed-budget intervention frontier scoring.
+- Added hand-authored V1-01 variants with track-specific failure stories, Data/Algorithm/Machine axis meanings, readiness thresholds, defaults, intervention options, validation tests, and report artifact metadata.
+- Replaced the old H100/Jetson/ESP32/ResNet fixed notebook with a selected-track D-A-M diagnosis, intervention frontier, defensible first-fix memo, ledger metadata, and local report export.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/triad.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific D-A-M axis text, thresholds, and validation tests live in typed V1-01 variants.
+
+Notebook-local constants removed:
+- H100/A100/Jetson/iPhone/ESP32/Himax hardware constants, ResNet-50 constants, and local cross-target formulas were removed from V1-01.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.triad` can be reused by V1-02, V1-03, V1-09, and later labs that need first-intervention diagnosis across Data, Algorithm, and Machine axes.
+
+Plan updates needed in other labs:
+- V1-02 can reuse the triad helper's track profile pattern while adding physics/deployment-envelope evidence.
+- V1-09 can reuse or extend the intervention-frontier pattern for candidate selection.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_01_ml_intro.py labs/mlsysbook_labs/triad.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_01_ml_intro" -q`
+- `python3 -m pytest labs/tests/test_triad_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`

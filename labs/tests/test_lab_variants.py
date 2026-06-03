@@ -85,6 +85,23 @@ def test_v1_10_variants_define_compression_guardrails():
         assert variant.assumptions["report_artifact"] == "compression deployment recipe"
 
 
+def test_v1_01_variants_define_triad_defaults():
+    for variant in list_lab_variants("v1_01_ai_triad"):
+        assert "failure_story" in variant.defaults
+        assert "data_axis" in variant.defaults
+        assert "algorithm_axis" in variant.defaults
+        assert "machine_axis" in variant.defaults
+        assert "data_threshold_pct" in variant.defaults
+        assert "algorithm_threshold_pct" in variant.defaults
+        assert "machine_threshold_pct" in variant.defaults
+        assert "default_data_pct" in variant.defaults
+        assert "default_algorithm_pct" in variant.defaults
+        assert "default_machine_pct" in variant.defaults
+        assert "intervention_options" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "triad diagnosis memo"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults
