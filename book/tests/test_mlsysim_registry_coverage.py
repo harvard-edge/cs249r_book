@@ -130,6 +130,7 @@ def test_reference_stats_are_separate_from_executable_scenarios() -> None:
     assert hasattr(mlsysim.ReferenceStats, "Workloads")
     assert hasattr(mlsysim.ReferenceStats, "MobilePower")
     assert hasattr(mlsysim.ReferenceStats, "PhoneBattery")
+    assert hasattr(mlsysim.ReferenceStats, "OuraSleepStudy")
     assert not hasattr(mlsysim.Scenarios, "ReferenceStats")
     assert not hasattr(mlsysim.Scenarios, "Workloads")
     assert not hasattr(mlsysim.Scenarios, "MobilePower")

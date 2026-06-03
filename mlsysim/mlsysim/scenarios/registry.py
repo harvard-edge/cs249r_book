@@ -57,6 +57,59 @@ class ClinicalImaging(Registry):
         description="Reference size for one retinal screening photograph in the rural-clinic workflow.")
 
 
+class OuraSleepStudy(Registry):
+    """Oura Ring sleep-stage case-study anchors."""
+
+    Participants = sourced(
+        106,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-stage study participants",
+        description="Participants included in the Oura sleep-stage validation dataset.",
+    )
+    Nights = sourced(
+        440,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-stage study nights",
+        description="Nights included in the Oura sleep-stage validation dataset.",
+    )
+    RecordingHours = sourced_qty(
+        3444 * _hour,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-stage study recording hours",
+        description="Combined PSG and wearable-ring recording duration.",
+    )
+    CrossValidationFolds = sourced(
+        5,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-stage cross-validation folds",
+        description="Cross-validation folds used for model evaluation.",
+    )
+    AccelerometerOnlyFourStageAccuracy = sourced(
+        0.57,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura accelerometer-only four-stage accuracy",
+        description="Four-stage sleep classification accuracy using accelerometer features only.",
+    )
+    EnhancedFourStageAccuracy = sourced(
+        0.79,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura enhanced four-stage accuracy",
+        description="Four-stage sleep classification accuracy using ANS-derived and circadian features.",
+    )
+    PsgScorerAgreementLow = sourced(
+        0.82,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="PSG inter-scorer reliability low",
+        description="Lower bound of reported human PSG inter-scorer sleep-staging reliability.",
+    )
+    PsgScorerAgreementHigh = sourced(
+        0.83,
+        pc.OURA_SLEEP_STAGE_STUDY,
+        name="PSG inter-scorer reliability high",
+        description="Upper bound of reported human PSG inter-scorer sleep-staging reliability.",
+    )
+
+
 class EnergyAnchors(Registry):
     """Everyday energy-scale comparison anchors (order-of-magnitude intuition)."""
 
@@ -205,6 +258,7 @@ class ReferenceStats(Registry):
     Workloads = Workloads
     AnomalyModel = AnomalyModel
     ClinicalImaging = ClinicalImaging
+    OuraSleepStudy = OuraSleepStudy
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles

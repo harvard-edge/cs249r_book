@@ -122,6 +122,12 @@ CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
     ref="Clinical imaging workflow anchors for rural-clinic bandwidth and edge-deployment examples",
     verified="2026-06-01",
 )
+OURA_SLEEP_STAGE_STUDY = _lit(
+    "prov:oura-sleep-stage-study",
+    "Altini and Kinnunen (2021), \"The Promise of Sleep: A Multi-Sensor Approach for Accurate Sleep Stage Detection Using the Oura Ring\"",
+    url="https://doi.org/10.3390/s21134302",
+    verified="2026-06-03",
+)
 ENERGY_SCALE_ANCHORS = Provenance(
     id="prov:energy-scale-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,

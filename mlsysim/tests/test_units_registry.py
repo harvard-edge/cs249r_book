@@ -168,6 +168,22 @@ def test_clinical_imaging_photo_size_anchor():
     assert anchor.provenance.ref
 
 
+def test_oura_sleep_study_anchors():
+    from mlsysim import ReferenceStats
+
+    study = ReferenceStats.OuraSleepStudy
+
+    assert study.Participants == pytest.approx(106)
+    assert study.Nights == pytest.approx(440)
+    assert study.RecordingHours.to(hour).magnitude == pytest.approx(3444)
+    assert study.CrossValidationFolds == pytest.approx(5)
+    assert study.AccelerometerOnlyFourStageAccuracy == pytest.approx(0.57)
+    assert study.EnhancedFourStageAccuracy == pytest.approx(0.79)
+    assert study.PsgScorerAgreementLow == pytest.approx(0.82)
+    assert study.PsgScorerAgreementHigh == pytest.approx(0.83)
+    assert study.EnhancedFourStageAccuracy.provenance.ref
+
+
 def test_storage_training_corpus_anchor():
     from mlsysim import ReferenceStats
     from mlsysim.core.units import byte, day, minute, param
