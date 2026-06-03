@@ -26,7 +26,9 @@ engine: jupyter
 
 _Why does inference cost eventually dwarf training cost, and what does this mean for system design?_
 
-Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, each request incurring compute, memory, and energy costs that accumulate into operational expenses far exceeding the original training investment. The serving cost dominance law\index{Serving Cost Dominance Law} (Principle \ref{pri-serving-cost-dominance}) captures this economic reality: over a successful model's lifetime, Inference OpEx exceeds Training CapEx by orders of magnitude, and optimization efforts should be disproportionately focused on the inference path, even when they increase training cost or complexity. Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into substantial savings or costs. Performance engineering developed the optimization toolkit: fusion, precision, compilation, speculative decoding, and this chapter applies those tools to build serving systems that handle millions of requests under strict latency budgets. Reliability requirements intensify because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments, and the architecture that was optimal for training (large batches, high throughput, tolerance for latency variance) becomes financially unsustainable or user-hostile at serving time. Inference at scale is where ML systems succeed or fail economically.
+Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, and every request consumes compute, memory, network, and energy budget. The serving cost dominance law\index{Serving Cost Dominance Law} (Principle \ref{pri-serving-cost-dominance}) captures this economic reality: for a successful production model, ongoing inference operating expense (OpEx) can exceed the one-time training capital expenditure (CapEx) by orders of magnitude.
+
+That cost structure changes the architecture. Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into substantial savings or costs. Performance engineering supplied the local toolkit: fusion, precision, compilation, and algorithmic changes such as speculative decoding. This chapter applies those tools at serving scale, where batching, sharding, routing, autoscaling, and isolation must preserve strict latency budgets under live traffic. Reliability requirements intensify as well, because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. Inference at scale is where ML systems succeed or fail economically.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -156,7 +158,7 @@ Verify your understanding of when to move from single-machine to distributed inf
 - [ ] A 13B model (26 GB weights) fits on a single A100. If the throughput requirements double, should you use model sharding or horizontal replication?
 - [ ] For a real-time speech-to-text service, the primary bottleneck is **inter-token latency**. Does adding more GPUs through data-parallel replication reduce this latency?
 - [ ] Why is **Model Sharding** mandatory for a 175B model on 80 GB GPUs, regardless of the request volume?
-- [ ] Identify the trade-off: what is the "serving tax" mentioned in the next section, and how does it affect the decision to shard across machines vs. staying within a single node?
+- [ ] Identify the trade-off: what distribution overheads might make sharding across machines worse than staying within a single node?
 
 :::
 
@@ -613,7 +615,7 @@ Each level has distinct optimization levers. @Tbl-serving-hierarchy maps these l
 
 Verify your understanding of where specific optimizations sit within the serving hierarchy:
 
-- [ ] Which level of the hierarchy is responsible for managing **KV cache fragmentation** to increase concurrent request capacity?
+- [ ] Which level of the hierarchy is responsible for managing GPU memory waste to increase concurrent request capacity?
 - [ ] If you implement **Speculative Decoding** to reduce token latency for a single request, at which level are you operating?
 - [ ] **Load Balancing** algorithms (like Power-of-Two-Choices) operate at the Service level. What is their primary optimization target?
 - [ ] True or False: Multi-tenancy and resource isolation are primarily Request-level concerns.
@@ -920,7 +922,7 @@ The 20-request queue depth and the unresolved question of whether queue wait tim
 
 ::: {#psp-inference-queuing-theory-review .callout-perspective title="Queuing theory as serving foundation"}
 
-At the single-node level, inference behaves as an M/D/1 or M/M/1 queue. Little's Law ($L = \lambda W$) dictates that the number of requests in the system equals the arrival rate times the processing time. For a rigorous mathematical review of single-node queuing dynamics and utilization curves, see @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0. @Sec-appdx-appendix-inference-serving works the M/D/1 queue analysis through from first principles, deriving the wait-time distribution that determines whether queue delay fits inside a serving SLO.
+At the single-node level, inference behaves like a single-server queue: requests arrive, wait if the replica is busy, and then receive service from the accelerator. The shorthand M/D/1 denotes random arrivals with deterministic service time on one server; M/M/1 denotes random arrivals with exponentially distributed service time. Little's Law ($L = \lambda W$) dictates that the number of requests in the system equals the arrival rate times the processing time. For a rigorous mathematical review of single-node queuing dynamics and utilization curves, see @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0. @Sec-appdx-appendix-inference-serving works the M/D/1 queue analysis through from first principles, deriving the wait-time distribution that determines whether queue delay fits inside a serving SLO.
 
 :::
 
@@ -2876,7 +2878,7 @@ The **Blackwell (B200)** architecture introduces native **FP4 support**\index{FP
 
 :::
 
-The dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited. Mixing them in the same batch can cause interference, producing the static power waste problem analyzed in @sec-sustainable-ai, where low-utilization decode steps dominate energy consumption.
+The dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited. Mixing them in the same batch can cause interference. The GPU remains powered and allocated even when decode steps expose little useful compute, so low-utilization decode traffic can dominate energy cost unless the scheduler keeps the hardware busy with compatible work.
 
 **Chunked prefill**[^fn-chunked-prefill-latency] addresses this by breaking long prompts into fixed-size chunks that interleave with decode operations:
 
@@ -2923,11 +2925,11 @@ KV Cache management enables a single GPU to handle many concurrent requests with
 
 ### Dynamic memory swapping and multi-tenancy {#sec-inference-scale-lora-multi-tenancy}
 
-As serving platforms scale to support thousands of concurrent users on a single foundation model, fine-tuning introduces a new memory bottleneck. When 10,000 users each have a unique Low-Rank Adaptation (LoRA) weight matrix applied to a shared base model, replicating the 140 GB base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific LoRA adapters are dynamically swapped into SRAM on demand.
+As serving platforms scale to support thousands of concurrent users on a single foundation model, personalization introduces a new memory bottleneck. Low-Rank Adaptation (LoRA) stores a small set of user- or task-specific adapter weights that modify a shared base model without copying the full model. When 10,000 users each have a unique LoRA adapter applied to the same 140 GB base model, replicating the base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific adapters are brought into the fast on-chip working set as needed.
 
 ::: {#psp-inference-context-switch-machine-learning .callout-perspective title="The context switch of machine learning"}
 
-This multi-tenant serving pattern shifts the fundamental performance constraint from compute throughput to **SRAM cache trashing**\index{SRAM Cache Trashing}. As the continuous batching scheduler interleaves requests from different users, the constant swapping of adapter weights from HBM to SRAM creates the machine learning equivalent of an operating system context switch. If the adapter swap latency exceeds the compute time of the generation step, the GPU compute cores stall. Efficient multi-tenancy requires integrating adapter scheduling directly with memory pagers like PagedAttention, batching requests by active adapter to minimize context-switching overhead.
+This multi-tenant serving pattern shifts the fundamental performance constraint from compute throughput to adapter locality. As the continuous batching scheduler interleaves requests from different users, adapter weights may have to move repeatedly from HBM into SRAM or registers before each generation step. The effect is similar to an operating-system context switch: the accelerator has work to do, but it first waits for the state belonging to the next tenant. If the adapter swap latency exceeds the compute time of the generation step, the GPU compute cores stall. Efficient multi-tenancy therefore batches requests by active adapter when possible and coordinates adapter placement with KV-cache paging so personalization does not erase the benefit of sharing the base model.
 
 :::
 
@@ -5064,7 +5066,7 @@ Semantic caching[^fn-semantic-cache-tradeoff] (caching based on embedding simila
 
 [^fn-semantic-cache-tradeoff]: **Semantic Caching**: Returns cached responses for queries that are embedding-similar rather than string-identical, requiring a vector database lookup per request. The trade-off: higher hit rates (potentially 2--3$\times$ for open-ended workloads) at the cost of added lookup latency (1--5 ms) and the risk of incorrect cache hits when semantically similar queries require different answers. Setting the similarity threshold is a precision-recall trade-off with direct impact on response correctness. \index{Semantic Caching!trade-off}
 
-#### Pattern 3: Federated inference with model sharding {#sec-inference-scale-pattern-3-federated-inference-model-sharding-6c44}
+#### Pattern 3: Cross-region model sharding {#sec-inference-scale-pattern-3-federated-inference-model-sharding-6c44}
 
 For the largest models, pipeline parallelism can theoretically span regions: a router assigns early layers to one region and later layers to another. This pattern is rarely practical because inter-region network latency (75–150 ms) dominates compute time per stage (1–5 ms), making cross-region pipeline parallelism 10--100$\times$ slower than co-located deployment. It applies only when no single region has sufficient GPU capacity for the full model.
 
@@ -5179,13 +5181,11 @@ The outlier distribution motivates the specialized quantization methods that fol
 
 ### GPTQ: Layer-by-layer weight quantization {#sec-inference-scale-gptq-layerbylayer-weight-quantization-9284}
 
-GPTQ [@frantar2023gptq] is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. It uses Hessian-based[^fn-hessian-quantization] error compensation, adjusting remaining weights to compensate for errors introduced by quantization rather than quantizing all weights independently.
+GPTQ [@frantar2023gptq] is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. Its serving value is that the model gets smaller without a full retraining run. The risk is that rounding one weight changes the layer output in a way later weights must absorb. GPTQ addresses that risk by using calibration activations to estimate which weight errors matter most,[^fn-hessian-quantization] then compensating the remaining unquantized weights as each column is rounded.
 
 [^fn-hessian-quantization]: **Hessian Matrix in Quantization**\index{Quantization!Hessian matrix}: The Hessian $H = X^T X$ captures second-order sensitivity: weights with large diagonal entries have outsized impact on model outputs. GPTQ exploits this to quantize insensitive weights aggressively while preserving sensitive ones, achieving 3--4-bit quantization with less than 1 percent perplexity degradation. Without Hessian guidance, naive uniform quantization below 8-bit typically destroys model quality. \index{Hessian!quantization}
 
-The GPTQ algorithm processes the model layer by layer. For each layer, it calibrates using a small dataset (128--256 samples). It quantizes weights in order of decreasing Hessian magnitude. It adjusts remaining weights to minimize output error.
-
-The Hessian matrix $H = X^T X$ captures which weights most affect outputs. GPTQ builds on the Optimal Brain Surgeon (OBS) framework, using the inverse Hessian to guide error compensation.
+The algorithm processes the model layer by layer. For each layer, it first runs a small calibration dataset (typically 128--256 samples) to collect the activations that determine local sensitivity. It then quantizes weights in an order informed by that sensitivity and updates the remaining weights so the layer's output changes as little as possible. The Hessian matrix $H = X^T X$ is the compact representation of this sensitivity information; GPTQ uses an efficient inverse-Hessian update rather than treating every rounded weight as an independent error.
 
 #### Column-wise processing algorithm {#sec-inference-gptq-column-wise-processing-c01a}
 
@@ -5946,20 +5946,20 @@ Avoiding these pitfalls keeps serving infrastructure resilient to traffic varian
 
 ## Summary {#sec-inference-scale-summary-bb6a}
 
-Inference at scale is the final realization of the Machine Learning Fleet. Throughout Part I, we designed the logical algorithms for scale, and in Part II, we built the physical machines to execute them. This chapter has developed the service layer, the "interface to reality," that transforms those massive computational resources into low-latency global predictions.
+Inference at scale is the final realization of the Machine Learning Fleet. Part I established the physical resources of the fleet, and Part II developed the distributed machinery that trains and coordinates large models. This chapter developed the service layer that turns those resources into low-latency global predictions.
 
-The serving hierarchy provides our organizing framework for these optimizations, from request-level batching and caching to replica-level GPU memory management, up to service-level load balancing and platform-level multi-tenancy. We established that the inversion from training (throughput-bound) to inference (latency-bound) necessitates a different engineering mindset, where "the tail" (P99 latency) is the primary determinant of success.
+The serving hierarchy organizes the optimization problem from request-level batching and caching to replica-level GPU memory management, service-level load balancing, and platform-level multi-tenancy. The inversion from training to inference changes the dominant metric: aggregate throughput remains important, but P99 latency determines whether the service feels usable and whether downstream systems can depend on it.
 
-We analyzed why different model architectures require distinct batching strategies: static/dynamic for vision, feature-parallel for recommendation, and continuous batching for LLMs. We explored how model sharding techniques like tensor and expert parallelism reduce latency for frontier models, provided the underlying networking fabric discussed in @sec-collective-communication can sustain the synchronization overhead. Finally, we examined the critical memory management challenges of autoregressive generation, where techniques like PagedAttention and speculative decoding break the sequential bottlenecks of modern AI.
+Different model architectures require different batching strategies. Vision models benefit from static or dynamic batches because inputs have predictable shapes. Recommendation systems batch and shard sparse features because embedding lookup dominates. LLMs need continuous batching and KV-cache management because every active request carries private sequence state. Model sharding techniques such as tensor and expert parallelism reduce latency for frontier models only when the networking fabric discussed in @sec-collective-communication can sustain the synchronization overhead.
 
 Understanding inference at scale matters because serving cost, not training cost, dominates the total economics of machine learning in production. A frontier model may require tens of millions of dollars and several months to train, but that investment is amortized once. Serving that same model to millions of users over its operational lifetime can exceed the original training expenditure by 100$\times$ or more. This asymmetry means that every optimization discussed in this chapter, from continuous batching to PagedAttention to power-of-two-choices load balancing, translates directly into sustained cost savings that compound over the model's deployment period.
 
-The engineer who internalizes the prefill/decode split, who understands why KV cache fragmentation destroys throughput, and who can reason about the interaction between batching strategy and tail latency holds the leverage to reduce serving costs by orders of magnitude. These are not incremental improvements. Choosing continuous batching over static batching can double GPU utilization; implementing PagedAttention can recover 60--80 percent of wasted memory; and disaggregating prefill from decode across specialized hardware pools can cut per-token cost in half. In aggregate, the techniques presented in this chapter represent the difference between inference infrastructure that scales economically and one that collapses under the weight of its own serving bill.
+The engineer who internalizes the prefill/decode split, who understands why wasted KV-cache memory destroys throughput, and who can reason about the interaction between batching strategy and tail latency holds the leverage to reduce serving costs by orders of magnitude. These are not incremental improvements. Choosing continuous batching over static batching can double GPU utilization; implementing PagedAttention can recover 60--80 percent of wasted memory; and disaggregating prefill from decode across specialized hardware pools can cut per-token cost in half. In aggregate, the techniques presented in this chapter represent the difference between inference infrastructure that scales economically and one that collapses under the weight of its own serving bill.
 
 ::: {.callout-takeaways title="Serving inverts every assumption"}
 
 * **The inference wall**: Serving cost often dominates training cost by 100$\times$ or more over a model's lifetime, making inference efficiency the primary driver of ML economics.
-* **Prefill vs. decode**: LLM serving is split into two regimes: compute-bound prefill (input processing) and memory-bandwidth-bound decode (token generation). Optimizing for the "Decode" phase requires high-bandwidth memory (HBM3) or specialized storage-as-memory such as High Bandwidth Flash (HBF).
+* **Prefill vs. decode**: LLM serving is split into two regimes: compute-bound prefill (input processing) and memory-bandwidth-bound decode (token generation). Optimizing decode requires high-bandwidth memory, careful KV-cache placement, and scheduling policies that keep bandwidth useful without violating inter-token latency.
 * **Batching is not universal**: There is no "optimal" batch size for all models. Vision models scale with batch size; recommendation models scale with feature-parallel shards; LLMs scale via continuous, iteration-level management.
 * **Power of two choices**: Simple, randomized load balancing achieves exponentially better queue balance ($\mathcal{O}(\log \log R)$) with minimal overhead, a must-have for any large-scale deployment.
 * **Statefulness is the challenge**: Unlike stateless vision models, LLM serving\index{Inference!stateful serving} is inherently stateful due to the KV cache. This requires sticky routing, prefix caching, and sophisticated memory paging (PagedAttention) to prevent fragmentation.
@@ -5969,7 +5969,7 @@ The engineer who internalizes the prefill/decode split, who understands why KV c
 
 ::: {.callout-chapter-connection title="From data center to edge"}
 
-The architectural foundations for inference at scale developed here, continuous batching, PagedAttention, model sharding, and load balancing, all assume data center-grade hardware: H100 GPUs, NVLink interconnects, terabytes of HBM. Many applications, however, require inference closer to the user: on smartphones, IoT devices, or local gateways where power budgets are measured in milliwatts, memory in megabytes, and connectivity is intermittent. @Sec-edge-intelligence examines how we push intelligence to the edge, adapting the serving principles developed here to operate under constraints that invert every data center assumption.
+The architectural foundations for inference at scale developed here, continuous batching, PagedAttention, model sharding, and load balancing, all assume data center-grade hardware: H100 GPUs, NVLink interconnects, terabytes of HBM. Many applications, however, require inference closer to the user: on smartphones, IoT devices, or local gateways where power budgets are measured in milliwatts, memory in megabytes, and connectivity is intermittent. @Sec-edge-intelligence examines how serving principles change when intelligence moves to the edge and every data center assumption is inverted.
 
 :::
 
