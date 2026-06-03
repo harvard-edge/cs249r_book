@@ -977,3 +977,54 @@ Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_11_hw_accel.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "vol1/lab_11 or lab_11_hw" -q`
 - `python3 -m pytest labs/tests/test_static.py::TestSyntax labs/tests/test_static.py::TestLabCatalog -q`
+
+### 2026-06-03 - V2-10 Inference Economy Deep Track Migration
+
+Lab:
+- `labs/vol2/lab_10_inference.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/inference.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_inference_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol2/lab_10_inference.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.inference`, a shared helper layer for cost crossover, state/cache capacity, batching speedup, and serving-plan sizing.
+- Added hand-authored V2-10 track variants with track-specific cost units, demand, setup budgets, state/cache assumptions, SLOs, batching defaults, serving policies, and validation tests.
+- Replaced the V2-10 baseline migration shell with a track selector, track context, source trace, track-aware widget defaults, track-neutral part narrative, ledger payload, and local report export.
+- Converted the old cloud-only H100/70B notebook calculations into selected-track calculations using MLSysIM hardware/model refs plus `mlsysbook_labs.inference`.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/inference.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.Llama2_70B`
+- Scenario-specific cost units, demand, state/cache teaching assumptions, SLOs, and validation tests live in typed V2-10 variants.
+
+Notebook-local constants removed:
+- H100 RAM/cost, T4, Jetson, `TRAINING_COST_2M`, `LLAMA2_70B`, `calc_kv_cache_size`, and `Engine.solve` notebook-local paths were removed from V2-10 setup and tab calculations.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.inference` is reusable for V1-12 benchmarking, V1-13 serving, V2-09 performance engineering, and later fleet synthesis labs whenever they need cost, state/cache, batching, or serving-plan evidence.
+
+Plan updates needed in other labs:
+- V1-12 should reuse the cost/state/batching result objects when constructing benchmark traps.
+- V1-13 should reuse `state_capacity` and `serving_plan` for tail-latency serving choices instead of rebuilding concurrency math locally.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/inference.py`
+- `python3 -m py_compile labs/vol2/lab_10_inference.py`
+- `python3 -m pytest labs/tests/test_inference_helpers.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol2/lab_10 or lab_10_inference" -q`
+- `python3 -m pytest labs/tests/test_inference_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py::TestWheelConsistency -q`

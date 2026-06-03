@@ -93,3 +93,19 @@ def test_v1_11_variants_define_roofline_defaults():
         assert "move_the_point" in variant.defaults
         assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "hardware acceleration diagnosis"
+
+
+def test_v2_10_variants_define_inference_economy_defaults():
+    for variant in list_lab_variants("v2_10_inference_economy"):
+        assert "setup_cost" in variant.defaults
+        assert "cost_per_event" in variant.defaults
+        assert "cost_unit" in variant.defaults
+        assert "cost_label" in variant.defaults
+        assert "demand_qps" in variant.defaults
+        assert "context_tokens" in variant.defaults
+        assert "state_kind" in variant.defaults
+        assert "precision_bytes" in variant.defaults
+        assert "slo_ms" in variant.defaults
+        assert "qps_per_slot" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "inference serving plan"

@@ -79,7 +79,7 @@ For each lab:
 
 - [x] 1. V2-11 Edge Intelligence: closest to device-specific constraints.
 - [x] 2. V1-11 Hardware Roofline: pressure-tests hardware registry and roofline plots.
-- [ ] 3. V2-10 Inference Economy: connects latency, cost, batching, and deployment target.
+- [x] 3. V2-10 Inference Economy: connects latency, cost, batching, and deployment target.
 - [ ] 4. V1-12 Benchmarking Trap: standardizes benchmark plots and report evidence.
 - [ ] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
 - [ ] 6. V1-14 Silent Degradation: adds monitoring and drift evidence.
@@ -558,19 +558,21 @@ Deep migration tasks:
 Path: `labs/vol2/lab_10_inference.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware notebook migration installed.
+- [x] Track selector, track context, source trace, and local report export installed.
+- [x] Shared inference-economy helper backs cost crossover, state/cache capacity, batching, and serving-plan evidence.
 
 Deep migration tasks:
-- [ ] Build track-specific inference economics.
-- [ ] Add shared inference cost/latency helper if current logic is notebook-local.
-- [ ] Track examples:
+- [x] Build track-specific inference economics.
+- [x] Add shared inference cost/latency helper if current logic is notebook-local.
+- [x] Track examples:
   - iPhone: local inference cost is battery/thermal/UX.
   - Oura Ring: local inference cost is energy and duty cycle.
   - RoboTaxi: local inference cost is latency and safety margin.
   - Cloud Fleet: service inference cost is dollars, utilization, and p99.
-- [ ] Display batching, quantization, caching, or placement tradeoffs by track.
-- [ ] Update report with inference placement and economic constraint.
-- [ ] Add tests for cost/latency helper.
+- [x] Display batching, quantization, caching, or placement tradeoffs by track.
+- [x] Update report with inference placement and economic constraint.
+- [x] Add tests for cost/latency helper.
 
 ### V2-11 - The Edge Thermodynamics Lab
 

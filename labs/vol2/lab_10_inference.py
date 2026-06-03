@@ -4,30 +4,28 @@ __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LAB V2-08: THE INFERENCE ECONOMY
+# LAB V2-10: THE INFERENCE ECONOMY
 #
 # Chapter: Inference at Scale (@sec-inference-at-scale)
-# Core Invariant: Serving cost eclipses training cost within weeks. The KV
-#                 cache memory wall (not compute) is the binding constraint on
-#                 concurrent serving. Continuous batching transforms a stop-and-
-#                 go assembly line into a flowing pipeline. The inference fleet
-#                 design challenge requires jointly optimizing quantization,
-#                 batching, and replica count under a latency SLO.
+# Core Invariant: Recurring inference cost eclipses one-time setup cost. Live
+#                 state/cache memory often binds concurrency before peak compute.
+#                 Continuous batching or duty-cycle scheduling transforms a
+#                 stop-and-go assembly line into a flowing pipeline. The design
+#                 challenge requires jointly optimizing precision, scheduling,
+#                 and serving units under the selected track's guardrail.
 #
 # Tabbed Structure (35-40 minutes):
 #   Part A — The Serving Cost Inversion (12-15 min)
-#             Serving cost > training cost within ~3-4 weeks at 100 QPS.
-#             Batching trades latency for throughput along a hockey stick.
+#             Recurring cost crosses one-time budget. Scheduling trades latency
+#             for throughput along a hockey stick.
 #
 #   Part B — The KV Cache Wall + Fleet Design Challenge (20-25 min)
-#             At 128K context, even 8xH100 can serve only 1 request for 70B.
-#             Design a fleet: INT4 + continuous batching + right replica count
-#             achieves the SLO at 40% lower cost than naive FP16 + static.
+#             State/cache memory sets concurrency. Precision + continuous
+#             scheduling + right serving-unit count reduces recurring cost.
 #
-# Hardware Constants:
-#   H100_RAM_GB        = 80     GB HBM3e per GPU
-#   H100_TFLOPS_FP16   = 989    TFLOPS dense tensor core
-#   H100_COST_HR       = 3.0    $/GPU-hour cloud pricing
+# Track source-of-truth:
+#   Hardware, model, and scenario defaults resolve through MLSysIM and
+#   mlsysbook_labs track variants. Notebook code composes and renders them.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -59,66 +57,145 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
-    from mlsysim import Hardware, Models, Infrastructure, Engine
-    from mlsysim import calc_kv_cache_size
-
-    LLAMA2_70B = Models.Language.Llama2_70B
-
-    # ── Hardware registry ─────────────────────────────────────────────────
-    H100 = Hardware.Cloud.H100
-    T4 = Hardware.Cloud.T4
-    EDGE = Hardware.Edge.JetsonOrinNX
-    H100_RAM_GB = H100.memory.capacity.m_as("GB")
-    H100_COST_HR = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("USD/hour")
-    T4_COST_HR = Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate.m_as("USD/hour")
-    EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
-    TRAINING_COST_2M = 2_000_000  # $2M training cost for 70B model
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        batching_result,
+        cost_crossover,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        inference_economy_profile,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        serving_plan,
+        source_trace,
+        state_capacity,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
-    return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, H100_RAM_GB, H100_COST_HR, T4_COST_HR, TRAINING_COST_2M, DecisionLog, Hardware, H100, T4, EDGE, EDGE_RAM_GB, LLAMA2_70B, calc_kv_cache_size, Engine
+    return (
+        ACADEMIC_LAB_CSS, COLORS, DecisionLog, LAB_CSS, apply_plotly_theme,
+        batching_result, build_lab_report, cost_crossover, get_lab_metadata,
+        get_lab_track_variant, get_track_profile, go, inference_economy_profile,
+        ledger, math, mo, np, report_export_panel, resolve_mlsysim_ref,
+        serving_plan, source_trace, state_capacity, track_context, track_selector,
+    )
+
+
+@app.cell
+def _(get_lab_metadata):
+    v2_10_metadata = get_lab_metadata("vol2/lab_10_inference.py")
+    return (v2_10_metadata,)
+
+
+@app.cell(hide_code=True)
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
+    v2_10_track_picker = track_selector(default=_default_track)
+    v2_10_track_picker
+    return (v2_10_track_picker,)
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    inference_economy_profile,
+    resolve_mlsysim_ref,
+    v2_10_track_picker,
+):
+    v2_10_track_id = v2_10_track_picker.value
+    v2_10_profile = get_track_profile(v2_10_track_id)
+    v2_10_variant = get_lab_track_variant("v2_10_inference_economy", v2_10_profile.track_id)
+    v2_10_hardware = resolve_mlsysim_ref(v2_10_variant.hardware_ref)
+    v2_10_model = resolve_mlsysim_ref(v2_10_variant.model_ref)
+    v2_10_inference = inference_economy_profile(
+        v2_10_profile,
+        v2_10_variant,
+        v2_10_hardware,
+        v2_10_model,
+    )
+    return (
+        v2_10_hardware,
+        v2_10_inference,
+        v2_10_model,
+        v2_10_profile,
+        v2_10_track_id,
+        v2_10_variant,
+    )
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, LAB_CSS, mo):
-    mo.Html(f"""
-    {LAB_CSS}
-    <div style="background: linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
-                border-radius: 16px; padding: 32px 40px; margin-bottom: 8px;
-                border: 1px solid #2d3748;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
-            <div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
-                            text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 8px;">
-                    Vol 2 &middot; Lab 10 &middot; Inference at Scale
+def _(
+    ACADEMIC_LAB_CSS,
+    COLORS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    v2_10_inference,
+    v2_10_metadata,
+    v2_10_profile,
+    v2_10_variant,
+):
+    mo.vstack([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
+        <div style="background: linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
+                    border-radius: 16px; padding: 32px 40px; margin-bottom: 8px;
+                    border: 1px solid #2d3748;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+                <div>
+                    <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
+                                text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 8px;">
+                        Vol 2 &middot; Lab 10 &middot; Inference at Scale
+                    </div>
+                    <div style="font-size: 2.0rem; font-weight: 800; color: #f1f5f9; line-height: 1.15; margin-bottom: 10px;">
+                        The Inference Economy
+                    </div>
+                    <div style="font-size: 0.95rem; color: #94a3b8; max-width: 640px; line-height: 1.6;">
+                        {v2_10_variant.workload_summary} Inference cost is the recurring
+                        constraint: {v2_10_inference.cost_label}, state/cache memory,
+                        batching, and replicas or local schedules determine whether the
+                        selected track can meet {v2_10_variant.guardrail_metric}.
+                    </div>
                 </div>
-                <div style="font-size: 2.0rem; font-weight: 800; color: #f1f5f9; line-height: 1.15; margin-bottom: 10px;">
-                    The Inference Economy
+                <div style="display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
+                    <span class="badge badge-info">{v2_10_profile.label}</span>
+                    <span class="badge badge-info">{v2_10_inference.hardware_ref}</span>
+                    <span class="badge badge-info">{v2_10_inference.model_name}</span>
+                    <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
                 </div>
-                <div style="font-size: 0.95rem; color: #94a3b8; max-width: 600px; line-height: 1.6;">
-                    You trained a 70B model for $2M. Congratulations -- that was the cheap
-                    part. Serving cost eclipses training cost within weeks. The KV cache
-                    memory wall, not compute, caps your concurrency. Continuous batching
-                    transforms the economics. Design a fleet that serves 10K QPS at
-                    200ms P99 for minimum cost.
-                </div>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
-                <span class="badge badge-info">Serving Cost Inversion</span>
-                <span class="badge badge-info">KV Cache Memory Wall</span>
-                <span class="badge badge-info">Continuous Batching</span>
-                <span class="badge badge-info">Fleet Design Challenge</span>
-                <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
             </div>
         </div>
-    </div>
-    """)
+        """),
+        track_context(v2_10_profile),
+        source_trace(
+            {
+                "lab_id": v2_10_metadata.lab_id,
+                "track_id": v2_10_profile.track_id,
+                "hardware_ref": v2_10_variant.hardware_ref,
+                "model_ref": v2_10_variant.model_ref,
+                "shared_helper": "mlsysbook_labs.inference",
+                "cost_unit": v2_10_inference.cost_unit,
+                "state_kind": v2_10_inference.state_kind,
+                "source_policy": v2_10_profile.source_policy,
+            },
+            summary="V2-10 resolves hardware/model facts through MLSysIM and track scenario defaults through mlsysbook_labs variants.",
+        ),
+    ])
     return
 
 # ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(mo, COLORS, v2_10_inference, v2_10_variant):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -130,9 +207,9 @@ def _(mo, COLORS):
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the serving cost inversion:</strong> calculate when cumulative serving cost exceeds the $2M training cost for a 70B LLM at 100 QPS.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose the KV cache memory wall:</strong> compute max concurrent requests at 128K context on 8xH100 for a 70B model and explain why memory, not compute, is the binding constraint.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Design an inference fleet:</strong> jointly optimize quantization, batch size, and replica count to meet a 10K QPS / 200ms P99 SLO at minimum cost.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the cost inversion:</strong> calculate when cumulative {v2_10_inference.cost_label} exceeds the one-time track budget.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose the state/cache wall:</strong> compute how many concurrent requests fit in {v2_10_inference.hardware_name} memory.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design an inference plan:</strong> jointly optimize precision, batching, and replicas or local scheduling under {v2_10_variant.guardrail_metric}.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -143,7 +220,7 @@ def _(mo, COLORS):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    KV cache formula from the Inference at Scale chapter &middot;
+                    State/cache formula from the Inference at Scale chapter &middot;
                     Queuing theory (Kingman's formula) from the Fleet Orchestration chapter
                 </div>
             </div>
@@ -166,9 +243,9 @@ def _(mo, COLORS):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                "You spent $2M training a 70B model. After how many weeks does serving cost
-                exceed training cost, and why does the KV cache &mdash; not compute &mdash;
-                determine whether you can afford to serve it at all?"
+                "For {v2_10_inference.label}, when does recurring {v2_10_inference.cost_label}
+                exceed the one-time budget, and which state/cache or batching constraint
+                determines whether the system can serve locally or at fleet scale?"
             </div>
         </div>
     </div>
@@ -181,8 +258,8 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete before this lab:
 
-    - **The Inference at Scale chapter** -- Serving economics, KV cache scaling, continuous batching
-    - The KV Cache section -- `KV = 2 * L * H * S * B * P` bytes formula
+    - **The Inference at Scale chapter** -- Serving economics, state/cache scaling, continuous batching
+    - The state/cache section -- `KV = 2 * L * H * S * B * P` for transformer KV cache
     - The Continuous Batching section -- Static vs iteration-level scheduling
     - The Queuing Theory section from the Fleet Orchestration chapter -- Kingman's formula
     """), kind="info")
@@ -194,25 +271,43 @@ def _(mo):
 
 # ─── CELL 4: Part A widgets ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v2_10_inference):
     # -- Part A prediction --
     partA_prediction = mo.ui.radio(
         options={
             "A) 6 months -- training dominates for a long time": "A",
             "B) 3 months -- serving catches up gradually": "B",
-            "C) ~3-4 weeks -- serving cost grows fast": "C",
+            "C) Weeks or days -- recurring inference cost grows fast": "C",
             "D) Never -- training is always more expensive": "D",
         },
-        label="You spent $2M training a 70B LLM. At 100 QPS and $0.01/query, when does cumulative serving cost exceed training cost?",
+        label=(
+            f"{v2_10_inference.label}: at {v2_10_inference.demand_qps:g} events/s and "
+            f"{v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}/event, "
+            f"when does cumulative {v2_10_inference.cost_label} exceed the one-time budget?"
+        ),
     )
     return (partA_prediction,)
 
 # ─── CELL 5: Part A controls + Part A reflection + Part B prediction ─────────
 @app.cell(hide_code=True)
-def _(mo):
-    a1_qps = mo.ui.slider(start=10, stop=1000, value=100, step=10, label="Queries per second (QPS)")
-    a1_cost_query = mo.ui.slider(start=0.001, stop=0.05, value=0.01, step=0.001, label="Cost per query ($)")
-    a1_weeks = mo.ui.slider(start=1, stop=52, value=26, step=1, label="Deployment duration (weeks)")
+def _(mo, v2_10_inference):
+    _qps = v2_10_inference.demand_qps
+    _unit_cost = v2_10_inference.cost_per_event
+    a1_qps = mo.ui.number(
+        start=0.0,
+        stop=max(_qps * 10, 1.0),
+        value=_qps,
+        step=max(_qps / 20, 0.01),
+        label="Demand rate (events/s)",
+    )
+    a1_cost_query = mo.ui.number(
+        start=0.0,
+        stop=max(_unit_cost * 10, 0.001),
+        value=_unit_cost,
+        step=max(_unit_cost / 20, 0.000001),
+        label=f"Cost per event ({v2_10_inference.cost_unit})",
+    )
+    a1_weeks = mo.ui.slider(start=1, stop=52, value=v2_10_inference.horizon_weeks, step=1, label="Deployment duration (weeks)")
     a1_optimization = mo.ui.slider(start=0, stop=50, value=0, step=5, label="Inference optimization (%)")
 
     # -- Part A reflection --
@@ -229,46 +324,64 @@ def _(mo):
     # -- Part B prediction --
     partB_prediction = mo.ui.radio(
         options={
-            "A) 16-32 concurrent requests -- GPUs have plenty of memory": "A",
-            "B) 4-8 concurrent requests -- some memory overhead": "B",
-            "C) 2-3 concurrent requests -- memory is tighter than expected": "C",
-            "D) Just 1 -- the KV cache consumes all available memory": "D",
+            "A) Many requests -- memory is not the constraint": "A",
+            "B) A modest batch -- state/cache overhead is visible": "B",
+            "C) Only a few requests -- memory is tighter than expected": "C",
+            "D) About one request -- live state/cache dominates memory": "D",
         },
-        label="70B model (FP16) on 8xH100 (640 GB). Weights = 140 GB. At 128K context, how many concurrent requests?",
+        label=(
+            f"{v2_10_inference.model_name} on {v2_10_inference.hardware_name}: "
+            f"with {v2_10_inference.state_kind}, how many concurrent requests fit?"
+        ),
     )
     return (a1_cost_query, a1_optimization, a1_qps, a1_weeks, partA_reflection, partB_prediction)
 
 # ─── CELL 6: Part B controls + Part B reflection ────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    a2_model_size = mo.ui.dropdown(
-        options={"7B (32L, 4096H)": (7, 32, 4096), "70B (80L, 8192H)": (70, 80, 8192), "175B (96L, 12288H)": (175, 96, 12288)},
-        value="70B (80L, 8192H)",
-        label="Model",
-    )
+def _(mo, v2_10_inference, v2_10_variant):
+    _precision_default = float(v2_10_variant.defaults.get("precision_bytes", 2.0))
+    _precision_label = {
+        2.0: "FP16 (2 bytes)",
+        1.0: "INT8 (1 byte)",
+        0.5: "INT4 (0.5 bytes)",
+    }.get(_precision_default, "FP16 (2 bytes)")
     a2_precision = mo.ui.dropdown(
         options={"FP16 (2 bytes)": 2, "INT8 (1 byte)": 1, "INT4 (0.5 bytes)": 0.5},
-        value="FP16 (2 bytes)",
+        value=_precision_label,
         label="Weight precision",
     )
-    a2_context_len = mo.ui.slider(start=2048, stop=131072, value=131072, step=2048, label="Context length (tokens)")
-    a2_n_gpus = mo.ui.slider(start=1, stop=8, value=8, step=1, label="GPUs per replica")
+    _context = v2_10_inference.context_tokens
+    _context_step = max(128, min(2048, _context // 8))
+    a2_context_len = mo.ui.slider(
+        start=max(128, _context_step),
+        stop=max(_context * 2, _context_step * 2),
+        value=_context,
+        step=_context_step,
+        label="State/cache context window",
+    )
+    a2_n_gpus = mo.ui.slider(
+        start=1,
+        stop=max(8, v2_10_inference.default_devices_per_replica),
+        value=v2_10_inference.default_devices_per_replica,
+        step=1,
+        label="Devices per serving unit",
+    )
 
     # -- Part B reflection --
     partB_reflection = mo.ui.radio(
         options={
-            "A) INT4 weight quantization frees HBM for more KV cache, enabling larger batches": "A",
-            "B) Add more compute (faster GPUs) to process more requests per second": "B",
-            "C) Reduce model size from 70B to 7B": "C",
-            "D) Use CPU offloading to store KV cache in system RAM": "D",
+            "A) Reduce precision to free memory for live state/cache slots": "A",
+            "B) Add peak compute without changing memory capacity": "B",
+            "C) Replace the model with a much smaller one": "C",
+            "D) Spill live state/cache to slower off-device memory": "D",
         },
-        label="What is the most effective way to increase concurrent serving capacity at 128K context?",
+        label=f"What is the most effective way to increase concurrent capacity for {v2_10_inference.state_kind}?",
     )
-    return (a2_context_len, a2_model_size, a2_n_gpus, a2_precision, partB_reflection)
+    return (a2_context_len, a2_n_gpus, a2_precision, partB_reflection)
 
 # ─── CELL 6b: Part C prediction + controls ─────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v2_10_inference):
     partC_prediction = mo.ui.radio(
         options={
             "A) 1.5x -- modest improvement over static batching": "A",
@@ -276,7 +389,7 @@ def _(mo):
             "C) 10x -- batching is the dominant optimization": "C",
             "D) No improvement -- batching does not affect memory-bound workloads": "D",
         },
-        label="You switch from static batching (pad all requests to max_len) to continuous batching (iteration-level scheduling). What throughput improvement do you expect for a 70B model at mixed context lengths?",
+        label=f"You switch {v2_10_inference.label} from static scheduling to continuous scheduling. What throughput improvement do you expect for mixed request lengths?",
     )
     c1_avg_len = mo.ui.slider(start=256, stop=65536, value=4096, step=256, label="Average output length (tokens)")
     c1_max_len = mo.ui.slider(start=2048, stop=131072, value=32768, step=2048, label="Max context length (tokens)")
@@ -294,7 +407,7 @@ def _(mo):
 
 # ─── CELL 6c: Part D prediction + controls ─────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, v2_10_inference, v2_10_variant):
     partD_prediction = mo.ui.radio(
         options={
             "A) 200 replicas of FP16 with static batching -- brute force": "A",
@@ -302,12 +415,29 @@ def _(mo):
             "C) 100 replicas of FP16 with continuous batching -- balanced approach": "C",
             "D) 25 replicas of INT4 with static batching -- minimize replica count": "D",
         },
-        label="Design: serve 10K QPS at 200ms P99 for a 70B model at 32K context. Which fleet configuration achieves this at lowest cost?",
+        label=(
+            f"Design: meet {v2_10_inference.demand_qps:g} events/s under "
+            f"{v2_10_inference.slo_ms:g} ms for {v2_10_inference.label}. "
+            "Which configuration is the best economic shape?"
+        ),
     )
-    d1_target_qps = mo.ui.slider(start=1000, stop=20000, value=10000, step=1000, label="Target QPS")
+    _target = v2_10_inference.demand_qps
+    d1_target_qps = mo.ui.number(
+        start=0.01,
+        stop=max(_target * 10, 1.0),
+        value=_target,
+        step=max(_target / 20, 0.01),
+        label="Target events/s",
+    )
+    _precision_default = float(v2_10_variant.defaults.get("precision_bytes", 2.0))
+    _precision_label = {
+        2.0: "FP16 (2 bytes)",
+        1.0: "INT8 (1 byte)",
+        0.5: "INT4 (0.5 bytes)",
+    }.get(_precision_default, "FP16 (2 bytes)")
     d1_quant = mo.ui.dropdown(
         options={"FP16 (2 bytes)": 2.0, "INT8 (1 byte)": 1.0, "INT4 (0.5 bytes)": 0.5},
-        value="INT4 (0.5 bytes)",
+        value=_precision_label,
         label="Weight quantization",
     )
     d1_batching = mo.ui.dropdown(
@@ -315,13 +445,19 @@ def _(mo):
         value="Continuous",
         label="Batching strategy",
     )
-    d1_gpus_per_replica = mo.ui.slider(start=1, stop=8, value=4, step=1, label="GPUs per replica")
+    d1_gpus_per_replica = mo.ui.slider(
+        start=1,
+        stop=max(8, v2_10_inference.default_devices_per_replica),
+        value=v2_10_inference.default_devices_per_replica,
+        step=1,
+        label="Devices per serving unit",
+    )
     partD_reflection = mo.ui.radio(
         options={
             "A) Minimize replica count to reduce management overhead": "A",
-            "B) Minimize cost = replicas * GPUs_per_replica * cost_per_GPU_hr, subject to QPS and latency constraints": "B",
-            "C) Maximize batch size per replica for best GPU utilization": "C",
-            "D) Use the largest GPU count per replica to maximize memory": "D",
+            "B) Minimize recurring cost subject to demand, latency, and guardrails": "B",
+            "C) Maximize batch size for best utilization": "C",
+            "D) Use the largest serving unit to maximize memory": "D",
         },
         label="What is the correct objective function for fleet design?",
     )
@@ -333,15 +469,15 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    COLORS, H100_RAM_GB, H100_COST_HR, TRAINING_COST_2M,
-    apply_plotly_theme, go, math, mo,
-    np, LLAMA2_70B, calc_kv_cache_size, Engine, H100,
+    COLORS, apply_plotly_theme, batching_result, cost_crossover,
+    go, math, mo, np, serving_plan, state_capacity,
     a1_cost_query, a1_optimization, a1_qps,
-    a1_weeks, a2_context_len, a2_model_size, a2_n_gpus,
+    a1_weeks, a2_context_len, a2_n_gpus,
     a2_precision, c1_avg_len, c1_batch_size, c1_max_len,
     d1_batching, d1_gpus_per_replica, d1_quant, d1_target_qps,
     partA_prediction, partA_reflection, partB_prediction, partB_reflection,
     partC_prediction, partC_reflection, partD_prediction, partD_reflection,
+    v2_10_inference, v2_10_model, v2_10_profile, v2_10_variant,
 ):
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -360,22 +496,35 @@ def _(
                 Incoming Message &middot; VP of Engineering
             </div>
             <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "We spent $2M training our 70B LLM. Finance wants to know the total cost of
-                ownership. I told them the training cost is the big expense. Our serving team
-                says I am wrong. Who is right?"
+                "{v2_10_variant.stakeholder}: the one-time budget is visible, but
+                recurring {v2_10_inference.cost_label} keeps accumulating. When does
+                the operating side dominate for {v2_10_inference.label}?"
             </div>
         </div>
         """))
 
         # ── Concept introduction ───────────────────────────────────────────
-        items.append(mo.md("""
-    At 100 QPS with a cost of $0.01 per query (GPU-hours amortized per request),
-    daily serving cost = 100 QPS x 86,400 s/day x $0.01 = **$86,400/day**.
+        _default_cost = cost_crossover(
+            setup_cost=v2_10_inference.setup_cost,
+            demand_qps=v2_10_inference.demand_qps,
+            cost_per_event=v2_10_inference.cost_per_event,
+        )
+        items.append(mo.md(f"""
+    Inference economy is a recurring-cost problem. For the **{v2_10_profile.label}** track,
+    the cost unit is **{v2_10_inference.cost_unit}**, and the recurring metric is
+    **{v2_10_inference.cost_label}**.
 
-    The $2M training cost is a one-time capital expenditure. Serving cost accrues daily.
-    At $86,400/day, the crossover occurs at 2,000,000 / 86,400 = **~23 days = ~3.3 weeks**.
+    At the default demand:
 
-    At higher QPS or cost-per-query, the crossover is even sooner.
+    ```
+    Daily recurring cost = {v2_10_inference.demand_qps:g} events/s x 86,400 s/day
+                         x {v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}/event
+                         = {_default_cost.daily_cost:,.2f} {v2_10_inference.cost_unit}/day
+    Crossover = {v2_10_inference.setup_cost:,.2f} / {_default_cost.weekly_cost:,.2f}
+              = {_default_cost.crossover_weeks:.1f} weeks
+    ```
+
+    Higher demand or higher per-event cost moves the crossover earlier.
         """))
 
         # ── Prediction lock ────────────────────────────────────────────────
@@ -397,26 +546,27 @@ def _(
         _weeks = a1_weeks.value
         _opt_pct = a1_optimization.value / 100
 
-        # Daily serving cost
-        _daily_cost = _qps * 86400 * _cpq * (1 - _opt_pct)
-        _weekly_cost = _daily_cost * 7
-
-        # Crossover week
-        _crossover_weeks = TRAINING_COST_2M / _weekly_cost if _weekly_cost > 0 else 999
-        _crossover_days = _crossover_weeks * 7
-
-        # Annual savings from optimization
-        _annual_savings = _qps * 86400 * 365 * _cpq * _opt_pct
+        _cost = cost_crossover(
+            setup_cost=v2_10_inference.setup_cost,
+            demand_qps=_qps,
+            cost_per_event=_cpq,
+            optimization_pct=a1_optimization.value,
+        )
+        _daily_cost = _cost.daily_cost
+        _weekly_cost = _cost.weekly_cost
+        _crossover_weeks = _cost.crossover_weeks
+        _crossover_days = _cost.crossover_days
+        _annual_savings = _cost.annual_savings
 
         # ── Cost curves ───────────────────────────────────────────────
         _week_range = np.arange(0, _weeks + 1)
-        _training_line = [TRAINING_COST_2M] * len(_week_range)
+        _training_line = [v2_10_inference.setup_cost] * len(_week_range)
         _serving_cumulative = [w * _weekly_cost for w in _week_range]
 
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(
             x=_week_range, y=_training_line, mode="lines",
-            name="Training cost ($2M)", line=dict(color=COLORS["BlueLine"], width=2.5, dash="dash"),
+            name=f"One-time budget ({v2_10_inference.cost_unit})", line=dict(color=COLORS["BlueLine"], width=2.5, dash="dash"),
             hovertemplate="Week %{x}: $%{y:,.0f}<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
@@ -433,7 +583,7 @@ def _(
         _fig.update_layout(
             height=340,
             xaxis=dict(title="Weeks Since Deployment"),
-            yaxis=dict(title="Cumulative Cost ($)", tickformat="$,.0f"),
+            yaxis=dict(title=f"Cumulative Cost ({v2_10_inference.cost_unit})"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             margin=dict(t=40, b=50, l=70, r=20),
         )
@@ -447,10 +597,10 @@ def _(
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
                 Physics &mdash; Serving Cost Model
             </div>
-            <div>Daily serving cost = {_qps} QPS &times; 86,400 s/day &times; ${_cpq:.3f}/query &times; (1 - {_opt_pct:.0%}) = <strong>${_daily_cost:,.0f}/day</strong></div>
+            <div>Daily recurring cost = {_qps:g} events/s &times; 86,400 s/day &times; {_cpq:g} {v2_10_inference.cost_unit}/event &times; (1 - {_opt_pct:.0%}) = <strong>{_daily_cost:,.2f} {v2_10_inference.cost_unit}/day</strong></div>
             <div>Crossover at week <strong>{_crossover_weeks:.1f}</strong> ({_crossover_days:.0f} days)</div>
-            <div>Annual serving cost: <strong>${_daily_cost * 365:,.0f}</strong></div>
-            {'<div>Annual savings from ' + str(a1_optimization.value) + '% optimization: <strong style=color:' + COLORS["GreenLine"] + ';>$' + f"{_annual_savings:,.0f}" + '</strong></div>' if _opt_pct > 0 else ''}
+            <div>Annual recurring cost: <strong>{_daily_cost * 365:,.2f} {v2_10_inference.cost_unit}</strong></div>
+            {'<div>Annual savings from ' + str(a1_optimization.value) + '% optimization: <strong style=color:' + COLORS["GreenLine"] + ';>' + f"{_annual_savings:,.2f} " + v2_10_inference.cost_unit + '</strong></div>' if _opt_pct > 0 else ''}
         </div>
         """))
 
@@ -465,13 +615,13 @@ def _(
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Daily Cost</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['RedLine']}; font-family:monospace;">${_daily_cost/1000:.0f}K</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">serving</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['RedLine']}; font-family:monospace;">{_daily_cost:.1f}</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{v2_10_inference.cost_unit}/day</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Annual Savings</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">${_annual_savings/1e6:.1f}M</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_annual_savings:.1f}</div>
                 <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{a1_optimization.value}% optimization</div>
             </div>
         </div>
@@ -482,54 +632,51 @@ def _(
         # ── Reveal ─────────────────────────────────────────────────────────
         if partA_prediction.value == "C":
             items.append(mo.callout(mo.md(
-                "**Correct.** At 100 QPS and $0.01/query, daily serving cost is $86,400. "
-                "The $2M training cost is exceeded in ~23 days = ~3.3 weeks. At 500 QPS "
-                "it crosses within a week. A 10% inference optimization at 100 QPS saves "
-                "$3.15M/year -- more than the training cost itself."
+                f"**Correct.** The default crossover for this track is {_default_cost.crossover_weeks:.1f} weeks. "
+                "The same recurring-cost math applies to the selected track: once a local "
+                "or fleet inference loop runs continuously, small per-event costs compound quickly."
             ), kind="success"))
         elif partA_prediction.value == "A":
             items.append(mo.callout(mo.md(
                 "**Far too conservative.** Students anchor on how expensive training *felt* "
                 "but underestimate the relentless compounding of per-query cost at scale. "
-                "At $86,400/day, the crossover is in weeks, not months."
+                f"For this track, the default crossover is {_default_cost.crossover_weeks:.1f} weeks."
             ), kind="warn"))
         elif partA_prediction.value == "B":
             items.append(mo.callout(mo.md(
                 "**In the right direction but too slow.** 3 months is possible at very low "
-                "QPS (~15 QPS), but 100 QPS crosses in under 4 weeks. Production LLM "
-                "services typically serve 100-10,000 QPS."
+                "demand, but recurring inference cost often crosses the one-time budget quickly."
             ), kind="warn"))
         elif partA_prediction.value == "D":
             items.append(mo.callout(mo.md(
                 "**Categorically wrong.** Training is a one-time cost; serving is a continuous "
-                "operating expense. At any non-trivial QPS, serving dominates within weeks. "
-                "This is why inference optimization is the highest-ROI activity for deployed models."
+                f"operating expense. At this track's default demand, recurring {v2_10_inference.cost_label} "
+                "eventually dominates. This is why inference optimization is high leverage."
             ), kind="warn"))
 
         # ── MathPeek ───────────────────────────────────────────────────────
         items.append(mo.accordion({
             "Governing equations -- serving cost model": mo.md("""
-        **Serving Cost**
+        **Recurring Inference Cost**
 
         ```
-        C_serving(t) = QPS * seconds_per_day * cost_per_query * t_days
+        C_operation(t) = demand_rate * seconds_per_day * cost_per_event * t_days
         ```
 
         **Crossover Condition**
 
         ```
-        C_training = C_serving(t_crossover)
-        t_crossover = C_training / (QPS * 86400 * cost_per_query)
+        C_setup = C_operation(t_crossover)
+        t_crossover = C_setup / (demand_rate * 86400 * cost_per_event)
         ```
 
         **ROI of Inference Optimization**
 
         ```
-        Annual_savings = QPS * 86400 * 365 * cost_per_query * optimization_fraction
+        Annual_savings = demand_rate * 86400 * 365 * cost_per_event * optimization_fraction
         ```
 
-        At 100 QPS and $0.01/query, a 10% optimization saves $3.15M/year.
-        The training cost was $2M. The optimization pays for itself in 8 months.
+        Use the selected track's cost unit: cloud uses dollars, device tracks use energy units.
             """)
         }))
 
@@ -540,9 +687,9 @@ def _(
         elif partA_reflection.value == "B":
             items.append(mo.callout(mo.md(
                 "**Correct.** Inference optimization directly reduces cost_per_query. "
-                "A 10% improvement at 100 QPS saves $3.15M/year -- more than the training cost. "
-                "Quantization (INT4 frees KV cache memory for larger batches), continuous batching "
-                "(2-4x throughput), and KV cache optimization are the primary levers."
+                f"At the selected demand, a 10% improvement saves {_cost.annual_savings:.2f} "
+                f"{v2_10_inference.cost_unit}/year. Precision, scheduling, and state/cache "
+                "management are the primary levers."
             ), kind="success"))
         else:
             items.append(mo.callout(mo.md(
@@ -569,25 +716,32 @@ def _(
                 Incoming Message &middot; Inference Platform Lead
             </div>
             <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "We are deploying a 70B FP16 model on 8xH100 (640 GB total HBM). Weights take
-                ~140 GB. We planned to serve 16-32 concurrent users at 128K context. Our load
-                test failed -- we can only serve 1 user at a time. What went wrong?"
+                "{v2_10_variant.stakeholder}: the model fits, but the live state/cache
+                grows with requests. How many concurrent requests fit before
+                {v2_10_inference.hardware_name} memory becomes the wall?"
             </div>
         </div>
         """))
 
         # ── Concept introduction ───────────────────────────────────────────
-        items.append(mo.md("""
-    The KV cache formula for a transformer:
+        _default_state = state_capacity(
+            v2_10_inference,
+            v2_10_model,
+            context_tokens=v2_10_inference.context_tokens,
+            precision_bytes=float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
+            devices_per_replica=v2_10_inference.default_devices_per_replica,
+        )
+        items.append(mo.md(f"""
+    Stateful serving has a memory wall. For transformers this is the KV cache;
+    for the device tracks it is the live activation, sensor-window, or runtime
+    buffer state that must fit beside model weights.
 
-    **KV_cache = 2 x num_layers x hidden_dim x seq_len x batch_size x bytes_per_element**
+    For **{v2_10_profile.label}**:
 
-    For a 70B model (80 layers, 8192 hidden_dim) at 128K context in FP16:
-    - Per-request KV cache = 2 x 80 x 8192 x 131,072 x 2 bytes = ~343 GB
-    - Available HBM after weights = 640 - 140 = 500 GB
-    - Max concurrent requests = floor(500 / 343) = **1 request**
-
-    The KV cache alone exceeds what remains after loading the model weights.
+    - Hardware memory: **{_default_state.total_memory_gb:.3g} GB**
+    - Model weights at default precision: **{_default_state.weight_gb:.3g} GB**
+    - Per-request {v2_10_inference.state_kind}: **{_default_state.state_per_request_gb:.3g} GB**
+    - Max concurrent requests: **{_default_state.max_concurrent}**
         """))
 
         # ── Prediction lock ────────────────────────────────────────────────
@@ -597,45 +751,30 @@ def _(
             return mo.vstack(items)
 
         # ── Controls ───────────────────────────────────────────────────────
-        items.append(mo.md("### KV Cache Memory Wall Explorer"))
+        items.append(mo.md("### State/Cache Memory Wall Explorer"))
         items.append(mo.hstack([
-            mo.vstack([a2_model_size, a2_precision]),
+            mo.vstack([a2_precision]),
             mo.vstack([a2_context_len, a2_n_gpus]),
         ], justify="center", gap=2))
 
         # ── Instruments ────────────────────────────────────────────────────
-        _params_b, _layers, _hidden = a2_model_size.value
         _bytes_per_elem = a2_precision.value
         _seq_len = a2_context_len.value
-        _gpus = a2_n_gpus.value
+        _devices = a2_n_gpus.value
 
-        _total_hbm_gb = _gpus * H100_RAM_GB
-        _weight_gb = _params_b * 1e9 * _bytes_per_elem / 1e9
-        _available_gb = max(0, _total_hbm_gb - _weight_gb)
-
-        # KV cache per request — mlsysim.physics.calc_kv_cache_size
-        _head_dim = LLAMA2_70B.hidden_dim // LLAMA2_70B.heads if (_params_b, _layers, _hidden) == (70, 80, 8192) else _hidden // 128
-        _n_heads = _hidden // _head_dim
-        _kv_per_req_gb = calc_kv_cache_size(
-            _layers, _n_heads, _head_dim, _seq_len, 1, bytes_per_elem=2,
-        ).m_as("GB")
-
-        _max_concurrent = math.floor(_available_gb / _kv_per_req_gb) if _kv_per_req_gb > 0 else 0
-        _oom = _max_concurrent < 1
-
-        _prec_map = {2: "fp16", 1: "int8", 0.5: "int4"}
-        _serve_model = LLAMA2_70B if (_params_b, _layers, _hidden) == (70, 80, 8192) else None
-        if _serve_model is not None:
-            _decode = Engine.solve(
-                _serve_model, H100, batch_size=1,
-                precision=_prec_map.get(_bytes_per_elem, "fp16"), efficiency=0.5,
-            )
-            _decode_lat_ms = _decode.latency.m_as("ms")
-            _decode_mem_gb = _decode.memory_footprint.m_as("GB")
-            _decode_bn = _decode.bottleneck
-        else:
-            _decode_lat_ms = _decode_mem_gb = None
-            _decode_bn = "n/a"
+        _state = state_capacity(
+            v2_10_inference,
+            v2_10_model,
+            context_tokens=_seq_len,
+            precision_bytes=_bytes_per_elem,
+            devices_per_replica=_devices,
+        )
+        _total_hbm_gb = _state.total_memory_gb
+        _weight_gb = _state.weight_gb
+        _available_gb = _state.available_gb
+        _kv_per_req_gb = _state.state_per_request_gb
+        _max_concurrent = _state.max_concurrent
+        _oom = _state.oom
 
         # ── Stacked memory chart ──────────────────────────────────────────────
         _n_requests = list(range(0, min(_max_concurrent + 3, 20)))
@@ -648,11 +787,11 @@ def _(
                                marker_color=COLORS["BlueLine"],
                                hovertemplate="Requests %{x}: %{y:.1f} GB<extra></extra>"))
         _kv_colors = [COLORS["GreenLine"] if t <= _total_hbm_gb else COLORS["RedLine"] for t in _total_vals]
-        _fig.add_trace(go.Bar(x=_n_requests, y=_kv_vals, name="KV cache",
+        _fig.add_trace(go.Bar(x=_n_requests, y=_kv_vals, name="State/cache",
                                marker_color=_kv_colors,
                                hovertemplate="Requests %{x}: %{y:.1f} GB<extra></extra>"))
         _fig.add_hline(y=_total_hbm_gb, line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
-                       annotation_text=f"Total HBM: {_total_hbm_gb:.0f} GB", annotation_position="top right")
+                       annotation_text=f"Total memory: {_total_hbm_gb:.3g} GB", annotation_position="top right")
         _fig.update_layout(
             height=300, barmode="stack",
             xaxis=dict(title="Concurrent Requests"),
@@ -672,8 +811,8 @@ def _(
                     OOM &mdash; Cannot Serve Even 1 Request
                 </div>
                 <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
-                    KV cache per request ({_kv_per_req_gb:.1f} GB) exceeds available memory ({_available_gb:.1f} GB).<br>
-                    Reduce context length, add GPUs, or use weight quantization to free HBM.
+                    State/cache per request ({_kv_per_req_gb:.3g} GB) exceeds available memory ({_available_gb:.3g} GB).<br>
+                    Reduce context length, add devices, use quantization, or change the serving policy.
                 </div>
             </div>
             """
@@ -687,13 +826,12 @@ def _(
                     font-size:0.83rem; line-height:1.8;">
             <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; KV Cache Memory Wall
+                Physics &mdash; State/Cache Memory Wall
             </div>
-            <div>KV per request = 2 &times; {_layers}L &times; {_hidden}H &times; {_seq_len:,} seq &times; 2 bytes = <strong>{_kv_per_req_gb:.1f} GB</strong></div>
-            <div>Weights = {_params_b}B &times; {_bytes_per_elem} bytes = <strong>{_weight_gb:.1f} GB</strong></div>
-            <div>Available HBM = {_total_hbm_gb:.0f} - {_weight_gb:.1f} = <strong>{_available_gb:.1f} GB</strong></div>
-            <div>Max concurrent = floor({_available_gb:.1f} / {_kv_per_req_gb:.1f}) = <strong style="color:{_conc_color};">{_max_concurrent}</strong></div>
-            {"<div>Engine.solve decode = " + f"{_decode_lat_ms:.2f} ms/token, footprint {_decode_mem_gb:.1f} GB ({_decode_bn})</div>" if _decode_lat_ms is not None else ""}
+            <div>{v2_10_inference.state_kind} per request = <strong>{_kv_per_req_gb:.3g} GB</strong></div>
+            <div>Weights = {v2_10_inference.model_params_b:.3g}B params &times; {_bytes_per_elem:g} bytes = <strong>{_weight_gb:.3g} GB</strong></div>
+            <div>Available memory = {_total_hbm_gb:.3g} - {_weight_gb:.3g} = <strong>{_available_gb:.3g} GB</strong></div>
+            <div>Max concurrent = floor({_available_gb:.3g} / {_kv_per_req_gb:.3g}) = <strong style="color:{_conc_color};">{_max_concurrent}</strong></div>
         </div>
         """))
 
@@ -707,18 +845,18 @@ def _(
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">KV/Request</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_kv_per_req_gb:.0f}GB</div>
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">State/Request</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_kv_per_req_gb:.2g}GB</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Weights</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">{_weight_gb:.0f}GB</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">{_weight_gb:.2g}GB</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Available</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_available_gb:.0f}GB</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_available_gb:.2g}GB</div>
             </div>
         </div>
         """))
@@ -728,50 +866,44 @@ def _(
         # ── Reveal ─────────────────────────────────────────────────────────
         if partB_prediction.value == "D":
             items.append(mo.callout(mo.md(
-                "**Correct.** At 128K context, the KV cache per request is ~343 GB for a 70B "
-                "model. After loading 140 GB of FP16 weights on 8xH100 (640 GB total), only "
-                "~500 GB remains. 500 / 343 = 1.46, so max concurrent = 1. The KV cache, "
-                "not compute, is the binding constraint. INT4 weights (35 GB) free 605 GB, "
-                "allowing 1 concurrent request. Shorter context (32K) drops KV to ~86 GB, "
-                "allowing 5+ concurrent requests."
+                "**Correct.** In the selected track, the active bottleneck is the state/cache wall: "
+                f"{v2_10_inference.state_kind} leaves room for {_max_concurrent} concurrent requests."
             ), kind="success"))
         elif partB_prediction.value == "A":
             items.append(mo.callout(mo.md(
-                "**Off by 16x.** Students think of GPUs as 'compute machines' and forget the "
-                "KV cache. At 128K context, each request's KV cache is ~343 GB -- larger than "
-                "the model weights themselves. Memory, not compute, is the wall."
+                "**Too optimistic.** It is easy to focus on peak compute and forget live state/cache. "
+                f"For this track, max concurrency is {_max_concurrent} before memory becomes the wall."
             ), kind="warn"))
         elif partB_prediction.value == "B":
             items.append(mo.callout(mo.md(
-                "**Possible at shorter contexts.** At 32K context, KV cache drops to ~86 GB, "
-                "allowing floor(500/86) = 5 concurrent requests. But at 128K, KV is 343 GB "
-                "per request -- only 1 fits."
+                "**Sometimes right.** A modest batch fits when state/cache per request is small enough. "
+                f"With the selected settings, the computed capacity is {_max_concurrent}."
             ), kind="warn"))
         elif partB_prediction.value == "C":
             items.append(mo.callout(mo.md(
-                "**Close for some configurations.** At 64K context, KV is ~172 GB, allowing "
-                "floor(500/172) = 2 concurrent requests. But at 128K, it is 343 GB -- only 1."
+                "**Close for some configurations.** The important move is to compute the memory frontier, "
+                f"not guess from hardware class. Here the frontier is {_max_concurrent} requests."
             ), kind="warn"))
 
         # ── MathPeek ───────────────────────────────────────────────────────
         items.append(mo.accordion({
-            "Governing equations -- KV cache and inference fleet design": mo.md("""
-        **KV Cache Formula**
+            "Governing equations -- state/cache and inference-plan design": mo.md("""
+        **State/Cache Formula**
 
         ```
-        KV_bytes = 2 * num_layers * hidden_dim * seq_len * batch_size * bytes_per_elem
+        transformer_KV_bytes = 2 * num_layers * hidden_dim * seq_len * batch_size * bytes_per_elem
         ```
 
         - Factor 2: one K tensor + one V tensor per layer
-        - KV cache is always FP16 (even with INT4 weights)
+        - KV cache is often stored at higher precision than quantized weights
         - Grows linearly with seq_len and batch_size
-        - 70B at 128K: 2 * 80 * 8192 * 131072 * 2 = ~343 GB per request
+        - Device tracks may substitute measured activation, sensor-window, or runtime state per request
 
         **Memory Constraint**
 
         ```
-        W + B * KV_per_request <= total_HBM
-        Max_batch = floor((total_HBM - W) / KV_per_request)
+        W + B * state_per_request <= total_memory
+        Max_batch = floor((total_memory - W) / state_per_request)
         ```
 
         **Continuous Batching Throughput**
@@ -780,7 +912,7 @@ def _(
         Throughput_continuous = Throughput_static * (avg_len / max_len) * fill_factor
         ```
 
-        - Static batching wastes (1 - avg/max) fraction of GPU cycles
+        - Static batching wastes (1 - avg/max) fraction of accelerator cycles
         - Continuous batching fills freed slots immediately: fill_factor = 2-4x
             """)
         }))
@@ -791,29 +923,24 @@ def _(
             items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
         elif partB_reflection.value == "A":
             items.append(mo.callout(mo.md(
-                "**Correct.** INT4 quantization reduces weight memory from 140 GB to 35 GB, "
-                "freeing 105 GB of HBM for KV cache. This increases max concurrent requests "
-                "from 1 to floor(605/343) = 1 at 128K context (still memory-bound), but at "
-                "32K context: floor(605/86) = 7 vs 5 with FP16. The freed memory directly "
-                "translates to higher throughput through larger batch sizes."
+                "**Correct.** Lower precision reduces model weight memory, which frees capacity "
+                f"for {v2_10_inference.state_kind}. If memory is the active wall, those freed bytes "
+                "translate into more live slots or more safety headroom."
             ), kind="success"))
         elif partB_reflection.value == "B":
             items.append(mo.callout(mo.md(
                 "**Does not address the binding constraint.** The bottleneck is memory, not "
-                "compute. Faster GPUs do not increase HBM capacity. The KV cache fills all "
-                "available memory regardless of compute speed."
+                "compute. More peak compute does not help if state/cache fills available memory."
             ), kind="warn"))
         elif partB_reflection.value == "C":
             items.append(mo.callout(mo.md(
-                "**Effective but changes the product.** A 7B model has lower quality than 70B. "
-                "The goal is to serve the 70B model efficiently, not to serve a different model."
+                "**Effective but changes the product.** A smaller model can fit better, but it also "
+                "changes quality, safety, or product behavior. Treat that as a model-selection decision."
             ), kind="warn"))
         elif partB_reflection.value == "D":
             items.append(mo.callout(mo.md(
-                "**Technically possible but too slow.** CPU RAM has ~10x lower bandwidth than "
-                "HBM. Moving KV cache to CPU adds 10x latency to every attention computation, "
-                "violating the 200ms P99 SLO. PagedAttention uses CPU offloading as a last "
-                "resort, not as the primary strategy."
+                "**Usually a last resort.** Spilling live state/cache to slower memory can preserve "
+                "capacity but often violates latency, energy, or reliability guardrails."
             ), kind="warn"))
 
         return mo.vstack(items)
@@ -834,9 +961,10 @@ def _(
                 Incoming Message &middot; ML Serving Engineer
             </div>
             <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "Our static batching system pads all requests to 32K tokens and waits for a
-                full batch of 8. Most requests are only 4K tokens -- 87% of GPU cycles are
-                wasted on padding. Someone mentioned 'continuous batching.' How much does it help?"
+                "{v2_10_variant.stakeholder}: static scheduling waits for the slowest
+                or longest request. Most {v2_10_inference.label} work is shorter than
+                the worst case. How much throughput do we recover if freed slots are
+                filled immediately?"
             </div>
         </div>
         """))
@@ -844,7 +972,7 @@ def _(
         # Concept framing
         items.append(mo.md("""
     **Static batching** pads all requests to `max_len` and processes them together.
-    When a short request (4K tokens) finishes, the GPU sits idle until all 8 requests
+    When a short request finishes, the accelerator slot sits idle until all requests
     in the batch complete. Waste = `1 - avg_len / max_len`.
 
     **Continuous batching** (iteration-level scheduling) processes one token per iteration.
@@ -856,7 +984,7 @@ def _(
 
     The fill_factor (2-4x) comes from:
     1. No padding waste: compute only on real tokens
-    2. Immediate slot filling: no idle GPU cycles between requests
+    2. Immediate slot filling: no idle accelerator cycles between requests
     3. Higher effective batch occupancy over time
         """))
 
@@ -870,20 +998,25 @@ def _(
         items.append(mo.md("### Continuous vs Static Batching Simulator"))
         items.append(mo.hstack([c1_avg_len, c1_max_len, c1_batch_size], justify="center", gap=2))
 
-        # Physics
         _avg = c1_avg_len.value
         _max = c1_max_len.value
         _batch = c1_batch_size.value
 
-        _padding_waste = 1 - _avg / _max if _max > 0 else 0
-        _static_throughput = _batch  # requests per batch cycle
-        _continuous_throughput = _batch * (_max / _avg) * 0.85  # fill factor ~85% of theoretical
-        _speedup = _continuous_throughput / _static_throughput if _static_throughput > 0 else 1
+        _batching = batching_result(
+            avg_len=_avg,
+            max_len=_max,
+            batch_size=_batch,
+            fill_factor=v2_10_inference.batching_fill_factor,
+        )
+        _padding_waste = _batching.padding_waste_pct / 100
+        _static_throughput = _batching.static_throughput
+        _continuous_throughput = _batching.continuous_throughput
+        _speedup = _batching.speedup
 
         # Chart: throughput vs avg_len ratio
         _ratios = np.linspace(0.05, 1.0, 50)
         _static_tp = [_batch for _ in _ratios]
-        _continuous_tp = [_batch * (1 / r) * 0.85 for r in _ratios]
+        _continuous_tp = [_batch * (1 / r) * v2_10_inference.batching_fill_factor for r in _ratios]
 
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(
@@ -1006,7 +1139,7 @@ def _(
 
         - Prefill phase for new requests is compute-intensive
         - Not all slots fill instantly (scheduling latency)
-        - KV cache management overhead
+        - State/cache management overhead
             """)
         }))
 
@@ -1017,9 +1150,9 @@ def _(
         elif partC_reflection.value == "B":
             items.append(mo.callout(mo.md(
                 "**Correct.** Continuous batching is strictly better because: (1) no padding waste, "
-                "(2) freed slots are filled immediately with new requests, (3) the GPU processes "
-                "real tokens instead of padding tokens. This is why every production LLM serving "
-                "system (vLLM, TensorRT-LLM, TGI) uses continuous batching."
+                "(2) freed slots are filled immediately with new requests, (3) the accelerator processes "
+                "real work instead of padding or idle time. This is why production serving systems use "
+                "continuous or iteration-level scheduling."
             ), kind="success"))
         else:
             items.append(mo.callout(mo.md(
@@ -1046,32 +1179,28 @@ def _(
                 Incoming Message &middot; VP of AI Infrastructure
             </div>
             <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "We need to serve 10,000 QPS at 200ms P99 for our 70B model at 32K context.
-                The naive fleet (FP16, static batching) requires 200 replicas on 8xH100 each
-                = 1,600 H100s at $115K/day. Can we do better?"
+                "{v2_10_variant.stakeholder}: we need to meet
+                {v2_10_inference.demand_qps:g} events/s under {v2_10_inference.slo_ms:g} ms.
+                Which precision, scheduling, and serving-unit count minimizes recurring cost
+                without violating {v2_10_variant.guardrail_metric}?"
             </div>
         </div>
         """))
 
         # Concept framing
-        items.append(mo.md("""
-    Fleet design jointly optimizes three levers:
-    1. **Quantization**: INT4 reduces weight memory, freeing HBM for larger KV cache batches
-    2. **Continuous batching**: 2-4x throughput per replica
-    3. **Replica count and GPU count per replica**: cost = replicas x GPUs x cost/hr
+        items.append(mo.md(f"""
+    Inference-plan design jointly optimizes three levers:
+    1. **Precision**: smaller weights free memory for more live state/cache slots.
+    2. **Scheduling**: continuous batching or duty-cycle scheduling improves effective throughput.
+    3. **Serving units**: replicas, devices per replica, or local schedules set recurring cost.
 
-    The naive fleet (FP16, static, 8 GPUs/replica):
-    - Per-replica throughput: ~50 QPS
-    - Replicas needed: 10,000 / 50 = 200
-    - Cost: 200 x 8 x $3/hr = $4,800/hr = $115,200/day
+    For **{v2_10_profile.label}**, the objective is:
 
-    The optimized fleet (INT4, continuous batching, 4 GPUs/replica):
-    - INT4 weights: 35 GB (vs 140 GB FP16), freeing 105 GB for KV cache
-    - Continuous batching: ~3x throughput = 150 QPS/replica
-    - Replicas needed: ceil(10,000 / 150) = 67
-    - Cost: 67 x 4 x $3/hr = $804/hr = $19,296/day
-
-    **Savings: ~83%** -- same SLO, dramatically lower cost.
+    ```
+    minimize recurring {v2_10_inference.cost_label}
+    subject to demand >= {v2_10_inference.demand_qps:g} events/s
+               guardrail = {v2_10_variant.guardrail_metric}
+    ```
         """))
 
         # Prediction lock
@@ -1087,50 +1216,64 @@ def _(
             mo.vstack([d1_batching, d1_gpus_per_replica]),
         ], justify="center", gap=2))
 
-        # Physics
         _target = d1_target_qps.value
         _bytes_per_elem = d1_quant.value
         _batch_mult = d1_batching.value
-        _gpus = d1_gpus_per_replica.value
+        _devices = d1_gpus_per_replica.value
 
-        # Memory model
-        _total_hbm = _gpus * H100_RAM_GB
-        _weight_gb = 70 * 1e9 * _bytes_per_elem / 1e9
-        _available_gb = max(0, _total_hbm - _weight_gb)
-
-        # KV cache per request at 32K context (70B from registry)
-        _kv_per_req_gb = calc_kv_cache_size(
-            LLAMA2_70B.layers, LLAMA2_70B.heads,
-            LLAMA2_70B.hidden_dim // LLAMA2_70B.heads,
-            32768, 1, bytes_per_elem=2,
-        ).m_as("GB")
-        _max_batch = math.floor(_available_gb / _kv_per_req_gb) if _kv_per_req_gb > 0 else 0
-
-        # Per-replica throughput
-        _base_qps_per_req = 1.5  # tokens/sec/request baseline
-        _effective_batch = max(1, _max_batch)
-        _per_replica_qps = _effective_batch * _base_qps_per_req * _batch_mult
-
-        # Fleet sizing
-        _replicas_needed = math.ceil(_target / _per_replica_qps) if _per_replica_qps > 0 else 9999
-        _total_gpus = _replicas_needed * _gpus
-        _hourly_cost = _total_gpus * H100_COST_HR
-        _daily_cost = _hourly_cost * 24
-
-        # Naive baseline
-        _naive_replicas = math.ceil(_target / 50)  # 50 QPS/replica naive
-        _naive_gpus = _naive_replicas * 8
-        _naive_daily = _naive_gpus * H100_COST_HR * 24
-        _savings_pct = (1 - _daily_cost / _naive_daily) * 100 if _naive_daily > 0 else 0
-
-        _oom = _max_batch < 1
+        _plan = serving_plan(
+            v2_10_inference,
+            v2_10_model,
+            target_qps=_target,
+            precision_bytes=_bytes_per_elem,
+            batching_multiplier=_batch_mult,
+            devices_per_replica=_devices,
+            context_tokens=v2_10_inference.context_tokens,
+        )
+        _state_for_plan = state_capacity(
+            v2_10_inference,
+            v2_10_model,
+            context_tokens=v2_10_inference.context_tokens,
+            precision_bytes=_bytes_per_elem,
+            devices_per_replica=_devices,
+        )
+        _total_hbm = _state_for_plan.total_memory_gb
+        _weight_gb = _state_for_plan.weight_gb
+        _available_gb = _state_for_plan.available_gb
+        _kv_per_req_gb = _state_for_plan.state_per_request_gb
+        _max_batch = _plan.max_batch
+        _per_replica_qps = _plan.per_replica_qps
+        _replicas_needed = _plan.replicas_needed
+        _total_gpus = _plan.total_devices
+        _daily_cost = _plan.daily_cost
+        _naive_daily = _plan.baseline_daily_cost
+        _savings_pct = _plan.savings_pct
+        _oom = _plan.oom
 
         # Chart: cost comparison across configurations
-        _configs = ["Naive FP16\nStatic 8GPU", "FP16 Cont.\n8GPU", "INT4 Cont.\n4GPU", "Your Config"]
+        _configs = ["Baseline\nStatic", "Continuous\nSame Precision", "Low Precision\nContinuous", "Your Config"]
+        _same_precision = serving_plan(
+            v2_10_inference,
+            v2_10_model,
+            target_qps=_target,
+            precision_bytes=float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
+            batching_multiplier=_batch_mult,
+            devices_per_replica=_devices,
+            context_tokens=v2_10_inference.context_tokens,
+        )
+        _low_precision = serving_plan(
+            v2_10_inference,
+            v2_10_model,
+            target_qps=_target,
+            precision_bytes=0.5,
+            batching_multiplier=max(1.0, _batch_mult),
+            devices_per_replica=_devices,
+            context_tokens=v2_10_inference.context_tokens,
+        )
         _costs = [
             _naive_daily,
-            math.ceil(_target / (8 * 1.5 * 3.0)) * 8 * H100_COST_HR * 24,  # FP16 continuous
-            math.ceil(_target / (max(1, math.floor((4 * 80 - 35) / _kv_per_req_gb)) * 1.5 * 3.0)) * 4 * H100_COST_HR * 24 if _kv_per_req_gb > 0 else 0,  # INT4 cont 4GPU
+            _same_precision.daily_cost,
+            _low_precision.daily_cost,
             _daily_cost,
         ]
         _bar_colors_d = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"], COLORS["BlueLine"]]
@@ -1143,12 +1286,12 @@ def _(
                 text=[f"${_cost/1000:.0f}K"],
                 textposition="auto",
                 showlegend=False,
-                hovertemplate="%{x}: $%{y:.1f}K/day<extra></extra>",
+                hovertemplate=f"%{{x}}: %{{y:.1f}}K {v2_10_inference.cost_unit}/day<extra></extra>",
             ))
         _fig.update_layout(
             height=300,
             xaxis=dict(title="Configuration"),
-            yaxis=dict(title="Daily Cost ($K)", tickformat="$,.0f"),
+            yaxis=dict(title=f"Daily Cost (K {v2_10_inference.cost_unit})"),
             margin=dict(t=30, b=70, l=70, r=20),
         )
         apply_plotly_theme(_fig)
@@ -1163,8 +1306,9 @@ def _(
                     OOM &mdash; Cannot Fit Any Request
                 </div>
                 <div style="font-size:0.85rem; color:#7f1d1d;">
-                    Weights ({_weight_gb:.0f} GB) + 1 KV cache ({_kv_per_req_gb:.1f} GB) exceed
-                    {_total_hbm:.0f} GB HBM. Increase GPUs per replica or use stronger quantization.
+                    Weights ({_weight_gb:.3g} GB) + one {_state_for_plan.state_kind}
+                    ({_kv_per_req_gb:.3g} GB) exceed {_total_hbm:.3g} GB memory.
+                    Increase devices, use stronger quantization, or change the serving policy.
                 </div>
             </div>
             """))
@@ -1177,10 +1321,10 @@ def _(
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
                 Physics &mdash; Fleet Design
             </div>
-            <div>Weights: {_weight_gb:.0f} GB &mdash; Available HBM: {_available_gb:.0f} GB &mdash; Max batch: {_max_batch}</div>
+            <div>Weights: {_weight_gb:.3g} GB &mdash; Available memory: {_available_gb:.3g} GB &mdash; Max live slots: {_max_batch}</div>
             <div>Per-replica QPS: {_per_replica_qps:.0f} &mdash; Replicas needed: {_replicas_needed}</div>
-            <div>Total GPUs: <strong>{_total_gpus}</strong> &mdash; Daily cost: <strong>${_daily_cost:,.0f}</strong></div>
-            <div>Naive baseline: {_naive_replicas} replicas &times; 8 GPUs = {_naive_gpus} GPUs = ${_naive_daily:,.0f}/day</div>
+            <div>Total devices: <strong>{_total_gpus}</strong> &mdash; Daily cost: <strong>{_daily_cost:,.2f} {v2_10_inference.cost_unit}</strong></div>
+            <div>Baseline daily cost: {_naive_daily:,.2f} {v2_10_inference.cost_unit}/day</div>
             <div>Savings: <strong style="color:{_cost_color};">{_savings_pct:.0f}%</strong></div>
         </div>
         """))
@@ -1190,11 +1334,11 @@ def _(
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Daily Cost</div>
-                <div style="font-size:2rem; font-weight:800; color:{_cost_color}; font-family:monospace;">${_daily_cost/1000:.0f}K</div>
+                <div style="font-size:2rem; font-weight:800; color:{_cost_color}; font-family:monospace;">{_daily_cost/1000:.1f}K</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Replicas</div>
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Serving Units</div>
                 <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_replicas_needed}</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
@@ -1212,22 +1356,18 @@ def _(
         if partD_prediction.value == "B":
             items.append(mo.callout(mo.md(
                 "**Correct.** INT4 + continuous batching achieves ~3x throughput per replica "
-                "while using only 4 GPUs instead of 8. The combination reduces fleet cost by "
-                "~80% compared to the naive FP16 static approach. The key insight: quantization "
-                "frees memory for larger batches, and continuous batching maximizes throughput "
-                "per batch slot."
+                "in the cloud reference. In the selected track, the same principle holds: precision "
+                "frees state/cache memory and scheduling fills live slots more efficiently."
             ), kind="success"))
         elif partD_prediction.value == "A":
             items.append(mo.callout(mo.md(
-                "**The most expensive option.** 200 replicas x 8 GPUs = 1,600 H100s at $115K/day. "
-                "FP16 wastes HBM on weight precision that INT4 can deliver. Static batching "
-                "wastes GPU cycles on padding."
+                "**The most expensive option.** Brute force adds serving units without attacking the active bottleneck. "
+                "If memory and scheduling are binding, static scheduling wastes accelerator cycles on padding or idle slots."
             ), kind="warn"))
         elif partD_prediction.value == "C":
             items.append(mo.callout(mo.md(
-                "**Better than naive but still suboptimal.** FP16 weights (140 GB) leave less "
-                "room for KV cache than INT4 (35 GB). With continuous batching, INT4 achieves "
-                "higher per-replica throughput because it can batch more concurrent requests."
+                "**Better than naive but still possibly suboptimal.** Higher precision leaves less room "
+                "for live state/cache. If memory is active, lower precision can increase serving-slot capacity."
             ), kind="warn"))
         elif partD_prediction.value == "D":
             items.append(mo.callout(mo.md(
@@ -1242,7 +1382,7 @@ def _(
         **Fleet Cost Objective**
 
         ```
-        minimize: replicas * GPUs_per_replica * cost_per_GPU_hour
+        minimize: serving_units * devices_per_unit * cost_per_device_or_event
         subject to: replicas * QPS_per_replica >= target_QPS
                     P99_latency <= SLO
         ```
@@ -1251,13 +1391,13 @@ def _(
 
         ```
         QPS_per_replica = max_batch * base_qps * batching_multiplier
-        max_batch = floor(available_HBM / KV_per_request)
-        available_HBM = GPUs * RAM_per_GPU - weight_memory
+        max_batch = floor(available_memory / state_per_request)
+        available_memory = devices * memory_per_device - weight_memory
         ```
 
         **Quantization Impact**
 
-        INT4 vs FP16 weights: 4x memory reduction -> 4x more KV cache slots
+        INT4 vs FP16 weights: 4x memory reduction -> more live state/cache slots
         -> 4x larger batch -> ~4x higher QPS per replica (if memory-bound)
 
         Combined with 3x from continuous batching: ~12x total improvement.
@@ -1272,14 +1412,14 @@ def _(
             items.append(mo.callout(mo.md(
                 "**Correct.** The objective is minimizing total cost subject to QPS and latency "
                 "constraints. This is a constrained optimization: for each combination of "
-                "(quantization, batching, GPUs_per_replica), compute the minimum replicas needed "
+                "(precision, scheduling, devices_per_unit), compute the minimum serving units needed "
                 "to meet the QPS target, then pick the cheapest configuration that also meets "
                 "the latency SLO."
             ), kind="success"))
         else:
             items.append(mo.callout(mo.md(
                 "**Not the right objective.** The correct objective is minimizing total fleet cost "
-                "(replicas x GPUs x cost/hr) subject to meeting both the QPS target and the "
+                "(serving units x devices x recurring cost) subject to meeting both demand and the "
                 "latency SLO. This requires jointly optimizing quantization, batching, and "
                 "replica count."
             ), kind="warn"))
@@ -1301,22 +1441,19 @@ def _(
                 </div>
                 <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                     <div style="margin-bottom: 10px;">
-                        <strong>1. Serving cost exceeds training cost within weeks, not months.</strong>
-                        At 100 QPS and $0.01/query, the $2M training cost is crossed in ~3 weeks.
-                        A 10% inference optimization saves $3.15M/year -- more than the training cost.
-                        Inference efficiency is the highest-ROI investment for deployed models.
+                        <strong>1. Recurring inference cost can exceed the one-time budget quickly.</strong>
+                        For {v2_10_profile.label}, the unit is {v2_10_inference.cost_unit} and the
+                        recurring metric is {v2_10_inference.cost_label}. Small per-event costs compound.
                     </div>
                     <div style="margin-bottom: 10px;">
-                        <strong>2. The KV cache, not compute, is the binding constraint on concurrency.</strong>
-                        At 128K context, a 70B model's KV cache is ~343 GB per request. On 8xH100
-                        (640 GB total), only 1 concurrent request fits after loading weights.
-                        Memory determines how many users you can serve, not how fast you can compute.
+                        <strong>2. Live state/cache often binds concurrency before compute.</strong>
+                        The selected track's {v2_10_inference.state_kind} must fit beside model
+                        weights in {v2_10_inference.hardware_name} memory.
                     </div>
                     <div>
-                        <strong>3. Quantization + continuous batching transforms the economics.</strong>
-                        INT4 weights free HBM for larger KV cache batches. Continuous batching
-                        fills freed slots immediately, achieving 2-4x throughput over static batching.
-                        Combined, they enable serving at 40% lower cost per query.
+                        <strong>3. Precision + continuous scheduling transforms the economics.</strong>
+                        Lower precision frees memory for live slots. Continuous scheduling fills freed
+                        slots immediately. Combined, they reduce recurring cost when they attack the active bottleneck.
                     </div>
                 </div>
             </div>
@@ -1330,10 +1467,9 @@ def _(
                         What's Next
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab V2-09: The Optimization Trap</strong> &mdash; You discovered that
-                        inference is memory-bound. The next lab asks: if you apply the wrong
-                        optimization (e.g., more compute for a memory-bound workload), what happens?
-                        The roofline model diagnoses what optimization to apply and when.
+                        <strong>Lab V2-11: Edge Intelligence</strong> &mdash; The next deployment lab asks
+                        what should remain local, what can be offloaded, and how privacy, battery,
+                        and feedback loops change the serving architecture.
                     </div>
                 </div>
                 <div style="flex: 1; min-width: 280px; background: white;
@@ -1343,9 +1479,9 @@ def _(
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the Inference at Scale chapter for the full KV cache derivation,
+                        <strong>Read:</strong> the Inference at Scale chapter for the full state/cache derivation,
                         continuous batching mechanics, and fleet design principles.<br/>
-                        <strong>Build:</strong> TinyTorch inference module &mdash; implement KV cache
+                        <strong>Build:</strong> TinyTorch inference module &mdash; implement state/cache
                         management and continuous batching in <code>tinytorch/src/inference/</code>.
                     </div>
                 </div>
@@ -1353,8 +1489,8 @@ def _(
             """),
             mo.accordion({
                 "Self-Assessment": mo.md("""
-1. At 100 QPS and $0.01/query, after how many weeks does serving cost exceed a $2M training cost?
-2. For a 70B model at 128K context on 8xH100, how many concurrent requests can you serve?
+1. For the selected track, when does recurring inference cost exceed the one-time budget?
+2. How many concurrent requests fit before state/cache memory becomes the wall?
 3. Why does INT4 weight quantization increase serving throughput, even though it does not speed up compute?
 4. What is the throughput advantage of continuous batching over static batching, and why?
 
@@ -1389,10 +1525,15 @@ def _(mo, DecisionLog):
 @app.cell(hide_code=True)
 def _(COLORS, partA_prediction, partB_prediction, partC_prediction, partD_prediction,
       partA_reflection, partB_reflection, partC_reflection, partD_reflection,
-      ledger, mo, decision_input, decision_ui):
+      ledger, mo, decision_input, decision_ui, v2_10_inference, v2_10_profile, v2_10_variant):
     ledger.save(
-        chapter=8,
+        chapter=10,
         design={
+            "lab": "inference_economy",
+            "track_id": v2_10_profile.track_id,
+            "scenario_id": v2_10_variant.scenario_id,
+            "hardware_ref": v2_10_inference.hardware_ref,
+            "model_ref": v2_10_inference.model_ref,
             "partA_prediction": partA_prediction.value or "no_selection",
             "partA_correct": partA_prediction.value == "C",
             "partA_reflection": partA_reflection.value or "no_selection",
@@ -1418,7 +1559,8 @@ def _(COLORS, partA_prediction, partB_prediction, partC_prediction, partD_predic
     mo.Html(f"""
     <div class="lab-hud">
         <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 10</span></div>
-        <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_08 &middot; Inference at Scale</span></div>
+        <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_10 &middot; Inference at Scale</span></div>
+        <div><span class="hud-label">TRACK</span> <span class="hud-value">{v2_10_profile.label}</span></div>
         <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
         <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
         <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
@@ -1427,25 +1569,192 @@ def _(COLORS, partA_prediction, partB_prediction, partC_prediction, partD_predic
     return
 
 
-# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
+# ─── DOWNLOADABLE TRACK REPORT ──────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(ledger, mo):
-    from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        legacy_migration_panel,
+def _(
+    a1_cost_query,
+    a1_optimization,
+    a1_qps,
+    a2_context_len,
+    a2_n_gpus,
+    a2_precision,
+    batching_result,
+    build_lab_report,
+    c1_avg_len,
+    c1_batch_size,
+    c1_max_len,
+    cost_crossover,
+    d1_batching,
+    d1_gpus_per_replica,
+    d1_quant,
+    d1_target_qps,
+    mo,
+    partA_prediction,
+    partA_reflection,
+    partB_prediction,
+    partB_reflection,
+    partC_prediction,
+    partC_reflection,
+    partD_prediction,
+    partD_reflection,
+    report_export_panel,
+    serving_plan,
+    state_capacity,
+    v2_10_inference,
+    v2_10_metadata,
+    v2_10_model,
+    v2_10_profile,
+    v2_10_variant,
+):
+    _cost = cost_crossover(
+        setup_cost=v2_10_inference.setup_cost,
+        demand_qps=a1_qps.value,
+        cost_per_event=a1_cost_query.value,
+        optimization_pct=a1_optimization.value,
+    )
+    _state = state_capacity(
+        v2_10_inference,
+        v2_10_model,
+        context_tokens=a2_context_len.value,
+        precision_bytes=a2_precision.value,
+        devices_per_replica=a2_n_gpus.value,
+    )
+    _batching = batching_result(
+        avg_len=c1_avg_len.value,
+        max_len=c1_max_len.value,
+        batch_size=c1_batch_size.value,
+        fill_factor=v2_10_inference.batching_fill_factor,
+    )
+    _plan = serving_plan(
+        v2_10_inference,
+        v2_10_model,
+        target_qps=d1_target_qps.value,
+        precision_bytes=d1_quant.value,
+        batching_multiplier=d1_batching.value,
+        devices_per_replica=d1_gpus_per_replica.value,
+        context_tokens=v2_10_inference.context_tokens,
     )
 
-    _metadata = get_lab_metadata("vol2/lab_10_inference.py")
-    _saved_track = ledger.get_track()
-    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    _profile = get_track_profile(_track_id)
-    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
+    _incomplete = []
+    if partA_prediction.value is None:
+        _incomplete.append("Part A cost inversion prediction")
+    if partA_reflection.value is None:
+        _incomplete.append("Part A cost-control reflection")
+    if partB_prediction.value is None:
+        _incomplete.append("Part B state/cache prediction")
+    if partB_reflection.value is None:
+        _incomplete.append("Part B capacity reflection")
+    if partC_prediction.value is None:
+        _incomplete.append("Part C batching prediction")
+    if partC_reflection.value is None:
+        _incomplete.append("Part C batching reflection")
+    if partD_prediction.value is None:
+        _incomplete.append("Part D serving-plan prediction")
+    if partD_reflection.value is None:
+        _incomplete.append("Part D objective reflection")
+
+    _report = build_lab_report(
+        v2_10_metadata,
+        track=v2_10_profile.label,
+        scenario=v2_10_variant.workload_summary,
+        learning_objectives=(
+            "Quantify when recurring inference cost exceeds the one-time setup or training budget.",
+            "Compute the selected track's state/cache memory wall and explain the binding constraint.",
+            "Choose a serving or local-inference plan using precision, batching, and serving-unit tradeoffs.",
+        ),
+        predictions={
+            "cost_inversion": partA_prediction.value,
+            "cost_control": partA_reflection.value,
+            "state_cache_wall": partB_prediction.value,
+            "capacity_lever": partB_reflection.value,
+            "batching_speedup": partC_prediction.value,
+            "batching_reason": partC_reflection.value,
+            "serving_plan": partD_prediction.value,
+            "fleet_objective": partD_reflection.value,
+        },
+        knob_settings={
+            "demand_qps": a1_qps.value,
+            "cost_per_event": a1_cost_query.value,
+            "optimization_pct": a1_optimization.value,
+            "context_tokens": a2_context_len.value,
+            "devices_per_serving_unit": a2_n_gpus.value,
+            "precision_bytes": a2_precision.value,
+            "avg_length": c1_avg_len.value,
+            "max_length": c1_max_len.value,
+            "batch_size": c1_batch_size.value,
+            "target_qps": d1_target_qps.value,
+            "plan_precision_bytes": d1_quant.value,
+            "plan_batching_multiplier": d1_batching.value,
+            "plan_devices_per_unit": d1_gpus_per_replica.value,
+        },
+        evidence_summary={
+            "hardware_ref": v2_10_inference.hardware_ref,
+            "model_ref": v2_10_inference.model_ref,
+            "cost_unit": v2_10_inference.cost_unit,
+            "daily_cost": round(_cost.daily_cost, 6),
+            "crossover_weeks": round(_cost.crossover_weeks, 3),
+            "state_kind": _state.state_kind,
+            "state_per_request_gb": round(_state.state_per_request_gb, 6),
+            "max_concurrent": _state.max_concurrent,
+            "batching_speedup": round(_batching.speedup, 3),
+            "plan_replicas_or_units": _plan.replicas_needed,
+            "plan_total_devices": _plan.total_devices,
+            "plan_daily_cost": round(_plan.daily_cost, 6),
+            "plan_savings_pct": round(_plan.savings_pct, 3),
+        },
+        final_decision=(
+            f"Use {v2_10_variant.assumptions.get('serving_policy', v2_10_profile.label)} "
+            f"only if it meets {v2_10_variant.guardrail_metric} at the computed recurring cost."
+        ),
+        big_takeaways=(
+            "Inference economy is recurring cost, not only a training bill.",
+            "Live state/cache memory determines concurrency before compute often does.",
+            "Precision and continuous scheduling improve economics only when they attack the active bottleneck.",
+        ),
+        reflections={
+            "cost_inversion": (
+                f"The selected settings cross the one-time budget after {_cost.crossover_weeks:.1f} weeks."
+            ),
+            "state_wall": (
+                f"{v2_10_inference.state_kind} allows {_state.max_concurrent} live requests per serving unit."
+            ),
+            "serving_plan": (
+                f"The plan uses {_plan.total_devices} devices and costs {_plan.daily_cost:.2f} "
+                f"{v2_10_inference.cost_unit}/day."
+            ),
+        },
+        residual_risk=(
+            "These are source-traced teaching estimates. Validate with profiler traces, workload distributions, "
+            "thermal behavior, p99 latency, quality regression, and real pricing or battery measurements."
+        ),
+        source_trace={
+            "track_id": v2_10_profile.track_id,
+            "scenario_id": v2_10_variant.scenario_id,
+            "hardware_ref": v2_10_variant.hardware_ref,
+            "model_ref": v2_10_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.inference",
+            "source_policy": v2_10_profile.source_policy,
+        },
+        result_snapshot={
+            "inference_profile": v2_10_inference,
+            "cost_crossover": _cost,
+            "state_capacity": _state,
+            "batching": _batching,
+            "serving_plan": _plan,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
     mo.vstack([
-        ACADEMIC_LAB_CSS,
-        legacy_migration_panel(_metadata, _profile, _variant),
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V2-10 report is generated locally from the selected track, MLSysIM hardware/model refs, "
+                "and shared `mlsysbook_labs.inference` calculations."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
     ])
     return
 
