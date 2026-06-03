@@ -525,18 +525,18 @@ class TestFmtPp:
 
 
 class TestFmtMultiple:
-    def test_number_only_no_glyph(self):
-        assert fmt_multiple(3.2) == "3.2"
-        assert fmt_multiple(10, precision=0) == "10"
+    def test_owns_times_glyph(self):
+        assert fmt_multiple(3.2) == "3.2×"
+        assert fmt_multiple(10, precision=0) == "10×"
 
     def test_inherits_fmt_precision_guard(self):
         # An integer-like factor at precision=1 would render "2.0" — the
         # shared fmt() guard rejects that; explicit precision=1 still errors.
         with pytest.raises(ValueError, match="spurious trailing zeros"):
             fmt_multiple(2.0, precision=1)
-        assert fmt_multiple(2.0, precision=0) == "2"
-        assert fmt_multiple(2) == "2"
-        assert fmt_multiple(2.0) == "2"
+        assert fmt_multiple(2.0, precision=0) == "2×"
+        assert fmt_multiple(2) == "2×"
+        assert fmt_multiple(2.0) == "2×"
 
     def test_rejects_negative_factor(self):
         with pytest.raises(ValueError, match="non-negative factor"):
@@ -785,10 +785,10 @@ class TestTypedRanges:
         with pytest.raises(ValueError, match="0-1 ratio"):
             fmt_percent_range(84.6, 88, precision=1)
 
-    def test_multiple_range_is_bare_and_checked(self):
+    def test_multiple_range_owns_times_glyph_and_is_checked(self):
         assert (
             fmt_multiple_range(3, 7.8, precision=(0, 1), commas=False)
-            == "3\u20137.8"
+            == "3\u20137.8×"
         )
         with pytest.raises(ValueError, match="non-negative"):
             fmt_multiple_range(-1, 2)

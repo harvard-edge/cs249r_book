@@ -193,7 +193,7 @@ The efficiency frontier establishes what we are optimizing toward. The physics o
 # │          Hardware.Cloud.H100.tdp, Hardware.Tech.Memory.DRAM.energy_per_access, Hardware.Tech.Memory.L1.energy_per_access, Hardware.Tech.Memory.DRAM.latency,
 # │          TFLOPs, TB, GiB, second, flop, byte, watt)
 # │ Exports: MemoryWallScenario.h100_fp8_tflops_str, MemoryWallScenario.h100_hbm_bw_tb_s_str,
-# │          MemoryWallScenario.h100_ridge_fp8_str, MemoryWallScenario.energy_ratio_str,
+# │          MemoryWallScenario.h100_ridge_fp8_str, MemoryWallScenario.energy_ratio_mult_str,
 # │          MemoryWallScenario.h100_mem_gb_str, MemoryWallScenario.h100_tdp_w_str,
 # │          MemoryWallScenario.l2_cache_mb_str, MemoryWallScenario.hbm_latency_ns_str,
 # │          MemoryWallScenario.hbm_energy_pj_str, MemoryWallScenario.register_total_mib_str,
@@ -240,7 +240,7 @@ class MemoryWallScenario:
     h100_fp8_tflops_str = fmt_qty_int(flops_fp8, TFLOP/second, commas=False)
     h100_hbm_bw_tb_s_str = fmt_qty(bw, TB/second, precision=2, commas=False)
     h100_ridge_fp8_str = fmt_arithmetic_intensity(ridge_fp8, unit=flop/byte, precision=1, commas=False)
-    energy_ratio_str = fmt_multiple(energy_ratio, precision=0, commas=False)
+    energy_ratio_mult_str = fmt_multiple(energy_ratio, precision=0, commas=False)
     h100_mem_gb_str = fmt_memory_capacity(mem, unit=GiB, precision=0, commas=False)
     h100_tdp_w_str = fmt_power(tdp, unit=watt, precision=0, commas=False)
     register_total_mib_str = fmt_memory_capacity(register_total, unit=MiB, precision=0, commas=False)
@@ -254,7 +254,7 @@ class MemoryWallScenario:
 
 An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_tflops_str` of FP8 compute but only `{python} MemoryWallScenario.h100_hbm_bw_tb_s_str` of memory bandwidth. If every byte loaded from memory does fewer than `{python} MemoryWallScenario.h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
 
-The memory wall represents a fundamental physical constraint rather than a temporary engineering limitation. Moving data costs energy proportional to distance. Accessing a value from on-chip SRAM (L1 cache) costs approximately 0.5 pJ, while fetching the same value from off-chip HBM costs roughly 640 pJ, a ratio of `{python} MemoryWallScenario.energy_ratio_str`$\times$. Manufacturing constraints limit the amount of SRAM that can sit close to the compute units. HBM provides capacity (the H100 offers `{python} MemoryWallScenario.h100_mem_gb_str`) but at physically greater distance, requiring the data to traverse longer wires. The fundamental tension is that models need gigabytes of parameters and state, but physics dictates that only kilobytes of data can be near the compute units at any given moment.
+The memory wall represents a fundamental physical constraint rather than a temporary engineering limitation. Moving data costs energy proportional to distance. Accessing a value from on-chip SRAM (L1 cache) costs approximately 0.5 pJ, while fetching the same value from off-chip HBM costs roughly 640 pJ, a ratio of `{python} MemoryWallScenario.energy_ratio_mult_str`. Manufacturing constraints limit the amount of SRAM that can sit close to the compute units. HBM provides capacity (the H100 offers `{python} MemoryWallScenario.h100_mem_gb_str`) but at physically greater distance, requiring the data to traverse longer wires. The fundamental tension is that models need gigabytes of parameters and state, but physics dictates that only kilobytes of data can be near the compute units at any given moment.
 
 ::: {.column-margin}
 ![](images/svg/vol2_performance_engineering_margin_001.svg){width="100%" fig-alt="Orange energy ladder showing HBM at 640 pJ, SRAM at 0.5 pJ, and register access at 0.01 pJ."}
@@ -871,7 +871,7 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 # │      dependent and is intentionally not counted here.
 # │
 # │ Imports: mlsysim.core.constants (BYTES_FP16, MB, byte)
-# │ Exports: naive_mb_str, flash_mb_str, savings_str,
+# │ Exports: naive_mb_str, flash_mb_str, savings_mult_str,
 # │          head_n_str, head_d_str,
 # │          naive_head_traffic_mb_str, flash_head_traffic_mb_str,
 # └─────────────────────────────────────────────────────────────────────────────
@@ -915,7 +915,7 @@ class FlashAttentionSavings:
     from mlsysim.fmt import fmt, fmt_int, fmt_qty
     naive_mb_str = fmt_qty(naive_attn_bytes_total, MB, precision=1, commas=False)
     flash_mb_str = fmt_qty(flash_attn_bytes_total, MB, precision=1, commas=False)
-    savings_str = fmt_multiple(round(savings_ratio), commas=False, precision=0)
+    savings_mult_str = fmt_multiple(round(savings_ratio), commas=False, precision=0)
 
     head_n_str = fmt_int(seq_len, commas=False)
     head_d_str = fmt_int(head_dim, commas=False)
@@ -931,7 +931,7 @@ FlashAttention\index{FlashAttention} [@dao2022] reformulates attention as a **ti
 *FlashAttention shrinks attention memory about 65 times.*
 :::
 
-The reduction in materialized attention state is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the naive implementation materializes and revisits approximately `{python} FlashAttentionSavings.naive_mb_str` of HBM-resident tensors for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. FlashAttention avoids the quadratic score and probability tensors; its persistent HBM-visible tensors are dominated by $Q$, $K$, $V$, and output $Y$, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. This simplified accounting excludes schedule-dependent tile reloads inside a particular kernel, but it captures the important scaling result: a `{python} FlashAttentionSavings.savings_str`$\times$ reduction in materialized attention state for this configuration.
+The reduction in materialized attention state is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the naive implementation materializes and revisits approximately `{python} FlashAttentionSavings.naive_mb_str` of HBM-resident tensors for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. FlashAttention avoids the quadratic score and probability tensors; its persistent HBM-visible tensors are dominated by $Q$, $K$, $V$, and output $Y$, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. This simplified accounting excludes schedule-dependent tile reloads inside a particular kernel, but it captures the important scaling result: a `{python} FlashAttentionSavings.savings_mult_str` reduction in materialized attention state for this configuration.
 
 The key insight behind FlashAttention is the **online softmax**[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information.
 
@@ -1172,7 +1172,7 @@ The choice depends on the operational regime. For memory-bound inference (small 
 # │          mlsysim.physics (calc_kv_cache_size, model_memory),
 # │          mlsysim.models.registry (Models)
 # │ Exports: kv_fp16_gb_str, max_batch_fp16_str, max_batch_int8_str,
-# │          batch_ratio_str
+# │          batch_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_kv_cache_size, model_memory
 from mlsysim.models.registry import Models
@@ -1236,7 +1236,7 @@ class KVCacheAnalysis:
     kv_int8_per_gpu_gb_str = fmt_memory(kv_cache_qty_i8 / tensor_parallel_degree, unit=GB, precision=2, commas=False)
     max_batch_fp16_str = fmt_int(max_batch_fp16_val, commas=False)
     max_batch_int8_str = fmt_int(max_batch_int8_val, commas=False)
-    batch_ratio_str = fmt_multiple(batch_ratio, precision=1, commas=False)
+    batch_ratio_mult_str = fmt_multiple(batch_ratio, precision=1, commas=False)
     avail_fp16_gb_str = fmt_memory(avail_fp16, unit=GB, precision=0, commas=False)
     weight_int4_gb_str = fmt_memory(weight_int4_shard, unit=GB, precision=2, commas=False)
     avail_int8_gb_str = fmt_memory(avail_int8, unit=GB, precision=2, commas=False)
@@ -1274,7 +1274,7 @@ A capacity calculation makes the serving impact of precision choices concrete.
 - KV cache per request (INT8): approximately `{python} KVCacheAnalysis.kv_int8_total_gb_str` total, or `{python} KVCacheAnalysis.kv_int8_per_gpu_gb_str`/GPU
 - Maximum batch size: approximately `{python} KVCacheAnalysis.max_batch_int8_str` requests
 
-**Systems insight**: Precision engineering changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} KVCacheAnalysis.batch_ratio_str`$\times$ or more.
+**Systems insight**: Precision engineering changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} KVCacheAnalysis.batch_ratio_mult_str` or more.
 
 :::
 
@@ -1475,7 +1475,7 @@ class CompilationDividend:
     launch_ms_str = fmt_time(launch_ms, 'millisecond', precision=2, commas=False)
     new_time_ms_str = fmt_time(new_time_ms, 'millisecond', precision=2, commas=False)
     new_tps_str = fmt_int(new_tps, commas=False)
-    speedup_str = fmt_multiple(speedup, precision=2, commas=False)
+    speedup_mult_str = fmt_multiple(speedup, precision=2, commas=False)
     gemm_share_str = fmt_percent(round(gemm_share_post)/100, precision=0, commas=False, style='prose')
     base_tps_str = fmt_int(base_tps, commas=False)
     elementwise_share_pct_str = fmt_percent(round(elementwise_share * 100)/100, precision=0, commas=False, style='prose')
@@ -1505,7 +1505,7 @@ Original time per token: $1/120 =$ `{python} CompilationDividend.tpt_ms_str`.
 
 New time per token: `{python} CompilationDividend.gemm_ms_str` + `{python} CompilationDividend.elem_ms_str` + `{python} CompilationDividend.launch_ms_str` = `{python} CompilationDividend.new_time_ms_str`, yielding approximately `{python} CompilationDividend.new_tps_str`/second.
 
-**Systems insight**: torch.compile delivers a `{python} CompilationDividend.speedup_str`$\times$ speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (`{python} CompilationDividend.gemm_share_str` of step time), indicating that further improvement requires either precision reduction or batching.
+**Systems insight**: torch.compile delivers a `{python} CompilationDividend.speedup_mult_str` speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (`{python} CompilationDividend.gemm_share_str` of step time), indicating that further improvement requires either precision reduction or batching.
 
 :::
 
@@ -1591,7 +1591,7 @@ The potential benefit of communication-computation overlap depends on the relati
 # │          BYTES_FP16, GB, second, flop), mlsysim.physics
 # │          (calc_ring_allreduce_time), mlsysim.fmt (check)
 # │ Exports: gradient_gb_str, allreduce_ms_str, backward_ms_str, forward_ms_str,
-# │          step_no_overlap_ms_str, step_overlap_ms_str, overlap_speedup_str,
+# │          step_no_overlap_ms_str, step_overlap_ms_str, overlap_speedup_mult_str,
 # │          overlap_status_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_ring_allreduce_time
@@ -1657,20 +1657,20 @@ class OverlapCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     from mlsysim.fmt import fmt_int, fmt_multiple, MarkdownStr, fmt_time, fmt_qty, fmt_qty_int
     gradient_gb_str = fmt_qty(gradient_qty, GB, precision=1, commas=False)
-    ring_allreduce_factor_str = fmt_multiple(ring_allreduce_factor, precision=2, commas=False)
+    ring_allreduce_factor_mult_str = fmt_multiple(ring_allreduce_factor, precision=2, commas=False)
     allreduce_ms_str = fmt_time(allreduce_time, ms, precision=1, commas=False)
     backward_ms_str = fmt_time(backward_time, ms, precision=1, commas=False)
     step_no_overlap_ms_str = fmt_time(step_no_overlap, ms, precision=1, commas=False)
     step_overlap_ms_str = fmt_time(step_with_overlap, ms, precision=1, commas=False)
-    overlap_speedup_str = fmt_multiple(overlap_speedup, precision=2, commas=False)
+    overlap_speedup_mult_str = fmt_multiple(overlap_speedup, precision=2, commas=False)
     overlap_status_str = MarkdownStr("fully hidden" if can_overlap else "partially hidden")
     num_gpus_str = fmt_int(num_gpus, commas=False)
     nvlink_bw_gbs_str = fmt_qty_int(nvlink_bw, GB/second, commas=False)
 ```
 
-Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gbs_str`. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_str`$\times$ this volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization, takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gbs_str`. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` this volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization, takes approximately `{python} OverlapCalc.backward_ms_str`.
 
-Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str`, a `{python} OverlapCalc.overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
+Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str`, a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
 ::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The Overlap Budget**: As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90 percent to ~18 percent due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution vs. GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from about 90 percent to about 18 percent."}
 
@@ -2417,7 +2417,7 @@ The Roofline Model provides the diagnostic framework, classifying operations as 
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Chapter summary — FlashAttention recap.
-# │ Exports: FlashAttentionSummaryRecap.savings_str
+# │ Exports: FlashAttentionSummaryRecap.savings_mult_str
 class FlashAttentionSummaryRecap:
     from mlsysim import Models
     m = Models.Language.Llama2_70B
@@ -2431,9 +2431,9 @@ class FlashAttentionSummaryRecap:
     flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem
     savings_ratio = (naive_attn_bytes_per_head / flash_attn_bytes_per_head).to("").magnitude
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    savings_str = fmt_multiple(savings_ratio, commas=False, precision=0)
+    savings_mult_str = fmt_multiple(savings_ratio, commas=False, precision=0)
 ```
-Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, avoiding the quadratic attention intermediates that dominate long sequences through tiling and online softmax. In the 8K example above, this is a `{python} FlashAttentionSummaryRecap.savings_str`$\times$ reduction in materialized attention state. Ring Attention extends this principle across GPUs for extreme sequence lengths.
+Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, avoiding the quadratic attention intermediates that dominate long sequences through tiling and online softmax. In the 8K example above, this is a `{python} FlashAttentionSummaryRecap.savings_mult_str` reduction in materialized attention state. Ring Attention extends this principle across GPUs for extreme sequence lengths.
 
 Precision engineering reduces bytes per transaction. FP8 formats (E4M3 for weights, E5M2 for gradients) double effective bandwidth on H100 hardware. Block-wise quantization (LLM.int8(), GPTQ, AWQ) handles the outlier features that defeat uniform quantization. KV cache compression to INT4 or INT8 directly increases serving batch size.
 

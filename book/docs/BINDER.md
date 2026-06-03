@@ -212,9 +212,10 @@ For example, `./book/binder check math --scope multiplier-style` catches these p
 
 | Error code | Bad source pattern | Canonical fix |
 |------------|--------------------|---------------|
-| `body_multiplier_suffix` | `speedup_str = fmt(speedup, suffix="x")` or `suffix="×"` for body prose | Export the number only, then write `` `{python} speedup_str`$\times$ `` in prose. |
+| `body_multiplier_suffix` | `speedup_str = fmt(speedup, suffix="x")` or `suffix="×"` for body prose | Use `speedup_mult_str = fmt_multiple(speedup, ...)`; the formatter owns `×`, so prose uses `` `{python} speedup_mult_str` `` by itself. |
+| `mult_double_glyph` | `` `{python} speedup_mult_str`$\times$ `` | Remove the prose glyph; `fmt_multiple` / `fmt_multiple_range` already emit `×`. |
 | `unicode_times_in_prose` | `A100 × H100` in normal Quarto prose | Use `A100 $\times$ H100` in prose. Raw `×` is only for non-LaTeX contexts such as alt text, Matplotlib labels, code fences, and ASCII diagrams. |
-| `times_product_spacing` | `$n$$\times$$m$` or `` `{python} n_str`$\times$`{python} m_str` `` | Put spaces around arithmetic products: `$n$ $\times$ $m$` or `` `{python} n_str` $\times$ `{python} m_str` ``. |
+| `times_product_spacing` | `$n$$\times$$m$` or `` `{python} n_str`$\times$`{python} m_str` `` | Put spaces around arithmetic products: `$n$ $\times$ $m$` or `` `{python} n_str` $\times$ `{python} m_str` ``. Computed prose multipliers use `*_mult_str` instead of a separate prose glyph. |
 | `fmt_sci_math_context` | `flops_math = fmt_sci(flops)` or `MarkdownStr(f"${fmt_sci(flops)}$")` | Treat `fmt_sci()` as plain-text output. For prose math, use `fmt_math(sci_latex(...))` or another LaTeX-first helper. |
 
 ### Diagnostic shape

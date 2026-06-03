@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-run_multiplier_lane.py — apply the PROVABLE multiplier migration with an
-automated, byte-level acceptance gate (the auto-verified lane of WS1).
+run_multiplier_lane.py — retired pre-Design-B multiplier migration helper.
+
+This script used the old convention where ``fmt_multiple`` returned a bare
+number and prose supplied ``$\\times$``. That convention is obsolete: Design B
+makes ``fmt_multiple`` / ``fmt_multiple_range`` own the glyph and uses
+``*_mult_str`` export names. Keep this file only as historical context for the
+older typed-fmt migration lanes; do not run it against current chapters.
 
 For each chapter this driver:
   1. snapshots the current (== HEAD, clean tree) values + visible prose;
@@ -12,15 +17,15 @@ For each chapter this driver:
        G-value  every changed *_str differs ONLY by a dropped '×'
                 (old == new + '×') and no export is added/removed
        G-prose  visible prose is byte-identical (Regime-2 guarantee)
-       G-contract  no mult_missing_glyph / mult_literal_x violations remain
+       G-contract  no obsolete multiplier-glyph violations remain
 
 This makes the multiplier lane safe to run unattended: a change is kept only
 when it is *proven* value-equivalent in the reader's eye.
 
 Usage::
 
-    python3 book/tools/audit/fmt/run_multiplier_lane.py --write <qmd> [<qmd> ...]
-    python3 book/tools/audit/fmt/run_multiplier_lane.py --write --all
+    Retired. Use ``codemod_design_b_multipliers.py`` plus
+    ``fmt_prose_contract.py`` for the current Design B convention.
 """
 from __future__ import annotations
 
@@ -117,7 +122,7 @@ def process(path: Path, variants: bool = False) -> tuple[str, str]:
             _revert(path)
             return "FAIL", f"G-prose: visible prose changed at {len(diffs)} site(s): {diffs[:2]}"
 
-    mult_viol = [v for v in check_file(path) if v.code in ("mult_missing_glyph", "mult_literal_x")]
+    mult_viol = [v for v in check_file(path) if v.code in ("mult_double_glyph", "mult_suffix")]
     if mult_viol:
         _revert(path)
         return "FAIL", f"G-contract: {len(mult_viol)} multiplier violation(s): {mult_viol[0].ref}"
@@ -126,6 +131,14 @@ def process(path: Path, variants: bool = False) -> tuple[str, str]:
 
 
 def main() -> int:
+    print(
+        "run_multiplier_lane.py is retired. Design B makes fmt_multiple own "
+        "$\\times$ and uses *_mult_str exports; use "
+        "codemod_design_b_multipliers.py for current migrations.",
+        file=sys.stderr,
+    )
+    return 2
+
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("qmd", nargs="*")
     ap.add_argument("--all", action="store_true", help="all chapters under contents/")

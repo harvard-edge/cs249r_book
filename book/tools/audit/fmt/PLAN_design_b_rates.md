@@ -8,8 +8,10 @@ proven *render-identical* before moving on. Author: fmt-convention pass.
 1. **Convention-correctness beats convenience.** If a value's kind changes, its
    suffix changes — no fudged `_str`.
 2. **100% coverage.** Every export and every prose ref, both volumes. No sampling.
-3. **Zero reader-visible change.** Rendered HTML/PDF output is byte-identical
-   before vs after (these are *refactors*, not content edits).
+3. **Zero reader-visible change.** Rendered HTML/PDF output must be visually
+   equivalent before vs after (these are *refactors*, not content edits). Raw
+   HTML need not be byte-identical when moving a prose glyph from MathJax markup
+   to a literal formatter-owned character.
 4. **Render is the truth.** Static gates are necessary but not sufficient. Every
    step ends with at least a spot HTML render; the migration is not "done" until
    the FULL HTML render is clean and the FULL PDF (final gatekeeper) is clean.
@@ -20,9 +22,9 @@ proven *render-identical* before moving on. Author: fmt-convention pass.
 
 | ID | Decision | Rationale |
 |----|----------|-----------|
-| **D1** | `fmt_multiple` / `fmt_multiple_range` **emit `N$\times$`** (a `MarkdownStr`). | `×` is a constant glyph that belongs to the formatter (like `$`→`fmt_usd`, `%`→`fmt_percent`). |
+| **D1** | `fmt_multiple` / `fmt_multiple_range` **emit `N×`** (a `MarkdownStr` with a literal rendered glyph, not a `$\\times$` math fragment). | `×` is a constant glyph that belongs to the formatter (like `$`→`fmt_usd`, `%`→`fmt_percent`). Render audit showed Quarto inline substitutions do not reliably re-parse math delimiters returned from Python, so the formatter must return the visible glyph directly. |
 | **D2** | Their exports rename to semantic **`*_mult_str`** names. | This matches the book's existing convention: the final suffix `_str` means "safe inline rendered string," while the token before `_str` declares what the string contains (`_usd_str`, `_pct_str`, `_pp_str`, `_ms_str`, now `_mult_str`). We do **not** introduce a new bare `_mult` export family. |
-| **D3** | The **10 bare-ratio mis-uses** of `fmt_multiple` move to **`fmt_ratio`** (stay `_str`). | They render "5:1 ratio" / bare — they are ratios, not multipliers. Prerequisite so `fmt_multiple` genuinely always means "×". |
+| **D3** | `fmt_multiple` is only for prose multipliers. Any value substituted into display math, or any genuinely bare ratio, moves to a number-only helper such as `fmt_ratio` and a name such as `*_value_str` / `*_ratio_str`. | Manual review showed the earlier "10 bare-ratio" list was overbroad: most were legitimate prose multipliers. The real invariant is context based: `fmt_multiple` may render `N×` only where that whole string belongs in prose. |
 | **D4** | Checker **inverts**: delete `mult_missing_glyph` + `mult_literal_x`; add `mult_double_glyph` (flag a `$\times$` *following* a `_mult_str` ref) + `mult_suffix` (a `fmt_multiple` export must be named `*_mult_str`, not generic `*_str`). | After B the bug class flips from "forgot ×" to "added × twice." |
 | **D5** | Rate exports use **`<unit>_per_s`**: `gb_per_s`, `tb_per_s`, `mb_per_s`, `gbit_per_s` (bits), `tflop_per_s`, `flop_per_s`, `tokens_per_s`. | One unambiguous form; dodges the bytes(`gb_s`)/bits(`gbps`) blur. |
 | **D6 (OPEN — confirm)** | Acronym rates `qps` / `rps` / `tps`: **keep as standard field acronyms** (recommended) vs convert to `queries_per_s` etc. | QPS/RPS/TPS are unambiguous, field-standard, and reader-facing output is owned by `fmt_rate`. Recommend keep; flag for user. |
@@ -46,6 +48,19 @@ grep -rn 'Traceback\|NameError\|raise ' <built-html>
 grep -rn '××\|\$\\times\$'  <built-html>   # double-glyph (B bug) or leaked literal $\times$
 python3 book/tools/audit/fmt/audit_lego_html.py --report /tmp/lego_html.json
 ```
+For direct `quarto render` spot checks, set `PYTHONPATH` with absolute worktree
+paths, not relative paths. Jupyter may execute from the chapter directory, so a
+relative `PYTHONPATH=../..:../../mlsysim` can silently import a stale installed
+`mlsysim` and make the HTML audit lie. Use:
+```bash
+env PYTHONPATH=/Users/VJ/GitHub/MLSysBook-fmt-audit:/Users/VJ/GitHub/MLSysBook-fmt-audit/mlsysim \
+  MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/mlsysbook-mplconfig \
+  quarto render <chapter.qmd> --to html --output-dir /private/tmp/<out> \
+  --execute --execute-daemon-restart --no-cache
+```
+`audit_lego_html.py` requires the repository's archived `html-audit/` tree; when
+that tree is absent, `NO_HTML` is a precondition failure and the applicable L2
+gate is the fresh render plus raw HTML scans above.
 **Representative chapters** (highest multiplier + rate density): `training` (multipliers),
 `network_fabrics` + `compute_infrastructure` (rates `gb_s`/`gbs`/`tbs`), `inference`,
 `benchmarking`. Use `training` + `network_fabrics` for L2 spot renders.
@@ -60,10 +75,11 @@ python3 book/tools/audit/fmt/inventory_design_b_rates.py \
   --root book/quarto/contents \
   --json book/tools/audit/artifacts/fmt_design_b_inventory.json
 ```
-Current frozen scope after removing equation-only ROI values from the multiplier
-lane: 434 multiplier exports, 505 multiplier refs, 0 multiplier refs in math
-context, and 470 rate-name candidates (308 byte/s, 24 bit/s, 100 compute/s,
-9 tokens/s, 29 QPS/RPS/TPS acronym rates).
+Current frozen scope after removing equation-only ROI values and arithmetic
+coefficient uses from the multiplier lane: 433 multiplier exports, 503
+multiplier refs, 0 multiplier refs in math context, and 470 rate-name
+candidates (308 byte/s, 24 bit/s, 100 compute/s, 9 tokens/s, 29 QPS/RPS/TPS
+acronym rates).
 0.2 Capture render baselines for the rep chapters (the "before" truth):
 ```bash
 for c in training network_fabrics compute_infrastructure benchmarking inference; do
@@ -79,27 +95,34 @@ done
 ## PHASE 1 — Design B (`fmt_multiple` owns `×`, multiplier exports become `*_mult_str`)
 
 **1.1 Edge cases first (manual, judgement).** Reassign values that are not prose
-multipliers before the formatter starts owning `$\times$`:
+multipliers before the formatter starts owning `×`:
 - Bare ratio uses stay `fmt_ratio` and `_ratio_str` where prose renders `N:1`
   or another bare quotient rather than `N×`.
 - Equation-only multiplier values use `fmt_ratio` and an explicit
   `*_value_str` name, leaving `\times` inside the equation. This precondition is
-  important: `fmt_multiple()` will emit `N$\times$` for prose after Design B,
+  important: `fmt_multiple()` will emit `N×` for prose after Design B,
   which must never be substituted inside display math.
 - Verify the frozen inventory reports `mult_refs_in_math_context == 0` before
-  changing `fmt_multiple()`.
+  changing `fmt_multiple()`. Do not treat every variable named `ratio_str` as a
+  bare ratio: read the prose. If the prose says "N times", "N× faster",
+  "N× reduction", "multiplier", "speedup", or "factor", it belongs in the
+  multiplier lane and should become `*_mult_str`.
 → L0 + L1 on touched files.
 
 **1.2 Formatter change (`mlsysim/mlsysim/fmt.py`).** `fmt_multiple` and
-`fmt_multiple_range` return `MarkdownStr(f"{number}$\\times$")` (range: `f"{lo}–{hi}$\\times$"`).
-Add/extend unit tests in `mlsysim` asserting the `$\times$` is present and the number is
+`fmt_multiple_range` return `MarkdownStr(f"{number}×")` (range: `f"{lo}–{hi}×"`).
+Add/extend unit tests in `mlsysim` asserting the visible `×` is present and the number is
 correct. Run `mlsysim` test suite.
 
 **1.3 Codemod (build `codemod_b.py`, dry-run first).** One pass over all chapter `.qmd`:
-- **export rename:** `NAME_str = fmt_multiple(…)` → `NAME_mult_str = fmt_multiple(…)` (and range names become semantic `*_mult_range_str` / `*_range_mult_str` where that reads better).
+- **export rename:** `NAME_str = fmt_multiple(…)` → `NAME_mult_str = fmt_multiple(…)`; range names become `*_range_mult_str`.
 - **ref transform:** `` `{python} CLASS.NAME_str`$\times$ `` → `` `{python} CLASS.NAME_mult_str` `` (rename + strip the now-duplicate `$\times$`, incl. optional space variants `` `…`$\times$ ``, `` `…` $\times$ ``).
 - **only** for names that are fmt_multiple exports (from the 1.0 inventory) — never touch `fmt_int`/etc. refs.
-- Dry-run prints a diff + counts; require counts == inventory (434 exports / 505 refs) before `--write`.
+- Dry-run prints counts for export rows, unique source names, duplicate export
+  rows, and stripped prose refs. Require all 501 old prose glyphs to be stripped. Export
+  rows may exceed source names because a file can assign the same output name in
+  more than one branch or cell; after write, the inventory must report
+  `mult_exports_without_mult_token == 0`.
 
 **1.4 Checker flip (`fmt_prose_contract.py` + `math_multiplier_style.py` + tests).**
 - delete `mult_missing_glyph`, `mult_literal_x`.
@@ -117,7 +140,7 @@ approved final suffix; document `_mult_str` as the semantic multiplier token),
 - L0 (gates) green.
 - L1: `assess_equiv diff` per touched chapter → **visible-prose identical** (the rendered
   "4×" is unchanged; only source moved the glyph). Value snapshot will differ (export now
-  holds "4$\times$") — that's expected; the *visible* diff is the gate.
+  holds "4×") — that's expected; the *visible* diff is the gate.
 - **L2 spot render:** `./book/binder build html training network_fabrics` → run the
   rendered-HTML scan. Confirm e.g. "achieving only 4–6× speedup" renders, no "4–6××", no
   literal `{python}`, no leaked `$\times$`.

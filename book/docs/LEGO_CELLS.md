@@ -22,9 +22,12 @@ Each LEGO cell should include:
    Exports (only fields used nearby).
 2. **Class name** — Scenario-specific (`Gpt4ClusterMtbf`), not generic (`Calc`).
 3. **Four blocks** (when applicable): LOAD → EXECUTE → GUARD → OUTPUT.
-4. **Exports** — Formatted strings (`*_str`) via `fmt_qty()` for physical quantities,
-   or `fmt()` / `fmt_int()` for dimensionless values. **Units live in OUTPUT only**
-   (suffix from formatter); prose must not repeat units after `` `{python} *_str` ``.
+4. **Exports** — Formatted strings (`*_str`) via typed helpers such as `fmt_qty()`,
+   `fmt_usd()`, `fmt_percent()`, and `fmt_multiple()`. **Units and fixed glyphs
+   live in OUTPUT only**; prose must not repeat units, percent signs, currency
+   symbols, or multiplier glyphs after `` `{python} *_str` ``. Multiplier exports
+   use a semantic `mult` token, for example `speedup_mult_str` or
+   `speedup_range_mult_str`.
 
 Example shape:
 

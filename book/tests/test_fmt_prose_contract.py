@@ -82,25 +82,32 @@ def test_usd_no_false_positive_on_math_delimiter(tmp_path):
     assert check_file(p) == []
 
 
-def test_multiple_requires_times_glyph(tmp_path):
+def test_multiple_export_requires_mult_suffix(tmp_path):
     p = _write(tmp_path, CELL.format(
         assigns="speedup_str = fmt_multiple(6)",
         prose="is `{python} C.speedup_str` faster than baseline"))
-    assert any(x.code == "mult_missing_glyph" for x in check_file(p))
+    assert any(x.code == "mult_suffix" for x in check_file(p))
 
 
-def test_multiple_with_times_glyph_ok(tmp_path):
+def test_multiple_without_extra_times_ok(tmp_path):
     p = _write(tmp_path, CELL.format(
-        assigns="speedup_str = fmt_multiple(6)",
-        prose="is `{python} C.speedup_str`$\\times$ faster than baseline"))
+        assigns="speedup_mult_str = fmt_multiple(6)",
+        prose="is `{python} C.speedup_mult_str` faster than baseline"))
     assert check_file(p) == []
 
 
-def test_multiple_literal_x_flagged(tmp_path):
+def test_multiple_extra_times_flagged(tmp_path):
     p = _write(tmp_path, CELL.format(
-        assigns="speedup_str = fmt_multiple(6)",
-        prose="is `{python} C.speedup_str`× faster than baseline"))
-    assert any(x.code == "mult_literal_x" for x in check_file(p))
+        assigns="speedup_mult_str = fmt_multiple(6)",
+        prose="is `{python} C.speedup_mult_str`$\\times$ faster than baseline"))
+    assert any(x.code == "mult_double_glyph" for x in check_file(p))
+
+
+def test_multiple_literal_x_flagged_as_double_glyph(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="speedup_mult_str = fmt_multiple(6)",
+        prose="is `{python} C.speedup_mult_str`× faster than baseline"))
+    assert any(x.code == "mult_double_glyph" for x in check_file(p))
 
 
 def test_generic_fmt_with_compact_times_flagged(tmp_path):

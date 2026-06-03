@@ -13,8 +13,9 @@ surrounding prose respects who owns the glyph:
     so it is not flagged.)
   * ``fmt_usd`` — string owns ``$``; prose must not type a leading ``$``.
   * ``fmt_count(scale=...)`` — string owns the K/M/B glyph; prose must not repeat it.
-  * ``fmt_multiple`` — string is a bare number; prose MUST add ``$\\times$``
-    (and must not use a literal ``×`` — see math.md §6 #14).
+  * ``fmt_multiple`` / ``fmt_multiple_range`` — string owns the visible ``×`` glyph;
+    prose must not repeat it, and the export name must contain a canonical
+    ``mult`` token before ``_str``.
 
 This is the "is the output in line with how it's used in prose?" gate.
 Read-only. Exit 0 = clean, 1 = violations.
@@ -57,6 +58,41 @@ def _const_str(node) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
+def _has_mult_token(name: str) -> bool:
+    if not name.endswith("_str"):
+        return False
+    return "mult" in name[:-4].split("_")
+
+
+def _target_names(node: ast.AST) -> list[str]:
+    targets = []
+    if isinstance(node, ast.Assign):
+        targets = list(node.targets)
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+    out = []
+    for target in targets:
+        if isinstance(target, ast.Name):
+            out.append(target.id)
+        elif isinstance(target, ast.Attribute):
+            out.append(target.attr)
+    return out
+
+
+def _call_name(node: ast.AST) -> str | None:
+    if not isinstance(node, ast.Call):
+        return None
+    fn = node.func
+    return fn.id if isinstance(fn, ast.Name) else (fn.attr if isinstance(fn, ast.Attribute) else None)
+
+
+def _kwargs(call: ast.Call) -> dict:
+    kwargs = {kw.arg: _const_str(kw.value) for kw in call.keywords if kw.arg}
+    if any(kw.arg == "scale" for kw in call.keywords):
+        kwargs["__has_scale__"] = "1"
+    return kwargs
+
+
 def build_formatter_map(cells_text: str) -> dict:
     """{name -> (formatter, {kwarg: literal})} from `x = fmt_KIND(...)`.
 
@@ -82,24 +118,51 @@ def build_formatter_map(cells_text: str) -> dict:
         return best[0] + "." if best else ""
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
             continue
         call = node.value
-        fn = call.func
-        fname = fn.id if isinstance(fn, ast.Name) else (fn.attr if isinstance(fn, ast.Attribute) else None)
+        fname = _call_name(call)
         if not fname or not fname.startswith("fmt"):
             continue
-        kwargs = {kw.arg: _const_str(kw.value) for kw in call.keywords if kw.arg}
-        if any(kw.arg == "scale" for kw in call.keywords):
-            kwargs["__has_scale__"] = "1"
-        for tgt in node.targets:
-            name = None
-            if isinstance(tgt, ast.Name):
-                name = tgt.id
-            elif isinstance(tgt, ast.Attribute):
-                name = tgt.attr
+        kwargs = _kwargs(call)
+        for name in _target_names(node):
             if name and name.endswith(("_str", "_math", "_eq", "_frac")):
                 out[_qual(node.lineno) + name] = (fname, kwargs)
+    return out
+
+
+def build_formatter_records(text: str) -> dict[str, tuple[str, dict, int, str]]:
+    """{qualified_name -> (formatter, kwargs, file_line, bare_name)}."""
+    out: dict[str, tuple[str, dict, int, str]] = {}
+    for fence_line, source in extract_python_cells(text):
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        classes = [
+            (n.name, n.lineno, n.end_lineno or n.lineno)
+            for n in ast.walk(tree) if isinstance(n, ast.ClassDef)
+        ]
+
+        def _qual(lineno: int) -> str:
+            best = None
+            for nm, s, e in classes:
+                if s <= lineno <= e and (best is None or s > best[1]):
+                    best = (nm, s, e)
+            return best[0] + "." if best else ""
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            fname = _call_name(call)
+            if not fname or not fname.startswith("fmt"):
+                continue
+            kwargs = _kwargs(call)
+            file_line = fence_line + (node.lineno or 0)
+            for name in _target_names(node):
+                if name and name.endswith(("_str", "_math", "_eq", "_frac")):
+                    out[_qual(node.lineno) + name] = (fname, kwargs, file_line, name)
     return out
 
 
@@ -143,10 +206,16 @@ _HW_AFTER_MULT_RE = re.compile(
 
 def check_file(path: Path) -> list[Violation]:
     text = path.read_text(encoding="utf-8", errors="replace")
-    cells = "\n".join(src for _, src in extract_python_cells(text))
-    fmap = build_formatter_map(cells)
+    records = build_formatter_records(text)
+    fmap = {name: (fname, kwargs) for name, (fname, kwargs, _, _) in records.items()}
     rel = str(path)
     out: list[Violation] = []
+
+    for qualified, (fname, _, file_line, bare_name) in records.items():
+        if fname in {"fmt_multiple", "fmt_multiple_range"} and not _has_mult_token(bare_name):
+            out.append(Violation("mult_suffix", rel, file_line, qualified,
+                f"{fname} now owns the times glyph; name the export with a canonical "
+                f"'mult' token before _str (for example, *_mult_str)."))
 
     in_cell = False
     for lineno, line in enumerate(text.splitlines(), 1):
@@ -173,8 +242,8 @@ def check_file(path: Path) -> list[Violation]:
                     and not _HW_AFTER_MULT_RE.match(after)):
                 out.append(Violation("mult_wrong_formatter", rel, lineno, ref,
                     f"{fname} is a generic number formatter, but prose uses it "
-                    f"as a compact multiplier with $\\times$. Use fmt_multiple "
-                    f"for the export, or add spaces around $\\times$ if this is "
+                    f"as a compact multiplier with a times glyph. Use fmt_multiple "
+                    f"for the export, or add spaces around the glyph if this is "
                     f"an arithmetic product."))
             elif fname in {"fmt_percent", "fmt_percent_range"}:
                 style = kwargs.get("style") or "number"
@@ -197,13 +266,10 @@ def check_file(path: Path) -> list[Violation]:
                         f"prose repeats it: …{after.strip()[:12]!r}"))
             elif fname in {"fmt_multiple", "fmt_multiple_range"}:
                 mm = _MULT_AFTER_RE.match(after)
-                if not mm:
-                    out.append(Violation("mult_missing_glyph", rel, lineno, ref,
-                        f"{fname} is a bare number; prose must add $\\times$ "
-                        f"after the ref (got: …{after.strip()[:12]!r})"))
-                elif "×" in mm.group(0) or mm.group(0).strip() == "x":
-                    out.append(Violation("mult_literal_x", rel, lineno, ref,
-                        f"use $\\times$ not a literal ×/x after a {fname} ref"))
+                if mm:
+                    out.append(Violation("mult_double_glyph", rel, lineno, ref,
+                        f"{fname} already carries the times glyph; prose repeats a "
+                        f"times glyph after the ref: …{after.strip()[:12]!r}"))
     return out
 
 

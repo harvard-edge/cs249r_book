@@ -76,6 +76,13 @@ def _target_names(node: ast.AST) -> list[str]:
     return out
 
 
+def _has_mult_token(name: str) -> bool:
+    """Return True when the canonical ``mult`` token appears before ``_str``."""
+    if not name.endswith("_str"):
+        return False
+    return "mult" in name[:-4].split("_")
+
+
 def _line(lines: list[str], lineno: int) -> str:
     if 1 <= lineno <= len(lines):
         return lines[lineno - 1].strip()
@@ -125,7 +132,7 @@ def _scan_python(qmd: Path, *, include_context: bool) -> tuple[list[dict], list[
                 if include_context:
                     record["context"] = _line(raw_lines, file_line)
                 if fname in MULT_FUNCS:
-                    record["has_mult_token"] = "_mult" in name
+                    record["has_mult_token"] = _has_mult_token(name)
                     mult_exports.append(record)
                 for group, pattern in RATE_SUFFIX_GROUPS.items():
                     if name.endswith("_str") and pattern.search(name):

@@ -118,9 +118,9 @@ from mlsysim.core.constants import *
 # │
 # │ Imports: mlsysim.book (check), mlsysim.core.constants (MS_PER_SEC)
 # │ Exports: gradient_size_gb_str, ring_bw_time_ms_str, ring_lat_time_ms_str,
-# │          ring_total_ms_str, n_gpus_napkin_str, ring_bw_factor_str
+# │          ring_total_ms_str, n_gpus_napkin_str, ring_bw_factor_value_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_params, fmt_qty, fmt_time
+from mlsysim.fmt import check, fmt, fmt_count, fmt_params, fmt_qty, fmt_ratio, fmt_time
 from mlsysim.core.constants import GB, byte, microsecond, ms, param, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -171,7 +171,7 @@ class AllReduceCost:
     ring_lat_time_ms_str = fmt_time(ring_lat_time, ms, precision=1, commas=False)
     ring_total_ms_str = fmt_time(ring_total, ms, precision=1, commas=True)
     n_gpus_napkin_str = fmt_count(n_gpus, commas=False, label="GPU")
-    ring_bw_factor_str = fmt_multiple(ring_bw_factor, precision=2, commas=False)
+    ring_bw_factor_value_str = fmt_ratio(ring_bw_factor, precision=2, commas=False)
     ib_bw_gbs_str = fmt_qty(ib_bw.bandwidth, GB/second, precision=0, commas=False)
     alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
     lat_steps_str = fmt(2 * (n_gpus - 1), precision=0, commas=False)
@@ -188,7 +188,7 @@ Each GPU produces a full gradient tensor: $70 \times 10^9 \times 2\ \text{bytes}
 **Step 2**: Apply the Ring AllReduce bandwidth formula.
 $$T_{\text{bandwidth}} = 2 \cdot \frac{N-1}{N} \cdot \frac{n}{\beta}$$
 
-Substituting: $T_{\text{bandwidth}}$ = `{python} AllReduceCost.ring_bw_factor_str` $\times$ `{python} AllReduceCost.gradient_size_gb_str` / `{python} AllReduceCost.ib_bw_gbs_str` $\approx$ `{python} AllReduceCost.ring_bw_time_ms_str`.
+Substituting: $T_{\text{bandwidth}}$ = `{python} AllReduceCost.ring_bw_factor_value_str` $\times$ `{python} AllReduceCost.gradient_size_gb_str` / `{python} AllReduceCost.ib_bw_gbs_str` $\approx$ `{python} AllReduceCost.ring_bw_time_ms_str`.
 
 **Step 3**: Add the latency term.
 $$T_{\text{latency}} = 2(N-1) \cdot \alpha$$
@@ -1356,7 +1356,7 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 # │ Goal: Compare flat Ring AllReduce vs. 3-step hierarchical AllReduce for a
 # │       1 GB gradient on 8 nodes × 8 GPUs to quantify the speedup from
 # │       exploiting NVLink vs. InfiniBand bandwidth hierarchy.
-# │ Show: speedup_str ≈ 6.3×—inline in callout insight sentence.
+# │ Show: speedup_mult_str ≈ 6.3×—inline in callout insight sentence.
 # │ How: Flat: T = 2M/β_IB; Hierarchical: T = T_rs + T_inter + T_ag with
 # │      NVLink for intra-node phases and IB for inter-node phase.
 # │
@@ -1364,7 +1364,7 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 # │          Systems.Fabrics.InfiniBand_NDR.bandwidth)
 # │ Exports: flat_time_ms_str, intra_data_mb_str, intra_rs_ms_str,
 # │          inter_data_mb_str, inter_time_ms_str, intra_ag_ms_str,
-# │          hier_total_ms_str, speedup_str, ib_bw_gbs_str, nvlink_bw_gbs_str
+# │          hier_total_ms_str, speedup_mult_str, ib_bw_gbs_str, nvlink_bw_gbs_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import GB, MB, microsecond, ms, second
 from mlsysim import Hardware, Systems
@@ -1415,7 +1415,7 @@ class HierarchicalAllreduceCalc:
     hier_total_ms_str = fmt_time(hier_total, ms, precision=1, commas=False)
     ib_bw_gbs_str     = fmt_qty(ib_bw, GB/second, precision=0, commas=False)
     nvlink_bw_gbs_str = fmt_qty(nvlink_bw, GB/second, precision=0, commas=False)
-    speedup_str       = fmt_multiple(speedup, precision=1, commas=False)
+    speedup_mult_str       = fmt_multiple(speedup, precision=1, commas=False)
     n_nodes_str       = fmt_count(n_nodes_har, commas=False, label="node")
     gpus_per_node_str = fmt_count(gpus_per_node, commas=False, label="GPU")
     n_gpus_total_str  = fmt(n_nodes_har * gpus_per_node, precision=0, commas=False)
@@ -1444,7 +1444,7 @@ class HierarchicalAllreduceCalc:
 3. **Intra-node AllGather**: Each GPU receives `{python} HierarchicalAllreduceCalc.intra_data_mb_str` at `{python} HierarchicalAllreduceCalc.nvlink_bw_gbs_str` → ~`{python} HierarchicalAllreduceCalc.intra_ag_ms_str`
 4. **Total time**: $\approx$ `{python} HierarchicalAllreduceCalc.intra_rs_ms_str` + `{python} HierarchicalAllreduceCalc.inter_time_ms_str` + `{python} HierarchicalAllreduceCalc.intra_ag_ms_str` = `{python} HierarchicalAllreduceCalc.hier_total_ms_str`
 
-**Systems insight**: Hierarchical AllReduce achieves a `{python} HierarchicalAllreduceCalc.speedup_str`$\times$ speedup by reducing the inter-node payload from 1 GB to `{python} HierarchicalAllreduceCalc.inter_data_mb_str` per GPU before the Ring traffic multiplier. With 8 GPUs per node, we effectively get 8$\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
+**Systems insight**: Hierarchical AllReduce achieves a `{python} HierarchicalAllreduceCalc.speedup_mult_str` speedup by reducing the inter-node payload from 1 GB to `{python} HierarchicalAllreduceCalc.inter_data_mb_str` per GPU before the Ring traffic multiplier. With 8 GPUs per node, we effectively get 8$\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
 
 :::
 
@@ -1722,7 +1722,7 @@ The success of 1-bit Adam illustrates a broader principle: compression is most e
 # │ How: T = T_compute + T_comm/Ratio.
 # │
 # │ Imports: mlsysim.book (check)
-# │ Exports: cp_comm_time_ms_str, cp_ratio_str, cp_overhead_ms_str, cp_speedup_str
+# │ Exports: cp_comm_time_ms_str, cp_ratio_str, cp_overhead_ms_str, cp_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_ratio, fmt_time
 
@@ -1739,21 +1739,21 @@ class CompressionPayback:
     check(5 < speedup < 6, f"Speedup {speedup:.1f}x unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     cp_comm_time_ms_str = fmt_time(t_comm_ms, 'millisecond', precision=0, commas=False)
-    cp_throughput_factor_str = fmt_multiple(ratio, precision=0, commas=False)
+    cp_throughput_factor_mult_str = fmt_multiple(ratio, precision=0, commas=False)
     cp_ratio_str = fmt_ratio(ratio, precision=0, commas=False)
     cp_overhead_ms_str = fmt_time(t_overhead_ms, 'millisecond', precision=0, commas=False)
-    cp_speedup_str = fmt_multiple(speedup, precision=1, commas=False)
+    cp_speedup_mult_str = fmt_multiple(speedup, precision=1, commas=False)
 ```
 
 ::: {#nbk-collective-communication-payback-compression .callout-notebook title="The payback of compression"}
 
-**Problem**: A training job synchronizes a `{python} CompressionPayback.cp_comm_time_ms_str` gradient buffer. The system implements 1-bit Adam, which reduces communication volume by 32$\times$ but adds `{python} CompressionPayback.cp_overhead_ms_str` of CPU/GPU overhead for the compression logic. If the effective network throughput improves by `{python} CompressionPayback.cp_throughput_factor_str`$\times$, what is the actual communication speedup?
+**Problem**: A training job synchronizes a `{python} CompressionPayback.cp_comm_time_ms_str` gradient buffer. The system implements 1-bit Adam, which reduces communication volume by 32$\times$ but adds `{python} CompressionPayback.cp_overhead_ms_str` of CPU/GPU overhead for the compression logic. If the effective network throughput improves by `{python} CompressionPayback.cp_throughput_factor_mult_str`, what is the actual communication speedup?
 
 **Math**:
 
 1. **Compressed communication time**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by `{python} CompressionPayback.cp_ratio_str` = 5 ms.
 2. **Total new time**: 5 ms (comm) + `{python} CompressionPayback.cp_overhead_ms_str` (overhead) = 7 ms.
-3. **Effective speedup**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by 7 $\approx$ `{python} CompressionPayback.cp_speedup_str`$\times$.
+3. **Effective speedup**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by 7 $\approx$ `{python} CompressionPayback.cp_speedup_mult_str`.
 
 **Systems insight**: Compression is a trade of *compute for bandwidth*. It pays off only when $T_{\text{overhead}} < T_{\text{comm}}(N) \times (1 - 1/\text{Ratio})$. In this case, spending 2 ms to save 35 ms of network time is an exceptional trade. However, on a high-speed NVLink network where $T_{\text{comm}}(N)$ is only 1 ms, this same compression logic would slow down training. Always profile the network before adding compression.
 
