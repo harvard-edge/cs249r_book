@@ -3420,21 +3420,15 @@ ML systems add model behavior to the same diagnostic problem. Silent accuracy de
 
 ### Observability pillars {#sec-fault-tolerance-reliability-reliability-observability-pillars-0e45}
 
-Observability is useful only when it connects a symptom to an action: shed load, restart a replica, roll back a checkpoint, or degrade gracefully. The three signal types in @fig-observability-three-pillars supply different parts of that decision: metrics, logs, and traces.
+Observability is useful only when it connects a symptom to an action: shed load, restart a replica, roll back a checkpoint, or degrade gracefully. Suppose a recommendation service suddenly violates its latency SLO while the model replicas still report healthy GPU utilization. Metrics establish the timing and scope of the symptom, traces show which service span is consuming the request budget, and logs explain what happened inside that service at the moment the cascade began. @Fig-observability-three-pillars summarizes those three evidence types, but the operating rule is correlation: no signal is sufficient unless it can be joined to the same request, model version, feature version, and deployment event.
 
 ::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The Three Pillars of Observability**: Diagnosis of fleet failures requires correlating three signal types. Metrics reveal *when* and *where* a problem occurs (for example, GPU utilization drops). Logs provide the *what* through event context (for example, Out-of-Memory exception). Traces provide the *why* by linking events across the distributed lifecycle (for example, identifying the specific request that triggered the memory spike)." fig-alt="Venn diagram with three overlapping circles: Metrics, Logs, and Traces."}
 ![](images/svg/observability-three-pillars.svg)
 :::
 
-#### Metrics {#sec-fault-tolerance-reliability-reliability-metrics-a1e0}
+Metrics are the first evidence because they compress fleet behavior into time series that can trigger action. In ML fleets, useful metrics span infrastructure signals such as CPU and GPU utilization, memory allocation, network bandwidth, and storage I/O; application signals such as request rate, latency percentiles, error counts, queue depths, and cache hit rates; and ML-specific signals such as inference latency by model, batch utilization, feature retrieval latency, feature freshness, and prediction distributions for drift detection. A metric stream becomes fault-tolerance infrastructure only when an alert maps to a recovery decision. High p99 latency may trigger load shedding, a falling cache hit rate may trigger fallback features, and a sudden prediction-distribution shift may block a rollout before it corrupts user-facing decisions.
 
-Metrics are numerical measurements collected over time. In ML fleets, they span infrastructure signals such as CPU and GPU utilization, memory allocation, network bandwidth, and storage I/O; application signals such as request rate, latency percentiles, error counts, queue depths, and cache hit rates; and ML-specific signals such as inference latency by model, batch utilization, feature retrieval latency, and prediction distributions for drift detection. Because metrics are cheap to aggregate over time, they support real-time dashboards, threshold-based alerting, capacity planning, and performance analysis.
-
-#### Logs {#sec-fault-tolerance-reliability-reliability-logs-9906}
-
-Logs answer what happened at a specific point in the recovery path.
-
-Structured logging uses structured formats such as JavaScript Object Notation (JSON) with consistent fields. @Lst-structured-log-entry shows a typical error entry that captures both the failure context and the trace identifiers needed to correlate events across services.\index{Structured Logging!JSON log entry}
+Logs provide the event context that a metric intentionally discards. Structured logging uses formats such as JavaScript Object Notation (JSON) with consistent fields, so incident tooling can search by service, request, model version, GPU, feature store, or trace identifier. @Lst-structured-log-entry shows a GPU memory allocation failure that records both the local failure context and the trace identifiers needed to connect the event to distributed metrics and spans.\index{Structured Logging!JSON log entry}
 
 ::: {#lst-structured-log-entry lst-cap="**Structured JSON Log Entry**: A structured log entry for a GPU memory allocation failure, including trace and span identifiers for correlation with distributed traces and resource metrics for diagnosis."}
 
@@ -3454,27 +3448,9 @@ Structured logging uses structured formats such as JavaScript Object Notation (J
 
 :::
 
-Log levels should map incidents to escalation consistently across all components:
+Log levels should map incidents to escalation consistently across all components: DEBUG records diagnostic detail, INFO records normal operational events, WARN records conditions that may become failures, ERROR records failed operations, and FATAL records system-wide failures that require immediate intervention. Log aggregation centralizes those events for search and analysis. The particular backend matters less than the ability to query distributed logs using the same trace and request identifiers that appear in metrics and spans.
 
-- DEBUG: Detailed diagnostic information
-- INFO: General operational information
-- WARN: Potential problems that do not prevent operation
-- ERROR: Problems that prevent specific operations
-- FATAL: System-wide failures requiring immediate attention
-
-Log aggregation centralizes logs from all components for search and analysis. The particular backend matters less than the ability to search distributed logs with the same trace and request identifiers used by metrics and spans.
-
-#### Traces {#sec-fault-tolerance-reliability-reliability-traces-ffc5}
-
-Traces show where latency or failure propagated across distributed components.
-
-Distributed tracing relies on three concepts that preserve request context across services:
-
-- **Trace**\index{Trace}: End-to-end journey of a request
-- **Span**\index{Span}: Single operation within a trace
-- **Context propagation**\index{Context Propagation}: Passing trace context between services
-
-A trace through an ML inference pipeline illustrates how spans compose:
+Traces show where latency or failure propagated across distributed components. A **trace**\index{Trace} is the end-to-end journey of a request, a **span**\index{Span} is one operation within that journey, and **context propagation**\index{Context Propagation} carries the trace identity across service boundaries. A trace through an ML inference pipeline illustrates how these spans compose:
 
 ```text
 Trace: user-request-12345
@@ -3491,7 +3467,7 @@ Trace: user-request-12345
 Total: 66 ms
 ```
 
-OpenTelemetry provides a standard API for distributed tracing\index{Distributed Tracing}. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces. The durable requirement is correlation: the same trace context must connect metrics, logs, and spans across the request path.
+OpenTelemetry provides a standard API for distributed tracing\index{Distributed Tracing}. Backend systems like Jaeger, Zipkin, or cloud tracing services store and visualize traces. The durable requirement is not the particular tracing backend; it is preserving enough context to answer whether the fault lives in request routing, feature retrieval, model execution, postprocessing, or a dependency outside the model service.
 
 ### ML-specific debugging {#sec-fault-tolerance-reliability-reliability-mlspecific-debugging-27d5}
 
