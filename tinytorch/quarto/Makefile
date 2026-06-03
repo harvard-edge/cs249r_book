@@ -68,10 +68,22 @@ install-deps: ## Install system + LaTeX packages needed to build the PDF.
 	  grep -v '^#' pdf/apt-requirements.txt | grep -v '^$$' | xargs -r sudo apt-get install -y; \
 	fi
 	@# TinyTeX / LaTeX packages (tlmgr from the Quarto TinyTeX install)
-	@if [ -f pdf/tex-requirements.txt ] && command -v tlmgr >/dev/null 2>&1; then \
-	  echo "  installing TeX packages from pdf/tex-requirements.txt"; \
-	  tlmgr update --self || true; \
-	  grep -v '^#' pdf/tex-requirements.txt | grep -v '^$$' | xargs -r tlmgr install; \
+	@if [ -f pdf/tex-requirements.txt ]; then \
+	  TLMGR="$$(command -v tlmgr 2>/dev/null || true)"; \
+	  if [ -z "$$TLMGR" ]; then \
+	    for dir in "$$HOME/bin" "$$HOME/.TinyTeX" "$$HOME/Library/TinyTeX" "$${APPDATA:-}/TinyTeX"; do \
+	      [ -d "$$dir" ] || continue; \
+	      TLMGR="$$(find "$$dir" \( -name tlmgr -o -name tlmgr.bat \) -type f 2>/dev/null | head -n 1)"; \
+	      [ -n "$$TLMGR" ] && break; \
+	    done; \
+	  fi; \
+	  if [ -n "$$TLMGR" ]; then \
+	    echo "  installing TeX packages from pdf/tex-requirements.txt using $$TLMGR"; \
+	    "$$TLMGR" update --self || true; \
+	    grep -v '^#' pdf/tex-requirements.txt | grep -v '^$$' | xargs -r "$$TLMGR" install; \
+	  else \
+	    echo "  tlmgr not found; skipping TeX package install"; \
+	  fi; \
 	fi
 	@echo "  dependencies installed"
 
