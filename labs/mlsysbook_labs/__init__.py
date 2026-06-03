@@ -14,6 +14,7 @@ from .legacy_components import (
 )
 from .catalog import LAB_CATALOG, get_lab_metadata
 from .reports import build_lab_report, report_export, report_export_panel, report_text_fallback
+from .registry_refs import resolve_mlsysim_ref
 from .schemas import (
     DEFAULT_TRACKS,
     ChapterRecap,
@@ -143,4 +144,5 @@ __all__ = [
     "report_export_panel",
     "report_text_fallback",
     "get_lab_metadata",
+    "resolve_mlsysim_ref",
 ]

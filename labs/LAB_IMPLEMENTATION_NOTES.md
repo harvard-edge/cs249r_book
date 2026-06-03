@@ -533,3 +533,48 @@ Tests or checks run:
 Follow-up:
 - Migrate V1-10 Parts A-C to use the new MLSysIM compression candidate and sweep APIs.
 - Decide whether iPhone INT8 fast-path support should be encoded in `Hardware.Mobile.iPhone15Pro` before making iPhone-specific V1-10 feasibility claims.
+
+### 2026-06-03 - MLSysIM Registry Reference Resolver
+
+Lab:
+- All labs, shared `mlsysbook_labs` helper layer.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/registry_refs.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_registry_refs.py`
+- `labs/tests/test_static.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `resolve_mlsysim_ref()` to resolve canonical strings such as `Hardware.Tiny.OuraRing`, `Models.Tiny.DS_CNN`, and `Systems.Clusters.Lab_64_H100`.
+- Exported the resolver from `mlsysbook_labs`.
+- Added tests for hardware, model, system, unsupported-root, and missing-path behavior.
+- Updated the browser-wheel contract so `registry_refs.py` must ship in `mlsysbook_labs`.
+- Rebuilt the `mlsysbook_labs` browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new facts. This helper resolves existing MLSysIM registry objects from typed lab variant references.
+
+Notebook-local constants removed:
+- None yet. The next V1-10 notebook pass can use this resolver instead of local maps from reference strings to objects.
+
+Reusable component or modality improved:
+- Track variants can now carry canonical registry strings while notebooks resolve the actual MLSysIM object through one shared helper.
+
+Plan updates needed in other labs:
+- Future lab migrations should call `resolve_mlsysim_ref()` when turning typed variant refs into MLSysIM objects.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/registry_refs.py labs/mlsysbook_labs/__init__.py labs/tests/test_registry_refs.py`
+- `python3 -m pytest labs/tests/test_registry_refs.py -q`
+- `python3 -m pytest labs/tests/test_registry_refs.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `mlsysbook_labs/registry_refs.py` and exports `resolve_mlsysim_ref`.
+
+Follow-up:
+- Use `resolve_mlsysim_ref()` in V1-10 when building compression candidates from the selected track variant.
