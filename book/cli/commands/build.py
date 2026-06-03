@@ -924,6 +924,9 @@ class BuildCommand:
         """
         console.print("[green]🌐 Building HTML-only version...[/green]")
 
+        config_file: Optional[Path] = None
+        original_config: Optional[str] = None
+
         try:
             # Always include index.qmd
             files_to_render = ["index.qmd"]
@@ -944,7 +947,11 @@ class BuildCommand:
                 console.print(f"[dim]📋 Found {len(all_chapters)} chapters[/dim]")
 
                 # Add all chapter files to render list
-                for chapter_name, chapter_file in all_chapters.items():
+                for chapter in all_chapters:
+                    chapter_name = chapter.get("name", "")
+                    chapter_file = chapter.get("path")
+                    if not chapter_file:
+                        continue
                     try:
                         rel_path = chapter_file.relative_to(self.config_manager.book_dir)
                         files_to_render.append(str(rel_path))
@@ -959,6 +966,7 @@ class BuildCommand:
 
             # Use surgical approach - modify existing config file directly
             config_file = self.config_manager.get_config_file("html")
+            original_config = config_file.read_text(encoding='utf-8')
             self._add_render_section(config_file, files_to_render)
 
             # Ensure symlink points to the HTML config
@@ -988,12 +996,17 @@ class BuildCommand:
             console.print(f"[red]❌ HTML-only build error: {e}[/red]")
             return False
         finally:
-            # Always remove render section from config
+            # Always restore the exact original config. HTML configs can carry
+            # load-bearing render lists, so deleting render blocks is unsafe.
             try:
-                config_file = self.config_manager.get_config_file("html")
-                self._remove_render_section(config_file)
-            except:
-                pass
+                if config_file and original_config is not None:
+                    config_file.write_text(original_config, encoding='utf-8')
+                    console.print("[dim]🛡️ Restored original HTML config[/dim]")
+                else:
+                    config_file = self.config_manager.get_config_file("html")
+                    self._remove_render_section(config_file)
+            except Exception as restore_error:
+                console.print(f"[yellow]⚠️ Error restoring HTML config: {restore_error}[/yellow]")
 
     def _add_render_section(self, config_file: Path, files_to_render: List[str]) -> None:
         """Add render section to existing config file.
@@ -1007,6 +1020,19 @@ class BuildCommand:
             content = f.read()
 
         lines = content.split('\n')
+        cleaned_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.strip().startswith('render:'):
+                i += 1
+                while i < len(lines) and (lines[i].startswith('    -') or lines[i].strip() == ''):
+                    i += 1
+                continue
+            cleaned_lines.append(line)
+            i += 1
+
+        lines = cleaned_lines
         modified_lines = []
         render_added = False
 
