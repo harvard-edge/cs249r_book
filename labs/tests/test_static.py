@@ -297,6 +297,36 @@ class TestLabCatalog:
             assert metadata.mlsysim_version, f"{path} missing mlsysim_version"
             assert metadata.updated_at, f"{path} missing updated_at"
 
+    def test_every_lab_has_track_plan_file(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        missing = []
+        for path in LAB_CATALOG:
+            plan_path = (LABS_ROOT / path).with_suffix(".track-plan.md")
+            if not plan_path.exists():
+                missing.append(str(plan_path.relative_to(LABS_ROOT)))
+        assert not missing, f"Missing track plan files: {missing}"
+
+    def test_every_lab_has_track_report_surface(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        missing = []
+        for path in LAB_CATALOG:
+            source = read_source(str(LABS_ROOT / path))
+            has_baseline_panel = (
+                "legacy_migration_panel" in source
+                and "get_lab_metadata" in source
+                and "get_lab_track_variant" in source
+            )
+            has_deep_surface = (
+                "get_track_profile" in source
+                and "build_lab_report" in source
+                and ("track_context" in source or "track_selector" in source)
+            )
+            if not (has_baseline_panel or has_deep_surface):
+                missing.append(path)
+        assert not missing, f"Missing track/report surface: {missing}"
+
     def test_no_absolute_wheel_url(self, lab_path):
         """Labs must use relative URLs for the wheel, not absolute mlsysbook.ai URLs."""
         source = read_source(lab_path)
