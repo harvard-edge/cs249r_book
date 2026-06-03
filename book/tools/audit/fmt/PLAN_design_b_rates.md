@@ -60,9 +60,10 @@ python3 book/tools/audit/fmt/inventory_design_b_rates.py \
   --root book/quarto/contents \
   --json book/tools/audit/artifacts/fmt_design_b_inventory.json
 ```
-Current frozen scope: 436 multiplier exports, 507 multiplier refs, 470 rate-name
-candidates (308 byte/s, 24 bit/s, 100 compute/s, 9 tokens/s, 29 QPS/RPS/TPS
-acronym rates).
+Current frozen scope after removing equation-only ROI values from the multiplier
+lane: 434 multiplier exports, 505 multiplier refs, 0 multiplier refs in math
+context, and 470 rate-name candidates (308 byte/s, 24 bit/s, 100 compute/s,
+9 tokens/s, 29 QPS/RPS/TPS acronym rates).
 0.2 Capture render baselines for the rep chapters (the "before" truth):
 ```bash
 for c in training network_fabrics compute_infrastructure benchmarking inference; do
@@ -77,13 +78,17 @@ done
 
 ## PHASE 1 — Design B (`fmt_multiple` owns `×`, multiplier exports become `*_mult_str`)
 
-**1.1 Edge cases first (manual, judgement).** Reassign the 10 bare-ratio uses to
-`fmt_ratio` (rename export to `_ratio_str` where the name still says `ratio`, else keep
-name + swap helper). Verify each in prose context. Sites:
-`responsible_engr:1762`, `ops_scale:1381`, `fleet_orchestration:1491`,
-`data_selection:4622`, `data_engineering:2992`, `appendix_assumptions:448`,
-`collective_communication:191`, `training:2649`, `ml_ops:2882`, `ml_ops:3543`.
-→ L0 + L1 on these files.
+**1.1 Edge cases first (manual, judgement).** Reassign values that are not prose
+multipliers before the formatter starts owning `$\times$`:
+- Bare ratio uses stay `fmt_ratio` and `_ratio_str` where prose renders `N:1`
+  or another bare quotient rather than `N×`.
+- Equation-only multiplier values use `fmt_ratio` and an explicit
+  `*_value_str` name, leaving `\times` inside the equation. This precondition is
+  important: `fmt_multiple()` will emit `N$\times$` for prose after Design B,
+  which must never be substituted inside display math.
+- Verify the frozen inventory reports `mult_refs_in_math_context == 0` before
+  changing `fmt_multiple()`.
+→ L0 + L1 on touched files.
 
 **1.2 Formatter change (`mlsysim/mlsysim/fmt.py`).** `fmt_multiple` and
 `fmt_multiple_range` return `MarkdownStr(f"{number}$\\times$")` (range: `f"{lo}–{hi}$\\times$"`).
@@ -94,7 +99,7 @@ correct. Run `mlsysim` test suite.
 - **export rename:** `NAME_str = fmt_multiple(…)` → `NAME_mult_str = fmt_multiple(…)` (and range names become semantic `*_mult_range_str` / `*_range_mult_str` where that reads better).
 - **ref transform:** `` `{python} CLASS.NAME_str`$\times$ `` → `` `{python} CLASS.NAME_mult_str` `` (rename + strip the now-duplicate `$\times$`, incl. optional space variants `` `…`$\times$ ``, `` `…` $\times$ ``).
 - **only** for names that are fmt_multiple exports (from the 1.0 inventory) — never touch `fmt_int`/etc. refs.
-- Dry-run prints a diff + counts; require counts == inventory (436 exports / 507 refs) before `--write`.
+- Dry-run prints a diff + counts; require counts == inventory (434 exports / 505 refs) before `--write`.
 
 **1.4 Checker flip (`fmt_prose_contract.py` + `math_multiplier_style.py` + tests).**
 - delete `mult_missing_glyph`, `mult_literal_x`.

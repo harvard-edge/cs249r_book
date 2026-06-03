@@ -21,6 +21,8 @@ INLINE_PY = re.compile(r"`\{python\}\s+([A-Za-z_][\w.]*)`")
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
 COMPACT_TIMES_AFTER = re.compile(r"^\s*(\$\\times\$|\\times|×|x\b)")
+DISPLAY_MATH = re.compile(r"\$\$")
+INLINE_MATH_DOLLAR = re.compile(r"(?<!\\)(?<!\$)\$(?!\$)")
 
 MULT_FUNCS = {"fmt_multiple", "fmt_multiple_range"}
 
@@ -80,6 +82,17 @@ def _line(lines: list[str], lineno: int) -> str:
     return ""
 
 
+def _inline_math_context(line: str, pos: int) -> bool:
+    """Best-effort check for a ref inside inline math on one source line."""
+    before = line[:pos]
+    dollar_count = len(INLINE_MATH_DOLLAR.findall(before))
+    if dollar_count % 2 == 1:
+        return True
+    open_paren = before.rfind(r"\(")
+    close_paren = before.rfind(r"\)")
+    return open_paren > close_paren
+
+
 def _scan_python(qmd: Path, *, include_context: bool) -> tuple[list[dict], list[dict]]:
     text = qmd.read_text(encoding="utf-8", errors="replace")
     raw_lines = text.splitlines()
@@ -128,6 +141,7 @@ def _scan_refs(
     text = qmd.read_text(encoding="utf-8", errors="replace")
     refs: list[dict] = []
     in_cell = False
+    in_display_math = False
     for lineno, line in enumerate(text.splitlines(), 1):
         if CELL_START.match(line):
             in_cell = True
@@ -137,10 +151,20 @@ def _scan_refs(
             continue
         if in_cell:
             continue
+        display_markers = [m.start() for m in DISPLAY_MATH.finditer(line)]
         for match in INLINE_PY.finditer(line):
             ref = match.group(1)
             if ref not in mult_by_qualified:
                 continue
+            markers_before_ref = sum(1 for pos in display_markers if pos < match.start())
+            ref_in_display_math = in_display_math ^ (markers_before_ref % 2 == 1)
+            math_context = (
+                "display"
+                if ref_in_display_math
+                else "inline"
+                if _inline_math_context(line, match.start())
+                else "none"
+            )
             after = line[match.end(): match.end() + 36]
             times_match = COMPACT_TIMES_AFTER.match(after)
             record = {
@@ -148,6 +172,7 @@ def _scan_refs(
                 "line": lineno,
                 "ref": ref,
                 "has_compact_times_after": bool(times_match),
+                "math_context": math_context,
                 "times_token": times_match.group(1) if times_match else "",
             }
             if include_context:
@@ -156,6 +181,8 @@ def _scan_refs(
             refs.append(
                 record
             )
+        if len(display_markers) % 2 == 1:
+            in_display_math = not in_display_math
     return refs
 
 
@@ -183,6 +210,12 @@ def inventory(root: Path, *, include_context: bool = False) -> dict:
             "mult_refs": len(mult_refs),
             "mult_refs_with_times_after": sum(
                 1 for row in mult_refs if row["has_compact_times_after"]
+            ),
+            "mult_refs_in_math_context": sum(
+                1 for row in mult_refs if row["math_context"] != "none"
+            ),
+            "mult_refs_by_math_context": dict(
+                Counter(row["math_context"] for row in mult_refs)
             ),
             "mult_exports_without_mult_token": sum(
                 1 for row in mult_exports if not row["has_mult_token"]
