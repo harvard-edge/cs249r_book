@@ -1500,20 +1500,13 @@ Managing these percentile constraints requires decomposing the total allowed res
 
 Before computing a full budget, we pose the foundational latency analysis questions that every serving engineer must answer.
 
-::: {#nbk-model-serving-resnet-50-latency-analysis-questions .callout-notebook title="ResNet-50: Latency analysis questions"}
+::: {#chk-model-serving-resnet-50-latency-analysis .callout-checkpoint title="ResNet-50 latency analysis"}
 
 Serving is about optimizing the tail latency under load.
 
-*The physics of latency*
-
-Consider these foundational questions:
-
-1. **Queuing theory**: Why do latency spikes occur nonlinearly as utilization approaches 100 percent? The M/M/1 queue model explains this behavior.
-2. **Batching trade-offs**: Why does increasing batch size improve throughput (images/sec) yet degrade latency (ms/request)?
-
-*Optimization targets*
-
-3. **The bottleneck**: In a highly optimized inference server, why does Preprocessing often consume more time than the model itself?
+- [ ] **Queuing theory**: Can you explain why latency spikes nonlinearly as utilization approaches 100 percent?
+- [ ] **Batching trade-offs**: Can you explain why increasing batch size improves throughput in images per second yet can degrade latency in milliseconds per request?
+- [ ] **The bottleneck**: Can you identify when preprocessing or postprocessing consumes more of the latency budget than the model itself?
 
 :::
 
@@ -3824,13 +3817,15 @@ Generative models produce a stream of tokens rather than a single output tensor.
 
 These two metrics capture distinct user experience aspects, and production systems set separate SLO targets for each.
 
-::: {#lhs-model-serving-llm-serving-latency-targets .callout-lighthouse title="LLM serving latency targets"}
+::: {#psp-model-serving-llm-serving-latency-targets .callout-perspective title="LLM serving latency targets"}
 
-A production-grade LLM service typically targets the following SLOs:
+Interactive LLM services usually need separate SLOs for responsiveness, generation fluidity, and fleet throughput:
 
 - **TTFT**: < 500 ms (for a 1000-token prompt)
 - **TPOT**: < 50 ms (equivalent to ~20 tokens/s, faster than human reading speed)
 - **Throughput**: > 1000 tokens/s aggregate across all users
+
+The systems point is that a single "latency" number hides the prefill/decode split: TTFT is the blank-screen budget, TPOT is the reading-flow budget, and throughput determines whether those targets hold under shared fleet load.
 
 :::
 
@@ -4287,7 +4282,7 @@ Parts of the graph that depend only on model weights\index{Constant Folding!comp
 
 Since the graph structure is known, the compiler can precalculate the exact memory offsets for every tensor\index{Memory Planning!tensor allocation}. This leads to a central architectural choice: whether to compile on the first request and pay a one-time latency spike, or to compile before deployment and ship the optimized graph as a static artifact.
 
-::: {#nbk-model-serving-jit-vs-aot-compilation .callout-notebook title="JIT vs. AOT compilation"}
+::: {#psp-model-serving-jit-vs-aot-compilation .callout-perspective title="Compilation timing trade-off"}
 
 *   **Just-In-Time (JIT)**\index{JIT Compilation!runtime optimization}: Compiles the graph the first time it is run (for example, `torch.compile`).
     *   Pros: Optimizes for the specific input shapes seen at runtime.
@@ -4295,6 +4290,8 @@ Since the graph structure is known, the compiler can precalculate the exact memo
 *   **Ahead-of-Time (AOT)**\index{Ahead-of-Time Compilation!predeployment}: Compiles the graph before deployment (for example, `torch.export`, TensorRT `trtexec`).
     *   Pros: Zero compilation latency at startup; guarantees a fixed graph.
     *   Cons: Must handle all dynamic shapes explicitly or compile multiple profiles.
+
+The systems choice is where to pay compilation cost: JIT pays it in the serving path and risks a first-request latency spike, while AOT pays it before deployment and requires tighter control over input shapes.
 
 :::
 
@@ -4355,11 +4352,11 @@ Tools\index{Timeline Profiling!serving optimization} like PyTorch Profiler\index
 
 ::: {#exmp-model-serving-profiling-loop .callout-example title="The profiling loop"}
 
-1.  **Capture**: Run a warmup, then capture a trace of ten to fifty requests.
-2.  **Visualize**: Open the trace in a viewer (Chrome Tracing, Nsight).
-3.  **Identify**: Find the largest gap or the longest block.
-4.  **Optimize**: Apply a specific fix (for example, fusion, pinning).
-5.  **Verify**: Re-capture and confirm the gap is gone.
+**Scenario**: A GPU serving node has high P99 latency even though average utilization looks acceptable. A trace of twenty-five warm requests shows large blank regions in the GPU timeline between short kernels.
+
+**System**: The trace indicates that CPU-side request preparation and kernel launch overhead are starving the accelerator. The team targets the largest visible idle gap, applies one specific change such as operator fusion or pinned host memory, then captures another trace to see whether that gap shrank.
+
+**Lesson**: Profiling is an iterative measurement loop: capture a representative trace, identify the dominant idle block, change one bottleneck, and verify with a new trace. The optimization is credible only when the timeline changes in the expected direction.
 
 :::
 

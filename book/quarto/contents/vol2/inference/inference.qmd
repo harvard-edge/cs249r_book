@@ -928,7 +928,7 @@ The 20-request queue depth and the unresolved question of whether queue wait tim
 
 ### Review: Single-node queuing dynamics {#sec-inference-scale-queuing-review-callout}
 
-::: {.callout-tip title="Foundational review: Queuing theory"}
+::: {#psp-inference-queuing-theory-review .callout-perspective title="Queuing theory as serving foundation"}
 
 At the single-node level, inference behaves as an M/D/1 or M/M/1 queue. Little's Law ($L = \lambda W$) dictates that the number of requests in the system equals the arrival rate times the processing time. For a rigorous mathematical review of single-node queuing dynamics and utilization curves, see @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0. @Sec-appdx-appendix-inference-serving works the M/D/1 queue analysis through from first principles, deriving the wait-time distribution that determines whether queue delay fits inside a serving SLO.
 
@@ -1552,35 +1552,19 @@ class A100HardwareScenario:
     nvlink_transfer_ms_str = fmt_time(nvlink_transfer, millisecond, precision=2, commas=False)
 ```
 
-::: {.callout-tip title="Debugging high P99 latency"}
+::: {#exmp-inference-debugging-high-p99-latency .callout-example title="Debugging high P99 latency"}
 
-**Problem**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100 ms and P95 is 180 ms, both within SLO, but P99 spikes to 500 ms against a 200 ms target. GPU utilization appears healthy at 85 percent. Where is the bottleneck?
+**Scenario**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100 ms and P95 is 180 ms, both within SLO, but P99 spikes to 500 ms against a 200 ms target. GPU utilization appears healthy at 85 percent.
 
-**Infrastructure Layer Analysis** (Hardware Constraints):
+**System**: The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb_str` connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations, but PCIe limits tensor-parallel communication. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The distribution layer is the real problem: dynamic request-level batching uses max batch size 32 and timeout 50 ms, and the largest 5 percent of batches experience head-of-line blocking because FIFO batching holds short requests behind long-sequence requests.
 
-The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb_str` connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` vs. NVLink's `{python} A100HardwareScenario.nvlink_a100_gb_per_s_str`. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe vs. `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink.
-
-**Distribution Layer Analysis** (Algorithmic Behavior):
-
-Dynamic request-level batching is configured with max batch size 32 and timeout 50 ms. Examining the batch size distribution reveals the problem: 90 percent of batches contain 4 to 8 requests (explaining good P50/P95), but 5 percent of batches reach the full 32 requests. These large batches occur during traffic bursts and experience head-of-line blocking\index{Head-of-Line Blocking}: short requests that would complete quickly must wait for long-sequence requests in the same batch to finish all their decode iterations.
-
-Why does this occur despite batching being enabled? Further investigation reveals that the scheduler uses FIFO request-level batching without iteration-level eviction. A burst of 32 simultaneous arrivals enters the same batch, and short requests are not released until the full request-level batch completes.
-
-**Diagnosis**:
-
-The root cause is not the hardware (Infrastructure Layer) but the scheduling policy (Distribution Layer). Head-of-line blocking occurs when the scheduler forms large batches from bursty arrivals without considering request heterogeneity. The 500 ms P99 corresponds to large batches where short requests wait for long-sequence completions.
-
-**Solution**:
-
-Implement priority-aware scheduling with separate batch size limits by request type:
+**Lesson**: The root cause is not the hardware layer but the scheduling policy. Implement priority-aware scheduling with separate batch size limits by request type:
 
 1. **Request classification**\index{Request Classification}: Tag requests by expected output length (short: under 50 tokens, medium: 50 to 200 tokens, long: over 200 tokens) based on prompt patterns or user-provided hints
 2. **Differentiated batching**\index{Batching!differentiated}: Limit short-request batches to 8, medium to 16, long to 32
 3. **Priority preemption**\index{Priority Preemption}: Allow short requests to preempt long-running sequences when P99 approaches SLO
 
-After implementing these changes, P99 dropped to 185 ms. The Infrastructure Layer was adequate; the problem was entirely in the Distribution Layer's scheduling logic.
-
-**Lesson**: When tail latency exceeds expectations despite healthy utilization, examine the batching and scheduling policies. High average GPU utilization can mask head-of-line blocking that only affects a small percentage of requests but drives P99. The fleet stack methodology systematically isolates whether bottlenecks arise from hardware constraints or algorithmic decisions; @fig-fleet-stack gives the complete framework.
+After implementing these changes, P99 dropped to 185 ms. High average GPU utilization can mask head-of-line blocking that affects only a small percentage of requests but drives P99; @fig-fleet-stack gives the full isolation framework.
 
 :::
 
@@ -5275,9 +5259,9 @@ Scaling global infrastructure aggressively is highly effective, but it is also e
 
 Weight quantization for serving is a bottleneck-selection decision: reducing weights from 16-bit floats to 8-bit or 4-bit integers can turn a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
 
-::: {#psp-inference-prior-knowledge-quantization .callout-perspective title="Prior knowledge: Quantization"}
+::: {#psp-inference-quantization-serving-constraint .callout-perspective title="Quantization as a serving constraint"}
 
-The necessary background is quantization fundamentals including post-training quantization (PTQ), which quantizes a trained model without retraining, and quantization-aware training (QAT)\index{Quantization!quantization-aware training}, which incorporates quantization effects during training for higher accuracy. Readers should also understand precision formats (FP32, FP16, INT8) and the basic trade-off between numerical precision and memory/compute efficiency. These concepts are covered in standard deep learning optimization references and in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
+In serving systems, quantization is not merely a model-compression technique; it changes the binding resource. Post-training quantization (PTQ) can shrink a deployed model without retraining, while quantization-aware training (QAT)\index{Quantization!quantization-aware training} spends training effort to preserve accuracy at lower precision. The systems question is which constraint the lower-precision representation relaxes: GPU memory capacity, HBM bandwidth during decode, accelerator instruction support, or cost per served token. The precision foundations appear in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
 
 :::
 
