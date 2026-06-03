@@ -1080,7 +1080,7 @@ The lifecycle view treats models as assets to protect, but it also exposes why t
 
 1.  **Significance (quantitative)**: Successful extraction often costs orders of magnitude less than the original training. Published demonstrations have recovered logistic regression and decision-tree models from public APIs at small fractions of their training cost [@tramer2016stealing], and recent work has reconstructed components of frontier-scale language models, including OpenAI's smaller deployments, using only public query access [@carlini2024stealing]. The chapter's BERT extraction case study later in this section illustrates the same dynamic on a transformer model at a query cost of tens of dollars.
 2.  **Distinction (durable)**: Model extraction is distinct from direct theft of model files (which requires intrusion into the storage layer) and from model inversion (which uses model outputs to reconstruct samples of the training data rather than the model itself). Extraction's attack surface is the model's query interface, which makes it a threat every deployed ML service faces by construction whenever the model is reachable.
-3.  **Common pitfall**: Treating rate limiting alone as sufficient defense. An attacker willing to issue queries slowly, distribute requests across accounts, or accept a multi-month attack window can still extract a model unless the API also reduces output information per query (truncating logits, returning categorical confidence bins) and prices queries to make extraction economically irrational (@sec-security-privacy-api-design-information-leakage-minimization-8e32).
+3.  **Common pitfall**: Treating rate limiting alone as sufficient defense. An attacker willing to issue queries slowly, distribute requests across accounts, or accept a multi-month attack window can still extract a model unless the API also reduces output information per query, detects systematic probing, and prices queries to make extraction economically irrational (@sec-security-privacy-model-extraction-defenses-8f3b).
 
 :::
 
@@ -1207,13 +1207,9 @@ The empirical results in @tbl-openai-theft demonstrate extraction of smaller mod
 
 #### Defenses against model extraction {#sec-security-privacy-model-extraction-defenses-8f3b}
 
-Model extraction attacks exploit the input-output behavior of deployed models accessed through APIs. Defending against these attacks requires mechanisms that limit information leakage while maintaining model utility for legitimate users. The defensive strategy balances three competing concerns: preventing unauthorized model replication, preserving service quality for valid queries, and maintaining acceptable inference latency and cost.
+Model extraction attacks exploit the input-output behavior of deployed models accessed through APIs. The durable defense question is not which mechanism sounds strongest, but how much information the API lets one actor accumulate. Every response leaks some bits about the decision boundary, confidence surface, architecture, or training distribution. A production defense therefore has four levers: reduce the information returned by each response, reduce the number of responses an attacker can collect, raise the marginal cost of collecting them, and detect query patterns that look like model measurement rather than product use.
 
-##### Query monitoring and anomaly detection {#sec-security-privacy-query-monitoring-anomaly-detection-3f4f}
-
-The first line of defense monitors query patterns to identify extraction attempts. Model extraction requires substantial query volume to achieve high-fidelity replication, often involving systematic probing of the input space. Detection systems track per-user query statistics and flag anomalous behavior.
-
-Query volume monitoring. Track the number of queries per user over time windows. Legitimate users typically exhibit bursty, irregular usage patterns, while extraction attacks require sustained high-volume querying. For an image classification API, a threshold might be:
+Monitoring provides the evidence for that control loop. Legitimate users usually produce bursty, task-shaped traffic, while extraction attacks need sustained and systematic coverage of the input space. A simple image-classification service might begin with a volume rule:
 
 $$
 \text{alert}(\text{user}) = \begin{cases}
@@ -1222,51 +1218,33 @@ $$
 \end{cases}
 $$
 
-where $q_{\text{daily}}$ and $q_{\text{hourly}}$ represent query counts. These thresholds must be calibrated based on legitimate usage statistics, use-case requirements, and service tier (free vs. paid).
+where $q_{\text{daily}}$ and $q_{\text{hourly}}$ represent query counts. Such thresholds are only the first signal. They must be calibrated by service tier and by the shape of normal use, because batch customers and attackers can both generate high volume.
 
-Input distribution analysis. Extraction attacks often use synthetic or systematically generated inputs that differ from natural user queries. Detection systems compute distributional divergence between a user's query distribution and the expected input distribution:
+The next signal asks whether the inputs look natural. Extraction traffic often uses synthetic or systematically generated examples that cover decision boundaries more evenly than ordinary user queries. A detector can compare the user's query distribution with the expected distribution:
 
 $$
 \mathcal{D}_{\text{KL}}(p_{\text{user}} \lVert p_{\text{expected}}) > \tau_{\text{alert}}
 $$
 
-where $\mathcal{D}_{\text{KL}}$ is Kullback-Leibler divergence and $\tau_{\text{alert}}$ is an alert threshold. For a language model API, this might detect unusual token distributions, repetitive patterns, or adversarially crafted prompts designed to probe model boundaries.
+where $\mathcal{D}_{\text{KL}}$ is Kullback-Leibler divergence and $\tau_{\text{alert}}$ is an alert threshold. For a language model API, the same idea appears as unusual token distributions, repetitive prompt templates, or low-variance probing of model boundaries. Temporal features add another clue: automated extraction tends to have regular inter-query intervals and long uninterrupted sessions, while human or product traffic carries more variance.
 
-Temporal pattern analysis. Extraction attacks exhibit regular, automated query patterns. Features include inter-query time distribution (automated tools have low variance, human users have high variance), query diversity (extraction uses systematic sampling, legitimate use follows task-specific patterns), and session duration (extraction involves long, uninterrupted sessions).
-
-Machine learning-based anomaly detection can combine these features. Training a binary classifier on historical data (benign vs. known extraction attempts) enables real-time classification:
+An anomaly detector combines these signals into a score that can drive enforcement:
 
 $$
 \text{score}_{\text{anomaly}}(u) = f_\theta(\text{qps}(u), \mathcal{D}_{\text{KL}}(u), \sigma_{\text{inter-query}}(u), \ldots)
 $$
 
-where $f_\theta$ is a trained classifier (e.g., random forest, neural network) and features capture query volume, distribution, and temporal patterns.
+where $f_\theta$ is a trained classifier and the features capture query volume, distribution, and temporal regularity. The score should not merely create an alert queue. It should feed the quota system, because rate limiting is how the service turns evidence into an information cap. Free users can receive low daily and burst limits, authenticated paid users can receive larger quotas, and enterprise customers can receive custom limits tied to contracts and monitoring. The point is not to punish volume by itself; it is to prevent anonymous or weakly authenticated actors from collecting enough observations to reconstruct the model.
 
-##### Rate limiting and quota management {#sec-security-privacy-rate-limiting-quota-management-5bf6}
-
-Complementing detection, rate limiting mechanically constrains the information an attacker can extract within a given time period. However, limits must accommodate legitimate high-volume users (e.g., production applications making batch predictions).
-
-Tiered rate limiting. Implement different limits based on authentication level and payment tier:
-
-- Free tier: 1,000 queries per day, 10 queries per second burst
-- Basic tier: 100,000 queries per day, 100 queries per second
-- Enterprise tier: 10M queries per day, custom burst limits
-
-This economic barrier raises the cost of extraction (attackers must pay for high query volumes) while serving legitimate enterprise customers.
-
-Adaptive rate limiting. Dynamically adjust limits based on anomaly scores. Users with high anomaly scores face stricter limits, while verified legitimate users receive relaxed limits:
+Adaptive limits connect the two pieces. Users with high anomaly scores face stricter limits, while verified legitimate users keep enough capacity for batch prediction:
 
 $$
 \text{limit}_{\text{effective}}(u) = \text{limit}_{\text{base}} \times \exp(-\gamma_{\text{rate}} \cdot \text{score}_{\text{anomaly}}(u))
 $$
 
-where $\gamma_{\text{rate}}$ controls sensitivity. A user with anomaly score 0.8 might face 55 percent rate reduction $(e^{-0.8} \approx 0.45)$, while score 0.1 faces negligible impact.
+where $\gamma_{\text{rate}}$ controls sensitivity. High scores reduce effective capacity; low scores preserve normal usage. This control works only if the response itself is also designed carefully. A permissive API that returns full logits, hidden states, attention weights, or exact confidence scores leaks too much per query, so even a modest quota can be dangerous.
 
-##### Output perturbation and rounding {#sec-security-privacy-output-perturbation-rounding-76d3}
-
-Reducing the precision of model outputs makes extraction more difficult without significantly degrading utility for legitimate use cases.
-
-**Confidence Rounding**\index{Confidence Rounding}: Round output probabilities to coarser precision. Instead of returning full-precision logits or probabilities:
+Output shaping reduces the leakage per response while preserving the part of the answer legitimate users usually need. **Confidence Rounding**\index{Confidence Rounding} returns coarser probabilities instead of full-precision logits or probabilities:
 
 $$
 \tilde{p}_i = \text{round}(p_i, d_{\text{dec}})
@@ -1326,7 +1304,7 @@ class OutputRoundingLeakage:
     topk_eliminated_pct_str = fmt_percent(topk_eliminated_pct/100, precision=1, commas=False, style='prose')
 ```
 
-where $d_{\text{dec}}$ is the number of decimal places. For a `{python} OutputRoundingLeakage.class_count_value_str`-class ImageNet classifier, rounding from `{python} OutputRoundingLeakage.from_decimals_str` decimals to `{python} OutputRoundingLeakage.to_decimals_str` decimals (e.g., 0.384627 → 0.38) removes `{python} OutputRoundingLeakage.decimal_digits_removed_str` decimal digits, about `{python} OutputRoundingLeakage.bits_removed_str` per class under a decimal-bin model, while maintaining decision boundaries.
+where $d_{\text{dec}}$ is the number of decimal places. For a `{python} OutputRoundingLeakage.class_count_value_str`-class ImageNet classifier, rounding from `{python} OutputRoundingLeakage.from_decimals_str` decimals to `{python} OutputRoundingLeakage.to_decimals_str` decimals removes `{python} OutputRoundingLeakage.decimal_digits_removed_str` decimal digits, about `{python} OutputRoundingLeakage.bits_removed_str` per class under a decimal-bin model, while preserving the decision boundaries most applications consume.
 
 **Top-k Truncation**\index{Top-k Truncation}: Return only the top-$k$ predicted classes rather than the full probability distribution:
 
@@ -1334,7 +1312,7 @@ $$
 \text{output} = \{(c_i, p_i) : i \in \text{top-}k\}
 $$
 
-For $k=$ `{python} OutputRoundingLeakage.top_k_str` on a `{python} OutputRoundingLeakage.class_count_value_str`-class problem, this reduces information leakage by $\log_2(1000/5) \approx$ `{python} OutputRoundingLeakage.topk_bits_str` per query. Legitimate users rarely need beyond top-5 predictions, making this a practical defense.
+For $k=$ `{python} OutputRoundingLeakage.top_k_str` on a `{python} OutputRoundingLeakage.class_count_value_str`-class problem, this reduces information leakage by approximately `{python} OutputRoundingLeakage.topk_bits_str` per query. Legitimate users often need only the top few predictions, while an extractor benefits from the full distribution.
 
 ::: {.column-margin}
 ![](images/svg/security_privacy_output_leakage_ladder.svg){width="100%" fig-alt="Two-rung ladder comparing a full 1000-score output distribution with top-5 returned scores, annotated as a 200 times reduction in exposed scores."}
@@ -1342,46 +1320,29 @@ For $k=$ `{python} OutputRoundingLeakage.top_k_str` on a `{python} OutputRoundin
 *Full distributions leak far more than top-k outputs.*
 :::
 
-**Additive Noise Injection**: Add calibrated noise to outputs to reduce extraction fidelity while preserving decision quality:
+When rounded or truncated outputs still leak too much, calibrated noise can make repeated measurements less useful:
 
 $$
 \tilde{p}_i = p_i + \mathcal{N}(0, \sigma^2)
 $$
 
-followed by re-normalization to ensure $\sum_i \tilde{p}_i = 1$. The noise scale $\sigma$ must balance extraction defense with utility preservation. For a sentiment classifier, $\sigma = 0.05$ adds sufficient uncertainty to impede extraction while rarely flipping prediction decisions.
+followed by re-normalization to ensure $\sum_i \tilde{p}_i = 1$. The noise scale $\sigma$ must balance extraction defense with utility preservation. Too little noise leaves the confidence surface measurable; too much noise changes decisions for legitimate users.
 
-**Differential Privacy for Predictions**: Apply differential privacy mechanisms to inference outputs, providing formal privacy guarantees. For a query $q$, the privatized response satisfies $(\epsilon, \delta)$-DP:
+Differential privacy mechanisms provide a formal version of this budget for inference outputs. For a query $q$, the privatized response satisfies $(\epsilon, \delta)$-DP:
 
 $$
 \Pr[\mathcal{M}(D, q) = o] \leq e^{\epsilon} \Pr[\mathcal{M}(D', q) = o] + \delta
 $$
 
-This protects against both model extraction and membership inference attacks. However, the privacy budget must be carefully managed across queries, as repeated queries on similar inputs deplete the budget.
+This protects against both model extraction and membership inference attacks, but repeated queries on similar inputs consume the budget. Privacy is therefore not a setting that can be enabled once; it is a resource that the API spends.
 
-##### Economic deterrents {#sec-security-privacy-economic-deterrents-f253}
-
-Pricing strategies can make extraction economically infeasible. If training a model from scratch costs $C_{\text{train}}$ and extraction requires $n_{\text{queries}}$ queries at price $p_{\text{query}}$ per query, extraction is economically rational only if:
+The final lever is economics. Pricing strategies can make extraction unattractive even when some leakage remains. If training a model from scratch costs $C_{\text{train}}$ and extraction requires $n_{\text{queries}}$ queries at price $p_{\text{query}}$ per query, extraction is economically rational only if:
 
 $$
 n_{\text{queries}} \cdot p_{\text{query}} < C_{\text{train}}
 $$
 
-Setting $p_{\text{query}}$ such that $n_{\text{queries}} \cdot p_{\text{query}} > C_{\text{train}}$ eliminates the economic incentive. For example, if training a competitive language model costs \$5M and extraction requires 100M queries, pricing at $p_{\text{query}} > \$0.05$ per query (the \$5M training cost divided by 100M queries) makes extraction more expensive than training.
-
-This pricing must account for the attacker's alternative: purchasing compute to train their own model. Cloud GPU costs, dataset acquisition, and engineering effort determine $C_{\text{train}}$. As model training becomes more expensive (frontier LLMs cost \$50M-\$100M+), API pricing can increase proportionally while remaining economical for legitimate users making smaller query volumes.
-
-##### API design and information leakage minimization {#sec-security-privacy-api-design-information-leakage-minimization-8e32}
-
-The information leakage invariant (Principle \ref{pri-information-leakage}) governs this design space: every model output potentially leaks information about its training data, and perfect privacy is mathematically impossible if the model remains useful. Privacy is a *budget*, not a *switch*—systems requiring strict privacy must implement Differential Privacy (DP) to quantify and cap the leakage $(\epsilon)$ per query.
-
-Careful API design reduces exploitable information channels:
-
-- Minimal Output Format: Return only class predictions, not full probability distributions or logits
-- Coarse Confidence Bins: Return categorical confidence ("high", "medium", "low") instead of numeric probabilities
-- Disable Intermediate Outputs: Prevent access to hidden layer activations, attention weights, or embeddings
-- Version Abstraction: Avoid exposing model version details that enable targeted extraction
-
-In a production API, these defenses work as a package: pricing raises extraction cost, monitoring detects systematic probing, and output shaping reduces the information returned by each query.
+Setting $p_{\text{query}}$ so that $n_{\text{queries}} \cdot p_{\text{query}} > C_{\text{train}}$ removes the economic incentive. That pricing must account for the attacker's alternative: purchasing compute, acquiring data, and doing the engineering work to train a substitute model independently. In practice, pricing, monitoring, quotas, and output shaping work as one package. Minimal outputs reduce bits per query, coarse confidence bins reduce numerical precision, hidden activations and attention weights stay private, model-version details are abstracted, and the quota system decides how much information any actor can accumulate.
 
 ```{python}
 #| echo: false
@@ -1473,7 +1434,6 @@ class DefenseOverheadAnalysis:
     false_positive_pct_str = fmt_percent(false_positive_pct/100, precision=1, commas=False, style='prose')
     false_positive_reviews_per_day_str = fmt_rate(false_positive_reviews_per_day, "reviews/day", precision=0, commas=False)
     monitoring_ms_str = fmt_time(monitoring_ms, 'millisecond', precision=0, commas=False)
-    perturbation_ms_str = fmt_time(perturbation_ms, 'millisecond', precision=1, commas=False)
     base_inference_ms_str = fmt_time(base_inference_ms, 'millisecond', precision=0, commas=False)
     total_defense_ms_str = fmt_time(total_defense_ms, 'millisecond', precision=1, commas=False)
     overhead_pct_str = fmt_percent(overhead_pct/100, precision=1, commas=False, style='prose')
@@ -1481,48 +1441,13 @@ class DefenseOverheadAnalysis:
 
 ::: {#nbk-security-privacy-protecting-production-api .callout-notebook title="Protecting a production API"}
 
-Consider a production API serving a ResNet-50 image classifier (`{python} DefenseOverheadAnalysis.class_count_value_str` ImageNet classes) with `{python} DefenseOverheadAnalysis.daily_queries_str` daily queries from `{python} DefenseOverheadAnalysis.daily_users_str`.
+Consider a production API serving a ResNet-50 image classifier (`{python} DefenseOverheadAnalysis.class_count_value_str` ImageNet classes) with `{python} DefenseOverheadAnalysis.daily_queries_str` daily queries from `{python} DefenseOverheadAnalysis.daily_users_str`. The model costs about `{python} DefenseOverheadAnalysis.training_cost_k_str` to train in this scenario. An extractor needs about `{python} DefenseOverheadAnalysis.extraction_queries_m_str` queries for `{python} DefenseOverheadAnalysis.target_fidelity_pct_str` fidelity, or `{python} DefenseOverheadAnalysis.queries_per_class_str` for a `{python} DefenseOverheadAnalysis.class_count_value_str`-class classifier. Without defenses, an attacker abusing a free tier can send `{python} DefenseOverheadAnalysis.attacker_queries_per_day_str` for `{python} DefenseOverheadAnalysis.extraction_days_str` and pay nothing, making extraction economically favorable.
 
-**Extraction Threat Analysis**:
+The defense stack first caps anonymous collection: the free tier allows `{python} DefenseOverheadAnalysis.free_tier_queries_per_day_str`, the paid tier costs `{python} DefenseOverheadAnalysis.paid_tier_price_usd_month_str` for `{python} DefenseOverheadAnalysis.paid_tier_queries_per_day_str`, and enterprise access requires authentication plus monitoring. The monitoring path watches for systematic probing, including more than `{python} DefenseOverheadAnalysis.alert_queries_per_day_str` from one user or median inter-query gaps below `{python} DefenseOverheadAnalysis.alert_interquery_ms_str`; the lightweight detector adds `{python} DefenseOverheadAnalysis.monitoring_ms_str` per query. Output shaping then rounds confidences to `{python} OutputRoundingLeakage.to_decimals_str` decimal places, retaining about `{python} OutputRoundingLeakage.retained_bits_str` from each rounded scalar probability, and returns only the top-`{python} OutputRoundingLeakage.top_k_str` classes, eliminating `{python} OutputRoundingLeakage.topk_eliminated_pct_str` of distribution entries.
 
-- Model training cost: ~`{python} DefenseOverheadAnalysis.training_cost_k_str` (GPU time, data, engineering)
-- Extraction requirements: ~`{python} DefenseOverheadAnalysis.extraction_queries_m_str` queries for `{python} DefenseOverheadAnalysis.target_fidelity_pct_str` fidelity, or `{python} DefenseOverheadAnalysis.queries_per_class_str` for a `{python} DefenseOverheadAnalysis.class_count_value_str`-class classifier
-- Without defenses: attacker queries `{python} DefenseOverheadAnalysis.attacker_queries_per_day_str` for `{python} DefenseOverheadAnalysis.extraction_days_str`, cost \$0 (free tier abuse)
-- Total extraction cost: \$0 vs. `{python} DefenseOverheadAnalysis.training_cost_k_str` training → extraction is economically favorable
+The pricing completes the loop. At `{python} DefenseOverheadAnalysis.price_per_query_usd_str`, `{python} DefenseOverheadAnalysis.extraction_queries_m_str` extraction queries cost `{python} DefenseOverheadAnalysis.extraction_cost_k_str`, which matches the training cost in this scenario. A legitimate user sending `{python} DefenseOverheadAnalysis.legit_queries_per_day_str` for `{python} DefenseOverheadAnalysis.billing_days_str` pays `{python} DefenseOverheadAnalysis.legit_monthly_cost_usd_str` per month, so the defense changes the attacker's economics without pricing out normal use.
 
-**Defense Implementation**:
-
-1.  **Rate limiting**:
-    - Free tier: `{python} DefenseOverheadAnalysis.free_tier_queries_per_day_str` (prevents sustained extraction)
-    - Paid tier (`{python} DefenseOverheadAnalysis.paid_tier_price_usd_month_str`): `{python} DefenseOverheadAnalysis.paid_tier_queries_per_day_str`
-    - Enterprise: Custom (authenticated, monitored)
-2.  **Query monitoring**:
-    - Deploy anomaly detector: 3-sigma threshold on query volume, inter-query timing variance, input diversity
-    - Alert on: >`{python} DefenseOverheadAnalysis.alert_queries_per_day_str` from single user, <`{python} DefenseOverheadAnalysis.alert_interquery_ms_str` median inter-query time, input entropy <threshold
-    - Implementation: Lightweight online ML model, `{python} DefenseOverheadAnalysis.monitoring_ms_str` overhead per query
-3.  **Output perturbation**:
-    - Round confidences to `{python} OutputRoundingLeakage.to_decimals_str` decimal places (retains about `{python} OutputRoundingLeakage.retained_bits_str` bits from each rounded scalar probability)
-    - Return top-`{python} OutputRoundingLeakage.top_k_str` classes only (eliminates `{python} OutputRoundingLeakage.topk_eliminated_pct_str` of distribution entries)
-    - Add Gaussian noise: $\sigma = 0.03$ to output probabilities before rounding
-4.  **Economic deterrent**:
-    - Pricing: `{python} DefenseOverheadAnalysis.price_per_query_usd_str` for paid tier
-    - Extraction cost: `{python} DefenseOverheadAnalysis.extraction_queries_m_str` queries $\times$ `{python} DefenseOverheadAnalysis.price_per_query_usd_str` = `{python} DefenseOverheadAnalysis.extraction_cost_k_str` (matches training cost)
-    - Legitimate user cost: `{python} DefenseOverheadAnalysis.legit_queries_per_day_str` $\times$ `{python} DefenseOverheadAnalysis.billing_days_str` $\times$ `{python} DefenseOverheadAnalysis.price_per_query_usd_str` = `{python} DefenseOverheadAnalysis.legit_monthly_cost_usd_str` per month (acceptable)
-
-**Quantitative Impact**:
-
--   **Extraction fidelity**: Without defenses, `{python} DefenseOverheadAnalysis.output_accuracy_no_defense_pct_str` accuracy surrogate. With defenses, surrogate accuracy drops to `{python} DefenseOverheadAnalysis.output_accuracy_with_defense_pct_str`, an `{python} DefenseOverheadAnalysis.fidelity_drop_pp_str` reduction in this scenario.
-
--   **Legitimate user impact**: Top-5 accuracy preserved at `{python} DefenseOverheadAnalysis.top5_accuracy_pct_str` (vs. `{python} DefenseOverheadAnalysis.baseline_top5_accuracy_pct_str` baseline). Latency increase: +`{python} DefenseOverheadAnalysis.monitoring_ms_str` for monitoring, +`{python} DefenseOverheadAnalysis.perturbation_ms_str` for perturbation = +`{python} DefenseOverheadAnalysis.total_defense_ms_str` total (`{python} DefenseOverheadAnalysis.overhead_pct_str` overhead on `{python} DefenseOverheadAnalysis.base_inference_ms_str` inference)
--   **False positive rate**: `{python} DefenseOverheadAnalysis.false_positive_pct_str` of users flagged for manual review (`{python} DefenseOverheadAnalysis.daily_users_str` → `{python} DefenseOverheadAnalysis.false_positive_reviews_per_day_str`, manageable)
--   **Economic viability**: Extraction cost `{python} DefenseOverheadAnalysis.extraction_cost_k_str` equals training cost, eliminating economic incentive
-
-**Deployment Lessons**:
-
--   Multi-layered defense (rate limiting + monitoring + perturbation) is more robust than single mechanism
--   Output perturbation provides best fidelity-protection trade-off for classification tasks
--   Query monitoring enables early detection before significant extraction occurs
--   Economic deterrents require accurate cost modeling for both training and extraction
+The impact numbers make the trade-off visible. The surrogate's accuracy drops from `{python} DefenseOverheadAnalysis.output_accuracy_no_defense_pct_str` without defenses to `{python} DefenseOverheadAnalysis.output_accuracy_with_defense_pct_str` with defenses, a `{python} DefenseOverheadAnalysis.fidelity_drop_pp_str` reduction in this scenario. Legitimate top-5 accuracy remains `{python} DefenseOverheadAnalysis.top5_accuracy_pct_str`, close to the `{python} DefenseOverheadAnalysis.baseline_top5_accuracy_pct_str` baseline. Monitoring and perturbation add `{python} DefenseOverheadAnalysis.total_defense_ms_str` on top of `{python} DefenseOverheadAnalysis.base_inference_ms_str` inference, or `{python} DefenseOverheadAnalysis.overhead_pct_str` overhead, while `{python} DefenseOverheadAnalysis.false_positive_pct_str` of users are flagged for manual review (`{python} DefenseOverheadAnalysis.false_positive_reviews_per_day_str`). The lesson is not that any single defense solves extraction. The API becomes safer because information per response, query volume, detection, and price all move in the same direction.
 
 :::
 
