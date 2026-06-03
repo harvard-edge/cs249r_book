@@ -2503,50 +2503,57 @@ As the "data center tax" on host CPUs has grown -- with up to 30 percent of CPU 
 
 #### Alternative node architectures {#sec-compute-infrastructure-alternative-node-architectures-2e3c}
 
-The DGX architecture is not the only approach to building dense multi-accelerator nodes. Google's TPU v4 and v5p pods use a different philosophy: instead of connecting chips through a central switch (NVSwitch), each TPU chip has direct links to its neighbors through the Inter-Chip Interconnect (ICI). Within a "tray" (Google's equivalent of a node), four TPU chips are connected in a small mesh, with each chip directly connected to the others via ICI. Multiple trays are then connected into larger topologies at the pod level. This eliminates the switch as a separate component, reducing cost and latency at the expense of the universal any-to-any connectivity that NVSwitch provides.
-
-AMD's MI300X represents a distinct alternative. The MI300X is a chiplet-based design that integrates 8 GPU compute dies (XCDs) and 4 I/O dies on a single package, with 192 GB of HBM3 memory providing 5.3 TB/s of aggregate bandwidth. The intra-package communication between XCDs uses AMD's Infinity Fabric, achieving bandwidth comparable to NVLink within the package. For multi-accelerator nodes, AMD uses Infinity Fabric links between packages, similar in concept to NVLink but with different bandwidth characteristics.
-
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap6.frontier_params_b_str
-class InfraFrontierStragglerRecap6:
+# │ Exports: AlternativeNodeArchitectureRecap.frontier_params_b_str,
+# │          AlternativeNodeArchitectureRecap.h100_hbm_gb_str,
+# │          AlternativeNodeArchitectureRecap.h100_nvlink_gb_per_s_str,
+# │          AlternativeNodeArchitectureRecap.tpu_v5p_ici_gb_per_s_str,
+# │          AlternativeNodeArchitectureRecap.mi300x_hbm_gb_str,
+# │          AlternativeNodeArchitectureRecap.mi300x_node_hbm_gb_str,
+# │          AlternativeNodeArchitectureRecap.mi300x_hbm_bw_tb_per_s_str,
+# │          AlternativeNodeArchitectureRecap.gaudi3_hbm_gb_str,
+# │          AlternativeNodeArchitectureRecap.frontier_weights_gb_str
+class AlternativeNodeArchitectureRecap:
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
+    frontier = Models.Language.GPT3
+    h100 = Hardware.Cloud.H100
+    mi300x = Hardware.Cloud.MI300X
+    tpu_v5p = Hardware.Cloud.TPUv5p
+    gaudi3 = Hardware.Cloud.Gaudi3
+    node_accelerators = Systems.Nodes.DGX_H100.accelerators_per_node
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────
+    frontier_weights = frontier.parameters * BYTES_FP16
+    mi300x_node_hbm = mi300x.memory.capacity * node_accelerators
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────────
+    check(mi300x.memory.capacity > h100.memory.capacity, "MI300X should carry more HBM than H100")
+    check(mi300x_node_hbm > frontier_weights, "8x MI300X HBM should hold 175B FP16 weights")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    frontier_params_b_str = fmt_params(frontier.parameters, scale="B", precision=0, commas=False)
+    h100_hbm_gb_str = fmt_memory_capacity(h100.memory.capacity, unit=GiB, precision=0, commas=False)
+    h100_nvlink_gb_per_s_str = fmt_bandwidth(h100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    tpu_v5p_ici_gb_per_s_str = fmt_bandwidth(tpu_v5p.nvlink.bandwidth, unit=GB / second, precision=0, commas=True)
+    mi300x_hbm_gb_str = fmt_memory_capacity(mi300x.memory.capacity, unit=GiB, precision=0, commas=False)
+    mi300x_node_hbm_gb_str = fmt_memory_capacity(mi300x_node_hbm, unit=GiB, precision=0, commas=True)
+    mi300x_hbm_bw_tb_per_s_str = fmt_bandwidth(mi300x.memory.bandwidth, unit=TB / second, precision=1, commas=False)
+    gaudi3_hbm_gb_str = fmt_memory_capacity(gaudi3.memory.capacity, unit=GiB, precision=0, commas=False)
+    frontier_weights_gb_str = fmt_memory(frontier_weights, unit=GB, precision=0, commas=False)
 ```
 
-The MI300X's 192 GB of HBM per accelerator is particularly notable. While the H100 offers 80 GB, the MI300X's larger capacity means that a single 8-GPU node can hold 1,536 GB of HBM, enough to fit the full weight tensor of our `{python} InfraFrontierStragglerRecap6.frontier_params_b_str` model (350 GB in FP16) with much more headroom for gradients and activations. It still does not hold the entire 2.2--2.5 TB Adam training footprint in HBM, but the extra capacity reduces offload pressure, enables larger microbatches, and can improve scaling efficiency.
+The DGX H100 is one answer to a more general design question: which boundary should the node make cheap? A switch-rich design spends power, board area, and cost on universal any-to-any exchange. That choice is easy to justify when tensor parallelism is the critical path, because each Transformer layer turns local accelerator communication into part of the model's inner loop. The `{python} AlternativeNodeArchitectureRecap.h100_nvlink_gb_per_s_str` H100 NVLink fabric therefore buys a software abstraction: the training framework can treat eight accelerators as one tightly coupled device for the layers that must be split across chips.
 
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_qty
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: H100NvlinkGaudiRecap.nvlink_gb_per_s_str
-class H100NvlinkGaudiRecap:
+Other systems move that boundary. TPU pods use the Inter-Chip Interconnect (ICI) and a mesh-oriented topology instead of making a central switch the defining component of the node; the TPU v5p profile in MLSysIM models ICI at `{python} AlternativeNodeArchitectureRecap.tpu_v5p_ici_gb_per_s_str`. The mesh can reduce switch cost and expose a regular structure to the compiler, but it also makes placement more visible: the runtime must respect neighbor relationships rather than assuming that every chip pair has the same communication path. That is a reasonable trade when the workload is regular enough for the compiler and collective libraries to map communication onto the topology.
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, precision=0, commas=False)
-```
+The MI300X shifts the pressure point from local switching toward memory capacity. Its package exposes `{python} AlternativeNodeArchitectureRecap.mi300x_hbm_gb_str` of HBM at `{python} AlternativeNodeArchitectureRecap.mi300x_hbm_bw_tb_per_s_str`, compared with `{python} AlternativeNodeArchitectureRecap.h100_hbm_gb_str` on an H100-class accelerator. An eight-accelerator MI300X node would therefore provide `{python} AlternativeNodeArchitectureRecap.mi300x_node_hbm_gb_str` of aggregate HBM, enough to hold the `{python} AlternativeNodeArchitectureRecap.frontier_weights_gb_str` FP16 weight tensor for our `{python} AlternativeNodeArchitectureRecap.frontier_params_b_str` running model. That does not eliminate the optimizer, gradient, activation, and fragmentation problem introduced in @sec-compute-node, but it changes how often the system must spill state into slower memory tiers and how much microbatch headroom remains before offload becomes mandatory.
 
-Intel's Gaudi architecture represents yet another approach: Gaudi 2 and Gaudi 3 accelerators use an integrated RDMA-capable Ethernet NIC (RoCE) built directly into each accelerator chip, combined with high-bandwidth on-die interconnects. This allows Gaudi to bypass the need for both NVSwitch and separate InfiniBand HCAs, using a single network fabric for both intra-node and inter-node communication. The trade-off is that the intra-node bandwidth is lower than NVLink (roughly 300 GB/s vs. `{python} H100NvlinkGaudiRecap.nvlink_gb_per_s_str`), limiting the efficiency of tensor parallelism within a node.
+Gaudi takes a different route by integrating RDMA-capable Ethernet into the accelerator and using a more network-centric design for communication. The point is not that it lacks memory capacity; a Gaudi 3-class accelerator still exposes `{python} AlternativeNodeArchitectureRecap.gaudi3_hbm_gb_str` of HBM. The question is whether simplifying the fabric and using Ethernet consistently across node and pod is worth giving up the very high local exchange bandwidth of a switch-rich NVLink design. That trade can be attractive when data parallelism, inference serving, or cluster cost dominates, and less attractive when tensor-parallel collectives sit inside every layer.
 
-These alternative architectures illustrate a recurring theme in infrastructure design: there is no single optimal architecture, only optimal architectures for specific workload and scale regimes. The DGX approach maximizes intra-node bandwidth at higher cost. The TPU approach eliminates switches but constrains topology. The Gaudi approach simplifies the network at the expense of intra-node bandwidth. The AMD approach prioritizes HBM capacity per accelerator, reducing the need for complex multi-node parallelism.
-
-Each approach reflects a different bet about which constraint will be most binding for the target workload. NVIDIA bets on bandwidth (NVLink provides the fastest intra-node fabric). Google bets on systolic efficiency (the MXU achieves higher utilization for regular workloads). AMD bets on memory capacity (192 GB HBM reduces the need for complex memory optimization). Intel bets on network simplicity (integrated Ethernet eliminates the need for separate InfiniBand infrastructure).
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierNodeChoiceRecap.frontier_params_b_str
-class InfraFrontierNodeChoiceRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-For our `{python} InfraFrontierNodeChoiceRecap.frontier_params_b_str` model, the choice matters primarily for the tensor-parallel portion of the training computation, where the accelerator interconnect is on the critical path. The secondary effects (software ecosystem maturity, supply chain availability, total cost of ownership), however, often dominate the primary performance differences in practice.
+These alternatives are not a ranking of vendors. They are different placements of scarce resources: switching bandwidth in the node, regular topology in the pod, HBM capacity in the package, or network attachment on the accelerator. For the `{python} AlternativeNodeArchitectureRecap.frontier_params_b_str` model used throughout this chapter, the tensor-parallel portion of training makes local accelerator communication unusually important, so the DGX-style answer is natural. In other regimes, especially memory-heavy recommenders, topology-regular training, or cost-sensitive serving fleets, a different boundary can become the one that matters most. Software ecosystem maturity, supply availability, and total cost of ownership then decide whether the theoretical architectural fit becomes a deployable system.
 
 #### Node health and reliability {#sec-compute-infrastructure-node-health-reliability-56a6}
 
