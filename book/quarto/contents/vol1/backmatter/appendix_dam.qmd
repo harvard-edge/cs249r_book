@@ -172,53 +172,21 @@ Theoretical constraints often manifest as confusing symptoms in production. Thes
 
 ### Case 1: The starving accelerator (Data) {#sec-appdx-dam-taxonomy-case-1-starving-accelerator-data-9a56}
 
-#### Symptom {.unnumbered}
-
 A team provisions a large A100 GPU instance to speed up training, but training time hardly improves. `nvidia-smi` shows GPU utilization fluctuating between 10 percent and 40 percent.
 
-#### Diagnosis {.unnumbered}
-
-The **Data** component cannot supply the **Machine** fast enough. The workload is I/O bound.
-
-#### The fix {.unnumbered}
-
-This is not a model or hardware problem. You must optimize the extract, transform, load (ETL) pipeline: move from raw JPEGs (CPU decoding heavy) to TFRecords or WebDataset (sequential reads), increase the number of data loader workers, and prefetch batches to GPU memory.
+The accelerator is not the binding resource. The **Data** component cannot supply the **Machine** fast enough, so the workload is I/O bound even though the visible symptom is slow training. The useful intervention is therefore upstream of the model: optimize the extract, transform, load (ETL) path by moving from raw JPEGs with heavy CPU decoding to TFRecords or WebDataset with sequential reads, increasing data loader parallelism, and prefetching batches into accelerator memory.
 
 ### Case 2: The latency cliff (Algorithm) {#sec-appdx-dam-taxonomy-case-2-latency-cliff-algorithm-8ee2}
 
-#### Symptom {.unnumbered}
+A real-time recommendation service fails to meet a 20 ms latency service-level agreement (SLA). Accelerator utilization is low and the batch size is one, so the signal does not point to a saturated chip. It points to an **Algorithm** that is too deep for the sequential deadline.
 
-Your real-time recommendation system fails to meet the 20 ms latency SLA. The accelerator utilization is low, and the batch size is 1.
-
-#### Diagnosis {.unnumbered}
-
-The **Algorithm** is too computationally deep for the sequential deadline. You are latency-bound by serial operations.
-
-#### The fix {.unnumbered}
-
-Throwing more hardware (Machine) will not help because latency is limited by the serial execution of layers. You must change the Algorithm:
-
-*   **Quantization**: Switch to INT8 to reduce memory fetch time.
-*   **Pruning**: Remove redundant heads or channels.
-*   **Knowledge Distillation**: Train a smaller student model.
+Adding more hardware does not remove the serial layer path that dominates latency. The effective fixes change the algorithmic work itself: quantization reduces memory fetch time by moving to INT8 where accuracy allows, pruning removes redundant heads or channels, and knowledge distillation trains a smaller student model to approximate the larger model's behavior.
 
 ### Case 3: The compute wall (Machine) {#sec-appdx-dam-taxonomy-case-3-compute-wall-machine-3a0a}
 
-#### Symptom {.unnumbered}
+Accelerator utilization is pinned at 99 percent, memory bandwidth remains unsaturated, and training is stable but takes three weeks. In this case, the data path is doing its job: the system has kept the accelerator fed, and the workload is compute bound.
 
-Accelerator utilization is pinned at 99 percent. Memory bandwidth is unsaturated. Training is stable but takes three weeks.
-
-#### Diagnosis {.unnumbered}
-
-The system has successfully kept the accelerator fed. It is compute bound.
-
-#### The fix {.unnumbered}
-
-You have hit the physical limits of the single chip.
-
-*   **Scale Up**: Move to a newer generation GPU (for example, A100 to H100).
-*   **Scale Out**: Distribute training across multiple accelerators (Data Parallelism).
-*   **Lower Precision**: Switch from FP32/TF32 training to BF16 where numerically safe; on NVIDIA Tensor Core paths, BF16 peak throughput is typically about 2$\times$ TF32 peak, with realized speedup depending on kernels and bottlenecks.
+The next step has to change the machine term in the iron law. The team can scale up to a newer accelerator generation, scale out by distributing training across multiple accelerators through data parallelism, or lower precision from FP32/TF32 to BF16 where numerically safe. On NVIDIA Tensor Core paths, BF16 peak throughput is typically about 2$\times$ TF32 peak, with realized speedup depending on kernels and bottlenecks.
 
 Taken together, the three cases show why the same utilization number can imply different next steps depending on loss behavior, batch size, and memory pressure.
 
