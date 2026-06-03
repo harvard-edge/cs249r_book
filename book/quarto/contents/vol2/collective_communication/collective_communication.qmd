@@ -71,12 +71,6 @@ The volume of data that must be synchronized is proportional to the model size. 
 
 [^fn-ring-allreduce-origin]: **Ring AllReduce**: The algorithm dates to the 1990s HPC community (Patarasuk and Yuan formalized it in 2009), but Baidu's Andrew Gibiansky popularized it for ML in February 2017, demonstrating 31$\times$ speedup scaling to 40 GPUs. Uber's Horovod library (2017) and NVIDIA's NCCL subsequently made it the default for distributed training, because its $\mathcal{O}(1)$-per-node bandwidth cost broke the $\mathcal{O}(N)$ bottleneck of parameter servers. \index{Ring AllReduce!origin}
 
-::: {.column-margin}
-![](images/svg/collective_communication_comm_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing the step's iron-law terms at frontier scale. The communication bar is wide and shaded violet, dominating; the compute bar is a narrow gray sliver."}
-
-*Gradient synchronization devours 30 to 70 percent of each step at scale.*
-:::
-
 At frontier scale (hundreds of billions of parameters across thousands of GPUs), gradient synchronization dominates the training step time, consuming 30--70 percent of wall-clock time unless aggressive optimization techniques are applied. The remainder of this chapter develops those techniques systematically.
 
 ### The physics of data movement {#sec-communication-collective-operations-physics-data-movement}
@@ -200,6 +194,12 @@ Total: $T_{\text{AllReduce}} \approx$ `{python} AllReduceCost.ring_bw_time_ms_st
 
 **Systems insight**: The gradient AllReduce alone takes over five seconds. This is pure communication overhead added to every training step. At this scale, communication dominates the step time unless overlapped with backward pass computation. This is why production systems pipeline AllReduce with the backward pass, launching communication for early layers while later layers are still computing.
 
+:::
+
+::: {.column-margin}
+![](images/svg/collective_communication_comm_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing the step's iron-law terms at frontier scale. The communication bar is wide and shaded violet, dominating; the compute bar is a narrow gray sliver."}
+
+*Gradient synchronization devours 30 to 70 percent of each step at scale.*
 :::
 
 The calculation reveals why data movement, not computation, becomes the governing constraint at scale. A single AllReduce on a 70B model's gradients consumes seconds of wall-clock time, during which all GPUs would otherwise sit idle. This asymmetry between local computation (which parallelizes perfectly) and global coordination (which requires physical data movement) motivates every algorithm in the remainder of this chapter. Halving that multi-second AllReduce would save thousands of GPU-hours over a typical training campaign, translating directly to reduced cost and faster time to deployment.
@@ -956,6 +956,12 @@ Each GPU sends its fully reduced chunk around the ring so all GPUs receive all r
 
 The trace leaves two mechanics to verify before moving on: the $2(N-1)$ step count and the fact that every rank sends and receives in each step.
 
+::: {.column-margin}
+![](images/svg/collective_communication_ring_tree_divergence.svg){width="100%" fig-alt="Two trend strokes from a shared origin. A steep red stroke (Ring, latency growing linearly with node count) pulls away above a near-flat blue stroke (Tree, latency growing logarithmically) as the cluster grows."}
+
+*Ring latency grows with N; tree stays logarithmic.*
+:::
+
 ::: {#chk-collective-communication-ring-allreduce-mechanics .callout-checkpoint title="Ring AllReduce mechanics"}
 
 Verify your understanding of bandwidth-optimal reduction:
@@ -968,12 +974,6 @@ Verify your understanding of bandwidth-optimal reduction:
 :::
 
 The trace above illustrates the key property of Ring AllReduce: at every step, every link in the ring is active, with data flowing in the same direction. No GPU ever sits idle, and no link is underutilized. This uniform link utilization is what makes Ring bandwidth-optimal.
-
-::: {.column-margin}
-![](images/svg/collective_communication_ring_tree_divergence.svg){width="100%" fig-alt="Two trend strokes from a shared origin. A steep red stroke (Ring, latency growing linearly with node count) pulls away above a near-flat blue stroke (Tree, latency growing logarithmically) as the cluster grows."}
-
-*Ring latency grows with N; tree stays logarithmic.*
-:::
 
 The performance follows directly from the algorithm structure. Each node sends and receives $\frac{M}{N}$ bytes in each of the $2(N-1)$ steps.
 $$
