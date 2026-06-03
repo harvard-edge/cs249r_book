@@ -34,6 +34,16 @@ from .migration import (
 )
 from .reports import build_lab_report, report_export, report_export_panel, report_text_fallback
 from .registry_refs import resolve_mlsysim_ref
+from .roofline import (
+    FusionTrafficResult,
+    GemmWorkload,
+    RooflineHardwareProfile,
+    RooflinePoint,
+    fusion_traffic,
+    gemm_workload,
+    hardware_roofline_profile,
+    roofline_point,
+)
 from .schemas import (
     DEFAULT_TRACKS,
     ChapterRecap,
@@ -181,4 +191,12 @@ __all__ = [
     "report_text_fallback",
     "get_lab_metadata",
     "resolve_mlsysim_ref",
+    "FusionTrafficResult",
+    "GemmWorkload",
+    "RooflineHardwareProfile",
+    "RooflinePoint",
+    "fusion_traffic",
+    "gemm_workload",
+    "hardware_roofline_profile",
+    "roofline_point",
 ]
