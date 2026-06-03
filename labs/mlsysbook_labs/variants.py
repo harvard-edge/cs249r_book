@@ -111,7 +111,14 @@ LAB_TRACK_VARIANTS: tuple[LabTrackVariant, ...] = (
         primary_metric="battery or thermal headroom",
         guardrail_metric="quality and on-device p99 latency",
         model_ref="Models.Vision.MobileNetV2",
-        defaults={"candidate_methods": ("int8_quantization", "structured_pruning", "distillation"), "bit_widths": (16, 8, 6, 4)},
+        defaults={
+            "candidate_methods": ("int8_quantization", "structured_pruning", "distillation"),
+            "bit_widths": (16, 8, 6, 4),
+            "size_limit_ref": "memory.capacity",
+            "max_accuracy_drop": 0.01,
+            "min_speedup": 1.05,
+            "require_hardware_support": True,
+        },
         assumptions={"unsupported_kernel_policy": "marks infeasible", "report_artifact": "compression deployment recipe"},
     ),
     _variant(
@@ -124,7 +131,14 @@ LAB_TRACK_VARIANTS: tuple[LabTrackVariant, ...] = (
         primary_metric="flash/SRAM fit and OTA payload size",
         guardrail_metric="battery life and signal quality",
         model_ref="Models.Tiny.DS_CNN",
-        defaults={"candidate_methods": ("int8_quantization", "structured_pruning", "distillation"), "bit_widths": (8, 6, 4, 3, 2)},
+        defaults={
+            "candidate_methods": ("int8_quantization", "structured_pruning", "distillation"),
+            "bit_widths": (8, 6, 4, 3, 2),
+            "size_limit_ref": "memory.flash_capacity",
+            "max_accuracy_drop": 0.02,
+            "min_speedup": 1.0,
+            "require_hardware_support": True,
+        },
         assumptions={"runtime_memory_included": True, "report_artifact": "compression deployment recipe"},
     ),
     _variant(
@@ -137,7 +151,14 @@ LAB_TRACK_VARIANTS: tuple[LabTrackVariant, ...] = (
         primary_metric="p99 or p999 latency",
         guardrail_metric="rare-event recall",
         model_ref="Models.Vision.YOLOv8_Nano",
-        defaults={"candidate_methods": ("int8_quantization", "structured_pruning", "distillation"), "bit_widths": (16, 8, 6, 4)},
+        defaults={
+            "candidate_methods": ("int8_quantization", "structured_pruning", "distillation"),
+            "bit_widths": (16, 8, 6, 4),
+            "size_limit_ref": "memory.capacity",
+            "max_accuracy_drop": 0.005,
+            "min_speedup": 1.05,
+            "require_hardware_support": True,
+        },
         assumptions={"rare_event_validation_required": True, "report_artifact": "compression deployment recipe"},
     ),
     _variant(
@@ -150,7 +171,14 @@ LAB_TRACK_VARIANTS: tuple[LabTrackVariant, ...] = (
         primary_metric="cost/request or throughput",
         guardrail_metric="quality and SLA",
         model_ref="Models.Language.BERT_Base",
-        defaults={"candidate_methods": ("int8_quantization", "structured_pruning", "distillation"), "bit_widths": (16, 8, 6, 4)},
+        defaults={
+            "candidate_methods": ("int8_quantization", "structured_pruning", "distillation"),
+            "bit_widths": (16, 8, 6, 4),
+            "size_limit_ref": "memory.capacity",
+            "max_accuracy_drop": 0.01,
+            "min_speedup": 1.05,
+            "require_hardware_support": True,
+        },
         assumptions={"fleet_profile": "Systems.Clusters.Lab_64_H100", "report_artifact": "compression deployment recipe"},
     ),
 

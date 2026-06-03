@@ -578,3 +578,54 @@ Tests or checks run:
 
 Follow-up:
 - Use `resolve_mlsysim_ref()` in V1-10 when building compression candidates from the selected track variant.
+
+### 2026-06-03 - V1-10 MLSysIM Candidate Evidence Pass
+
+Lab:
+- V1-10 The Compression Paradox.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added V1-10 compression guardrail defaults to each track variant: size-limit source, maximum accuracy drop, minimum speedup, and hardware-support requirement.
+- Updated V1-10 to resolve the selected variant's `model_ref` and `hardware_ref` with `resolve_mlsysim_ref()`.
+- Added a reactive `CompressionModel.sweep()` cell that evaluates quantization and pruning candidates for the selected track.
+- Added a visible MLSysIM-backed `Evidence Summary` with best feasible frontier candidate, frontier candidates, dominated candidates, feasible count, size limit, and guardrail source.
+- Updated the local report export to include compression candidate rows, best candidate, frontier labels, dominated labels, and solver source trace.
+- Updated the Design Ledger payload to save the same plain candidate snapshot.
+- Rebuilt the `mlsysbook_labs` browser wheel so the updated variant defaults are available in WASM.
+
+MLSysIM facts/APIs needed:
+- This pass consumes `CompressionModel.sweep()` and `resolve_mlsysim_ref()`.
+- iPhone fast-path support remains conservative because `Hardware.Mobile.iPhone15Pro` has no explicit `int8` precision entry. The lab records that through hardware-support feasibility rather than adding a notebook override.
+
+Notebook-local constants removed:
+- The report and opening evidence path no longer depend on notebook-local compression candidate calculations.
+- Legacy Parts A-E still contain their original calculation snippets and will be migrated part-by-part.
+
+Reusable component or modality improved:
+- V1-10 now demonstrates the intended flow: typed track variant -> MLSysIM registry objects -> MLSysIM compression sweep -> evidence summary -> ledger/report snapshot.
+
+Plan updates needed in other labs:
+- Other labs with typed variants should follow this ref-resolution pattern when turning `hardware_ref`, `model_ref`, or `system_ref` into solver inputs.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_10_model_compress.py labs/mlsysbook_labs/variants.py labs/tests/test_lab_variants.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestSyntax::test_ast_parse labs/tests/test_static.py::TestWheelConsistency::test_mlsysbook_labs_wheel_present_when_imported labs/tests/test_static.py::TestWheelConsistency::test_micropip_url_matches_pyproject_version --tb=short -q labs/vol1/lab_10_model_compress.py`
+- Runtime sweep check across all four V1-10 variants with `PYTHONPATH=mlsysim:labs`.
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains the V1-10 guardrail defaults.
+
+Follow-up:
+- Migrate the internals of Parts A-C so the interactive controls and visuals read from the MLSysIM candidate/sweep outputs instead of legacy notebook formulas.
+- Add structured reflection/checkpoint widgets for the final recipe so the report can become complete.

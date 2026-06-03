@@ -33,6 +33,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
+    from mlsysim.engine.solver import CompressionModel
     from mlsysim import Hardware, Models
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
@@ -43,12 +44,14 @@ async def _():
         big_takeaways,
         build_lab_report,
         chapter_recap,
+        evidence_summary,
         get_lab_track_variant,
         get_track_profile,
         lab_header,
         lab_map,
         learning_objectives,
         report_export_panel,
+        resolve_mlsysim_ref,
         scenario_brief,
         source_trace,
         track_context,
@@ -80,7 +83,7 @@ async def _():
         _ = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS,
-        COLORS, H100_BW, H100_RAM, H100_TDP, H100_TFLOPS,
+        COLORS, CompressionModel, H100_BW, H100_RAM, H100_TDP, H100_TFLOPS,
         ChapterRecap, DEFAULT_TRACK_ID,
         IPHONE_BW, IPHONE_RAM, IPHONE_TDP, IPHONE_TFLOPS,
         JETSON_BW, JETSON_RAM, JETSON_TFLOPS,
@@ -88,10 +91,11 @@ async def _():
         MOBILENET_FLOPS, MOBILENET_PARAMS,
         RESNET50_FLOPS, RESNET50_PARAMS,
         apply_plotly_theme, big_takeaways, build_lab_report,
-        chapter_recap, get_lab_track_variant, get_track_profile,
-        go, lab_header, lab_map, learning_objectives, ledger, math,
-        mo, np, report_export_panel, scenario_brief, source_trace,
-        track_context, track_selector,
+        chapter_recap, evidence_summary, get_lab_track_variant,
+        get_track_profile, go, lab_header, lab_map,
+        learning_objectives, ledger, math, mo, np,
+        report_export_panel, resolve_mlsysim_ref,
+        scenario_brief, source_trace, track_context, track_selector,
     )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -148,6 +152,83 @@ def _(get_lab_track_variant, get_track_profile, v1_10_track_picker):
     return v1_10_track_id, v1_10_track_profile, v1_10_variant
 
 
+@app.cell
+def _(CompressionModel, resolve_mlsysim_ref, v1_10_variant):
+    def _size_limit_for(hardware, limit_ref: str):
+        if limit_ref == "memory.flash_capacity":
+            return hardware.memory.flash_capacity or hardware.memory.capacity
+        if limit_ref == "storage.capacity" and hardware.storage is not None:
+            return hardware.storage.capacity
+        return hardware.memory.capacity
+
+    v1_10_model = resolve_mlsysim_ref(v1_10_variant.model_ref)
+    v1_10_hardware = resolve_mlsysim_ref(v1_10_variant.hardware_ref)
+    v1_10_defaults = dict(v1_10_variant.defaults)
+    v1_10_size_limit = _size_limit_for(
+        v1_10_hardware,
+        str(v1_10_defaults.get("size_limit_ref", "memory.capacity")),
+    )
+    _bit_widths = tuple(v1_10_defaults.get("bit_widths", (16, 8, 4)))
+    _candidate_configs = [
+        {
+            "label": f"{'FP' if bit_width >= 16 else 'INT'}{bit_width} quantization",
+            "method": "quantization",
+            "target_bitwidth": int(bit_width),
+        }
+        for bit_width in _bit_widths
+    ]
+    _candidate_configs.extend(
+        [
+            {
+                "label": "50% structured pruning",
+                "method": "pruning",
+                "sparsity": 0.5,
+                "sparsity_type": "structured",
+            },
+            {
+                "label": "90% unstructured pruning",
+                "method": "pruning",
+                "sparsity": 0.9,
+                "sparsity_type": "unstructured",
+            },
+        ]
+    )
+    v1_10_compression_solver = CompressionModel()
+    v1_10_compression_sweep = v1_10_compression_solver.sweep(
+        v1_10_model,
+        v1_10_hardware,
+        _candidate_configs,
+        size_limit=v1_10_size_limit,
+        max_accuracy_drop=float(v1_10_defaults["max_accuracy_drop"]),
+        min_speedup=float(v1_10_defaults["min_speedup"]),
+        require_hardware_support=bool(v1_10_defaults["require_hardware_support"]),
+    )
+    v1_10_candidate_rows = tuple(
+        {
+            "label": candidate.label,
+            "feasible": candidate.feasible,
+            "pareto_status": candidate.pareto_status,
+            "binding_constraint": candidate.binding_constraint,
+            "compressed_size_mb": round(candidate.compressed_size_gb.to("MB").magnitude, 4),
+            "compression_ratio": round(candidate.compression_ratio, 3),
+            "accuracy_delta": round(candidate.estimated_accuracy_delta, 4),
+            "inference_speedup": round(candidate.inference_speedup, 3),
+            "hardware_supported": candidate.hardware_supported,
+            "guardrail_violations": tuple(candidate.guardrail_violations),
+        }
+        for candidate in v1_10_compression_sweep.candidates
+    )
+    return (
+        v1_10_candidate_rows,
+        v1_10_compression_solver,
+        v1_10_compression_sweep,
+        v1_10_defaults,
+        v1_10_hardware,
+        v1_10_model,
+        v1_10_size_limit,
+    )
+
+
 @app.cell(hide_code=True)
 def _(ACADEMIC_LAB_CSS, LAB_CSS, lab_header, lab_metadata, mo):
     mo.vstack([
@@ -171,6 +252,7 @@ def _(ACADEMIC_LAB_CSS, LAB_CSS, lab_header, lab_metadata, mo):
 def _(
     chapter_10_recap,
     chapter_recap,
+    evidence_summary,
     lab_learning_objectives,
     lab_map,
     learning_objectives,
@@ -183,6 +265,9 @@ def _(
     scenario_brief,
     source_trace,
     track_context,
+    v1_10_candidate_rows,
+    v1_10_compression_sweep,
+    v1_10_size_limit,
     v1_10_track_picker,
     v1_10_track_profile,
     v1_10_variant,
@@ -213,8 +298,10 @@ def _(
         "defaults": dict(v1_10_variant.defaults),
         "assumptions": dict(v1_10_variant.assumptions),
         "equations": "model_size = parameters * bytes_per_parameter; compression_ratio = baseline_size / compressed_size",
-        "implementation_status": "Outer track/report contract migrated; Parts A-E calculations still use the legacy notebook formulas until the solver pass.",
+        "solver": "CompressionModel.sweep",
+        "implementation_status": "Track-specific candidate evidence comes from MLSysIM; Parts A-E visuals still use the legacy notebook formulas until the part-internal migration.",
     }
+    _feasible_count = sum(1 for row in v1_10_candidate_rows if row["feasible"])
     mo.vstack(
         [
             learning_objectives(lab_learning_objectives),
@@ -276,6 +363,17 @@ def _(
                 _part_completion,
             ),
             source_trace(_source_trace),
+            evidence_summary(
+                {
+                    "Best feasible frontier candidate": v1_10_compression_sweep.best_candidate_label or "No feasible frontier candidate",
+                    "Frontier candidates": ", ".join(v1_10_compression_sweep.frontier_labels) or "None",
+                    "Dominated candidates": ", ".join(v1_10_compression_sweep.dominated_labels) or "None",
+                    "Feasible candidates": f"{_feasible_count} of {len(v1_10_candidate_rows)}",
+                    "Size limit": f"{v1_10_size_limit.to('MB').magnitude:.3g} MB",
+                    "Guardrail source": "V1-10 LabTrackVariant.defaults",
+                },
+                caption="Track-specific compression candidates are evaluated through MLSysIM before the detailed part migration.",
+            ),
         ]
     )
     return
@@ -1213,6 +1311,8 @@ def _(
     pD_pred,
     pE_pred,
     report_export_panel,
+    v1_10_candidate_rows,
+    v1_10_compression_sweep,
     v1_10_track_profile,
     v1_10_variant,
 ):
@@ -1234,8 +1334,10 @@ def _(
         "model_ref": v1_10_variant.model_ref,
         "variant_defaults": dict(v1_10_variant.defaults),
         "variant_assumptions": dict(v1_10_variant.assumptions),
-        "current_limitation": "Report export captures track, scenario, and predictions before the solver-backed evidence migration.",
+        "solver": "CompressionModel.sweep",
+        "current_limitation": "Report export captures solver-backed candidate evidence; final recipe and structured reflection migrate next.",
     }
+    _feasible_count = sum(1 for row in v1_10_candidate_rows if row["feasible"])
     _report = build_lab_report(
         lab_metadata,
         track=v1_10_track_profile.track_id,
@@ -1246,12 +1348,21 @@ def _(
             "track": v1_10_track_profile.label,
             "primary_metric": v1_10_variant.primary_metric,
             "guardrail_metric": v1_10_variant.guardrail_metric,
-            "legacy_notebook_status": "Parts A-E still use the pre-migration calculations in this slice.",
+            "best_feasible_frontier_candidate": v1_10_compression_sweep.best_candidate_label or "No feasible frontier candidate",
+            "frontier_candidates": tuple(v1_10_compression_sweep.frontier_labels),
+            "dominated_candidates": tuple(v1_10_compression_sweep.dominated_labels),
+            "feasible_candidates": f"{_feasible_count} of {len(v1_10_candidate_rows)}",
+            "legacy_notebook_status": "Parts A-E visuals still use the pre-migration calculations in this slice.",
+        },
+        result_snapshot={
+            "compression_candidates": v1_10_candidate_rows,
+            "best_candidate_label": v1_10_compression_sweep.best_candidate_label,
+            "frontier_labels": tuple(v1_10_compression_sweep.frontier_labels),
+            "dominated_labels": tuple(v1_10_compression_sweep.dominated_labels),
         },
         big_takeaways=lab_big_takeaways,
         source_trace=_source_trace,
         incomplete_fields=(
-            "Track-specific compression candidate evidence",
             "Final recipe decision widget",
             "Structured reflection fields",
         ),
@@ -1264,9 +1375,10 @@ def _(
 <div class="mlsysbook-panel">
   <h2>Download Report</h2>
   <p class="mlsysbook-source-summary">
-    This local report already records the selected track, scenario variant, source trace,
-    and any predictions you have made. It marks the final recipe and solver-backed
-    evidence as incomplete until the next migration slices land.
+    This local report records the selected track, scenario variant, MLSysIM
+    candidate evidence, source trace, and any predictions you have made. It marks
+    the final recipe and structured reflection fields as incomplete until the next
+    migration slice lands.
   </p>
 </div>
 """
@@ -1286,7 +1398,20 @@ def _(
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred, v1_10_track_id, v1_10_variant):
+def _(
+    COLORS,
+    ledger,
+    mo,
+    pA_pred,
+    pB_pred,
+    pC_pred,
+    pD_pred,
+    pE_pred,
+    v1_10_candidate_rows,
+    v1_10_compression_sweep,
+    v1_10_track_id,
+    v1_10_variant,
+):
     _complete = all(
         prediction.value is not None
         for prediction in (pA_pred, pB_pred, pC_pred, pD_pred, pE_pred)
@@ -1302,6 +1427,10 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred, v1_10_tra
         "model_ref": v1_10_variant.model_ref,
         "primary_metric": v1_10_variant.primary_metric,
         "guardrail_metric": v1_10_variant.guardrail_metric,
+        "compression_candidates": v1_10_candidate_rows,
+        "best_candidate_label": v1_10_compression_sweep.best_candidate_label,
+        "frontier_labels": tuple(v1_10_compression_sweep.frontier_labels),
+        "dominated_labels": tuple(v1_10_compression_sweep.dominated_labels),
         "quantization_accuracy_loss": pA_pred.value,
         "pruning_speedup_prediction": pB_pred.value,
         "deployment_strategy": pC_pred.value,
