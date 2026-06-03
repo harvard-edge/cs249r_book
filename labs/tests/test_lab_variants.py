@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from mlsysbook_labs import (
+    ALL_LAB_IDS,
+    LAB_CATALOG,
     PILOT_LAB_IDS,
     canonical_track_ids,
     get_lab_track_variant,
@@ -19,14 +21,15 @@ def test_pilot_labs_have_all_canonical_track_variants():
     expected = canonical_track_ids()
     coverage = variant_coverage()
 
-    assert tuple(coverage) == PILOT_LAB_IDS
-    for lab_id in PILOT_LAB_IDS:
+    assert tuple(coverage) == ALL_LAB_IDS
+    assert len(ALL_LAB_IDS) == len(LAB_CATALOG) == 34
+    for lab_id in ALL_LAB_IDS:
         assert coverage[lab_id] == expected
         assert len(list_lab_variants(lab_id)) == len(expected)
 
 
 def test_variant_track_refs_match_canonical_profiles():
-    for lab_id in PILOT_LAB_IDS:
+    for lab_id in ALL_LAB_IDS:
         for variant in list_lab_variants(lab_id):
             profile = get_track_profile(variant.track_id)
             assert variant.hardware_ref == profile.hardware_ref
@@ -49,7 +52,7 @@ def test_variant_alias_lookup():
 
 def test_variant_registry_paths_resolve():
     scenario_ids = set()
-    for lab_id in PILOT_LAB_IDS:
+    for lab_id in ALL_LAB_IDS:
         for variant in list_lab_variants(lab_id):
             scenario_ids.add(variant.scenario_id)
             assert _resolve_ref(variant.hardware_ref) is not None
@@ -57,8 +60,17 @@ def test_variant_registry_paths_resolve():
             if variant.system_ref is not None:
                 assert _resolve_ref(variant.system_ref) is not None
 
-    variant_count = sum(len(list_lab_variants(lab_id)) for lab_id in PILOT_LAB_IDS)
+    variant_count = sum(len(list_lab_variants(lab_id)) for lab_id in ALL_LAB_IDS)
     assert len(scenario_ids) == variant_count
+
+
+def test_non_pilot_variants_are_marked_as_baseline():
+    for lab_id in ALL_LAB_IDS:
+        for variant in list_lab_variants(lab_id):
+            if lab_id in PILOT_LAB_IDS:
+                continue
+            assert variant.defaults["implementation_status"] == "baseline_variant_pending_notebook_migration"
+            assert variant.assumptions["fallback_variant"] is True
 
 
 def test_v1_10_variants_define_compression_guardrails():

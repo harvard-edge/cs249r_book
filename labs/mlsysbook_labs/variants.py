@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .schemas import LabTrackVariant
+from .catalog import LAB_CATALOG
+from .schemas import LabTrackVariant, TrackProfile
 from .tracks import CANONICAL_TRACKS, get_track_profile, normalize_track_id
 
 
@@ -11,6 +12,15 @@ PILOT_LAB_IDS = (
     "v1_10_compression_paradox",
     "v2_11_edge_thermodynamics",
 )
+
+ALL_LAB_IDS = tuple(metadata.lab_id for metadata in LAB_CATALOG.values())
+
+_MODEL_REF_BY_TRACK = {
+    "iphone": "Models.Vision.MobileNetV2",
+    "oura_ring": "Models.Tiny.DS_CNN",
+    "robotaxi": "Models.Vision.YOLOv8_Nano",
+    "cloud_fleet": "Models.Language.BERT_Base",
+}
 
 
 def _variant(
@@ -45,7 +55,7 @@ def _variant(
     )
 
 
-LAB_TRACK_VARIANTS: tuple[LabTrackVariant, ...] = (
+_HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
     # Lab 00: orientation and track identity.
     _variant(
         lab_id="v1_00_architects_portal",
@@ -242,6 +252,56 @@ LAB_TRACK_VARIANTS: tuple[LabTrackVariant, ...] = (
 )
 
 
+def _baseline_variant(lab_id: str, title: str, profile: TrackProfile) -> LabTrackVariant:
+    """Create a conservative track variant for labs not yet hand-authored."""
+    return LabTrackVariant(
+        lab_id=lab_id,
+        track_id=profile.track_id,
+        scenario_id=f"{lab_id}_{profile.track_id}_baseline",
+        stakeholder=profile.stakeholder,
+        workload_summary=(
+            f"{title} realized through the {profile.label} track. "
+            f"{profile.narrative}"
+        ),
+        objective=(
+            f"Apply the {title} lab decisions to {profile.label} and defend "
+            "the track-specific trade-off using local evidence."
+        ),
+        primary_metric=profile.primary_metrics[0],
+        guardrail_metric=profile.guardrail_metrics[0],
+        hardware_ref=profile.hardware_ref,
+        system_ref=profile.system_ref,
+        model_ref=_MODEL_REF_BY_TRACK[profile.track_id],
+        defaults={
+            "assignment_mode": "track-aware baseline",
+            "implementation_status": "baseline_variant_pending_notebook_migration",
+            "dominant_constraints": profile.dominant_constraints,
+            "primary_metrics": profile.primary_metrics,
+            "guardrail_metrics": profile.guardrail_metrics,
+        },
+        assumptions={
+            "report_artifact": f"{title} engineering memo",
+            "solver_required": False,
+            "source_policy": profile.source_policy,
+            "fallback_variant": True,
+        },
+    )
+
+
+def _baseline_variants() -> tuple[LabTrackVariant, ...]:
+    hand_authored_lab_ids = {variant.lab_id for variant in _HAND_AUTHORED_VARIANTS}
+    variants = []
+    for metadata in LAB_CATALOG.values():
+        if metadata.lab_id in hand_authored_lab_ids:
+            continue
+        for profile in CANONICAL_TRACKS:
+            variants.append(_baseline_variant(metadata.lab_id, metadata.title, profile))
+    return tuple(variants)
+
+
+LAB_TRACK_VARIANTS: tuple[LabTrackVariant, ...] = _HAND_AUTHORED_VARIANTS + _baseline_variants()
+
+
 _VARIANT_MAP: dict[tuple[str, str], LabTrackVariant] = {
     (variant.lab_id, variant.track_id): variant for variant in LAB_TRACK_VARIANTS
 }
@@ -265,7 +325,7 @@ def variant_coverage() -> dict[str, tuple[str, ...]]:
     """Return available track IDs by lab ID for tests and dashboards."""
     return {
         lab_id: tuple(variant.track_id for variant in list_lab_variants(lab_id))
-        for lab_id in PILOT_LAB_IDS
+        for lab_id in ALL_LAB_IDS
     }
 
 
@@ -276,6 +336,7 @@ def canonical_track_ids() -> tuple[str, ...]:
 
 __all__ = [
     "LAB_TRACK_VARIANTS",
+    "ALL_LAB_IDS",
     "PILOT_LAB_IDS",
     "canonical_track_ids",
     "get_lab_track_variant",

@@ -63,6 +63,7 @@ from .ui import (
     what_you_need_to_know,
 )
 from .variants import (
+    ALL_LAB_IDS,
     LAB_TRACK_VARIANTS,
     PILOT_LAB_IDS,
     canonical_track_ids,
@@ -111,6 +112,7 @@ __all__ = [
     "get_track_profile",
     "track_options",
     "track_profile_map",
+    "ALL_LAB_IDS",
     "LAB_TRACK_VARIANTS",
     "PILOT_LAB_IDS",
     "canonical_track_ids",

@@ -676,3 +676,50 @@ Tests or checks run:
 Follow-up:
 - Migrate Part A, Part B, and Part C internals to render directly from MLSysIM candidate/sweep outputs.
 - Consider adding a reusable structured synthesis widget helper if V2-11 repeats this pattern.
+
+### 2026-06-03 - All-Lab Baseline Variant Coverage
+
+Lab:
+- All 34 cataloged labs.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/variants.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `ALL_LAB_IDS` from the lab catalog.
+- Kept hand-authored variants for Lab 00, V1-10, and V2-11.
+- Added generated baseline variants for every non-pilot catalog lab and every canonical track.
+- Baseline variants use canonical track profiles for stakeholder, hardware/system refs, primary metrics, guardrails, dominant constraints, and source policy.
+- Baseline variants use stable model refs by track: MobileNetV2 for iPhone, DS-CNN for Oura Ring, YOLOv8-Nano for RoboTaxi, and BERT-Base for Cloud Fleet.
+- Updated variant coverage tests to require all 34 labs to expose all four canonical track variants.
+- Rebuilt the `mlsysbook_labs` browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new facts. Baseline variants point to existing MLSysIM model, hardware, and system registries.
+- Lab-specific solver thresholds still need hand-authored defaults when a notebook migration needs more than the baseline variant.
+
+Notebook-local constants removed:
+- None. This pass creates source-of-truth track/scenario coverage before batch notebook edits.
+
+Reusable component or modality improved:
+- Every lab now has a typed track variant entry that can drive track context, scenario brief, source trace, ledger metadata, and report exports.
+
+Plan updates needed in other labs:
+- Batch notebook migrations can now depend on `get_lab_track_variant()` for every catalog lab.
+- Replace baseline variants with hand-authored variants as individual labs receive deeper solver-backed migrations.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py labs/tests/test_lab_variants.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py -q`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `ALL_LAB_IDS`, `_baseline_variants`, and `baseline_variant_pending_notebook_migration`.
+
+Follow-up:
+- Add a compact shared migration shell for legacy notebooks so batch migration does not duplicate outer-contract/report boilerplate.
