@@ -239,6 +239,25 @@ def test_v1_08_variants_define_training_defaults():
         assert variant.assumptions["report_artifact"] == "training feasibility plan"
 
 
+def test_v1_09_variants_define_selection_defaults():
+    for variant in list_lab_variants("v1_09_selection_paradox"):
+        assert "selection_story" in variant.defaults
+        assert "dataset_unit" in variant.defaults
+        assert "dataset_size_k" in variant.defaults
+        assert "cost_per_k" in variant.defaults
+        assert "compute_cost_per_k" in variant.defaults
+        assert "storage_mb_per_k" in variant.defaults
+        assert "cost_budget" in variant.defaults
+        assert "storage_budget_mb" in variant.defaults
+        assert "quality_floor_pct" in variant.defaults
+        assert "coverage_floor_pct" in variant.defaults
+        assert "rare_event_floor_pct" in variant.defaults
+        assert "subgroups" in variant.defaults
+        assert "policy_options" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "data selection policy memo"
+
+
 def test_v1_11_variants_define_roofline_defaults():
     for variant in list_lab_variants("v1_11_hardware_roofline"):
         assert "matrix_dim" in variant.defaults

@@ -254,15 +254,15 @@ Deep migration tasks:
 Path: `labs/vol1/lab_09_data_selection.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware data-selection migration installed.
 
 Deep migration tasks:
-- [ ] Make data/model selection criteria depend on track constraints.
-- [ ] Add shared candidate-selection helper if useful across labs.
-- [ ] Include track-specific tradeoffs between accuracy, robustness, latency, memory, and cost.
-- [ ] Ensure plots compare candidates with track-specific feasibility boundaries.
-- [ ] Update report with selected candidate, rejected candidate, and reason.
-- [ ] Add tests for candidate feasibility logic if introduced.
+- [x] Make data/model selection criteria depend on track constraints.
+- [x] Add shared candidate-selection helper if useful across labs.
+- [x] Include track-specific tradeoffs between accuracy, robustness, latency, memory, and cost.
+- [x] Ensure plots compare candidates with track-specific feasibility boundaries.
+- [x] Update report with selected candidate, rejected candidate, and reason.
+- [x] Add tests for candidate feasibility logic if introduced.
 
 ### V1-10 - Compression Paradox
 

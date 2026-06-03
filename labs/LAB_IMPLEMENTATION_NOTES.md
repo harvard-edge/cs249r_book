@@ -1756,3 +1756,52 @@ Plan updates needed in other labs:
 Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_08_model_train.py labs/mlsysbook_labs/training.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_08_model_train" -q`
+
+### 2026-06-03 - V1-09 Selection Paradox Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_09_data_selection.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/selection.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_selection_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_09_data_selection.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.selection`, a shared helper layer for data policy options, utility/cost feasibility, subgroup coverage profiles, and data policy decision memos.
+- Added hand-authored V1-09 variants with track-specific dataset units, quality/coverage/rare-event floors, storage/cost budgets, subgroup coverage metadata, policy options, next-data recommendations, and validation tests.
+- Replaced the old A100/Jetson coreset notebook with a selected-track Selection Paradox lab: selection-pressure prediction, utility-cost frontier, subgroup coverage chart, data policy recommendation, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/selection.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific dataset units, cost/storage budgets, subgroup coverage values, policy assumptions, and validation requirements live in typed V1-09 variants.
+
+Notebook-local constants removed:
+- Fixed A100/Jetson hardware constants, ResNet/MobileNet scoring examples, generic ICR curves, and preprocessing-tax formulas were removed from V1-09.
+- Displayed selected examples, quality, coverage, rare-event score, cost, storage, subgroup coverage, next data, and residual blind spots now come from `mlsysbook_labs.selection`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.selection` can be reused by robustness, responsibility, operations, and capstone labs that need subgroup coverage, rare-event coverage, or data-policy evidence.
+
+Plan updates needed in other labs:
+- V1-15 responsible engineering should reuse subgroup coverage and accepted-blind-spot language when fairness or harm tradeoffs are data-driven.
+- V2-14 robustness should reuse rare-event coverage and next-data policy fields rather than creating separate notebook-local coverage math.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_09_data_selection.py labs/mlsysbook_labs/selection.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_09_data_selection" -q`
