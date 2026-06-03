@@ -161,6 +161,9 @@ HARDCODED_HARDWARE = re.compile(
 )
 
 # Hardcoded literature/infrastructure scalars that belong in registries.
+#   2026-06-03 (Oura/MobileNetV2 source-of-truth audit): Oura case-study
+#   accuracy anchors belong in ReferenceStats.OuraSleepStudy; MobileNetV2 alpha
+#   profile parameter counts belong in Models.Vision.*.
 HARDCODED_REGISTRY = re.compile(
     r"\b(?:scaling_factor|cf_scaling_factor|training_flops_per_token_param)\s*=\s*6\b|"
     r"\b(?:psi_threshold)\s*=\s*0\.2\b|"
@@ -181,7 +184,14 @@ HARDCODED_REGISTRY = re.compile(
     r"\bgpu_cost_per_hour\s*=\s*3\b|"
     r"\bn_gpus\s*=\s*8192\b|"
     r"\bmoe_(?:total|active)_params_b\s*=\s*(?:671|37)\b|"
-    r"\bsmartphone_ram_gb\s*=\s*8\b",
+    r"\bsmartphone_ram_gb\s*=\s*8\b|"
+    r"\bmobilenetv2_alpha10_params\s*=\s*3_?504_?872\b|"
+    r"\bmobilenetv2_alpha05_total_params\s*=\s*1_?968_?680\b|"
+    r"\bmobilenetv2_alpha05_feature_params\s*=\s*687_?680\b|"
+    r"\baccel_only_accuracy\s*=\s*0\.57\b|"
+    r"\benhanced_accuracy\s*=\s*0\.79\b|"
+    r"\bscorer_agreement_low\s*=\s*0\.82\b|"
+    r"\bscorer_agreement_high\s*=\s*0\.83\b",
     re.I,
 )
 

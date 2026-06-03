@@ -612,12 +612,13 @@ Resource-constrained devices use a two-stage learning process. Offline pretraini
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Model constraints — MobileNetV2 and STM32 sizing.
 # │ Exports: mobilenetv2_*_str, stm32_hidden_*_str
-from mlsysim.fmt import check, fmt, fmt_int, fmt_params, fmt_percent, fmt_qty, fmt_qty_int
+from mlsysim import BYTES_FP32, KB, MB, Models, param
+from mlsysim.fmt import check, fmt_int, fmt_params, fmt_percent, fmt_qty, fmt_qty_int
 
 class EdgeMobilenetSizing:
-    mobilenetv2_alpha10_params = 3_504_872
-    mobilenetv2_alpha05_total_params = 1_968_680
-    mobilenetv2_alpha05_feature_params = 687_680
+    mobilenetv2_alpha10_params = int(Models.Vision.MobileNetV2.parameters.to(param).magnitude)
+    mobilenetv2_alpha05_total_params = int(Models.Vision.MobileNetV2_Alpha0_5.parameters.to(param).magnitude)
+    mobilenetv2_alpha05_feature_params = int(Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters.to(param).magnitude)
     stm32_sram_kb = 192
     stm32_hidden_inputs = 1_000
     stm32_hidden_outputs = 10
@@ -645,7 +646,7 @@ class EdgeMobilenetSizing:
     stm32_hidden_inputs_str = fmt_int(stm32_hidden_inputs, commas=False)
     stm32_hidden_kb_str = fmt_qty(stm32_hidden, KB, precision=3, commas=False)
     stm32_hidden_sram_pct_str = fmt_percent(stm32_hidden_sram_pct/100, precision=3, commas=False, style='prose')
-    model_budget = 4 * MB
+    model_budget = 4 * MB  # scenario assumption: compact on-device model budget
     model_budget_mb_str = fmt_qty_int(model_budget, MB, commas=False)
 ```
 
@@ -1059,7 +1060,7 @@ class EdgeBattery:
 
 **Math**:
 
-1. **Total Energy**: `{python} EdgeBattery.battery_power_w_str` $\times$ `{python} EdgeBattery.battery_duration_h_str` = `{python} EdgeBattery.battery_energy_wh_str`.
+1. **Total energy**: `{python} EdgeBattery.battery_power_w_str` $\times$ `{python} EdgeBattery.battery_duration_h_str` = `{python} EdgeBattery.battery_energy_wh_str`.
 2. **Battery Impact**\index{Battery!on-device training impact}: `{python} EdgeBattery.battery_energy_wh_str`/`{python} EdgeBattery.battery_total_wh_str` = `{python} EdgeBattery.battery_drain_pct_str`.
 
 **Systems insight**: Consuming `{python} EdgeBattery.battery_drain_pct_str` of a user's battery for a background task is a severe violation of mobile UX principles—it is equivalent to losing an hour of screen-on time. This is why on-device training is typically restricted to **Opportunistic Scheduling**\index{Opportunistic Scheduling}: it only runs when the device is plugged in, connected to Wi-Fi, and thermally stable. Designing for the edge means respecting the user's energy budget as strictly as the model's accuracy budget.
@@ -1185,7 +1186,7 @@ class StorageWall:
     ls_total_savings_ratio_mult_str = fmt_multiple(total_storage_savings, precision=1, commas=False)
 ```
 
-::: {#nbk-edge-intelligence-hidden-cost-personalization .callout-notebook title="The hidden cost of personalization"}
+:::: {#nbk-edge-intelligence-hidden-cost-personalization .callout-notebook title="The hidden cost of personalization"}
 
 **Problem**: A team is deploying a 10M parameter vision model to a smartphone with support for `{python} StorageWall.ls_contexts_str` different "User Contexts" (Home, Office, Car, etc.). If a full fine-tuned model requires `{python} StorageWall.ls_full_mb_str`, how much storage does using **Residual Adapters**\index{Residual Adapter!parameter efficient finetuning} save instead?
 
@@ -1204,7 +1205,7 @@ class StorageWall:
 *Adapters make per-user personalization cheap versus full model copies.*
 :::
 
-:::
+::::
 
 The engineering challenge centers on navigating a fundamental trade-off space: adaptation expressivity vs. resource consumption. At one extreme, updating all parameters provides maximum flexibility but exceeds edge device capabilities. At the other extreme, no adaptation preserves resources but fails to capture user-specific patterns. Effective on-device learning systems must operate in the middle ground, selecting adaptation strategies based on three key engineering criteria.
 
@@ -1635,7 +1636,11 @@ Systems typically deploy different adapter configurations based on device capabi
 
 ::: {#exmp-edge-intelligence-device-keyboard-learning .callout-example title="On-device keyboard learning"}
 
-Large-scale mobile keyboard systems are a canonical deployment pattern for federated and on-device learning. A keyboard can adapt next-word prediction without uploading raw keystrokes, but only if training is strictly constrained: it runs during idle, charging, Wi-Fi-connected windows and transmits compressed updates rather than text. Production systems typically combine secure aggregation with privacy accounting or noise addition so that the server learns population-level update statistics, not individual typing histories. The result is a practical path for learning new slang and usage patterns while keeping the raw interaction stream on the device.
+**Scenario**: Large-scale mobile keyboard systems are a canonical deployment pattern for federated and on-device learning.
+
+**System**: A keyboard can adapt next-word prediction without uploading raw keystrokes, but only if training is strictly constrained: it runs during idle, charging, Wi-Fi-connected windows and transmits compressed updates rather than text. Production systems typically combine secure aggregation with privacy accounting or noise addition so that the server learns population-level update statistics, not individual typing histories.
+
+**Systems lesson**: On-device learning is viable only when the training schedule, communication payload, and privacy boundary are engineered together. The model update is a systems protocol, not just a local optimization step.
 
 :::
 
@@ -1848,7 +1853,7 @@ Few-shot and streaming adaptation form the foundation for more advanced memory a
 
 ### Experience replay {#sec-edge-intelligence-experience-replay-737e}
 
-::: {#dfn-edge-intelligence-catastrophic-forgetting .callout-definition title="Catastrophic forgetting"}
+:::: {#dfn-edge-intelligence-catastrophic-forgetting .callout-definition title="Catastrophic forgetting"}
 
 ***Catastrophic Forgetting***\index{Catastrophic Forgetting!definition} is the phenomenon in which a neural network trained sequentially on new tasks or data distributions rapidly loses performance on previously learned tasks, because gradient updates that optimize the new objective overwrite weight configurations that supported the old ones.
 
@@ -1862,7 +1867,7 @@ Few-shot and streaming adaptation form the foundation for more advanced memory a
 *Learning the new task erodes accuracy on the old one.*
 :::
 
-:::
+::::
 
 Experience replay addresses catastrophic forgetting in continuous learning scenarios by maintaining a buffer of representative examples from previous learning episodes. This technique, originally developed for reinforcement learning [@mnih2015], proves essential in on-device learning where sequential data streams can cause models to overfit to recent examples. We introduce experience replay here to address immediate stability needs; the deeper challenge of lifelong adaptation without forgetting receives comprehensive treatment in the bio-inspired learning section below (@sec-edge-intelligence-lifelong-adaptation-without-forgetting-9200).
 

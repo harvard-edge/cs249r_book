@@ -182,3 +182,29 @@ def test_storage_training_corpus_anchor():
     assert corpus.CheckpointInterval.to(minute).magnitude == pytest.approx(10.0)
     assert corpus.CheckpointBytesPerParameter.to(byte / param).magnitude == pytest.approx(10.0)
     assert corpus.CompressedSource.provenance.ref
+
+
+def test_mobilenetv2_variant_model_profiles():
+    from mlsysim import Models
+    from mlsysim.core.units import param
+
+    assert Models.Vision.MobileNetV2.parameters.to(param).magnitude == pytest.approx(3_504_872)
+    assert Models.Vision.MobileNetV2_Alpha0_5.parameters.to(param).magnitude == pytest.approx(1_968_680)
+    assert Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters.to(param).magnitude == pytest.approx(687_680)
+    assert Models.Vision.MobileNetV2.metadata.provenance.ref
+    assert Models.Vision.MobileNetV2_Alpha0_5.metadata.provenance.ref
+
+
+def test_oura_sleep_study_case_anchors():
+    from mlsysim import ReferenceStats
+    from mlsysim.core.provenance import scalar_value
+
+    study = ReferenceStats.OuraSleepStudy
+    assert scalar_value(study.Participants) == pytest.approx(106)
+    assert scalar_value(study.RecordingNights) == pytest.approx(440)
+    assert scalar_value(study.RecordingHours) == pytest.approx(3400)
+    assert scalar_value(study.AccelOnlyAccuracy) == pytest.approx(0.57)
+    assert scalar_value(study.EnhancedAccuracy) == pytest.approx(0.79)
+    assert scalar_value(study.PsgScorerAgreementLow) == pytest.approx(0.82)
+    assert scalar_value(study.PsgScorerAgreementHigh) == pytest.approx(0.83)
+    assert study.EnhancedAccuracy.provenance.ref

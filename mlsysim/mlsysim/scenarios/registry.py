@@ -48,6 +48,39 @@ class AnomalyModel(Registry):
         name="Anomaly model energy", description="Per-inference energy of the TinyML anomaly detector.")
 
 
+class OuraSleepStudy(Registry):
+    """Oura Ring sleep-stage case-study anchors."""
+
+    Participants = sourced(
+        106, pc.OURA_SLEEP_STAGING_STUDY,
+        name="Oura sleep-study participants",
+        description="Participants in the Oura Ring sleep-stage validation study.")
+    RecordingNights = sourced(
+        440, pc.OURA_SLEEP_STAGING_STUDY,
+        name="Oura sleep-study nights",
+        description="Recorded nights in the Oura Ring sleep-stage validation study.")
+    RecordingHours = sourced(
+        3400, pc.OURA_SLEEP_STAGING_STUDY,
+        name="Oura sleep-study recording hours",
+        description="Approximate hours of time-synchronized sleep-study recordings.")
+    AccelOnlyAccuracy = sourced(
+        0.57, pc.OURA_SLEEP_STAGING_STUDY,
+        name="Oura accelerometer-only sleep-stage accuracy",
+        description="Four-stage sleep classification accuracy for the accelerometer-only baseline.")
+    EnhancedAccuracy = sourced(
+        0.79, pc.OURA_SLEEP_STAGING_STUDY,
+        name="Oura enhanced sleep-stage accuracy",
+        description="Four-stage sleep classification accuracy for the enhanced multi-sensor model.")
+    PsgScorerAgreementLow = sourced(
+        0.82, pc.OURA_SLEEP_STAGING_STUDY,
+        name="PSG inter-scorer agreement low",
+        description="Lower bound of the expert PSG inter-scorer agreement band used as a practical ceiling.")
+    PsgScorerAgreementHigh = sourced(
+        0.83, pc.OURA_SLEEP_STAGING_STUDY,
+        name="PSG inter-scorer agreement high",
+        description="Upper bound of the expert PSG inter-scorer agreement band used as a practical ceiling.")
+
+
 class ClinicalImaging(Registry):
     """Clinical-imaging workflow anchors used by edge-deployment examples."""
 
@@ -204,6 +237,7 @@ class ReferenceStats(Registry):
 
     Workloads = Workloads
     AnomalyModel = AnomalyModel
+    OuraSleepStudy = OuraSleepStudy
     ClinicalImaging = ClinicalImaging
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors

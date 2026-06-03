@@ -116,6 +116,13 @@ TINYML_ANOMALY_CASE = Provenance(
     ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
     verified="2025-03-06",
 )
+OURA_SLEEP_STAGING_STUDY = Provenance(
+    id="prov:oura-sleep-staging-study-2021",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Altini and Kinnunen (2021), The Promise of Sleep: A Multi-Sensor Approach for Accurate Sleep Stage Detection Using the Oura Ring",
+    url="https://www.mdpi.com/1424-8220/21/13/4302",
+    verified="2026-06-03",
+)
 CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
     id="prov:clinical-imaging-workflow-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
