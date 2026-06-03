@@ -5411,8 +5411,10 @@ To answer that question, let us walk through the memory-feasibility path for GPT
 # │          total_fp32_gb_str, params_fp16_str, grads_fp16_str,
 # │          master_weights_str, adam_amp_str, act_fp16_str, total_amp_gb_str,
 # │          static_mem_str, act_ckpt_str, total_ckpt_gb_str, v100_mem_gib_str,
-# │          amp_reduction_str, recompute_overhead_str, checkpoint_factor_mult_str,
-# │          memory_reduction_mult_str
+# │          amp_reduction_pct_str, recompute_overhead_pct_str,
+# │          checkpoint_factor_mult_str, memory_reduction_mult_str,
+# │          util_naive_pct_str, data_naive_pct_str, compute_naive_pct_str,
+# │          mem_xfer_naive_pct_str, util_optim_pct_str, overhead_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_memory
 from mlsysim.physics import calc_activation_memory
@@ -5504,15 +5506,15 @@ class GPT2WalkthroughCalc:
     total_ckpt_gb_str = fmt_memory(total_ckpt, unit=GB, precision=1, commas=False)
     v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(memory_reduction, precision=1, commas=False)
-    amp_reduction_str = fmt_percent(amp_reduction, precision=1, commas=False, style='symbol')
-    recompute_overhead_str = fmt_percent(recompute_overhead_pct/100, precision=0, commas=False, style='symbol')
+    amp_reduction_pct_str = fmt_percent(amp_reduction, precision=1, commas=False, style='symbol')
+    recompute_overhead_pct_str = fmt_percent(recompute_overhead_pct/100, precision=0, commas=False, style='symbol')
     checkpoint_factor_mult_str = fmt_multiple(checkpoint_factor, precision=0, commas=False)
-    util_naive_str = fmt_percent(util_naive_pct/100, precision=0, commas=False, style='symbol')
-    data_naive_str = fmt_percent(data_naive_pct/100, precision=0, commas=False, style='symbol')
-    compute_naive_str = fmt_percent(compute_naive_pct/100, precision=0, commas=False, style='symbol')
-    mem_xfer_naive_str = fmt_percent(mem_xfer_naive_pct/100, precision=0, commas=False, style='symbol')
-    util_optim_str = fmt_percent(util_optim_pct/100, precision=0, commas=False, style='symbol')
-    overhead_str = fmt_percent(overhead_pct/100, precision=0, commas=False, style='symbol')
+    util_naive_pct_str = fmt_percent(util_naive_pct/100, precision=0, commas=False, style='symbol')
+    data_naive_pct_str = fmt_percent(data_naive_pct/100, precision=0, commas=False, style='symbol')
+    compute_naive_pct_str = fmt_percent(compute_naive_pct/100, precision=0, commas=False, style='symbol')
+    mem_xfer_naive_pct_str = fmt_percent(mem_xfer_naive_pct/100, precision=0, commas=False, style='symbol')
+    util_optim_pct_str = fmt_percent(util_optim_pct/100, precision=0, commas=False, style='symbol')
+    overhead_pct_str = fmt_percent(overhead_pct/100, precision=0, commas=False, style='symbol')
     summary_b_total_mem_gb_str = fmt_memory(summary_b_total, unit=GB, precision=1, commas=False)
     summary_o_total_mem_gb_str = fmt_memory(summary_o_total, unit=GB, precision=1, commas=False)
 ```
@@ -5521,11 +5523,11 @@ class GPT2WalkthroughCalc:
 
 The naive starting point is GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: it is small enough to discuss on one V100, but large enough that the first failure is immediate and unambiguous.
 
-This walkthrough uses batch size 4; the mixed-precision callout earlier uses batch 32, and @Tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized). The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. At batch size 4, the FP32 baseline requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the Machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_gib_str` V100 before throughput matters. Mixed precision changes the first term in the memory budget and reduces the footprint to `{python} GPT2WalkthroughCalc.total_amp_gb_str`, a `{python} GPT2WalkthroughCalc.amp_reduction_str` reduction, but it still does not fit. Gradient checkpointing changes a different term by storing fewer activations and recomputing them during backpropagation. Checkpointing every four layers reduces activation storage by `{python} GPT2WalkthroughCalc.checkpoint_factor_mult_str` and brings total memory to `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`, which fits at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_str` additional compute.
+This walkthrough uses batch size 4; the mixed-precision callout earlier uses batch 32, and @Tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized). The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. At batch size 4, the FP32 baseline requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the Machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_gib_str` V100 before throughput matters. Mixed precision changes the first term in the memory budget and reduces the footprint to `{python} GPT2WalkthroughCalc.total_amp_gb_str`, a `{python} GPT2WalkthroughCalc.amp_reduction_pct_str` reduction, but it still does not fit. Gradient checkpointing changes a different term by storing fewer activations and recomputing them during backpropagation. Checkpointing every four layers reduces activation storage by `{python} GPT2WalkthroughCalc.checkpoint_factor_mult_str` and brings total memory to `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`, which fits at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` additional compute.
 
-Fitting the model is only the first diagnostic pass. The next profile asks whether the accelerator is doing useful work once the run can start. The answer is no: utilization is only `{python} GPT2WalkthroughCalc.util_naive_str`, with data loading consuming `{python} GPT2WalkthroughCalc.data_naive_str` of iteration time, compute consuming `{python} GPT2WalkthroughCalc.compute_naive_str`, and memory transfers consuming `{python} GPT2WalkthroughCalc.mem_xfer_naive_str`. This profile moves the bottleneck from Machine capacity to the Data axis in D·A·M terms. Additional memory optimization would not improve wall-clock time, because the accelerator is waiting for batches.
+Fitting the model is only the first diagnostic pass. The next profile asks whether the accelerator is doing useful work once the run can start. The answer is no: utilization is only `{python} GPT2WalkthroughCalc.util_naive_pct_str`, with data loading consuming `{python} GPT2WalkthroughCalc.data_naive_pct_str` of iteration time, compute consuming `{python} GPT2WalkthroughCalc.compute_naive_pct_str`, and memory transfers consuming `{python} GPT2WalkthroughCalc.mem_xfer_naive_pct_str`. This profile moves the bottleneck from Machine capacity to the Data axis in D·A·M terms. Additional memory optimization would not improve wall-clock time, because the accelerator is waiting for batches.
 
-The targeted fix is to overlap input preparation with accelerator execution. Configuring the data loader with eight workers, pinned memory, and a prefetch factor of 2 changes the pipeline schedule rather than the model. Data loading becomes mostly hidden behind computation, accelerator utilization rises to `{python} GPT2WalkthroughCalc.util_optim_str`, and the remaining overhead is dominated by synchronization, loss scaling, memory transfers, and kernel launch latency rather than batch starvation.
+The targeted fix is to overlap input preparation with accelerator execution. Configuring the data loader with eight workers, pinned memory, and a prefetch factor of 2 changes the pipeline schedule rather than the model. Data loading becomes mostly hidden behind computation, accelerator utilization rises to `{python} GPT2WalkthroughCalc.util_optim_pct_str`, and the remaining overhead is dominated by synchronization, loss scaling, memory transfers, and kernel launch latency rather than batch starvation.
 
 ```{=latex}
 \tcbbreak
@@ -5533,12 +5535,12 @@ The targeted fix is to overlap input preparation with accelerator execution. Con
 
 @Tbl-training-gpt2-final-profile contrasts the naive baseline against the optimized configuration:
 
-| **Metric**                  |                    **Naive**                     |                  **Optimized**                   |                          **Improvement**                           |
-|:----------------------------|:------------------------------------------------:|:------------------------------------------------:|:------------------------------------------------------------------:|
-| **Memory**                  | `{python} GPT2WalkthroughCalc.total_fp32_gb_str` | `{python} GPT2WalkthroughCalc.total_ckpt_gb_str` | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` reduction |
-| **Accelerator utilization** |                       N/A                        |  `{python} GPT2WalkthroughCalc.util_optim_str`   |                             Trainable                              |
-| **Throughput**              |                       N/A                        |                  1,200 tokens/s                  |                                 —                                  |
-| **Time per epoch**          |                       N/A                        |                    8.3 hours                     |                                 —                                  |
+| **Metric**                  |                    **Naive**                     |                   **Optimized**                   |                          **Improvement**                           |
+|:----------------------------|:------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------------:|
+| **Memory**                  | `{python} GPT2WalkthroughCalc.total_fp32_gb_str` |  `{python} GPT2WalkthroughCalc.total_ckpt_gb_str` | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` reduction |
+| **Accelerator utilization** |                       N/A                        | `{python} GPT2WalkthroughCalc.util_optim_pct_str` |                             Trainable                              |
+| **Throughput**              |                       N/A                        |                   1,200 tokens/s                  |                                 —                                  |
+| **Time per epoch**          |                       N/A                        |                     8.3 hours                     |                                 —                                  |
 
 : **GPT-2 Optimization Final Profile**: Batch-4 memory figures from the walkthrough (`{python} GPT2WalkthroughCalc.total_fp32_gb_str` → `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`); @tbl-gpt2-summary reports batch-32 totals. {#tbl-training-gpt2-final-profile tbl-colwidths="[31,23,23,23]"}
 
@@ -5546,7 +5548,7 @@ The final profile is compute-bound, an Algorithm constraint in D·A·M terms, wh
 
 :::
 
-The case study illustrates why training optimization is an iterative diagnostic discipline rather than a menu of tricks. Each intervention answers the bottleneck exposed by the previous measurement: mixed precision reduces tensor storage but does not solve capacity alone, checkpointing accepts `{python} GPT2WalkthroughCalc.recompute_overhead_str` additional compute to gain `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` memory reduction, and prefetching matters only after the model can run and profiling reveals data starvation. The systematic loop of profile, identify the bottleneck, apply a targeted technique, and re-profile transforms optimization from trial-and-error into engineering practice.
+The case study illustrates why training optimization is an iterative diagnostic discipline rather than a menu of tricks. Each intervention answers the bottleneck exposed by the previous measurement: mixed precision reduces tensor storage but does not solve capacity alone, checkpointing accepts `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` additional compute to gain `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` memory reduction, and prefetching matters only after the model can run and profiling reveals data starvation. The systematic loop of profile, identify the bottleneck, apply a targeted technique, and re-profile transforms optimization from trial-and-error into engineering practice.
 
 ### Optimization impact summary {#sec-model-training-optimization-impact-summary-0213}
 
