@@ -256,6 +256,7 @@ class TestWheelConsistency:
             "mlsysbook_labs/registry_refs.py",
             "mlsysbook_labs/migration.py",
             "mlsysbook_labs/ops.py",
+            "mlsysbook_labs/responsibility.py",
             "mlsysbook_labs/roofline.py",
             "mlsysbook_labs/serving.py",
             "mlsysbook_labs/ui.py",

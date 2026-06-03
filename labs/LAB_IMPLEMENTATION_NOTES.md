@@ -1220,3 +1220,54 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_06_collective_communication" -q`
 - `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
 - `git diff --check`
+
+### 2026-06-03 - V1-15 Responsible Engineering Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_15_responsible_engr.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/responsibility.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_responsibility_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_15_responsible_engr.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.responsibility`, a shared helper layer for metric conflict, responsibility budget scoring, explanation overhead, and carbon accounting.
+- Added hand-authored V1-15 variants with track-specific harmed parties, obligations, audit signals, subgroup/context labels, metric gap targets, explanation defaults, latency SLOs, retraining energy, carbon intensity, governance delay, validation tests, and residual harm.
+- Replaced the old loan-only notebook with a track selector, track context, source trace, selected-track defaults, helper-backed plots/tables, ledger metadata, and local report export.
+- Converted Part A-D into track-aware narratives: metric conflict, responsibility budget, explainability tax, and carbon ledger.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/responsibility.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Scenario-specific harmed-party text, subgroup/context assumptions, audit signals, and responsibility thresholds live in typed V1-15 variants.
+
+Notebook-local constants removed:
+- Loan-only fairness assumptions, H100/Jetson carbon constants, grid constants, SHAP formulas, and notebook-local responsibility/carbon formulas were removed from V1-15.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.responsibility` can be reused by V2-14 robust AI, V2-16 responsible AI, V2-17 future systems, and any lab that needs source-traced harmed-party, audit, explanation, or carbon evidence.
+
+Plan updates needed in other labs:
+- V2-16 should reuse the V1-15 helper rather than reintroducing local fairness/responsibility formulas.
+- V1-16 can include V1-15's responsible decision memo as one of the capstone constraints in the ledger synthesis.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_15_responsible_engr.py labs/mlsysbook_labs/responsibility.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_15_responsible_engr" -q`
+- `python3 -m pytest labs/tests/test_responsibility_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`

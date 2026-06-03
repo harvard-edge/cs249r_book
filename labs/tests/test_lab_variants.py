@@ -178,6 +178,33 @@ def test_v1_14_variants_define_ops_defaults():
         assert variant.assumptions["report_artifact"] == "operations policy memo"
 
 
+def test_v1_15_variants_define_responsibility_defaults():
+    for variant in list_lab_variants("v1_15_no_free_fairness"):
+        assert "harmed_party" in variant.defaults
+        assert "obligation" in variant.defaults
+        assert "audit_signal" in variant.defaults
+        assert "subgroups" in variant.defaults
+        assert "baseline_quality_pct" in variant.defaults
+        assert "baseline_gap_pp" in variant.defaults
+        assert "target_gap_pp" in variant.defaults
+        assert "fairness_sensitivity" in variant.defaults
+        assert "explanation_features" in variant.defaults
+        assert "explanation_method" in variant.defaults
+        assert "explanation_coverage_pct" in variant.defaults
+        assert "base_latency_ms" in variant.defaults
+        assert "latency_slo_ms" in variant.defaults
+        assert "inference_events_per_day" in variant.defaults
+        assert "retrain_frequency_per_year" in variant.defaults
+        assert "train_energy_kwh" in variant.defaults
+        assert "grid_ci_g_per_kwh" in variant.defaults
+        assert "max_energy_factor" in variant.defaults
+        assert "max_cost_factor" in variant.defaults
+        assert "governance_delay_days" in variant.defaults
+        assert "residual_harm" in variant.defaults
+        assert "validation_tests" in variant.defaults
+        assert variant.assumptions["report_artifact"] == "responsible engineering decision memo"
+
+
 def test_v2_06_variants_define_collective_defaults():
     for variant in list_lab_variants("v2_06_collective_communication"):
         assert "operation" in variant.defaults

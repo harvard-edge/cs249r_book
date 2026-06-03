@@ -7,11 +7,11 @@ app = marimo.App(width="full")
 # ZONE A: OPENING
 # ===========================================================================
 
+
 @app.cell
 async def _():
     import marimo as mo
     import sys
-    import math
     from pathlib import Path
     import numpy as np
 
@@ -28,74 +28,181 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    import mlsysim
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim import Hardware, Infrastructure
-
-    H100_TDP_W = Hardware.Cloud.H100.tdp.m_as("W")
-    JETSON_TDP_W = Hardware.Edge.JetsonOrinNX.tdp.m_as("W")
-
-    _grids = Infrastructure.Grids
-    CI_CLEAN = float(_grids.Quebec.carbon_intensity_g_kwh)
-    CI_MIXED = float(_grids.US_Avg.carbon_intensity_g_kwh)
-    CI_COAL = float(_grids.Poland.carbon_intensity_g_kwh)
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        carbon_budget,
+        explanation_overhead,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        metric_conflict,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        responsibility_budget,
+        responsibility_track_profile,
+        source_trace,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, H100_TDP_W, JETSON_TDP_W, CI_CLEAN, CI_COAL, CI_MIXED, LAB_CSS,
-        apply_plotly_theme, go, ledger, math, mo, np,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        build_lab_report,
+        carbon_budget,
+        explanation_overhead,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        ledger,
+        metric_conflict,
+        mlsysim,
+        mo,
+        np,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        responsibility_budget,
+        responsibility_track_profile,
+        source_trace,
+        track_context,
+        track_selector,
     )
 
+
+@app.cell
+def _(get_lab_metadata):
+    v1_15_metadata = get_lab_metadata("vol1/lab_15_responsible_engr.py")
+    return (v1_15_metadata,)
+
+
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v1_15_track_picker = track_selector(default=_default_track)
+    v1_15_track_picker
+    return (v1_15_track_picker,)
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    responsibility_track_profile,
+    v1_15_track_picker,
+):
+    v1_15_track_id = v1_15_track_picker.value
+    v1_15_profile = get_track_profile(v1_15_track_id)
+    v1_15_variant = get_lab_track_variant("v1_15_no_free_fairness", v1_15_profile.track_id)
+    v1_15_hardware = resolve_mlsysim_ref(v1_15_variant.hardware_ref)
+    v1_15_model = resolve_mlsysim_ref(v1_15_variant.model_ref)
+    v1_15_resp = responsibility_track_profile(
+        v1_15_profile,
+        v1_15_variant,
+        v1_15_hardware,
+        v1_15_model,
+    )
+    return (
+        v1_15_hardware,
+        v1_15_model,
+        v1_15_profile,
+        v1_15_resp,
+        v1_15_track_id,
+        v1_15_variant,
+    )
+
+
+@app.cell(hide_code=True)
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    v1_15_metadata,
+    v1_15_profile,
+    v1_15_resp,
+    v1_15_variant,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
+                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 15
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
+                       color: #f8fafc; line-height: 1.1;">
                 No Free Fairness
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Impossibility &middot; Accuracy Cost &middot; Explainability Tax &middot; Carbon
+                Metric Conflict &middot; Responsibility Budget &middot; Explainability Tax &middot; Carbon
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                Fairness is mathematically impossible to achieve perfectly, fixing it
-                costs accuracy, explaining it costs latency, and all of it costs carbon
-                &mdash; and none of these costs are optional.
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
+                      max-width: 780px; line-height: 1.65;">
+                {v1_15_variant.workload_summary} Responsible engineering is not an
+                afterthought; it is a measurable systems constraint.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~48 min</span>
+                    4 Parts + Synthesis &middot; ~50 min
+                </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 15: Responsible Engineering</span>
+                    {v1_15_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v1_15_resp.hardware_ref}
+                </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Impossibility Theorem</span>
-                <span class="badge badge-warn">Pareto Frontier</span>
-                <span class="badge badge-fail">Carbon Budget</span>
+                <span class="badge badge-info">Harmed Party</span>
+                <span class="badge badge-warn">Audit Signal</span>
+                <span class="badge badge-fail">Residual Harm</span>
             </div>
         </div>
         """),
+        track_context(v1_15_profile),
+        source_trace(
+            {
+                "lab_id": v1_15_metadata.lab_id,
+                "track_id": v1_15_profile.track_id,
+                "hardware_ref": v1_15_variant.hardware_ref,
+                "model_ref": v1_15_variant.model_ref,
+                "shared_helper": "mlsysbook_labs.responsibility",
+                "obligation": v1_15_resp.obligation,
+                "audit_signal": v1_15_resp.audit_signal,
+                "source_policy": v1_15_profile.source_policy,
+            },
+            summary="V1-15 resolves responsibility scenarios through MLSysIM refs and mlsysbook_labs.responsibility calculations.",
+        ),
     ])
     return
 
+
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, mo, v1_15_resp):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -104,786 +211,658 @@ def _(COLORS, mo):
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives</div>
+                Learning Objectives
+            </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Prove the impossibility</strong>
-                    &mdash; equal accuracy across groups does not guarantee equal error rates
-                    when base rates differ.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Quantify the accuracy cost of fairness</strong>
-                    &mdash; the first 10pp gap reduction costs 3&ndash;5% accuracy (sweet spot);
-                    the last 5pp costs 10%+ (cliff).</div>
-                <div style="margin-bottom: 3px;">3. <strong>Calculate explanation overhead</strong>
-                    &mdash; SHapley Additive exPlanations (SHAP) with 50 features adds 50x latency to each prediction.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Name the harmed party:</strong>
+                    identify who pays when the selected track fails responsibly.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Quantify metric conflict:</strong>
+                    show why one aggregate metric cannot satisfy every subgroup or context.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Budget responsibility:</strong>
+                    connect privacy, explanations, robustness, monitoring, and carbon to systems overhead.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
         <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
+            <div style="flex: 1; min-width: 240px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites</div>
+                    Obligation
+                </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Classification metrics from the Training chapter &middot;
-                    Model serving Service Level Objectives (SLOs) from the Model Serving chapter</div>
+                    {v1_15_resp.obligation}
+                </div>
             </div>
-            <div style="flex: 0 0 180px;">
+            <div style="flex: 1; min-width: 240px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration</div>
+                    Audit Signal
+                </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~48 min</strong><br/>
-                    A: ~12 &middot; B: ~12 &middot; C: ~10 &middot; D: ~8 min</div>
+                    {v1_15_resp.audit_signal}
+                </div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
                     padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question</div>
+                Core Question
+            </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;Your loan model has 92% accuracy for both demographic groups.
-                Is it fair &mdash; and what does it cost to make it fairer?&rdquo;
+                "What responsible design can protect {v1_15_resp.harmed_party}
+                without pretending the overhead is free?"
             </div>
         </div>
-    </div>""")
+    </div>
+    """)
     return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.callout(mo.md("""
+    **Recommended Reading** - Complete before this lab:
+
+    - **The Responsible Engineering chapter** - metric conflict, fairness trade-offs,
+      explainability overhead, privacy constraints, robustness, and sustainability.
+    """), kind="info")
+    return
+
 
 # ===========================================================================
 # ZONE B: WIDGET DEFINITIONS
 # ===========================================================================
 
+
 @app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** &mdash; Complete before this lab:
-
-    - **The Responsible Engineering chapter** &mdash; Chouldechova impossibility theorem,
-      fairness-accuracy Pareto frontier, explainability methods, and carbon accounting.
-    """), kind="info")
-    return
-
-# ═════════════════════════════════════════════════════════════════════════════
-# MAIN LAB CELL
-# ═════════════════════════════════════════════════════════════════════════════
-@app.cell(hide_code=True)
-def _(COLORS, H100_TDP_W, JETSON_TDP_W, apply_plotly_theme, go, math, mo, np):
-
-    # ── Part A widgets ────────────────────────────────────────────────────────
+def _(mo, v1_15_resp):
     partA_pred = mo.ui.radio(
         options={
-            "A) Yes -- equal accuracy guarantees equal error rates": "equal",
-            "B) Nearly equal -- small differences from noise": "nearly",
-            "C) No -- Group B FPR is 3x higher despite equal accuracy": "3x",
-            "D) No -- Group A FPR is higher (more positives)": "a_higher",
+            "A) Aggregate quality is enough if it stays high": "aggregate",
+            "B) The subgroup gap can violate the obligation even when aggregate quality looks good": "gap",
+            "C) Lowering the threshold always fixes the harmed party": "threshold",
+            "D) Audits are only needed after deployment incidents": "incident",
         },
-        label="Loan model: 92% accuracy for both groups. Group A base rate 30%, Group B 10%. False Positive Rate (FPR) equal?",
+        label=f"{v1_15_resp.label}: what is the first responsibility risk for {v1_15_resp.harmed_party}?",
     )
     return (partA_pred,)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partA_base_a = mo.ui.slider(start=5, stop=50, value=30, step=5,
-                                 label="Group A base rate (%)")
-    partA_base_b = mo.ui.slider(start=5, stop=50, value=10, step=5,
-                                 label="Group B base rate (%)")
-    partA_threshold = mo.ui.slider(start=0.10, stop=0.90, value=0.50, step=0.05,
-                                    label="Classification threshold")
 
-    # ── Part B widgets ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, v1_15_resp):
+    partA_base_a = mo.ui.slider(
+        start=5,
+        stop=60,
+        value=30,
+        step=5,
+        label=f"{v1_15_resp.subgroup_a} base/context rate (%)",
+    )
+    partA_base_b = mo.ui.slider(
+        start=5,
+        stop=60,
+        value=10,
+        step=5,
+        label=f"{v1_15_resp.subgroup_b} base/context rate (%)",
+    )
+    partA_threshold = mo.ui.slider(start=0.10, stop=0.90, value=0.50, step=0.05, label="Decision threshold")
+
     partB_pred = mo.ui.radio(
         options={
-            "A) ~1% (fairness is nearly free)": "1pct",
-            "B) ~3-5% (sweet spot of the frontier)": "3-5pct",
-            "C) ~10% (significant sacrifice)": "10pct",
-            "D) ~15% (proportional to gap reduction)": "15pct",
+            "A) Add every control at maximum strength": "max",
+            "B) Choose controls until the gap closes and budgets still pass": "balanced",
+            "C) Explanations are free if they are only generated for some users": "free_explanations",
+            "D) Monitoring changes governance but not system cost": "monitoring_free",
         },
-        label="Apply equalized odds to reduce FPR gap from 15% to 5%. Accuracy loss?",
+        label=f"How should {v1_15_resp.stakeholder} budget responsibility controls?",
     )
     return (partA_base_a, partA_base_b, partA_threshold, partB_pred)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partB_target_gap = mo.ui.slider(start=0, stop=20, value=5, step=1,
-                                     label="Target FPR gap (pp)")
-    partB_method = mo.ui.dropdown(
-        options={"Threshold Adjustment": "threshold", "Reweighting": "reweight",
-                 "Adversarial Debiasing": "adversarial"},
-        value="Threshold Adjustment", label="Mitigation method")
 
-    # ── Part C widgets ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, v1_15_resp):
+    partB_privacy = mo.ui.slider(start=0, stop=100, value=60, step=5, label="Privacy / consent strength")
+    partB_explain = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=int(v1_15_resp.explanation_coverage_pct),
+        step=5,
+        label="Explanation coverage (%)",
+    )
+    partB_robustness = mo.ui.slider(start=0, stop=100, value=70, step=5, label="Robustness / mitigation strength")
+    partB_monitoring = mo.ui.slider(start=0, stop=100, value=60, step=5, label="Audit / monitoring strength")
+
     partC_pred = mo.ui.radio(
         options={
-            "A) ~2x (modest overhead)": "2x",
-            "B) ~10x (noticeable but manageable)": "10x",
-            "C) ~50x (scales with feature count)": "50x",
-            "D) ~2500x (exponential in features)": "2500x",
+            "A) The explanation method only affects the report text": "text_only",
+            "B) Explanations add latency proportional to the method and feature count": "latency",
+            "C) SHAP is always safe for online serving": "always_safe",
+            "D) Explanations remove the need for subgroup audits": "replace_audit",
         },
-        label="Loan model has 50 features. How much does SHAP add to inference latency?",
+        label=f"What does explainability cost on {v1_15_resp.hardware_name}?",
     )
-    return (partB_method, partB_target_gap, partC_pred)
+    return (partB_explain, partB_monitoring, partB_privacy, partB_robustness, partC_pred)
+
 
 @app.cell(hide_code=True)
-def _(mo):
-    partC_features = mo.ui.slider(start=10, stop=200, value=50, step=10,
-                                   label="Number of features")
+def _(mo, v1_15_resp):
+    partC_features = mo.ui.slider(
+        start=5,
+        stop=120,
+        value=v1_15_resp.explanation_features,
+        step=5,
+        label="Explanation features / trace factors",
+    )
     partC_method = mo.ui.dropdown(
-        options={"SHAP (Kernel)": "shap", "LIME": "lime",
-                 "Feature Importance": "fi", "None": "none"},
-        value="SHAP (Kernel)", label="Explanation method")
+        options={
+            "None": "none",
+            "Feature Importance": "feature_importance",
+            "LIME": "lime",
+            "Trace Replay": "trace_replay",
+            "SHAP": "shap",
+        },
+        value={
+            "none": "None",
+            "feature_importance": "Feature Importance",
+            "lime": "LIME",
+            "trace_replay": "Trace Replay",
+            "shap": "SHAP",
+        }.get(v1_15_resp.explanation_method, "SHAP"),
+        label="Explanation method",
+    )
+    partC_coverage = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=int(v1_15_resp.explanation_coverage_pct),
+        step=5,
+        label="Online explanation coverage (%)",
+    )
 
-    # ── Part D widgets ────────────────────────────────────────────────────────
     partD_pred = mo.ui.radio(
         options={
-            "A) ~2x (modest increase)": "2x",
-            "B) ~10x (significant but necessary)": "10x",
-            "C) ~60x (52x retraining + 5x explanations)": "60x",
-            "D) ~100x (even higher)": "100x",
+            "A) Carbon is dominated by one training run": "one_train",
+            "B) Retraining cadence and explanation coverage can dominate the footprint": "cadence",
+            "C) Grid carbon intensity does not matter for the same model": "grid_irrelevant",
+            "D) Carbon accounting is separate from responsible engineering": "separate",
         },
-        label="Weekly retraining + SHAP for 10% of predictions. Carbon vs baseline?",
+        label=f"What changes the carbon budget for {v1_15_resp.label}?",
     )
-    return (partC_features, partC_method, partD_pred)
+    return (partC_coverage, partC_features, partC_method, partD_pred)
 
-# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+
 @app.cell(hide_code=True)
-def _(CI_CLEAN, CI_COAL, CI_MIXED, mo):
-    partD_retrain_freq = mo.ui.dropdown(
-        options={"Weekly": 52, "Monthly": 12, "Quarterly": 4, "Once": 1},
-        value="Weekly", label="Retraining frequency")
-    partD_explain_pct = mo.ui.slider(start=0, stop=100, value=10, step=5,
-                                      label="Explanation coverage (%)")
-    partD_grid_mix = mo.ui.dropdown(
-        options={
-            f"Clean (hydro, {CI_CLEAN:.0f} gCO2/kWh)": CI_CLEAN,
-            f"Mixed ({CI_MIXED:.0f} gCO2/kWh)": CI_MIXED,
-            f"Coal-heavy ({CI_COAL:.0f} gCO2/kWh)": CI_COAL,
-        },
-        value=f"Mixed ({CI_MIXED:.0f} gCO2/kWh)", label="Grid carbon intensity")
-    return (partD_explain_pct, partD_grid_mix, partD_retrain_freq)
+def _(mo, v1_15_resp):
+    partD_retrains = mo.ui.slider(
+        start=1,
+        stop=52,
+        value=v1_15_resp.retrain_frequency_per_year,
+        step=1,
+        label="Retrains per year",
+    )
+    partD_explain = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=int(v1_15_resp.explanation_coverage_pct),
+        step=5,
+        label="Explanation coverage for carbon (%)",
+    )
+    partD_grid_ci = mo.ui.slider(
+        start=20,
+        stop=800,
+        value=int(v1_15_resp.grid_ci_g_per_kwh),
+        step=10,
+        label="Grid carbon intensity (gCO2/kWh)",
+    )
+    return (partD_explain, partD_grid_ci, partD_retrains)
+
+
+# ===========================================================================
+# ZONE C: MAIN LAB
+# ===========================================================================
+
 
 @app.cell(hide_code=True)
 def _(
-    mo, partA_base_a, partA_base_b, partA_pred,
-    partA_threshold, partB_method, partB_pred, partB_target_gap,
-    partC_features, partC_method, partC_pred, partD_pred,
-    partD_explain_pct, partD_grid_mix, partD_retrain_freq,
+    COLORS,
+    apply_plotly_theme,
+    carbon_budget,
+    explanation_overhead,
+    go,
+    metric_conflict,
+    mo,
+    np,
+    partA_base_a,
+    partA_base_b,
+    partA_pred,
+    partA_threshold,
+    partB_explain,
+    partB_monitoring,
+    partB_pred,
+    partB_privacy,
+    partB_robustness,
+    partC_coverage,
+    partC_features,
+    partC_method,
+    partC_pred,
+    partD_explain,
+    partD_grid_ci,
+    partD_pred,
+    partD_retrains,
+    responsibility_budget,
+    v1_15_profile,
+    v1_15_resp,
+    v1_15_variant,
 ):
+    def _metric_card(label, value, detail, color, border=False):
+        border_style = f"2px solid {color}" if border else "1px solid #e2e8f0"
+        return f"""
+        <div style="padding:16px; border:{border_style}; border-radius:10px;
+                    min-width:150px; text-align:center; background:white;
+                    border-top:3px solid {color}; flex:1;">
+            <div style="color:#64748b; font-size:0.78rem; font-weight:700;">{label}</div>
+            <div style="font-size:1.55rem; font-weight:800; color:{color};">{value}</div>
+            <div style="font-size:0.72rem; color:#64748b;">{detail}</div>
+        </div>
+        """
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART A — The Fairness Illusion
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_a():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Chief Compliance Officer, EquiLend</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our loan approval model achieves 92% accuracy for both Group A and Group B.
-                Can you confirm this means the model treats both groups equally?&rdquo;</div>
-        </div>"""))
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Responsibility Brief &middot; {v1_15_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "Aggregate quality is high. Can we ship, or does the responsibility
+                    obligation require a subgroup audit first?"
+                </div>
+            </div>
+            """),
+            mo.md(f"""
+## Part A: Metric Conflict
 
-        items.append(mo.md("""
-## The Chouldechova Impossibility Theorem
+**What you need to know.** A high aggregate metric can hide a harmed subgroup or
+context. For this track, the harmed party is **{v1_15_resp.harmed_party}** and
+the obligation is **{v1_15_resp.obligation}**.
 
-When **base rates differ** between groups, a calibrated classifier cannot simultaneously
-satisfy equal FPR, equal False Negative Rate (FNR), and equal Positive Predictive Value (PPV). Equal accuracy does **not** mean equal
-treatment. This is a mathematical impossibility, not an engineering limitation.
-
-The key: accuracy = (TP + TN) / total. With different base rates, the composition
-of TP and TN differs between groups even when the sum (accuracy) is identical.
-        """))
-
-        items.append(partA_pred)
+The simulator compares two subgroups or contexts with different base rates and
+a shared threshold. The point is not to claim the formula is a production audit;
+the point is to make the conflict visible before the design memo is written.
+            """),
+            partA_pred,
+        ]
         if partA_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the fairness simulator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the subgroup metric audit."), kind="warn"))
             return mo.vstack(items)
 
         items.append(mo.hstack([partA_base_a, partA_base_b, partA_threshold], widths="equal"))
+        _conflict = metric_conflict(
+            v1_15_resp,
+            base_rate_a_pct=partA_base_a.value,
+            base_rate_b_pct=partA_base_b.value,
+            threshold=partA_threshold.value,
+        )
 
-        _ba = partA_base_a.value / 100  # Group A base rate
-        _bb = partA_base_b.value / 100  # Group B base rate
-        _thresh = partA_threshold.value
-        _n = 1000  # sample size per group
-
-        # Simulate confusion matrices for each group
-        # With a fixed threshold and Gaussian score distributions
-        def _compute_metrics(base_rate, threshold, n=1000):
-            positives = int(n * base_rate)
-            negatives = n - positives
-            # Model: P(score > threshold | positive) ~ base_rate-dependent
-            # Higher base rate -> better separation
-            tpr = min(0.98, 0.85 + (1 - threshold) * 0.3)
-            fpr_raw = max(0.01, threshold * 0.2 + (1 - base_rate) * 0.08)
-            tp = int(positives * tpr)
-            fn = positives - tp
-            fp = int(negatives * fpr_raw)
-            tn = negatives - fp
-            acc = (tp + tn) / n * 100
-            fpr = fp / negatives * 100 if negatives > 0 else 0
-            fnr = fn / positives * 100 if positives > 0 else 0
-            ppv = tp / (tp + fp) * 100 if (tp + fp) > 0 else 0
-            return {"acc": acc, "fpr": fpr, "fnr": fnr, "ppv": ppv,
-                    "tp": tp, "fp": fp, "tn": tn, "fn": fn}
-
-        _ma = _compute_metrics(_ba, _thresh)
-        _mb = _compute_metrics(_bb, _thresh)
-        _fpr_gap = abs(_ma["fpr"] - _mb["fpr"])
-
-        # Grouped bar chart
         _metrics = ["Accuracy", "FPR", "FNR", "PPV"]
-        _va = [_ma["acc"], _ma["fpr"], _ma["fnr"], _ma["ppv"]]
-        _vb = [_mb["acc"], _mb["fpr"], _mb["fnr"], _mb["ppv"]]
-
+        _a_values = [
+            _conflict.accuracy_a_pct,
+            _conflict.fpr_a_pct,
+            _conflict.fnr_a_pct,
+            _conflict.ppv_a_pct,
+        ]
+        _b_values = [
+            _conflict.accuracy_b_pct,
+            _conflict.fpr_b_pct,
+            _conflict.fnr_b_pct,
+            _conflict.ppv_b_pct,
+        ]
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(name=f"Group A (base={_ba*100:.0f}%)",
-                               x=_metrics, y=_va, marker_color=COLORS['BlueLine'], opacity=0.88))
-        _fig.add_trace(go.Bar(name=f"Group B (base={_bb*100:.0f}%)",
-                               x=_metrics, y=_vb, marker_color=COLORS['OrangeLine'], opacity=0.88))
-        _fig.update_layout(barmode="group", height=360,
-                           yaxis=dict(title="Percentage (%)", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=50, r=20, t=60, b=40))
+        _fig.add_trace(go.Bar(name=_conflict.subgroup_a, x=_metrics, y=_a_values, marker_color=COLORS["BlueLine"], opacity=0.88))
+        _fig.add_trace(go.Bar(name=_conflict.subgroup_b, x=_metrics, y=_b_values, marker_color=COLORS["OrangeLine"], opacity=0.88))
+        _fig.update_layout(
+            barmode="group",
+            height=360,
+            yaxis=dict(title="Percentage (%)", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=50, r=20, t=60, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        # Gap cards
-        _gap_col = COLORS['RedLine'] if _fpr_gap > 10 else (
-            COLORS['OrangeLine'] if _fpr_gap > 5 else COLORS['GreenLine'])
+        _gap_color = COLORS["RedLine"] if _conflict.fpr_gap_pp > v1_15_resp.target_gap_pp else COLORS["GreenLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Accuracy Gap</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">
-                    {abs(_ma['acc']-_mb['acc']):.1f} pp</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">Looks equal</div></div>
-            <div style="padding:16px; border:2px solid {_gap_col}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {_gap_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">FPR Gap</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_gap_col};">
-                    {_fpr_gap:.1f} pp</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">NOT equal</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">FNR Gap</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                    {abs(_ma['fnr']-_mb['fnr']):.1f} pp</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">PPV Gap</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                    {abs(_ma['ppv']-_mb['ppv']):.1f} pp</div></div>
-        </div>"""))
-
-        if _fpr_gap > 5:
-            items.append(mo.callout(mo.md(
-                f"**Unequal treatment despite equal accuracy.** FPR gap = {_fpr_gap:.1f} pp. "
-                "Group B (lower base rate) has higher false positive rate. "
-                "This is the Chouldechova impossibility in action."), kind="danger"))
-
-        # Live confusion matrix comparison
-        items.append(mo.md(f"""
-**Confusion Matrix Comparison &mdash; Live** (`base_A={_ba*100:.0f}%, base_B={_bb*100:.0f}%, threshold={_thresh:.2f}`)
-
-```
-Group A (base rate = {_ba*100:.0f}%):
-  TP={_ma['tp']:>4}  FP={_ma['fp']:>4}  |  Acc={_ma['acc']:.1f}%  FPR={_ma['fpr']:.1f}%  FNR={_ma['fnr']:.1f}%  PPV={_ma['ppv']:.1f}%
-  FN={_ma['fn']:>4}  TN={_ma['tn']:>4}  |
-
-Group B (base rate = {_bb*100:.0f}%):
-  TP={_mb['tp']:>4}  FP={_mb['fp']:>4}  |  Acc={_mb['acc']:.1f}%  FPR={_mb['fpr']:.1f}%  FNR={_mb['fnr']:.1f}%  PPV={_mb['ppv']:.1f}%
-  FN={_mb['fn']:>4}  TN={_mb['tn']:>4}  |
-
-Accuracy gap:  {abs(_ma['acc']-_mb['acc']):.1f} pp   (looks equal)
-FPR gap:       {_fpr_gap:.1f} pp   (NOT equal)
-FNR gap:       {abs(_ma['fnr']-_mb['fnr']):.1f} pp
-PPV gap:       {abs(_ma['ppv']-_mb['ppv']):.1f} pp
-```
-*Source: Chouldechova impossibility from @sec-responsible-engineering-fairness*
+            {_metric_card("Accuracy Gap", f"{_conflict.accuracy_gap_pp:.1f} pp", "aggregate can look stable", COLORS["BlueLine"])}
+            {_metric_card("FPR Gap", f"{_conflict.fpr_gap_pp:.1f} pp", f"target {v1_15_resp.target_gap_pp:.1f} pp", _gap_color, True)}
+            {_metric_card("PPV Gap", f"{_conflict.ppv_gap_pp:.1f} pp", "different user impact", COLORS["OrangeLine"])}
+            {_metric_card("Audit Signal", "required", v1_15_resp.audit_signal, COLORS["RedLine"])}
+        </div>
         """))
 
-        if partA_pred.value == "3x":
+        items.append(mo.md(f"""
+**Metric Table - Live Values**
+
+| Metric | {v1_15_resp.subgroup_a} | {v1_15_resp.subgroup_b} |
+|---|---:|---:|
+| Base/context rate | {_conflict.base_rate_a_pct:.1f}% | {_conflict.base_rate_b_pct:.1f}% |
+| Accuracy | {_conflict.accuracy_a_pct:.1f}% | {_conflict.accuracy_b_pct:.1f}% |
+| False positive rate | {_conflict.fpr_a_pct:.1f}% | {_conflict.fpr_b_pct:.1f}% |
+| False negative rate | {_conflict.fnr_a_pct:.1f}% | {_conflict.fnr_b_pct:.1f}% |
+| Positive predictive value | {_conflict.ppv_a_pct:.1f}% | {_conflict.ppv_b_pct:.1f}% |
+
+*Source: `mlsysbook_labs.metric_conflict`, track `{v1_15_profile.track_id}`.*
+        """))
+
+        if _conflict.fpr_gap_pp > v1_15_resp.target_gap_pp:
             items.append(mo.callout(mo.md(
-                "**Correct.** Equal accuracy does not guarantee equal error rates. "
-                "The impossibility theorem proves this mathematically when base rates differ."), kind="success"))
-        elif partA_pred.value == "equal":
-            items.append(mo.callout(mo.md(
-                "**Equal accuracy does NOT mean equal fairness.** "
-                f"Despite similar accuracy, FPR gap = {_fpr_gap:.1f} pp. "
-                "This is mathematically inescapable."), kind="warn"))
+                f"**Gap above target.** {_conflict.conflict_summary} A responsible design needs mitigation and audit evidence."
+            ), kind="danger"))
         else:
             items.append(mo.callout(mo.md(
-                f"**The FPR gap is {_fpr_gap:.1f} pp despite equal accuracy.** "
-                "Different base rates force different error distributions."), kind="warn"))
+                f"**Gap within target.** {_conflict.conflict_summary} The audit still belongs in the report."
+            ), kind="success"))
 
-        items.append(mo.accordion({
-            "Math Peek: Chouldechova Impossibility": mo.md("""
-**Theorem (Chouldechova, 2017):**
-
-When base rates differ between groups ($b_A \\neq b_B$), it is **impossible** to simultaneously equalize:
-
-$$
-\\text{FPR}_A = \\text{FPR}_B, \\quad \\text{FNR}_A = \\text{FNR}_B, \\quad \\text{PPV}_A = \\text{PPV}_B
-$$
-
-**Variables:**
-- **FPR**: False Positive Rate &mdash; $P(\\hat{Y}=1 \\mid Y=0)$
-- **FNR**: False Negative Rate &mdash; $P(\\hat{Y}=0 \\mid Y=1)$
-- **PPV**: Positive Predictive Value &mdash; $P(Y=1 \\mid \\hat{Y}=1)$
-- **$b_A, b_B$**: base rates (prevalence) for each group &mdash; when these differ, equalizing any two metrics forces the third to diverge
-""")
-        }))
-
+        if partA_pred.value == "gap":
+            items.append(mo.callout(mo.md("**Correct.** Responsibility starts with who can be harmed by an aggregate metric."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Aggregate quality is insufficient.** The report must name the harmed party, gap, audit signal, and residual harm."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART B — The Price of Fairness
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_b():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Escalation &middot; Chief Risk Officer, EquiLend</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Perfect fairness is impossible. How much accuracy must we sacrifice
-                to reduce the disparity to an acceptable level? What is the sweet spot?&rdquo;</div>
-        </div>"""))
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Budget Review &middot; {v1_15_resp.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "Add privacy, explanations, robustness, and monitoring. Which
+                    combination closes the gap without breaking the system?"
+                </div>
+            </div>
+            """),
+            mo.md(f"""
+## Part B: Responsibility Budget
 
-        items.append(mo.md("""
-## The Fairness-Accuracy Pareto Frontier
-
-The frontier has a specific shape: **concave near the sweet spot** (large fairness
-gains for small accuracy cost) and **steep near strict equality** (small fairness
-gains for large accuracy cost).
-
-```
-Accuracy_loss = k * (1 / max(target_gap, 1))^alpha
-```
-
-The first 10pp of gap reduction is cheap. The last 5pp is expensive.
-        """))
-
-        items.append(partB_pred)
+**What you need to know.** Responsibility controls are technical controls. They
+change latency, energy, cost, quality, and governance delay. The track-specific
+guardrail is **{v1_15_resp.guardrail_metric}**.
+            """),
+            partB_pred,
+        ]
         if partB_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the Pareto frontier."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the responsibility budget."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partB_target_gap, partB_method], widths="equal"))
-
-        _target = partB_target_gap.value
-        _method = partB_method.value
-
-        # Pareto frontier model
-        _method_factors = {"threshold": 1.0, "reweight": 0.8, "adversarial": 0.6}
-        _k = _method_factors[_method]
-        _unconstrained_gap = 15.0  # pp
-
-        # Accuracy loss as function of target gap
-        _gaps = np.linspace(0, 15, 100)
-        _losses = [_k * max(0, 3.0 * (15 - g) / 15 + 2.0 * max(0, 5 - g) / 5) for g in _gaps]
-
-        _curr_loss = _k * max(0, 3.0 * (15 - _target) / 15 + 2.0 * max(0, 5 - _target) / 5)
-
+        items.append(mo.hstack([partB_privacy, partB_explain, partB_robustness, partB_monitoring], widths="equal"))
+        _budget = responsibility_budget(
+            v1_15_resp,
+            privacy_level=partB_privacy.value,
+            explanation_coverage_pct=partB_explain.value,
+            robustness_level=partB_robustness.value,
+            monitoring_level=partB_monitoring.value,
+        )
+        _ratios = [
+            _budget.latency_ms / _budget.latency_slo_ms,
+            _budget.energy_factor / v1_15_resp.max_energy_factor,
+            _budget.cost_factor / v1_15_resp.max_cost_factor,
+            _budget.fairness_gap_pp / max(0.1, _budget.target_gap_pp),
+        ]
+        _names = ["Latency/SLO", "Energy/Budget", "Cost/Budget", "Gap/Target"]
+        _colors = [COLORS["GreenLine"] if _r <= 1 else COLORS["RedLine"] for _r in _ratios]
         _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=list(_gaps), y=_losses, mode='lines',
-                                   name='Pareto Frontier',
-                                   line=dict(color=COLORS['BlueLine'], width=3)))
-        _fig.add_trace(go.Scatter(x=[_target], y=[_curr_loss], mode='markers',
-                                   name=f'Target gap={_target}pp',
-                                   marker=dict(color=COLORS['RedLine'], size=14, symbol='diamond')))
-        # Sweet spot annotation
-        _fig.add_trace(go.Scatter(x=[5], y=[_k * (3.0 * 10/15 + 2.0 * 0/5)], mode='markers',
-                                   name='Sweet Spot',
-                                   marker=dict(color=COLORS['GreenLine'], size=12, symbol='star')))
-        _fig.update_layout(height=360,
-                           xaxis=dict(title="FPR Gap (pp) -- lower is fairer", autorange="reversed"),
-                           yaxis=dict(title="Accuracy Cost (pp)", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=50, r=20, t=60, b=40))
+        _fig.add_trace(go.Bar(x=_names, y=_ratios, marker_color=_colors, opacity=0.9))
+        _fig.add_hline(y=1.0, line_dash="dash", line_color="#64748b", annotation_text="budget boundary")
+        _fig.update_layout(
+            height=340,
+            yaxis=dict(title="Ratio to allowed budget", gridcolor="#f1f5f9"),
+            margin=dict(l=60, r=20, t=40, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
+        _status_color = COLORS["GreenLine"] if _budget.feasible else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:2px solid {COLORS['OrangeLine']}; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Accuracy Cost</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                    {_curr_loss:.1f} pp</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">gap: {_unconstrained_gap:.0f} to {_target} pp</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Method</div>
-                <div style="font-size:1.2rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_method.replace('_', ' ').title()}</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">efficiency: {_k:.1f}x</div></div>
-        </div>"""))
-
-        items.append(mo.md(f"""
-**Pareto Frontier &mdash; Live** (`target_gap={_target}pp, method={_method}, k={_k:.1f}`)
-
-```
-Unconstrained FPR gap = {_unconstrained_gap:.0f} pp
-Target FPR gap        = {_target} pp
-Gap reduction         = {_unconstrained_gap - _target:.0f} pp
-
-Accuracy cost  = k * [3.0*(15-target)/15 + 2.0*max(0, 5-target)/5]
-               = {_k:.1f} * [{3.0*(15-_target)/15:.2f} + {2.0*max(0,5-_target)/5:.2f}]
-               = {_curr_loss:.1f} pp
-
-Sweet spot (gap=5pp): ~{_k * (3.0*10/15):.1f} pp accuracy cost
-Cliff (gap=0pp):      ~{_k * (3.0 + 2.0):.1f} pp accuracy cost
-```
-*Source: fairness-accuracy frontier from @sec-responsible-engineering-mitigation*
+            {_metric_card("Latency", f"{_budget.latency_ms:.1f} ms", f"SLO {_budget.latency_slo_ms:.0f} ms", COLORS["BlueLine"])}
+            {_metric_card("Energy Factor", f"{_budget.energy_factor:.2f}x", f"max {v1_15_resp.max_energy_factor:.1f}x", COLORS["OrangeLine"])}
+            {_metric_card("Gap", f"{_budget.fairness_gap_pp:.1f} pp", f"target {_budget.target_gap_pp:.1f} pp", COLORS["RedLine"])}
+            {_metric_card("Policy", "PASS" if _budget.feasible else "FAIL", ", ".join(_budget.violations) or "no violations", _status_color, True)}
+        </div>
         """))
 
-        if partB_pred.value == "3-5pct":
+        items.append(mo.md(f"""
+**Budget Table - Live Values**
+
+| Quantity | Value |
+|---|---:|
+| Privacy strength | {_budget.privacy_level:.0f}% |
+| Explanation coverage | {_budget.explanation_coverage_pct:.0f}% |
+| Robustness strength | {_budget.robustness_level:.0f}% |
+| Monitoring strength | {_budget.monitoring_level:.0f}% |
+| Estimated quality | {_budget.estimated_quality_pct:.1f}% |
+| Quality delta | {_budget.quality_delta_pp:+.1f} pp |
+| Cost factor | {_budget.cost_factor:.2f}x |
+| Governance delay | {_budget.governance_delay_days:.1f} days |
+
+*Source: `mlsysbook_labs.responsibility_budget`.*
+        """))
+
+        if not _budget.feasible:
             items.append(mo.callout(mo.md(
-                "**Correct.** The 15pp to 5pp reduction is in the sweet spot of the "
-                "Pareto frontier. Pushing from 5pp to 0pp costs disproportionately more."), kind="success"))
+                "**Budget violation:** " + ", ".join(_budget.violations) + ". Reduce coverage, change method, or increase the system budget."
+            ), kind="danger"))
+
+        if partB_pred.value == "balanced" and _budget.feasible:
+            items.append(mo.callout(mo.md("**Correct.** A responsible system names a target and keeps the overhead budget visible."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**The accuracy cost is ~{_curr_loss:.1f} pp.** The Pareto frontier "
-                "is concave: first gains are cheap, strict equality is expensive."), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Price of Fairness (Pareto Frontier)": mo.md("""
-**Formula:**
-$$
-\\text{Accuracy\\_cost} = f\\bigl(\\Delta_{\\text{fairness}}\\bigr) \\quad \\text{where the frontier is concave}
-$$
-
-**Variables:**
-- **$\\Delta_{\\text{fairness}}$**: reduction in the fairness gap (e.g., FPR difference between groups)
-- **Accuracy\\_cost**: accuracy points sacrificed to achieve that gap reduction
-- **Knee point**: the sweet spot on the Pareto frontier where marginal cost of fairness is lowest &mdash; beyond it, each additional pp of gap reduction costs disproportionately more accuracy
-""")
-        }))
-
+                "**Responsibility is not a maximum-controls checkbox.** The defensible point is the smallest control stack that satisfies the obligation and the system budgets."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART C — The Explainability Tax
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_c():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Regulatory Requirement &middot; Compliance Team, EquiLend</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Under the Equal Credit Opportunity Act (ECOA), denied applicants must receive an explanation of which factors
-                contributed to the decision. How much compute does this cost?&rdquo;</div>
-        </div>"""))
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Explanation Requirement &middot; {v1_15_resp.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "We need a usable explanation. Can it run online, or does it
+                    belong in an asynchronous audit/report path?"
+                </div>
+            </div>
+            """),
+            mo.md(f"""
+## Part C: Explainability Tax
 
-        items.append(mo.md("""
-## SHAP Explanations Require N Additional Forward Passes
-
-Kernel SHAP computes marginal contributions by running the model with each feature
-masked. For N features, this requires approximately **N forward passes**:
-
-```
-Explanation latency = N_features * base_inference_latency
-```
-
-Exact SHAP requires 2^N evaluations (infeasible for N > 30).
-Local Interpretable Model-agnostic Explanations (LIME) uses ~100 samples (fixed). Feature importance is free (~1x).
-        """))
-
-        items.append(partC_pred)
+**What you need to know.** Explanations consume model evaluations, trace replay,
+or feature passes. The same pedagogical idea becomes different across tracks:
+mobile and wearable systems feel latency and battery, RoboTaxi feels p99 safety,
+and cloud feels SLA and fleet cost.
+            """),
+            partC_pred,
+        ]
         if partC_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the explainability calculator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the explanation calculator."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partC_features, partC_method], widths="equal"))
+        items.append(mo.hstack([partC_method, partC_features, partC_coverage], widths="equal"))
+        _explain = explanation_overhead(
+            v1_15_resp,
+            method=partC_method.value,
+            features=partC_features.value,
+            coverage_pct=partC_coverage.value,
+        )
 
-        _nf = partC_features.value
-        _method = partC_method.value
-        _base_ms = 2.0  # base inference latency for a tabular model
-
-        _multipliers = {"shap": _nf, "lime": 100, "fi": 1, "none": 0}
-        _method_labels = {"shap": "SHAP (Kernel)", "lime": "LIME", "fi": "Feature Importance", "none": "None"}
-        _mult = _multipliers[_method]
-        _total_ms = _base_ms * (1 + _mult)
-        _slo = 100  # ms
-        _slo_viol = _total_ms > _slo
-
-        # Comparison chart
-        _methods = ["None", "Feature Imp.", "LIME", "SHAP"]
-        _latencies = [_base_ms, _base_ms * 2, _base_ms * 101, _base_ms * (_nf + 1)]
-        _colors = [COLORS['GreenLine'], COLORS['GreenLine'],
-                   COLORS['OrangeLine'] if _base_ms * 101 < _slo else COLORS['RedLine'],
-                   COLORS['RedLine'] if _base_ms * (_nf + 1) > _slo else COLORS['OrangeLine']]
-
+        _method_labels = {
+            "none": "None",
+            "feature_importance": "Feature Importance",
+            "lime": "LIME",
+            "trace_replay": "Trace Replay",
+            "shap": "SHAP",
+        }
+        _methods = ["none", "feature_importance", "lime", "trace_replay", "shap"]
+        _latencies = [
+            explanation_overhead(v1_15_resp, method=_method, features=partC_features.value, coverage_pct=partC_coverage.value).total_latency_ms
+            for _method in _methods
+        ]
+        _colors = [COLORS["GreenLine"] if _lat <= v1_15_resp.latency_slo_ms else COLORS["RedLine"] for _lat in _latencies]
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(x=_methods, y=_latencies, marker_color=_colors, opacity=0.88))
-        _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS['GreenLine'],
-                       annotation_text=f"SLO = {_slo} ms")
-        _fig.update_layout(height=340, yaxis=dict(title="Total Latency (ms)",
-                                                    type="log", gridcolor="#f1f5f9"),
-                           margin=dict(l=50, r=20, t=40, b=40))
+        _fig.add_trace(go.Bar(x=[_method_labels[_m] for _m in _methods], y=_latencies, marker_color=_colors, opacity=0.9))
+        _fig.add_hline(y=v1_15_resp.latency_slo_ms, line_dash="dash", line_color=COLORS["BlueLine"], annotation_text="latency SLO")
+        _fig.update_layout(
+            height=340,
+            yaxis=dict(title="Total explanation path latency (ms)", gridcolor="#f1f5f9"),
+            margin=dict(l=60, r=20, t=40, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _tot_col = COLORS['RedLine'] if _slo_viol else COLORS['GreenLine']
+        _slo_color = COLORS["GreenLine"] if _explain.slo_ok else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Base Inference</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_base_ms:.1f} ms</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Explanation Overhead</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_mult}x</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_method_labels[_method]}</div></div>
-            <div style="padding:16px; border:2px solid {_tot_col}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {_tot_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total Latency</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_tot_col};">{_total_ms:.0f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{"SLO VIOLATED" if _slo_viol else "Within SLO"}</div></div>
-        </div>"""))
-
-        if _slo_viol:
-            items.append(mo.callout(mo.md(
-                f"**SLO VIOLATED.** {_method_labels[_method]} with {_nf} features: "
-                f"{_total_ms:.0f} ms > {_slo} ms SLO. Consider LIME or async explanations."), kind="danger"))
-
-        # Method comparison table
-        items.append(mo.md(f"""
-**Explanation Method Comparison** (`{_nf} features, base inference = {_base_ms:.1f} ms`)
-
-| Method | Forward Passes | Total Latency | Fidelity | Regulatory |
-|--------|---------------|---------------|----------|------------|
-| None | 0 | {_base_ms:.1f} ms | N/A | Non-compliant |
-| Feature Importance | 1 | {_base_ms*2:.1f} ms | Low | Insufficient |
-| LIME | ~100 | {_base_ms*101:.0f} ms | Medium | Acceptable |
-| SHAP (Kernel) | ~{_nf} | {_base_ms*(_nf+1):.0f} ms | High | Gold standard |
-| SHAP (Exact) | 2^{_nf} | Infeasible | Perfect | Infeasible |
-
-*Source: explainability cost analysis from @sec-responsible-engineering-explanations*
+            {_metric_card("Base Latency", f"{_explain.base_latency_ms:.1f} ms", v1_15_resp.hardware_name, COLORS["BlueLine"])}
+            {_metric_card("Multiplier", f"{_explain.multiplier:.1f}x", _method_labels.get(_explain.method, _explain.method), COLORS["OrangeLine"])}
+            {_metric_card("Total Latency", f"{_explain.total_latency_ms:.1f} ms", f"SLO {_explain.slo_ms:.0f} ms", _slo_color, True)}
+            {_metric_card("p99 Added", f"{_explain.p99_added_ms:.1f} ms", f"{_explain.coverage_pct:.0f}% coverage", COLORS["RedLine"])}
+        </div>
         """))
 
-        if partC_pred.value == "50x":
+        items.append(mo.md(f"""
+**Explanation Table - Live Values**
+
+| Quantity | Value |
+|---|---:|
+| Method | {_method_labels.get(_explain.method, _explain.method)} |
+| Features / trace factors | {_explain.features} |
+| Base latency | {_explain.base_latency_ms:.1f} ms |
+| Explanation latency | {_explain.explanation_latency_ms:.1f} ms |
+| Total latency | {_explain.total_latency_ms:.1f} ms |
+| p99 added at coverage | {_explain.p99_added_ms:.1f} ms |
+| SLO status | {"PASS" if _explain.slo_ok else "FAIL"} |
+
+*Source: `mlsysbook_labs.explanation_overhead`.*
+        """))
+
+        if not _explain.slo_ok:
             items.append(mo.callout(mo.md(
-                "**Correct.** SHAP with 50 features requires ~50 forward passes. "
-                "Each pass has the same latency as the original prediction."), kind="success"))
+                f"**SLO violation.** {_method_labels.get(_explain.method, _explain.method)} adds enough work to exceed the track latency guardrail. Use async explanations, sampling, a lighter method, or a larger serving budget."
+            ), kind="danger"))
+
+        if partC_pred.value == "latency":
+            items.append(mo.callout(mo.md("**Correct.** Explainability is a systems path with latency, cost, and coverage choices."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**SHAP overhead = {_nf}x.** Each feature requires a separate "
-                "model evaluation to compute its marginal contribution."), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: SHAP Explainability Overhead": mo.md("""
-**Formula:**
-$$
-\\text{Latency}_{\\text{SHAP}} = N_{\\text{features}} \\times T_{\\text{base}}
-$$
-
-**Variables:**
-- **$N_{\\text{features}}$**: number of input features requiring explanation
-- **$T_{\\text{base}}$**: latency of a single model forward pass
-- **Latency$_{\\text{SHAP}}$**: total explanation time per prediction &mdash; SHAP requires one forward pass per feature to estimate each feature's marginal contribution
-""")
-        }))
-
+                "**Explanation is not just report text.** The method and coverage determine whether the responsible design still satisfies the system guardrails."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART D — The Carbon Cost of Responsibility
-    # ═════════════════════════════════════════════════════════════════════════
     def build_part_d():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Board Inquiry &middot; Sustainability Committee, EquiLend</div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our responsible AI stack requires weekly retraining and SHAP explanations
-                for all denied applications. What is the annual carbon footprint compared
-                to our baseline model that was trained once?&rdquo;</div>
-        </div>"""))
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Sustainability Review &middot; {v1_15_resp.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    "The responsible stack needs retraining and explanations. What
+                    is the annual carbon footprint of that decision?"
+                </div>
+            </div>
+            """),
+            mo.md("""
+## Part D: Carbon Ledger
 
-        items.append(mo.md("""
-## The Carbon Accounting of Responsible AI
-
-Every intervention in the responsible AI stack has an energy cost:
-
-- **Retraining** consumes GPU-hours. Weekly retraining is 52x the baseline of train-once.
-- **SHAP explanations** require N additional forward passes per explained prediction.
-  For 10M annual predictions at 10% coverage, that is 1M extra inference calls.
-- **Grid carbon intensity** transforms energy into emissions: hydro grids (20 gCO2/kWh)
-  produce 40x less carbon than coal grids (800 gCO2/kWh) for identical workloads.
-
-The question is not whether to pay this cost -- regulation and ethics demand it.
-The question is: **how large is the carbon multiplier, and how do you budget it?**
-
-```
-Annual carbon = (retrains/yr * train_energy + explanations * serve_energy) * grid_intensity
-```
-        """))
-
-        items.append(partD_pred)
+**What you need to know.** Responsibility can require more retraining, more
+audits, more explanation calls, and more governance work. Carbon is not a reason
+to ignore harm, but it is part of the design budget and should be reported.
+            """),
+            partD_pred,
+        ]
         if partD_pred.value is None:
-            items.append(mo.callout(mo.md(
-                "Select your prediction to unlock the carbon calculator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the carbon ledger."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partD_retrain_freq, partD_explain_pct, partD_grid_mix], widths="equal"))
+        items.append(mo.hstack([partD_retrains, partD_explain, partD_grid_ci], widths="equal"))
+        _carbon = carbon_budget(
+            v1_15_resp,
+            retrain_frequency_per_year=partD_retrains.value,
+            explanation_coverage_pct=partD_explain.value,
+            grid_ci_g_per_kwh=partD_grid_ci.value,
+        )
 
-        _retrains_yr = partD_retrain_freq.value
-        _explain_frac = partD_explain_pct.value / 100
-        _carbon_intensity = partD_grid_mix.value  # gCO2/kWh
-
-        # Training energy: 4 A100-hours per retrain ~= 4 * 0.4 kW * 1 hr = 1.6 kWh
-        _train_kwh = 1.6  # kWh per retraining run
-        _baseline_carbon = _train_kwh * _carbon_intensity / 1000  # kg CO2
-
-        # Retraining carbon
-        _retrain_carbon = _retrains_yr * _train_kwh * _carbon_intensity / 1000
-
-        # Serving energy: 10M predictions/year, 2ms each
-        _predictions_yr = 10_000_000
-        _base_serve_kwh = _predictions_yr * 0.002 / 3600 * H100_TDP_W / 1000  # kWh
-        _explain_serve_kwh = _predictions_yr * _explain_frac * 50 * 0.002 / 3600 * H100_TDP_W / 1000
-        _serve_carbon = (_base_serve_kwh + _explain_serve_kwh) * _carbon_intensity / 1000
-
-        _total_carbon = _retrain_carbon + _serve_carbon
-        _baseline_total = _baseline_carbon + _base_serve_kwh * _carbon_intensity / 1000
-        _ratio = _total_carbon / _baseline_total if _baseline_total > 0 else 1
-
-        # Stacked bar chart
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(name="Baseline (train-once)", x=["Baseline"],
-                               y=[_baseline_total], marker_color=COLORS['GreenLine'], opacity=0.88))
-        _fig.add_trace(go.Bar(name="Retraining Carbon", x=["Responsible AI"],
-                               y=[_retrain_carbon], marker_color=COLORS['BlueLine'], opacity=0.88))
-        _fig.add_trace(go.Bar(name="Serving + Explanations", x=["Responsible AI"],
-                               y=[_serve_carbon], marker_color=COLORS['OrangeLine'], opacity=0.88))
-        _fig.update_layout(barmode="stack", height=340,
-                           yaxis=dict(title="Annual Carbon (kg CO2)", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=60, r=20, t=60, b=40))
+        _fig.add_trace(go.Bar(name="Baseline", x=["Baseline"], y=[_carbon.baseline_kgco2_per_year], marker_color=COLORS["GreenLine"], opacity=0.9))
+        _fig.add_trace(go.Bar(name="Retraining", x=["Responsible stack"], y=[_carbon.retraining_kwh_per_year * _carbon.grid_ci_g_per_kwh / 1000.0], marker_color=COLORS["BlueLine"], opacity=0.9))
+        _fig.add_trace(go.Bar(name="Serving", x=["Responsible stack"], y=[_carbon.base_serving_kwh_per_year * _carbon.grid_ci_g_per_kwh / 1000.0], marker_color=COLORS["OrangeLine"], opacity=0.9))
+        _fig.add_trace(go.Bar(name="Explanations", x=["Responsible stack"], y=[_carbon.explanation_kwh_per_year * _carbon.grid_ci_g_per_kwh / 1000.0], marker_color=COLORS["RedLine"], opacity=0.9))
+        _fig.update_layout(
+            barmode="stack",
+            height=340,
+            yaxis=dict(title="Annual carbon (kg CO2)", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=60, r=20, t=60, b=40),
+        )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Baseline Carbon</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_baseline_total:.1f} kg</div></div>
-            <div style="padding:16px; border:2px solid {COLORS['RedLine']}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Responsible AI Carbon</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_total_carbon:.1f} kg</div></div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Carbon Multiplier</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">{_ratio:.0f}x</div></div>
-        </div>"""))
-
-        items.append(mo.md(f"""
-**Carbon Budget &mdash; Live** (`{_retrains_yr} retrains/yr, {_explain_frac*100:.0f}% coverage, {_carbon_intensity} gCO2/kWh`)
-
-```
-Baseline:
-  Training carbon  = 1 * {_train_kwh:.1f} kWh * {_carbon_intensity} g/kWh = {_baseline_carbon:.2f} kg CO2
-  Serving carbon   = {_base_serve_kwh:.1f} kWh * {_carbon_intensity} g/kWh = {_base_serve_kwh*_carbon_intensity/1000:.2f} kg CO2
-  Total baseline   = {_baseline_total:.1f} kg CO2/year
-
-Responsible AI:
-  Retrain carbon   = {_retrains_yr} * {_train_kwh:.1f} kWh * {_carbon_intensity} g/kWh = {_retrain_carbon:.1f} kg CO2
-  Serving+explain  = ({_base_serve_kwh:.1f} + {_explain_serve_kwh:.1f}) kWh * {_carbon_intensity} g/kWh = {_serve_carbon:.1f} kg CO2
-  Total            = {_total_carbon:.1f} kg CO2/year
-  Multiplier       = {_total_carbon:.1f} / {_baseline_total:.1f} = {_ratio:.0f}x
-```
-*Source: carbon accounting from @sec-responsible-engineering-sustainability*
+            {_metric_card("Baseline", f"{_carbon.baseline_kgco2_per_year:.1f} kg", "train once + serving", COLORS["GreenLine"])}
+            {_metric_card("Responsible Stack", f"{_carbon.total_kgco2_per_year:.1f} kg", "retrain + serve + explain", COLORS["RedLine"], True)}
+            {_metric_card("Multiplier", f"{_carbon.carbon_multiplier:.1f}x", f"{_carbon.retrain_frequency_per_year} retrains/year", COLORS["OrangeLine"])}
+            {_metric_card("Grid", f"{_carbon.grid_ci_g_per_kwh:.0f}", "gCO2/kWh", COLORS["BlueLine"])}
+        </div>
         """))
 
-        if partD_pred.value == "60x":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Weekly retraining (52x) plus explanation overhead produces "
-                f"~{_ratio:.0f}x carbon vs baseline. The cost is real, but so is the harm of unfairness."), kind="success"))
+        items.append(mo.md(f"""
+**Carbon Table - Live Values**
+
+| Quantity | Value |
+|---|---:|
+| Training energy per run | {_carbon.train_energy_kwh:.1f} kWh |
+| Retraining energy / year | {_carbon.retraining_kwh_per_year:.1f} kWh |
+| Base serving energy / year | {_carbon.base_serving_kwh_per_year:.3f} kWh |
+| Explanation energy / year | {_carbon.explanation_kwh_per_year:.3f} kWh |
+| Total energy / year | {_carbon.total_kwh_per_year:.1f} kWh |
+| Baseline carbon / year | {_carbon.baseline_kgco2_per_year:.1f} kg CO2 |
+| Responsible carbon / year | {_carbon.total_kgco2_per_year:.1f} kg CO2 |
+
+*Source: `mlsysbook_labs.carbon_budget`; hardware TDP from `{v1_15_resp.hardware_ref}`.*
+        """))
+
+        if partD_pred.value == "cadence":
+            items.append(mo.callout(mo.md("**Correct.** Retraining cadence, explanation coverage, and grid intensity are all design knobs."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**The carbon multiplier is ~{_ratio:.0f}x.** "
-                "Responsible AI has a real environmental cost. The question is not whether "
-                "to pay it, but how to budget it against the harms of an unfair system."), kind="warn"))
-
-        # Edge deployment carbon comparison
-        _edge_serve_kwh = _predictions_yr * 0.002 / 3600 * JETSON_TDP_W / 1000
-        _edge_explain_kwh = _predictions_yr * _explain_frac * 50 * 0.002 / 3600 * JETSON_TDP_W / 1000
-        _edge_total_serve = (_edge_serve_kwh + _edge_explain_kwh) * _carbon_intensity / 1000
-        _power_ratio = H100_TDP_W / JETSON_TDP_W if JETSON_TDP_W > 0 else 1
-        items.append(mo.callout(mo.md(
-            f"**Edge deployment contrast (Jetson Orin NX, {JETSON_TDP_W:.0f} W):** "
-            f"Serving carbon drops to {_edge_total_serve:.1f} kg CO2/year "
-            f"({_power_ratio:.0f}x lower TDP), but edge retraining is impractical — "
-            f"you must retrain in the cloud and deploy to the edge, adding OTA update costs."
-        ), kind="info"))
-
-        items.append(mo.accordion({
-            "Math Peek: Carbon Accounting": mo.md("""
-**Formula:**
-$$
-\\text{Carbon}_{\\text{kg}} = \\frac{E_{\\text{kWh}} \\times G_{\\text{gCO}_2/\\text{kWh}}}{1000}
-$$
-
-**Variables:**
-- **$E_{\\text{kWh}}$**: energy consumed (training + serving + explanation overhead)
-- **$G_{\\text{gCO}_2/\\text{kWh}}$**: grid carbon intensity in grams CO2 per kWh (varies by region)
-- **Carbon$_{\\text{kg}}$**: total carbon emissions in kilograms &mdash; fairness and explainability add energy overhead that compounds into measurable carbon cost
-""")
-        }))
-
+                "**Carbon is part of the responsible design budget.** It does not replace the harmed-party analysis, but it must be reported."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # SYNTHESIS
-    # ═════════════════════════════════════════════════════════════════════════
     def build_synthesis():
         return mo.vstack([
             mo.md("## Key Takeaways"),
             mo.callout(mo.md(
-                "**1. Equal accuracy does not mean equal treatment.**\n\n"
-                "When base rates differ, you cannot simultaneously equalize FPR, FNR, "
-                "and PPV. This is the Chouldechova impossibility theorem."
+                f"**1. Responsibility starts with a named harmed party.** For {v1_15_resp.label}, that is {v1_15_resp.harmed_party}."
             ), kind="info"),
             mo.callout(mo.md(
-                "**2. The fairness-accuracy Pareto frontier has a sweet spot and a cliff.**\n\n"
-                "The first 10pp gap reduction costs 3-5% accuracy. "
-                "Strict equality costs 10%+. Find the knee."
+                f"**2. A responsible system has evidence.** The audit signal is {v1_15_resp.audit_signal}."
             ), kind="info"),
             mo.callout(mo.md(
-                "**3. Responsible AI has quantifiable costs: accuracy, latency, and carbon.**\n\n"
-                "SHAP adds Nx latency (N = features). Weekly retraining adds 52x carbon. "
-                "These costs are not optional under regulation."
+                "**3. There is no free fairness.** Privacy, explanations, robustness, monitoring, and carbon all create measurable system overhead."
             ), kind="info"),
             mo.Html(f"""
             <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
@@ -892,13 +871,12 @@ $$
                             padding: 20px 24px;">
                     <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                                 text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        What's Next
+                        Responsible Decision Memo
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab 16: Capstone</strong> -- Every invariant from 15 labs
-                        collapses into one deployment decision. You will trace a single
-                        model from arithmetic intensity through fairness constraints and
-                        discover which constraint actually binds.
+                        Submit the track, harmed party, obligation, metric conflict,
+                        control budget, explanation policy, carbon budget, audit
+                        signal, and residual harm.
                     </div>
                 </div>
                 <div style="flex: 1; min-width: 280px; background: white;
@@ -906,77 +884,241 @@ $$
                             padding: 20px 24px;">
                     <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                                 text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Textbook &amp; TinyTorch
+                        Next Lab
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the Responsible Engineering chapter for impossibility
-                        theorems, fairness-accuracy trade-offs, and carbon accounting.<br/>
-                        <strong>Build:</strong> TinyTorch Module 15 -- implement SHAP
-                        explanations from scratch.
+                        Lab 16 combines the Volume I constraints into one deployment
+                        decision. The responsibility policy becomes one of the binding
+                        constraints rather than a separate checklist.
                     </div>
                 </div>
             </div>
             """),
         ])
 
-    tabs = mo.ui.tabs({
-        "Part A \u2014 The Fairness Illusion":       build_part_a(),
-        "Part B \u2014 The Price of Fairness":       build_part_b(),
-        "Part C \u2014 The Explainability Tax":      build_part_c(),
-        "Part D \u2014 The Carbon Ledger":           build_part_d(),
-        "Synthesis":                                  build_synthesis(),
+    _tabs = mo.ui.tabs({
+        "Part A: Metric Conflict": build_part_a(),
+        "Part B: Responsibility Budget": build_part_b(),
+        "Part C: Explainability Tax": build_part_c(),
+        "Part D: Carbon Ledger": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
-    tabs
+    _tabs
     return
 
+
 # ===========================================================================
-# ZONE D: LEDGER HUD
+# ZONE D: LEDGER HUD AND REPORT
 # ===========================================================================
 
+
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
-    _track = ledger.get_track()
+def _(
+    ledger,
+    mo,
+    partA_pred,
+    partB_pred,
+    partC_pred,
+    partD_pred,
+    v1_15_profile,
+    v1_15_resp,
+    v1_15_variant,
+):
     if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
         ledger.save(chapter=15, design={
             "chapter": "v1_15",
-            "impossibility_theorem_understood": True,
-            "fairness_accuracy_tradeoff": "pareto_frontier",
-            "explainability_latency_cost": "Nx_features",
-            "carbon_multiplier_from_retraining": "52x",
+            "track_id": v1_15_profile.track_id,
+            "scenario_id": v1_15_variant.scenario_id,
+            "hardware_ref": v1_15_resp.hardware_ref,
+            "model_ref": v1_15_resp.model_ref,
+            "harmed_party": v1_15_resp.harmed_party,
+            "obligation": v1_15_resp.obligation,
+            "audit_signal": v1_15_resp.audit_signal,
             "completed": True,
+            "metric_conflict_prediction": partA_pred.value,
+            "budget_prediction": partB_pred.value,
+            "explainability_prediction": partC_pred.value,
+            "carbon_prediction": partD_pred.value,
         })
 
     mo.Html(f"""
     <div class="lab-hud">
-        <span class="hud-label">LAB</span><span class="hud-value">15 &mdash; Responsible Engineering</span>
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">15 &middot; Responsible Engineering</span>
         <span class="hud-label">TRACK</span>
-        <span class="{'hud-active' if _track != 'NONE' else 'hud-none'}">{_track}</span>
-        <span class="hud-label">STATUS</span><span class="hud-active">ACTIVE</span>
-    </div>""")
+        <span class="hud-value">{v1_15_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">OBLIGATION</span>
+        <span class="hud-value">{v1_15_resp.obligation}</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">ACTIVE</span>
+    </div>
+    """)
     return
 
 
-# ─── TRACK-AWARE MIGRATION SHELL ────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(ledger, mo):
-    from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        legacy_migration_panel,
+def _(
+    build_lab_report,
+    carbon_budget,
+    explanation_overhead,
+    metric_conflict,
+    mo,
+    partA_base_a,
+    partA_base_b,
+    partA_pred,
+    partA_threshold,
+    partB_explain,
+    partB_monitoring,
+    partB_pred,
+    partB_privacy,
+    partB_robustness,
+    partC_coverage,
+    partC_features,
+    partC_method,
+    partC_pred,
+    partD_explain,
+    partD_grid_ci,
+    partD_pred,
+    partD_retrains,
+    report_export_panel,
+    responsibility_budget,
+    v1_15_metadata,
+    v1_15_profile,
+    v1_15_resp,
+    v1_15_variant,
+):
+    _conflict = metric_conflict(
+        v1_15_resp,
+        base_rate_a_pct=partA_base_a.value,
+        base_rate_b_pct=partA_base_b.value,
+        threshold=partA_threshold.value,
+    )
+    _budget = responsibility_budget(
+        v1_15_resp,
+        privacy_level=partB_privacy.value,
+        explanation_coverage_pct=partB_explain.value,
+        robustness_level=partB_robustness.value,
+        monitoring_level=partB_monitoring.value,
+    )
+    _explain = explanation_overhead(
+        v1_15_resp,
+        method=partC_method.value,
+        features=partC_features.value,
+        coverage_pct=partC_coverage.value,
+    )
+    _carbon = carbon_budget(
+        v1_15_resp,
+        retrain_frequency_per_year=partD_retrains.value,
+        explanation_coverage_pct=partD_explain.value,
+        grid_ci_g_per_kwh=partD_grid_ci.value,
     )
 
-    _metadata = get_lab_metadata("vol1/lab_15_responsible_engr.py")
-    _saved_track = ledger.get_track()
-    _track_id = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    _profile = get_track_profile(_track_id)
-    _variant = get_lab_track_variant(_metadata.lab_id, _profile.track_id)
+    _incomplete = []
+    if partA_pred.value is None:
+        _incomplete.append("Part A metric conflict prediction")
+    if partB_pred.value is None:
+        _incomplete.append("Part B responsibility budget prediction")
+    if partC_pred.value is None:
+        _incomplete.append("Part C explainability prediction")
+    if partD_pred.value is None:
+        _incomplete.append("Part D carbon prediction")
+
+    _report = build_lab_report(
+        v1_15_metadata,
+        track=v1_15_profile.label,
+        scenario=v1_15_variant.workload_summary,
+        learning_objectives=(
+            "Name the harmed party, obligation, and audit signal for the selected track.",
+            "Quantify subgroup or context metric conflict before accepting aggregate quality.",
+            "Budget responsibility controls as latency, energy, cost, quality, governance, and carbon overhead.",
+        ),
+        predictions={
+            "metric_conflict": partA_pred.value,
+            "responsibility_budget": partB_pred.value,
+            "explainability_tax": partC_pred.value,
+            "carbon_ledger": partD_pred.value,
+        },
+        knob_settings={
+            "base_rate_a_pct": partA_base_a.value,
+            "base_rate_b_pct": partA_base_b.value,
+            "threshold": partA_threshold.value,
+            "privacy_level": partB_privacy.value,
+            "explanation_coverage_budget_pct": partB_explain.value,
+            "robustness_level": partB_robustness.value,
+            "monitoring_level": partB_monitoring.value,
+            "explanation_method": partC_method.value,
+            "explanation_features": partC_features.value,
+            "explanation_coverage_online_pct": partC_coverage.value,
+            "retrains_per_year": partD_retrains.value,
+            "explanation_coverage_carbon_pct": partD_explain.value,
+            "grid_ci_g_per_kwh": partD_grid_ci.value,
+        },
+        evidence_summary={
+            "harmed_party": v1_15_resp.harmed_party,
+            "obligation": v1_15_resp.obligation,
+            "audit_signal": v1_15_resp.audit_signal,
+            "hardware_ref": v1_15_resp.hardware_ref,
+            "model_ref": v1_15_resp.model_ref,
+            "fpr_gap_pp": round(_conflict.fpr_gap_pp, 3),
+            "target_gap_pp": v1_15_resp.target_gap_pp,
+            "responsibility_budget_feasible": _budget.feasible,
+            "budget_violations": _budget.violations,
+            "explanation_total_latency_ms": round(_explain.total_latency_ms, 3),
+            "explanation_slo_ok": _explain.slo_ok,
+            "annual_carbon_kgco2": round(_carbon.total_kgco2_per_year, 3),
+            "carbon_multiplier": round(_carbon.carbon_multiplier, 3),
+        },
+        final_decision=(
+            f"Protect {v1_15_resp.harmed_party} by treating {v1_15_resp.obligation} "
+            f"as a system constraint, auditing with {v1_15_resp.audit_signal}, "
+            "and reporting residual harm explicitly."
+        ),
+        big_takeaways=(
+            "A high aggregate metric can hide the harmed party.",
+            "Responsibility controls have measurable latency, energy, cost, quality, governance, and carbon overhead.",
+            "The report artifact is a decision memo, not a checklist of slogans.",
+        ),
+        reflections={
+            "report_artifact": v1_15_resp.report_artifact,
+            "validation_tests": v1_15_resp.validation_tests,
+            "residual_harm_owner": v1_15_resp.residual_harm,
+        },
+        residual_risk=(
+            f"{v1_15_resp.residual_harm} Teaching estimates must be validated with "
+            "track-specific audits, representative cohorts, and deployment evidence."
+        ),
+        source_trace={
+            "track_id": v1_15_profile.track_id,
+            "scenario_id": v1_15_variant.scenario_id,
+            "hardware_ref": v1_15_variant.hardware_ref,
+            "model_ref": v1_15_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.responsibility",
+            "source_policy": v1_15_profile.source_policy,
+        },
+        result_snapshot={
+            "responsibility_profile": v1_15_resp,
+            "metric_conflict": _conflict,
+            "responsibility_budget": _budget,
+            "explanation_overhead": _explain,
+            "carbon_budget": _carbon,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
     mo.vstack([
-        ACADEMIC_LAB_CSS,
-        legacy_migration_panel(_metadata, _profile, _variant),
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V1-15 report is generated locally from the selected track, MLSysIM hardware/model refs, "
+                "and shared `mlsysbook_labs.responsibility` calculations."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
     ])
     return
+
 
 if __name__ == "__main__":
     app.run()

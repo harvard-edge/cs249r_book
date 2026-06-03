@@ -368,15 +368,16 @@ Deep migration tasks:
 Path: `labs/vol1/lab_15_responsible_engr.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep track-aware responsibility structure installed.
+- [x] Track selector, source trace, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make fairness/responsibility tradeoffs specific to each deployment context.
-- [ ] Add shared metric-policy helper if the lab needs comparable definitions.
-- [ ] Tie track scenarios to realistic stakeholders and harm models.
-- [ ] Ensure any group metric examples come from a shared synthetic dataset/helper.
-- [ ] Update report with selected metric, tradeoff, mitigation, and residual risk.
-- [ ] Add tests for report fields and synthetic dataset shape if introduced.
+- [x] Make fairness/responsibility tradeoffs specific to each deployment context.
+- [x] Add shared metric-policy helper if the lab needs comparable definitions.
+- [x] Tie track scenarios to realistic stakeholders and harm models.
+- [x] Ensure any group metric examples come from a shared synthetic dataset/helper.
+- [x] Update report with selected metric, tradeoff, mitigation, and residual risk.
+- [x] Add tests for report fields and synthetic dataset shape if introduced.
 
 ### V1-16 - The Architect's Audit
 
