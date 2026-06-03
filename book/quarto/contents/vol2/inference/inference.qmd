@@ -3896,27 +3896,17 @@ Archetype B (DLRM at Scale) is the canonical victim of tail latency. Processing 
 *Two-choice routing flattens the tail imbalance of random placement.*
 :::
 
-Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
-
-Load balancing evaluation uses several key metrics. Maximum queue length measures the longest queue across all replicas and determines worst-case latency. Load variance captures the standard deviation of queue lengths and measures balance. Utilization spread represents the difference between most- and least-loaded replicas. Decision overhead quantifies the time required to make routing decisions.
+Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized. Evaluation therefore needs both tail-latency and balance signals: maximum queue length determines worst-case latency, load variance measures how evenly work is distributed, utilization spread shows whether some replicas are idle while others are saturated, and decision overhead captures the cost of making the routing choice.
 
 ### Round-robin and random assignment {#sec-inference-scale-roundrobin-random-assignment-f374}
 
-The simplest load balancing strategies assign requests without considering server state:
+The simplest load-balancing strategies assign requests without considering server state. Round-robin sends request 1 to server 1, request 2 to server 2, and so on, which gives perfect distribution only when servers are homogeneous and request processing times are identical. Random assignment selects a server uniformly at random for each request; with many requests it converges to an even mean distribution, but its variance is higher than round-robin. Both strategies are reasonable baselines for identical servers, yet production serving rarely satisfies that assumption. Heterogeneous GPU generations, different memory configurations, variable request sizes, warmup behavior, and replicas nearing memory limits all make the state of the server fleet matter.
 
-Round-robin assigns requests in circular order. Request 1 goes to server 1, request 2 to server 2, and so on. This guarantees perfect distribution when servers are homogeneous and request processing times are identical.
-
-Random assignment selects a server uniformly at random for each request. With large numbers of requests, this converges to even distribution but with higher variance than round-robin.
-
-For homogeneous servers with identical service times, both achieve near-optimal load distribution. However, production systems rarely meet these assumptions. Heterogeneous hardware introduces different GPU generations and memory configurations. Variable request sizes mean some requests take 10$\times$ longer than others. Server state variations occur when some replicas are warming up while others approach memory limits.
-
-Under these realistic conditions, uninformed strategies perform poorly. The maximum queue length under random assignment follows @eq-random-max-queue:
+Under these realistic conditions, uninformed strategies perform poorly because unlucky assignments accumulate in the tail. The maximum queue length under random assignment follows @eq-random-max-queue:
 
 $$E[\text{max queue}] = \Theta\left(\frac{\log R}{\log \log R}\right)$$ {#eq-random-max-queue}
 
-where $R$ is the number of servers or replicas. For 1,000 servers, this is approximately 4-5 requests. This seems small, but the unlucky requests in long queues experience significantly higher latency.
-
-The power of two choices (Principle \ref{pri-power-two-choices}) provides the theoretical foundation: querying just two random replicas and selecting the least-loaded one exponentially reduces tail latency from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$.
+where $R$ is the number of servers or replicas. For 1,000 servers, this is approximately 4--5 requests. This seems small, but the unlucky requests in long queues experience significantly higher latency. The power of two choices (Principle \ref{pri-power-two-choices}) provides the theoretical response: one extra queue-length probe changes the tail behavior from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$.
 
 ### The power of two choices {#sec-inference-scale-power-two-choices-ffdd}
 
@@ -3924,55 +3914,29 @@ A foundational result in load balancing theory [@mitzenmacher2001] shows that qu
 
 [^fn-balls-bins-routing]: **Balls-into-Bins (Power of Two Choices)**: With random placement, maximum bin load is $\Theta(\log R / \log \log R)$; with two random choices and greedy selection, it drops to $\Theta(\log \log R)$. For a 1,000-server inference fleet, this reduces worst-case queue depth from roughly 5 to roughly 2, cutting P99 tail latency by nearly half while adding only the overhead of a single extra queue-length probe per request. \index{Power of Two Choices!routing}
 
-The power-of-two-choices algorithm operates as follows. Select two servers uniformly at random. Query both for their current queue length. Route the request to the server with the shorter queue.
-
-@Eq-two-choices-max-queue formalizes this exponential improvement, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
+The algorithm is deliberately small: select two servers uniformly at random, query both for current queue length, and route to the server with the shorter queue. @Eq-two-choices-max-queue formalizes why this small change matters, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
 
 $$E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log R)$$ {#eq-two-choices-max-queue}
 
-For 1,000 servers:
-
-- Random assignment max queue: ~4-5 requests
-- Two choices max queue: ~2 requests
-
-The improvement is exponential: two choices with 1,000 servers achieves better balance than random with just 10 servers.
+For 1,000 servers, random assignment produces a maximum queue of roughly 4--5 requests, while two choices reduces the maximum to roughly 2. The improvement is exponential: two choices with 1,000 servers achieves better balance than random assignment with just 10 servers.
 
 ::: {.callout-important title="Exponential gain from one change"}
 
 The power-of-two-choices result is one of the most impactful findings in distributed systems theory. By examining just one additional server, maximum queue length improves from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$, an exponential improvement.
 
-The practical implications are substantial:
-
-- Near-optimal load balancing with minimal overhead (2 probes vs. $R$ probes)
-- Scalable: improvement increases with system size
-- Robust: works with heterogeneous servers and variable request sizes
-- Simple: easy to implement in any load balancer
-
-Production systems at Google, Meta, and AWS all use variants of power-of-two-choices.
+The practical implication is that near-optimal load balancing does not require polling the whole fleet. Two probes avoid the $R$-probe cost of exact least-loaded routing, the improvement grows with system size, and the method remains simple enough to implement inside ordinary load balancers. Production systems at Google, Meta, and AWS all use variants of power-of-two-choices.
 
 :::
 
-The mechanism is intuitive: random assignment occasionally makes poor choices (routing to an already-busy server), and these mistakes compound. With two choices, the algorithm almost never makes the worst choice, avoiding the tail behavior that creates long queues.
-
-Mathematically, the key insight is that with random assignment, when $m$ servers have queue length $k$, the probability of queue length $k+1$ growing is proportional to $m/R$. With two choices, this probability drops to $(m/R)^2$, creating a super-exponential decay in queue length distribution.
+The mechanism is intuitive: random assignment occasionally makes poor choices by routing to an already-busy server, and these mistakes compound. With two choices, the algorithm almost never makes the worst choice, avoiding the tail behavior that creates long queues. Mathematically, when $m$ servers have queue length $k$, random assignment grows queue length $k+1$ with probability proportional to $m/R$. With two choices, that probability drops to $(m/R)^2$, creating a super-exponential decay in queue length distribution.
 
 ### Weighted and adaptive load balancing {#sec-inference-scale-weighted-adaptive-load-balancing-1c03}
 
-When servers have different capacities, naive load balancing creates imbalance. A mix of A100 GPUs (high capacity) and T4 GPUs (lower capacity) receiving equal request rates will have T4 servers overloaded while A100 servers are underutilized.
-
-Weighted round-robin assigns requests proportional to server capacity:
+When servers have different capacities, naive load balancing creates imbalance. A mix of A100 GPUs and lower-capacity T4 GPUs receiving equal request rates will overload the T4 servers while leaving A100 capacity idle. Weighted round-robin corrects the mean assignment rate by routing requests proportional to server capacity:
 
 $$\Pr(\text{route to server } i) = \frac{w_i}{\sum_j w_j}$$
 
-where $w_i$ is the weight (capacity) of server $i$.
-
-Weighted two-choices applies the same principle:
-
-1. Select two servers with probability proportional to their weights
-2. Query both for current load relative to their capacity
-3. Route to the server with lower relative load
-
-A weighted-routing example shows how the policy handles mixed GPU hardware in practice.
+where $w_i$ is the weight, or capacity, of server $i$. Weighted two-choices applies the same idea to tail control: sample two servers with probability proportional to their weights, compare current load relative to capacity, and route to the lower relative load. The weighted-routing example below shows how this policy handles mixed GPU hardware in practice.
 
 ```{python}
 #| echo: false
@@ -4057,35 +4021,13 @@ class HeterogeneousGpuCluster:
 
 ::: {#exmp-inference-heterogeneous-gpu-cluster .callout-example title="Heterogeneous GPU cluster"}
 
-Consider a cluster with mixed GPU types:
+Consider a cluster with `{python} HeterogeneousGpuCluster.n_h100_str` H100 GPUs at `{python} HeterogeneousGpuCluster.h100_cap_qps_str` each and `{python} HeterogeneousGpuCluster.n_a100_str` A100 GPUs at `{python} HeterogeneousGpuCluster.a100_cap_qps_str` each, for total capacity of `{python} HeterogeneousGpuCluster.total_cap_str`. At target traffic of `{python} HeterogeneousGpuCluster.target_qps_str`, weighted assignment gives each H100 a weight of `{python} HeterogeneousGpuCluster.h100_weight_str` and each A100 a weight of `{python} HeterogeneousGpuCluster.a100_weight_str`.\index{Target Traffic}\index{Weighted Assignment}
 
-- `{python} HeterogeneousGpuCluster.n_h100_str` H100 GPUs (capacity: `{python} HeterogeneousGpuCluster.h100_cap_qps_str` each)
-- `{python} HeterogeneousGpuCluster.n_a100_str` A100 GPUs (capacity: `{python} HeterogeneousGpuCluster.a100_cap_qps_str` each)
-- Total capacity: $10 \times 1000$ + $20 \times 600$ = `{python} HeterogeneousGpuCluster.total_cap_str`
-
-**Target traffic**\index{Target Traffic}: `{python} HeterogeneousGpuCluster.target_qps_str`
-
-**Weighted assignment**\index{Weighted Assignment}:
-
-- H100 weight: 1000/22000 = `{python} HeterogeneousGpuCluster.h100_weight_str`
-- A100 weight: 600/22000 = `{python} HeterogeneousGpuCluster.a100_weight_str`
-
-**Expected load per server**\index{Expected Load Per Server}:
-
-- H100: $15000 \times (1000/22000)$ = `{python} HeterogeneousGpuCluster.h100_load_qps_str` (`{python} HeterogeneousGpuCluster.h100_util_str` utilization)
-- A100: $15000 \times (600/22000)$ = `{python} HeterogeneousGpuCluster.a100_load_qps_str` (`{python} HeterogeneousGpuCluster.a100_util_str` utilization)
-
-Both server types operate at equal utilization, maximizing overall capacity while maintaining latency consistency.
-
-**Without weighting** (equal distribution):
-
-- Per-server load: 15000/30 = `{python} HeterogeneousGpuCluster.equal_load_str`
-- H100 utilization: `{python} HeterogeneousGpuCluster.h100_util_equal_pct_str` (underutilized)
-- A100 utilization: `{python} HeterogeneousGpuCluster.a100_util_equal_pct_str` (high utilization, reduced latency headroom)
+The expected per-server load then becomes `{python} HeterogeneousGpuCluster.h100_load_qps_str` for H100s and `{python} HeterogeneousGpuCluster.a100_load_qps_str` for A100s, leaving the two server types at `{python} HeterogeneousGpuCluster.h100_util_str` and `{python} HeterogeneousGpuCluster.a100_util_str` utilization. Equal distribution would instead send `{python} HeterogeneousGpuCluster.equal_load_str` to every server, leaving H100s underutilized at `{python} HeterogeneousGpuCluster.h100_util_equal_pct_str` and A100s with reduced latency headroom at `{python} HeterogeneousGpuCluster.a100_util_equal_pct_str`.\index{Expected Load Per Server}
 
 :::
 
-Adaptive load balancing adjusts weights dynamically based on observed performance:
+Static weights handle known capacity differences, but production replicas also change over time. Adaptive load balancing adjusts weights dynamically based on observed performance:
 
 ```
 For each server i:
@@ -4093,47 +4035,17 @@ For each server i:
     weight[i] = 1 / latency[i]  # Inverse latency weighting
 ```
 
-Inverse latency weighting automatically adapts to:
-
-- Server degradation (memory pressure, thermal throttling)
-- Request size variations (some traffic patterns harder to serve)
-- Background tasks consuming resources
+Inverse latency weighting lowers the probability of routing to servers whose observed latency has risen, whether the cause is memory pressure, thermal throttling, request mix, or background work consuming resources.
 
 ### Least-connections load balancing {#sec-inference-scale-leastconnections-load-balancing-3f21}
 
-An alternative to random selection is routing to the server with the fewest active connections (or shortest queue). This requires maintaining global state but provides better balance for variable-size requests.
+An alternative to random selection is routing to the server with the fewest active connections or shortest queue. Least-connections maintains an active-request count for each server, routes a new request to the minimum count, increments on dispatch, and decrements on completion. For long-running requests, common in LLM serving, this outperforms round-robin because it accounts for work still in progress rather than only historical assignment order.
 
-**Least-connections algorithm.**
-
-1. Maintain a count of active requests per server
-2. Route each new request to the server with the minimum count
-3. Increment count on dispatch, decrement on completion
-
-For long-running requests (common in LLM serving), least-connections significantly outperforms round-robin because it accounts for current load rather than just historical assignments. The challenge is maintaining accurate connection counts in a distributed system. Options include:
-
-- **Centralized counter**: Single source of truth, potential bottleneck
-- **Distributed counters with gossip**\index{Distributed Counters with Gossip}: Eventually consistent, may route to stale information
-- **Sampled least-connections**\index{Sampled Least-Connections}: Query a subset of servers, choose minimum (combines with two-choices)
+The challenge is maintaining accurate connection counts in a distributed system. A centralized counter gives a single source of truth but can become a bottleneck. Distributed counters with gossip\index{Distributed Counters with Gossip} scale better but may route using stale information. Sampled least-connections\index{Sampled Least-Connections} combines the idea with two choices by probing only a subset of servers and choosing the minimum.
 
 ::: {#exmp-inference-least-connections-llm-serving .callout-example title="Least-connections for LLM serving"}
 
-LLM inference has highly variable request durations based on output length:
-
-- Short response (10 tokens): 500 ms
-- Long response (500 tokens): 25s
-- Ratio: 50$\times$
-
-With round-robin at 100 QPS across 10 servers:
-
-- Each server receives 10 requests/second
-- If one server gets multiple long requests, it falls behind
-- Queue builds while other servers sit idle
-
-With least-connections:
-
-- New requests route away from servers processing long responses
-- Servers finishing short requests receive new work immediately
-- Load naturally balances based on actual work remaining
+LLM inference has highly variable request durations because output length changes service time. A short 10-token response might take 500 ms, while a 500-token response might take 25 seconds, a 50$\times$ difference. With round-robin at 100 QPS across 10 servers, each server receives 10 requests per second regardless of whether it is already handling long responses. A server that receives several long requests falls behind while other servers sit idle. Least-connections routes new work away from those busy servers, so replicas that finish short requests receive new work immediately and load balances around actual work remaining.
 
 @Tbl-inference-llm-routing-comparison reports the observed improvement in production LLM serving across routing algorithms:
 
@@ -4145,19 +4057,13 @@ With least-connections:
 
 : **LLM Routing Algorithm Comparison**: Observed p99 latency and load variance under round-robin, least-connections, and least-connections-plus-two-choices routing for highly variable LLM workloads, quantifying how routing choices reshape tail latency. {#tbl-inference-llm-routing-comparison tbl-colwidths="[42,25,33]"}
 
-Least-connections reduces P99 by 38 percent; combining with two-choices provides additional improvement.
+Least-connections reduces P99 by 38 percent in this example, and combining it with two choices provides additional improvement.
 
 :::
 
 ### Consistent hashing for stateful routing {#sec-inference-scale-consistent-hashing-stateful-routing-ae5b}
 
-Many inference workloads maintain state that benefits from routing affinity:
-
-- **LLM conversations**\index{LLM!conversations}: KV cache from previous turns
-- **Recommendation sessions**\index{Recommendation Sessions}: User context and recent interactions
-- **Streaming inference**\index{Inference!streaming}: Model state from previous frames
-
-For these workloads, routing the same user or session to the same server improves performance by avoiding cache misses and state reconstruction.
+Many inference workloads maintain state that benefits from routing affinity. LLM conversations reuse KV cache from previous turns, recommendation sessions carry user context and recent interactions, and streaming inference may depend on model state from previous frames.\index{LLM!conversations}\index{Recommendation Sessions}\index{Inference!streaming} For these workloads, routing the same user or session to the same server improves performance by avoiding cache misses and state reconstruction.
 
 **Consistent hashing**[^fn-consistent-hashing-kv] [@karger1997] maps requests to servers based on a hash of the routing key (user ID, session ID):
 
@@ -4167,35 +4073,13 @@ $$\text{server}(request) = \operatorname{arg\,min}_{s \in \mathcal{S}_{\text{srv
 
 where $\mathcal{S}_{\text{srv}}$ is the set of servers mapped onto the ring, and each request routes to the nearest server clockwise.
 
-Key properties:
-
-- **Deterministic**\index{Deterministic}: Same key always routes to same server
-- **Minimal disruption**\index{Minimal Disruption}: Adding/removing servers only remaps $K/N_{\text{servers}}$ keys on average
-- **Load balancing**: With virtual nodes, load distributes evenly
-
-For LLM serving, the most direct payoff is avoiding unnecessary KV-cache rebuilds across conversation turns.
+The important properties are determinism, minimal disruption, and balance. The same key always routes to the same server, adding or removing servers remaps only $K/N_{\text{servers}}$ keys on average, and virtual nodes distribute load evenly enough to prevent one physical server from owning a disproportionate key range.\index{Deterministic}\index{Minimal Disruption} For LLM serving, the most direct payoff is avoiding unnecessary KV-cache rebuilds across conversation turns.
 
 ::: {#exmp-inference-consistent-hashing-kv-cache-affinity .callout-example title="Consistent hashing for KV cache affinity"}
 
-Consider an LLM serving system where each user's conversation maintains KV cache state:
+Consider an LLM serving system where each user's conversation maintains KV-cache state. Without affinity, the first message may route to Server A and build a KV cache, while the next message randomly routes to Server B and forces a cache rebuild. A 500 ms rebuild penalty across a 10-turn conversation wastes 4.5 seconds on recomputation rather than generation.\index{Without Affinity}
 
-**Without affinity**\index{Without Affinity}:
-
-- User sends message, routed to Server A, KV cache built
-- Next message routes to Server B (random)
-- KV cache rebuilt from scratch, 500 ms penalty
-- Average conversation: 10 turns, 4.5s wasted on cache rebuilds
-
-**With consistent hashing**\index{With Consistent Hashing}:
-
-- User ID hashed to Server A
-- All messages from this user route to Server A
-- KV cache reused across turns
-- Rebuild only on server changes or cache eviction
-
-**Implementation with virtual nodes**\index{Implementation with Virtual Nodes}:
-
-Each physical server has 100 virtual nodes on the hash ring, ensuring even distribution despite server heterogeneity.
+With consistent hashing, the user ID maps to Server A, all messages from that user route to the same server, and the KV cache is reused across turns. Rebuilds occur only when the server assignment changes or the cache is evicted. In practice, each physical server is represented by many virtual nodes on the hash ring, which improves balance despite server heterogeneity.\index{With Consistent Hashing}\index{Implementation with Virtual Nodes}
 
 ```
 Hash ring positions:
