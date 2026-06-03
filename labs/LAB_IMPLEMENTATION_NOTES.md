@@ -770,3 +770,55 @@ Tests or checks run:
 
 Follow-up:
 - Batch-apply the migration shell to the remaining Volume I notebooks first.
+
+### 2026-06-03 - Volume I Baseline Migration Panels
+
+Lab:
+- Volume I labs 01-09 and 11-16.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_01_ml_intro.py`
+- `labs/vol1/lab_02_ml_systems.py`
+- `labs/vol1/lab_03_ml_workflow.py`
+- `labs/vol1/lab_04_data_engr.py`
+- `labs/vol1/lab_05_nn_compute.py`
+- `labs/vol1/lab_06_nn_arch.py`
+- `labs/vol1/lab_07_ml_frameworks.py`
+- `labs/vol1/lab_08_model_train.py`
+- `labs/vol1/lab_09_data_selection.py`
+- `labs/vol1/lab_11_hw_accel.py`
+- `labs/vol1/lab_12_perf_bench.py`
+- `labs/vol1/lab_13_model_serving.py`
+- `labs/vol1/lab_14_ml_ops.py`
+- `labs/vol1/lab_15_responsible_engr.py`
+- `labs/vol1/lab_16_ml_conclusion.py`
+
+What changed:
+- Installed the `mlsysbook_labs` browser wheel in each remaining Volume I notebook.
+- Added a track-aware migration panel to each remaining Volume I notebook.
+- Each panel resolves lab metadata from the catalog, reads the saved ledger track, falls back to iPhone when no track is set, resolves the canonical track profile and lab variant, and renders the shared legacy migration panel.
+- The panels add learning objectives, track context, scenario brief, source trace, big takeaways, and local report export without duplicating constants in each notebook.
+
+MLSysIM facts/APIs needed:
+- No new facts. The notebooks now consume the shared `mlsysbook_labs` catalog, track profiles, variants, and migration helper.
+
+Notebook-local constants removed:
+- None in this slice. Existing lab mechanics were preserved while adding the shared outer contract.
+
+Reusable component or modality improved:
+- The Volume I notebooks now exercise `legacy_migration_panel()` at notebook level, proving the shared shell can be applied across heterogeneous lab structures.
+
+Plan updates needed in other labs:
+- Apply the same baseline migration shell to Volume II labs that are not already deeply migrated.
+- Replace baseline panels with deeper part-level track variants as solver-backed evidence is added to each lab.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_01_ml_intro.py labs/vol1/lab_02_ml_systems.py labs/vol1/lab_03_ml_workflow.py labs/vol1/lab_04_data_engr.py labs/vol1/lab_05_nn_compute.py labs/vol1/lab_06_nn_arch.py labs/vol1/lab_07_ml_frameworks.py labs/vol1/lab_08_model_train.py labs/vol1/lab_09_data_selection.py labs/vol1/lab_11_hw_accel.py labs/vol1/lab_12_perf_bench.py labs/vol1/lab_13_model_serving.py labs/vol1/lab_14_ml_ops.py labs/vol1/lab_15_responsible_engr.py labs/vol1/lab_16_ml_conclusion.py`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest labs/tests/test_static.py -q`
+
+Follow-up:
+- Batch-apply the migration shell to the remaining Volume II notebooks.
