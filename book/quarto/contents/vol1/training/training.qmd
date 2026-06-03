@@ -125,13 +125,13 @@ class TrainingScenarios:
     )
 ```
 
-## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
-
 ::: {.column-margin}
 ![](images/svg/training_cost_asymmetry.svg){width="100%" fig-alt="A cost curve that stays nearly flat across model scale, then rises almost vertically at the right, with a marked knee point and a shaded danger zone past it. Training cost explodes at frontier scale."}
 
 *Training cost stays flat across scale, then explodes past the frontier knee.*
 :::
+
+## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
 
 The frameworks examined in @sec-ml-frameworks provided the execution substrate: computational graphs that schedule operations, automatic differentiation that computes gradients, and hardware abstractions that target diverse accelerators. Those tools make a single training step possible. This chapter confronts what happens when that step must execute billions of times, and what systems engineering is required to do so within practical time and budget constraints.
 
@@ -1136,12 +1136,6 @@ class GPT2Optimizer:
 # Note: Use GPT2Optimizer.param_fp32_gb_str directly.
 ```
 
-::: {.column-margin}
-![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A single stacked memory bar split into three segments, Params, Grads, and Adam optimizer state in a 1 to 1 to 2 ratio, with the optimizer-state segment highlighted as the largest single piece, half the total."}
-
-*Adam state is the largest piece: 2$\times$ the weights, half of training memory.*
-:::
-
 ::: {#nbk-gpt2-optimizer .callout-notebook title="GPT-2 optimizer memory requirements"}
 
 A representative GPT-2 XL training configuration uses the Adam optimizer with the following hyperparameters:
@@ -1219,6 +1213,12 @@ for epoch in range(num_epochs):
 The `optimizer.zero_grad()` call marks the boundary between one update and the next. Gradients accumulate across calls to `backward()`, so clearing them explicitly prevents stale gradients from contaminating the next batch. The same accumulation behavior later becomes useful for large effective batch sizes, but only when the training loop manages the boundary deliberately.
 
 The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Lst-adam-internals makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
+
+::: {.column-margin}
+![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A single stacked memory bar split into three segments, Params, Grads, and Adam optimizer state in a 1 to 1 to 2 ratio, with the optimizer-state segment highlighted as the largest single piece, half the total."}
+
+*Adam state is the largest piece: 2$\times$ the weights, half of training memory.*
+:::
 
 ::: {#lst-adam-internals lst-cap="**Adam Optimizer Internals**: Illustrative pseudocode for the operations implemented by optimizer.step(), showing momentum estimation, variance tracking, bias correction, and parameter updates. Per-parameter optimizer state (momentum_buffer, variance_buffer, step_count) is initialized to zero on the first call and persisted across calls by the framework."}
 
@@ -5006,7 +5006,7 @@ Flash Attention addresses memory bandwidth bottlenecks during computation, but a
 
 ### Gradient accumulation and checkpointing {#sec-model-training-gradient-accumulation-checkpointing-0c47}
 
-Training large models requires substantial memory for storing activations, gradients, and model parameters simultaneously. When GPU memory constrains the batch size or model complexity, gradient accumulation\index{Gradient Accumulation!memory efficiency} and activation checkpointing address these limitations by trading computation for memory. These techniques exploit the efficiency principles formalized by the iron law in @sec-introduction-iron-law-ml-systems-c32a and have become indispensable for modern deep learning workflows.
+Training large models requires substantial memory for storing activations, gradients, and model parameters simultaneously. When GPU memory constrains the batch size or model complexity, gradient accumulation[^fn-gradient-accumulation-training]\index{Gradient Accumulation!memory efficiency} and activation checkpointing address these limitations by trading computation for memory. These techniques exploit the efficiency principles formalized by the iron law in @sec-introduction-iron-law-ml-systems-c32a and have become indispensable for modern deep learning workflows.
 
 #### Gradient accumulation and checkpointing mechanics {#sec-model-training-gradient-accumulation-checkpointing-mechanics-fb09}
 
@@ -5201,7 +5201,7 @@ Not all operations are equally expensive to recompute, which motivates selective
 
 #### Memory and computational benefits {#sec-model-training-memory-computational-benefits-9372}
 
-Gradient accumulation[^fn-gradient-accumulation-training] simulates larger batch sizes without increasing memory requirements for storing the full batch. Larger batch sizes improve gradient estimates, leading to more stable convergence and faster training. This flexibility proves particularly valuable when training on high-resolution data where even a single batch may exceed available memory.
+Gradient accumulation simulates larger batch sizes without increasing memory requirements for storing the full batch. Larger batch sizes improve gradient estimates, leading to more stable convergence and faster training. This flexibility proves particularly valuable when training on high-resolution data where even a single batch may exceed available memory.
 
 [^fn-gradient-accumulation-training]: **Gradient Accumulation**: Enables effective batch sizes of 2,048+ on single GPUs with only 32--64 micro-batch capacity, essential for transformer training where convergence requires large batches. The technique sums gradients across $k$ micro-batches before a single optimizer step, trading 10--15 percent wall-clock overhead from micro-batch serialization, synchronization, and gradient-buffer management for $k\times$ lower activation memory. BERT-Large training achieved 99.5 percent of full-batch performance using an effective batch size of 256 accumulated over eight steps. \index{Gradient Accumulation!memory-compute trade-off}
 
