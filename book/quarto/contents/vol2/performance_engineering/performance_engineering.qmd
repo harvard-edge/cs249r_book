@@ -40,7 +40,7 @@ Model compression reduces the size of what we compute. Performance engineering r
 
 - Apply the Roofline Model to diagnose whether an ML workload is compute-bound or memory-bound on a given accelerator
 - Explain how Operator Fusion and Tiling (FlashAttention) overcome HBM bandwidth limitations by keeping intermediate data in on-chip SRAM
-- Implement FP8 training (E4M3, E5M2) and block-wise quantization (LLM.int8(), GPTQ, AWQ) to handle outlier features in LLMs
+- Evaluate FP8 formats (E4M3, E5M2) and block-wise quantization (LLM.int8(), GPTQ, AWQ) as precision choices under bandwidth, compute, and quality constraints
 - Apply Graph Compilation frameworks (torch.compile, Accelerated Linear Algebra (XLA), TensorRT) to automate operator fusion, memory planning, and kernel selection
 - Evaluate Speculative Decoding strategies to reduce inference latency by trading extra compute for lower latency using small draft models
 - Design Mixture of Experts (MoE) systems that decouple model capacity from inference cost through sparse activation and expert parallelism
@@ -72,7 +72,7 @@ Those objectives connect directly to fleet design: scheduling decides where a re
 
 ::: {#psp-performance-engineering-fleet-stack-connection .callout-perspective title="Fleet stack connection"}
 
-Performance Engineering is the Optimization Layer of the fleet stack. While Inference at Scale (@sec-inference-scale) defines the serving architecture and scheduling policies, Performance Engineering optimizes the individual operations that execute within each serving node. In the fleet stack shown in @fig-fleet-stack, this chapter belongs to the Serving Layer while reaching downward into the Distribution and Infrastructure layers that determine how hardware actually executes work. Every technique here targets the same goal: closing the gap between theoretical hardware peak and achieved throughput, turning the iron law from a speed limit into a speedometer that reads closer to maximum.
+Performance Engineering is the Optimization Layer of the fleet stack. Serving architecture and scheduling policy determine which node receives the work; performance engineering determines how efficiently that node executes it. In the fleet stack shown in @fig-fleet-stack, this chapter belongs to the Serving Layer while reaching downward into the Distribution and Infrastructure layers that determine how hardware actually executes work. Every technique here targets the same goal: closing the gap between theoretical hardware peak and achieved throughput, turning the iron law from a speed limit into a speedometer that reads closer to maximum.
 
 :::
 
@@ -80,7 +80,7 @@ Performance Engineering is the Optimization Layer of the fleet stack. While Infe
 
 An H100 GPU capable of 989 teraFLOP/s often sits 95 percent idle while generating text from a large language model because the processor is starving for data. Performance engineering operates within a constrained optimization space defined by the memory wall, where the speed of moving bytes from memory to compute units fundamentally caps our operational throughput.
 
-Part II established the distributed logic of the fleet: partitioning workloads, synchronizing gradients, recovering from faults, and orchestrating scarce accelerator capacity. Those chapters ensured that workloads reach the right hardware and survive failures along the way. This chapter ensures that each workload uses that hardware efficiently, extracting maximum throughput from every accelerator cycle through operator fusion that keeps data in fast memory, precision formats that double effective bandwidth, graph compilation that automates kernel selection, and algorithmic techniques like speculative decoding and expert routing that change the performance equation outright.
+Part II established the distributed logic of the fleet: partitioning workloads, synchronizing gradients, recovering from faults, and orchestrating scarce accelerator capacity. Those chapters ensured that workloads reach the right hardware and survive failures along the way. This chapter asks why expensive hardware still sits idle after the work arrives. The answer is usually data movement. Performance engineering therefore begins with the memory hierarchy, then follows the consequences through fusion, precision, compilation, and algorithmic changes that either move fewer bytes, launch less overhead, or do different work entirely.
 
 ### The iron law of ML performance {#sec-performance-engineering-efficiency-frontier}
 
@@ -106,9 +106,9 @@ The inherited iron law decomposes execution time into three terms. The compute f
 
 Standard model compression (pruning, quantization, distillation) reduces the *numerators*, performing fewer operations on smaller data. System optimization, the focus of this chapter, attacks the *structure* of the equation itself:
 
-Several levers map directly to those terms. Operator fusion and tiling, including FlashAttention and fused kernels, reduce the Memory Access numerator by eliminating intermediate HBM round-trips. When a sequence of operations keeps its data in SRAM, the effective Memory Access term shrinks dramatically, often by 10--30$\times$ for attention computation. Precision engineering, including FP8, INT4, and KV cache compression, attacks the same numerator by representing each value in fewer bytes: halving the precision halves the bytes transferred, doubling the effective bandwidth.
+Several levers map directly to those terms. When memory traffic dominates, operator fusion and tiling reduce the data-volume numerator by eliminating intermediate HBM round-trips. A fused sequence that keeps its intermediates in SRAM can shrink the exposed memory-access term dramatically, often by 10--30$\times$ for attention computation. Precision engineering attacks the same numerator from a different angle: FP8, INT4, and KV-cache compression represent each value in fewer bytes, so the same physical bandwidth carries more useful model state.
 
-Other levers change the overhead or compute terms rather than the data-volume term. Graph compilation, including torch.compile, XLA, and TensorRT, reduces the Overhead term by eliminating kernel launch gaps, fusing operations, and optimizing memory allocation. Communication-computation overlap transforms the equation for distributed systems by making communication overhead concurrent with the compute term, effectively eliminating it from the critical path when $T_{\text{comm}}(N) - T_{\text{overlap}} \leq T_{\text{compute}}/N$ (that is, communication finishes before the next layer's computation completes). Algorithmic innovations such as speculative decoding and mixture-of-experts (MoE) change the Compute numerator itself by performing a fundamentally different, less expensive computation that produces equivalent results.
+Other levers change the overhead or compute terms. Graph compilation, including torch.compile, XLA, and TensorRT, reduces overhead by eliminating kernel launch gaps, fusing operations, and optimizing memory allocation across the graph. Communication-computation overlap makes distributed communication concurrent with useful work, removing it from the critical path when $T_{\text{comm}}(N) - T_{\text{overlap}} \leq T_{\text{compute}}/N$ (that is, communication finishes before the next layer's computation completes). Algorithmic innovations such as speculative decoding and mixture-of-experts (MoE) change the compute term itself by making the model perform a different computation that preserves the output contract at lower exposed cost.
 
 Each technique attacks a different term, and this taxonomy guides optimization strategy: diagnose which term dominates (using the roofline model from @sec-performance-engineering-roofline), then apply the technique targeting that term. Applying a technique that targets the nondominant term wastes engineering effort.
 
@@ -643,7 +643,7 @@ At large batch sizes, the GPU transitions from memory-bound to compute-bound, an
 
 The constraint is memory: each additional request in the batch requires its own KV cache, and the total KV cache across all requests must fit in GPU memory alongside the model weights. A 70B model with 140 GB of weights in FP16 must be sharded across multiple GPUs; on an 8-GPU node that leaves about 62.5 GB per GPU for KV cache before overhead. The precision engineering techniques covered later in this chapter address exactly this constraint: INT4 weight quantization reduces the per-GPU weight footprint to about 4.4 GB and frees roughly 13 GB per GPU for KV cache, enabling batch sizes that transform the economics of serving.
 
-The continuous batching systems introduced in @sec-inference-scale-continuous-batching-llm-inference-f8e6 manage batch size dynamically, adding and removing requests as they complete. Performance engineering's role is to maximize the effective batch size by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization.
+A serving scheduler can keep the effective batch full by adding new requests as older requests finish, but that policy only works when memory is available for the active requests. Performance engineering's role is to make that scheduler's job feasible by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization. The next chapter develops the full serving scheduler; the local point here is that memory optimization expands the batch sizes the scheduler can safely admit.
 
 A critical enabler for large batch sizes is **paged KV cache management**[^fn-paged-attention-os], introduced by vLLM [@kwon2023]. Traditional KV cache implementations preallocate contiguous memory for each request's maximum possible sequence length.
 
@@ -661,7 +661,7 @@ The **prefill phase**\index{Prefill Phase} processes the entire input prompt in 
 
 The **decode phase**\index{Decode Phase} generates output tokens one at a time, autoregressively. Each step has a batch dimension of 1 (for a single request) or the number of concurrent requests (for batched serving). At batch size 1, decode is deeply memory-bound as analyzed in @sec-performance-engineering-workload-placement.
 
-The prefill-decode decomposition has direct implications for system design. A system optimized for prefill (maximizing FLOP/s utilization) would use large matrix sizes and high compute throughput. A system optimized for decode (maximizing bandwidth utilization) would use aggressive quantization and memory optimization. A real serving system must handle both phases, often simultaneously across different requests in a continuous batching framework.
+The prefill-decode decomposition has direct implications for system design. A system optimized for prefill (maximizing FLOP/s utilization) would use large matrix sizes and high compute throughput. A system optimized for decode (maximizing bandwidth utilization) would use aggressive quantization and memory optimization. A real serving system must handle both phases, often simultaneously across different active requests.
 
 Disaggregated serving addresses this mismatch by running prefill and decode on separate hardware pools. Prefill servers are optimized for compute (fewer, higher-FLOP/s GPUs), while decode servers are optimized for memory bandwidth and capacity (more memory per GPU, aggressive quantization). The KV cache computed during prefill is transferred to a decode server, which handles the subsequent autoregressive generation. This disaggregation allows each phase to use hardware and software configurations tuned for its specific bottleneck.
 
@@ -729,7 +729,7 @@ $$
 
 This yields approximately `{python} RooflineDiagnostic.tps_tokens_per_s_str` per GPU, or about `{python} RooflineDiagnostic.tps_tokens_per_s_str` for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this substantially below the ideal bandwidth-only limit.
 
-**Systems insight**: At batch size 1, fewer than 0.4 percent of the H100's FP16 FLOP/s are in use. The only ways to improve are: (a) increase batch size to amortize weight reads, (b) reduce weight bytes via quantization, or (c) use speculative decoding to generate multiple tokens per weight read.
+**Systems insight**: At batch size 1, fewer than 0.4 percent of the H100's FP16 FLOP/s are in use. The improvement paths all attack the same weight-streaming cost: larger batches amortize each weight read across more requests, quantization reduces the bytes read for each weight, and speculative decoding tries to obtain multiple accepted tokens from one target-model weight pass.
 
 :::
 
@@ -1126,7 +1126,7 @@ The practical choice depends on the binding resource and the quality budget. LLM
 
 The choice among these techniques also depends on the deployment target. For GPU inference with Tensor Core support, GPTQ and AWQ produce INT4 weight representations that are dequantized to FP16 during the GEMM computation, using the GPU's FP16 Tensor Cores. For CPU inference or edge deployment, INT8 representations (LLM.int8() or static per-channel INT8 quantization) can directly exploit integer arithmetic units without dequantization overhead.
 
-The storage cost for block-wise quantization is minimal. Storing one FP32 scale (32 bits) for every block of 128 INT8 weights (1024 bits) increases total model size by only 3 percent. This small overhead allows block-wise quantization to isolate the destructive impact of outliers, preserving the effective dynamic range for the 99 percent of normal weights, without the bandwidth penalty of higher-precision formats. At the extreme end of the deployment spectrum, quantization moves from an optimization to a physical necessity.
+The storage cost for block-wise quantization is minimal. Storing one FP32 scale (32 bits) for every block of 128 INT8 weights (1024 bits) increases total model size by only 3 percent. This small overhead allows block-wise quantization to isolate the destructive impact of outliers, preserving the effective dynamic range for the 99 percent of normal weights, without the bandwidth penalty of higher-precision formats. At the extreme end of the deployment spectrum, quantization moves from an optimization to a physical necessity. The mobile and federated archetype introduced in Volume 1 provides that limiting case: when the device has only kilobytes or megabytes of memory, precision is no longer a tuning knob after the model is chosen; it is part of the feasibility test.
 
 ::: {#lhs-performance-engineering-archetype-c-federated-mobilenet-tinyml-survival .callout-lighthouse title="Archetype C (Federated MobileNet): TinyML survival"}
 
@@ -1148,7 +1148,7 @@ The practical workflow in most production environments follows a two-stage appro
 
 ### KV cache compression and architectural optimization {#sec-performance-engineering-kv-cache}
 
-The key-value (KV) cache is the precision problem that determines whether weight savings become larger batches. In decode, weights may be compressed aggressively while per-request cache state still grows with sequence length, so a precision change that leaves the cache untouched may fail to move the serving bottleneck. Strategies to mitigate this pressure include numerical compression (quantization to INT8, FP8, or INT4) and architectural optimizations like grouped query attention (GQA). Because these techniques are fundamental to scaling model serving, @sec-inference-scale-kv-cache-compression-943a provides the full quantitative treatment of KV cache memory footprints and the performance impact of GQA.
+The key-value (KV) cache is the precision problem that determines whether weight savings become larger batches. In decode, weights may be compressed aggressively while per-request cache state still grows with sequence length, so a precision change that leaves the cache untouched may fail to move the serving bottleneck. Numerical compression reduces the bytes stored per cached key or value, while grouped query attention (GQA) reduces how many key-value heads must be cached for each layer. Both mechanisms matter because the scheduler admits requests against the combined memory footprint of weights plus active cache state; the next calculation shows the local capacity effect before the inference chapter returns to the full serving policy.
 
 ### Weight-only vs. weight-activation quantization {#sec-performance-engineering-quant-strategies}
 
@@ -1528,7 +1528,7 @@ Graph compilation automates what manual kernel engineering achieves for individu
 *Speculative decoding shifts decode toward the compute-bound ridge.*
 :::
 
-Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. The performance-engineering relevance is that speculative decoding raises the effective arithmetic intensity of the decode phase: a single forward pass of the target model now processes $k$ candidate tokens for the same weight-streaming cost as one token, shifting the operating point from deeply memory-bound toward the ridge point on the roofline. The speedup is bounded by the draft model's acceptance rate and breaks down when the draft model is too cheap (low acceptance) or too expensive (compute-bound verification). It interacts with batching: at large batch sizes the decode phase is already closer to compute-bound, so the marginal benefit of speculation shrinks. The full algorithm, speedup analysis, and SLA-driven deployment patterns are in @sec-inference-scale-speculative-decoding-c438.
+Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. The performance-engineering relevance is that speculative decoding raises the effective arithmetic intensity of the decode phase: a single forward pass of the target model now processes $k$ candidate tokens for the same weight-streaming cost as one token, shifting the operating point from deeply memory-bound toward the ridge point on the roofline. The speedup is bounded by the draft model's acceptance rate and breaks down when the draft model is too inaccurate (too many rejected tokens) or too expensive (verification becomes compute-bound). It also interacts with batching: at large batch sizes the decode phase is already closer to compute-bound, so the marginal benefit of speculation shrinks. This chapter uses speculative decoding as a performance transformation; the inference chapter later treats it as a serving policy with admission control and SLA consequences.
 
 ## Mixture of Experts {#sec-performance-engineering-moe}
 
@@ -1538,7 +1538,7 @@ For performance engineering, the local question is whether active-parameter savi
 
 ### MoE architecture {#sec-performance-engineering-moe-architecture}
 
-A standard MoE transformer layer replaces the feed-forward network (FFN) with multiple parallel "expert" FFNs and a lightweight **router**\index{Router!Mixture of Experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, Expert Parallelism (EP), AllToAll communication, and load balancing. Because the serving logic for these models is fundamental to large-scale inference, @sec-inference-scale-expert-parallelism-moe-models-55f6 provides the full quantitative treatment of MoE serving.
+A standard MoE transformer layer replaces the feed-forward network (FFN) with multiple parallel "expert" FFNs and a lightweight **router**\index{Router!Mixture of Experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, and load balance. When experts are distributed across GPUs, expert parallelism places different experts on different devices, and an AllToAll exchange moves each token's hidden state to its assigned expert before returning the result. The active-parameter savings are valuable only if that routing traffic and any expert imbalance remain smaller than the dense compute they replace.
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
@@ -1988,7 +1988,7 @@ Large intermediate tensors appear as memory timeline spikes corresponding to att
 
 Low FLOP/s utilization combined with high memory bandwidth means the GPU achieves near-peak bandwidth but single-digit FLOP/s utilization. Memory-bound operations dominate execution time, and the remedy is precision reduction (FP16 to FP8, INT4 KV cache) or algorithmic changes (batching, speculative decoding).
 
-Communication bubbles appear as GPU idle periods coinciding with NCCL AllReduce or AllToAll operations. Communication is not overlapped with compute, and the fix is to enable gradient overlap in DDP or restructure the pipeline schedule for zero-bubble execution.
+Communication bubbles appear as GPU idle periods coinciding with NCCL AllReduce or AllToAll operations. Communication is not overlapped with compute, and the fix is to enable gradient overlap in DDP or restructure the pipeline so communication from one stage is hidden under useful compute from another.
 
 Load imbalance causes some GPUs to finish earlier and wait for stragglers. Uneven work distribution is the root cause. For MoE, adjusting auxiliary loss and capacity factors rebalances the load; for tensor parallelism, ensuring even dimension splitting eliminates the skew.
 
@@ -2238,7 +2238,7 @@ For **communication-bound workloads**\index{Communication-Bound!optimization pat
 
 1. Enable gradient communication overlap with backward pass.
 2. Apply gradient compression or reduced precision communication.
-3. Restructure pipeline schedules for zero-bubble execution.
+3. Restructure pipeline schedules so stage-to-stage communication is hidden under useful compute.
 4. Consider topology-aware placement to minimize cross-node traffic.
 
 The fourth step is to apply and verify. Implement the highest-impact optimization, reprofile, and verify improvement. Then iterate from the roofline classification step with the new profile, as the bottleneck may have shifted.
@@ -2307,7 +2307,7 @@ The roofline analysis confirms that decode is deeply memory-bound, with arithmet
 
 The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the per-GPU weight footprint from 17.5 GB to about 4.4 GB on an 8-GPU node. The raw weight-read traffic drops by 4$\times$, and the effective bandwidth for weight reads roughly doubles once on-the-fly dequantization to FP16 is included.
 
-Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately 75.6 GB available for KV cache, up from 62.5 GB. Under the raw 4K GQA cache calculation from @sec-inference-scale-kv-cache-compression-943a, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from 4 to approximately 32.
+Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately 75.6 GB available for KV cache, up from 62.5 GB. Under the 4K-context GQA cache calculation from @sec-performance-engineering-kv-cache, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from 4 to approximately 32.
 
 Postoptimization metrics at batch size 1:
 
@@ -2442,21 +2442,9 @@ class FlashAttentionSummaryRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     savings_mult_str = fmt_multiple(savings_ratio, commas=False, precision=0)
 ```
-Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, avoiding the quadratic attention intermediates that dominate long sequences through tiling and online softmax. In the 8K example above, this is a `{python} FlashAttentionSummaryRecap.savings_mult_str` reduction in materialized attention state. Ring Attention extends this principle across GPUs for extreme sequence lengths.
+The chapter's techniques form an optimization stack rather than a menu. Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, avoiding the quadratic attention intermediates that dominate long sequences through tiling and online softmax; in the 8K example above, this is a `{python} FlashAttentionSummaryRecap.savings_mult_str` reduction in materialized attention state. Precision engineering then reduces the bytes in the trips that remain: FP8 formats improve effective bandwidth on H100 hardware, block-wise quantization protects the outlier features that defeat uniform quantization, and KV cache compression directly increases the batch sizes a serving node can admit.
 
-Precision engineering reduces bytes per transaction. FP8 formats (E4M3 for weights, E5M2 for gradients) double effective bandwidth on H100 hardware. Block-wise quantization (LLM.int8(), GPTQ, AWQ) handles the outlier features that defeat uniform quantization. KV cache compression to INT4 or INT8 directly increases serving batch size.
-
-Graph compilation automates fusion, kernel selection, and memory planning. torch.compile/TorchInductor generates optimized Triton kernels from standard PyTorch code. XLA provides whole-program optimization for JAX/TPU workloads. TensorRT delivers aggressive inference-specific optimization.
-
-Speculative decoding trades extra compute for lower latency by using a fast draft model to generate candidate tokens verified in parallel by the target model, with mathematical guarantees on output quality. Speedups of 1.5--3$\times$ are typical for diverse workloads.
-
-Mixture of Experts decouples model capacity from per-token inference cost through sparse activation. Public MoE systems illustrate the scale: models such as DeepSeek-V3 report hundreds of billions of total parameters with only tens of billions active per token.
-
-Communication-computation overlap hides network latency by executing communication and computation concurrently on separate hardware engines. Zero-bubble pipeline schedules approach the theoretical minimum idle time.
-
-System profiling provides the measurement infrastructure to identify which bottleneck dominates and which optimization to apply, closing the loop between diagnosis and treatment.
-
-Together, these techniques compose a coherent optimization stack. Precision engineering and operator fusion attack the iron law at the hardware level, reducing the memory and compute terms. Graph compilation automates these hardware-level optimizations across the full model. Communication overlap attacks the distributed overhead term. Speculative decoding and MoE change the algorithm itself, fundamentally restructuring the terms of the equation.
+Graph compilation moves those local transformations from hand-written kernels into the model graph. torch.compile/TorchInductor generates optimized Triton kernels from standard PyTorch code, XLA provides whole-program optimization for JAX/TPU workloads, and TensorRT specializes stable inference graphs. Communication-computation overlap applies the same bottleneck logic at the distributed boundary, hiding network latency when communication can run under useful compute. Speculative decoding and MoE go one level higher: instead of optimizing the same dense computation, they restructure the computation itself by obtaining more accepted tokens per target-model pass or by activating only the experts a token needs. System profiling closes the loop by showing which term dominates after each change, so the next intervention follows the new bottleneck rather than the old intuition.
 
 The case study in @sec-performance-engineering-case-study demonstrated how these techniques compound in practice: INT4 quantization freed memory for larger batches, which changed the arithmetic intensity, which determined whether further bandwidth or compute optimizations were profitable. Each optimization shifted the bottleneck, requiring reprofiling and a new optimization decision. This iterative, measurement-driven process is the discipline of performance engineering.
 
@@ -2480,7 +2468,7 @@ This iterative mindset also determines which skills endure as hardware evolves. 
 
 ::: {.callout-chapter-connection title="From optimization to serving"}
 
-Operator fusion, precision reduction, graph compilation, and algorithmic innovations like speculative decoding and MoE extract maximum computational efficiency from a single model executing on bare metal. Optimizing an isolated forward pass, however, is merely the precursor to deployment. In production, models do not operate in zero-contention vacuums. They must process unpredictable bursts of concurrent requests, multiplexing across fleets of distributed accelerators while strictly adhering to latency and throughput budgets. @Sec-inference-scale transitions from the mechanics of local execution to the architecture of robust serving systems. The low-level optimizations developed here become the foundational primitives for high-availability infrastructure: continuous batching, distributed KV cache management, and dynamic request routing.
+Operator fusion, precision reduction, graph compilation, and algorithmic innovations like speculative decoding and MoE extract maximum computational efficiency from a single model executing on bare metal. Optimizing an isolated forward pass, however, is merely the precursor to deployment. In production, the same model must handle bursts of concurrent requests, share accelerators with other work, and preserve latency budgets while request lengths and arrival rates change. @Sec-inference-scale transitions from local execution mechanics to the architecture of robust serving systems. The low-level optimizations developed here become the primitives that make high-availability serving possible: they reduce per-request memory, increase useful batch size, and give the scheduler more room to protect tail latency.
 
 :::
 
