@@ -1298,6 +1298,66 @@ The $T^2$ factor compensates for gradient magnitude reduction at high temperatur
 
 
 @app.cell(hide_code=True)
+def _(mo, v1_10_candidate_rows, v1_10_compression_sweep, v1_10_defaults):
+    _feasible_labels = [row["label"] for row in v1_10_candidate_rows if row["feasible"]]
+    _candidate_labels = _feasible_labels or [row["label"] for row in v1_10_candidate_rows]
+    _candidate_options = {label: label for label in _candidate_labels}
+    _default_candidate = v1_10_compression_sweep.best_candidate_label or _candidate_labels[0]
+    _validation_tests = tuple(v1_10_defaults["validation_tests"])
+    v1_10_recipe_choice = mo.ui.dropdown(
+        options=_candidate_options,
+        value=_default_candidate,
+        label="Final Decision",
+    )
+    v1_10_validation_test = mo.ui.dropdown(
+        options={test: test for test in _validation_tests},
+        value=_validation_tests[0],
+        label="Validation Test",
+    )
+    v1_10_reflection_diagnosis = mo.ui.text_area(
+        label="Reflection - Diagnosis",
+        placeholder="What did the compression evidence show for your track?",
+        full_width=True,
+    )
+    v1_10_reflection_tradeoff = mo.ui.text_area(
+        label="Reflection - Tradeoff",
+        placeholder="What improved, what worsened, and which guardrail mattered most?",
+        full_width=True,
+    )
+    v1_10_residual_risk = mo.ui.text_area(
+        label="Residual Risk",
+        placeholder="What assumption could invalidate this compression recipe?",
+        full_width=True,
+    )
+    mo.vstack(
+        [
+            mo.Html(
+                """
+<div class="mlsysbook-panel">
+  <h2>Synthesis</h2>
+  <p class="mlsysbook-source-summary">
+    Choose a compression recipe from the feasible MLSysIM candidates, name the
+    validation test you would run before release, and record a short reflection.
+  </p>
+</div>
+"""
+            ),
+            mo.hstack([v1_10_recipe_choice, v1_10_validation_test], justify="start"),
+            v1_10_reflection_diagnosis,
+            v1_10_reflection_tradeoff,
+            v1_10_residual_risk,
+        ]
+    )
+    return (
+        v1_10_recipe_choice,
+        v1_10_reflection_diagnosis,
+        v1_10_reflection_tradeoff,
+        v1_10_residual_risk,
+        v1_10_validation_test,
+    )
+
+
+@app.cell(hide_code=True)
 def _(
     big_takeaways,
     build_lab_report,
@@ -1313,8 +1373,13 @@ def _(
     report_export_panel,
     v1_10_candidate_rows,
     v1_10_compression_sweep,
+    v1_10_recipe_choice,
+    v1_10_reflection_diagnosis,
+    v1_10_reflection_tradeoff,
+    v1_10_residual_risk,
     v1_10_track_profile,
     v1_10_variant,
+    v1_10_validation_test,
 ):
     _prediction_values = {
         "Part A - Quantization": pA_pred.value,
@@ -1338,6 +1403,19 @@ def _(
         "current_limitation": "Report export captures solver-backed candidate evidence; final recipe and structured reflection migrate next.",
     }
     _feasible_count = sum(1 for row in v1_10_candidate_rows if row["feasible"])
+    _reflections = {}
+    if v1_10_reflection_diagnosis.value:
+        _reflections["diagnosis"] = v1_10_reflection_diagnosis.value
+    if v1_10_reflection_tradeoff.value:
+        _reflections["tradeoff"] = v1_10_reflection_tradeoff.value
+    _final_decision = {
+        "selected_recipe": v1_10_recipe_choice.value,
+        "validation_test": v1_10_validation_test.value,
+        "track": v1_10_track_profile.label,
+        "primary_metric": v1_10_variant.primary_metric,
+        "guardrail_metric": v1_10_variant.guardrail_metric,
+        "solver_best_candidate": v1_10_compression_sweep.best_candidate_label or "No feasible frontier candidate",
+    }
     _report = build_lab_report(
         lab_metadata,
         track=v1_10_track_profile.track_id,
@@ -1360,12 +1438,11 @@ def _(
             "frontier_labels": tuple(v1_10_compression_sweep.frontier_labels),
             "dominated_labels": tuple(v1_10_compression_sweep.dominated_labels),
         },
+        final_decision=_final_decision,
         big_takeaways=lab_big_takeaways,
+        reflections=_reflections,
+        residual_risk=v1_10_residual_risk.value or "",
         source_trace=_source_trace,
-        incomplete_fields=(
-            "Final recipe decision widget",
-            "Structured reflection fields",
-        ),
     )
     mo.vstack(
         [
@@ -1376,9 +1453,9 @@ def _(
   <h2>Download Report</h2>
   <p class="mlsysbook-source-summary">
     This local report records the selected track, scenario variant, MLSysIM
-    candidate evidence, source trace, and any predictions you have made. It marks
-    the final recipe and structured reflection fields as incomplete until the next
-    migration slice lands.
+    candidate evidence, final recipe, source trace, and any predictions or
+    reflections you have made. If a required field is empty, the Markdown report
+    marks it under Incomplete Fields.
   </p>
 </div>
 """
@@ -1409,8 +1486,13 @@ def _(
     pE_pred,
     v1_10_candidate_rows,
     v1_10_compression_sweep,
+    v1_10_recipe_choice,
+    v1_10_reflection_diagnosis,
+    v1_10_reflection_tradeoff,
+    v1_10_residual_risk,
     v1_10_track_id,
     v1_10_variant,
+    v1_10_validation_test,
 ):
     _complete = all(
         prediction.value is not None
@@ -1431,6 +1513,15 @@ def _(
         "best_candidate_label": v1_10_compression_sweep.best_candidate_label,
         "frontier_labels": tuple(v1_10_compression_sweep.frontier_labels),
         "dominated_labels": tuple(v1_10_compression_sweep.dominated_labels),
+        "final_decision": {
+            "selected_recipe": v1_10_recipe_choice.value,
+            "validation_test": v1_10_validation_test.value,
+        },
+        "reflections": {
+            "diagnosis": v1_10_reflection_diagnosis.value,
+            "tradeoff": v1_10_reflection_tradeoff.value,
+        },
+        "residual_risk": v1_10_residual_risk.value,
         "quantization_accuracy_loss": pA_pred.value,
         "pruning_speedup_prediction": pB_pred.value,
         "deployment_strategy": pC_pred.value,

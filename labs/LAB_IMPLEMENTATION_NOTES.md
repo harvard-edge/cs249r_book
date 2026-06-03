@@ -629,3 +629,50 @@ Tests or checks run:
 Follow-up:
 - Migrate the internals of Parts A-C so the interactive controls and visuals read from the MLSysIM candidate/sweep outputs instead of legacy notebook formulas.
 - Add structured reflection/checkpoint widgets for the final recipe so the report can become complete.
+
+### 2026-06-03 - V1-10 Synthesis And Complete Report Pass
+
+Lab:
+- V1-10 The Compression Paradox.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added track-specific validation-test options to the V1-10 variant defaults.
+- Added a structured `Synthesis` block with final recipe choice, validation-test choice, diagnosis reflection, tradeoff reflection, and residual-risk field.
+- Updated report generation so `Final Decision`, `Reflections`, and `Residual Risk` come from local widgets.
+- Updated the ledger payload to save final decision, validation test, reflections, and residual risk alongside the compression candidate snapshot.
+- Rebuilt the `mlsysbook_labs` browser wheel so validation-test defaults ship to WASM notebooks.
+
+MLSysIM facts/APIs needed:
+- No new facts. This pass uses existing candidate evidence and typed variant defaults.
+
+Notebook-local constants removed:
+- None. This pass completes the report contract around the solver-backed evidence.
+- Legacy Part A-C internals still need migration from local formulas to `CompressionModel.candidate()` and `CompressionModel.sweep()`.
+
+Reusable component or modality improved:
+- V1-10 now has the local-first report loop: prediction values, solver-backed evidence, final decision, structured reflection, residual risk, and downloadable report.
+
+Plan updates needed in other labs:
+- Future lab migrations should add structured synthesis widgets before claiming the report is complete.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_10_model_compress.py labs/mlsysbook_labs/variants.py labs/tests/test_lab_variants.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_static.py::TestSyntax::test_ast_parse labs/tests/test_static.py::TestWheelConsistency::test_mlsysbook_labs_wheel_present_when_imported --tb=short -q labs/vol1/lab_10_model_compress.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains the V1-10 validation-test defaults.
+- Note: a combined labs-plus-MLSysIM pytest invocation was split into separate commands because both suites expose a top-level `tests.conftest`.
+
+Follow-up:
+- Migrate Part A, Part B, and Part C internals to render directly from MLSysIM candidate/sweep outputs.
+- Consider adding a reusable structured synthesis widget helper if V2-11 repeats this pattern.

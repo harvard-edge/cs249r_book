@@ -69,4 +69,5 @@ def test_v1_10_variants_define_compression_guardrails():
         assert "max_accuracy_drop" in variant.defaults
         assert "min_speedup" in variant.defaults
         assert "require_hardware_support" in variant.defaults
+        assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "compression deployment recipe"
