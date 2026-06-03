@@ -298,3 +298,45 @@ Follow-up:
 - Migrate the Lab 00 visible structure to the full header contract in a separate pass.
 - Build the V1-10 Compression pilot on the new profile/report APIs.
 - Add typed `LabTrackVariant` entries for each pilot lab before broad notebook migration.
+
+### 2026-06-03 - Lab 00 Structure Pass
+
+Lab:
+- V1-00 The Architect's Portal.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_00_introduction.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added explicit Lab 00 metadata and learning-objective tuples.
+- Added visible contract headers for `Learning Objectives`, `Chapter Recap`, `Scenario Brief`, `Your Track`, `Lab Map`, `Big Takeaways`, and `Download Report`.
+- Added the reusable `track_context()` panel after track selection so Lab 00 shows the selected canonical track and MLSysIM source references.
+- Added local report generation with `build_lab_report()` and `report_export_panel()`.
+- The downloaded report records the selected track, hardware reference, optional system reference, check answers, big takeaways, source trace, and residual risk.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts. Lab 00 now consumes canonical track profiles and source references created in the foundation pass.
+
+Notebook-local constants removed:
+- None. This was a structure/report pass; the remaining Lab 00 explanatory constants will be handled only if they become active solver inputs.
+
+Reusable component or modality improved:
+- Proved that Lab 00 can use `track_context()` and the local report export panel without rewriting the existing concept checks.
+
+Plan updates needed in other labs:
+- V1-10 should follow the same local report pattern but with solver-backed evidence instead of orientation-only evidence.
+- The report should be complete only when predictions, evidence summary, final decision, big takeaways, reflections, residual risk, and source trace are present.
+
+Tests or checks run:
+- `python3` AST parse check for `labs/vol1/lab_00_introduction.py`
+- `python3 -m pytest labs/tests/test_track_profiles.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency labs/tests/test_static.py::TestRequiredImports::test_imports_design_ledger --tb=short -q`
+- `rg` check for required Lab 00 contract headers and helper calls.
+
+Follow-up:
+- Start the Lab Variant Registry pass.
+- Then migrate V1-10 Compression as the first content-heavy pilot.

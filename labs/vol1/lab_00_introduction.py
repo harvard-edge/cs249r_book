@@ -54,19 +54,64 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS
     from mlsysim.labs.components import DecisionLog
-    from mlsysbook_labs import get_track_profile
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        LabMetadata,
+        build_lab_report,
+        get_track_profile,
+        report_export_panel,
+        track_context,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
-    return COLORS, DecisionLog, LAB_CSS, get_track_profile, ledger, mo
+    return (
+        COLORS,
+        ACADEMIC_LAB_CSS,
+        DecisionLog,
+        LAB_CSS,
+        LabMetadata,
+        build_lab_report,
+        get_track_profile,
+        ledger,
+        mo,
+        report_export_panel,
+        track_context,
+    )
+
+@app.cell
+def _(LabMetadata):
+    lab_metadata = LabMetadata(
+        lab_id="v1_00_architects_portal",
+        title="The Architect's Portal",
+        volume="Volume I",
+        chapter="Orientation",
+        book_anchor="Volume I orientation",
+        lab_version="1.0.0",
+        updated_at="2026-06-03",
+        release_channel="dev",
+        mlsysim_version="0.1.2",
+    )
+    lab_learning_objectives = (
+        "Identify why production ML systems are constrained by infrastructure, not only model accuracy.",
+        "Choose a canonical track and explain the physical constraint that makes it distinct.",
+        "Recognize the recurring lab rhythm: prediction, interaction, evidence, reflection, and report.",
+    )
+    lab_big_takeaways = (
+        "The same model idea becomes a different systems problem on iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.",
+        "Track selection changes hardware facts, constraints, metrics, stakeholder pressure, and report framing.",
+        "Future labs should use MLSysIM source references instead of notebook-local hardware constants.",
+    )
+    return lab_big_takeaways, lab_learning_objectives, lab_metadata
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell
-def _(LAB_CSS, mo):
+def _(ACADEMIC_LAB_CSS, LAB_CSS, lab_metadata, mo):
     mo.vstack([
         LAB_CSS,
-        mo.md("""
+        ACADEMIC_LAB_CSS,
+        mo.md(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
@@ -76,7 +121,7 @@ def _(LAB_CSS, mo):
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Architect's Portal
+                {lab_metadata.title}
             </h1>
             <p style="margin: 0 0 20px 0; font-size: 1.05rem; color: #94a3b8;
                       max-width: 620px; line-height: 1.65;">
@@ -92,12 +137,12 @@ def _(LAB_CSS, mo):
                 <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(16,185,129,0.25);">
-                    20–25 min
+                    Lab v{lab_metadata.lab_version}
                 </span>
                 <span style="background: rgba(245,158,11,0.15); color: #fcd34d;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(245,158,11,0.25);">
-                    No prior reading required
+                    Local report artifact
                 </span>
             </div>
         </div>
@@ -107,7 +152,11 @@ def _(LAB_CSS, mo):
 
 # ─── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, lab_learning_objectives, mo):
+    _objective_rows = "".join(
+        f"""<div style="margin-bottom: 3px;">{idx}. <strong>{objective}</strong></div>"""
+        for idx, objective in enumerate(lab_learning_objectives, start=1)
+    )
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -121,9 +170,22 @@ def _(COLORS, mo):
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Identify why infrastructure accounts for 95% of a production ML system</strong> and why the remaining 5% (the model) cannot be the primary engineering concern.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Predict which deployment paradigm satisfies a given set of physical constraints</strong> (latency floor, power budget, memory capacity) from the four-regime framework.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Recognize each recurring UI component</strong> of the lab interface &mdash; prediction lock, Latency Waterfall, MathPeek accordion, and Design Ledger status strip &mdash; before encountering them in live labs.</div>
+                {_objective_rows}
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CHAPTER RECAP -->
+        <div style="margin-top: 16px; margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Chapter Recap
+            </div>
+            <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                Orientation introduces the central MLSys idea: a model becomes a system only when
+                it runs inside a concrete machine, workload, stakeholder context, and physical
+                constraint budget. The common trap is treating deployment as a late-stage detail.
             </div>
         </div>
 
@@ -151,6 +213,22 @@ def _(COLORS, mo):
                     <strong>20&ndash;25 min</strong><br/>
                     3 Concept Checks &middot; Interface Tour
                 </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- LAB MAP -->
+        <div style="margin-top: 16px; margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Lab Map
+            </div>
+            <div style="font-size: 0.86rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <strong>Part A:</strong> 95% infrastructure problem &middot;
+                <strong>Part B:</strong> physical regimes &middot;
+                <strong>Part C:</strong> recurring lab interface &middot;
+                <strong>Synthesis:</strong> choose your track and download the local report.
             </div>
         </div>
 
@@ -1007,7 +1085,7 @@ def _(check1, check2empty, check3, mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## Choose Your Physical Regime
+        ## Scenario Brief
 
         You have now seen why deployment context is a first-order engineering decision,
         not an afterthought. For the next 15 labs, you will carry one deployment context
@@ -1017,6 +1095,12 @@ def _(check1, check2empty, check3, mo):
         **This is not a career choice.** It is a choice of which physical law will
         be your primary adversary. You will understand all four regimes —
         but you will develop deep intuition for one.
+
+        ## Your Track
+
+        Choose one canonical track. Later labs will read this choice from the
+        local Design Ledger and adapt narrative, hardware references, metrics,
+        guardrails, and report framing automatically.
         """),
     ])
     return
@@ -1055,6 +1139,7 @@ def _(
     get_track_profile,
     ledger,
     mo,
+    track_context,
 ):
     mo.stop(
         check1.value is None
@@ -1211,6 +1296,7 @@ def _(
         context_selector,
         mo.md("---"),
         decision_ui,
+        track_context(_track_profile),
 
         # Stakeholder message
         mo.Html(f"""
@@ -1270,6 +1356,94 @@ def _(
     ])
     return
 
+@app.cell
+def _(
+    build_lab_report,
+    check1,
+    check2empty,
+    check2value_list,
+    check3,
+    context_selector,
+    get_track_profile,
+    lab_big_takeaways,
+    lab_learning_objectives,
+    lab_metadata,
+    mo,
+    report_export_panel,
+):
+    mo.stop(
+        check1.value is None
+        or check2empty()
+        or check3.value is None
+        or context_selector.value is None,
+        mo.md("_Complete the checks and choose your track to unlock the local report._"),
+    )
+
+    _track_id = {
+        "cloud": "cloud_fleet",
+        "edge": "robotaxi",
+        "mobile": "iphone",
+        "tiny": "oura_ring",
+    }[context_selector.value]
+    _profile = get_track_profile(_track_id)
+    _selected = f"{_profile.label} ({_profile.category})"
+    _report = build_lab_report(
+        lab_metadata,
+        track=_profile.label,
+        scenario="Lab 00 track selection and lab-interface orientation",
+        learning_objectives=lab_learning_objectives,
+        predictions={
+            "production_ml_domain": check1.value,
+            "physical_constraint_actions": ", ".join(check2value_list()),
+            "always_on_sensing_regime": check3.value,
+        },
+        evidence_summary={
+            "selected_track": _selected,
+            "hardware_ref": _profile.hardware_ref,
+            "system_ref": _profile.system_ref or "single-device profile",
+            "dominant_constraints": ", ".join(_profile.dominant_constraints),
+        },
+        final_decision=f"Use {_profile.label} as the student's canonical track for subsequent labs.",
+        big_takeaways=lab_big_takeaways,
+        reflections={
+            "diagnosis": "Deployment context determines which constraints matter first.",
+            "tradeoff": f"{_profile.label} emphasizes {_profile.primary_metrics[0]} while preserving {_profile.guardrail_metrics[0]}.",
+            "residual_risk": "This orientation report records track intent; later labs must validate feasibility with MLSysIM solver outputs.",
+        },
+        residual_risk=(
+            "Lab 00 establishes the track and source references. Later labs may expose "
+            "additional constraints that change a specific design choice inside the same track."
+        ),
+        source_trace={
+            "track_id": _profile.track_id,
+            "hardware_ref": _profile.hardware_ref,
+            "system_ref": _profile.system_ref or "single-device profile",
+            "source_policy": _profile.source_policy,
+            "report_builder": "mlsysbook_labs.build_lab_report",
+        },
+        result_snapshot={
+            "track_id": _profile.track_id,
+            "track_label": _profile.label,
+            "hardware_ref": _profile.hardware_ref,
+            "system_ref": _profile.system_ref,
+            "check1_correct": check1.value == "C",
+            "check3_correct": check3.value == "D",
+        },
+    )
+
+    mo.vstack([
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "Your Lab 00 report is generated locally from the current notebook state. "
+                "The fallback text panel contains the same Markdown artifact if browser download fails."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
+    ])
+    return
+
 # ─── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
@@ -1282,7 +1456,7 @@ def _(COLORS, mo):
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
+                Big Takeaways
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
