@@ -1081,7 +1081,7 @@ Local NVMe provides high bandwidth and low latency within a single node, but dis
 
 ::: {#dfn-data-storage-parallel-file-system .callout-definition title="Parallel file system"}
 
-***Parallel File System (PFS)***\index{Parallel File System!definition} is a distributed storage architecture that stripes data across many storage servers to provide aggregate throughput exceeding the capacity of any single device.
+***Parallel File System (PFS)***\index{Parallel File System!definition} is a distributed storage architecture for ML training clusters that stripes data across many storage servers to provide aggregate throughput exceeding the capacity of any single device.
 
 1.  **Significance (quantitative)**: A PFS aggregates $\text{BW}_{\text{io}}$ linearly with the number of storage servers (Object Storage Servers). A Lustre cluster with 20 OSS nodes each delivering 10 GB/s provides 200 GB/s aggregate, vs. a single NAS server capped at 10 GB/s, enabling a training job to load a 10 GB striped shard in about 50 ms rather than 1 second. This aggregate bandwidth directly reduces the $D_{\text{vol}}/\text{BW}$ term in the iron law.
 2.  **Distinction (durable)**: Unlike Network Attached Storage (NAS), where every I/O request routes through a single server, a PFS client receives stripe location metadata from a dedicated Metadata Server (MDS) and then reads data directly from multiple OSS nodes in parallel—the MDS and OSS paths are architecturally separated, so data bandwidth scales with OSS count while metadata operations scale with MDS count.
@@ -1105,7 +1105,7 @@ This separation creates a critical bottleneck: the small file problem. If a data
 
 ::: {#dfn-data-storage-small-file-problem .callout-definition title="Small file problem"}
 
-***Small File Problem***\index{Small File Problem!definition} is a pathological I/O pattern where millions of individually small files overwhelm the metadata server of a storage system.
+***Small File Problem***\index{Small File Problem!definition} is an ML data-loading pathology where millions of individually small files overwhelm the metadata server of a storage system.
 
 1.  **Significance (quantitative)**: It reduces effective I/O Bandwidth $(\text{BW}_{\text{io}})$ to a fraction of its theoretical rating because each file requires its own metadata operations (`open`, `stat`, `close`). With 10,000 workers simultaneously accessing small files, the metadata server becomes a Serialization Point that idles the entire cluster.
 2.  **Distinction (durable)**: Unlike bulk data throughput (which measures bit-rate), the small file problem is a metadata latency $(L_{\text{lat}})$ issue: the bottleneck is the frequency of requests, not the size of the data.
@@ -1169,7 +1169,7 @@ Object storage achieves "eleven nines"[^fn-eleven-nines-durability] of durabilit
 
 ::: {#dfn-data-storage-erasure-coding .callout-definition title="Erasure coding"}
 
-***Erasure Coding***\index{Erasure Coding!definition} is a data protection scheme that fragments an object into $k$ data and $m$ parity blocks, ensuring the original is recoverable from any $k$ remaining fragments.
+***Erasure Coding***\index{Erasure Coding!definition} is a storage protection scheme for ML datasets and checkpoint archives that fragments an object into $k$ data and $m$ parity blocks, ensuring the original is recoverable from any $k$ remaining fragments.
 
 1.  **Significance (quantitative)**: It achieves extreme data durability (for example, "eleven nines") with significantly lower storage overhead than replication. For example, a 4+2 code provides the same protection as triple replication but at 1.5$\times$ cost instead of 3$\times$ cost.
 2.  **Distinction (durable)**: Unlike replication (which stores complete copies), erasure coding uses mathematical encoding (for example, Reed-Solomon) to distribute redundant information across different failure domains (disks, racks, or sites).
@@ -2320,7 +2320,7 @@ class CheckpointStormDefinition:
     replicas_str = fmt_count(replicas, commas=True, label="replica")
 ```
 
-***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in a training fleet save model state simultaneously.
+***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
 
 1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the data-parallel replica count. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model in FP16 (`{python} CheckpointStormDefinition.weights_gb_str` of weights) trained across `{python} CheckpointStormDefinition.replicas_str` with vanilla data parallelism (every replica holding its own complete copy), a naive checkpoint generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes; at 100 GB/s fabric bandwidth, $T_{\text{write}} \approx$ `{python} CheckpointStormDefinition.naive_write_s_str`, over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses this to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
 2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
