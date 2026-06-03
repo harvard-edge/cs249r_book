@@ -4279,9 +4279,13 @@ The first gain is operator fusion\index{Operator Fusion!graph compilation}. Memo
 
 These optimizations lead to a deployment choice. Just-in-time compilation adapts to the shapes observed at runtime, but the first request pays the compilation penalty. Ahead-of-time compilation removes that startup spike by shipping an optimized artifact, but the deployment must explicitly cover every shape profile the service will accept.
 
-::: {#nbk-model-serving-jit-vs-aot-compilation .callout-notebook title="JIT vs. AOT compilation"}
+::: {#psp-model-serving-jit-vs-aot-compilation .callout-perspective title="Compilation timing trade-off"}
 
-Just-in-time compilation\index{JIT Compilation!runtime optimization}, such as `torch.compile`, waits until the graph is first executed and can specialize to the shapes it observes. That specialization is useful for variable traffic, but it moves compiler work into the serving path and creates a cold-request latency spike. Ahead-of-time compilation\index{Ahead-of-Time Compilation!predeployment}, such as `torch.export` or TensorRT `trtexec`, performs the compiler work before deployment. It gives the service a fixed graph and avoids startup compilation latency, at the cost of defining all dynamic shapes explicitly or compiling multiple profiles.
+**JIT path**: Just-in-time compilation\index{JIT Compilation!runtime optimization}, such as `torch.compile`, waits until the graph is first executed and can specialize to the shapes it observes. That specialization is useful for variable traffic, but it moves compiler work into the serving path and creates a cold-request latency spike.
+
+**AOT path**: Ahead-of-time compilation\index{Ahead-of-Time Compilation!predeployment}, such as `torch.export` or TensorRT `trtexec`, performs the compiler work before deployment. It gives the service a fixed graph and avoids startup compilation latency, at the cost of defining all dynamic shapes explicitly or compiling multiple profiles.
+
+The systems choice is where to pay compilation cost: JIT pays it during serving and risks a first-request latency spike, while AOT pays it before deployment and requires tighter control over accepted input shapes.
 
 :::
 
@@ -4356,7 +4360,14 @@ class SafetensorsLoadingSpeed:
 
 ::: {#exmp-model-serving-loading-speed-safetensors-vs-pickle .callout-example title="Loading speed: Safetensors vs. Pickle"}
 
-In an illustrative cold-start scenario, loading a `{python} SafetensorsLoadingSpeed.model_size_gb_str` Stable Diffusion model through Pickle (`torch.load`) takes `{python} SafetensorsLoadingSpeed.pickle_load_s_str` while consuming substantial CPU time because Python has to reconstruct objects before tensors are usable. The same weights stored with Safetensors load in `{python} SafetensorsLoadingSpeed.safetensors_load_s_str` in this scenario, a `{python} SafetensorsLoadingSpeed.load_speedup_mult_str` improvement. By using `mmap` and formats like `safetensors`, loading speed becomes limited mainly by the disk's read speed, for example `{python} SafetensorsLoadingSpeed.nvme_bw_gb_per_s_str` for local Gen3 NVMe, rather than by CPU parsing overhead.
+**Scenario**: A cold-start replica has to load a `{python} SafetensorsLoadingSpeed.model_size_gb_str` Stable Diffusion model before it can absorb traffic.
+
+**Trace**:
+
+- **Pickle path**: Loading through Pickle (`torch.load`) takes `{python} SafetensorsLoadingSpeed.pickle_load_s_str` in this scenario because Python has to reconstruct objects before tensors are usable.
+- **Safetensors path**: The same weights stored with Safetensors load in `{python} SafetensorsLoadingSpeed.safetensors_load_s_str`, a `{python} SafetensorsLoadingSpeed.load_speedup_mult_str` improvement.
+
+**Systems insight**: With `mmap` and formats like `safetensors`, loading speed becomes limited mainly by the disk's read speed, for example `{python} SafetensorsLoadingSpeed.nvme_bw_gb_per_s_str` for local Gen3 NVMe, rather than by CPU parsing overhead.
 
 :::
 
@@ -4370,7 +4381,16 @@ A useful trace reading is bottleneck-first. Empty spaces in the GPU bar mean idl
 
 ::: {#exmp-model-serving-profiling-loop .callout-example title="The profiling loop"}
 
-Run a warmup, capture a trace of ten to fifty representative requests, and open the trace in Chrome Tracing, Nsight, or the runtime's profiler. The largest gap or longest block identifies the first intervention: fusion for kernel-launch fragmentation, pinning for CPU locality, zero-copy loading for startup, or scheduling changes for host-device stalls. After applying the fix, capture the trace again. The loop ends only when the targeted gap has actually disappeared.
+**Scenario**: A serving node has high P99 latency even though average accelerator utilization looks acceptable.
+
+**Trace loop**:
+
+1. **Capture**: Run a warmup, then capture ten to fifty representative requests in Chrome Tracing, Nsight, or the runtime's profiler.
+2. **Identify**: Find the largest idle gap or longest blocking event in the trace.
+3. **Intervene**: Apply the smallest targeted fix, such as fusion for kernel-launch fragmentation, pinning for CPU locality, zero-copy loading for startup, or scheduling changes for host-device stalls.
+4. **Verify**: Capture the trace again and confirm that the targeted gap disappeared or moved.
+
+**Systems lesson**: Profiling is credible only when the next trace changes in the expected direction. The loop prevents optimization from becoming a list of tricks detached from measured bottlenecks.
 
 :::
 
