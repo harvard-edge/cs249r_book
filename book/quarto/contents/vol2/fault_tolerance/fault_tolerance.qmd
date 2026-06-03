@@ -853,7 +853,7 @@ While the mathematics of failure rates apply universally, the cost of failure di
 | **Model Type**                        | **Typical Training Duration** | **Checkpoint Size** |      **State Sensitivity**      |       **Failure Cost**       |
 |:--------------------------------------|:-----------------------------:|:-------------------:|:-------------------------------:|:----------------------------:|
 | **Archetype A (70B-class dense LLM)** |           2–4 weeks           |      350–700 GB     |  High (position in curriculum)  | \$2–5M compute per 24hr loss |
-| **Vision (ViT-Large)**                |            1–3 days           |        1–2 GB       |   Medium (augmentation state)   |    \$10–50K per day loss     |
+| **Vision transformer class**          |            1–3 days           |        1–2 GB       |   Medium (augmentation state)   |    \$10–50K per day loss     |
 | **Archetype B (DLRM at Scale)**       |           Continuous          | 2–4 TB (embeddings) | Very High (embedding freshness) |   Revenue impact per hour    |
 | **Speech (Whisper-scale)**            |            3–7 days           |       5–10 GB       |              Medium             |    \$50–200K per day loss    |
 | **Scientific (AlphaFold)**            |         Days to weeks         |       10–50 GB      |     High (exploration state)    |        Research delay        |
@@ -884,7 +884,7 @@ Recommendation Systems present unique challenges because their training is often
 
 [^fn-recsys-freshness-cost]: **RecSys Freshness**\index{RecSys Freshness}: Meta's Deep Learning Recommendation Model (DLRM) infrastructure documents that embedding staleness measured in hours produces measurable degradation in recommendation relevance and engagement metrics. This inverts the typical fault tolerance priority: for recommendation systems, minimizing recovery time matters more than minimizing checkpoint overhead, because stale embeddings directly reduce revenue. \index{Recommendation Systems!freshness fault tolerance}
 
-Vision Models occupy a middle ground with moderate training durations and manageable checkpoint sizes. The relatively small checkpoints enable frequent checkpointing with minimal overhead. A vision transformer (ViT) such as ViT-Large produces checkpoints of 1–2 GB, imposing little overhead. Data augmentation state represents the primary state beyond model weights that must be preserved for reproducible recovery. Current augmentation parameters and data shuffling seed must be captured.
+Vision Models occupy a middle ground with moderate training durations and manageable checkpoint sizes. The relatively small checkpoints enable frequent checkpointing with minimal overhead. A medium-scale vision transformer may produce checkpoints of 1–2 GB, imposing little overhead compared with frontier language or embedding-heavy recommendation workloads. Data augmentation state represents the primary state beyond model weights that must be preserved for reproducible recovery. Current augmentation parameters and data shuffling seed must be captured.
 
 Scientific Models such as those used in protein structure prediction or climate simulation often have unique state requirements beyond model parameters. AlphaFold-style training may maintain exploration state tracking which protein families have been sampled, preventing repetition during recovery. Drug discovery models may track which molecular configurations have been evaluated. This domain-specific state complicates checkpoint and recovery design.
 
@@ -2404,108 +2404,135 @@ If checkpoints occur hourly, the system wastes \$24,000 per day waiting for stor
 # │ How: write_time = size / bandwidth; tau_opt = sqrt(2 * write_time * MTBF);
 # │      overhead = write_time / tau_opt * 100.
 # │
-# │ Imports: mlsysim.fmt (fmt, MarkdownStr, check), math
-# │ Exports: CheckpointOverheadCalc.{archA,gpt35,bert,archB,resnet,vit}_*_str
+# │ Imports: mlsysim public API (Models, units, fmt helpers), math
+# │ Exports: CheckpointOverheadCalc.{archA,dense20b,bert,archB,resnet,vision_transformer}_*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, MarkdownStr, check, fmt_time
+from mlsysim import Models
+from mlsysim.core.units import BYTES_FP32, GB, MB, TB, hour, second
+from mlsysim.fmt import MarkdownStr, check, fmt_memory, fmt_percent, fmt_time
 import math
 
 
 class CheckpointOverheadCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
-    # Checkpoint sizes in GB for each model archetype
-    archA_size_gb = 2100       # 175B dense LLM: ~12 bytes/param (mixed precision + optimizer)
-    gpt35_size_gb = 240        # 20B model
-    bert_size_gb = 1.3         # BERT-Large
-    archB_size_gb = 4000       # DLRM at scale (embedding-heavy)
-    resnet_size_gb = 0.1       # ResNet-50 (100 MB)
-    vit_size_gb = 1.2          # ViT-Large
+    # Checkpoint sizes for each model archetype.
+    archA_size = 2100 * GB     # 175B dense LLM: ~12 bytes/param (mixed precision + optimizer)
+    dense20b_size = 240 * GB   # scenario assumption: 20B dense transformer checkpoint
+    bert_size = Models.Language.BERT_Large.size_in_bytes(BYTES_FP32)
+    archB_size = 4 * TB        # scenario assumption: embedding-heavy recommender checkpoint
+    resnet_size = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32)
+    vision_transformer_size = 1.2 * GB  # scenario assumption: medium vision-transformer checkpoint
 
-    write_bw_gbs = 100         # Write bandwidth: 100 GB/s
-    mtbf_hours = 5             # GPU-only MTBF: 5 hours
-    mtbf_s = mtbf_hours * 3600  # = 18000 seconds
+    write_bw = 100 * (GB / second)
+    mtbf = 5 * hour            # GPU-only MTBF
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
     # Write time = checkpoint_size / write_bandwidth
-    archA_write_s = archA_size_gb / write_bw_gbs
-    gpt35_write_s = gpt35_size_gb / write_bw_gbs
-    bert_write_s = bert_size_gb / write_bw_gbs
-    archB_write_s = archB_size_gb / write_bw_gbs
-    resnet_write_s = resnet_size_gb / write_bw_gbs
-    vit_write_s = vit_size_gb / write_bw_gbs
+    archA_write = (archA_size / write_bw).to(second)
+    dense20b_write = (dense20b_size / write_bw).to(second)
+    bert_write = (bert_size / write_bw).to(second)
+    archB_write = (archB_size / write_bw).to(second)
+    resnet_write = (resnet_size / write_bw).to(second)
+    vision_transformer_write = (vision_transformer_size / write_bw).to(second)
+
+    def young_daly_interval(write_time):
+        interval_s = math.sqrt((2 * write_time * mtbf).to(second**2).magnitude)
+        return interval_s * second
 
     # Optimal interval = sqrt(2 * write_time * MTBF) [Young-Daly formula]
-    archA_interval_s = math.sqrt(2 * archA_write_s * mtbf_s)
-    gpt35_interval_s = math.sqrt(2 * gpt35_write_s * mtbf_s)
-    bert_interval_s = math.sqrt(2 * bert_write_s * mtbf_s)
-    archB_interval_s = math.sqrt(2 * archB_write_s * mtbf_s)
-    resnet_interval_s = math.sqrt(2 * resnet_write_s * mtbf_s)
-    vit_interval_s = math.sqrt(2 * vit_write_s * mtbf_s)
+    archA_interval = young_daly_interval(archA_write)
+    dense20b_interval = young_daly_interval(dense20b_write)
+    bert_interval = young_daly_interval(bert_write)
+    archB_interval = young_daly_interval(archB_write)
+    resnet_interval = young_daly_interval(resnet_write)
+    vision_transformer_interval = young_daly_interval(vision_transformer_write)
 
     # Save overhead = write_time / optimal_interval * 100
-    archA_overhead_pct = (archA_write_s / archA_interval_s) * 100
-    gpt35_overhead_pct = (gpt35_write_s / gpt35_interval_s) * 100
-    bert_overhead_pct = (bert_write_s / bert_interval_s) * 100
-    archB_overhead_pct = (archB_write_s / archB_interval_s) * 100
-    resnet_overhead_pct = (resnet_write_s / resnet_interval_s) * 100
-    vit_overhead_pct = (vit_write_s / vit_interval_s) * 100
+    archA_overhead_ratio = (archA_write / archA_interval).to_base_units().magnitude
+    dense20b_overhead_ratio = (dense20b_write / dense20b_interval).to_base_units().magnitude
+    bert_overhead_ratio = (bert_write / bert_interval).to_base_units().magnitude
+    archB_overhead_ratio = (archB_write / archB_interval).to_base_units().magnitude
+    resnet_overhead_ratio = (resnet_write / resnet_interval).to_base_units().magnitude
+    vision_transformer_overhead_ratio = (
+        vision_transformer_write / vision_transformer_interval
+    ).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
-    check(archA_interval_s > 0, "Archetype A interval must be positive")
-    check(gpt35_interval_s > 0, "GPT-3.5 interval must be positive")
-    check(bert_interval_s > 0, "BERT interval must be positive")
-    check(archB_interval_s > 0, "Archetype B interval must be positive")
-    check(resnet_interval_s > 0, "ResNet-50 interval must be positive")
-    check(vit_interval_s > 0, "ViT-Large interval must be positive")
-    check(archA_overhead_pct < 10, "Archetype A overhead must be < 10%")
-    check(gpt35_overhead_pct < 10, "GPT-3.5 overhead must be < 10%")
-    check(bert_overhead_pct < 10, "BERT overhead must be < 10%")
-    check(archB_overhead_pct < 10, "Archetype B overhead must be < 10%")
-    check(resnet_overhead_pct < 10, "ResNet-50 overhead must be < 10%")
-    check(vit_overhead_pct < 10, "ViT-Large overhead must be < 10%")
+    check(archA_interval > 0 * second, "Archetype A interval must be positive")
+    check(dense20b_interval > 0 * second, "20B dense transformer interval must be positive")
+    check(bert_interval > 0 * second, "BERT interval must be positive")
+    check(archB_interval > 0 * second, "Archetype B interval must be positive")
+    check(resnet_interval > 0 * second, "ResNet-50 interval must be positive")
+    check(vision_transformer_interval > 0 * second, "Vision transformer interval must be positive")
+    check(archA_overhead_ratio < 0.10, "Archetype A overhead must be < 10%")
+    check(dense20b_overhead_ratio < 0.10, "20B dense transformer overhead must be < 10%")
+    check(bert_overhead_ratio < 0.10, "BERT overhead must be < 10%")
+    check(archB_overhead_ratio < 0.10, "Archetype B overhead must be < 10%")
+    check(resnet_overhead_ratio < 0.10, "ResNet-50 overhead must be < 10%")
+    check(vision_transformer_overhead_ratio < 0.10, "Vision transformer overhead must be < 10%")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     # -- Checkpoint sizes
-    archA_size_str = MarkdownStr("2.1 TB")
-    gpt35_size_str = MarkdownStr("240 GB")
-    bert_size_str = MarkdownStr("1.3 GB")
-    archB_size_str = MarkdownStr("4 TB")
-    resnet_size_str = MarkdownStr("100 MB")
-    vit_size_str = MarkdownStr("1.2 GB")
+    archA_ckpt_tb_str = fmt_memory(archA_size, unit=TB, precision=1, commas=False)
+    dense20b_ckpt_gb_str = fmt_memory(dense20b_size, unit=GB, precision=0, commas=False)
+    bert_ckpt_gb_str = fmt_memory(bert_size, unit=GB, precision=1, commas=False)
+    archB_ckpt_tb_str = fmt_memory(archB_size, unit=TB, precision=0, commas=False)
+    resnet_ckpt_mb_str = fmt_memory(resnet_size, unit=MB, precision=0, commas=False)
+    vision_transformer_ckpt_gb_str = fmt_memory(
+        vision_transformer_size, unit=GB, precision=1, commas=False
+    )
 
     # -- Write times
-    archA_write_s_str = fmt_time(archA_write_s, 'second', precision=0, commas=False)
-    gpt35_write_s_str = fmt_time(gpt35_write_s, 'second', precision=1, commas=False)
-    bert_write_s_str = fmt_time(bert_write_s, 'second', precision=3, commas=False)
-    archB_write_s_str = fmt_time(archB_write_s, 'second', precision=0, commas=False)
-    resnet_write_s_str = fmt_time(resnet_write_s, 'second', precision=3, commas=False)
-    vit_write_s_str = fmt_time(vit_write_s, 'second', precision=3, commas=False)
+    archA_write_s_str = fmt_time(archA_write, second, precision=0, commas=False)
+    dense20b_write_s_str = fmt_time(dense20b_write, second, precision=1, commas=False)
+    bert_write_s_str = fmt_time(bert_write, second, precision=3, commas=False)
+    archB_write_s_str = fmt_time(archB_write, second, precision=0, commas=False)
+    resnet_write_s_str = fmt_time(resnet_write, second, precision=3, commas=False)
+    vision_transformer_write_s_str = fmt_time(
+        vision_transformer_write, second, precision=3, commas=False
+    )
 
     # -- Optimal intervals (min for >= 60s, s for < 60s)
-    archA_interval_min_str = fmt_time(archA_interval_s / 60, 'minute', precision=1, commas=False)
-    gpt35_interval_min_str = fmt_time(gpt35_interval_s / 60, 'minute', precision=1, commas=False)
-    bert_interval_s_str = fmt_time(round(bert_interval_s), 'second', precision=0, commas=False)
-    archB_interval_min_str = fmt_time(round(archB_interval_s / 60), 'minute', precision=0, commas=False)
-    resnet_interval_s_str = fmt_time(round(resnet_interval_s), 'second', precision=0, commas=False)
-    vit_interval_s_str = fmt_time(round(vit_interval_s), 'second', precision=0, commas=False)
+    archA_interval_min_str = fmt_time(archA_interval, "minute", precision=1, commas=False)
+    dense20b_interval_min_str = fmt_time(
+        dense20b_interval, "minute", precision=1, commas=False
+    )
+    bert_interval_s_str = fmt_time(bert_interval, second, precision=0, commas=False)
+    archB_interval_min_str = fmt_time(archB_interval, "minute", precision=0, commas=False)
+    resnet_interval_s_str = fmt_time(resnet_interval, second, precision=0, commas=False)
+    vision_transformer_interval_s_str = fmt_time(
+        vision_transformer_interval, second, precision=0, commas=False
+    )
 
     # -- Save overhead percentages
-    archA_overhead_str = fmt_percent(archA_overhead_pct/100, precision=1, commas=False, style='prose')
-    gpt35_overhead_str = fmt_percent(gpt35_overhead_pct/100, precision=1, commas=False, style='prose')
-    bert_overhead_str = fmt_percent(bert_overhead_pct/100, precision=2, commas=False, style='prose')
-    archB_overhead_str = fmt_percent(archB_overhead_pct/100, precision=1, commas=False, style='prose')
-    resnet_overhead_str = fmt_percent(resnet_overhead_pct/100, precision=2, commas=False, style='prose')
-    vit_overhead_str = fmt_percent(vit_overhead_pct/100, precision=2, commas=False, style='prose')
+    archA_overhead_pct_str = fmt_percent(
+        archA_overhead_ratio, precision=1, commas=False, style='prose'
+    )
+    dense20b_overhead_pct_str = fmt_percent(
+        dense20b_overhead_ratio, precision=1, commas=False, style='prose'
+    )
+    bert_overhead_pct_str = fmt_percent(
+        bert_overhead_ratio, precision=2, commas=False, style='prose'
+    )
+    archB_overhead_pct_str = fmt_percent(
+        archB_overhead_ratio, precision=1, commas=False, style='prose'
+    )
+    resnet_overhead_pct_str = fmt_percent(
+        resnet_overhead_ratio, precision=2, commas=False, style='prose'
+    )
+    vision_transformer_overhead_pct_str = fmt_percent(
+        vision_transformer_overhead_ratio, precision=2, commas=False, style='prose'
+    )
 ```
 
-| **Model Type**                   |                **Checkpoint Size**                |              **Write Time (100 GB/s)**               |         **Optimal Interval (5hr GPU-only MTBF)**         |                   **Save Overhead**                   |
-|:---------------------------------|:-------------------------------------------------:|:----------------------------------------------------:|:--------------------------------------------------------:|:-----------------------------------------------------:|
-| **Archetype A (175B dense LLM)** |  `{python} CheckpointOverheadCalc.archA_size_str` | `{python} CheckpointOverheadCalc.archA_write_s_str`  | `{python} CheckpointOverheadCalc.archA_interval_min_str` |  `{python} CheckpointOverheadCalc.archA_overhead_str` |
-| **GPT-3.5 (20B)**                |  `{python} CheckpointOverheadCalc.gpt35_size_str` | `{python} CheckpointOverheadCalc.gpt35_write_s_str`  | `{python} CheckpointOverheadCalc.gpt35_interval_min_str` |  `{python} CheckpointOverheadCalc.gpt35_overhead_str` |
-| **BERT-Large**                   |  `{python} CheckpointOverheadCalc.bert_size_str`  |  `{python} CheckpointOverheadCalc.bert_write_s_str`  |  `{python} CheckpointOverheadCalc.bert_interval_s_str`   |  `{python} CheckpointOverheadCalc.bert_overhead_str`  |
-| **Archetype B (DLRM at Scale)**  |  `{python} CheckpointOverheadCalc.archB_size_str` | `{python} CheckpointOverheadCalc.archB_write_s_str`  | `{python} CheckpointOverheadCalc.archB_interval_min_str` |  `{python} CheckpointOverheadCalc.archB_overhead_str` |
-| **ResNet-50**\index{ResNet-50}   | `{python} CheckpointOverheadCalc.resnet_size_str` | `{python} CheckpointOverheadCalc.resnet_write_s_str` | `{python} CheckpointOverheadCalc.resnet_interval_s_str`  | `{python} CheckpointOverheadCalc.resnet_overhead_str` |
-| **ViT-Large**                    |   `{python} CheckpointOverheadCalc.vit_size_str`  |  `{python} CheckpointOverheadCalc.vit_write_s_str`   |   `{python} CheckpointOverheadCalc.vit_interval_s_str`   |   `{python} CheckpointOverheadCalc.vit_overhead_str`  |
+| **Model Type**                   |                       **Checkpoint Size**                        |                    **Write Time (100 GB/s)**                     |               **Optimal Interval (5hr GPU-only MTBF)**              |                           **Save Overhead**                           |
+|:---------------------------------|:----------------------------------------------------------------:|:----------------------------------------------------------------:|:-------------------------------------------------------------------:|:---------------------------------------------------------------------:|
+| **Archetype A (175B dense LLM)** |       `{python} CheckpointOverheadCalc.archA_ckpt_tb_str`        |       `{python} CheckpointOverheadCalc.archA_write_s_str`        |       `{python} CheckpointOverheadCalc.archA_interval_min_str`      |        `{python} CheckpointOverheadCalc.archA_overhead_pct_str`       |
+| **20B dense transformer class**  |      `{python} CheckpointOverheadCalc.dense20b_ckpt_gb_str`      |      `{python} CheckpointOverheadCalc.dense20b_write_s_str`      |     `{python} CheckpointOverheadCalc.dense20b_interval_min_str`     |      `{python} CheckpointOverheadCalc.dense20b_overhead_pct_str`      |
+| **BERT-Large**                   |        `{python} CheckpointOverheadCalc.bert_ckpt_gb_str`        |        `{python} CheckpointOverheadCalc.bert_write_s_str`        |        `{python} CheckpointOverheadCalc.bert_interval_s_str`        |        `{python} CheckpointOverheadCalc.bert_overhead_pct_str`        |
+| **Archetype B (DLRM at Scale)**  |       `{python} CheckpointOverheadCalc.archB_ckpt_tb_str`        |       `{python} CheckpointOverheadCalc.archB_write_s_str`        |       `{python} CheckpointOverheadCalc.archB_interval_min_str`      |        `{python} CheckpointOverheadCalc.archB_overhead_pct_str`       |
+| **ResNet-50**\index{ResNet-50}   |       `{python} CheckpointOverheadCalc.resnet_ckpt_mb_str`       |       `{python} CheckpointOverheadCalc.resnet_write_s_str`       |       `{python} CheckpointOverheadCalc.resnet_interval_s_str`       |       `{python} CheckpointOverheadCalc.resnet_overhead_pct_str`       |
+| **Vision transformer class**     | `{python} CheckpointOverheadCalc.vision_transformer_ckpt_gb_str` | `{python} CheckpointOverheadCalc.vision_transformer_write_s_str` | `{python} CheckpointOverheadCalc.vision_transformer_interval_s_str` | `{python} CheckpointOverheadCalc.vision_transformer_overhead_pct_str` |
 
 : **Checkpoint Overhead by Model Type**: Larger models with correspondingly larger checkpoints require longer save times but also benefit from longer optimal checkpoint intervals. The percentage column reports save-only checkpoint write tax, not total Young-Daly waste; at the optimum, expected rework adds a comparable term. {#tbl-checkpoint-overhead-by-model}
 
@@ -3327,7 +3354,7 @@ Other degradation dimensions preserve a useful answer by narrowing what the syst
 
 Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements. The primary model provides full capability at the highest resource cost, a secondary model reduces capability and resource demand, a tertiary model preserves minimal capability, and a static fallback serves precomputed defaults with no inference at all.\index{Primary Model}\index{Secondary Model}\index{Tertiary Model}\index{Static Fallback} When the primary path is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward after the primary path is healthy again.
 
-An image classification cascade makes the trade-off concrete. A ViT-Large primary model with 307 million parameters might deliver 88 percent ImageNet top-1 accuracy, while an EfficientNet-B4 secondary model with 19 million parameters delivers 83 percent and a MobileNet-V3-Large tertiary model with 5.4 million parameters delivers 75 percent. If all inference paths fail, the fallback returns "classification unavailable" or cached results.\index{Fallback} For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
+An image classification cascade makes the trade-off concrete. The primary path can run the highest-quality model while the service has enough accelerator headroom. If latency, memory pressure, or dependency failures make that path unsafe, the serving layer can route to a smaller model that preserves coarse classification quality at lower cost. If even that path cannot meet the SLO, the service can return cached labels, a coarse category, or "classification unavailable" rather than blocking the request indefinitely.\index{Fallback} For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
 
 Recommendation and ranking systems use the same pattern when a complex deep learning model falls back to a top-n popularity list, a linear ranker, or a cached response during primary serving failures. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover. Otherwise the product appears healthy while quality is silently traded for availability.
 
