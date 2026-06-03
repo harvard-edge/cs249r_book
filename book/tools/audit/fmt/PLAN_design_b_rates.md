@@ -56,8 +56,13 @@ python3 book/tools/audit/fmt/audit_lego_html.py --report /tmp/lego_html.json
 
 0.1 Freeze the exact work-lists to files (so coverage is provable):
 ```bash
-python3 /tmp/scope_b.py > book/tools/audit/fmt/_b_inventory.txt   # 436 exports, 503 refs, 10 edge, 444 rates
+python3 book/tools/audit/fmt/inventory_design_b_rates.py \
+  --root book/quarto/contents \
+  --json book/tools/audit/artifacts/fmt_design_b_inventory.json
 ```
+Current frozen scope: 436 multiplier exports, 507 multiplier refs, 470 rate-name
+candidates (308 byte/s, 24 bit/s, 100 compute/s, 9 tokens/s, 29 QPS/RPS/TPS
+acronym rates).
 0.2 Capture render baselines for the rep chapters (the "before" truth):
 ```bash
 for c in training network_fabrics compute_infrastructure benchmarking inference; do
@@ -89,7 +94,7 @@ correct. Run `mlsysim` test suite.
 - **export rename:** `NAME_str = fmt_multiple(…)` → `NAME_mult_str = fmt_multiple(…)` (and range names become semantic `*_mult_range_str` / `*_range_mult_str` where that reads better).
 - **ref transform:** `` `{python} CLASS.NAME_str`$\times$ `` → `` `{python} CLASS.NAME_mult_str` `` (rename + strip the now-duplicate `$\times$`, incl. optional space variants `` `…`$\times$ ``, `` `…` $\times$ ``).
 - **only** for names that are fmt_multiple exports (from the 1.0 inventory) — never touch `fmt_int`/etc. refs.
-- Dry-run prints a diff + counts; require counts == inventory (436 / 503) before `--write`.
+- Dry-run prints a diff + counts; require counts == inventory (436 exports / 507 refs) before `--write`.
 
 **1.4 Checker flip (`fmt_prose_contract.py` + `math_multiplier_style.py` + tests).**
 - delete `mult_missing_glyph`, `mult_literal_x`.
@@ -123,7 +128,8 @@ approved final suffix; document `_mult_str` as the semantic multiplier token),
 `_mb_s_str`/`_mbs_str` → `_mb_per_s_str`; `_tflops_str`/`_tflop_s_str` → `_tflop_per_s_str`;
 `_tokens_s_str` → `_tokens_per_s_str`. **Leave `_gbps_/_mbps_` (bits) untouched** unless
 they should be `_gbit_per_s_` (decide per-site — bits stay bits). Per D6, leave qps/rps/tps.
-Dry-run counts must == inventory (444 minus the qps/rps/tps + bits exclusions).
+Dry-run counts must match the frozen inventory after applying the chosen exclusions
+(470 total candidates; with QPS/RPS/TPS retained, 441 non-acronym candidates).
 
 **2.2 Output is unchanged by construction** (the formatter owns "GB/s"); still:
 - L0 gates green.
