@@ -103,8 +103,7 @@ configs and confirm whether the change should propagate.
 
 ## Current Shared Files
 
-- `base/crossref-video.yml`
-- `base/algorithm-reference-labels.yml`
+- `base/crossref-labels.yml`
 - `base/custom-numbered-blocks.yml`
 - `base/diagram.yml`
 - `base/execute-env.yml`
