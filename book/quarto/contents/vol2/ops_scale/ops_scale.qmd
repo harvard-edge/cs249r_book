@@ -3719,7 +3719,9 @@ Spot/preemptible instances fit this control loop because automatic retry on pree
 
 #### Serving resource management {#sec-ml-operations-scale-serving-resource-management-35b7}
 
-Serving workloads bind on latency rather than batch flexibility. Demand fluctuates with time of day, events, and seasonality, but a live request cannot be preempted without user impact. Serving resource management therefore protects latency while avoiding overprovisioning: autoscaling adds horizontal capacity from request-rate, latency, or model-specific queue metrics; resource isolation prevents one model from consuming another model's budget; and cost optimization combines right-sized instances, reserved capacity for baseline demand, and spot instances only where overflow can tolerate interruption.
+Serving workloads bind on latency rather than batch flexibility. Demand fluctuates with time of day, events, and seasonality, but a live request cannot be preempted without user impact. The serving control loop therefore starts from the latency SLO and asks how much capacity must be online before requests arrive.
+
+Autoscaling adds horizontal capacity from request-rate, latency, or model-specific queue metrics, but it must account for model load time and GPU memory granularity. Resource isolation prevents one model from consuming another model's budget, while cost optimization combines right-sized instances, reserved capacity for baseline demand, and spot instances only where overflow can tolerate interruption. The operational goal is not maximum utilization in isolation; it is the cheapest capacity plan that still protects tail latency.
 
 #### Platform utilization metrics {#sec-ml-operations-scale-platform-utilization-metrics-ed31}
 
@@ -3783,7 +3785,9 @@ Enterprise platforms earn their sharing dividend only if multiple teams can shar
 
 #### Isolation requirements {#sec-ml-operations-scale-isolation-requirements-19a2}
 
-Tenants need isolation at every boundary where one team's workload, data, or cost can affect another team. Performance isolation uses resource limits, scheduling fairness, and network quality of service to prevent one workload from degrading another. Security isolation uses access controls, network segmentation, and encryption when teams work with different sensitivity levels. Cost isolation completes the boundary by making each team's usage attributable through metering and chargeback.
+Tenants need isolation at every boundary where one team's workload, data, or cost can affect another team. Performance isolation is the first boundary: resource limits, scheduling fairness, and network quality of service prevent one workload from degrading another during training spikes or serving bursts.
+
+Security isolation draws the second boundary. Access controls, network segmentation, and encryption keep teams with different sensitivity levels from sharing data paths accidentally. Cost isolation completes the model by making each team's usage attributable through metering and chargeback. Together, the three boundaries make shared infrastructure safe enough for teams to use without negotiating every deployment by hand.
 
 #### Namespace architecture {#sec-ml-operations-scale-namespace-architecture-190c}
 
@@ -3865,11 +3869,15 @@ Training Cost Comparison (100 GPU-hours):
 
 #### Autoscaling for serving {#sec-ml-operations-scale-autoscaling-serving-2ae1}
 
-Serving costs scale with traffic, but ML serving cannot autoscale like a stateless web application. Large models may take seconds or minutes to load, so purely reactive scaling arrives after the latency spike; the platform needs predictive scale-up before anticipated demand. GPU memory also makes capacity discrete rather than fractional: a service often scales in jumps of 0, 1, 2, or 4 GPUs. Batching adds another coupling because waiting for a larger batch improves utilization but consumes latency budget. An autoscaling policy must therefore choose the least expensive capacity step that still protects the p99 latency SLO.
+Serving costs scale with traffic, but ML serving cannot autoscale like a stateless web application. Large models may take seconds or minutes to load, so purely reactive scaling arrives after the latency spike; the platform needs predictive scale-up before anticipated demand.
+
+The capacity steps are also lumpy. GPU memory makes serving scale in jumps of 0, 1, 2, or 4 GPUs rather than smooth CPU fractions, and batching adds another coupling because waiting for a larger batch improves utilization but consumes latency budget. An autoscaling policy must therefore choose the least expensive capacity step that still protects the p99 latency SLO.
 
 #### Right-sizing and instance selection {#sec-ml-operations-scale-rightsizing-instance-selection-fe66}
 
-ML workloads have distinct compute profiles, so right-sizing starts from the binding constraint rather than the newest instance type. Memory-bound training with large embedding tables prioritizes GPU memory capacity and bandwidth. Compute-bound dense training maximizes sustained FLOP/s per dollar. Latency-sensitive serving minimizes cold start and single-request latency, while throughput-oriented serving maximizes requests per dollar through batching. Instance selection should therefore be benchmark-driven: compare cost per training step or cost per inference across instance types instead of assuming larger hardware is automatically more economical.
+ML workloads have distinct compute profiles, so right-sizing starts from the binding constraint rather than the newest instance type. Memory-bound training with large embedding tables prioritizes GPU memory capacity and bandwidth. Compute-bound dense training maximizes sustained FLOP/s per dollar.
+
+Serving splits the decision again. Latency-sensitive serving minimizes cold start and single-request latency, while throughput-oriented serving maximizes requests per dollar through batching. Instance selection should therefore be benchmark-driven: compare cost per training step or cost per inference across instance types instead of assuming larger hardware is automatically more economical.
 
 ### Cost visibility and attribution {#sec-ml-operations-scale-cost-visibility-attribution-3f3a}
 
