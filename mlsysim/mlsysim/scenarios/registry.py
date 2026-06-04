@@ -17,6 +17,7 @@ from ..core.units import (
     GiB,
     KiB,
     MB,
+    GFLOPs,
     MWh,
     TB,
     TOPS,
@@ -26,6 +27,7 @@ from ..core.units import (
     day,
     minute,
     param,
+    second,
     TRILLION,
 )
 
@@ -434,6 +436,18 @@ class EdgeDeviceSpectrum(Registry):
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
         name="Microcontroller board cost endpoint",
         description="Representative low-cost microcontroller board price used in hardware-spectrum examples.",
+    )
+    LowEndEdgeRam = sourced_qty(
+        512 * MB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Low-end edge RAM target",
+        description="Representative RAM envelope for low-end edge deployment pitfall examples.",
+    )
+    LowEndEdgeCompute = sourced_qty(
+        1 * (GFLOPs / second),
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Low-end edge compute target",
+        description="Representative compute envelope for low-end edge deployment pitfall examples.",
     )
     FlagshipPhonePowerHigh = sourced_qty(
         5 * ureg.watt,

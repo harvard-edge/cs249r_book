@@ -7,6 +7,7 @@ import pytest
 from mlsysim.core.units import (
     Bparam,
     GB,
+    GFLOPs,
     GW,
     GiB,
     KiB,
@@ -262,6 +263,8 @@ def test_edge_device_spectrum_anchors():
     assert float(spectrum.MobileCpuThroughputMips) == pytest.approx(100_000.0)
     assert spectrum.SensorPowerLow.to(microwatt).magnitude == pytest.approx(10.0)
     assert spectrum.MicrocontrollerBoardCost.to(USD).magnitude == pytest.approx(10.0)
+    assert spectrum.LowEndEdgeRam.to(MB).magnitude == pytest.approx(512.0)
+    assert spectrum.LowEndEdgeCompute.to(GFLOPs / second).magnitude == pytest.approx(1.0)
     assert spectrum.FlagshipPhonePowerHigh.to(watt).magnitude == pytest.approx(5.0)
     assert spectrum.IotMicrocontrollerComputeLow.to(TOPS).magnitude == pytest.approx(0.03)
     assert spectrum.TinyRamLow.provenance.ref
