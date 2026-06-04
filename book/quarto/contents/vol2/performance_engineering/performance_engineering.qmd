@@ -1144,10 +1144,6 @@ The cost is substantial: QAT is effectively a full fine-tuning run, often requir
 
 The practical workflow in most production environments follows a two-stage approach: deploy with PTQ first (because it is fast and requires no training infrastructure), then apply QAT or QLoRA only if the PTQ model fails to meet quality requirements at the target precision. This sequence minimizes engineering effort while preserving the option of higher quality when needed.
 
-### KV cache compression and architectural optimization {#sec-performance-engineering-kv-cache}
-
-The key-value (KV) cache is the precision problem that determines whether weight savings become larger batches. In decode, weights may be compressed aggressively while per-request cache state still grows with sequence length, so a precision change that leaves the cache untouched may fail to move the serving bottleneck. Numerical compression reduces the bytes stored per cached key or value, while grouped query attention (GQA) reduces how many key-value heads must be cached for each layer. Both mechanisms matter because the scheduler admits requests against the combined memory footprint of weights plus active cache state; the next calculation shows the local capacity effect before the inference chapter returns to the full serving policy.
-
 ### Weight-only vs. weight-activation quantization {#sec-performance-engineering-quant-strategies}
 
 The final precision choice is whether the optimization should stop at the weights or include activations as well. Weight-only quantization (GPTQ, AWQ) reduces weight precision to INT4 or INT3 while keeping activations in FP16. During a GEMM, the INT4 weights are dequantized to FP16 on-the-fly, and the computation proceeds using FP16 Tensor Cores. The benefit is reduced memory for weight storage and reduced HBM bandwidth for weight reads, but the GEMM itself still operates at FP16 precision. This approach is ideal for memory-bound inference (batch size 1 decode), where the bottleneck is reading weights from HBM.
@@ -1156,13 +1152,15 @@ Weight-activation quantization (SmoothQuant, FP8 training) reduces both weights 
 
 The choice depends on the operational regime. For memory-bound inference (small batch sizes), weight-only INT4 quantization provides the largest speedup per unit of quality degradation. For compute-bound inference (large batch sizes) or training, weight-activation FP8 quantization provides throughput gains that weight-only quantization cannot match. Many production systems use different quantization strategies for different operating points: INT4 weight-only at low batch sizes (for latency) and FP8 weight-activation at high batch sizes (for throughput).
 
+The same precision problem extends to the key-value (KV) cache, which determines whether weight savings become larger batches. In decode, weights may be compressed aggressively while per-request cache state still grows with sequence length, so a precision change that leaves the cache untouched may fail to move the serving bottleneck. Numerical compression reduces the bytes stored per cached key or value, while grouped query attention (GQA) reduces how many key-value heads must be cached for each layer. Both mechanisms matter because the scheduler admits requests against the combined memory footprint of weights plus active cache state. The calculation below isolates the local capacity effect before the inference chapter returns to full serving policy.
+
 ```{python}
 #| echo: false
 #| label: kv-cache-size
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ KV CACHE MEMORY PER REQUEST (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Precision Dividend callout—@sec-performance-engineering-kv-cache
+# │ Context: Precision Dividend callout—@sec-performance-engineering-quant-strategies
 # │
 # │ Goal: Compute KV cache memory per request for a 70B model (Llama-style GQA)
 # │       at FP16, then derive max batch sizes before/after quantization.
@@ -2311,7 +2309,7 @@ The roofline analysis confirms that decode is deeply memory-bound, with arithmet
 
 The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the per-GPU weight footprint from `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` to about `{python} KVCacheAnalysis.weight_int4_gb_str` on an `{python} KVCacheAnalysis.tensor_parallel_degree_str`-GPU node. The raw weight-read traffic drops by 4$\times$, and the effective bandwidth for weight reads roughly doubles once on-the-fly dequantization to FP16 is included.
 
-Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately `{python} KVCacheAnalysis.avail_int8_gb_str` available for KV cache, up from `{python} KVCacheAnalysis.avail_fp16_gb_str`. Under the `{python} KVCacheAnalysis.context_len_tokens_str`-token GQA cache calculation from @sec-performance-engineering-kv-cache, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from `{python} KVCacheAnalysis.baseline_policy_batch_size_str` to approximately `{python} KVCacheAnalysis.optimized_policy_batch_size_str`.
+Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately `{python} KVCacheAnalysis.avail_int8_gb_str` available for KV cache, up from `{python} KVCacheAnalysis.avail_fp16_gb_str`. Under the `{python} KVCacheAnalysis.context_len_tokens_str`-token GQA cache calculation from @sec-performance-engineering-quant-strategies, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from `{python} KVCacheAnalysis.baseline_policy_batch_size_str` to approximately `{python} KVCacheAnalysis.optimized_policy_batch_size_str`.
 
 Postoptimization metrics at batch size 1:
 
