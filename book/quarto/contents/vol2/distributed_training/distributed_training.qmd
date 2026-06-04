@@ -474,36 +474,35 @@ class HierarchicalAllReduceDebug:
     gpus_per_node_str = fmt_count(gpus_per_node, commas=False, label="GPU")
     total_gpus_str = fmt_count(nodes * gpus_per_node, commas=True, label="GPU")
     ib_hdr_bw_gb_per_s_str = fmt_bandwidth(ib_hdr_bw, unit=GB/second, precision=0, commas=False)
-    flat_single_link_ms_str = fmt_time(tensor_bytes / ib_hdr_bw, ms, precision=0, commas=False)
     ib_util_pct_str = fmt_percent(ib_util_pct/100, precision=0, commas=False, style='prose')
 ```
 
 ::: {#exmp-distributed-training-debugging-slow-gradient-synchronization .callout-example title="Debugging slow gradient synchronization"}
 
-**Problem statement**: An AllReduce of a `{python} HierarchicalAllReduceDebug.tensor_gb_str` gradient tensor across `{python} HierarchicalAllReduceDebug.nodes_str` (`{python} HierarchicalAllReduceDebug.total_gpus_str`) takes `{python} HierarchicalAllReduceDebug.observed_ms_str`, while a hierarchical-AllReduce model that exploits NVLink within nodes and InfiniBand between nodes predicts roughly `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` including intra-node phases. The Fleet Stack framework provides a systematic debugging methodology by examining each layer:
+**Scenario**: An AllReduce of a `{python} HierarchicalAllReduceDebug.tensor_gb_str` gradient tensor across `{python} HierarchicalAllReduceDebug.nodes_str` (`{python} HierarchicalAllReduceDebug.total_gpus_str`) takes `{python} HierarchicalAllReduceDebug.observed_ms_str`. This chapter treats AllReduce as the synchronization primitive created by data parallelism; @sec-collective-communication derives the ring, tree, and hierarchical algorithms in detail. For now, the useful debugging move is to compare the observation against two coarse bounds: a pessimistic flat communication path and a topology-aware path that separates fast intra-node traffic from slower inter-node traffic.
 
-**Infrastructure layer**:
+**Context**:
 
 - **Topology**: `{python} HierarchicalAllReduceDebug.nodes_str`, `{python} HierarchicalAllReduceDebug.gpus_per_node_str` per node
-- **Intra-node**: NVLink at `{python} HierarchicalAllReduceDebug.nvlink_a100_gb_per_s_str` bidirectional between GPUs
-- **Inter-node**: InfiniBand HDR at 200 Gb/s (`{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_per_s_str`) per port
-- **Naive single-stream baseline**: A flat `{python} HierarchicalAllReduceDebug.tensor_gb_str` transfer over one InfiniBand link takes `{python} HierarchicalAllReduceDebug.tensor_gb_str` / `{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_per_s_str` = `{python} HierarchicalAllReduceDebug.flat_single_link_ms_str`, and a flat ring across all `{python} HierarchicalAllReduceDebug.total_gpus_str` pays $2(N-1)/N \times$ `{python} HierarchicalAllReduceDebug.tensor_gb_str` / `{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_per_s_str`, or approximately `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`. A hierarchical AllReduce (intra-node ring over NVLink + inter-node ring over InfiniBand) brings the inter-node cost down to roughly `{python} HierarchicalAllReduceDebug.inter_node_ms_str` because each node only ships its 1/8 share over the slow link, or roughly `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` after adding two intra-node NVLink phases.
+- **Fast local path**: NVLink at `{python} HierarchicalAllReduceDebug.nvlink_a100_gb_per_s_str` bidirectional between GPUs
+- **Slower network path**: InfiniBand HDR at 200 Gb/s (`{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_per_s_str`) per port
+- **Diagnostic bounds**: A flat all-GPU path over the network would land near `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`; a topology-aware local-then-network path predicts roughly `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` because each node sends only its share across the slower link
 
-**Distribution layer**:
+**Analysis**:
 
-- **Algorithm choice**: NCCL hierarchical AllReduce (intra-node NVLink ring + inter-node InfiniBand ring)
-- **Expected behavior**: Hierarchical decomposition isolates the slow link from the fast link, scaling with the inter-node share rather than the full tensor
+- **Algorithm choice**: The collective library is using a hierarchical path that treats the node boundary as the expensive communication boundary
+- **Expected behavior**: The inter-node phase should scale with each node's reduced share rather than with the full tensor from every GPU
 - **Diagnosis check**: A flat single ring over all `{python} HierarchicalAllReduceDebug.total_gpus_str` would have measured close to `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`, so the algorithm is already hierarchical
 
-**Serving layer (measurement)**:
+**Observation**:
 
 - **Observed latency**: `{python} HierarchicalAllReduceDebug.observed_ms_str` (well below the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring upper bound, but about `{python} HierarchicalAllReduceDebug.residual_ms_str` above the hierarchical ideal)
 - **Bandwidth utilization**: Only `{python} HierarchicalAllReduceDebug.ib_util_pct_str` of theoretical InfiniBand throughput
 - **Network counters**: Show congestion on specific switch uplinks
 
-**Root cause diagnosis**: NCCL is already using a hierarchical algorithm (`{python} HierarchicalAllReduceDebug.observed_ms_str` vs. the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring prediction confirms this). The remaining gap between observed and modeled latency can come from switch congestion on a handful of inter-node uplinks, effective-bandwidth loss, or implementation overhead, not from a fully flat algorithm.
+**Diagnosis**: NCCL is already using a hierarchical algorithm (`{python} HierarchicalAllReduceDebug.observed_ms_str` vs. the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring prediction confirms this). The remaining gap between observed and modeled latency can come from switch congestion on a handful of inter-node uplinks, effective-bandwidth loss, or implementation overhead, not from a fully flat algorithm.
 
-**Solution**: Monitor InfiniBand switch port utilization to identify hot spots. Consider the rail-optimized topology in @sec-network-fabrics-rail-optimized or further tuning of the hierarchical AllReduce hand-off so it explicitly partitions intra-node (NVLink) from inter-node (InfiniBand) communication. The residual gap likely represents achievable optimization through better network provisioning and bandwidth utilization rather than a wholesale algorithm change.
+**Solution**: Monitor InfiniBand switch port utilization to identify hot spots. Consider the rail-optimized topology in @sec-network-fabrics-rail-optimized or further tuning of the hierarchical hand-off so it explicitly partitions intra-node (NVLink) from inter-node (InfiniBand) communication. The residual gap likely represents achievable optimization through better network provisioning and bandwidth utilization rather than a wholesale algorithm change.
 
 **Systems lesson**: The analysis demonstrates how the Fleet Stack layers interact: Physical constraints (bandwidth) bound Operational choices (algorithm), which manifest in Service metrics (latency). Debugging requires examining all three layers, not just tuning one in isolation.
 
