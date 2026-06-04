@@ -2030,9 +2030,7 @@ Linewidth=1.0pt}};
 
 A single training iteration involves three subsystems executing in sequence: a *data pipeline* that ingests, transforms, and batches raw data; a *training loop* that performs the forward pass, gradient computation, and parameter update; and an *evaluation pipeline* that measures model quality against held-out data. This subsystem sequence frames the chapter's training pipeline, while @fig-training-loop details the forward, backward, and update interactions inside the training loop. Understanding each subsystem's role clarifies where performance bottlenecks arise and where the system-level optimizations discussed later in this chapter have their greatest impact.
 
-#### Data pipeline {#sec-model-training-data-pipeline-8b50}
-
-The data pipeline manages the ingestion, preprocessing, and batching of data for training. Raw data is loaded from storage and transformed dynamically during training, with image datasets undergoing preprocessing steps like resizing, augmentation, and normalization; input normalization is a long-standing training aid [@lecun2012]. Once processed, the data is packaged into batches and handed off to the training loop.
+A training system is easiest to reason about from its boundaries inward. The data pipeline loads raw records from storage, applies transformations such as resizing, augmentation, and normalization, and assembles the resulting examples into batches; input normalization is a long-standing training aid [@lecun2012]. The evaluation pipeline sits at the other boundary. At configurable intervals, it runs held-out validation data through the current model, computes metrics such as accuracy or loss, and exposes convergence problems such as overfitting, where training loss improves while validation loss degrades. Because evaluation consumes accelerator time, its cadence trades finer-grained feedback against training throughput.
 
 #### Training loop {#sec-model-training-training-loop-7fc8}
 
@@ -2116,15 +2114,7 @@ font=\small\usefont{T1}{phv}{b}{n}, color=TextBlack] {Step 3: Update};
 Each iteration executes the forward pass, loss computation, backward pass, and parameter update cycle established in @sec-model-training-mathematical-foundations-d894. The systems question is not *what* these operations compute (covered earlier) but *how* they interact as a *pipeline*, where the bottleneck in any one stage limits overall throughput.
 
 \index{Epoch!training cycle}
-This process repeats iteratively across multiple batches and epochs, gradually refining the model to improve its predictive accuracy.
-
-#### Evaluation pipeline {#sec-model-training-evaluation-pipeline-0a35}
-
-The evaluation pipeline provides periodic feedback on model quality during training. Using a held-out validation dataset, predictions are compared against known outcomes to compute metrics such as accuracy or loss. These metrics serve a dual purpose: monitoring convergence progress and detecting pathologies like overfitting (training loss decreases while validation loss increases) or underfitting (both remain high). Evaluation frequency involves a trade-off---more frequent evaluation provides finer-grained feedback but diverts accelerator cycles from training.
-
-#### Component integration {#sec-model-training-component-integration-65c2}
-
-These three components form a tightly coupled system where throughput depends on coordination. Data preparation overlaps with computation, preprocessing the next batch while the current batch trains, so that the accelerator never idles waiting for data. Evaluation interleaves with training at configurable intervals (every $k$ steps or every epoch), temporarily pausing gradient updates to measure validation metrics. This integration minimizes idle time for system resources, but any imbalance (a slow data pipeline, an overly frequent evaluation schedule) propagates as reduced overall throughput.
+This process repeats across batches and epochs, gradually refining the model to improve its predictive accuracy. The loop is tightly coupled to the stages around it: data preparation can overlap with computation by preprocessing the next batch while the current batch trains, while evaluation temporarily pauses gradient updates to measure validation quality. The integration minimizes idle time for system resources, but any imbalance, such as a slow data pipeline or an overly frequent evaluation schedule, propagates as reduced overall throughput.
 
 ### Data pipeline {#sec-model-training-data-pipeline-8e71}
 
@@ -4219,13 +4209,11 @@ The choice between formats depends on model characteristics. Models with gradien
 
 Modern hardware architectures are specifically designed to accelerate reduced precision computations. NVIDIA Tensor Cores were introduced for FP16 mixed-precision operations [@nvidia_tensors_fp16_2017], and later A100-class Tensor Cores added BF16 support [@NVIDIA2020]. Google's TPUs natively support BF16, as this format was specifically designed for machine learning workloads [@google_bfloat16]. These architectural optimizations typically enable substantially higher computational throughput for reduced precision operations compared to FP32, making mixed-precision training particularly efficient on modern hardware.
 
-#### FP16 computation {#sec-model-training-fp16-computation-374c}
+#### Precision roles {#sec-model-training-precision-roles}
 
-The majority of operations in mixed-precision training, such as matrix multiplications and activation functions, are performed in FP16. The reduced precision allows these calculations to be executed faster and with less memory consumption compared to FP32. FP16 operations are particularly effective on modern GPUs equipped with Tensor Cores, which are designed to accelerate computations involving half-precision values. These cores perform FP16 operations natively, resulting in significant speedups.
+Mixed-precision training assigns the fast path and the stable path to different formats. Matrix multiplications, convolutions, and activation functions run primarily in FP16 because their tensor-heavy arithmetic dominates training cost and maps directly to Tensor Core fast paths. Storing and moving those tensors at half precision also reduces activation and gradient traffic, so the performance gain comes from both arithmetic throughput and memory movement.
 
-#### FP32 accumulation {#sec-model-training-fp32-accumulation-4e2d}
-
-FP16 is efficient, but its limited precision can lead to numerical instability in critical operations like gradient updates. Mixed-precision training retains FP32 precision for certain steps, such as weight updates and gradient accumulation, avoiding gradient underflow or overflow and ensuring the model converges correctly during training.
+FP32 remains in the update path because the optimizer is where small numerical errors accumulate across many steps. Master weights, gradient accumulation, and weight updates use higher precision to avoid underflow, overflow, and accumulated rounding error. The system therefore does not simply train in FP16; it uses FP16 where the hardware gains are largest and keeps FP32 where convergence is most fragile.
 
 #### Loss scaling {#sec-model-training-loss-scaling-f9f5}
 
