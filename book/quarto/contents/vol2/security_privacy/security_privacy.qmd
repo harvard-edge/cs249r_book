@@ -1238,13 +1238,67 @@ $$
 
 where $f_\theta$ is a trained classifier and the features capture query volume, distribution, and temporal regularity. The score should not merely create an alert queue. It should feed the quota system, because rate limiting is how the service turns evidence into an information cap. Free users can receive low daily and burst limits, authenticated paid users can receive larger quotas, and enterprise customers can receive custom limits tied to contracts and monitoring. The point is not to punish volume by itself; it is to prevent anonymous or weakly authenticated actors from collecting enough observations to reconstruct the model.
 
+```{python}
+#| echo: false
+import math
+from mlsysim.fmt import fmt, fmt_count, fmt_percent, fmt_rate, fmt_usd
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: ExtractionDefenseReference.free_queries_per_day_str,
+# │          ExtractionDefenseReference.free_burst_qps_str,
+# │          ExtractionDefenseReference.basic_queries_per_day_str,
+# │          ExtractionDefenseReference.basic_burst_qps_str,
+# │          ExtractionDefenseReference.enterprise_queries_per_day_str,
+# │          ExtractionDefenseReference.anomaly_score_str,
+# │          ExtractionDefenseReference.capacity_remaining_pct_str,
+# │          ExtractionDefenseReference.rate_reduction_pct_str,
+# │          ExtractionDefenseReference.training_cost_m_usd_str,
+# │          ExtractionDefenseReference.extraction_queries_m_str,
+# │          ExtractionDefenseReference.breakeven_usd_per_query_str
+class ExtractionDefenseReference:
+    # ┌── 1. LOAD (Local teaching anchors) ────────────────────────────────────
+    free_queries_per_day = 1_000
+    free_burst_qps = 10
+    basic_queries_per_day = 100_000
+    basic_burst_qps = 100
+    enterprise_queries_per_day = 10 * MILLION
+    anomaly_score = 0.8
+    gamma_rate = 1.0
+    training_cost_usd = 5 * MILLION
+    extraction_queries = 100 * MILLION
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────────
+    capacity_remaining = math.exp(-gamma_rate * anomaly_score)
+    rate_reduction = 1 - capacity_remaining
+    breakeven_price_usd = training_cost_usd / extraction_queries
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────────
+    check(0.54 < rate_reduction < 0.56, "Score 0.8 should reduce quota by about 55 percent")
+    check(abs(breakeven_price_usd - 0.05) < 1e-9, "Break-even extraction price should be 0.05 USD/query")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    free_queries_per_day_str = fmt_rate(free_queries_per_day, "queries/day", precision=0, commas=True)
+    free_burst_qps_str = fmt_rate(free_burst_qps, "queries/s", precision=0, commas=False)
+    basic_queries_per_day_str = fmt_rate(basic_queries_per_day, "queries/day", precision=0, commas=True)
+    basic_burst_qps_str = fmt_rate(basic_burst_qps, "queries/s", precision=0, commas=False)
+    enterprise_queries_per_day_str = fmt_rate(enterprise_queries_per_day, "queries/day", scale="M", precision=0, commas=False)
+    anomaly_score_str = fmt(anomaly_score, precision=1, commas=False)
+    capacity_remaining_pct_str = fmt_percent(capacity_remaining, precision=0, commas=False, style="prose")
+    rate_reduction_pct_str = fmt_percent(rate_reduction, precision=0, commas=False, style="prose")
+    training_cost_m_usd_str = fmt_usd(training_cost_usd, scale="M", precision=0, commas=False)
+    extraction_queries_m_str = fmt_count(extraction_queries, scale="M", precision=0, commas=False)
+    breakeven_usd_per_query_str = fmt_usd(breakeven_price_usd, precision=2, commas=False, per="query")
+```
+
+A concrete quota ladder makes that information cap visible. A free tier might allow `{python} ExtractionDefenseReference.free_queries_per_day_str` with a `{python} ExtractionDefenseReference.free_burst_qps_str` burst, a basic paid tier might allow `{python} ExtractionDefenseReference.basic_queries_per_day_str` with `{python} ExtractionDefenseReference.basic_burst_qps_str`, and an enterprise tier might allow `{python} ExtractionDefenseReference.enterprise_queries_per_day_str` with custom burst limits and contractual monitoring. The exact numbers depend on product needs, but the ladder matters because extraction cost scales with accumulated responses.
+
 Adaptive limits connect the two pieces. Users with high anomaly scores face stricter limits, while verified legitimate users keep enough capacity for batch prediction:
 
 $$
 \text{limit}_{\text{effective}}(u) = \text{limit}_{\text{base}} \times \exp(-\gamma_{\text{rate}} \cdot \text{score}_{\text{anomaly}}(u))
 $$
 
-where $\gamma_{\text{rate}}$ controls sensitivity. High scores reduce effective capacity; low scores preserve normal usage. This control works only if the response itself is also designed carefully. A permissive API that returns full logits, hidden states, attention weights, or exact confidence scores leaks too much per query, so even a modest quota can be dangerous.
+where $\gamma_{\text{rate}}$ controls sensitivity. With $\gamma_{\text{rate}}=1$, a user with anomaly score `{python} ExtractionDefenseReference.anomaly_score_str` keeps about `{python} ExtractionDefenseReference.capacity_remaining_pct_str` of the base quota, a `{python} ExtractionDefenseReference.rate_reduction_pct_str` rate reduction; low scores preserve normal usage. This control works only if the response itself is also designed carefully. A permissive API that returns full logits, hidden states, attention weights, or exact confidence scores leaks too much per query, so even a modest quota can be dangerous.
 
 Output shaping reduces the leakage per response while preserving the part of the answer legitimate users usually need. **Confidence Rounding**\index{Confidence Rounding} returns coarser probabilities instead of full-precision logits or probabilities:
 
@@ -1344,7 +1398,7 @@ $$
 n_{\text{queries}} \cdot p_{\text{query}} < C_{\text{train}}
 $$
 
-Setting $p_{\text{query}}$ so that $n_{\text{queries}} \cdot p_{\text{query}} > C_{\text{train}}$ removes the economic incentive. That pricing must account for the attacker's alternative: purchasing compute, acquiring data, and doing the engineering work to train a substitute model independently. In practice, pricing, monitoring, quotas, and output shaping work as one package. Minimal outputs reduce bits per query, coarse confidence bins reduce numerical precision, hidden activations and attention weights stay private, model-version details are abstracted, and the quota system decides how much information any actor can accumulate.
+Setting $p_{\text{query}}$ so that $n_{\text{queries}} \cdot p_{\text{query}} > C_{\text{train}}$ removes the economic incentive. For example, if training a competitive model costs `{python} ExtractionDefenseReference.training_cost_m_usd_str` and extraction requires `{python} ExtractionDefenseReference.extraction_queries_m_str` queries, the break-even price is `{python} ExtractionDefenseReference.breakeven_usd_per_query_str`; pricing above that makes extraction more expensive than retraining. That pricing must account for the attacker's alternative: purchasing compute, acquiring data, and doing the engineering work to train a substitute model independently. In practice, pricing, monitoring, quotas, and output shaping work as one package. Minimal outputs reduce bits per query, coarse confidence bins reduce numerical precision, hidden activations and attention weights stay private, model-version details are abstracted, and the quota system decides how much information any actor can accumulate.
 
 ```{python}
 #| echo: false
