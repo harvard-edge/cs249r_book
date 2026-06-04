@@ -290,7 +290,14 @@ def audit_systems_reliability() -> list[str]:
         if hasattr(comp, "name"):
             issues.extend(_check_node(f"Systems.Reliability.{comp.name}", comp))
     recovery = Reliability.Recovery
-    for field in ("heartbeat_timeout_s", "reschedule_time_s", "checkpoint_write_bw_gbs"):
+    for field in (
+        "heartbeat_timeout_s",
+        "reschedule_time_s",
+        "detection_time_s",
+        "restart_time_s",
+        "warmup_time_s",
+        "checkpoint_write_bw_gbs",
+    ):
         val = getattr(recovery, field)
         if isinstance(val, Sourced):
             issues.extend(
