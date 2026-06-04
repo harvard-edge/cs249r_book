@@ -1294,7 +1294,7 @@ class BatchingWorkedExample:
     r4_imp_mult_str = fmt_multiple(r4_improvement, precision=2, commas=False)
 ```
 
-**System parameters.**
+The calculation starts from three system parameters:
 
 - Decode time per iteration (batch of 4): 20 ms
 - Maximum output length in batch: 200 tokens (R2)
@@ -5493,29 +5493,12 @@ A 70B model with 4-bit weights requires approximately `{python} QuantizedServing
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
-The final selection matches the method to the binding constraint. Deployment constraints determine the appropriate quantization method:
+The final selection matches the method to the binding constraint. Deployment constraints determine the appropriate quantization method through a short decision sequence:
 
-#### Decision framework {#sec-inference-quantization-decision-framework-d3c1}
-
-```
-1. Is latency or throughput the primary goal?
-   - Latency-sensitive: Prefer FP16/BF16 (no quantization overhead)
-   - Throughput-oriented: Quantization typically beneficial
-
-2. What hardware is available?
-   - H100/H200: Consider FP8 (native support, minimal quality loss)
-   - A100/A10G: W8A8 or W4A16 depending on workload
-   - Consumer GPUs: W4A16 often necessary for memory
-
-3. What quality requirements exist?
-   - <0.5% degradation acceptable: AWQ 4-bit
-   - <1% degradation acceptable: GPTQ 4-bit or SmoothQuant W8A8
-   - No degradation acceptable: FP16/BF16 only
-
-4. Is the model compute-bound or memory-bound?
-   - Compute-bound (prefill): W8A8 provides 2× speedup
-   - Memory-bound (decode): W4A16 provides 4× memory bandwidth
-```
+1. **Primary goal**: Latency-sensitive paths should prefer FP16 or BF16 when quantization overhead would dominate. Throughput-oriented paths are more likely to benefit from quantization.
+2. **Available hardware**: H100 and H200 deployments can consider FP8 because the hardware provides native support with minimal quality loss. A100 and A10G deployments usually choose between W8A8 and W4A16 depending on the workload, while consumer GPUs often require W4A16 simply to fit the model.
+3. **Quality budget**: If less than 0.5 percent degradation is acceptable, AWQ 4-bit is a plausible target. If less than 1 percent degradation is acceptable, GPTQ 4-bit or SmoothQuant W8A8 may be viable. If no degradation is acceptable, FP16 or BF16 remains the safest choice.
+4. **Binding resource**: Compute-bound prefill favors W8A8 because it can provide a 2$\times$ speedup. Memory-bound decode favors W4A16 because it can provide a 4$\times$ effective bandwidth increase.
 
 @Tbl-quantization-serving-cost shows how quantization reshapes serving cost per million tokens:
 
@@ -5900,33 +5883,19 @@ The case studies reveal how deeply custom engineering is required to serve ML at
 
 A DevOps team applies their standard web-server load balancing rules to a new fleet of GPU inference nodes, only to watch tail latency explode because they ignored the extreme variance of autoregressive token generation. Inference at scale breaks the rules of traditional microservices, creating dangerous fallacies for engineers transitioning from standard web development to machine learning systems.
 
-**Fallacy**: *Inference at scale is synonymous with LLM serving.*
+The first fallacy is treating inference at scale as synonymous with LLM serving. The misconception, reinforced by current discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems constitute 80–90 percent of production inference at major technology companies, with vision and other models comprising most of the remainder. LLMs currently represent 1--5 percent of requests, though this is growing. A practitioner who only understands continuous batching and KV cache management will be unprepared for the feature-parallel batching and embedding sharding that dominate production inference. Technique selection must match the actual workload.
 
-The misconception, reinforced by current discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems constitute 80–90 percent of production inference at major technology companies, with vision and other models comprising most of the remainder. LLMs currently represent 1--5 percent of requests, though this is growing. A practitioner who only understands continuous batching and KV cache management will be unprepared for the feature-parallel batching and embedding sharding that dominate production inference. Technique selection must match the actual workload.
+A related pitfall is using training infrastructure for production serving. Training and serving have different requirements. Training optimizes for aggregate throughput over hours or days; serving optimizes for per-request latency under strict SLOs. Training tolerates batch sizes of thousands; serving often requires batch sizes in single digits. Training accepts checkpoint-based recovery; serving requires graceful failover without user impact. Teams that deploy training clusters for serving often discover unacceptable latency variance, poor resource utilization, and difficulty meeting SLOs. Purpose-built serving infrastructure with appropriate batching, load balancing, and autoscaling is essential.
 
-**Pitfall**: *Using training infrastructure for production serving.*
+Within LLM serving, the most common fallacy is that continuous batching solves the whole problem. Continuous batching dramatically improves GPU utilization for LLM serving, but it addresses only one dimension of the problem. Prefill remains a bottleneck for long contexts, as the quadratic attention computation cannot be avoided regardless of how subsequent decode iterations are batched. As discussed in @sec-inference-scale-kv-cache-management-04ed, KV cache memory, not compute, often limits batch size. Network bandwidth between sharded model components can dominate latency for large models. Continuous batching is necessary but not sufficient for efficient LLM serving.
 
-Training and serving have different requirements. Training optimizes for aggregate throughput over hours or days; serving optimizes for per-request latency under strict SLOs. Training tolerates batch sizes of thousands; serving often requires batch sizes in single digits. Training accepts checkpoint-based recovery; serving requires graceful failover without user impact. Teams that deploy training clusters for serving often discover unacceptable latency variance, poor resource utilization, and difficulty meeting SLOs. Purpose-built serving infrastructure with appropriate batching, load balancing, and autoscaling is essential.
+The capacity-planning pitfall is sizing the fleet by average throughput. Queuing theory establishes that systems provisioned for average load violate SLOs during traffic peaks. At 80 percent average utilization, a modest 25 percent traffic spike pushes utilization above 100 percent, causing unbounded queue growth. As discussed in @sec-inference-scale-autoscaling-168d, the cold start problem exacerbates this: by the time new capacity is available, which can take multiple minutes for GPU instances, SLO violations have already occurred. Capacity planning must account for peak load plus headroom, not average load.
 
-**Fallacy**: *Continuous batching solves all LLM serving problems.*
+Another fallacy is that load balancing does not matter much for inference. Simple load balancing strategies like round-robin seem adequate until examined quantitatively. As shown in @sec-inference-scale-load-balancing-request-routing-4997, random assignment produces maximum queue lengths of $\mathcal{O}(\log R / \log \log R)$ across $R$ servers. Power-of-two-choices reduces this to $\mathcal{O}(\log \log R)$, an exponential improvement. For a 1,000-server cluster, this translates from ~4-5 requests maximum queue to ~2 requests. At the tail latencies that determine SLO compliance, this difference is substantial. The choice of load balancing algorithm has first-order impact on system performance.
 
-Continuous batching dramatically improves GPU utilization for LLM serving, but it addresses only one dimension of the problem. Prefill remains a bottleneck for long contexts, as the quadratic attention computation cannot be avoided regardless of how subsequent decode iterations are batched. As discussed in @sec-inference-scale-kv-cache-management-04ed, KV cache memory, not compute, often limits batch size. Network bandwidth between sharded model components can dominate latency for large models. Continuous batching is necessary but not sufficient for efficient LLM serving.
+The latency-budget pitfall is ignoring the serving tax. Distributed inference introduces overhead absent from single-machine serving: network round-trips, serialization, load balancer decisions, and coordination for sharded models. This "serving tax" often consumes 10--30 percent of the latency budget. A team that achieves 70 ms model inference on a single GPU may be surprised when end-to-end latency reaches 100 ms in production due to these overheads. Latency budgets must explicitly account for distribution overhead, not just compute time.
 
-**Pitfall**: *Sizing capacity based on average throughput.*
-
-Queuing theory establishes that systems provisioned for average load violate SLOs during traffic peaks. At 80 percent average utilization, a modest 25 percent traffic spike pushes utilization above 100 percent, causing unbounded queue growth. As discussed in @sec-inference-scale-autoscaling-168d, the cold start problem exacerbates this: by the time new capacity is available (multiple minutes for GPU instances), SLO violations have already occurred. Capacity planning must account for peak load plus headroom, not average load.
-
-**Fallacy**: *Load balancing does not matter much for inference.*
-
-Simple load balancing strategies like round-robin seem adequate until examined quantitatively. As shown in @sec-inference-scale-load-balancing-request-routing-4997, random assignment produces maximum queue lengths of $\mathcal{O}(\log R / \log \log R)$ across $R$ servers. Power-of-two-choices reduces this to $\mathcal{O}(\log \log R)$, an exponential improvement. For a 1,000-server cluster, this translates from ~4-5 requests maximum queue to ~2 requests. At the tail latencies that determine SLO compliance, this difference is substantial. The choice of load balancing algorithm has first-order impact on system performance.
-
-**Pitfall**: *Ignoring the serving tax in latency budgets.*
-
-Distributed inference introduces overhead absent from single-machine serving: network round-trips, serialization, load balancer decisions, and coordination for sharded models. This "serving tax" often consumes 10--30 percent of the latency budget. A team that achieves 70 ms model inference on a single GPU may be surprised when end-to-end latency reaches 100 ms in production due to these overheads. Latency budgets must explicitly account for distribution overhead, not just compute time.
-
-**Fallacy**: *More GPU memory always means more batch size and throughput.*
-
-Larger GPU memory enables larger batches only for models whose throughput is capacity-bound. The binding constraint in LLM decode is *memory bandwidth*, not *capacity*: once HBM bandwidth saturates, adding memory does not increase tokens per second. The bottleneck hierarchy makes the mistake visible.
+The hardware-capacity fallacy is that more GPU memory always means larger batch size and higher throughput. Larger GPU memory enables larger batches only for models whose throughput is capacity-bound. The binding constraint in LLM decode is *memory bandwidth*, not *capacity*: once HBM bandwidth saturates, adding memory does not increase tokens per second. The bottleneck hierarchy makes the mistake visible.
 
 ```{python}
 #| echo: false
@@ -5962,9 +5931,7 @@ class FinalSummaryHardware:
 
 While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A bandwidth-bound decode workload on an H100 with `{python} FinalSummaryHardware.h100_mem_gb_str` memory eventually plateaus when HBM3 bandwidth (`{python} FinalSummaryHardware.h100_mem_bw_tb_per_s_str`) saturates; adding memory alone does not raise token throughput once that point is reached. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.
 
-**Pitfall**: *Neglecting multi-tenancy isolation until production.*
-
-In development and staging, single-tenant deployments work well. In production, noisy neighbors cause sudden, unpredictable performance degradation that is difficult to diagnose and resolve. A tenant bursting to 5$\times$ normal traffic can degrade latency for all other tenants on shared infrastructure. As emphasized in @sec-inference-scale-multitenancy-isolation-688c, resource quotas, priority scheduling, and bulkhead isolation must be designed into the system from the start, not retrofitted after production incidents.
+The final pitfall is neglecting multi-tenancy isolation until production. In development and staging, single-tenant deployments work well. In production, noisy neighbors cause sudden, unpredictable performance degradation that is difficult to diagnose and resolve. A tenant bursting to 5$\times$ normal traffic can degrade latency for all other tenants on shared infrastructure. As emphasized in @sec-inference-scale-multitenancy-isolation-688c, resource quotas, priority scheduling, and bulkhead isolation must be designed into the system from the start, not retrofitted after production incidents.
 
 Avoiding these pitfalls keeps serving infrastructure resilient to traffic variance, cost-efficient under fixed SLOs, and consistently responsive across tenants. The remainder of this chapter consolidates the core architectural principles required to deploy and serve machine learning at scale.
 
