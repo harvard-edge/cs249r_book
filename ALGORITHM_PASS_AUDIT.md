@@ -1,6 +1,6 @@
 # Algorithm Pass Audit
 
-Status: in progress. Worktree: `/Users/VJ/GitHub/MLSysBook-algorithm-pass-audit`. Branch: `codex/algorithm-pass-audit`.
+Status: implementation complete; final validation in progress. Worktree: `/Users/VJ/GitHub/MLSysBook-algorithm-pass-audit`. Branch: `codex/algorithm-pass-audit`.
 
 ## Rendering Decision
 
@@ -61,30 +61,45 @@ An algorithm earns a place only when the procedure's structure creates a systems
 
 | Candidate | Decision | Notes |
 |---|---|---|
-| DP-SGD, `security_privacy.qmd` | Pair after source/notation check | Strong systems hook: per-example clipping breaks batch-level gradient reduction and creates memory/throughput tax. Overhead ranges and symbols need validation before conversion. |
+| DP-SGD, `security_privacy.qmd` | Defer | Strong systems hook, but it needs a citation/notation/accounting pass before conversion. Keep out of this implementation branch rather than add privacy math without the dedicated source check. |
 | API protection notebook | Reject | Service-control policy stack, not an algorithm whose structure creates the systems cost. |
 | Secure multi-tenancy / trusted compute notebooks | Reject | Arithmetic comparisons and cost notebooks, not procedures. |
 | Secure aggregation | Reject for this pass | Not locally developed with protocol recipe or bandwidth/round-trip payoff. |
 | Data poisoning and synthetic data loops | Reject | Would drift toward ML-security theory; current figures/prose are the right form. |
 | DP decision framework and maturity tables | Reject | Governance/checklist artifacts, not algorithm floats. |
 
-## Current Implementation Spine
+### Additional Read-Only Agent Findings
 
-The sparse core should stay near twelve algorithms across both volumes:
+Later read-only agents found several plausible algorithm candidates in collective communication, distributed training, inference, fleet orchestration, security/privacy, responsible AI, and operations. These were recorded as future audit material, not automatic implementation work. The main accepted additions for this branch were the candidates that already sat on the initial spine and had clear systems-cost payoff: Ring AllReduce, 1F1B, continuous batching, speculative decoding, and power-of-two routing. The following families remain deferred for future task branches if a chapter-level pass needs them:
+
+- **Distributed systems mechanics:** hierarchical AllReduce, rail-aware rank mapping, DDP bucket overlap, ZeRO/FSDP gather-reshard, tensor-parallel transformer blocks, MoE All-to-All dispatch, sharded checkpoint commit, warm restart, FlashAttention tiling, PagedAttention allocation, chunked prefill, topology-aware placement, and memory-aware model routing.
+- **Security/privacy/operations mechanics:** threat-model triage, adaptive API extraction defense, runtime containment and rollback, secure boot, DP-SGD accounting, rolling-window fairness monitoring, SISA unlearning, dependency-graph deployment gates, canary controllers, multi-region rollback, shadow replay gates, point-in-time feature joins, and incident attribution.
+- **Rejected for this branch:** governance matrices, maturity lists, broad policy frameworks, and trade-off prose that reads better as narrative than as an algorithm float.
+
+## Implemented Spine
+
+This branch keeps the algorithm core sparse across both volumes:
 
 1. Adam update.
 2. Mini-batch SGD.
 3. Backpropagation.
 4. Reverse-mode autodiff.
-5. Iterative pruning or PTQ calibration, with preference decided in context.
+5. PTQ calibration.
 6. Ring AllReduce.
-7. 1F1B pipeline schedule, after correctness repair.
+7. 1F1B pipeline schedule, with the GPipe/1F1B bubble-overclaim corrected.
 8. Continuous batching.
 9. Speculative decoding.
 10. Power-of-two-choices routing.
-11. DP-SGD, after citation and notation repair.
 
-Conv-BN-ReLU fusion and QAT are useful backups if one of the above fails the narrative or source-support gate, but they should not push the pass past the sparse target.
+Conv-BN-ReLU fusion, QAT, iterative pruning, DP-SGD, FlashAttention, and PagedAttention remain useful backups or future branch candidates. They should not be added to this branch unless a dedicated chapter-level pass shows that the current prose fails pedagogically without them.
+
+## Validation Notes
+
+- Targeted pre-commit passed on every touched chapter after each task commit.
+- HTML renders passed for representative Vol. I and Vol. II chapters after algorithm insertion.
+- Vol. II `collective_communication` HTML rendered after Ring AllReduce. The fast Vol. II PDF build reached LaTeX and failed on an existing `\copyrightpage` titlepage issue, not on the algorithm block.
+- The algorithm-reference rendering pass normalized all mid-sentence prose references to `[algorithm @alg-...]`; rendered HTML shows `algorithm N`, not `alg. N`, and no `?@alg-` leaks.
+- Binder builds must run sequentially in this worktree because the build command rewrites shared `index.qmd` and `_quarto.yml` symlinks per volume/format.
 
 ## Checks Before Commit
 
