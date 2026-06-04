@@ -217,10 +217,11 @@ from mlsysim.core.constants import *
 # │       (Device and Memory Management section prose).
 # │
 # │ Imports: mlsysim.core.constants (TFLOPs, TB, second, flop, byte), mlsysim.book (fmt, check)
-# │ Exports: MemoryWallSpecs.a100_fp16_tflop_per_s_str, MemoryWallSpecs.a100_bw_tb_per_s_str
+# │ Exports: MemoryWallSpecs.a100_fp16_tflop_per_s_str, MemoryWallSpecs.a100_bw_tb_per_s_str,
+# │          MemoryWallSpecs.relu_peak_util_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.fmt import fmt, fmt_percent, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MemoryWallSpecs:
@@ -237,14 +238,20 @@ class MemoryWallSpecs:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Arithmetic Intensity "Ridge Point" (FLOP/byte)
-    ridge_point = gpu.ridge_point().to(flop/byte).magnitude
+    ridge_point_q = gpu.ridge_point().to(flop/byte)
+    ridge_point = ridge_point_q.magnitude
+    relu_bytes_per_element = 2 * BYTES_FP16
+    relu_arithmetic_intensity = (1 * flop / relu_bytes_per_element).to(flop / byte)
+    relu_peak_util = (relu_arithmetic_intensity / ridge_point_q).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ridge_point >= 100, f"A100 ridge point ({ridge_point:.1f}) is too low to claim a 'Memory Wall'.")
+    check(relu_peak_util < 0.01, "Element-wise ReLU should use less than 1 percent of A100 peak FLOP/s.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_fp16_tflop_per_s_str = fmt_qty(flops_fp16_q, TFLOP/second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_qty(bw_q, TB/second, precision=2, commas=False)
+    relu_peak_util_pct_str = fmt_percent(relu_peak_util, precision=1, commas=False, style="prose")
 
 # Note: Use MemoryWallSpecs.a100_fp16_tflop_per_s_str directly.
 ```
@@ -267,7 +274,7 @@ class A100BLASMemoryWallRecap:
 ```
 
 \index{Memory Wall!execution strategy impact}
-To understand why execution strategy matters so much, return to the memory wall introduced in @sec-ml-systems\index{Memory Wall!framework execution}: processor arithmetic has grown faster than memory bandwidth. Modern GPUs can perform arithmetic far faster than they can fetch data. On an A100 GPU with `{python} A100BLASMemoryWallRecap.dense_tflop_per_s_str` of compute and `{python} MemoryWallSpecs.a100_bw_tb_per_s_str` of memory bandwidth, element-wise operations like ReLU achieve less than 1 percent of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. The Roofline Model (@sec-appdx-machine-foundations-roofline-model-2529) formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
+To understand why execution strategy matters so much, return to the memory wall introduced in @sec-ml-systems\index{Memory Wall!framework execution}: processor arithmetic has grown faster than memory bandwidth. Modern GPUs can perform arithmetic far faster than they can fetch data. On an A100 GPU with `{python} A100BLASMemoryWallRecap.dense_tflop_per_s_str` of compute and `{python} MemoryWallSpecs.a100_bw_tb_per_s_str` of memory bandwidth, element-wise operations like ReLU achieve about `{python} MemoryWallSpecs.relu_peak_util_pct_str` of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. @Sec-appdx-machine-foundations-roofline-model-2529 formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
 
 The memory wall creates a critical classification: operations are either **compute-bound**\index{Compute-Bound!operation classification} (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound**\index{Memory-Bound!operation classification} (limited by data movement, like activation functions and normalization). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory bound, though the large matrix multiplications that dominate total compute time can be compute bound.
 
