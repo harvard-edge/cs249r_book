@@ -1020,7 +1020,24 @@ $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 
 For realistic output length distributions with high variance, wasted compute can exceed 50 percent.
 
-Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. At each decode iteration, the system checks for completed sequences, removes completed sequences from the batch immediately, inserts waiting sequences into freed slots, and processes the reorganized batch for the next iteration. This technique is central to the throughput-latency trade-off that defines large-scale LLM serving—Archetype A workloads (GPT-4/Llama-3, @sec-vol2-introduction-archetypes) would be economically unviable without it, because their memory-bandwidth-bound decode phase leaves compute cores idle waiting for weights to load, and only by interleaving unrelated requests can the bandwidth be saturated.
+Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. [Algorithm @alg-continuous-batching-decode-scheduler] states the scheduler as a decode loop: completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. This technique is central to the throughput-latency trade-off that defines large-scale LLM serving---Archetype A workloads (GPT-4/Llama-3, @sec-vol2-introduction-archetypes) would be economically unviable without it, because their memory-bandwidth-bound decode phase leaves compute cores idle waiting for weights to load, and only by interleaving unrelated requests can the bandwidth be saturated.
+
+::: {#alg-continuous-batching-decode-scheduler name="Continuous batching decode scheduler"}
+
+**Require:** Waiting queue $Q$; active sequence set $A$; GPU KV-cache page allocator; maximum active-token budget $B_{\max}$; model replica with a batched decode kernel.
+
+**Output:** Generated tokens for completed requests and a continually refreshed active batch.
+
+1. Admit requests from $Q$ while batch capacity and free KV-cache pages remain; allocate their prompt and KV-cache state and append them to $A$.
+2. Run one batched decode kernel over all sequences in $A$.
+3. Append each sampled token to its sequence and extend the corresponding KV-cache pages.
+4. Remove completed or length-limited sequences from $A$ and return their KV-cache pages to the allocator.
+5. If HBM pressure exceeds the serving policy's threshold, preempt lower-priority sequences by moving their KV-cache pages to CPU DRAM and marking those sequences paused.
+6. Fill newly freed capacity from $Q$ or resume paused sequences whose KV-cache pages now fit, then repeat the decode loop.
+
+**Systems cost:** The scheduler pays an admission, completion, and memory-accounting step at every decode iteration, and preemption adds HBM-to-CPU-DRAM transfer latency when memory pressure spikes. The payoff is immediate slot reuse: a Llama-2 70B service on 8$\times$ A100 GPUs can keep batch slots occupied instead of idling behind the longest sequence.
+
+:::
 
 Unlike static or dynamic batching, which group requests at the *request* level, continuous batching operates at the *iteration* level, dynamically reshaping the compute tensor at each clock cycle. As @fig-continuous-batching-comparison illustrates, static batching leaves the GPU idle while waiting for the longest request, whereas continuous batching keeps it saturated.
 
