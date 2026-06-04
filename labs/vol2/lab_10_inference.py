@@ -72,6 +72,7 @@ async def _():
         source_trace,
         state_capacity,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -83,7 +84,8 @@ async def _():
         batching_result, build_lab_report, cost_crossover, get_lab_metadata,
         get_lab_track_variant, get_track_profile, go, inference_economy_profile,
         ledger, math, mo, np, report_export_panel, resolve_mlsysim_ref,
-        serving_plan, source_trace, state_capacity, track_context, track_selector,
+        serving_plan, source_trace, state_capacity, track_context,
+        track_arc_context, track_selector,
     )
 
 
@@ -139,6 +141,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v2_10_inference,
     v2_10_metadata,
     v2_10_profile,
@@ -177,19 +180,7 @@ def _(
         </div>
         """),
         track_context(v2_10_profile),
-        source_trace(
-            {
-                "lab_id": v2_10_metadata.lab_id,
-                "track_id": v2_10_profile.track_id,
-                "hardware_ref": v2_10_variant.hardware_ref,
-                "model_ref": v2_10_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.inference",
-                "cost_unit": v2_10_inference.cost_unit,
-                "state_kind": v2_10_inference.state_kind,
-                "source_policy": v2_10_profile.source_policy,
-            },
-            summary="V2-10 resolves hardware/model facts through MLSysIM and track scenario defaults through mlsysbook_labs variants.",
-        ),
+        track_arc_context(v2_10_profile, v2_10_metadata.lab_id),
     ])
     return
 

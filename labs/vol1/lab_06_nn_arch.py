@@ -43,6 +43,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -69,6 +70,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_06_architecture,
     v1_06_metadata,
     v1_06_profile,
@@ -179,17 +182,7 @@ def _(
         </div>
         """),
         track_context(v1_06_profile),
-        source_trace(
-            {
-                "lab_id": v1_06_metadata.lab_id,
-                "track_id": v1_06_profile.track_id,
-                "hardware_ref": v1_06_variant.hardware_ref,
-                "model_ref": v1_06_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.architecture",
-                "source_policy": v1_06_profile.source_policy,
-            },
-            summary="V1-06 evaluates architecture signatures, scaling curves, and recommendations through mlsysbook_labs.architecture.",
-        ),
+        track_arc_context(v1_06_profile, v1_06_metadata.lab_id),
     ])
     return
 
@@ -534,15 +527,6 @@ def _(
           <ul class="mlsysbook-list">{_validation_items}</ul>
         </div>
         """),
-        source_trace(
-            {
-                "helper": "architecture_decision",
-                "selected_id": v1_06_decision.selected_id,
-                "hardware_ref": v1_06_architecture.hardware_ref,
-                "model_ref": v1_06_architecture.model_ref,
-            },
-            summary="Architecture decision evidence is computed from the selected track budgets and candidate registry.",
-        ),
         mo.Html('<div class="mlsysbook-panel"><h2>Reflection</h2></div>'),
         v1_06_reflection,
     ])
@@ -709,7 +693,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-06 architecture recommendation memo is generated locally from "
-                "the selected track, MLSysIM refs, and shared `mlsysbook_labs.architecture` calculations."
+                "the selected track, your inputs, and the computed evidence."
             ),
             kind="info",
         ),

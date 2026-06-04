@@ -49,6 +49,7 @@ async def _():
         sustained_benchmark,
         tail_latency,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -61,7 +62,8 @@ async def _():
         get_lab_metadata, get_lab_track_variant, get_track_profile, go,
         ledger, math, metric_gate, mo, np, report_export_panel,
         resolve_mlsysim_ref, source_trace, sustained_benchmark,
-        tail_latency, track_context, track_selector,
+        tail_latency, track_context,
+        track_arc_context, track_selector,
     )
 
 
@@ -118,6 +120,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_12_benchmark,
     v1_12_metadata,
     v1_12_profile,
@@ -173,19 +176,7 @@ def _(
         </div>
         """),
         track_context(v1_12_profile),
-        source_trace(
-            {
-                "lab_id": v1_12_metadata.lab_id,
-                "track_id": v1_12_profile.track_id,
-                "hardware_ref": v1_12_variant.hardware_ref,
-                "model_ref": v1_12_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.benchmarking",
-                "benchmark_claim": v1_12_benchmark.benchmark_claim,
-                "hidden_failure_metric": v1_12_benchmark.hidden_failure_metric,
-                "source_policy": v1_12_profile.source_policy,
-            },
-            summary="V1-12 resolves benchmark scenarios through MLSysIM refs and mlsysbook_labs.benchmarking calculations.",
-        ),
+        track_arc_context(v1_12_profile, v1_12_metadata.lab_id),
     ])
     return
 

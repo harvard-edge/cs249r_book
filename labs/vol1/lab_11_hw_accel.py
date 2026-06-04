@@ -48,6 +48,7 @@ async def _():
         roofline_point,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -59,7 +60,8 @@ async def _():
         build_lab_report, fusion_traffic, gemm_workload,
         get_lab_metadata, get_lab_track_variant, get_track_profile, go,
         hardware_roofline_profile, ledger, math, mo, np, report_export_panel,
-        resolve_mlsysim_ref, roofline_point, source_trace, track_context, track_selector,
+        resolve_mlsysim_ref, roofline_point, source_trace, track_context,
+        track_arc_context, track_selector,
     )
 
 
@@ -119,6 +121,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_11_metadata,
     v1_11_profile,
     v1_11_roofline,
@@ -174,20 +177,7 @@ def _(
         </div>
         """),
         track_context(v1_11_profile),
-        source_trace(
-            {
-                "lab_id": v1_11_metadata.lab_id,
-                "track_id": v1_11_profile.track_id,
-                "hardware_ref": v1_11_variant.hardware_ref,
-                "model_ref": v1_11_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.roofline",
-                "peak_tflops": v1_11_roofline.peak_tflops,
-                "bandwidth_gbs": v1_11_roofline.bandwidth_gbs,
-                "ridge_flop_per_byte": v1_11_roofline.ridge_flop_per_byte,
-                "source_policy": v1_11_profile.source_policy,
-            },
-            summary="V1-11 uses MLSysIM hardware refs plus mlsysbook_labs.roofline calculations.",
-        ),
+        track_arc_context(v1_11_profile, v1_11_metadata.lab_id),
     ])
     return
 

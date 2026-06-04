@@ -72,6 +72,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
         training_memory_breakdown,
     )
@@ -103,6 +104,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
         training_memory_breakdown,
     )
@@ -152,6 +154,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v2_11_device,
     v2_11_metadata,
     v2_11_profile,
@@ -207,20 +210,7 @@ def _(
         </div>
         """),
         track_context(v2_11_profile),
-        source_trace(
-            {
-                "lab_id": v2_11_metadata.lab_id,
-                "track_id": v2_11_profile.track_id,
-                "hardware_ref": v2_11_variant.hardware_ref,
-                "model_ref": v2_11_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.edge",
-                "memory_capacity_mb": v2_11_device.memory_capacity_mb,
-                "available_memory_mb": v2_11_device.available_memory_mb,
-                "energy_budget_wh": v2_11_device.energy_budget_wh,
-                "source_policy": v2_11_profile.source_policy,
-            },
-            summary="V2-11 uses MLSysIM hardware refs plus mlsysbook_labs.edge calculations.",
-        ),
+        track_arc_context(v2_11_profile, v2_11_metadata.lab_id),
     ])
     return
 

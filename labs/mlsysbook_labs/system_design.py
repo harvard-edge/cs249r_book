@@ -483,7 +483,7 @@ def render_system_design_lab(
     """Render a compact track-aware Volume II decision lab."""
     from .reports import build_lab_report, report_export_panel
     from .style import ACADEMIC_LAB_CSS
-    from .ui import source_trace, track_context
+    from .ui import source_trace, track_arc_context, track_context
     from mlsysim.labs.style import LAB_CSS
 
     metadata = context.metadata
@@ -698,16 +698,7 @@ def render_system_design_lab(
         """),
         track_picker,
         track_context(track),
-        source_trace(
-            {
-                "lab_id": metadata.lab_id,
-                "track_id": track.track_id,
-                "hardware_ref": variant.hardware_ref,
-                "model_ref": variant.model_ref,
-                "shared_helper": "mlsysbook_labs.system_design",
-            },
-            summary=f"{metadata.title} uses typed track variants and a shared system-design frontier.",
-        ),
+        track_arc_context(track, metadata.lab_id),
         mo.Html(f"""
         <div class="mlsysbook-panel">
           <h2>Learning Objectives</h2>

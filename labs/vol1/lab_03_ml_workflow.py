@@ -41,6 +41,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
         workflow_policy,
         workflow_track_profile,
@@ -67,6 +68,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
         workflow_policy,
         workflow_track_profile,
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_03_metadata,
     v1_03_profile,
     v1_03_variant,
@@ -179,17 +182,7 @@ def _(
         </div>
         """),
         track_context(v1_03_profile),
-        source_trace(
-            {
-                "lab_id": v1_03_metadata.lab_id,
-                "track_id": v1_03_profile.track_id,
-                "hardware_ref": v1_03_variant.hardware_ref,
-                "model_ref": v1_03_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.workflow",
-                "source_policy": v1_03_profile.source_policy,
-            },
-            summary="V1-03 computes workflow costs and policy evidence through typed variants and mlsysbook_labs.workflow.",
-        ),
+        track_arc_context(v1_03_profile, v1_03_metadata.lab_id),
     ])
     return
 
@@ -590,15 +583,6 @@ def _(
           </table>
         </div>
         """),
-        source_trace(
-            {
-                "helper": "constraint_tax + iteration_frontier + workflow_policy",
-                "gate_id": v1_03_policy.gate_id,
-                "hardware_ref": v1_03_workflow.hardware_ref,
-                "model_ref": v1_03_workflow.model_ref,
-            },
-            summary="Workflow policy evidence is computed from the selected track variant and MLSysIM refs.",
-        ),
         mo.Html('<div class="mlsysbook-panel"><h2>Reflection</h2></div>'),
         v1_03_reflection,
     ])
@@ -762,7 +746,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-03 workflow memo is generated locally from the selected track, "
-                "MLSysIM refs, and shared `mlsysbook_labs.workflow` calculations."
+                "your inputs, and the computed evidence."
             ),
             kind="info",
         ),

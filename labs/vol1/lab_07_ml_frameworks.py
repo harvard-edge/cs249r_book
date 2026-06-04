@@ -43,6 +43,7 @@ async def _():
         runtime_decision,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -69,6 +70,7 @@ async def _():
         runtime_decision,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_07_framework,
     v1_07_metadata,
     v1_07_profile,
@@ -179,17 +182,7 @@ def _(
         </div>
         """),
         track_context(v1_07_profile),
-        source_trace(
-            {
-                "lab_id": v1_07_metadata.lab_id,
-                "track_id": v1_07_profile.track_id,
-                "hardware_ref": v1_07_variant.hardware_ref,
-                "model_ref": v1_07_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.frameworks",
-                "source_policy": v1_07_profile.source_policy,
-            },
-            summary="V1-07 evaluates runtime dispatch, compile break-even, and unsupported-op risk through mlsysbook_labs.frameworks.",
-        ),
+        track_arc_context(v1_07_profile, v1_07_metadata.lab_id),
     ])
     return
 
@@ -570,15 +563,6 @@ def _(
           <ul class="mlsysbook-list">{_validation_items}</ul>
         </div>
         """),
-        source_trace(
-            {
-                "helper": "runtime_decision",
-                "selected_id": v1_07_decision.selected_id,
-                "hardware_ref": v1_07_framework.hardware_ref,
-                "model_ref": v1_07_framework.model_ref,
-            },
-            summary="Runtime decision evidence is computed from runtime options, track budgets, and MLSysIM refs.",
-        ),
         mo.Html('<div class="mlsysbook-panel"><h2>Reflection</h2></div>'),
         v1_07_reflection,
     ])
@@ -751,7 +735,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-07 runtime deployment recommendation is generated locally from "
-                "the selected track, MLSysIM refs, and shared `mlsysbook_labs.frameworks` calculations."
+                "the selected track, your inputs, and the computed evidence."
             ),
             kind="info",
         ),

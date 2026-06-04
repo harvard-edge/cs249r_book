@@ -43,6 +43,7 @@ async def _():
         source_trace,
         sweep_deployment_knob,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -69,6 +70,7 @@ async def _():
         source_trace,
         sweep_deployment_knob,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_02_deployment,
     v1_02_metadata,
     v1_02_profile,
@@ -178,18 +181,7 @@ def _(
         </div>
         """),
         track_context(v1_02_profile),
-        source_trace(
-            {
-                "lab_id": v1_02_metadata.lab_id,
-                "track_id": v1_02_profile.track_id,
-                "hardware_ref": v1_02_variant.hardware_ref,
-                "model_ref": v1_02_variant.model_ref,
-                "system_ref": v1_02_variant.system_ref or "single-device profile",
-                "shared_helper": "mlsysbook_labs.deployment",
-                "source_policy": v1_02_profile.source_policy,
-            },
-            summary="V1-02 computes envelope evidence through MLSysIM refs and mlsysbook_labs.deployment.",
-        ),
+        track_arc_context(v1_02_profile, v1_02_metadata.lab_id),
     ])
     return
 
@@ -554,15 +546,6 @@ def _(
           </table>
         </div>
         """),
-        source_trace(
-            {
-                "workload_value": f"{v1_02_result.workload_value:.1f} {v1_02_deployment.workload_unit}",
-                "placement_id": v1_02_placement.value,
-                "helper": "evaluate_deployment_envelope + deployment_mitigation",
-                "source_refs": ", ".join(v1_02_deployment.source_refs),
-            },
-            summary="Placement evidence is computed from the selected workload, MLSysIM refs, and V1-02 variant budgets.",
-        ),
         mo.Html('<div class="mlsysbook-panel"><h2>Reflection</h2></div>'),
         v1_02_reflection,
     ])
@@ -738,8 +721,8 @@ def _(
         mo.md("## Download Report"),
         mo.callout(
             mo.md(
-                "This V1-02 memo is generated locally from the selected track, MLSysIM refs, "
-                "and shared `mlsysbook_labs.deployment` calculations."
+                "This V1-02 memo is generated locally from the selected track, "
+                "your inputs, and the computed evidence."
             ),
             kind="info",
         ),

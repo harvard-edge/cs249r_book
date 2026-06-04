@@ -44,6 +44,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -74,6 +75,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
         ureg,
     )
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v2_06_defaults,
     v2_06_metadata,
     v2_06_profile,
@@ -178,19 +181,7 @@ def _(
         </div>
         """),
         track_context(v2_06_profile),
-        source_trace(
-            {
-                "lab_id": v2_06_metadata.lab_id,
-                "track_id": v2_06_profile.track_id,
-                "hardware_ref": v2_06_variant.hardware_ref,
-                "model_ref": v2_06_variant.model_ref,
-                "operation": v2_06_defaults["operation"],
-                "topology": v2_06_defaults["topology"],
-                "shared_solver": "mlsysim.physics collective communication",
-                "source_policy": v2_06_profile.source_policy,
-            },
-            summary="V2-06 uses typed track variants plus MLSysIM collective physics for ring, tree, and hierarchical timing.",
-        ),
+        track_arc_context(v2_06_profile, v2_06_metadata.lab_id),
     ])
     return
 

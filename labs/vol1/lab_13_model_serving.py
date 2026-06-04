@@ -47,6 +47,7 @@ async def _():
         serving_track_profile,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -77,6 +78,7 @@ async def _():
         serving_track_profile,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -132,6 +134,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_13_metadata,
     v1_13_profile,
     v1_13_serving,
@@ -186,20 +189,7 @@ def _(
         </div>
         """),
         track_context(v1_13_profile),
-        source_trace(
-            {
-                "lab_id": v1_13_metadata.lab_id,
-                "track_id": v1_13_profile.track_id,
-                "hardware_ref": v1_13_variant.hardware_ref,
-                "model_ref": v1_13_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.serving",
-                "arrival_qps": v1_13_serving.arrival_qps,
-                "service_ms": v1_13_serving.service_ms,
-                "slo_ms": v1_13_serving.slo_ms,
-                "source_policy": v1_13_profile.source_policy,
-            },
-            summary="V1-13 resolves serving scenarios through MLSysIM hardware/model refs and mlsysbook_labs.serving calculations.",
-        ),
+        track_arc_context(v1_13_profile, v1_13_metadata.lab_id),
     ])
     return
 
@@ -1008,7 +998,7 @@ cold path     = {_cold.cold_start_ms/1000:.2f} s
             ), kind="info"),
             mo.callout(mo.md(
                 f"**3. Live state and cold starts are source-of-truth calculations.** "
-                f"This lab uses MLSysIM refs plus `mlsysbook_labs.serving` for {v1_13_serving.state_kind}, memory, and scale-out evidence."
+                f"This lab uses the selected track inputs to compute {v1_13_serving.state_kind}, memory, and scale-out evidence."
             ), kind="info"),
             mo.Html(f"""
             <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">

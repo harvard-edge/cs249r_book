@@ -43,6 +43,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -69,6 +70,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_04_metadata,
     v1_04_pipeline_profile,
     v1_04_profile,
@@ -178,17 +181,7 @@ def _(
         </div>
         """),
         track_context(v1_04_profile),
-        source_trace(
-            {
-                "lab_id": v1_04_metadata.lab_id,
-                "track_id": v1_04_profile.track_id,
-                "hardware_ref": v1_04_variant.hardware_ref,
-                "model_ref": v1_04_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.data_pipeline",
-                "source_policy": v1_04_profile.source_policy,
-            },
-            summary="V1-04 computes data rates, pipeline bottlenecks, movement costs, and architecture decisions through mlsysbook_labs.data_pipeline.",
-        ),
+        track_arc_context(v1_04_profile, v1_04_metadata.lab_id),
     ])
     return
 
@@ -502,16 +495,6 @@ def _(
           </table>
         </div>
         """),
-        source_trace(
-            {
-                "helper": "movement_frontier",
-                "strategy_id": v1_04_movement_result.strategy_id,
-                "dataset_gb": v1_04_dataset_gb.value,
-                "network_gbps": v1_04_network_gbps.value,
-                "egress_cost_per_gb": v1_04_pipeline_profile.egress_cost_per_gb,
-            },
-            summary="Movement evidence is computed from selected strategy, data size, network bandwidth, and V1-04 variant defaults.",
-        ),
     ])
     return
 
@@ -559,15 +542,6 @@ def _(
           <div class="mlsysbook-callout"><strong>Memo decision:</strong> {v1_04_architecture.memo_summary}</div>
         </div>
         """),
-        source_trace(
-            {
-                "helper": "pipeline_architecture",
-                "hardware_ref": v1_04_pipeline_profile.hardware_ref,
-                "model_ref": v1_04_pipeline_profile.model_ref,
-                "privacy_stance": v1_04_pipeline_profile.privacy_stance,
-            },
-            summary="Architecture evidence packages the pipeline bottleneck, movement result, and selected retention policy.",
-        ),
         mo.Html('<div class="mlsysbook-panel"><h2>Reflection</h2></div>'),
         v1_04_reflection,
     ])
@@ -730,7 +704,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-04 data pipeline memo is generated locally from the selected track, "
-                "MLSysIM refs, and shared `mlsysbook_labs.data_pipeline` calculations."
+                "your inputs, and the computed evidence."
             ),
             kind="info",
         ),

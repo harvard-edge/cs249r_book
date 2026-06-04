@@ -42,6 +42,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
         triad_track_profile,
     )
@@ -68,6 +69,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
         triad_track_profile,
     )
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_01_metadata,
     v1_01_profile,
     v1_01_triad,
@@ -178,17 +181,7 @@ def _(
         </div>
         """),
         track_context(v1_01_profile),
-        source_trace(
-            {
-                "lab_id": v1_01_metadata.lab_id,
-                "track_id": v1_01_profile.track_id,
-                "hardware_ref": v1_01_variant.hardware_ref,
-                "model_ref": v1_01_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.triad",
-                "source_policy": v1_01_profile.source_policy,
-            },
-            summary="V1-01 resolves D-A-M scenarios through MLSysIM refs and mlsysbook_labs.triad calculations.",
-        ),
+        track_arc_context(v1_01_profile, v1_01_metadata.lab_id),
     ])
     return
 
@@ -773,7 +766,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-01 diagnosis memo is generated locally from the selected track, "
-                "MLSysIM refs, and shared `mlsysbook_labs.triad` calculations."
+                "your inputs, and the computed evidence."
             ),
             kind="info",
         ),

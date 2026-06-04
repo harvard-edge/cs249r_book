@@ -44,6 +44,7 @@ async def _():
         sensitivity_audit,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -71,6 +72,7 @@ async def _():
         sensitivity_audit,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -126,6 +128,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_16_capstone,
     v1_16_metadata,
     v1_16_profile,
@@ -180,18 +183,7 @@ def _(
         </div>
         """),
         track_context(v1_16_profile),
-        source_trace(
-            {
-                "lab_id": v1_16_metadata.lab_id,
-                "track_id": v1_16_profile.track_id,
-                "hardware_ref": v1_16_variant.hardware_ref,
-                "model_ref": v1_16_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.capstone",
-                "report_artifact": v1_16_capstone.report_artifact,
-                "source_policy": v1_16_profile.source_policy,
-            },
-            summary="V1-16 resolves the capstone architecture audit through MLSysIM refs and mlsysbook_labs.capstone calculations.",
-        ),
+        track_arc_context(v1_16_profile, v1_16_metadata.lab_id),
     ])
     return
 
@@ -890,7 +882,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-16 architecture memo is generated locally from the selected track, "
-                "ledger entries, MLSysIM refs, and shared `mlsysbook_labs.capstone` calculations."
+                "ledger entries, your inputs, and the computed evidence."
             ),
             kind="info",
         ),

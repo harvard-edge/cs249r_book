@@ -43,6 +43,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -69,6 +70,7 @@ async def _():
         resolve_mlsysim_ref,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -124,6 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_05_compute,
     v1_05_metadata,
     v1_05_profile,
@@ -178,17 +181,7 @@ def _(
         </div>
         """),
         track_context(v1_05_profile),
-        source_trace(
-            {
-                "lab_id": v1_05_metadata.lab_id,
-                "track_id": v1_05_profile.track_id,
-                "hardware_ref": v1_05_variant.hardware_ref,
-                "model_ref": v1_05_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.neural_compute",
-                "source_policy": v1_05_profile.source_policy,
-            },
-            summary="V1-05 computes operation ledger, memory cliffs, and operator design evidence through mlsysbook_labs.neural_compute.",
-        ),
+        track_arc_context(v1_05_profile, v1_05_metadata.lab_id),
     ])
     return
 
@@ -468,15 +461,6 @@ def _(COLORS, mo, source_trace, v1_05_compute, v1_05_design, v1_05_design_result
           <div class="mlsysbook-callout"><strong>Memo decision:</strong> {v1_05_design_result.memo_summary}</div>
         </div>
         """),
-        source_trace(
-            {
-                "helper": "operator_design",
-                "design_id": v1_05_design_result.design_id,
-                "hardware_ref": v1_05_compute.hardware_ref,
-                "model_ref": v1_05_compute.model_ref,
-            },
-            summary="Operator design evidence is computed from the selected design option and track budgets.",
-        ),
         mo.Html('<div class="mlsysbook-panel"><h2>Reflection</h2></div>'),
         v1_05_reflection,
     ])
@@ -636,7 +620,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-05 operator budget note is generated locally from the selected track, "
-                "MLSysIM refs, and shared `mlsysbook_labs.neural_compute` calculations."
+                "your inputs, and the computed evidence."
             ),
             kind="info",
         ),

@@ -55,6 +55,7 @@ async def _():
         scenario_brief,
         scenario_thread,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -95,7 +96,8 @@ async def _():
         get_track_profile, go, lab_header, lab_map,
         learning_objectives, ledger, math, mo, np,
         report_export_panel, resolve_mlsysim_ref,
-        scenario_brief, scenario_thread, track_context, track_selector,
+        scenario_brief, scenario_thread, track_context,
+        track_arc_context, track_selector,
     )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -253,6 +255,7 @@ def _(
     chapter_10_recap,
     chapter_recap,
     lab_learning_objectives,
+    lab_metadata,
     lab_map,
     learning_objectives,
     mo,
@@ -263,6 +266,7 @@ def _(
     pE_pred,
     scenario_brief,
     track_context,
+        track_arc_context,
     v1_10_track_picker,
     v1_10_track_profile,
     v1_10_variant,
@@ -290,6 +294,7 @@ def _(
             chapter_recap(chapter_10_recap),
             v1_10_track_picker,
             track_context(v1_10_track_profile),
+            track_arc_context(v1_10_track_profile, lab_metadata.lab_id),
             scenario_brief(
                 "Scenario Brief",
                 stakeholder=v1_10_variant.stakeholder,

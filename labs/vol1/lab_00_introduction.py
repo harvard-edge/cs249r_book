@@ -62,6 +62,7 @@ async def _():
         get_track_profile,
         report_export_panel,
         track_context,
+        track_arc_context,
     )
 
     ledger = DesignLedger()
@@ -80,6 +81,7 @@ async def _():
         mo,
         report_export_panel,
         track_context,
+        track_arc_context,
     )
 
 @app.cell
@@ -1088,9 +1090,11 @@ def _(
     context_selector,
     decision_ui,
     get_track_profile,
+    lab_metadata,
     ledger,
     mo,
     track_context,
+        track_arc_context,
 ):
     mo.stop(
         check1.value is None
@@ -1222,6 +1226,7 @@ def _(
         mo.md("---"),
         decision_ui,
         track_context(_track_profile),
+        track_arc_context(_track_profile, lab_metadata.lab_id),
 
         # Stakeholder message
         mo.Html(f"""

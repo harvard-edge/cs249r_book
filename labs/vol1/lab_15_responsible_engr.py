@@ -46,6 +46,7 @@ async def _():
         responsibility_track_profile,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -75,6 +76,7 @@ async def _():
         responsibility_track_profile,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -130,6 +132,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_15_metadata,
     v1_15_profile,
     v1_15_resp,
@@ -184,19 +187,7 @@ def _(
         </div>
         """),
         track_context(v1_15_profile),
-        source_trace(
-            {
-                "lab_id": v1_15_metadata.lab_id,
-                "track_id": v1_15_profile.track_id,
-                "hardware_ref": v1_15_variant.hardware_ref,
-                "model_ref": v1_15_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.responsibility",
-                "obligation": v1_15_resp.obligation,
-                "audit_signal": v1_15_resp.audit_signal,
-                "source_policy": v1_15_profile.source_policy,
-            },
-            summary="V1-15 resolves responsibility scenarios through MLSysIM refs and mlsysbook_labs.responsibility calculations.",
-        ),
+        track_arc_context(v1_15_profile, v1_15_metadata.lab_id),
     ])
     return
 

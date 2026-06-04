@@ -44,6 +44,7 @@ async def _():
         selection_utility,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -71,6 +72,7 @@ async def _():
         selection_utility,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -126,6 +128,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_09_metadata,
     v1_09_profile,
     v1_09_selection,
@@ -181,17 +184,7 @@ def _(
         </div>
         """),
         track_context(v1_09_profile),
-        source_trace(
-            {
-                "lab_id": v1_09_metadata.lab_id,
-                "track_id": v1_09_profile.track_id,
-                "hardware_ref": v1_09_variant.hardware_ref,
-                "model_ref": v1_09_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.selection",
-                "source_policy": v1_09_profile.source_policy,
-            },
-            summary="V1-09 evaluates utility/cost frontiers, coverage profiles, and data policy decisions through mlsysbook_labs.selection.",
-        ),
+        track_arc_context(v1_09_profile, v1_09_metadata.lab_id),
     ])
     return
 
@@ -540,15 +533,6 @@ def _(
           <ul class="mlsysbook-list">{_validation_items}</ul>
         </div>
         """),
-        source_trace(
-            {
-                "helper": "data_policy_decision",
-                "selected_id": v1_09_decision.selected_id,
-                "hardware_ref": v1_09_selection.hardware_ref,
-                "model_ref": v1_09_selection.model_ref,
-            },
-            summary="Data policy evidence is computed from track policy metadata, subgroup coverage, and MLSysIM refs.",
-        ),
         mo.Html('<div class="mlsysbook-panel"><h2>Reflection</h2></div>'),
         v1_09_reflection,
     ])
@@ -716,7 +700,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-09 data selection policy memo is generated locally from "
-                "the selected track, MLSysIM refs, and shared `mlsysbook_labs.selection` calculations."
+                "the selected track, your inputs, and the computed evidence."
             ),
             kind="info",
         ),

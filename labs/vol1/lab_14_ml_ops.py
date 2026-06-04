@@ -47,6 +47,7 @@ async def _():
         retraining_cadence,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -77,6 +78,7 @@ async def _():
         retraining_cadence,
         source_trace,
         track_context,
+        track_arc_context,
         track_selector,
     )
 
@@ -132,6 +134,7 @@ def _(
     mo,
     source_trace,
     track_context,
+        track_arc_context,
     v1_14_metadata,
     v1_14_ops,
     v1_14_profile,
@@ -186,19 +189,7 @@ def _(
         </div>
         """),
         track_context(v1_14_profile),
-        source_trace(
-            {
-                "lab_id": v1_14_metadata.lab_id,
-                "track_id": v1_14_profile.track_id,
-                "hardware_ref": v1_14_variant.hardware_ref,
-                "model_ref": v1_14_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.ops",
-                "drift_source": v1_14_ops.drift_source,
-                "monitoring_signal": v1_14_ops.monitoring_signal,
-                "source_policy": v1_14_profile.source_policy,
-            },
-            summary="V1-14 resolves operations scenarios through MLSysIM refs and mlsysbook_labs.ops calculations.",
-        ),
+        track_arc_context(v1_14_profile, v1_14_metadata.lab_id),
     ])
     return
 
