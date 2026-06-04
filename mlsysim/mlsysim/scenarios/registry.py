@@ -335,6 +335,18 @@ class EdgeDeviceSpectrum(Registry):
         name="Microcontroller SRAM endpoint",
         description="Representative microcontroller SRAM endpoint used in memory-wall examples.",
     )
+    MicrocontrollerSramHigh = sourced_qty(
+        2 * MB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Microcontroller SRAM upper endpoint",
+        description="Upper microcontroller SRAM endpoint used in memory hierarchy examples.",
+    )
+    ArduinoNano33BleFlash = sourced_qty(
+        1 * MB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Arduino Nano 33 BLE Sense flash",
+        description="Flash storage anchor used in the Arduino memory-wall example.",
+    )
     FlagshipSmartphoneRamHigh = sourced_qty(
         16 * GiB,
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
@@ -382,6 +394,167 @@ class EdgeDeviceSpectrum(Registry):
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
         name="IoT microcontroller compute endpoint",
         description="Representative low-end compute endpoint for federated heterogeneity examples.",
+    )
+
+
+class EdgeAdaptationTierProfile(Registry):
+    """Reusable device-tier assumptions for on-device adaptation examples."""
+
+    WearablePersonalizationMemory = sourced_qty(
+        500 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Wearable personalization memory",
+        description="Reference wearable memory envelope for impossible-full-finetuning examples.",
+    )
+    TinyWearableRam = sourced_qty(
+        1 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Tiny wearable RAM",
+        description="Severely constrained wearable/sensor RAM envelope for adaptation-strategy selection.",
+    )
+    BudgetPhoneRam = sourced_qty(
+        4 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget phone RAM",
+        description="Reference budget smartphone total memory in edge adaptation examples.",
+    )
+    BudgetPhoneAvailableLow = sourced_qty(
+        1 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget phone ML-available memory low",
+        description="Lower ML-available memory envelope after OS and background-process overhead.",
+    )
+    BudgetPhoneAvailableHigh = sourced_qty(
+        2 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget phone ML-available memory high",
+        description="Upper ML-available memory envelope after OS and background-process overhead.",
+    )
+    BudgetDeviceMemoryLimit = sourced_qty(
+        1 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget device adaptation memory limit",
+        description="Reference budget-device memory limit for lightweight personalization examples.",
+    )
+    BudgetKeyboardPhoneRam = sourced_qty(
+        2 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget keyboard phone RAM",
+        description="Budget-device RAM anchor in the mobile-keyboard heterogeneity example.",
+    )
+    IotMemoryLow = sourced_qty(
+        64 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="IoT memory envelope low",
+        description="Lower memory envelope for IoT embedded systems in edge adaptation examples.",
+    )
+    IotMemoryHigh = sourced_qty(
+        1 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="IoT memory envelope high",
+        description="Upper memory envelope for IoT embedded systems in edge adaptation examples.",
+    )
+    KeyboardGradientMemoryLow = sourced_qty(
+        50 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard adaptation gradient memory low",
+        description="Lower memory envelope for a compact keyboard-model gradient update.",
+    )
+    KeyboardGradientMemoryHigh = sourced_qty(
+        100 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard adaptation gradient memory high",
+        description="Upper memory envelope for a compact keyboard-model gradient update.",
+    )
+    KeyboardBackgroundBudgetLow = sourced_qty(
+        200 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard background app budget low",
+        description="Lower background-app memory budget for smartphone keyboard adaptation.",
+    )
+    KeyboardBackgroundBudgetHigh = sourced_qty(
+        300 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard background app budget high",
+        description="Upper background-app memory budget for smartphone keyboard adaptation.",
+    )
+    KeyboardGradientExample = sourced_qty(
+        75 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard adaptation gradient example",
+        description="Representative gradient-update memory used for the keyboard memory-share example.",
+    )
+    KeyboardBackgroundBudgetExample = sourced_qty(
+        300 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard background app budget example",
+        description="Representative background-app memory budget used for the keyboard memory-share example.",
+    )
+    VoiceAssistantFleetDevices = sourced(
+        50_000_000,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Voice assistant fleet devices",
+        description="Reference fleet size for tiered on-device voice-assistant adaptation.",
+    )
+    FlagshipFleetShare = sourced(
+        0.20,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Flagship device fleet share",
+        description="Flagship-device share in the tiered adaptation profile.",
+    )
+    MidTierFleetShare = sourced(
+        0.60,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Mid-tier device fleet share",
+        description="Mid-tier device share in the tiered adaptation profile.",
+    )
+    BudgetFleetShare = sourced(
+        0.20,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget device fleet share",
+        description="Budget-device share in the tiered adaptation profile.",
+    )
+    FlagshipLoraRank = sourced(
+        32,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Flagship LoRA adapter rank",
+        description="Reference LoRA rank for flagship-device adaptation.",
+    )
+    MidTierLoraRank = sourced(
+        16,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Mid-tier LoRA adapter rank",
+        description="Reference LoRA rank for mid-tier-device adaptation.",
+    )
+    BudgetReplayBuffer = sourced_qty(
+        10 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget device replay buffer",
+        description="Reference replay-buffer budget for constrained edge devices.",
+    )
+    FlagshipReplayBuffer = sourced_qty(
+        100 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Flagship device replay buffer",
+        description="Reference replay-buffer budget for flagship edge devices.",
+    )
+    FewShotInteractionsLow = sourced(
+        5,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Few-shot personalization interactions low",
+        description="Lower interaction count for few-shot personalization examples.",
+    )
+    FewShotInteractionsHigh = sourced(
+        10,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Few-shot personalization interactions high",
+        description="Upper interaction count for few-shot personalization examples.",
+    )
+    FederatedLoraUpdate = sourced_qty(
+        50 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Federated LoRA adapter update",
+        description="Reference LoRA adapter update payload for mobile federated coordination.",
     )
 
 
@@ -440,6 +613,7 @@ class ReferenceStats(Registry):
     ServingProfiles = ServingProfiles
     CheckpointArchetypes = CheckpointArchetypes
     EdgeDeviceSpectrum = EdgeDeviceSpectrum
+    EdgeAdaptationTierProfile = EdgeAdaptationTierProfile
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
 

@@ -146,6 +146,16 @@ EDGE_DEVICE_SPECTRUM_ANCHORS = _est(
     notes="Pedagogical class endpoints spanning microcontroller/tiny-sensor and flagship-mobile envelopes; not a single SKU specification.",
     verified="2026-06-04",
 )
+EDGE_ADAPTATION_TIER_PROFILE = _est(
+    "prov:edge-adaptation-tier-profile",
+    "Reference edge adaptation tier profile",
+    notes=(
+        "Reusable device-tier, wearable, and fleet-mix assumptions for on-device "
+        "learning examples. These are pedagogical deployment-profile anchors, "
+        "not a claim about one production fleet."
+    ),
+    verified="2026-06-04",
+)
 
 # --- Hardware technology-class facts (Hardware.Tech) ---
 HOROWITZ_ENERGY = _lit(
