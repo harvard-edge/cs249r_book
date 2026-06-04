@@ -3654,15 +3654,9 @@ with torch.cuda.stream(stream2):
 
 The performance difference between these approaches is not incremental but categorical. Full synchronization after every operation converts a concurrent pipeline into a sequential one, entirely negating the hardware parallelism that streams expose. Event-based synchronization preserves the concurrent execution model while enforcing only the dependencies that correctness requires.
 
-###### Device placement discipline {.unnumbered}
-
 Device placement discipline protects the bandwidth hierarchy from accidental PCIe traffic. Every tensor carries a device attribute, and frameworks enforce a strict rule: operations can only combine tensors on the *same* device. A RuntimeError results from mixing cuda:0 and cuda:1 tensors, preventing silent cross-device transfers. The `.to()` method moves tensors between devices with copy-on-write semantics: calling `.to("cuda")` on a tensor already on the GPU returns the same object without copying. A module-level `.to()` recursively moves all parameters and buffers, ensuring the entire model hierarchy lands on a single device. Three placement principles prevent transfer bottlenecks: allocate tensors on the target device from the start rather than creating on CPU and transferring, reuse GPU memory across iterations rather than reallocating, and colocate all inputs, labels, and model parameters on the same device to eliminate implicit transfers. At `{python} DeviceBandwidthHierarchy.pcie4_gb_per_s_str`, violating any of these principles inserts PCIe transfers into the critical path that can dominate a training iteration that otherwise runs at `{python} DeviceBandwidthHierarchy.a100_bw_tb_per_s_str` on-device.
 
-###### Synchronization patterns {.unnumbered}
-
-As @lst-cuda-events demonstrated, event-based synchronization preserves parallelism by enforcing only the dependencies that correctness requires. A common mistake in production code is inserting `torch.cuda.synchronize()` calls for debugging and forgetting to remove them, silently converting an overlapped pipeline into a serialized one.
-
-###### Profiling transfer bottlenecks {.unnumbered}
+The same synchronization discipline has one operational trap: developers often insert `torch.cuda.synchronize()` calls for debugging and forget to remove them, silently converting an overlapped pipeline into a serialized one.
 
 When overlap remains poor, profiling must separate scheduling stalls from kernel inefficiency. **Nsight Systems**\index{Nsight Systems!profiling tool} (`nsys profile`) captures system-wide timelines correlating CPU activity, GPU kernel execution, and memory transfers, identifying which kernels dominate runtime. **Nsight Compute**\index{Nsight Compute!profiling tool} (`ncu`) provides kernel-level analysis with hardware counters, revealing *why* those kernels underperform. @Tbl-nsight-metrics lists the key metrics to examine when optimizing ML kernels.
 
@@ -3818,7 +3812,7 @@ class GPT3ParameterStructures:
 
 DataLoaders, Datasets, and collation functions answer the third question---*how does data arrive fast enough?*---by sustaining accelerator-rate throughput through parallelism, prefetching, and DMA. These structures, however, handle only *ephemeral* data: samples flow through the pipeline once per epoch and are discarded. The fourth question asks how frameworks manage data that *persists*---the model's own weights---especially when those weights exceed the memory of any single device.
 
-##### Parameter structures {.unnumbered}
+#### Parameter structures {.unnumbered}
 
 A GPT-3 scale model stores `{python} GPT3ParameterStructures.gpt3_params_b_str` parameters, occupying `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` in FP16. Managing these parameters across devices, keeping gradients synchronized, and maintaining optimizer state (Adam state alone can add about 4$\times$ the FP16 weight memory, as the Administrative Tax notebook showed) is a core framework responsibility.
 
@@ -3826,7 +3820,7 @@ Because parameters persist throughout training and inference, frameworks organiz
 
 Parameter structures must also adapt to varying precision requirements. Training typically uses FP32 for gradient stability, but inference and large-scale training increasingly use FP16 or INT8. Frameworks implement type casting and mixed-precision management to enable these optimizations without compromising numerical accuracy.
 
-##### Distributed execution contexts {.unnumbered}
+#### Distributed execution contexts {.unnumbered}
 
 \index{Distributed Training!execution contexts}
 The computational graph defines *what* to compute, but *where* and *how* that computation runs across devices is the job of execution contexts. On a single node, execution contexts manage CUDA streams and events (introduced in @sec-ml-frameworks-device-memory-management-9404) to overlap computation and data transfer across GPUs.
@@ -3946,9 +3940,9 @@ The data structures examined so far---tensors, device managers, data pipelines, 
 
 ### Core operations {#sec-ml-frameworks-core-operations-914f}
 
-When an engineer writes `y = torch.matmul(x, w)`, the gap between Python and the GPU is larger than it appears. The gap between a single line of Python and thousands of parallel GPU threads is bridged by three groups of operations\index{Operator Kernel!dispatch hierarchy} working in coordination. @Fig-mlfm-core-ops is arranged left to right: system-level operations coordinate resources and execution, basic numerical operations implement mathematical computations, and hardware abstraction operations manage computing platform complexity.
+When an engineer writes `y = torch.matmul(x, w)`, the gap between Python and the GPU is larger than it appears. The gap between a single line of Python and thousands of parallel GPU threads is bridged by three groups of operations\index{Operator Kernel!dispatch hierarchy} working in coordination. @Fig-mlfm-core-ops shows the full stack: hardware abstraction operations manage platform-specific execution, basic numerical operations implement mathematical computation, and system-level operations coordinate scheduling, memory, and resources across the graph. The prose follows that build-up from the hardware-specific kernel path toward system orchestration.
 
-::: {#fig-mlfm-core-ops fig-env="figure" fig-pos="htb" fig-cap="**Core Operations Stack**: Three side-by-side groups showing how frameworks bridge Python code to hardware. From left to right: system-level operations (scheduling, memory management, resource optimization), numerical operations (GEMM, BLAS, element-wise), and hardware operations (kernel management, memory abstraction, execution control)." fig-alt="Three grouped boxes connected left to right by arrows. System level: Scheduling, memory management, resource optimization. Numerical: GEMM, BLAS, element-wise operations. Hardware: Kernel management, memory abstraction, execution control."}
+::: {#fig-mlfm-core-ops fig-env="figure" fig-pos="htb" fig-cap="**Core Operations Stack**: Three groups show how frameworks bridge Python code to hardware: system-level operations coordinate resources and execution, numerical operations implement GEMM and element-wise computation, and hardware operations manage kernel dispatch, memory abstraction, and execution control." fig-alt="Three grouped boxes connected left to right by arrows. System level: Scheduling, memory management, resource optimization. Numerical: GEMM, BLAS, element-wise operations. Hardware: Kernel management, memory abstraction, execution control."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
@@ -4536,11 +4530,7 @@ PyTorch's eager execution and TensorFlow's graph compilation represent two point
 
 JAX's architecture reframes the Differentiation Problem entirely. Google Research built JAX on a key observation: if functions are pure (no side effects, no mutable state), the compiler can safely reorder, fuse, and parallelize any operation, because outputs depend only on inputs. This constraint, borrowed from functional programming, is what makes JAX's composable transformations possible. Rather than implementing automatic differentiation as a tape-based system (PyTorch) or a graph transformation pass (TensorFlow), JAX treats differentiation as one of several *composable function transformations*. The `jax.grad`\index{jax.grad!composable transformation} function does not compute gradients directly; it returns a *new function* that computes gradients. This subtle distinction enables arbitrary compositions: differentiating a differentiated function yields higher-order derivatives, vectorizing a gradient computation (`vmap(grad(f))`) parallelizes across examples, and compiling a vectorized gradient to XLA (`jit(vmap(grad(f)))`) eliminates Python overhead entirely.
 
-JAX's functional paradigm requires a genuine mental shift from "tracking state through objects" to "transforming pure functions." The conceptual introduction here covers JAX's core design; transformation composition, pytree handling, and XLA tracing mechanics each warrant dedicated study for production use.
-
-#### Transformations over state {#sec-ml-frameworks-transformations-state-3b46}
-
-While PyTorch and TensorFlow expose autograd primarily through dynamic tapes or graph-compilation paths, JAX asks users to write pure Python functions and then applies transformations to those functions. The core insight is that automatic differentiation, vectorization, and JIT compilation are all *program transformations* that can compose. @Lst-jax-transformations demonstrates this composable approach.
+JAX's functional paradigm requires a genuine mental shift from "tracking state through objects" to "transforming pure functions." While PyTorch and TensorFlow expose autograd primarily through dynamic tapes or graph-compilation paths, JAX asks users to write pure Python functions and then applies transformations to those functions. The core insight is that automatic differentiation, vectorization, and JIT compilation are all *program transformations* that can compose. @Lst-jax-transformations demonstrates this composable approach.
 
 ::: {#lst-jax-transformations lst-cap="**JAX Function Transformations**: JAX treats differentiation, vectorization, and compilation as composable function transformations rather than user-authored graph operations."}
 
