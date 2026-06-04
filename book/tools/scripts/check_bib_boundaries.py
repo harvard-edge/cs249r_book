@@ -41,7 +41,9 @@ SCOPES = {
 }
 
 EXCLUDE = ("_build", "_site", "node_modules", ".git", "__pycache__", ".venv")
-NON_CITE_PREFIXES = ("sec-", "fig-", "tbl-", "eq-", "lst-", "exr-", "exm-", "thm-")
+NON_CITE_PREFIXES = (
+    "sec-", "fig-", "tbl-", "eq-", "lst-", "alg-", "exr-", "exm-", "thm-"
+)
 
 # Tightened regex: Must NOT be followed by a / (which suggests a file path)
 # and should be followed by a word boundary or specific punctuation.
