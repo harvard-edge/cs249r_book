@@ -2969,9 +2969,9 @@ Test your understanding of the structural optimization techniques covered so far
 
 :::
 
-This brings us to the second dimension of our optimization framework: the precision at which those computations are performed. Numerical precision directly determines memory footprint and arithmetic cost, two resources that structural optimization cannot touch. A 32-bit floating-point number uses 4 bytes of memory and requires expensive floating-point arithmetic; an 8-bit integer uses 1 byte and enables fast integer math. For many models, this 4$\times$ reduction in precision translates directly to 4$\times$ reduction in memory bandwidth, and since LLM inference is bandwidth bound, this means 4$\times$ faster token generation. The accuracy cost is often less than 1 percent.
+This brings us to the second dimension of our optimization framework: the precision at which those computations are performed. Numerical precision directly determines memory footprint and arithmetic cost, two resources that structural optimization cannot touch. A 32-bit floating-point number uses 4 bytes of memory and requires expensive floating-point arithmetic; an 8-bit integer uses 1 byte and enables fast integer math. For bandwidth-bound inference, the smaller representation can reduce weight traffic by the same factor and unlock large latency gains when the runtime maps the model to efficient low-precision kernels. The accuracy cost can be small, often below 1 percent for well-calibrated INT8, but it still has to be measured on the target model and hardware.
 
-Quantization is the single most impactful optimization technique for deployment, especially for large language models. It requires no architectural changes, applies posttraining in many cases, and delivers immediate, hardware-agnostic benefits.
+Quantization is often the highest-leverage optimization technique for deployment, especially for large language models. It requires no architectural changes, applies posttraining in many cases, and turns a model-size problem into a precision, calibration, and hardware-mapping problem.
 
 ## Quantization and Precision {#sec-model-compression-quantization-precision-cd46}
 \index{Model Compression!precision optimization}
@@ -3820,8 +3820,8 @@ Binary and ternary networks\index{Quantization!binary networks}\index{Quantizati
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ INT8 VS FP32 MAC ENERGY RATIO
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-model-compression-energy-efficiency-sustainability-7150
-# │          opening paragraph ("~Nx less energy than FP32").
+# │ Context: @sec-model-compression-precision-energy-cc8e concluding
+# │          energy-ratio paragraph ("~Nx less energy than FP32").
 # │
 # │ Goal:    Compute the full MAC (multiply + add) energy ratio INT8 vs FP32.
 # │ Show:    That INT8 MACs use ~20x less energy than FP32 MACs.
@@ -3861,17 +3861,14 @@ class EnergyRatio:
     int8_fp32_energy_ratio_mult_str = fmt_multiple(int8_fp32_energy_ratio, precision=0, commas=False)
 ```
 
-### Energy efficiency and sustainability {#sec-model-compression-energy-efficiency-sustainability-7150}
 \index{Energy Efficiency!quantization benefits}
 \index{Model Compression!energy efficiency}
 
-Quantization reduces energy consumption through two complementary mechanisms: smaller data types require fewer memory accesses (the dominant energy cost, as established in the preceding Physics of Quantization analysis), and lower-precision arithmetic units consume less power per operation. An INT8 operation, for example, uses roughly `{python} EnergyRatio.int8_fp32_energy_ratio_mult_str` less energy than its FP32 equivalent, compounding the memory energy savings into substantial reductions at system scale.
-
-These gains depend on hardware support. AI accelerators with dedicated low-precision units (Tensor Cores for FP16/INT8, or the newer FP8 units on H100-class hardware) realize the full energy benefit, while general-purpose CPUs lacking such units see limited improvement. The practical implication is that energy efficiency from quantization is not a software-only optimization; it requires matching the chosen precision format to the target hardware's arithmetic capabilities.
+The energy analysis completes the motivation for quantization: fewer bits reduce memory movement and lower arithmetic energy, but only when the target processor exposes the corresponding low-precision units. An INT8 operation, for example, uses roughly `{python} EnergyRatio.int8_fp32_energy_ratio_mult_str` less energy than its FP32 equivalent. Accelerators with Tensor Cores, FP8/INT8 units, TPUs, or NPUs can compound arithmetic savings with lower memory traffic, while general-purpose CPUs without efficient low-precision paths may lose much of the benefit to packing, dequantization, or scalar fallback. The practical implication is that precision is a model-hardware decision, not a software flag.
 
 ### Precision reduction strategies {#sec-model-compression-precision-reduction-strategies-db83}
 
-The preceding sections established *why* reduced precision matters: fewer bits means less energy, less memory traffic, and faster arithmetic. The question now is *how* to reduce precision without destroying model accuracy. Naive quantization introduces errors that degrade predictions, so practitioners need structured strategies that control *where* and *how* precision is reduced.
+With the hardware condition established, the question becomes *how* to reduce precision without destroying model accuracy. Naive quantization introduces errors that degrade predictions, so practitioners need structured strategies that control *where* and *how* precision is reduced.
 
 Three approaches form a complexity ladder. Post-training quantization (PTQ) reduces precision after training, requiring no retraining and minimal engineering effort. Quantization-aware training (QAT) incorporates quantization effects into the training loop, enabling models to adapt to lower precision and retain higher accuracy. Mixed-precision training assigns different precision levels to different operations, matching precision to each layer's sensitivity.
 
@@ -4074,8 +4071,6 @@ Post-training quantization (PTQ) reduces numerical precision after training, con
 
 \index{Framework Toolkits!quantization support}
 PTQ's key advantage is low computational cost: it requires no retraining and usually no labeled training set, although activation calibration typically needs a small representative calibration dataset. However, reducing precision introduces quantization error\index{Quantization!error} that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks such as TensorFlow Lite, Open Neural Network Exchange (ONNX) Runtime, and PyTorch provide built-in PTQ support.
-
-##### PTQ functionality {#sec-model-compression-ptq-functionality-bd56}
 
 \index{Quantization!scaling factor}
 The core mechanism of PTQ is **uniform quantization**\index{Uniform Quantization!definition}\index{Quantization!uniform}, which maps floating-point values to discrete integer levels using a consistent scaling factor. Because the interval between each quantized value is constant, uniform quantization simplifies implementation and enables efficient hardware execution. The quantized value $q$ is computed as:
@@ -5385,9 +5380,9 @@ The preceding techniques (hardware-aware design and operator fusion) optimize mo
 
 #### Dynamic schemes {#sec-model-compression-dynamic-schemes-e9ff}
 
-When inputs vary in complexity, applying a uniform computational budget wastes resources on the simplest cases. Dynamic schemes address this inefficiency by modifying the computation graph at inference time so that average-case computation falls while worst-case accuracy remains available.
+When inputs vary in complexity, applying a uniform computational budget wastes resources on the simplest cases. Dynamic schemes address this inefficiency by modifying the computation graph at inference time so that average-case computation falls while worst-case accuracy remains available. The design question is what the controller is allowed to vary: the depth of one path, the path itself, the expert subnetwork, or a continuous compute budget.
 
-The first pattern is **early exit**\index{Adaptive Computation!early exit}\index{Early Exit Architectures!definition}: the model attaches lightweight classifiers to intermediate layers and stops once confidence is high enough [@teerapittayanon2016]. BranchyNet\index{BranchyNet}\index{Early Exit Architectures!BranchyNet} implements this idea with multiple exit points, while multi-exit vision transformers attach the same decision rule to transformer layers. Simple inputs leave early and save power; difficult inputs continue deeper and pay the full cost.
+The first control variable is depth. **Early exit**\index{Adaptive Computation!early exit}\index{Early Exit Architectures!definition} attaches lightweight classifiers to intermediate layers and stops once confidence is high enough [@teerapittayanon2016]. BranchyNet\index{BranchyNet}\index{Early Exit Architectures!BranchyNet} implements this idea with multiple exit points, while multi-exit vision transformers attach the same decision rule to transformer layers. Simple inputs leave early and save power; difficult inputs continue deeper and pay the full cost.
 
 The systems trade-off depends on where those exits run. On mobile processors and edge accelerators, the power savings compound with lower latency [@hu2020triple]. In GPU and TPU deployments, exit paths can sometimes be evaluated in parallel to recover throughput, but that benefit has to be balanced against routing overhead and batch fragmentation [@chen2024eellm]. @Fig-early-exit-transformers traces the decision logic step by step: each layer refines the representation, the confidence estimator decides whether the answer is already reliable, and only low-confidence inputs continue to the next layer.
 
@@ -5457,11 +5452,11 @@ Box/.style={inner xsep=2pt,
 
 :::
 
-Early exits decide how far to proceed along one path. **Conditional computation**\index{Conditional Computation!definition}\index{Adaptive Computation!conditional} generalizes the idea by deciding which path, layer, unit, or expert should run for a given input [@bengio2015conditional]. The control signal can skip work, change the computation being applied, or route representations through different structures; in every case, the model becomes an input-dependent execution graph rather than a fixed sequence of layers.
+Early exits decide how far to proceed along one path. The next control variable is route. **Conditional computation**\index{Conditional Computation!definition}\index{Adaptive Computation!conditional} decides which path, layer, unit, or expert should run for a given input [@bengio2015conditional]. The control signal can skip work, change the computation being applied, or route representations through different structures; in every case, the model becomes an input-dependent execution graph rather than a fixed sequence of layers.
 
 Representative mechanisms make that range concrete. SkipNet\index{SkipNet}\index{Conditional Computation!SkipNet} uses a lightweight gate to skip CNN layers when the input is simple and to execute the full network when the input is difficult [@wang2018skipnet]. Dynamic Filter Networks\index{Dynamic Computation!filter networks} condition the filters themselves on the input, adapting feature extraction at runtime rather than merely skipping operations [@jia2016dynamic]. Capsule Networks\index{Capsule Networks!dynamic routing} use routing to assign lower-level capsules to higher-level capsules based on agreement; in that case, routing supports part-whole representation learning rather than guaranteeing lower operation count [@sabour2017dynamic]. The systems question is therefore not just whether routing is possible, but whether the routing decision saves more time and energy than it consumes.
 
-The **mixture-of-experts (MoE)**\index{MoE!definition} framework applies the same control-loop idea at subnetwork scale. Different inputs may benefit from different specialist pathways, so a gating network\index{MoE!gating network} selects a small subset of expert subnetworks rather than activating the entire model [@shazeer2017outrageously]. A question about mathematics and a question about history can use different experts while sharing the same overall model capacity. Google's Switch Transformer\index{Switch Transformer}\index{MoE!Switch Transformer}[^fn-switch-transformer-scaling] instantiates this idea in transformers by replacing the dense feedforward layer with an expert-routed layer [@fedus2021switch]. The benefit is parameter capacity without proportional per-token compute; the cost is load balancing, routing overhead, and more complicated batching. While we introduce MoE principles here for single-system context, large-scale MoE deployments involving distributed expert placement are explored in advanced coverage of large-scale systems.
+At subnetwork scale, the route becomes an expert-selection decision. The **mixture-of-experts (MoE)**\index{MoE!definition} framework uses a gating network\index{MoE!gating network} to select a small subset of expert subnetworks rather than activating the entire model [@shazeer2017outrageously]. A question about mathematics and a question about history can use different experts while sharing the same overall model capacity. Google's Switch Transformer\index{Switch Transformer}\index{MoE!Switch Transformer}[^fn-switch-transformer-scaling] instantiates this idea in transformers by replacing the dense feedforward layer with an expert-routed layer [@fedus2021switch]. The benefit is parameter capacity without proportional per-token compute; the cost is load balancing, routing overhead, and more complicated batching. While we introduce MoE principles here for single-system context, large-scale MoE deployments involving distributed expert placement are explored in advanced coverage of large-scale systems.
 
 [^fn-switch-transformer-scaling]: **Switch Transformer**: @fedus2021switch scales to 1.6 trillion parameters while activating only two billion per token (0.13 percent of total), achieving 7$\times$ faster pretraining than dense T5 at equivalent FLOPs. Routing each token to a single expert (vs. top-$k$) reduces communication overhead, but training instability from load imbalance requires auxiliary loss terms and capacity factors of 1.25--2$\times$ to handle routing variance. This trade-off—massive parameter capacity at low per-token compute cost, but with complex systems engineering for load balancing—defines the MoE design space. \index{Switch Transformer!scaling trade-off}
 
@@ -5837,11 +5832,7 @@ $$
 \begin{bmatrix} 2x_1 + x_4 \\ 3x_2 \\ 4x_1 + 5x_3 \\ 6x_4 \end{bmatrix}
 $$
 
-Low-rank approximation, covered earlier in @sec-model-compression-lowrank-factorization-955e, is the related dense-factor alternative. Unlike sparsity exploitation, which skips literal zero-valued weights, low-rank approximation replaces a dense matrix with two smaller dense factors that capture the most important information while discarding redundant components. For instance, a weight matrix of size $1000{\times}1000$ with one million parameters can be factorized into two smaller matrices, say $U$ (size $1000{\times}50$) and $V$ (size $50{\times}1000$), which results in only 100,000 parameters, much fewer than the original one million. This smaller representation retains the key features of the original matrix while reducing storage and computation when the factorized path executes directly [@Denton2014].
-
-The deployment choice is therefore sparse skips vs. dense factors rather than a generic desire for fewer parameters. Low-rank approximations, particularly Singular Value Decomposition, compress weight matrices in neural networks by discarding low-energy singular values. Recommendation systems and natural language processing models use these approximations extensively to reduce computational complexity and memory usage without significant performance loss [@joulin2017].
-
-Sparsity-aware training\index{Sparsity!sparsity-aware training} complements these methods by helping models learn sparse representations during the training process itself. Sparse gradient descent\index{Sparsity!sparse gradient descent}, which updates only nonzero elements, reduces the number of active parameters throughout training rather than applying compression after the fact.
+The deployment choice is therefore not a generic desire for fewer parameters; it is a choice between representations the runtime can execute efficiently. Low-rank approximation, covered earlier in @sec-model-compression-lowrank-factorization-955e, replaces a dense matrix with smaller dense factors, while sparsity exploitation skips literal zero-valued weights. Sparsity-aware training\index{Sparsity!sparsity-aware training} and sparse gradient descent\index{Sparsity!sparse gradient descent} can help models learn or maintain zero patterns, but runtime speedup appears only when the deployed representation uses formats and kernels that skip zeros. That is why the next design question is not merely how sparse the matrix is, but what structure the zeros have.
 
 #### Structured patterns {#sec-model-compression-structured-patterns-c3f4}
 
@@ -6987,6 +6978,16 @@ Knowing *how* each technique works is necessary but not sufficient; the practica
 
 An engineer deploying a transformer model faces a concrete decision: the model exceeds the target device's memory by 3$\times$, inference latency is 4$\times$ above the SLO, and the power budget allows no more than 2 W sustained. The choice of whether to quantize first, prune first, distill to a smaller architecture, or combine techniques depends on which constraint is binding, what accuracy loss is tolerable, and how much engineering time is available. The following framework structures that decision.
 
+Before choosing a sequence, separate the major levers by what they change. Pruning changes the operation pattern and only becomes fast when the resulting structure maps to kernels. Quantization changes bit width and is usually the first memory and bandwidth lever. Distillation changes the model itself by training a smaller dense student. @Tbl-optimization-comparison summarizes the first-order trade-offs; the sections that follow then refine the choice by constraint, hardware support, and engineering budget.
+
+| **Technique**    | **Primary Goal**    | **Accuracy Impact** |    **Training Cost**    | **Hardware Dependency** | **Best For**                          |
+|:-----------------|:--------------------|:-------------------:|:-----------------------:|:-----------------------:|:--------------------------------------|
+| **Pruning**      | Reduce FLOPs/Size   |       Moderate      |    Low (fine-tuning)    |  High (for sparse ops)  | Latency-critical apps                 |
+| **Quantization** | Reduce Size/Latency |         Low         |   Low (PTQ)/High (QAT)  |   High (INT8 support)   | Edge/Mobile deployment                |
+| **Distillation** | Reduce Size         |     Low-Moderate    | High (student training) |           Low           | Creating smaller, high-quality models |
+
+: **Optimization Technique Trade-Offs**: Comparison of the three major optimization approaches across key performance dimensions, highlighting how each technique addresses different constraints and deployment scenarios. Pruning excels for computational reduction but requires sparse hardware support, quantization provides balanced size and speed improvements with wide hardware compatibility, while distillation produces high-quality compressed models at higher training cost. {#tbl-optimization-comparison tbl-colwidths="[13,13,16,16,20,22]"}
+
 ### Mapping constraints to techniques {#sec-model-compression-mapping-constraints-techniques-ff2c}
 
 Understanding how system constraints map to optimization dimensions guides practitioners toward the most relevant approaches. @Tbl-constraint-opt-mapping maps system constraints to specific optimization dimensions, guiding technique selection based on deployment requirements.
@@ -7524,7 +7525,10 @@ After the model leaves the training framework, hardware-specific libraries own t
 
 The runtime layer checks whether the apparent compression is executable compression. A pruned model needs sparsity-aware kernels or it may still run as dense arithmetic. A quantized model needs INT8 or INT4 kernels, scale handling, and layouts that the device supports. A fused model needs an operator pattern the compiler can legally combine without changing numerical behavior. These requirements explain why framework integration is not enough by itself: the artifact must survive conversion into a hardware-specific execution plan.
 
-The toolchain boundary is therefore clear: framework APIs create and calibrate the compressed model, while hardware optimization libraries adapt that model to the execution substrate. The benchmarking and MLOps chapters later show how to validate and operate that exported artifact; within this chapter, visualization\index{Visualization!quantization error histograms}\index{Visualization!activation visualizations}\index{Visualization!sparsity heat maps} tools answer whether the optimization damaged the model, rather than only whether it shrank.
+### Diagnostic visualization {#sec-model-compression-diagnostic-visualization}
+
+\index{Visualization!quantization error histograms}\index{Visualization!activation visualizations}\index{Visualization!sparsity heat maps}
+The toolchain boundary is therefore clear: framework APIs create and calibrate the compressed model, hardware optimization libraries adapt that model to the execution substrate, and diagnostic visualization asks whether the optimization damaged the model rather than only whether it shrank. The benchmarking and MLOps chapters later show how to validate and operate the exported artifact at system scale; within this chapter, the local diagnostic question is whether quantization, pruning, or sparsity changed the internal distributions in a way that threatens accuracy.
 
 Quantization error histograms reveal whether quantization errors are Gaussian or contain problematic outliers. Activation visualizations help detect overflow and saturation issues. @Fig-color-mapping shows color-mapped first-layer convolutional kernels grouped by the pattern type each filter has learned. TensorFlow's Quantization Debugger, PyTorch's FX Graph Mode, and TensorRT Inspector provide these capabilities.
 
@@ -8097,22 +8101,8 @@ node[align=left,anchor=west]{\textit{\color{black!50}Transformer layers:}\\
 
 :::
 
-Each optimization approach carries distinct trade-offs in accuracy, training cost, and hardware requirements. A structured comparison clarifies which to reach for first when a practitioner must choose among them.
-
-## Technique Comparison {#sec-model-compression-technique-comparison-3142}
-
-An engineer with a model that exceeds her deployment budget faces three levers: prune it, quantize it, or distill it into a smaller architecture. Each lever operates on a different physical resource. Pruning reduces floating-point operations and works best when sparse computation hardware is available. Quantization reduces bit-width and provides the most versatile approach with broad hardware support. Knowledge distillation produces dense, compact models at higher training cost but consistently preserves accuracy. @Tbl-optimization-comparison summarizes these trade-offs for systematic technique selection.
-
-| **Technique**    | **Primary Goal**    | **Accuracy Impact** |    **Training Cost**    | **Hardware Dependency** | **Best For**                          |
-|:-----------------|:--------------------|:-------------------:|:-----------------------:|:-----------------------:|:--------------------------------------|
-| **Pruning**      | Reduce FLOPs/Size   |       Moderate      |    Low (fine-tuning)    |  High (for sparse ops)  | Latency-critical apps                 |
-| **Quantization** | Reduce Size/Latency |         Low         |   Low (PTQ)/High (QAT)  |   High (INT8 support)   | Edge/Mobile deployment                |
-| **Distillation** | Reduce Size         |     Low-Moderate    | High (student training) |           Low           | Creating smaller, high-quality models |
-
-: **Optimization Technique Trade-Offs**: Comparison of the three major optimization approaches across key performance dimensions, highlighting how each technique addresses different constraints and deployment scenarios. Pruning excels for computational reduction but requires sparse hardware support, quantization provides balanced size and speed improvements with wide hardware compatibility, while distillation produces high-quality compressed models at higher training cost. {#tbl-optimization-comparison tbl-colwidths="[13,13,16,16,20,22]"}
-
 \index{Model Compression!sequential application}
-These techniques combine synergistically, with quantization often applied after pruning or distillation to achieve compound compression benefits. Production systems frequently employ sequential application: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers any accuracy loss. Sequential application enables compression ratios of 10--50$\times$ while maintaining competitive accuracy across diverse deployment scenarios.
+Implementation tools make compression repeatable, but they do not make the trade-offs disappear. In practice, quantization is often applied after pruning or distillation to achieve compound compression benefits: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers accuracy loss. Sequential application can enable compression ratios of 10--50$\times$ while maintaining competitive accuracy across diverse deployment scenarios, but only if the interactions are measured rather than assumed.
 
 The most instructive lessons in model compression often come not from what works but from what fails. The following fallacies and pitfalls capture the most common mistakes engineers make when applying these techniques, each grounded in quantitative trade-offs.
 
