@@ -662,9 +662,7 @@ The memory management strategy directly determines batch capacity: paged systems
 
 ### Scheduling policy: FCFS, preemptive, and priority-aware {#sec-inference-scale-vllm-architecture-9b84}
 
-The scheduling policy determines which requests receive GPU time and in what order. This decision becomes critical when request mix is heterogeneous, with some requests requiring 50 tokens of output and others requiring 4,000.
-
-**First-come-first-served (FCFS) scheduling**\index{First-Come-First-Served Scheduling} processes requests in arrival order. FCFS is fair and simple but suffers from head-of-line blocking: a single long-generation request delays all subsequent requests. For workloads with high output-length variance, FCFS produces poor tail latency.
+The scheduling policy determines which requests receive GPU time and in what order. This decision becomes critical when request mix is heterogeneous, with some requests requiring 50 tokens of output and others requiring 4,000. **First-come-first-served (FCFS) scheduling**\index{First-Come-First-Served Scheduling} processes requests in arrival order. FCFS is fair and simple but suffers from head-of-line blocking: a single long-generation request delays all subsequent requests. For workloads with high output-length variance, FCFS produces poor tail latency.
 
 **Preemptive scheduling**\index{Preemptive Scheduling} allows the system to pause a long-running request and swap its KV cache to CPU memory (or discard it for later recomputation) to make room for shorter, higher-priority requests. The cost of preemption is the swap overhead (transferring KV cache between GPU and CPU memory) or the recomputation cost (re-running the prefill phase when the preempted request resumes). Production systems typically preempt when a request has consumed more than 2$\times$ the median generation length.
 
@@ -672,9 +670,7 @@ The scheduling policy determines which requests receive GPU time and in what ord
 
 ### Deployment topology: Single-GPU to disaggregated {#sec-inference-scale-tensorrtllm-architecture-2794}
 
-The deployment topology determines how model computation maps to physical hardware, and this mapping is driven by the ratio of model size to single-device memory capacity.
-
-Single-GPU deployment is the simplest topology: the entire model fits in one device's memory, and all inference computation occurs locally. For models under 15--20 billion parameters (30--40 GB in FP16), this topology provides the lowest latency because it eliminates all inter-device communication.
+The deployment topology determines how model computation maps to physical hardware, and this mapping is driven by the ratio of model size to single-device memory capacity. Single-GPU deployment is the simplest topology: the entire model fits in one device's memory, and all inference computation occurs locally. For models under 15--20 billion parameters (30--40 GB in FP16), this topology provides the lowest latency because it eliminates all inter-device communication.
 
 ```{python}
 #| echo: false
@@ -3378,9 +3374,7 @@ The router behavior directly impacts both system performance and model quality. 
 -   **Distribution shift**\index{Distribution Shift}: A router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
 -   **Token dropping**\index{Token Dropping}: At high load, capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
 
-Expert parallelism represents the peak of model sharding complexity, requiring tight integration between the model architecture, the routing algorithm, and the physical interconnect topology. The next section examines how recommendation systems use similar sharding techniques for massive embedding tables.
-
-MoE[^fn-moe-serving] models present unique sharding challenges because computation is dynamically routed to different experts based on input. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
+These failure modes follow from the basic MoE serving trade-off[^fn-moe-serving]: computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
 
 [^fn-moe-serving]: **MoE (Mixture-of-Experts) Serving Trade-Off**: Only a subset of experts activate per token (typically 2 of 8--16), keeping per-token FLOPs low while total parameter count reaches hundreds of billions. The serving constraint: all expert weights must reside in memory even though most are idle on any given token, inflating memory footprint 4--8$\times$ relative to the active compute. This forces expert parallelism across devices with AllToAll communication at every MoE layer. \index{MoE!serving}
 
@@ -3497,6 +3491,8 @@ Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer w
 | **Severe imbalance (50 percent)**   |      67 percent     |      -33 percent      |
 
 : **MoE Routing Load Balance vs. Throughput**: GPU utilization and throughput impact as routing imbalance grows across the eight experts of a Mixtral-8x7B MoE layer with 4-way expert parallelism. {#tbl-inference-moe-load-balancing}
+
+Expert parallelism represents the peak of model sharding complexity, requiring tight integration between the model architecture, the routing algorithm, and the physical interconnect topology. The next section examines how recommendation systems use similar sharding techniques for massive embedding tables.
 
 ### Embedding sharding for recommendation systems {#sec-inference-scale-embedding-sharding-recommendation-systems-afde}
 
@@ -4006,7 +4002,13 @@ class HeterogeneousGpuCluster:
 
 ::: {#exmp-inference-heterogeneous-gpu-cluster .callout-example title="Heterogeneous GPU cluster"}
 
-**Scenario**: A serving cluster mixes `{python} HeterogeneousGpuCluster.n_h100_str` `{python} HeterogeneousGpuCluster.h100_name_str` GPUs at `{python} HeterogeneousGpuCluster.h100_cap_qps_str` each and `{python} HeterogeneousGpuCluster.n_a100_str` `{python} HeterogeneousGpuCluster.a100_name_str` GPUs at `{python} HeterogeneousGpuCluster.a100_cap_qps_str` each, for total capacity of `{python} HeterogeneousGpuCluster.total_cap_qps_str`.\index{Target Traffic}
+**Scenario**: A serving cluster mixes two GPU tiers and must route requests without overloading the slower tier.
+
+**Given**:
+
+- `{python} HeterogeneousGpuCluster.n_h100_str` `{python} HeterogeneousGpuCluster.h100_name_str` GPUs at `{python} HeterogeneousGpuCluster.h100_cap_qps_str` each.
+- `{python} HeterogeneousGpuCluster.n_a100_str` `{python} HeterogeneousGpuCluster.a100_name_str` GPUs at `{python} HeterogeneousGpuCluster.a100_cap_qps_str` each.
+- Total capacity is `{python} HeterogeneousGpuCluster.total_cap_qps_str`; target traffic is `{python} HeterogeneousGpuCluster.target_qps_str`.\index{Target Traffic}
 
 **Weighted assignment**: At target traffic of `{python} HeterogeneousGpuCluster.target_qps_str`, weighted assignment gives each H100 a weight of `{python} HeterogeneousGpuCluster.h100_weight_pct_str` and each A100 a weight of `{python} HeterogeneousGpuCluster.a100_weight_pct_str`. The expected per-server load becomes `{python} HeterogeneousGpuCluster.h100_load_qps_str` for H100s and `{python} HeterogeneousGpuCluster.a100_load_qps_str` for A100s, leaving the two server types at `{python} HeterogeneousGpuCluster.h100_util_pct_str` and `{python} HeterogeneousGpuCluster.a100_util_pct_str` utilization.\index{Weighted Assignment}\index{Expected Load Per Server}
 
