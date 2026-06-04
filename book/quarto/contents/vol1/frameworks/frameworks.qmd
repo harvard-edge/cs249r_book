@@ -2363,7 +2363,7 @@ Every modern ML framework defaults to reverse mode for training because of compu
 
 A neural network has one scalar loss but millions of parameters. Forward mode computes one parameter's gradient per pass, requiring $P$ passes for $P$ parameters. Reverse mode computes all $P$ gradients in a single backward pass. For a model with 100 million parameters, that is the difference between 100 million forward passes and exactly one backward pass, a speedup proportional to the parameter count.
 
-This asymmetry makes reverse mode the only viable option for training. Consider a function where $x$ influences the output through two distinct paths. @Lst-reverse_simple defines such a function, and @lst-reverse_forward traces its forward and backward computation for a concrete input.
+This asymmetry makes reverse mode the only viable option for training. Consider a function where $x$ influences the output through two distinct paths. @Lst-reverse_simple defines such a function, and [Algorithm @alg-reverse-mode-ad-trace] traces its forward and backward computation for a concrete input.
 
 ::: {#lst-reverse_simple lst-cap="**Reverse Mode Automatic Differentiation**: Basic example of reverse mode automatic differentiation."}
 
@@ -2398,34 +2398,25 @@ class GPT3ReverseModeParams:
     gpt3_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
 ```
 
-The critical observation is that this single backward pass computed $dc/dx$ regardless of how many paths connect $x$ to $c$. In a neural network, each weight can affect the loss through thousands of paths across layers, and reverse mode handles them all in one traversal. This is why training a `{python} GPT3ReverseModeParams.gpt3_params_b_str`-parameter model like GPT-3 is feasible at all: reverse mode's $\mathcal{O}(1)$ backward passes (relative to parameter count) keeps gradient computation tractable.
+::: {#alg-reverse-mode-ad-trace name="Reverse-mode automatic differentiation trace"}
 
-::: {#lst-reverse_forward lst-cap="**Forward and Backward Pass**: The forward pass stores intermediate values; the backward pass propagates gradients from output to input, accumulating contributions from all paths."}
+**Require:** Stored forward values for $x=2.0$, $a=x^2=4.0$, $b=\sin(x)\approx 0.9093$, and $c=a b\approx 3.637$.
 
-```{.python}
-#—Forward pass: compute and store values ---
-x = 2.0             # Input value
-a = 4.0             # x * x = 2.0 * 2.0 = 4.0
-b = 0.9093          # sin(2.0) ≈ 0.9093
-c = 3.637           # a * b = 4.0 * 0.9093 ≈ 3.637
+**State:** For each intermediate value $v$, the adjoint $\bar{v}$ stores $\partial c/\partial v$.
 
-#—Backward pass: propagate gradients from output ---
-dc/dc = 1.0         # Seed gradient
+**Output:** The derivative $\partial c/\partial x$.
 
-# Through multiplication c = a * b
-dc/da = b            # ∂(a*b)/∂a = b = 0.9093
-dc/db = a            # ∂(a*b)/∂b = a = 4.0
+1. Seed the output adjoint: $\bar{c}\gets 1.0$; initialize $\bar{a},\bar{b},\bar{x}\gets 0$.
+2. Reverse the multiplication $c=a b$: accumulate $\bar{a}\gets \bar{a}+\bar{c}b=0.9093$ and $\bar{b}\gets \bar{b}+\bar{c}a=4.0$.
+3. Reverse the square path $a=x^2$: accumulate $\bar{x}\gets \bar{x}+\bar{a}(2x)=0.9093\cdot 4.0=3.637$.
+4. Reverse the sine path $b=\sin(x)$: accumulate $\bar{x}\gets \bar{x}+\bar{b}\cos(x)=3.637+4.0\cos(2.0)\approx 1.972$.
+5. Return $\partial c/\partial x=\bar{x}\approx 1.972$.
 
-# Combine contributions from both paths through x
-# Path 1: x -> x² -> c    contribution: 2x * dc/da
-# Path 2: x -> sin(x) -> c contribution: cos(x) * dc/db
-dc/dx = (2 * x * dc/da) + (cos(x) * dc/db)
-      = (2 * 2.0 * 0.9093) + (cos(2.0) * 4.0)
-      = 3.637 + (-0.416 * 4.0)
-      = 1.972  # 3.637 - 1.665 = 1.972
-```
+**Systems cost:** The reverse traversal computes every path contribution in one pass, but it can do so only because the forward pass retained $x$, $a$, $b$, and the graph edges until the backward rules consumed them.
 
 :::
+
+The critical observation is that this single backward pass computed $\partial c/\partial x$ regardless of how many paths connect $x$ to $c$. In a neural network, each weight can affect the loss through thousands of paths across layers, and reverse mode handles them all in one traversal. This is why training a `{python} GPT3ReverseModeParams.gpt3_params_b_str`-parameter model like GPT-3 is feasible at all: reverse mode's $\mathcal{O}(1)$ backward passes relative to parameter count keep gradient computation tractable.
 
 Translating this mathematical elegance into a working system requires solving a concrete engineering problem: the backward pass needs values computed during the forward pass, so the framework must decide what to store, when to store it, and when to free it. Modern frameworks accomplish this through computational graphs and automatic gradient accumulation[^fn-gradient-accumulation-batch].
 
