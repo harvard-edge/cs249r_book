@@ -1982,21 +1982,19 @@ Experienced performance engineers develop pattern recognition for these traces, 
 
 ### Common bottleneck patterns {#sec-performance-engineering-bottleneck-patterns}
 
-Profiling is valuable because recurring trace patterns map directly to optimization choices.
+Profiling is valuable because recurring trace patterns map directly to optimization choices. @Tbl-performance-engineering-bottleneck-patterns turns that pattern recognition into a diagnostic map: first identify the visual signature, then connect it to the likely cause and the intervention that changes the system.
 
-Small kernel gaps manifest as many short GPU idle periods between small kernels, indicating that kernel launch overhead dominates. Graph compilation (`torch.compile`) fuses these small kernels to reclaim the lost cycles.
+| **Trace Pattern**               | **Likely Cause**                                   | **Primary Intervention**                                                       | **Trade-Off to Check**                                |
+|:--------------------------------|:---------------------------------------------------|:-------------------------------------------------------------------------------|:------------------------------------------------------|
+| Small gaps between many kernels | Kernel launch overhead dominates                   | Graph compilation with `torch.compile`, CUDA Graphs, or fusion                 | Compilation warmup and debugging complexity           |
+| Large memory spikes             | Unfused operators materialize intermediate tensors | FlashAttention or custom Triton fusion                                         | Numerical validation and kernel maintenance           |
+| Low FLOP/s with high bandwidth  | Memory-bound operations dominate                   | Precision reduction, batching, or algorithmic changes                          | Accuracy, cache pressure, and quality guardrails      |
+| NCCL bars during GPU idle gaps  | Communication is serialized rather than overlapped | DDP gradient overlap or pipeline restructuring                                 | Bucket size, schedule complexity, and synchronization |
+| Some GPUs wait for stragglers   | Uneven work distribution or MoE load imbalance     | MoE capacity tuning, auxiliary loss adjustment, or even tensor-parallel splits | Routing quality and utilization balance               |
+| Repeated large allocations      | Buffers are recreated rather than reused           | Memory planning, preallocated buffer pools, or checkpointing                   | Recompute cost and allocator behavior                 |
+| Periodic GPU utilization drops  | CPU preprocessing or tokenization is not pipelined | More data workers, preprocessing services, or pretokenized datasets            | Storage cost and data freshness                       |
 
-Large intermediate tensors appear as memory timeline spikes corresponding to attention score matrices or other intermediate results. Unfused operations are materializing intermediates in HBM, and operator fusion (FlashAttention for attention, custom Triton kernels for other sequences) eliminates the unnecessary round-trips.
-
-Low FLOP/s utilization combined with high memory bandwidth means the GPU achieves near-peak bandwidth but single-digit FLOP/s utilization. Memory-bound operations dominate execution time, and the remedy is precision reduction (FP16 to FP8, INT4 KV cache) or algorithmic changes (batching, speculative decoding).
-
-Communication bubbles appear as GPU idle periods coinciding with NCCL AllReduce or AllToAll operations. Communication is not overlapped with compute, and the fix is to enable gradient overlap in DDP or restructure the pipeline so communication from one stage is hidden under useful compute from another.
-
-Load imbalance causes some GPUs to finish earlier and wait for stragglers. Uneven work distribution is the root cause. For MoE, adjusting auxiliary loss and capacity factors rebalances the load; for tensor parallelism, ensuring even dimension splitting eliminates the skew.
-
-Memory allocation thrashing shows repeated allocations and deallocations of large tensors, with peak memory far exceeding the steady-state usage. The framework is creating new tensors for each forward pass instead of reusing buffers. Enabling torch.compile's memory planning, using preallocated buffer pools, or applying activation checkpointing addresses this waste.
-
-CPU-bound data loading causes GPU utilization to drop periodically to zero while the CPU prepares the next batch. Data preprocessing or tokenization is not pipelined with GPU computation. Increasing the number of data loading workers, moving tokenization to a dedicated preprocessing service, or pretokenizing the dataset resolves this bottleneck. This pattern is more common in training than in inference but can occur in inference when input preprocessing (image resizing, text tokenization) is expensive.
+: **Common Bottleneck Trace Patterns**: Diagnostic map from trace signature to likely cause, intervention, and trade-off. The table is most useful after the profiler has already localized the bottleneck to launch overhead, memory movement, communication, load balance, allocation behavior, or input preparation. {#tbl-performance-engineering-bottleneck-patterns}
 
 A full decode trace shows how several of these smaller bottlenecks can combine into the dominant loss.
 
