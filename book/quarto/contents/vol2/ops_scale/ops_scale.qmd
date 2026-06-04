@@ -880,9 +880,7 @@ class DeploymentRoi:
 
 :::
 
-Pay debt when this ratio exceeds the expected value from feature development. The configuration debt above qualifies because it has high impact (blocks deployments), high frequency (every deployment), high benefit (eliminates 35 percent of delays), and moderate cost (6 weeks).
-
-Defer debt when it is localized to a single team, frequency is low (monthly or less), system sunset is planned within 12 months, or resolution cost exceeds 6 months of engineering effort.
+The decision rule is asymmetric. Pay debt when this ratio exceeds the expected value from feature development; the configuration debt above qualifies because it has high impact (blocks deployments), high frequency (every deployment), high benefit (eliminates 35 percent of delays), and moderate cost (6 weeks). Defer debt when it is localized to a single team, frequency is low (monthly or less), system sunset is planned within 12 months, or resolution cost exceeds 6 months of engineering effort.
 
 #### Organizational practices {#sec-ml-operations-scale-organizational-practices-9f81}
 
@@ -2534,11 +2532,9 @@ Shadow deployment\index{Shadow Deployment} runs the new model in parallel with p
 
 Shadow deployment earns its duplicate infrastructure cost when it answers validation questions offline tests cannot:
 
-Operational load testing proves the new model can handle full production traffic volume without crashing, leaking memory, or violating latency **service-level objectives (SLOs)**[^fn-slo-three-nines].
+Operational load testing proves the new model can handle full production traffic volume without crashing, leaking memory, or violating latency **service-level objectives (SLOs)**[^fn-slo-three-nines]. A model that passes offline validation with small datasets may exhibit memory leaks, performance regressions, or resource contention when processing millions of requests per hour. Shadow deployment catches these operational issues before user impact.
 
 [^fn-slo-three-nines]: **SLO (Service Level Objective)**: A target reliability level. For a model-serving API, "three nines" (99.9 percent) availability allows only 8.7 hours of downtime per year. For latency, a P99 SLO of 200 ms means 99 percent of requests must complete faster than 200 ms. Meeting these targets at scale requires automated scaling and circuit breaking to handle load spikes. \index{SLO!reliability target}
-
-A model that passes offline validation with small datasets may exhibit memory leaks, performance regressions, or resource contention when processing millions of requests per hour. Shadow deployment catches these operational issues before user impact.
 
 Output comparison enables quantitative analysis of prediction differences between production and shadow models. Rather than relying on aggregate offline metrics, teams can analyze distribution shifts, outlier behavior, and edge cases at production scale. For classification models, this might reveal systematic shifts in confidence scores; for recommendation systems, it might expose changes in diversity or category distribution.
 
@@ -3465,19 +3461,11 @@ Monitoring cadence follows failure cost. Compare the entries in @tbl-ops-scale-m
 
 : **Model-Type Monitoring Parameters**\index{Model-Type Monitoring Parameters}: Primary metrics, alert thresholds, and monitoring frequencies tailored to model operational requirements. Recommendation systems demand real-time CTR monitoring with 5 percent degradation thresholds, while vision classifiers tolerate daily accuracy checks at dataset-specific thresholds reflecting their lower update frequency and more stable input distributions. {#tbl-ops-scale-monitoring-types}
 
-#### Recommendation system monitoring {#sec-ml-operations-scale-recommendation-system-monitoring-85fa}
-
 Recommendation monitoring is real-time because the product consequence is real-time. Click-through rate, dwell time, and conversion rate should be compared against time-matched historical baselines, control traffic when available, and the previous model version after a release. Those fast engagement metrics are not sufficient by themselves: diversity, catalog coverage, and filter-bubble indicators protect the long-term user experience, while revenue attribution and promotional-inventory metrics connect recommendation quality to business outcomes.
-
-#### Fraud detection monitoring {#sec-ml-operations-scale-fraud-detection-monitoring-ff45}
 
 Fraud monitoring binds on adversarial urgency. Missed fraud creates immediate financial loss, but excessive false positives create customer friction and manual-review load. The monitoring surface therefore has to pair detection rate, prevented dollar amount, and detection latency with false-positive rate, blocked-legitimate-transaction events, manual-review volume, and adversarial indicators such as probing patterns or sudden shifts in fraudulent behavior.
 
-#### LLM monitoring {#sec-ml-operations-scale-llm-monitoring-92d7}
-
 LLM monitoring binds on semantic quality, which is difficult to measure from service metrics alone. Latency, token generation rate, error rate, and safety-classifier scores establish operational health; user satisfaction signals such as thumbs-up/thumbs-down rates, regeneration rate, and task-completion proxies add delayed quality evidence. Safety metrics such as toxicity detections, refusal rate, and hallucination indicators remain partial, so they should trigger review rather than claim complete coverage.
-
-#### Red teaming and jailbreak detection {#sec-ml-operations-scale-red-teaming-jailbreak-detection-7b94}
 
 Standard monitoring cannot detect semantic safety failures such as persuasive misinformation or skilled manipulation. Red teaming\index{Red Teaming} adds an adversarial testing channel: human evaluators or automated probes attempt jailbreaks\index{Jailbreak} before deployment, and a smaller continuous probe set verifies that production safety filters remain active. Sampling outputs for delayed human review closes the loop for failures that automated metrics do not observe.
 
@@ -4001,14 +3989,16 @@ Model selection should explicitly consider cost alongside accuracy. @Tbl-ops-sca
 
 For many applications, the marginal accuracy gain does not justify the cost increase. Making these tradeoffs explicit prevents defaulting to the largest available model.
 
-#### Efficiency metrics {#sec-ml-operations-scale-efficiency-metrics-a397}
+Efficiency metrics should be reviewed alongside model quality so the platform can identify waste that accuracy alone hides. @Tbl-ops-scale-efficiency-metric-actions connects each metric to the operational question it answers.
 
-Efficiency metrics should be reviewed alongside model quality so the platform can identify waste that accuracy alone hides:
+| **Metric**                       | **Waste Signal**                                      | **Typical Action**                                                    |
+|:---------------------------------|:------------------------------------------------------|:----------------------------------------------------------------------|
+| Cost per accuracy point          | Accuracy gains are bought with disproportionate spend | Revisit model size, feature set, or serving target before scaling up. |
+| Experiments per production model | Many runs produce little deployable value             | Improve experiment design, stopping rules, and promotion criteria.    |
+| GPU utilization                  | Capacity is reserved but not doing useful work        | Right-size instances, improve batching, or profile inefficient code.  |
+| Spot utilization rate            | Eligible workloads use expensive on-demand capacity   | Move fault-tolerant jobs to spot instances with checkpoint support.   |
 
-- Cost per accuracy point: Total cost divided by accuracy percentage
-- Experiments per production model: Ratio indicates development efficiency
-- GPU utilization: Low utilization suggests over-provisioning or inefficient code
-- Spot utilization rate: Fraction of eligible workloads using spot instances
+: **Efficiency Metric Action Map**: Efficiency metrics are useful only when they identify a decision. The platform reviews these signals alongside quality metrics to find waste that accuracy alone hides. {#tbl-ops-scale-efficiency-metric-actions}
 
 Regular review of these metrics identifies systemic inefficiencies and guides platform improvements.
 
@@ -4609,13 +4599,19 @@ Feature definitions are production interfaces, so changing one without versionin
 
 The later `user_engagement_score` incident makes the mechanics concrete. A platform team changes the feature from a 30-day z-score to a 7-day min-max scale. The output may still be a floating-point number, so schema validation alone can pass while the feature's meaning changes completely. Versioning names the semantic change before it reaches production; lineage identifies every model trained or served with the old meaning; backfill recomputes historical values for the new meaning; and freshness and quality checks decide whether the rewritten history is safe to use. Without that chain, a feature migration becomes a silent multi-model regression.
 
-#### Version schema {#sec-ml-operations-scale-version-schema-178c}
+A safe feature interface records both version dimensions and lineage fields. @Tbl-ops-scale-feature-version-lineage-components keeps those fields tied to their operational use.
 
-A version schema must separate the parts of a feature that change for different reasons. The definition version identifies the computation logic, the data version identifies the source snapshot or stream contract, and the schema version identifies the output type and shape. A change to any one of these can preserve API compatibility while changing model semantics, so dependent models declare the exact feature versions they consume. That declaration gives the platform a place to block unsafe updates before incompatible feature meanings reach production.
+| **Component**                         | **What It Records**                                     | **Operational Use**                                                            |
+|:--------------------------------------|:--------------------------------------------------------|:-------------------------------------------------------------------------------|
+| Definition version                    | Computation logic for the feature                       | Blocks silent semantic changes when the formula changes but the type does not. |
+| Data version                          | Source snapshot or stream contract                      | Distinguishes model changes from upstream data changes.                        |
+| Schema version                        | Output type, shape, units, and nullability              | Preserves API compatibility checks while still naming semantic shifts.         |
+| Consumer declaration                  | Exact feature versions each model consumes              | Gives the platform a place to block unsafe updates before serving.             |
+| Source lineage                        | Source tables, streams, and their versions              | Traces bad predictions back to the upstream data that produced them.           |
+| Transformation and runtime provenance | Transformation code, timestamp, and environment         | Reproduces historical values for audit, debugging, and compliance.             |
+| Quality and freshness metrics         | Validation results observed when the value was produced | Estimates blast radius and decides whether rewritten history is safe to use.   |
 
-#### Lineage tracking {#sec-ml-operations-scale-lineage-tracking-1265}
-
-Feature lineage records enough provenance to make that version declaration actionable. Each feature value needs a path back to the source tables and their versions, the transformation code, the computation timestamp and environment, and the quality metrics observed when the value was produced. Without that path, a bad prediction leaves the operator comparing symptoms. With it, the platform can trace unexpected feature behavior to its source, estimate the blast radius of an upstream data change, and reproduce historical values for audit or compliance.
+: **Feature Version and Lineage Components**: Feature versioning separates logic, data, and schema changes; lineage records the path needed to debug, audit, and reproduce feature values. Together, these fields turn a feature definition into a governed production interface. {#tbl-ops-scale-feature-version-lineage-components}
 
 ### Backfill procedures {#sec-ml-operations-scale-backfill-procedures-eb66}
 
