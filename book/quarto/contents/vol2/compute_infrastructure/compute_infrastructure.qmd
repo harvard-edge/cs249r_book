@@ -1836,14 +1836,18 @@ An accelerator's compute throughput, memory bandwidth, memory capacity, and powe
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierTdpRecap.frontier_params_b_str
+# │ Exports: InfraFrontierTdpRecap.frontier_params_b_str,
+# │          InfraFrontierTdpRecap.diffusion_steps_count_str
+from mlsysim.fmt import fmt_count
 class InfraFrontierTdpRecap:
+    diffusion = Models.GenerativeVision.StableDiffusion_v1_5
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    diffusion_steps_count_str = fmt_count(diffusion.denoising_steps, label="denoising step", commas=False)
 ```
 
-Start with the `{python} InfraFrontierTdpRecap.frontier_params_b_str` running example. During training, large batches push the forward and backward passes above the Roofline ridge point, so the immediate constraint is arithmetic throughput. Peak low-precision TFLOP/s matters, but only after memory capacity is sufficient to hold the sharded model state and after the interconnect can keep tensor and data parallel groups synchronized. H100, B200, and TPU-class systems are all plausible answers to this training problem; the final choice depends on the software stack as much as the silicon. A PyTorch-first research team values the GPU ecosystem, while a JAX/XLA-centered organization may accept tighter compilation constraints for TPU cost efficiency.
+Start with the `{python} InfraFrontierTdpRecap.frontier_params_b_str` running example. During training, large batches push the forward and backward passes above the Roofline ridge point, so the immediate constraint is arithmetic throughput. Peak low-precision TFLOP/s matters, but only after memory capacity is sufficient to hold the sharded model state and after the interconnect can keep tensor and data parallel groups synchronized. H100, B200, and TPU v5p pods are all plausible answers to this training problem; the final choice depends on the software stack as much as the silicon. A PyTorch-first research team values the GPU ecosystem, while a JAX/XLA-centered organization may accept tighter compilation constraints for TPU cost efficiency.
 
 ```{python}
 #| echo: false
@@ -1856,9 +1860,9 @@ class RooflineTdpRecap:
 ```
 Serving the same language model changes the answer. During autoregressive decode, every generated token streams weights through memory, so the key metric becomes memory bandwidth per dollar rather than peak TFLOP/s. At batch size 1, the H100's `{python} RooflineTdpRecap.h100_bw_tb_per_s_str` bandwidth determines throughput while much of the arithmetic silicon waits. Batching raises arithmetic intensity by reusing the same weight movement across more requests, which is why serving systems work so hard to batch without violating tail-latency SLOs. The workload did not change names, but the binding term in the iron law changed, and the accelerator choice changes with it.
 
-Recommendation models\index{Recommendation Model} split the decision again. Embedding table lookup is dominated by random access and memory capacity, because each request retrieves small vectors from a very large table with poor locality. The dense tower that consumes those embeddings is compute-bound. A hybrid CPU-GPU design follows from that split: CPU and DRAM capacity handle the sparse lookup path, while GPUs accelerate the dense neural network layers\index{Dense Layer}. A single headline TFLOP/s number cannot describe this workload because it has two different bottlenecks inside one request.
+Recommendation models\index{Recommendation Model} split the decision again. Embedding table lookup is dominated by random access and memory capacity, because each request retrieves small vectors from TB-scale tables with poor locality. The dense tower that consumes those embeddings is compute-bound. A hybrid CPU-GPU design follows from that split: CPU and DRAM capacity handle the sparse lookup path, while GPUs accelerate the dense neural network layers\index{Dense Layer}. A single headline TFLOP/s number cannot describe this workload because it has two different bottlenecks inside one request.
 
-Vision and diffusion workloads move back toward arithmetic throughput because convolutions, attention blocks, and denoising networks reuse data heavily. Diffusion inference makes this especially clear: generating one image requires many repeated denoising passes, so the service pays for a sequence of full model evaluations rather than one decode step per token. For these workloads, TFLOP/s per dollar often dominates bandwidth per dollar once model state fits in memory.
+Vision and diffusion workloads move back toward arithmetic throughput because convolutions, attention blocks, and denoising networks reuse data heavily. Diffusion inference makes this especially clear: the Stable Diffusion v1.5 profile in MLSysIM uses `{python} InfraFrontierTdpRecap.diffusion_steps_count_str`, so the service pays for a sequence of full model evaluations rather than one decode step per token. For these workloads, TFLOP/s per dollar often dominates bandwidth per dollar once model state fits in memory.
 
 ```{python}
 #| echo: false
@@ -2549,6 +2553,7 @@ As the "data center tax" on host CPUs has grown -- with up to 30 percent of CPU 
 # │          AlternativeNodeArchitectureRecap.mi300x_node_hbm_gb_str,
 # │          AlternativeNodeArchitectureRecap.mi300x_hbm_bw_tb_per_s_str,
 # │          AlternativeNodeArchitectureRecap.gaudi3_hbm_gb_str,
+# │          AlternativeNodeArchitectureRecap.gaudi2_roce_gb_per_s_str,
 # │          AlternativeNodeArchitectureRecap.frontier_weights_gb_str
 class AlternativeNodeArchitectureRecap:
 
@@ -2557,6 +2562,7 @@ class AlternativeNodeArchitectureRecap:
     h100 = Hardware.Cloud.H100
     mi300x = Hardware.Cloud.MI300X
     tpu_v5p = Hardware.Cloud.TPUv5p
+    gaudi2 = Hardware.Cloud.Gaudi2
     gaudi3 = Hardware.Cloud.Gaudi3
     node_accelerators = Systems.Nodes.DGX_H100.accelerators_per_node
 
@@ -2567,6 +2573,7 @@ class AlternativeNodeArchitectureRecap:
     # ┌── 3. GUARD ────────────────────────────────────────────────────────────
     check(mi300x.memory.capacity > h100.memory.capacity, "MI300X should carry more HBM than H100")
     check(mi300x_node_hbm > frontier_weights, "8x MI300X HBM should hold 175B FP16 weights")
+    check(gaudi2.nvlink is not None, "Gaudi 2 profile should expose RoCE aggregate bandwidth")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(frontier.parameters, scale="B", precision=0, commas=False)
@@ -2577,6 +2584,7 @@ class AlternativeNodeArchitectureRecap:
     mi300x_node_hbm_gb_str = fmt_memory_capacity(mi300x_node_hbm, unit=GiB, precision=0, commas=True)
     mi300x_hbm_bw_tb_per_s_str = fmt_bandwidth(mi300x.memory.bandwidth, unit=TB / second, precision=1, commas=False)
     gaudi3_hbm_gb_str = fmt_memory_capacity(gaudi3.memory.capacity, unit=GiB, precision=0, commas=False)
+    gaudi2_roce_gb_per_s_str = fmt_bandwidth(gaudi2.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
     frontier_weights_gb_str = fmt_memory(frontier_weights, unit=GB, precision=0, commas=False)
 ```
 
@@ -2586,7 +2594,7 @@ Other systems move that boundary. TPU pods use the Inter-Chip Interconnect (ICI)
 
 The MI300X shifts the pressure point from local switching toward memory capacity. Its package exposes `{python} AlternativeNodeArchitectureRecap.mi300x_hbm_gb_str` of HBM at `{python} AlternativeNodeArchitectureRecap.mi300x_hbm_bw_tb_per_s_str`, compared with `{python} AlternativeNodeArchitectureRecap.h100_hbm_gb_str` on an H100-class accelerator. An eight-accelerator MI300X node would therefore provide `{python} AlternativeNodeArchitectureRecap.mi300x_node_hbm_gb_str` of aggregate HBM, enough to hold the `{python} AlternativeNodeArchitectureRecap.frontier_weights_gb_str` FP16 weight tensor for our `{python} AlternativeNodeArchitectureRecap.frontier_params_b_str` running model. That does not eliminate the optimizer, gradient, activation, and fragmentation problem introduced in @sec-compute-node, but it changes how often the system must spill state into slower memory tiers and how much microbatch headroom remains before offload becomes mandatory.
 
-Gaudi takes a different route by integrating RDMA-capable Ethernet into the accelerator and using a more network-centric design for communication. The point is not that it lacks memory capacity; a Gaudi 3-class accelerator still exposes `{python} AlternativeNodeArchitectureRecap.gaudi3_hbm_gb_str` of HBM. The question is whether simplifying the fabric and using Ethernet consistently across node and pod is worth giving up the very high local exchange bandwidth of a switch-rich NVLink design. That trade can be attractive when data parallelism, inference serving, or cluster cost dominates, and less attractive when tensor-parallel collectives sit inside every layer.
+Gaudi takes a different route by integrating RDMA-capable Ethernet into the accelerator and using a more network-centric design for communication. The Gaudi 2 profile exposes `{python} AlternativeNodeArchitectureRecap.gaudi2_roce_gb_per_s_str` of aggregate RoCE bandwidth through 24 attached 100 GbE ports, while the newer Gaudi 3-class accelerator still exposes `{python} AlternativeNodeArchitectureRecap.gaudi3_hbm_gb_str` of HBM. The question is whether simplifying the fabric and using Ethernet consistently across node and pod is worth giving up the very high local exchange bandwidth of a switch-rich NVLink design. That trade can be attractive when data parallelism, inference serving, or cluster cost dominates, and less attractive when tensor-parallel collectives sit inside every layer.
 
 These alternatives are not a ranking of vendors. They are different placements of scarce resources: switching bandwidth in the node, regular topology in the pod, HBM capacity in the package, or network attachment on the accelerator. For the `{python} AlternativeNodeArchitectureRecap.frontier_params_b_str` model used throughout this chapter, the tensor-parallel portion of training makes local accelerator communication unusually important, so the DGX-style answer is natural. In other regimes, especially memory-heavy recommenders, topology-regular training, or cost-sensitive serving fleets, a different boundary can become the one that matters most. Software ecosystem maturity, supply availability, and total cost of ownership then decide whether the theoretical architectural fit becomes a deployable system.
 
@@ -4101,7 +4109,7 @@ Wafer-scale integration also faces manufacturing challenges. Because the chip sp
 
 The lesson for infrastructure planners is not that wafer-scale systems replace GPU fleets. It is that memory proximity and memory capacity trade against each other. WSE-style designs buy extraordinary local bandwidth by putting the working set near the arithmetic, while CXL buys flexible capacity by moving memory farther away. HBM sits between those extremes: off-chip but on-package, smaller than host memory but fast enough for the active computation. The right architecture is the one whose memory tier matches the workload's reuse pattern.
 
-Underpinning both directions is the evolution of **advanced packaging**\index{Advanced Packaging}. Packaging moves the boundary inside the accelerator package rather than all the way out to the rack or all the way in to a single wafer. Current **2.5D interposers**\index{2.5D interposers} mount compute dies and HBM stacks on a shared silicon substrate, allowing chiplet-based accelerators to behave like a single device for most software. The next step, **3D stacking**\index{3D stacking}, places SRAM caches or logic vertically above one another, shortening data paths further. The wall that appears next is thermal: dense vertical integration makes it harder to remove heat from buried layers. The fleet-design consequence is that future accelerators may demand liquid cooling, tighter power transients, and more conservative rack layouts before their architectural advantages can be realized.
+Underpinning both directions is the evolution of **advanced packaging**\index{Advanced Packaging}. Packaging moves the boundary inside the accelerator package rather than all the way out to the rack or all the way in to a single wafer, and it matters because the reticle limit is only about 858 mm$^2$ for a single exposure. Current **2.5D interposers**\index{2.5D interposers}, such as TSMC's CoWoS, mount compute dies and HBM stacks on a shared silicon substrate, allowing chiplet-based accelerators to behave like a single device for most software. The next step is **3D stacking**\index{3D stacking}, with approaches such as SoIC placing SRAM caches or logic directly above one another and shortening data paths further. The H100-to-B200 transition shows the fleet consequence: the package can deliver far more local arithmetic and die-to-die bandwidth, but the rack must absorb higher power density, tighter cooling requirements, and less tolerance for power transients before the silicon advantage becomes useful infrastructure.
 
 The common theme is relocation rather than elimination. CXL moves capacity outward into a fabric and leaves bandwidth as the limiting discipline. Wafer-scale integration moves communication inward and leaves capacity and yield as the limiting disciplines. Advanced packaging compresses die-to-die distance and leaves power density as the limiting discipline. Future infrastructure planning therefore still begins by identifying where the next byte will move, how quickly it must arrive, and what physical system must be built so that movement does not dominate the workload.
 
