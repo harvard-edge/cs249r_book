@@ -1434,129 +1434,7 @@ The trend is toward convergence. NVIDIA's Spectrum-4 Ethernet switches incorpora
 
 :::
 
-### Looking ahead: Next-generation interconnects {#sec-network-fabrics-next-gen}
-
-As cluster sizes push past 100,000 accelerators, the physics tax of current interconnects (power, latency, and reliability) becomes the primary scaling bottleneck. The durable question is which constraint each new technology relaxes: lossless transport without PFC cascades, lower power per bit, fewer switching hops, or a more flexible compute-memory-network ratio.
-
-The **Ultra Ethernet Consortium (UEC)**\index{Ultra Ethernet} targets the reliability side of this bottleneck by trying to make Ethernet behave more like an HPC fabric without inheriting RoCEv2's PFC fragility. With that constraint in view, UEC integrates HPC-native features directly into the standard: packet spraying across multiple paths, flexible ordered and unordered reliable delivery services, packet-trimming and link-layer-retry mechanisms, and new congestion-control schemes intended to reduce reliance on Priority Flow Control for AI/HPC traffic. The goal is to provide the losslessness of InfiniBand with the ubiquity and multi-vendor economics of Ethernet.
-
-The power consumption of pluggable transceivers is becoming unsustainable at scale. **Co-Packaged Optics (CPO)**\index{Co-Packaged Optics} addresses this by moving the optical engine from the faceplate directly into the switch ASIC package. By driving optical signals almost from the silicon itself, CPO eliminates the power-hungry electrical traces across the PCB, reducing power per port by 30–50 percent.
-
-A quick estimate makes the power dividend concrete.
-
-```{python}
-#| echo: false
-#| label: optical-dividend-calc
-from mlsysim.fmt import fmt_int, fmt_power, fmt_qty, fmt, check
-
-class OpticalDividend:
-    """Power savings from Co-Packaged Optics (CPO)."""
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    SWITCH_ASIC_51T2_BW = Systems.SwitchFabric.SwitchAsic51T2
-    ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
-    OPTICS_POWER_PLUGGABLE_400G_W = Systems.SwitchFabric.OpticsPluggable400G
-    OPTICS_POWER_CPO_400G_W = Systems.SwitchFabric.OpticsCpo400G
-    n_ports = int((SWITCH_ASIC_51T2_BW / ETHERNET_400G_BW).to_base_units().magnitude) # 51.2 Tb/s switch
-    n_switches = 1000
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_pluggable = n_ports * OPTICS_POWER_PLUGGABLE_400G_W
-    total_cpo = n_ports * OPTICS_POWER_CPO_400G_W
-    savings = total_pluggable - total_cpo
-    cluster_pluggable = total_pluggable * n_switches
-    cluster_savings = savings * n_switches
-    equivalent_h100_gpus = (cluster_savings / Hardware.Cloud.H100.tdp).to_base_units().magnitude
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(savings == 1.28 * kilowatt, f"Savings {savings.to(kW).magnitude:.2f}kW unexpected")
-
-    @classmethod
-    def plot(cls):
-        """Visualizes the Optical Dividend."""
-        from book.tools.figures import style as book_style
-        return book_style.bar_compare(
-            labels=["Pluggable", "CPO"],
-            values=[cls.total_pluggable.to(kilowatt).magnitude, cls.total_cpo.to(kilowatt).magnitude],
-            title="Optical Power Dividend",
-            ylabel="Total Optics Power (kW)"
-        )
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    p_pluggable_w_str = fmt_qty(OPTICS_POWER_PLUGGABLE_400G_W, watt, precision=0, commas=False)
-    p_cpo_w_str = fmt_qty(OPTICS_POWER_CPO_400G_W, watt, precision=0, commas=False)
-    savings_kw_str = fmt_qty(savings, kilowatt, precision=2, commas=False)
-    total_pluggable_kw_str = fmt_qty(total_pluggable, kilowatt, precision=2, commas=False)
-    total_cpo_kw_str = fmt_qty(total_cpo, kilowatt, precision=2, commas=False)
-    n_switches_str = fmt(n_switches, precision=0)
-    cluster_pluggable_mw_str = fmt_power(cluster_pluggable, unit=MW, precision=2, commas=False)
-    cluster_savings_mw_str = fmt_power(cluster_savings, unit=MW, precision=2, commas=False)
-    equivalent_h100_gpus_str = fmt_int(round(equivalent_h100_gpus / 100) * 100)
-```
-
-::: {#nbk-network-fabrics-napkin-math-optical-dividend .callout-notebook title="The optical dividend"}
-
-**Problem**: Calculate the power savings of moving a 51.2 Tb/s switch from pluggable transceivers to Co-Packaged Optics (CPO).
-
-1. **Pluggable Architecture**\index{Pluggable Optics!power cost}: 128 ports $\times$ `{python} OpticalDividend.p_pluggable_w_str` = `{python} OpticalDividend.total_pluggable_kw_str` for optics alone.
-2. **CPO Architecture**\index{Co-Packaged Optics!power savings}: 128 engines $\times$ `{python} OpticalDividend.p_cpo_w_str` = `{python} OpticalDividend.total_cpo_kw_str`.
-3. **The dividend**: The savings reach `{python} OpticalDividend.savings_kw_str` of power per switch.
-
-**Systems insight**: In a cluster with `{python} OpticalDividend.n_switches_str` switches, pluggable optics consume `{python} OpticalDividend.cluster_pluggable_mw_str` just to move light. CPO halves this "network tax," saving `{python} OpticalDividend.cluster_savings_mw_str` and redirecting enough power to fuel roughly `{python} OpticalDividend.equivalent_h100_gpus_str` H100 GPUs. At the $\text{BW}_{\text{bisect}}$ wall, sustainability is not a choice; it is an architectural requirement driven by the thermal limits of the faceplate.
-
-:::
-
-For a 10,000-GPU cluster, eliminating pluggable modules could save over 100 kW of power—energy that can be redirected to computation. CPO also removes the transceiver as a discrete field-replaceable unit, eliminating a common point of mechanical failure.
-
-```{python}
-#| echo: false
-#| label: next-gen-link-density
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ NEXT-GENERATION LINK DENSITY (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-network-fabrics-next-gen—800G/XDR and 1.6T link density.
-# │
-# │ Goal: Keep the exact next-generation port-rate and switch-capacity claims
-# │       local to the paragraph that uses them.
-# │ Show: 800 Gb/s XDR/800GbE, 1.6 Tb/s Ethernet ports, 102.4 Tb/s switch ASIC.
-# │ How: Decimal link-rate arithmetic; 1.6 Tb/s / 400 Gb/s = 4.
-# │
-# │ Imports: mlsysim.core.constants, mlsysim.fmt (fmt, check)
-# │ Exports: NextGenLinkDensity.xdr_port_gbit_per_s_str,
-# │          NextGenLinkDensity.eth_800g_port_gbit_per_s_str,
-# │          NextGenLinkDensity.eth_1_6t_port_tbps_s_str,
-# │          NextGenLinkDensity.switch_capacity_tbps_s_str,
-# │          NextGenLinkDensity.port_ratio_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_bandwidth, fmt_qty, fmt_ratio, check
-
-class NextGenLinkDensity:
-    """Port-rate and switch-capacity references for next-generation fabrics."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    ETHERNET_800G_BW = Systems.Fabrics.Ethernet_800G.bandwidth
-    ETHERNET_1P6T_BW = Systems.Fabrics.Ethernet_1P6T.bandwidth
-    ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
-    SWITCH_ASIC_102T4_BW = Systems.SwitchFabric.SwitchAsic102T4
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    port_ratio_val = (ETHERNET_1P6T_BW / ETHERNET_400G_BW).to_base_units().magnitude
-    equivalent_1_6t_ports_val = (SWITCH_ASIC_102T4_BW / ETHERNET_1P6T_BW).to_base_units().magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(round(port_ratio_val) == 4, "1.6T should equal four 400G ports")
-    check(equivalent_1_6t_ports_val == 64, "102.4 Tb/s should equal 64 * 1.6T ports")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    xdr_port_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_XDR.bandwidth, unit=Gbps, precision=0, commas=False)
-    eth_800g_port_gbit_per_s_str = fmt_bandwidth(ETHERNET_800G_BW, unit=Gbps, precision=0, commas=False)
-    eth_1_6t_port_tbps_s_str = fmt_bandwidth(ETHERNET_1P6T_BW, unit=terabit / second, precision=1, commas=False)
-    switch_capacity_tbps_s_str = fmt_bandwidth(SWITCH_ASIC_102T4_BW, unit=terabit / second, precision=1, commas=False)
-    port_ratio_str = fmt_ratio(port_ratio_val, precision=0, commas=False)
-```
-
-Higher port rates matter because they attack hop count as well as raw bandwidth. XDR InfiniBand pushes `{python} NextGenLinkDensity.xdr_port_gbit_per_s_str` per port and 800GbE pushes `{python} NextGenLinkDensity.eth_800g_port_gbit_per_s_str` per port, while `{python} NextGenLinkDensity.eth_1_6t_port_tbps_s_str` Ethernet switch silicon pushes aggregate capacity to `{python} NextGenLinkDensity.switch_capacity_tbps_s_str`. A single `{python} NextGenLinkDensity.eth_1_6t_port_tbps_s_str` port delivers the bandwidth of `{python} NextGenLinkDensity.port_ratio_str` 400G ports. The increased density allows architects to flatten the topology: a cluster that previously required three tiers of switches can now be served by two, halving the transceiver count and reducing tail latency by removing an entire hop of switching and FEC overhead.
-
-Finally, CXL (Compute Express Link)\index{CXL} addresses the resource-ratio side of the same scaling problem by blurring the boundary between network and memory bus. While currently an intra-rack technology, CXL 3.0 enables memory pooling\index{Memory!pooling}, allowing a GPU in one chassis to access host memory in another with load/store semantics rather than RDMA message passing. Memory pooling suggests a future where the rigid distinction between intra-node NVLink domains and inter-node InfiniBand domains dissolves into a unified memory fabric, allowing the scheduler to compose virtual nodes of arbitrary size dynamically.
-
-The physical fabric and production architectures established in the preceding sections leave a practical challenge unaddressed: sharing this expensive infrastructure across multiple teams and workloads without sacrificing the predictable performance that training demands.
+These case studies close the five-level stack by showing how the physical wire, transport protocol, topology, and congestion controls become one production fabric. The remaining operational problem is not how to build a single fast cluster, but how to share that expensive substrate across teams and workloads without sacrificing the predictable performance that training demands.
 
 ## Network Virtualization {#sec-network-fabrics-virtualization}
 
@@ -1684,6 +1562,59 @@ The monitoring tools above keep today's fabrics honest, but observability cannot
 
 The physical ceiling that monitoring exposes is the reason emerging fabrics deserve attention: they matter only when they move a bound the current synchronization backbone cannot cross. As clusters scale toward 100,000 nodes, the durable design variables are power per bit, reach, and the ratio of compute to memory to network capacity, not the product names attached to a particular roadmap.
 
+### Protocol convergence and link density {#sec-network-fabrics-protocol-convergence}
+
+The first pressure point is reliability. The Ultra Ethernet Consortium (UEC)\index{Ultra Ethernet} targets that constraint by trying to make Ethernet behave more like an HPC fabric without inheriting RoCEv2's PFC fragility. UEC integrates packet spraying across multiple paths, flexible ordered and unordered reliable delivery services, packet-trimming and link-layer-retry mechanisms, and new congestion-control schemes intended to reduce reliance on Priority Flow Control for AI/HPC traffic. The goal is to preserve Ethernet's ubiquity and multi-vendor economics while moving its failure behavior closer to InfiniBand's lossless fabric model.
+
+```{python}
+#| echo: false
+#| label: next-gen-link-density
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NEXT-GENERATION LINK DENSITY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-protocol-convergence—800G/XDR and 1.6T link density.
+# │
+# │ Goal: Keep the exact next-generation port-rate and switch-capacity claims
+# │       local to the paragraph that uses them.
+# │ Show: 800 Gb/s XDR/800GbE, 1.6 Tb/s Ethernet ports, 102.4 Tb/s switch ASIC.
+# │ How: Decimal link-rate arithmetic; 1.6 Tb/s / 400 Gb/s = 4.
+# │
+# │ Imports: mlsysim.core.constants, mlsysim.fmt (fmt, check)
+# │ Exports: NextGenLinkDensity.xdr_port_gbit_per_s_str,
+# │          NextGenLinkDensity.eth_800g_port_gbit_per_s_str,
+# │          NextGenLinkDensity.eth_1_6t_port_tbps_s_str,
+# │          NextGenLinkDensity.switch_capacity_tbps_s_str,
+# │          NextGenLinkDensity.port_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_bandwidth, fmt_qty, fmt_ratio, check
+
+class NextGenLinkDensity:
+    """Port-rate and switch-capacity references for next-generation fabrics."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    ETHERNET_800G_BW = Systems.Fabrics.Ethernet_800G.bandwidth
+    ETHERNET_1P6T_BW = Systems.Fabrics.Ethernet_1P6T.bandwidth
+    ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
+    SWITCH_ASIC_102T4_BW = Systems.SwitchFabric.SwitchAsic102T4
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    port_ratio_val = (ETHERNET_1P6T_BW / ETHERNET_400G_BW).to_base_units().magnitude
+    equivalent_1_6t_ports_val = (SWITCH_ASIC_102T4_BW / ETHERNET_1P6T_BW).to_base_units().magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(round(port_ratio_val) == 4, "1.6T should equal four 400G ports")
+    check(equivalent_1_6t_ports_val == 64, "102.4 Tb/s should equal 64 * 1.6T ports")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    xdr_port_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_XDR.bandwidth, unit=Gbps, precision=0, commas=False)
+    eth_800g_port_gbit_per_s_str = fmt_bandwidth(ETHERNET_800G_BW, unit=Gbps, precision=0, commas=False)
+    eth_1_6t_port_tbps_s_str = fmt_bandwidth(ETHERNET_1P6T_BW, unit=terabit / second, precision=1, commas=False)
+    switch_capacity_tbps_s_str = fmt_bandwidth(SWITCH_ASIC_102T4_BW, unit=terabit / second, precision=1, commas=False)
+    port_ratio_str = fmt_ratio(port_ratio_val, precision=0, commas=False)
+```
+
+Higher port rates attack hop count as well as raw bandwidth. XDR InfiniBand pushes `{python} NextGenLinkDensity.xdr_port_gbit_per_s_str` per port and 800GbE pushes `{python} NextGenLinkDensity.eth_800g_port_gbit_per_s_str` per port, while `{python} NextGenLinkDensity.eth_1_6t_port_tbps_s_str` Ethernet switch silicon pushes aggregate capacity to `{python} NextGenLinkDensity.switch_capacity_tbps_s_str`. A single `{python} NextGenLinkDensity.eth_1_6t_port_tbps_s_str` port delivers the bandwidth of `{python} NextGenLinkDensity.port_ratio_str` 400G ports. The increased density allows architects to flatten the topology: a cluster that previously required three tiers of switches can now be served by two, halving the transceiver count and reducing tail latency by removing an entire hop of switching and FEC overhead.
+
 ### Optical interconnects {#sec-network-fabrics-optical}
 
 \index{Optical Interconnect!co-packaged optics}
@@ -1702,6 +1633,69 @@ Co-packaged optics (CPO) addresses these limitations by integrating optical tran
 
 CPO changes the link budget in three ways. First, the electrical signal path from the SerDes to the optical transceiver is reduced from centimeters (in a pluggable module at the faceplate of a switch) to millimeters (on the package substrate), reducing the power consumed by electrical signal conditioning. Second, optical fiber has no distance-dependent bandwidth degradation over data center-relevant distances (up to 100 meters), eliminating the need for retimers and enabling more flexible physical layouts. Third, fiber is lighter and thinner than copper cables, dramatically simplifying the cable management challenge in dense racks.
 
+A quick estimate makes the power dividend concrete.
+
+```{python}
+#| echo: false
+#| label: optical-dividend-calc
+from mlsysim.fmt import fmt_int, fmt_power, fmt_qty, fmt, check
+
+class OpticalDividend:
+    """Power savings from Co-Packaged Optics (CPO)."""
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    SWITCH_ASIC_51T2_BW = Systems.SwitchFabric.SwitchAsic51T2
+    ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
+    OPTICS_POWER_PLUGGABLE_400G_W = Systems.SwitchFabric.OpticsPluggable400G
+    OPTICS_POWER_CPO_400G_W = Systems.SwitchFabric.OpticsCpo400G
+    n_ports = int((SWITCH_ASIC_51T2_BW / ETHERNET_400G_BW).to_base_units().magnitude) # 51.2 Tb/s switch
+    n_switches = 1000
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    total_pluggable = n_ports * OPTICS_POWER_PLUGGABLE_400G_W
+    total_cpo = n_ports * OPTICS_POWER_CPO_400G_W
+    savings = total_pluggable - total_cpo
+    cluster_pluggable = total_pluggable * n_switches
+    cluster_savings = savings * n_switches
+    equivalent_h100_gpus = (cluster_savings / Hardware.Cloud.H100.tdp).to_base_units().magnitude
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(savings == 1.28 * kilowatt, f"Savings {savings.to(kW).magnitude:.2f}kW unexpected")
+
+    @classmethod
+    def plot(cls):
+        """Visualizes the Optical Dividend."""
+        from book.tools.figures import style as book_style
+        return book_style.bar_compare(
+            labels=["Pluggable", "CPO"],
+            values=[cls.total_pluggable.to(kilowatt).magnitude, cls.total_cpo.to(kilowatt).magnitude],
+            title="Optical Power Dividend",
+            ylabel="Total Optics Power (kW)"
+        )
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    p_pluggable_w_str = fmt_qty(OPTICS_POWER_PLUGGABLE_400G_W, watt, precision=0, commas=False)
+    p_cpo_w_str = fmt_qty(OPTICS_POWER_CPO_400G_W, watt, precision=0, commas=False)
+    savings_kw_str = fmt_qty(savings, kilowatt, precision=2, commas=False)
+    total_pluggable_kw_str = fmt_qty(total_pluggable, kilowatt, precision=2, commas=False)
+    total_cpo_kw_str = fmt_qty(total_cpo, kilowatt, precision=2, commas=False)
+    n_switches_str = fmt(n_switches, precision=0)
+    cluster_pluggable_mw_str = fmt_power(cluster_pluggable, unit=MW, precision=2, commas=False)
+    cluster_savings_mw_str = fmt_power(cluster_savings, unit=MW, precision=2, commas=False)
+    equivalent_h100_gpus_str = fmt_int(round(equivalent_h100_gpus / 100) * 100)
+```
+
+::: {#nbk-network-fabrics-napkin-math-optical-dividend .callout-notebook title="The optical dividend"}
+
+**Problem**: Calculate the power savings of moving a 51.2 Tb/s switch from pluggable transceivers to Co-Packaged Optics (CPO).
+
+1. **Pluggable Architecture**\index{Pluggable Optics!power cost}: 128 ports $\times$ `{python} OpticalDividend.p_pluggable_w_str` = `{python} OpticalDividend.total_pluggable_kw_str` for optics alone.
+2. **CPO Architecture**\index{Co-Packaged Optics!power savings}: 128 engines $\times$ `{python} OpticalDividend.p_cpo_w_str` = `{python} OpticalDividend.total_cpo_kw_str`.
+3. **The dividend**: The savings reach `{python} OpticalDividend.savings_kw_str` of power per switch.
+
+**Systems insight**: In a cluster with `{python} OpticalDividend.n_switches_str` switches, pluggable optics consume `{python} OpticalDividend.cluster_pluggable_mw_str` just to move light. CPO halves this "network tax," saving `{python} OpticalDividend.cluster_savings_mw_str` and redirecting enough power to fuel roughly `{python} OpticalDividend.equivalent_h100_gpus_str` H100 GPUs. At the $\text{BW}_{\text{bisect}}$ wall, sustainability is not a choice; it is an architectural requirement driven by the thermal limits of the faceplate.
+
+:::
+
+For a 10,000-GPU cluster, eliminating pluggable modules could save over 100 kW of power that can be redirected to computation. CPO also removes the transceiver as a discrete field-replaceable unit, eliminating a common point of mechanical failure.
+
 For ML infrastructure, CPO could flatten the bandwidth hierarchy by narrowing the gap between intra-node and inter-node bandwidth. If inter-node links achieve bandwidth comparable to current NVLink (hundreds of GB/s per GPU), the constraint that confines tensor parallelism to within a single node would relax. This would enable new parallelism strategies where tensor parallelism spans 2--4 nodes rather than being confined to a single 8-GPU node, potentially improving scaling efficiency for very large models.
 
 The product roadmap is less durable than the constraint it illustrates: as link speed rises, optics moves closer to silicon to control power and reach. NVIDIA's NVLink 5.0 (expected with the next GPU generation after Blackwell) and Broadcom's co-packaged optics switches are among the first products targeting this transition. The industry roadmap envisions CPO becoming standard for data center switches in the mid-2020s, with GPU-integrated optics following by 2028–2030.
@@ -1713,6 +1707,8 @@ However, CPO introduces new challenges. Optical components are sensitive to temp
 \index{Architecture!disaggregated}
 
 The current node architecture bundles a fixed ratio of compute, memory, and networking in each server: 8 GPUs, 640 GB of HBM, 2 TB of DDR, and 8 InfiniBand HCAs in a DGX H100. This fixed bundling is suboptimal for workloads that need a different ratio. Training a 175B model needs more memory capacity per GPU than training a 7B model. Inference serving needs more network bandwidth per GPU (to handle request traffic) than training (which has predictable, batch-oriented communication). The fixed node architecture forces organizations to provision for the most demanding ratio across all workloads, wasting resources on workloads that need a different balance.
+
+CXL (Compute Express Link)\index{CXL} is the near-term mechanism that makes this disaggregation plausible rather than just a scheduler abstraction. While currently an intra-rack technology, CXL 3.0 enables memory pooling\index{Memory!pooling}, allowing a GPU in one chassis to access host memory in another with load/store semantics rather than RDMA message passing. Memory pooling suggests a future where the rigid distinction between intra-node NVLink domains and inter-node InfiniBand domains dissolves into a unified memory fabric, allowing the scheduler to compose virtual nodes of arbitrary size dynamically.
 
 Disaggregated architectures decouple compute, memory, and networking into separate, independently scalable pools. A disaggregated system might have a pool of GPU compute modules, a pool of CXL-attached memory modules, and a pool of network interface modules, all connected through a high-bandwidth fabric. The orchestration layer composes these pools into virtual nodes with the exact ratio of resources that each workload requires.
 
