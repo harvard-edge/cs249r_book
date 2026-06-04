@@ -289,6 +289,30 @@ class ServingProfiles(Registry):
         name="Heterogeneous routing target traffic",
         description="Total incoming QPS target for the H100/A100 weighted-routing example.",
     )
+    CircuitBreakerErrorThreshold = sourced(
+        0.50,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker error threshold",
+        description="Reference error-rate threshold for opening a GPU inference circuit breaker.",
+    )
+    CircuitBreakerLatencyThresholdMultiple = sourced(
+        2,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker latency threshold multiple",
+        description="Reference latency multiple over baseline for opening a GPU inference circuit breaker.",
+    )
+    CircuitBreakerOpenDuration = sourced_qty(
+        30 * ureg.second,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker open duration",
+        description="Reference recovery interval before probing a half-open GPU inference circuit breaker.",
+    )
+    CircuitBreakerHalfOpenRequests = sourced(
+        5,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker half-open probe requests",
+        description="Reference number of probe requests allowed while half-open.",
+    )
 
 
 class CheckpointArchetypes(Registry):

@@ -754,6 +754,16 @@ HETEROGENEOUS_ROUTING_SCENARIO = _est(
     ),
 )
 
+CIRCUIT_BREAKER_SERVING_PROFILE = _est(
+    "prov:circuit-breaker-serving-profile",
+    "Reference GPU inference circuit-breaker profile",
+    notes=(
+        "Reusable threshold and recovery-window assumptions for teaching "
+        "GPU inference circuit-breaker behavior; production thresholds should "
+        "be calibrated from service SLOs and fleet telemetry."
+    ),
+)
+
 CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS = _est(
     "prov:checkpoint-archetype-scenario-assumptions",
     "Reference checkpoint-size archetype assumptions",

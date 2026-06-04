@@ -4270,6 +4270,35 @@ The **circuit breaker pattern**\index{Circuit Breaker!circuit breaker pattern}[^
 
 Backpressure propagation complements the breaker by making overload visible upstream. When queue depth crosses a threshold, the server returns a signal such as `503 Service Unavailable`; the load balancer marks the replica as degraded and routes fewer requests to it. If all replicas become degraded, the system shifts from routing control to admission control, rejecting some requests at the edge rather than accepting work it cannot serve within the latency SLO. Circuit breakers isolate unhealthy replicas; backpressure tells the rest of the system to slow down before retries amplify the failure.
 
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_count, fmt_multiple, fmt_percent, fmt_time
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: CircuitBreakerServingProfile.error_threshold_pct_str,
+# │          CircuitBreakerServingProfile.latency_threshold_mult_str,
+# │          CircuitBreakerServingProfile.open_duration_s_str,
+# │          CircuitBreakerServingProfile.half_open_requests_count_str
+class CircuitBreakerServingProfile:
+    # ┌── 1. LOAD (Source of truth) ───────────────────────────────────────────
+    profile = ReferenceStats.ServingProfiles
+
+    error_threshold = profile.CircuitBreakerErrorThreshold
+    latency_threshold_multiple = profile.CircuitBreakerLatencyThresholdMultiple
+    open_duration = profile.CircuitBreakerOpenDuration
+    half_open_requests = profile.CircuitBreakerHalfOpenRequests
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────────
+    check(error_threshold == 0.50, "Circuit breaker example should open at 50 percent errors")
+    check(open_duration == 30 * second, "Circuit breaker example should probe after 30 seconds")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    error_threshold_pct_str = fmt_percent(error_threshold, precision=0, commas=False, style="prose")
+    latency_threshold_mult_str = fmt_multiple(latency_threshold_multiple, precision=0, commas=False)
+    open_duration_s_str = fmt_time(open_duration, unit=second, precision=0, commas=False)
+    half_open_requests_count_str = fmt_count(half_open_requests, label="request", commas=False)
+```
+
 ::: {#exmp-inference-cascading-failure-prevention .callout-example title="Cascading failure prevention"}
 
 Consider a scenario where one server becomes slow (thermal throttling):
@@ -4286,22 +4315,22 @@ Consider a scenario where one server becomes slow (thermal throttling):
 **With circuit breaker**:
 
 1. Server A slows down
-2. Error rate on Server A rises above 50 percent
+2. Error rate on Server A rises above `{python} CircuitBreakerServingProfile.error_threshold_pct_str`
 3. Circuit breaker opens for Server A
 4. All requests route to Servers B, C, D
 5. System operates at reduced capacity but remains stable
-6. After recovery, circuit breaker closes, Server A rejoins
+6. After `{python} CircuitBreakerServingProfile.open_duration_s_str`, the breaker admits probe requests and closes if they succeed
 
 **Systems lesson**: For GPU inference\index{Inference!configuration for gpu}, the canonical thresholds and recovery settings appear in @tbl-inference-circuit-breaker-gpu. Circuit breakers preserve partial capacity by stopping retries from amplifying one slow replica into a system-wide overload.
 
 :::
 
-| **Parameter**\index{Parameter} |     **Value**      | **Rationale**                         |
-|:-------------------------------|:------------------:|:--------------------------------------|
-| **Error threshold**            |     30 percent     | GPU OOM failures are serious          |
-| **Latency threshold**          | 2$\times$ baseline | Detect throttling early               |
-| **Open duration**              |        60s         | GPU recovery takes time               |
-| **Half-open requests**         |         5          | Careful testing before full reopening |
+| **Parameter**\index{Parameter} |                                  **Value**                                  | **Rationale**                         |
+|:-------------------------------|:---------------------------------------------------------------------------:|:--------------------------------------|
+| **Error threshold**            |       `{python} CircuitBreakerServingProfile.error_threshold_pct_str`       | GPU OOM failures are serious          |
+| **Latency threshold**          | `{python} CircuitBreakerServingProfile.latency_threshold_mult_str` baseline | Detect throttling early               |
+| **Open duration**              |         `{python} CircuitBreakerServingProfile.open_duration_s_str`         | Probe only after the queue drains     |
+| **Half-open requests**         |     `{python} CircuitBreakerServingProfile.half_open_requests_count_str`    | Careful testing before full reopening |
 
 : **Circuit-Breaker Settings for GPU Inference**: Error and latency thresholds, open duration, and half-open probe count chosen so that a single throttling GPU is isolated quickly without prematurely failing healthy nodes. {#tbl-inference-circuit-breaker-gpu}
 
