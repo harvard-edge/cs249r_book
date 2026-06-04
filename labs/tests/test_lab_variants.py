@@ -73,6 +73,13 @@ def test_non_pilot_variants_are_marked_as_baseline():
             assert variant.assumptions["fallback_variant"] is True
 
 
+def test_all_catalog_labs_are_now_pilot_variants():
+    assert set(PILOT_LAB_IDS) == set(ALL_LAB_IDS)
+    for lab_id in ALL_LAB_IDS:
+        for variant in list_lab_variants(lab_id):
+            assert variant.assumptions.get("fallback_variant") is not True
+
+
 def test_v1_10_variants_define_compression_guardrails():
     for variant in list_lab_variants("v1_10_compression_paradox"):
         assert "candidate_methods" in variant.defaults

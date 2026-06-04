@@ -46,10 +46,10 @@ def test_build_migration_report_marks_baseline_gaps():
         metadata,
         profile,
         variant,
-        predictions={"legacy_status": "not yet migrated"},
-        final_decision="Use the baseline track variant until the lab-specific solver pass.",
+        predictions={"legacy_status": "legacy shell report"},
+        final_decision="Use the hand-authored track variant while preserving the legacy shell report path.",
         reflections={"diagnosis": "The shell records track context before deeper migration."},
-        residual_risk="The baseline variant still needs lab-specific thresholds.",
+        residual_risk="The legacy shell still needs notebook-specific part checkpoints.",
     )
 
     assert "## Source Trace" in report.markdown
