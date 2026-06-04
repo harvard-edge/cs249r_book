@@ -2022,3 +2022,53 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_report_contract.py -q`
 - Browser render of V1-10 on `http://127.0.0.1:30311`: relevant-only chips, visible bullet objectives, consistent 840px shell panels, compact track/scenario tables, no page errors, no stale marker on clean load.
 - Browser click check of V1-10 Part A prediction: no persistent stale marker or visible red stale overlay in the captured after-click screenshots.
+
+### 2026-06-04 - Full Student-Flow Browser Interaction QA Pass
+
+Labs:
+- All 34 lab pages.
+- `labs/lab-plan-dashboard.html`
+- `labs/lab-modality-catalog.html`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/tools/interaction_lab_smoke.py`
+- `labs/mlsysbook_labs/ui.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added a deep Playwright/Marimo interaction smoke tool that launches each lab, loads it in Chromium, scrolls through the page, switches canonical tracks, opens part tabs, simulates safe answer clicks, captures screenshots, and checks for runtime, stale-output, layout overflow, offscreen, and report/part-structure failures.
+- The tool now treats Lab 00 as a real student flow: it answers the three orientation checks, unlocks the track selector, then verifies all four canonical tracks.
+- Fixed shared tab styling in `mlsysbook_labs.ui` so later tabs do not shift content off the left side of the viewport after selection.
+- The full browser pass verified that every lab part exposed by the tabs has multiple student-facing pieces such as narrative, prediction/control, evidence/source, and reflection/report structure.
+
+MLSysIM facts/APIs needed:
+- No new hardware, model, metric, or system facts were added.
+- The QA pass reinforces the existing rule that track-specific facts shown in labs must come from the `mlsysbook_labs`/MLSysIM registries rather than notebook-local constants.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- Shared tab overflow behavior in `apply_lab_styles()`.
+- Reusable interaction smoke harness for future student-flow regression checks.
+
+Plan updates needed in other labs:
+- Keep the part-depth requirement as a release gate: a part should not be just one question; it should include a readable purpose, at least one action/control or prediction, evidence/source trace, and reflection or report consequence.
+- Future part-body migrations should keep using shared components rather than embedding per-lab CSS.
+
+Tests or checks run:
+- `python3 labs/tools/interaction_lab_smoke.py --labs labs/vol1/lab_00_introduction.py --html-pages labs/lab-plan-dashboard.html --port-start 30800 --output-dir /tmp/mlsysbook-interaction-lab00 --max-radios 0 > /tmp/mlsysbook-interaction-lab00/results.json`
+- Focused result: 1/1 lab passed and 1/1 HTML page passed.
+- `python3 labs/tools/interaction_lab_smoke.py --port-start 30900 --output-dir /tmp/mlsysbook-interaction-all-v3 --max-radios 0 > /tmp/mlsysbook-interaction-all-v3/results.json`
+- Full result: 34/34 labs passed and 2/2 HTML pages passed; 118 part checks passed the multi-piece requirement.
+- Aggregated part categories: narrative 118, controls 118, source/math 118, reflection 116, evidence 114, prediction 61.
+- Screenshot spot checks: Lab 00 orientation, V1-10 compression synthesis, and V1-11 hardware acceleration synthesis.
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py labs/tools/interaction_lab_smoke.py`
+- `python3 -m pytest labs/tests/test_report_contract.py labs/tests/test_static.py -q`
+- Result: 818 passed, 4 skipped, 5 xfailed.
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`

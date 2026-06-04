@@ -289,7 +289,7 @@ div[style*="border-left: 4px solid"][style*="border-radius: 0px 10px"] {
   margin-right: auto !important;
 }
 marimo-tabs {
-  overflow-x: auto !important;
+  overflow-x: visible !important;
   overflow-y: visible !important;
 }
 marimo-callout-output {
