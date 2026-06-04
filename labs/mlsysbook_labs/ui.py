@@ -759,12 +759,11 @@ def track_selector(default: str = DEFAULT_TRACK_ID):
 
 
 def track_context(track: str | TrackProfile) -> mo.Html:
-    """Render the selected track profile and its MLSysIM source references."""
+    """Render the selected track profile as a student-facing mission."""
     profile = track if isinstance(track, TrackProfile) else get_track_profile(track)
     metrics = ", ".join(profile.primary_metrics)
     guardrails = ", ".join(profile.guardrail_metrics)
     constraints = ", ".join(profile.dominant_constraints)
-    system_ref = profile.system_ref or "single-device profile"
     track_delta = (
         f"Watch {profile.primary_metrics[0]} first, protect {profile.guardrail_metrics[0]}, "
         f"and test {profile.dominant_constraints[0]} before treating the design as feasible."
@@ -772,12 +771,11 @@ def track_context(track: str | TrackProfile) -> mo.Html:
     fields = _render_compact_fields(
         {
             "Track": f"{profile.label} ({profile.category})",
-            "Stakeholder": profile.stakeholder,
-            "Hardware source": profile.hardware_ref,
-            "System source": system_ref,
+            "Your role": profile.stakeholder,
             "Primary metrics": metrics,
             "Guardrails": guardrails,
             "Dominant constraints": constraints,
+            "What changes": track_delta,
         }
     )
     return mo.Html(

@@ -282,7 +282,8 @@ def _(
             else "not_started"
         ),
     }
-    _system_ref = v1_10_variant.system_ref or "single-device profile"
+    _model_name = v1_10_variant.model_ref.rsplit(".", 1)[-1].replace("_", " ")
+    _guardrail_label = v1_10_variant.guardrail_metric.replace("sla", "SLA")
     mo.vstack(
         [
             learning_objectives(lab_learning_objectives),
@@ -295,11 +296,11 @@ def _(
                 objective=v1_10_variant.objective,
                 constraints={
                     "Workload": v1_10_variant.workload_summary,
-                    "Model source": v1_10_variant.model_ref,
-                    "Hardware source": v1_10_variant.hardware_ref,
-                    "System source": _system_ref,
-                    "Primary metric": v1_10_variant.primary_metric,
-                    "Guardrail metric": v1_10_variant.guardrail_metric,
+                    "Model under pressure": _model_name,
+                    "Primary goal": v1_10_variant.primary_metric,
+                    "Release guardrail": _guardrail_label,
+                    "First decision": "Which compression recipe reduces pressure without breaking the guardrail?",
+                    "Validation question": "What test would you run before shipping the compressed model?",
                 },
             ),
             lab_map(
@@ -495,10 +496,9 @@ def _(
     _track_metric = v1_10_variant.primary_metric
     _track_guardrail = v1_10_variant.guardrail_metric.replace("sla", "SLA")
     _track_objective = v1_10_variant.objective
-    _track_workload = v1_10_variant.workload_summary.rstrip(".")
     _metric_hint = (
-        f"For {_track_label}, the compression choice is not just a size reduction. "
-        f"It must improve {_track_metric} while keeping {_track_guardrail} acceptable."
+        f"Keep the recipe only if it improves {_track_metric} while keeping "
+        f"{_track_guardrail} acceptable."
     )
 
     # ─────────────────────────────────────────────────────────────────────
@@ -522,9 +522,9 @@ def _(
         items.append(scenario_thread(
             f"{_track_label} compression decision",
             (
-                f"{_track_objective} Start by asking whether a lower-precision model "
-                f"helps this workload: {_track_workload}. Do not keep the recipe "
-                "unless it protects the guardrail."
+                "Start with the cheapest compression move: lower precision. "
+                "The question is whether INT8 changes the deployment answer, not "
+                "whether the textbook ratio looks good."
             ),
             callout=_metric_hint,
         ))
@@ -698,8 +698,8 @@ FP32 to INT8 = 4x compression. Below 4 bits, $\\Delta$ grows large enough to col
         items.append(scenario_thread(
             f"{_track_label} hardware check",
             (
-                "A smaller file only helps this deployment if the selected hardware "
-                "can turn sparsity into actual latency, energy, or thermal relief."
+                "Pruning only helps if the machine can exploit the zeros. A smaller "
+                "file is not the same thing as a faster or cooler deployment."
             ),
             callout=(
                 f"Treat {_track_metric} as the win condition and {_track_guardrail} "
@@ -870,8 +870,8 @@ Dense GPU kernels cannot skip zero multiplications. Only structured sparsity wit
         items.append(scenario_thread(
             f"{_track_label} feasible set",
             (
-                "Now compare compression recipes as deployment candidates. A candidate "
-                "that is smaller but misses the guardrail is not a solution for this track."
+                "Now compare recipes as candidates. A candidate that is smaller but "
+                "misses the guardrail is not deployable for this track."
             ),
             callout=(
                 f"The final answer must balance {_track_metric} against "
@@ -1013,8 +1013,7 @@ At INT4, Llama-3 8B weighs 4 GB -- just barely fitting a 4 GB device with minima
             f"{_track_label} energy and thermal pressure",
             (
                 "After size and quality, ask what the bits cost during repeated "
-                "inference. Compression should reduce movement, heat, or battery drain "
-                "for the actual track workload."
+                "inference. The best recipe reduces movement, heat, or battery drain."
             ),
             callout=(
                 f"Use {_track_metric} as the benefit and {_track_guardrail} "
@@ -1168,9 +1167,8 @@ At FP32: $E_{\\text{mem}} / E_{\\text{comp}} = (4 \\times 640) / 3.7 \\approx 69
         items.append(scenario_thread(
             f"{_track_label} fallback strategy",
             (
-                "If compression alone cannot satisfy the deployment, switch from "
-                "shrinking the same model to training a smaller student that was built "
-                "for the track."
+                "If shrinking the same model is not enough, switch strategies: train "
+                "a smaller student that was built for the deployment."
             ),
             callout=(
                 f"The student only works if it preserves {_track_guardrail} while "

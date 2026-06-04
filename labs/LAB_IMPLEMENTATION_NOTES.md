@@ -2131,3 +2131,10 @@ Tests or checks run:
 - Full result: 34/34 labs passed and 2/2 HTML pages passed; 118 part checks passed.
 - `python3 -m build --wheel labs`
 - `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+Follow-up iteration:
+- Ran a stricter learner audit that switched all four tracks, clicked through Parts A-E, opened synthesis, and checked for visible source/provenance labels.
+- Removed visible `Hardware source`, `System source`, and `Model source` labels from the Lab 10 student setup and shared track context.
+- Shortened Lab 10 part-level scenario threads so they act as reminders, not repeated scenario briefs.
+- Added `labs/LAB10_LEARNER_FEEDBACK_LOOP_2026_06_04.md` as the focused simulated instructor/learner feedback record.
+- Re-ran focused and full browser checks: 1/1 Lab 10 passed, then 34/34 labs and 2/2 HTML pages passed.
