@@ -6072,23 +6072,91 @@ class ValidateCommand:
           * Mid-sentence -- a capitalized @Sec-/@Fig-/... after a comma,
             semicolon, open paren, or a lowercase word renders a stray capital
             ("...as Table 2 shows") and must be lowercased (@sec-, @fig-, ...).
+          * Algorithm theorem refs -- direct @Alg-/@alg- refs follow the same
+            casing rule as other cross-refs. Bracketed [Algorithm @alg-id]
+            refs are unnecessary because the shared Quarto language file
+            renders native @alg- refs as "Algorithm N"; bare Algorithm @alg-id
+            is invalid Quarto prose.
 
         Both halves share one is_sentence_start / is_mid_sentence computation so
-        they stay consistent by construction. Algorithm refs (@alg-) are covered
-        for forward-compat even though the corpus carries none yet. Sentence
-        position is intentionally classified conservatively: clause boundaries
+        they stay consistent by construction. Sentence position is
+        intentionally classified conservatively: clause boundaries
         that are genuinely ambiguous (em-dash, a heading line, a preceding
         acronym) are left unflagged in the mid-sentence direction rather than
         risk a false positive.
 
         Reverse (mid-sentence) direction + @alg- added 2026-06-04 to mirror the
-        documented Prefix Casing policy; the forward direction predates it.
+        documented Prefix Casing policy; algorithm bracket/bare-prefix checks
+        were added the same day.
         """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
         xref_re = re.compile(r"@([Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lg)-[\w-]+")
+        alg_bracket_re = re.compile(r"\[(Algorithm|algorithm)\s+(@[Aa]lg-[\w-]+)\]")
+        bare_alg_re = re.compile(r"(?<!\[)\b(Algorithm|algorithm)\s+@[Aa]lg-[\w-]+")
         footnote_def = re.compile(r"^\s*\[\^fn-")
+
+        def classify_position(line: str, lines: List[str], idx: int, col: int, ref_end: int) -> tuple[bool, bool]:
+            """Return (is_sentence_start, is_mid_sentence) for a reference."""
+            before = line[:col].rstrip()
+            is_sentence_start = False
+            is_mid_sentence = False
+
+            if not before:
+                # Line-start ref: classify by the preceding non-blank line.
+                # A blank line, a sentence-final prev line, a heading, or a div
+                # close => sentence start. Only call mid-sentence when the prev
+                # line genuinely ends inside a clause (lowercase word, digit,
+                # comma, semicolon) -- a symmetric-conservative test that
+                # mirrors the same-line rule and avoids treating metadata (a
+                # standalone \index{} line) as running prose.
+                prev = ""
+                prev_blank = False
+                for pi in range(idx - 2, -1, -1):
+                    ps = lines[pi].strip()
+                    if not ps:
+                        prev_blank = True
+                        break
+                    prev = ps
+                    break
+                # Strip trailing \index{...} tags -- they are metadata
+                # appended to the paragraph, not sentence content.
+                prev = re.sub(r'(\s*\\index\{[^}]*\})+\s*$', '', prev)
+                if prev_blank or not prev:
+                    is_sentence_start = True
+                elif (prev[-1] in ".?!"
+                        or prev.startswith("#")
+                        or prev.endswith(":::")):
+                    is_sentence_start = True
+                elif prev[-1].islower() or prev[-1].isdigit() or prev[-1] in ",;":
+                    is_mid_sentence = True
+            else:
+                last = before[-1]
+                if re.search(r'[.?!]\s*$', before):
+                    is_sentence_start = True
+                elif last in ",;":
+                    is_mid_sentence = True
+                elif last == "(":
+                    # Parenthetical: "(see @sec-x)" lowercases, but
+                    # "Foo. (@Sec-x ...)" opens a sentence inside parens.
+                    head = before[:-1].rstrip()
+                    if head and head[-1] in ".?!":
+                        is_sentence_start = True
+                    else:
+                        is_mid_sentence = True
+                elif last.islower() or last.isdigit():
+                    # Preceded by a lowercase word or a number -> the ref
+                    # sits inside a clause. (Uppercase/acronym before is
+                    # left unflagged on purpose -- it may end a clause.)
+                    is_mid_sentence = True
+                elif re.search(r':\s*$', before):
+                    after_ref = line[ref_end:].strip()
+                    if after_ref and after_ref[0] not in ".,;:)]":
+                        is_sentence_start = True
+                # otherwise (em-dash, other punctuation): neutral, no flag
+
+            return is_sentence_start, is_mid_sentence
 
         for file in files:
             lines = self._read_text(file).splitlines()
@@ -6112,68 +6180,12 @@ class ValidateCommand:
                 on_heading = stripped.startswith("#")
 
                 for m in xref_re.finditer(line):
-                    col = m.start()
-                    before = line[:col].rstrip()
                     ref_type = m.group(1)
                     is_capitalized = ref_type[0].isupper()
                     type_lower = ref_type.lower()
-
-                    is_sentence_start = False
-                    is_mid_sentence = False
-
-                    if not before:
-                        # Line-start ref: classify by the preceding non-blank
-                        # line. A blank line, a sentence-final prev line, a
-                        # heading, or a div close => sentence start. Only call
-                        # mid-sentence when the prev line genuinely ends inside a
-                        # clause (lowercase word, digit, comma, semicolon) -- a
-                        # symmetric-conservative test that mirrors the same-line
-                        # rule and avoids treating metadata (a standalone
-                        # \index{} line) as running prose.
-                        prev = ""
-                        prev_blank = False
-                        for pi in range(idx - 2, -1, -1):
-                            ps = lines[pi].strip()
-                            if not ps:
-                                prev_blank = True
-                                break
-                            prev = ps
-                            break
-                        # Strip trailing \index{...} tags -- they are metadata
-                        # appended to the paragraph, not sentence content.
-                        prev = re.sub(r'(\s*\\index\{[^}]*\})+\s*$', '', prev)
-                        if prev_blank or not prev:
-                            is_sentence_start = True
-                        elif (prev[-1] in ".?!"
-                                or prev.startswith("#")
-                                or prev.endswith(":::")):
-                            is_sentence_start = True
-                        elif prev[-1].islower() or prev[-1].isdigit() or prev[-1] in ",;":
-                            is_mid_sentence = True
-                    else:
-                        last = before[-1]
-                        if re.search(r'[.?!]\s*$', before):
-                            is_sentence_start = True
-                        elif last in ",;":
-                            is_mid_sentence = True
-                        elif last == "(":
-                            # Parenthetical: "(see @sec-x)" lowercases, but
-                            # "Foo. (@Sec-x ...)" opens a sentence inside parens.
-                            head = before[:-1].rstrip()
-                            if head and head[-1] in ".?!":
-                                is_sentence_start = True
-                            else:
-                                is_mid_sentence = True
-                        elif last.islower() or last.isdigit():
-                            # Preceded by a lowercase word or a number -> the ref
-                            # sits inside a clause. (Uppercase/acronym before is
-                            # left unflagged on purpose -- it may end a clause.)
-                            is_mid_sentence = True
-                        elif re.search(r':\s*$', before):
-                            after_ref = line[m.end():].strip()
-                            if after_ref and after_ref[0] not in ".,;:)]":
-                                is_sentence_start = True
-                        # otherwise (em-dash, other punctuation): neutral, no flag
+                    is_sentence_start, is_mid_sentence = classify_position(
+                        line, lines, idx, m.start(), m.end()
+                    )
 
                     context = line.strip()[:100]
                     if not is_capitalized and is_sentence_start:
@@ -6206,6 +6218,48 @@ class ValidateCommand:
                                 context=context,
                             )
                         )
+
+                for m in alg_bracket_re.finditer(line):
+                    direct_ref = m.group(2)
+                    is_sentence_start, _ = classify_position(
+                        line, lines, idx, m.start(), m.end()
+                    )
+                    ref_suffix = re.sub(r"^@[Aa]lg-", "", direct_ref)
+                    replacement = (
+                        f"@Alg-{ref_suffix}"
+                        if is_sentence_start
+                        else f"@alg-{ref_suffix}"
+                    )
+                    context = line.strip()[:100]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="algorithm_ref_bracketed_prefix",
+                            message=(
+                                "Use direct algorithm references such as "
+                                f"{replacement}, not bracketed [Algorithm @alg-id]"
+                            ),
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+                for m in bare_alg_re.finditer(line):
+                    context = line.strip()[:100]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="algorithm_ref_bare_prefix",
+                            message=(
+                                "Use direct algorithm references such as @Alg-id "
+                                "or @alg-id, not bare Algorithm @alg-id"
+                            ),
+                            severity="warning",
+                            context=context,
+                        )
+                    )
 
         return ValidationRunResult(
             name="xref-sentence-start-case",
