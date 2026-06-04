@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that every footnote definition starts with a capital letter.
+"""Check footnote definition capitalization.
 
 MIT Press style requires that terms like "computer engineering" remain
 lowercase in running prose (e.g., "computer engineering is a discipline").
@@ -13,7 +13,8 @@ footnote *definitions* of the form:
     [^fn-id]: Body of the footnote.
 
 It flags definitions where the first letter character (after skipping an
-optional leading `**` bold opener and whitespace) is lowercase.
+optional leading `**` bold opener and whitespace) is lowercase. It also checks
+leading bold term heads such as `**Memory Wall**:` for Title Case drift.
 
 Footnotes that begin with a non-letter (citations, numbers, math,
 URLs) are not flagged — they have no first-letter to capitalize.
@@ -41,8 +42,36 @@ FOOTNOTE_DEF = re.compile(r"^\[\^([A-Za-z0-9_:.\-]+)\]:\s+(.*)$")
 FOOTNOTE_DEF_PREFIX = re.compile(r"^\[\^[A-Za-z0-9_:.\-]+\]:\s+")
 
 # After the `]: `, peel off an optional leading `**` (bold term opener) and
-# any whitespace; the next character decides the check.
+# any whitespace; the next character decides the first-letter check.
 BOLD_OPENER = re.compile(r"^\*\*\s*")
+TERM_HEAD = re.compile(r"^(\s*\*\*)(.+?)(\*\*:)")
+
+MINOR_WORDS = {
+    "a",
+    "an",
+    "the",
+    "and",
+    "but",
+    "or",
+    "nor",
+    "yet",
+    "so",
+    "of",
+    "in",
+    "into",
+    "on",
+    "onto",
+    "to",
+    "for",
+    "with",
+    "vs",
+    "vs.",
+    "at",
+    "by",
+    "as",
+    "from",
+    "via",
+}
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 DEFAULT_SCAN_ROOT = REPO_ROOT / "book" / "quarto" / "contents"
@@ -50,7 +79,7 @@ DEFAULT_ALLOWLIST = pathlib.Path(__file__).with_name("footnote_caps_allowlist.tx
 
 
 def load_allowlist(path: pathlib.Path) -> set[str]:
-    """Parse an allowlist file; return the set of footnote ids to skip.
+    """Parse an allowlist file; return ids with intentional lowercase starts.
 
     One id per line (without the surrounding `[^...]`). Content after `#` is
     a comment and is stripped. Blank lines are ignored.
@@ -73,6 +102,8 @@ class Violation:
     prefix: str   # the `[^id]: ` part, reproduced verbatim for --fix
     body: str     # the remainder of the line after the prefix
     first_char: str
+    kind: str = "lowercase_first_letter"
+    detail: str = ""
 
 
 def find_qmd_files(paths: list[pathlib.Path]) -> list[pathlib.Path]:
@@ -109,8 +140,70 @@ def first_meaningful_char(body: str) -> tuple[str, int]:
     return "", -1
 
 
+def _is_protected_term_token(term: str, start: int, end: int, token: str) -> bool:
+    """Return True for case-sensitive tokens that should not be title-cased."""
+    if token.lower() in MINOR_WORDS:
+        return True
+    if len(token) == 1:
+        return True
+    if any(ch.isupper() for ch in token[1:]):
+        return True
+
+    before = term[start - 1] if start > 0 else ""
+    after = term[end] if end < len(term) else ""
+    if (before and before in ".`_/") or (after and after in ".`_/"):
+        return True
+    if before.isdigit() or after.isdigit():
+        return True
+    if before == "-":
+        prefix = term[: start - 1].rsplit("-", 1)[-1]
+        if len(prefix) == 1 and prefix.isupper():
+            return True
+    return False
+
+
+def term_head_case_issues(term: str) -> list[tuple[int, str]]:
+    """Return lowercase significant words in a leading footnote term head.
+
+    Offsets are relative to `term`. Inline code spans and math spans are
+    skipped; mixed-case identifiers and unit/API tokens are treated as
+    intentionally case-sensitive.
+    """
+    issues: list[tuple[int, str]] = []
+    i = 0
+    while i < len(term):
+        ch = term[i]
+        if ch == "`":
+            end = term.find("`", i + 1)
+            i = len(term) if end == -1 else end + 1
+            continue
+        if ch == "$":
+            end = term.find("$", i + 1)
+            i = len(term) if end == -1 else end + 1
+            continue
+        if not ch.isalpha():
+            i += 1
+            continue
+
+        start = i
+        while i < len(term) and term[i].isalpha():
+            i += 1
+        token = term[start:i]
+        if token[0].islower() and not _is_protected_term_token(term, start, i, token):
+            issues.append((start, token))
+    return issues
+
+
+def leading_term_head(body: str) -> tuple[str, int] | None:
+    """Return (term-head, start-offset-in-body) if body starts with `**...**:`."""
+    m = TERM_HEAD.match(body)
+    if not m:
+        return None
+    return m.group(2), m.start(2)
+
+
 def scan_file(path: pathlib.Path, allowlist: set[str]) -> list[Violation]:
-    """Return every lowercase-first-letter footnote in `path`.
+    """Return every capitalization violation in footnotes in `path`.
 
     Footnote ids listed in `allowlist` are skipped.
     """
@@ -125,13 +218,11 @@ def scan_file(path: pathlib.Path, allowlist: set[str]) -> list[Violation]:
         if not m:
             continue
         fn_id, body = m.group(1), m.group(2)
-        if fn_id in allowlist:
-            continue
         prefix_match = FOOTNOTE_DEF_PREFIX.match(line)
         assert prefix_match is not None  # same line, same regex shape
         prefix = prefix_match.group(0)
         ch, _ = first_meaningful_char(body)
-        if ch and ch.islower():
+        if fn_id not in allowlist and ch and ch.islower():
             violations.append(
                 Violation(
                     path=path,
@@ -142,7 +233,36 @@ def scan_file(path: pathlib.Path, allowlist: set[str]) -> list[Violation]:
                     first_char=ch,
                 )
             )
+        term_match = leading_term_head(body)
+        if term_match is not None:
+            term, _ = term_match
+            issues = term_head_case_issues(term)
+            if issues:
+                words = ", ".join(word for _, word in issues)
+                violations.append(
+                    Violation(
+                        path=path,
+                        line_no=line_no,
+                        raw_line=line,
+                        prefix=prefix,
+                        body=body,
+                        first_char=issues[0][1][0],
+                        kind="term_head_case",
+                        detail=words,
+                    )
+                )
     return violations
+
+
+def _fix_term_head_case(body: str) -> str:
+    m = TERM_HEAD.match(body)
+    if not m:
+        return body
+    term = m.group(2)
+    chars = list(term)
+    for offset, _word in term_head_case_issues(term):
+        chars[offset] = chars[offset].upper()
+    return body[: m.start(2)] + "".join(chars) + body[m.end(2):]
 
 
 def apply_fix(v: Violation) -> str:
@@ -150,6 +270,9 @@ def apply_fix(v: Violation) -> str:
 
     Uppercases the first letter while preserving everything else verbatim.
     """
+    if v.kind == "term_head_case":
+        return v.prefix + _fix_term_head_case(v.body)
+
     body = v.body
     m = BOLD_OPENER.match(body)
     head = ""
@@ -193,15 +316,20 @@ def fix_files(violations: list[Violation]) -> None:
 
 def format_report(violations: list[Violation]) -> str:
     if not violations:
-        return "OK: every footnote starts with a capital letter."
-    out = [f"Found {len(violations)} footnote(s) starting with a lowercase letter:", ""]
+        return "OK: footnote capitalization checks passed."
+    out = [f"Found {len(violations)} footnote capitalization issue(s):", ""]
     for v in violations:
         try:
             rel = v.path.relative_to(REPO_ROOT)
         except ValueError:
             rel = v.path
         snippet = v.raw_line if len(v.raw_line) <= 160 else v.raw_line[:157] + "..."
-        out.append(f"  {rel}:{v.line_no}  (first letter: {v.first_char!r})")
+        if v.kind == "term_head_case":
+            out.append(
+                f"  {rel}:{v.line_no}  (term head word(s): {v.detail})"
+            )
+        else:
+            out.append(f"  {rel}:{v.line_no}  (first letter: {v.first_char!r})")
         out.append(f"    {snippet}")
     return "\n".join(out)
 
@@ -225,7 +353,8 @@ def main() -> int:
         default=DEFAULT_ALLOWLIST,
         help=(
             "Path to an allowlist of footnote ids whose first letter is "
-            "intentionally lowercase (brand names, math notation, SI units)."
+            "intentionally lowercase (brand names, math notation, SI units). "
+            "Term-head Title Case still applies to non-protected words."
         ),
     )
     args = parser.parse_args()

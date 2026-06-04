@@ -11,7 +11,25 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
-from ..core.units import ureg, MB, MWh, TB, byte, count, day, minute, param, TRILLION
+from ..core.units import (
+    ureg,
+    GB,
+    GiB,
+    KiB,
+    MB,
+    GFLOPs,
+    MWh,
+    TB,
+    TOPS,
+    USD,
+    byte,
+    count,
+    day,
+    minute,
+    param,
+    second,
+    TRILLION,
+)
 
 _hour = ureg.hour
 _joule = ureg.joule
@@ -46,6 +64,43 @@ class AnomalyModel(Registry):
     Energy = sourced_qty(
         516 * ureg.microjoule, pc.TINYML_ANOMALY_CASE,
         name="Anomaly model energy", description="Per-inference energy of the TinyML anomaly detector.")
+
+
+class OuraSleepStudy(Registry):
+    """Oura Ring sleep-stage case-study anchors."""
+
+    Participants = sourced(
+        106, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-study participants",
+        description="Participants in the Oura Ring sleep-stage validation study.")
+    RecordingNights = sourced(
+        440, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-study nights",
+        description="Recorded nights in the Oura Ring sleep-stage validation study.")
+    RecordingHours = sourced_qty(
+        3444 * _hour, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-study recording hours",
+        description="Combined PSG and wearable-ring recording duration.")
+    CrossValidationFolds = sourced(
+        5, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura sleep-stage cross-validation folds",
+        description="Cross-validation folds used for model evaluation.")
+    AccelOnlyAccuracy = sourced(
+        0.57, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura accelerometer-only sleep-stage accuracy",
+        description="Four-stage sleep classification accuracy for the accelerometer-only baseline.")
+    EnhancedAccuracy = sourced(
+        0.79, pc.OURA_SLEEP_STAGE_STUDY,
+        name="Oura enhanced sleep-stage accuracy",
+        description="Four-stage sleep classification accuracy for the enhanced multi-sensor model.")
+    PsgScorerAgreementLow = sourced(
+        0.82, pc.OURA_SLEEP_STAGE_STUDY,
+        name="PSG inter-scorer agreement low",
+        description="Lower bound of the expert PSG inter-scorer agreement band used as a practical ceiling.")
+    PsgScorerAgreementHigh = sourced(
+        0.83, pc.OURA_SLEEP_STAGE_STUDY,
+        name="PSG inter-scorer agreement high",
+        description="Upper bound of the expert PSG inter-scorer agreement band used as a practical ceiling.")
 
 
 class ClinicalImaging(Registry):
@@ -159,6 +214,416 @@ class StorageTrainingCorpus(Registry):
     )
 
 
+class ModelLoading(Registry):
+    """Reusable cold-start model-loading scenario anchors."""
+
+    StableDiffusionV15CheckpointSize = sourced_qty(
+        5 * GB,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="Stable Diffusion v1.5 serialized checkpoint size",
+        description="Representative checkpoint footprint for cold-start model-loading examples.",
+    )
+    StableDiffusionV15PickleLoadTime = sourced_qty(
+        15 * ureg.second,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="Stable Diffusion v1.5 Pickle load time",
+        description="Reference cold-start load time for the object-reconstruction path.",
+    )
+    StableDiffusionV15SafetensorsLoadTime = sourced_qty(
+        0.5 * ureg.second,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="Stable Diffusion v1.5 Safetensors load time",
+        description="Reference cold-start load time for the memory-mapped tensor path.",
+    )
+    PcieSwapReferenceModelSize = sourced_qty(
+        10 * GB,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="PCIe model-swap reference model size",
+        description="Reference model footprint for host-to-device model-swap latency examples.",
+    )
+
+
+class ServingProfiles(Registry):
+    """Reusable serving-shape profiles for performance-engineering examples."""
+
+    H100VendorMemoryBudget = sourced_qty(
+        80 * GB,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="H100 vendor-facing serving memory budget",
+        description="Vendor-facing H100 memory budget used for decimal-GB serving capacity arithmetic.",
+    )
+    PrecisionDividendTensorParallelDegree = sourced(
+        8,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Precision-dividend tensor-parallel degree",
+        description="H100 tensor-parallel degree for the 70B LLM KV-cache precision-dividend example.",
+    )
+    PrecisionDividendContextLengthTokens = sourced(
+        4096,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Precision-dividend context length",
+        description="Reference context length in tokens for the 70B LLM KV-cache precision-dividend example.",
+    )
+    PrecisionDividendGpuMemoryBudget = H100VendorMemoryBudget
+    PrecisionDividendBaselinePolicyBatchLimit = sourced(
+        4,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Baseline policy batch limit",
+        description="Baseline maximum admitted batch size in the 70B LLM serving case study.",
+    )
+    PrecisionDividendOptimizedPolicyBatchLimit = sourced(
+        32,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Optimized policy batch limit",
+        description="Post-precision maximum admitted batch size in the 70B LLM serving case study.",
+    )
+    PrecisionDividendSpeculationBatchThreshold = sourced(
+        16,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Speculation policy batch threshold",
+        description="Batch-size threshold below which the case-study policy enables speculative decoding.",
+    )
+    HeterogeneousRoutingH100Servers = sourced(
+        10,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="Heterogeneous routing H100 servers",
+        description="Number of H100 serving servers in the weighted-routing example.",
+    )
+    HeterogeneousRoutingA100Servers = sourced(
+        20,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="Heterogeneous routing A100 servers",
+        description="Number of A100 serving servers in the weighted-routing example.",
+    )
+    HeterogeneousRoutingH100CapacityQps = sourced(
+        1000,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="H100 per-server routing capacity",
+        description="Workload-specific per-server QPS capacity for H100 routing examples.",
+    )
+    HeterogeneousRoutingA100CapacityQps = sourced(
+        600,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="A100 per-server routing capacity",
+        description="Workload-specific per-server QPS capacity for A100 routing examples.",
+    )
+    HeterogeneousRoutingTargetQps = sourced(
+        15000,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="Heterogeneous routing target traffic",
+        description="Total incoming QPS target for the H100/A100 weighted-routing example.",
+    )
+    CircuitBreakerErrorThreshold = sourced(
+        0.50,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker error threshold",
+        description="Reference error-rate threshold for opening a GPU inference circuit breaker.",
+    )
+    CircuitBreakerLatencyThresholdMultiple = sourced(
+        2,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker latency threshold multiple",
+        description="Reference latency multiple over baseline for opening a GPU inference circuit breaker.",
+    )
+    CircuitBreakerOpenDuration = sourced_qty(
+        30 * ureg.second,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker open duration",
+        description="Reference recovery interval before probing a half-open GPU inference circuit breaker.",
+    )
+    CircuitBreakerHalfOpenRequests = sourced(
+        5,
+        pc.CIRCUIT_BREAKER_SERVING_PROFILE,
+        name="Circuit-breaker half-open probe requests",
+        description="Reference number of probe requests allowed while half-open.",
+    )
+
+
+class CheckpointArchetypes(Registry):
+    """Reusable checkpoint-size scenario anchors for fault-tolerance examples."""
+
+    MixedPrecisionOptimizerBytesPerParameter = sourced_qty(
+        12 * (byte / param),
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Mixed-precision optimizer checkpoint bytes per parameter",
+        description="Reference checkpoint footprint for FP32 master weights plus optimizer state.",
+    )
+    Dense20BTransformerCheckpointSize = sourced_qty(
+        240 * GB,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="20B dense transformer checkpoint size",
+        description="Representative checkpoint footprint for a 20B dense transformer class model.",
+    )
+    EmbeddingHeavyRecommenderCheckpointSize = sourced_qty(
+        4 * TB,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Embedding-heavy recommender checkpoint size",
+        description="Representative checkpoint footprint for an embedding-heavy recommender.",
+    )
+    MediumVisionTransformerCheckpointSize = sourced_qty(
+        1.2 * GB,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Medium vision-transformer checkpoint size",
+        description="Representative checkpoint footprint for a medium vision transformer.",
+    )
+
+
+class EdgeDeviceSpectrum(Registry):
+    """Reusable device-class range endpoints for edge-learning heterogeneity."""
+
+    TinyRamLow = sourced_qty(
+        32 * KiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Tiny sensor-class RAM endpoint",
+        description="Lower memory endpoint used for edge device-spectrum examples.",
+    )
+    MicrocontrollerSram = sourced_qty(
+        256 * KiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Microcontroller SRAM endpoint",
+        description="Representative microcontroller SRAM endpoint used in memory-wall examples.",
+    )
+    MicrocontrollerSramHigh = sourced_qty(
+        2 * MB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Microcontroller SRAM upper endpoint",
+        description="Upper microcontroller SRAM endpoint used in memory hierarchy examples.",
+    )
+    ArduinoNano33BleFlash = sourced_qty(
+        1 * MB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Arduino Nano 33 BLE Sense flash",
+        description="Flash storage anchor used in the Arduino memory-wall example.",
+    )
+    FlagshipSmartphoneRamHigh = sourced_qty(
+        16 * GiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Flagship smartphone RAM endpoint",
+        description="Upper mobile memory endpoint used for edge device-spectrum examples.",
+    )
+    CortexMClock = sourced_qty(
+        48 * ureg.megahertz,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Cortex-M-class clock endpoint",
+        description="Representative Cortex-M-class clock endpoint used for device-spectrum prose.",
+    )
+    MobileClassClock = sourced_qty(
+        3 * ureg.gigahertz,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Mobile-class CPU clock endpoint",
+        description="Representative mobile-class CPU clock endpoint used for device-spectrum prose.",
+    )
+    TinyCpuThroughputMips = sourced(
+        10,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Tiny CPU throughput endpoint",
+        description="Representative MIPS endpoint for tiny Cortex-M-class processors.",
+    )
+    MobileCpuThroughputMips = sourced(
+        100_000,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Mobile CPU throughput endpoint",
+        description="Representative MIPS endpoint for high-end mobile-class processors.",
+    )
+    SensorPowerLow = sourced_qty(
+        10 * ureg.microwatt,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Tiny sensor power endpoint",
+        description="Lower power endpoint used for edge device-spectrum examples.",
+    )
+    MicrocontrollerBoardCost = sourced_qty(
+        10 * USD,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Microcontroller board cost endpoint",
+        description="Representative low-cost microcontroller board price used in hardware-spectrum examples.",
+    )
+    LowEndEdgeRam = sourced_qty(
+        512 * MB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Low-end edge RAM target",
+        description="Representative RAM envelope for low-end edge deployment pitfall examples.",
+    )
+    LowEndEdgeCompute = sourced_qty(
+        1 * (GFLOPs / second),
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Low-end edge compute target",
+        description="Representative compute envelope for low-end edge deployment pitfall examples.",
+    )
+    FlagshipPhonePowerHigh = sourced_qty(
+        5 * ureg.watt,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Flagship phone power endpoint",
+        description="Upper mobile power endpoint used for edge device-spectrum examples.",
+    )
+    IotMicrocontrollerComputeLow = sourced_qty(
+        0.03 * TOPS,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="IoT microcontroller compute endpoint",
+        description="Representative low-end compute endpoint for federated heterogeneity examples.",
+    )
+
+
+class EdgeAdaptationTierProfile(Registry):
+    """Reusable device-tier assumptions for on-device adaptation examples."""
+
+    WearablePersonalizationMemory = sourced_qty(
+        500 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Wearable personalization memory",
+        description="Reference wearable memory envelope for impossible-full-finetuning examples.",
+    )
+    TinyWearableRam = sourced_qty(
+        1 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Tiny wearable RAM",
+        description="Severely constrained wearable/sensor RAM envelope for adaptation-strategy selection.",
+    )
+    BudgetPhoneRam = sourced_qty(
+        4 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget phone RAM",
+        description="Reference budget smartphone total memory in edge adaptation examples.",
+    )
+    BudgetPhoneAvailableLow = sourced_qty(
+        1 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget phone ML-available memory low",
+        description="Lower ML-available memory envelope after OS and background-process overhead.",
+    )
+    BudgetPhoneAvailableHigh = sourced_qty(
+        2 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget phone ML-available memory high",
+        description="Upper ML-available memory envelope after OS and background-process overhead.",
+    )
+    BudgetDeviceMemoryLimit = sourced_qty(
+        1 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget device adaptation memory limit",
+        description="Reference budget-device memory limit for lightweight personalization examples.",
+    )
+    BudgetKeyboardPhoneRam = sourced_qty(
+        2 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget keyboard phone RAM",
+        description="Budget-device RAM anchor in the mobile-keyboard heterogeneity example.",
+    )
+    IotMemoryLow = sourced_qty(
+        64 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="IoT memory envelope low",
+        description="Lower memory envelope for IoT embedded systems in edge adaptation examples.",
+    )
+    IotMemoryHigh = sourced_qty(
+        1 * GiB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="IoT memory envelope high",
+        description="Upper memory envelope for IoT embedded systems in edge adaptation examples.",
+    )
+    KeyboardGradientMemoryLow = sourced_qty(
+        50 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard adaptation gradient memory low",
+        description="Lower memory envelope for a compact keyboard-model gradient update.",
+    )
+    KeyboardGradientMemoryHigh = sourced_qty(
+        100 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard adaptation gradient memory high",
+        description="Upper memory envelope for a compact keyboard-model gradient update.",
+    )
+    KeyboardBackgroundBudgetLow = sourced_qty(
+        200 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard background app budget low",
+        description="Lower background-app memory budget for smartphone keyboard adaptation.",
+    )
+    KeyboardBackgroundBudgetHigh = sourced_qty(
+        300 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard background app budget high",
+        description="Upper background-app memory budget for smartphone keyboard adaptation.",
+    )
+    KeyboardGradientExample = sourced_qty(
+        75 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard adaptation gradient example",
+        description="Representative gradient-update memory used for the keyboard memory-share example.",
+    )
+    KeyboardBackgroundBudgetExample = sourced_qty(
+        300 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Keyboard background app budget example",
+        description="Representative background-app memory budget used for the keyboard memory-share example.",
+    )
+    VoiceAssistantFleetDevices = sourced(
+        50_000_000,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Voice assistant fleet devices",
+        description="Reference fleet size for tiered on-device voice-assistant adaptation.",
+    )
+    FlagshipFleetShare = sourced(
+        0.20,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Flagship device fleet share",
+        description="Flagship-device share in the tiered adaptation profile.",
+    )
+    MidTierFleetShare = sourced(
+        0.60,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Mid-tier device fleet share",
+        description="Mid-tier device share in the tiered adaptation profile.",
+    )
+    BudgetFleetShare = sourced(
+        0.20,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget device fleet share",
+        description="Budget-device share in the tiered adaptation profile.",
+    )
+    FlagshipLoraRank = sourced(
+        32,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Flagship LoRA adapter rank",
+        description="Reference LoRA rank for flagship-device adaptation.",
+    )
+    MidTierLoraRank = sourced(
+        16,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Mid-tier LoRA adapter rank",
+        description="Reference LoRA rank for mid-tier-device adaptation.",
+    )
+    BudgetReplayBuffer = sourced_qty(
+        10 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Budget device replay buffer",
+        description="Reference replay-buffer budget for constrained edge devices.",
+    )
+    FlagshipReplayBuffer = sourced_qty(
+        100 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Flagship device replay buffer",
+        description="Reference replay-buffer budget for flagship edge devices.",
+    )
+    FewShotInteractionsLow = sourced(
+        5,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Few-shot personalization interactions low",
+        description="Lower interaction count for few-shot personalization examples.",
+    )
+    FewShotInteractionsHigh = sourced(
+        10,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Few-shot personalization interactions high",
+        description="Upper interaction count for few-shot personalization examples.",
+    )
+    FederatedLoraUpdate = sourced_qty(
+        50 * MB,
+        pc.EDGE_ADAPTATION_TIER_PROFILE,
+        name="Federated LoRA adapter update",
+        description="Reference LoRA adapter update payload for mobile federated coordination.",
+    )
+
+
 class MobilePower(Registry):
     """Mobile/edge device + workload power-envelope reference figures."""
 
@@ -204,11 +669,17 @@ class ReferenceStats(Registry):
 
     Workloads = Workloads
     AnomalyModel = AnomalyModel
+    OuraSleepStudy = OuraSleepStudy
     ClinicalImaging = ClinicalImaging
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
     StorageTrainingCorpus = StorageTrainingCorpus
+    ModelLoading = ModelLoading
+    ServingProfiles = ServingProfiles
+    CheckpointArchetypes = CheckpointArchetypes
+    EdgeDeviceSpectrum = EdgeDeviceSpectrum
+    EdgeAdaptationTierProfile = EdgeAdaptationTierProfile
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
 

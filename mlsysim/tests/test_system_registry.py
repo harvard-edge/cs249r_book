@@ -52,6 +52,11 @@ def test_reliability_node_composite_profile():
     assert Systems.Reliability.DgxNodeComposite.mttf_hours == pytest.approx(1_000)
     assert Systems.Reliability.NodeRecoveryLowMin == pytest.approx(10)
     assert Systems.Reliability.NodeRecoveryHighMin == pytest.approx(30)
+    recovery = Systems.Reliability.Recovery
+    assert float(recovery.detection_time_s) == pytest.approx(60)
+    assert float(recovery.restart_time_s) == pytest.approx(180)
+    assert float(recovery.warmup_time_s) == pytest.approx(120)
+    assert float(recovery.checkpoint_write_bw_gbs) == pytest.approx(100)
 
 
 def test_storage_random_access_profiles():

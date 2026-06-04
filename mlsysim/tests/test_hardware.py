@@ -64,3 +64,13 @@ def test_lab_track_hardware_profiles():
     assert robotaxi.memory.capacity.to("GB").magnitude == pytest.approx(32)
     assert robotaxi.tdp.to("W").magnitude == pytest.approx(60)
     assert robotaxi.metadata.provenance.kind.value == "estimate"
+
+
+def test_memory_tech_bandwidth_tiers():
+    """Memory-interface bandwidth tiers live in Hardware.Tech.Memory."""
+    from mlsysim.core.constants import GB, second
+
+    assert Hardware.Tech.Memory.DDR4_3200.bandwidth.m_as(GB / second) == pytest.approx(51.2)
+    assert Hardware.Tech.Memory.HBM2.bandwidth.m_as(GB / second) == pytest.approx(900)
+    assert Hardware.Tech.Memory.HBM3.bandwidth.m_as(GB / second) == pytest.approx(1600)
+    assert Hardware.Tech.Memory.GDDR6X.bandwidth.m_as(GB / second) == pytest.approx(760)

@@ -80,7 +80,7 @@ In the Fleet Stack\index{Fleet Stack} shown in @fig-fleet-stack, network fabrics
 ![](images/svg/five-level-model.svg)
 :::
 
-This chapter wires those nodes together, because at scale, communication cost dominates computation cost. The **law of distributed efficiency** in @eq-iron-law-scale makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric constrains every layer above it in the stack by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
+This chapter wires those nodes together, because at scale, communication cost dominates computation cost. The **law of distributed efficiency** in @eq-fleet-law makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric constrains every layer above it in the stack by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
 
 The physical network fabric exists to carry three fundamental collective communication patterns. An AllReduce\index{AllReduce}[^fn-allreduce-forward] sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training. An AllGather[^fn-collectives-forward] collects different model portions so that every GPU can reconstruct the full model state. An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism[^fn-moe-forward]. @Sec-collective-communication covers the *algorithms* that orchestrate these patterns; this chapter covers the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
 
@@ -272,6 +272,8 @@ Each of these inversions traces back to a specific physical or protocol constrai
 - **Level 4: Fabric Behavior** (@sec-network-fabrics-behavior). Congestion control mechanisms such as DCTCP-style ECN response, DCQCN, and HPCC, along with adaptive routing and incast behavior, determine whether theoretical bandwidth translates to realized throughput [@alizadeh2010; @zhu2015; @li2019].
 - **Level 5: Cluster Design** (@sec-network-fabrics-cluster). Production supercomputers like the NVIDIA SuperPOD and Meta Grand Teton integrate these layers into a unified Gradient Bus.
 
+The levels are not an inventory of networking topics; they are the causal chain that turns synchronous ML traffic into infrastructure requirements. Large gradient messages first stress the wire and transport, then force topology choices that preserve bisection bandwidth, then expose congestion behavior that ordinary enterprise networks can hide, and finally determine whether the whole cluster behaves like one training machine.
+
 The remainder of this chapter ascends this stack, starting from the copper and glass at the bottom.
 
 ## Level 1: Wire and Link {#sec-network-fabrics-wire-link}
@@ -302,7 +304,7 @@ Before analyzing protocols and topologies, we must understand the physical mediu
 
 ::: {#dfn-network-fabrics-pam4-signaling .callout-definition title="PAM4 signaling"}
 
-***PAM4 Signaling***\index{PAM4}\index{PAM4 Signaling!definition} is an electrical modulation scheme used in high-speed ML cluster fabrics that encodes two bits per symbol period with four distinct voltage levels, doubling the data rate achievable over a given physical medium without requiring a higher symbol rate.
+***PAM4 Signaling***\index{PAM4 Signaling!definition}\index{PAM4} is an electrical modulation scheme used in high-speed ML cluster fabrics that encodes two bits per symbol period with four distinct voltage levels, doubling the data rate achievable over a given physical medium without requiring a higher symbol rate.
 
 1.  **Significance (quantitative)**: PAM4 enables 400 Gb/s and 800 Gb/s link speeds that sustain the $\text{BW}$ required for large-scale gradient synchronization. However, the reduced gap between voltage levels increases susceptibility to noise, requiring Forward Error Correction (FEC), typically Reed-Solomon RS(544,514), that adds 100–200 ns of irreducible processing latency per hop. Across a three-tier fat-tree (3 hops each way), FEC alone contributes 600–1,200 ns of fixed latency to every packet, setting a hard lower bound on the $\alpha$ term in the communication cost model.
 2.  **Distinction (durable)**: Unlike NRZ (Non-Return-to-Zero) binary signaling, which uses only two voltage levels and offers better noise margin but is limited to half the data rate per lane, PAM4 trades signal-to-noise ratio for bandwidth density—the same copper trace carries twice the data at the cost of requiring FEC at every port.
@@ -390,7 +392,7 @@ Large-scale training requires sustained, synchronized bulk transfers. A single A
 
 ::: {#dfn-network-fabrics-remote-direct-memory-access-rdma .callout-definition title="Remote direct memory access (RDMA)"}
 
-***Remote Direct Memory Access (RDMA)***\index{RDMA}\index{RDMA!definition} is a networking technology used in ML training fabrics that allows one machine to read or write the memory of another machine directly, bypassing the operating system kernel and CPU of both endpoints by offloading transport processing to the network interface card.
+***Remote Direct Memory Access (RDMA)***\index{RDMA!definition}\index{RDMA} is a networking technology used in ML training fabrics that allows one machine to read or write the memory of another machine directly, bypassing the operating system kernel and CPU of both endpoints by offloading transport processing to the network interface card.
 
 1.  **Significance (quantitative)**: RDMA reduces end-to-end message latency from the 50–100 μs typical of kernel TCP to approximately 1–2 μs, cutting the $L_{\text{lat}}$ term in the iron law by 25--50$\times$. For a 175B-parameter model exchanging 350 GB of gradient data across `{python} NetworkTransportClusterRecap.n_gpus_str`, RDMA also eliminates 700 GB of redundant memory copies per step by allowing the NIC to read GPU memory directly without staging through host RAM (GPUDirect RDMA).
 2.  **Distinction (durable)**: Unlike traditional TCP/IP, where the CPU processes every packet through the kernel network stack (consuming tens of CPU cores to saturate a 400 Gb/s link), RDMA offloads the entire transport to dedicated NIC hardware, freeing the CPU to orchestrate computation rather than move data.
@@ -457,7 +459,7 @@ Consider a 2,048-GPU training cluster that will run both large language model tr
 
 \index{Alpha-Beta Model}
 
-Protocol choice determines whether the fabric can behave as a lossless medium; performance modeling then asks how fast that medium can carry a given message. The α-β model\index{Alpha-Beta Model} (formally defined in @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4) decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $\alpha$ is the fixed startup latency and $\beta$ is the sustained bandwidth [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers; here we establish the decomposition and apply it to the fabric. Topology choice directly shifts both parameters: a fat-tree minimizes $\alpha$ by providing short equal-cost paths, while a ring amplifies $\alpha$ with cluster size as messages traverse $\lfloor H/2 \rfloor$ hops.
+Protocol choice determines whether the fabric can behave as a lossless medium; performance modeling then asks how fast that medium can carry a given message. The α-β model\index{Alpha-Beta Model} decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $\alpha$ is the fixed startup latency and $\beta$ is the sustained bandwidth [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers; @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4 later applies the same decomposition to collective algorithms. Topology choice directly shifts both parameters: a fat-tree minimizes $\alpha$ by providing short equal-cost paths, while a ring amplifies $\alpha$ with cluster size as messages traverse $\lfloor H/2 \rfloor$ hops.
 
 ```{python}
 #| echo: false
@@ -529,9 +531,7 @@ The model reveals two regimes:
 1. **Latency-dominated $(n < \alpha\beta)$**: Transfer time is dominated by the startup cost $\alpha$. Small control messages and pipeline bubbles fall here.
 2. **Bandwidth-dominated $(n > \alpha\beta)$**: Transfer time scales with $n/\beta$. Gradient AllReduce typically falls here.
 
-For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta \approx$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n = \alpha\beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency.
-
-The crossover point separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding link bandwidth to raise $\beta$. Applying the model to the concrete message sizes that our 175B training job generates on every iteration makes this distinction actionable.
+For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta \approx$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n = \alpha\beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency. That crossover separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding link bandwidth to raise $\beta$. Applying the model to the concrete message sizes that our 175B training job generates on every iteration makes this distinction actionable.
 
 ::: {#nbk-network-fabrics-alpha-beta-crossover .callout-notebook title="The alpha-beta crossover"}
 
@@ -1053,7 +1053,7 @@ However, scale imposes a latency tax. Typical **hop counts**\index{Hop Count} ar
 
 ### Rail-optimized topology {#sec-network-fabrics-rail-optimized}
 
-As @fig-rail-optimized-cabling shows, in modern ML nodes GPUs are partitioned into "Rails" corresponding to their PCIe slot position.
+Rail-optimized topology begins from the communication pattern rather than from a generic switch hierarchy. In modern ML nodes, GPUs can be grouped by local slot position into rails; @fig-rail-optimized-cabling makes that physical cabling pattern concrete.
 
 ::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**: In modern ML nodes (for example, DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that data-parallel AllReduce traffic—which synchronizes between corresponding GPUs—never competes for $\\text{BW}_{\\text{bisect}}$ with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, etc."}
 
@@ -1061,9 +1061,7 @@ As @fig-rail-optimized-cabling shows, in modern ML nodes GPUs are partitioned in
 
 :::
 
-@Fig-rail-optimized-cabling shows the wiring pattern: corresponding GPUs across nodes (GPU 0 to GPU 0, GPU 1 to GPU 1) connect through dedicated rail switches rather than a shared ToR switch.
-
-In distributed training, data parallelism\index{Data Parallelism} creates a deterministic and highly stratified communication pattern that standard topologies fail to exploit. When tensor-parallel groups stay inside each node, the same local GPU rank in every replica owns the corresponding shard of the model. GPU 0 on one node therefore synchronizes that shard's gradients with GPU 0 on other nodes, but rarely with GPU 1. A **rail-optimized topology**\index{Rail-Optimized Topology!definition} physically hardwires this logic by isolating these same-rank communication paths into dedicated networks. Instead of connecting all 8 GPUs in a node to a single ToR switch, the network connects all GPU 0s across the entire cluster to a dedicated "Rail 0" switch fabric, all GPU 1s to "Rail 1," and so on.
+The wiring pattern connects corresponding GPUs across nodes (GPU 0 to GPU 0, GPU 1 to GPU 1) through dedicated rail switches rather than a shared ToR switch. This matters because data parallelism\index{Data Parallelism} creates a deterministic and highly stratified communication pattern that standard topologies fail to exploit. When tensor-parallel groups stay inside each node, each replica assigns the corresponding model shard to the same local GPU rank. A rank is the worker or GPU index assigned by the distributed runtime, so GPU 0 on one node synchronizes that shard's gradients with GPU 0 on other nodes, but rarely with GPU 1. A **rail-optimized topology**\index{Rail-Optimized Topology!definition} physically hardwires this logic by isolating these same-rank communication paths into dedicated networks. Instead of connecting all 8 GPUs in a node to a single ToR switch, the network connects all GPU 0s across the entire cluster to a dedicated "Rail 0" switch fabric, all GPU 1s to "Rail 1," and so on.
 
 A simple hop-count estimate shows the payoff.
 
@@ -1110,8 +1108,8 @@ class RailLatency:
 **Math**:
 Communication latency ($\alpha$) is proportional to the number of switch hops.
 
-1. **Standard Latency**\index{Latency!standard}: 2 hops $\times$ `{python} RailLatency.rol_hop_lat_us_str` = 1.2 μs.
-2. **Rail-Optimized**: 1 hop $\times$ `{python} RailLatency.rol_hop_lat_us_str` = 0.6 μs.
+1. **Standard latency**\index{Latency!standard}: 2 hops $\times$ `{python} RailLatency.rol_hop_lat_us_str` = 1.2 μs.
+2. **Rail-optimized**: 1 hop $\times$ `{python} RailLatency.rol_hop_lat_us_str` = 0.6 μs.
 3. **Result**: `{python} RailLatency.rol_speedup_mult_str` lower latency.
 
 **Systems insight**: For synchronous data-parallel AllReduce (which the training step waits on every iteration), a 2$\times$ latency reduction is the difference between 80 percent and 95 percent scaling efficiency. The scaling efficiency bound (Principle \ref{pri-scaling-efficiency}) explains why this matters: physically aligning the network to the model's same-rank traffic pattern eliminates the "Spine Tax" for the most bandwidth-hungry communication. Archetype A clusters achieve their performance because they are structured, not merely large.
@@ -1556,7 +1554,7 @@ class NextGenLinkDensity:
 
 Higher port rates matter because they attack hop count as well as raw bandwidth. XDR InfiniBand pushes `{python} NextGenLinkDensity.xdr_port_gbit_per_s_str` per port and 800GbE pushes `{python} NextGenLinkDensity.eth_800g_port_gbit_per_s_str` per port, while `{python} NextGenLinkDensity.eth_1_6t_port_tbps_s_str` Ethernet switch silicon pushes aggregate capacity to `{python} NextGenLinkDensity.switch_capacity_tbps_s_str`. A single `{python} NextGenLinkDensity.eth_1_6t_port_tbps_s_str` port delivers the bandwidth of `{python} NextGenLinkDensity.port_ratio_str` 400G ports. The increased density allows architects to flatten the topology: a cluster that previously required three tiers of switches can now be served by two, halving the transceiver count and reducing tail latency by removing an entire hop of switching and FEC overhead.
 
-Finally, **CXL (Compute Express Link)**\index{CXL} addresses the resource-ratio side of the same scaling problem by blurring the boundary between network and memory bus. While currently an intra-rack technology, CXL 3.0 enables memory pooling\index{Memory!pooling}, allowing a GPU in one chassis to access host memory in another with load/store semantics rather than RDMA message passing. Memory pooling suggests a future where the rigid distinction between intra-node NVLink domains and inter-node InfiniBand domains dissolves into a unified memory fabric, allowing the scheduler to compose virtual nodes of arbitrary size dynamically.
+Finally, CXL (Compute Express Link)\index{CXL} addresses the resource-ratio side of the same scaling problem by blurring the boundary between network and memory bus. While currently an intra-rack technology, CXL 3.0 enables memory pooling\index{Memory!pooling}, allowing a GPU in one chassis to access host memory in another with load/store semantics rather than RDMA message passing. Memory pooling suggests a future where the rigid distinction between intra-node NVLink domains and inter-node InfiniBand domains dissolves into a unified memory fabric, allowing the scheduler to compose virtual nodes of arbitrary size dynamically.
 
 The physical fabric and production architectures established in the preceding sections leave a practical challenge unaddressed: sharing this expensive infrastructure across multiple teams and workloads without sacrificing the predictable performance that training demands.
 
@@ -1576,7 +1574,7 @@ class IbNdrVirtualizationRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
-Cloud providers deliver bare-metal RDMA performance to virtualized GPU instances through **Single Root I/O Virtualization (SR-IOV)**\index{SR-IOV}, a standard that allows a physical NIC to present itself as multiple independent **Virtual Functions (VFs)**\index{Virtual Function}. Each VF has its own hardware queues, doorbell registers, and DMA mappings. By assigning a dedicated VF to each VM or container, the hardware creates a direct path for DMA operations that bypasses the host kernel and hypervisor completely. The passthrough architecture is critical for ML training because it reduces virtualization overhead to negligible levels, typically adding less than 2 percent latency compared to bare metal. In a Kubernetes environment, the RDMA device plugin manages this resource allocation, exposing available VFs to the scheduler so that pods can request guaranteed network access just as they request GPU cores.
+Cloud providers deliver bare-metal RDMA performance to virtualized GPU instances through **Single Root I/O Virtualization (SR-IOV)**\index{SR-IOV!definition}, a standard that allows a physical NIC to present itself as multiple independent **Virtual Functions (VFs)**\index{Virtual Function!definition}. Each VF has its own hardware queues, doorbell registers, and DMA mappings. By assigning a dedicated VF to each VM or container, the hardware creates a direct path for DMA operations that bypasses the host kernel and hypervisor completely. The passthrough architecture is critical for ML training because it reduces virtualization overhead to negligible levels, typically adding less than 2 percent latency compared to bare metal. The cluster-management consequence is immediate: VFs become allocatable network resources, so placement logic must reserve NIC capacity and QoS policy alongside GPUs rather than treating the network as an unbounded shared pool.
 
 However, hardware-level isolation still needs explicit bandwidth policy. SR-IOV exposes multiple VFs that share the NIC's physical resources; administrators can add per-VF or per-group QoS policies to cap or guarantee bandwidth, such as assigning eight VFs 50 Gb/s each on a `{python} IbNdrVirtualizationRecap.ib_ndr_gbit_per_s_str` NIC. For our 175B-parameter model training on a multi-tenant cluster, that configured partitioning can prevent a neighboring tenant from stealing bandwidth, but it also enforces a hard ceiling on peak throughput. The training job must be architected to operate within this slice, as no amount of software optimization can burst beyond the configured VF limit.
 
@@ -1880,11 +1878,11 @@ The network fabric now binds compute nodes into a fleet, and every byte of gradi
 
 :::
 
-[^fn-allreduce-forward]: **AllReduce**: A collective operation that sums data from all nodes and distributes the result back to all nodes. @sec-collective-communication develops the mathematical cost models for ring and tree-based AllReduce implementations. \index{AllReduce!forward reference}
+[^fn-allreduce-forward]: **AllReduce**: A collective operation that sums data from all nodes and distributes the result back to all nodes. @Sec-collective-communication develops the mathematical cost models for ring and tree-based AllReduce implementations. \index{AllReduce!forward reference}
 
 [^fn-collectives-forward]: **Collective Primitives**: Higher-level communication patterns involving groups of nodes. While @sec-collective-communication derives the algorithms for AllGather, ReduceScatter, and AllToAll, this chapter addresses the physical fabric requirements ($\text{BW}_{\text{bisect}}$, switch radix) that enable them at scale. \index{Collective Primitives!forward reference}
 
-[^fn-moe-forward]: **Mixture-of-Experts (MoE)**: An architecture that activates only a subset of model "experts" per input, necessitating AllToAll communication. @sec-inference-scale-expert-parallelism-moe-models-55f6 examines how MoE decouples model capacity from per-token compute cost ($O$). \index{MoE!forward reference}
+[^fn-moe-forward]: **Mixture-of-Experts (MoE)**: An architecture that activates only a subset of model "experts" per input, necessitating AllToAll communication. @Sec-inference-scale-expert-parallelism-moe-models-55f6 examines how MoE decouples model capacity from per-token compute cost ($O$). \index{MoE!forward reference}
 
 ::: { .quiz-end }
 :::

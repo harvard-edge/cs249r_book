@@ -41,7 +41,7 @@ A model trained in a data center encounters a world it has never seen when deplo
 - Select model adaptation strategies (weight freezing, LoRA, sparse updates) by comparing memory footprints, expressivity, and convergence for specific device capabilities
 - Apply data-efficiency techniques (few-shot learning, experience replay, contrastive learning) to learn from limited local data without catastrophic forgetting
 - Design federated learning systems that aggregate privacy-preserving updates across heterogeneous devices while managing non-IID data, communication efficiency, and stragglers
-- Integrate on-device learning into production MLOps by implementing device-aware deployment, distributed validation, and privacy-preserving monitoring across heterogeneous populations
+- Explain the operational controls needed for on-device learning: device-aware deployment, distributed validation, privacy-preserving monitoring, and rollback across heterogeneous populations
 
 :::
 
@@ -51,6 +51,232 @@ from mlsysim import *
 from mlsysim.core.constants import *
 #| label: edge-intelligence-setup
 from mlsysim.fmt import fmt, check
+```
+
+```{python}
+#| echo: false
+#| label: edge-device-spectrum-anchors
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EDGE DEVICE SPECTRUM (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Reusable tiny-to-mobile endpoints for heterogeneity prose.
+# │
+# │ Goal: Keep edge device-class range anchors sourced from MLSysIM.
+# │ Show: Memory, clock, throughput, compute, and power endpoints.
+# │ How: Pull ReferenceStats.EdgeDeviceSpectrum values and format for prose.
+# │
+# │ Exports: EdgeDeviceSpectrum.tiny_ram_kb_str,
+# │          EdgeDeviceSpectrum.mcu_sram_kb_str,
+# │          EdgeDeviceSpectrum.mcu_sram_high_mb_str,
+# │          EdgeDeviceSpectrum.arduino_flash_mb_str,
+# │          EdgeDeviceSpectrum.flagship_ram_gb_str,
+# │          EdgeDeviceSpectrum.memory_ratio_mult_str,
+# │          EdgeDeviceSpectrum.tiny_clock_mhz_str,
+# │          EdgeDeviceSpectrum.mobile_clock_ghz_str,
+# │          EdgeDeviceSpectrum.tiny_cpu_mips_str,
+# │          EdgeDeviceSpectrum.mobile_cpu_mips_str,
+# │          EdgeDeviceSpectrum.cpu_throughput_ratio_mult_str,
+# │          EdgeDeviceSpectrum.sensor_power_uw_str,
+# │          EdgeDeviceSpectrum.phone_power_w_str,
+# │          EdgeDeviceSpectrum.power_ratio_mult_str,
+# │          EdgeDeviceSpectrum.iot_compute_tops_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import (
+    check,
+    fmt_int,
+    fmt_memory_capacity,
+    fmt_multiple,
+    fmt_ops_rate,
+    fmt_power,
+    fmt_qty,
+    fmt_rate,
+)
+
+class EdgeDeviceSpectrum:
+    """Reusable device-class endpoints for edge-learning prose."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    profile = ReferenceStats.EdgeDeviceSpectrum
+    tiny_ram = profile.TinyRamLow
+    mcu_sram = profile.MicrocontrollerSram
+    mcu_sram_high = profile.MicrocontrollerSramHigh
+    arduino_flash = profile.ArduinoNano33BleFlash
+    flagship_ram = profile.FlagshipSmartphoneRamHigh
+    tiny_clock = profile.CortexMClock
+    mobile_clock = profile.MobileClassClock
+    tiny_cpu_mips = float(profile.TinyCpuThroughputMips)
+    mobile_cpu_mips = float(profile.MobileCpuThroughputMips)
+    sensor_power = profile.SensorPowerLow
+    phone_power = profile.FlagshipPhonePowerHigh
+    iot_compute = profile.IotMicrocontrollerComputeLow
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    memory_ratio = (flagship_ram / mcu_sram).to("").magnitude
+    endpoint_memory_ratio = (flagship_ram / tiny_ram).to("").magnitude
+    cpu_throughput_ratio = mobile_cpu_mips / tiny_cpu_mips
+    power_ratio = (phone_power / sensor_power).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tiny_ram < mcu_sram < mcu_sram_high < flagship_ram,
+          "Device memory endpoints should be ordered.")
+    check(50_000 < memory_ratio < 70_000, f"MCU-to-phone memory ratio drifted: {memory_ratio:.0f}x")
+    check(500_000 <= endpoint_memory_ratio <= 600_000,
+          f"Tiny-to-phone memory ratio drifted: {endpoint_memory_ratio:.0f}x")
+    check(9_999 <= cpu_throughput_ratio <= 10_001,
+          f"Tiny-to-mobile CPU throughput ratio drifted: {cpu_throughput_ratio:.0f}x")
+    check(499_000 <= power_ratio <= 501_000, f"Tiny-to-phone power ratio drifted: {power_ratio:.0f}x")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    tiny_ram_kb_str = fmt_memory_capacity(tiny_ram, unit=KiB, precision=0, commas=False)
+    mcu_sram_kb_str = fmt_memory_capacity(mcu_sram, unit=KiB, precision=0, commas=False)
+    mcu_sram_high_mb_str = fmt_memory_capacity(mcu_sram_high, unit=MB, precision=0, commas=False)
+    arduino_flash_mb_str = fmt_memory_capacity(arduino_flash, unit=MB, precision=0, commas=False)
+    flagship_ram_gb_str = fmt_memory_capacity(flagship_ram, unit=GiB, precision=0, commas=False)
+    memory_ratio_mult_str = fmt_multiple(memory_ratio, precision=0, commas=True)
+    tiny_clock_mhz_str = fmt_qty(tiny_clock, unit=ureg.megahertz, precision=0, commas=False)
+    mobile_clock_ghz_str = fmt_qty(mobile_clock, unit=ureg.gigahertz, precision=0, commas=False)
+    tiny_cpu_mips_str = fmt_rate(tiny_cpu_mips, "MIPS", commas=False, approx=True)
+    mobile_cpu_mips_str = fmt_rate(mobile_cpu_mips, "MIPS", commas=True, approx=True)
+    cpu_throughput_ratio_mult_str = fmt_multiple(cpu_throughput_ratio, precision=0, commas=True)
+    sensor_power_uw_str = fmt_power(sensor_power, unit=microwatt, precision=0, commas=False)
+    phone_power_w_str = fmt_power(phone_power, unit=watt, precision=0, commas=False)
+    power_ratio_mult_str = fmt_multiple(power_ratio, precision=0, commas=True)
+    iot_compute_tops_str = fmt_ops_rate(iot_compute, unit=TOPS, precision=2, commas=False)
+```
+
+```{python}
+#| echo: false
+#| label: edge-adaptation-tier-profile
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EDGE ADAPTATION TIER PROFILE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Reusable wearable, phone, and voice-assistant fleet assumptions.
+# │
+# │ Goal: Keep tiered adaptation examples sourced from one MLSysIM profile.
+# │ Show: Device memories, fleet shares, adapter ranks, replay buffers, updates.
+# │ How: Pull ReferenceStats.EdgeAdaptationTierProfile values and format them.
+# │
+# │ Exports: EdgeAdaptationTierProfile.wearable_system_memory_mb_str,
+# │          EdgeAdaptationTierProfile.tiny_wearable_ram_mb_str,
+# │          EdgeAdaptationTierProfile.budget_phone_ram_gb_str,
+# │          EdgeAdaptationTierProfile.budget_phone_available_low_gb_str,
+# │          EdgeAdaptationTierProfile.budget_phone_available_high_gb_str,
+# │          EdgeAdaptationTierProfile.budget_device_memory_limit_gb_str,
+# │          EdgeAdaptationTierProfile.budget_keyboard_phone_ram_gb_str,
+# │          EdgeAdaptationTierProfile.iot_memory_low_mb_str,
+# │          EdgeAdaptationTierProfile.iot_memory_high_gb_str,
+# │          EdgeAdaptationTierProfile.keyboard_gradient_memory_low_mb_str,
+# │          EdgeAdaptationTierProfile.keyboard_gradient_memory_high_mb_str,
+# │          EdgeAdaptationTierProfile.keyboard_background_budget_low_mb_str,
+# │          EdgeAdaptationTierProfile.keyboard_background_budget_high_mb_str,
+# │          EdgeAdaptationTierProfile.keyboard_memory_share_pct_str,
+# │          EdgeAdaptationTierProfile.fleet_devices_million_str,
+# │          EdgeAdaptationTierProfile.flagship_share_pct_str,
+# │          EdgeAdaptationTierProfile.mid_tier_share_pct_str,
+# │          EdgeAdaptationTierProfile.budget_share_pct_str,
+# │          EdgeAdaptationTierProfile.flagship_lora_rank_str,
+# │          EdgeAdaptationTierProfile.mid_tier_lora_rank_str,
+# │          EdgeAdaptationTierProfile.budget_replay_buffer_mb_str,
+# │          EdgeAdaptationTierProfile.flagship_replay_buffer_mb_str,
+# │          EdgeAdaptationTierProfile.few_shot_interactions_range_str,
+# │          EdgeAdaptationTierProfile.federated_lora_update_mb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import (
+    check,
+    fmt_count,
+    fmt_count_range,
+    fmt_int,
+    fmt_memory,
+    fmt_memory_capacity,
+    fmt_percent,
+)
+
+class EdgeAdaptationTierProfile:
+    """Reusable tiered adaptation assumptions for edge-learning prose."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    profile = ReferenceStats.EdgeAdaptationTierProfile
+    wearable_memory = profile.WearablePersonalizationMemory
+    tiny_wearable_ram = profile.TinyWearableRam
+    smartphone_ram = Platforms.Mobile.ram
+    budget_phone_ram = profile.BudgetPhoneRam
+    budget_phone_available_low = profile.BudgetPhoneAvailableLow
+    budget_phone_available_high = profile.BudgetPhoneAvailableHigh
+    budget_device_memory_limit = profile.BudgetDeviceMemoryLimit
+    budget_keyboard_phone_ram = profile.BudgetKeyboardPhoneRam
+    iot_memory_low = profile.IotMemoryLow
+    iot_memory_high = profile.IotMemoryHigh
+    keyboard_gradient_memory_low = profile.KeyboardGradientMemoryLow
+    keyboard_gradient_memory_high = profile.KeyboardGradientMemoryHigh
+    keyboard_background_budget_low = profile.KeyboardBackgroundBudgetLow
+    keyboard_background_budget_high = profile.KeyboardBackgroundBudgetHigh
+    keyboard_gradient_example = profile.KeyboardGradientExample
+    keyboard_background_budget_example = profile.KeyboardBackgroundBudgetExample
+    fleet_devices = int(profile.VoiceAssistantFleetDevices)
+    flagship_share = float(profile.FlagshipFleetShare)
+    mid_tier_share = float(profile.MidTierFleetShare)
+    budget_share = float(profile.BudgetFleetShare)
+    flagship_lora_rank = int(profile.FlagshipLoraRank)
+    mid_tier_lora_rank = int(profile.MidTierLoraRank)
+    budget_replay_buffer = profile.BudgetReplayBuffer
+    flagship_replay_buffer = profile.FlagshipReplayBuffer
+    few_shot_interactions_low = int(profile.FewShotInteractionsLow)
+    few_shot_interactions_high = int(profile.FewShotInteractionsHigh)
+    federated_lora_update = profile.FederatedLoraUpdate
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fleet_share_sum = flagship_share + mid_tier_share + budget_share
+    keyboard_memory_share = (
+        keyboard_gradient_example / keyboard_background_budget_example
+    ).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tiny_wearable_ram < wearable_memory < smartphone_ram,
+          "Wearable and phone memory envelopes should be ordered.")
+    check(budget_phone_available_low < budget_phone_available_high <= budget_phone_ram,
+          "Budget phone available-memory envelope should fit within total RAM.")
+    check(abs(fleet_share_sum - 1.0) < 1e-9, "Fleet shares should sum to one.")
+    check(mid_tier_lora_rank < flagship_lora_rank,
+          "Flagship LoRA rank should exceed mid-tier LoRA rank.")
+    check(budget_replay_buffer < flagship_replay_buffer,
+          "Replay buffers should grow with device capability.")
+    check(few_shot_interactions_low < few_shot_interactions_high,
+          "Few-shot interaction range should be ordered.")
+    check(keyboard_gradient_memory_low < keyboard_gradient_example < keyboard_gradient_memory_high,
+          "Keyboard gradient example should sit inside its memory range.")
+    check(keyboard_background_budget_low < keyboard_background_budget_example <= keyboard_background_budget_high,
+          "Keyboard background-budget example should sit inside its memory range.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    wearable_system_memory_mb_str = fmt_memory_capacity(wearable_memory, unit=MB, precision=0, commas=False)
+    tiny_wearable_ram_mb_str = fmt_memory_capacity(tiny_wearable_ram, unit=MB, precision=0, commas=False)
+    smartphone_ram_gb_str = fmt_memory_capacity(smartphone_ram, unit=GB, precision=0, commas=False)
+    budget_phone_ram_gb_str = fmt_memory_capacity(budget_phone_ram, unit=GiB, precision=0, commas=False)
+    budget_phone_available_low_gb_str = fmt_memory_capacity(budget_phone_available_low, unit=GiB, precision=0, commas=False)
+    budget_phone_available_high_gb_str = fmt_memory_capacity(budget_phone_available_high, unit=GiB, precision=0, commas=False)
+    budget_device_memory_limit_gb_str = fmt_memory_capacity(budget_device_memory_limit, unit=GiB, precision=0, commas=False)
+    budget_keyboard_phone_ram_gb_str = fmt_memory_capacity(budget_keyboard_phone_ram, unit=GiB, precision=0, commas=False)
+    iot_memory_low_mb_str = fmt_memory(iot_memory_low, unit=MB, precision=0, commas=False)
+    iot_memory_high_gb_str = fmt_memory_capacity(iot_memory_high, unit=GiB, precision=0, commas=False)
+    keyboard_gradient_memory_low_mb_str = fmt_memory(keyboard_gradient_memory_low, unit=MB, precision=0, commas=False)
+    keyboard_gradient_memory_high_mb_str = fmt_memory(keyboard_gradient_memory_high, unit=MB, precision=0, commas=False)
+    keyboard_background_budget_low_mb_str = fmt_memory(keyboard_background_budget_low, unit=MB, precision=0, commas=False)
+    keyboard_background_budget_high_mb_str = fmt_memory(keyboard_background_budget_high, unit=MB, precision=0, commas=False)
+    keyboard_memory_share_pct_str = fmt_percent(keyboard_memory_share, precision=0, commas=False, style="prose")
+    fleet_devices_million_str = fmt_count(
+        fleet_devices, scale="million", scale_style="word", precision=0, label="device"
+    )
+    flagship_share_pct_str = fmt_percent(flagship_share, precision=0, commas=False, style="prose")
+    mid_tier_share_pct_str = fmt_percent(mid_tier_share, precision=0, commas=False, style="prose")
+    budget_share_pct_str = fmt_percent(budget_share, precision=0, commas=False, style="prose")
+    flagship_lora_rank_str = fmt_int(flagship_lora_rank, commas=False)
+    mid_tier_lora_rank_str = fmt_int(mid_tier_lora_rank, commas=False)
+    budget_replay_buffer_mb_str = fmt_memory(budget_replay_buffer, unit=MB, precision=0, commas=False)
+    flagship_replay_buffer_mb_str = fmt_memory(flagship_replay_buffer, unit=MB, precision=0, commas=False)
+    few_shot_interactions_range_str = fmt_count_range(
+        few_shot_interactions_low, few_shot_interactions_high, label="interaction", commas=False
+    )
+    federated_lora_update_mb_str = fmt_memory(federated_lora_update, unit=MB, precision=0, commas=False)
 ```
 
 ## The Edge Learning Paradigm {#sec-edge-intelligence-distributed-learning-paradigm-shift-883d}
@@ -153,7 +379,7 @@ The transition to on-device learning introduces fundamental tension in machine l
 
 :::
 
-Throughout this chapter, we trace these constraints through Archetype C (Federated MobileNet) (@sec-introduction-archetype-c-federated-mobilenet-65a3), where autonomy demands that learning happen on-device under severe resource limits. Archetype C represents the extreme end of this spectrum. Operating on milliwatt power budgets, it cannot afford the energy cost of transmitting raw data to the cloud. Data locality is therefore a physical necessity imposed by the power wall, not merely a privacy feature. The techniques developed in this chapter, including quantized training, sparse updates, and federated coordination, are the survival strategies that allow Archetype C to exist.
+These constraints run through Archetype C (Federated MobileNet) (@sec-introduction-archetype-c-federated-mobilenet-65a3), where autonomy demands that learning happen on-device under severe resource limits. Archetype C represents the extreme end of this spectrum. Operating on milliwatt power budgets, it cannot afford the energy cost of transmitting raw data to the cloud. Data locality is therefore a physical necessity imposed by the power wall, not merely a privacy feature. The techniques developed in this chapter, including quantized training, sparse updates, and federated coordination, are the survival strategies that allow Archetype C to exist.
 
 Navigating this architectural tension requires computational efficiency principles including quantization, pruning, and knowledge distillation, combined with algorithmic techniques, design patterns, and system principles that enable effective learning under extreme resource constraints. The challenge extends beyond conventional optimization of training algorithms: it requires rethinking the entire machine learning pipeline for deployment environments where traditional computational assumptions fail.
 
@@ -181,15 +407,7 @@ On-device learning challenges this established model by enabling systems to trai
 *On-device learning hits the memory wall before the compute wall.*
 :::
 
-Consider a smartphone keyboard adapting to a user's unique vocabulary and typing patterns. To personalize predictions, the system must perform gradient updates on a compact language model using locally observed text input. A single gradient update for even a minimal language model requires 50–100 MB of memory for activations and optimizer state. Modern smartphones typically allocate 200–300 MB to background applications like keyboards (varies by OS and device generation). This razor-thin margin demonstrates the central engineering challenge of on-device learning: a single training step can consume 25 percent of available memory. The system must achieve meaningful personalization while operating within constraints so severe that traditional training approaches become architecturally infeasible. This quantitative reality drives the need for specialized techniques that make adaptation possible within extreme resource limitations.
-
-### On-device learning benefits {#sec-edge-intelligence-ondevice-learning-benefits-3256}
-
-Traditional machine learning systems rely on a clear division of labor between model training and inference. Centralized environments with high-performance compute resources and large-scale datasets handle training; client devices receive the trained models and operate in a static inference-only mode.
-
-The centralized paradigm works well when data collection is feasible, connectivity is reliable, and a single global model can serve all users. It breaks down when data is user-specific, behavior is dynamic, or connectivity is intermittent.
-
-On-device learning addresses these limitations by enabling deployed devices to perform model adaptation using locally available data. The capability extends beyond efficiency optimization into a cornerstone of trustworthy AI systems. Keeping data local provides a structural foundation for privacy. Adapting to individual users enhances fairness and utility. Enabling offline operation improves robustness against network failures and infrastructure dependencies.
+Consider a smartphone keyboard adapting to a user's unique vocabulary and typing patterns. To personalize predictions, the system must perform gradient updates on a compact language model using locally observed text input. A single gradient update for even a minimal language model requires `{python} EdgeAdaptationTierProfile.keyboard_gradient_memory_low_mb_str`--`{python} EdgeAdaptationTierProfile.keyboard_gradient_memory_high_mb_str` of memory for activations and optimizer state. Modern smartphones typically allocate `{python} EdgeAdaptationTierProfile.keyboard_background_budget_low_mb_str`--`{python} EdgeAdaptationTierProfile.keyboard_background_budget_high_mb_str` to background applications like keyboards (varies by OS and device generation). This razor-thin margin demonstrates the central engineering challenge of on-device learning: a single training step can consume `{python} EdgeAdaptationTierProfile.keyboard_memory_share_pct_str` of available memory. The system must achieve meaningful personalization while operating within constraints so severe that traditional training approaches become architecturally infeasible. This quantitative reality drives the need for specialized techniques that make adaptation possible within extreme resource limitations.
 
 Four key considerations motivate the shift from centralized to decentralized learning [@li2020]: personalization, latency and availability, privacy, and infrastructure efficiency.
 
@@ -220,6 +438,8 @@ User-specific lookup tables combine global models with personalized retrieval me
 The decision to implement on-device learning should be driven by quantifiable requirements that preclude these simpler alternatives. True data privacy constraints that legally prohibit cloud processing, genuine network limitations that prevent reliable connectivity, quantitative latency budgets that preclude cloud round-trips, or demonstrable performance improvements that justify the operational complexity represent legitimate drivers for on-device learning adoption.
 
 For applications with critical timing requirements, network round-trip times make cloud-based alternatives architecturally infeasible. Camera processing under 33 ms, voice response under 500 ms, AR/VR motion-to-photon latency under 20 ms, or safety-critical control under 10 ms all face network round-trip times typically ranging from 50 to 200 ms. In such scenarios, on-device learning becomes necessary regardless of complexity considerations. Teams should thoroughly evaluate simpler solutions before committing to the significant engineering investment that on-device learning requires.
+
+### Knowledge transfer as the adaptation foundation {#sec-edge-intelligence-knowledge-transfer-adaptation-foundation}
 
 These motivations are grounded in the broader concept of knowledge transfer, where a pretrained model transfers useful representations to a new task or domain. This foundational principle makes on-device learning both feasible and effective, enabling sophisticated adaptation with minimal local resources. @Fig-transfer-conceptual illustrates how knowledge transfer occurs between closely related tasks such as playing different board games or musical instruments, or across domains that share structure such as from riding a bicycle to driving a scooter. In the context of on-device learning, this means using a model pretrained in the cloud and adapting it efficiently to a new context using only local data and limited updates, allowing fast adaptation without relearning from scratch even when the new task diverges in input modality or goal.\index{Knowledge Transfer}
 
@@ -265,11 +485,7 @@ Each domain reveals a common pattern. Deployment environments introduce variatio
 
 ### Architectural trade-offs: Centralized vs. decentralized training {#sec-edge-intelligence-architectural-tradeoffs-centralized-vs-decentralized-training-d420}
 
-The diversity of these applications reveals how fundamentally on-device learning differs from traditional ML architectures. The differences extend beyond deployment choices into a complete reimagining of the training lifecycle.
-
-Most machine learning systems today follow a centralized learning paradigm that has served the field well but increasingly shows strain under modern deployment requirements. Models train in data centers using large-scale, curated datasets aggregated from many sources, deploy to client devices in static form for inference without further modification, and receive updates periodically through offline retraining using newly collected or labeled data sent back from the field.
-
-The centralized model offers proven advantages: high-performance computing infrastructure, access to diverse data distributions, and robust debugging and validation pipelines. It also depends on assumptions that increasingly fail in modern deployments: reliable data transfer, trust in data custodianship, and infrastructure capable of managing global updates across device fleets.
+The diversity of these applications reveals how fundamentally on-device learning differs from traditional ML architectures, extending beyond deployment choices into a complete reimagining of the training lifecycle. Most machine learning systems today follow a centralized learning paradigm that has served the field well but increasingly shows strain under modern deployment requirements: models train in data centers using large-scale, curated datasets aggregated from many sources, deploy to client devices in static form for inference without further modification, and receive updates periodically through offline retraining using newly collected or labeled data sent back from the field. This centralized model offers proven advantages, including high-performance computing infrastructure, access to diverse data distributions, and robust debugging and validation pipelines, but it also depends on assumptions that increasingly fail in modern deployments: reliable data transfer, trust in data custodianship, and infrastructure capable of managing global updates across device fleets.
 
 On-device learning inverts these assumptions. Each device maintains its own model copy and adapts it locally using data unavailable to centralized infrastructure. Training occurs asynchronously under varying resource conditions driven by device usage patterns, battery levels, and thermal states. Raw data remains on the device, reducing privacy exposure but complicating coordination. Hardware capabilities, runtime environments, and usage patterns vary dramatically across devices, making the learning process heterogeneous and difficult to standardize.
 
@@ -279,15 +495,13 @@ Managing thousands of heterogeneous edge devices exceeds typical distributed sys
 
 When disconnected devices reconnect, they require state reconciliation to avoid version conflicts. Update verification becomes critical as devices can silently fail to apply updates or report success while running outdated models. Robust systems implement multi-stage verification. Cryptographic signatures confirm update integrity, functional tests validate model behavior, and telemetry confirms deployment success. Rollback strategies must handle partial deployments where some devices received updates while others remain on previous versions. Maintaining system consistency during failure recovery requires sophisticated orchestration that draws on distributed systems principles while introducing edge-specific complexities.
 
-Despite these challenges, decentralization enables deep personalization without centralized oversight, supports learning in disconnected or bandwidth-limited environments, and reduces the operational cost of model updates. The central question is how to coordinate learning across devices: through periodic synchronization, federated aggregation, or hybrid approaches that balance local and global objectives.
-
-The transformation from centralized to decentralized learning creates three distinct operational phases, each with different characteristics and challenges.
+Despite these challenges, decentralization enables deep personalization without centralized oversight, supports learning in disconnected or bandwidth-limited environments, and reduces the operational cost of model updates. The central question is how to coordinate learning across devices, and that question unfolds across three operational phases: centralized training, local adaptation, and federated coordination.
 
 The traditional centralized paradigm begins with cloud-based training on aggregated data, followed by static model deployment to client devices. This approach works well when data collection is feasible, network connectivity is reliable, and a single global model can serve all users effectively. However, it breaks down when data becomes personalized, privacy-sensitive, or collected in environments with limited connectivity.
 
 Once deployed, local differences begin to emerge as each device encounters its own unique data distribution. Devices collect data that reflects individual user patterns, environmental conditions, and usage contexts. This data is often non-i.i.d.[^fn-non-iid-federated] and noisy, requiring local model adaptation to maintain performance. This transition marks the shift from *global generalization* to *local specialization*.
 
-[^fn-non-iid-federated]: **Non-IID (not independent and identically distributed)**: Data where samples are not drawn from a single common distribution, the default condition in federated learning where each device reflects a single user's patterns. Non-IID data causes federated averaging to diverge: experiments show accuracy drops of 10--50 percent compared to IID baselines when label distributions are skewed across clients, forcing systems to adopt techniques like local adaptation layers or clustered aggregation to maintain convergence. \index{Non-IID!federated learning}
+[^fn-non-iid-federated]: **Non-IID (Not Independent and Identically Distributed)**: Data where samples are not drawn from a single common distribution, the default condition in federated learning where each device reflects a single user's patterns. Non-IID data causes federated averaging to diverge: experiments show accuracy drops of 10--50 percent compared to IID baselines when label distributions are skewed across clients, forcing systems to adopt techniques like local adaptation layers or clustered aggregation to maintain convergence. \index{Non-IID!federated learning}
 
 The final phase introduces federated coordination, where devices periodically synchronize their local adaptations through aggregated model updates rather than raw data sharing. This enables privacy-preserving global refinement while maintaining the benefits of local personalization.
 
@@ -435,8 +649,8 @@ These amplifications explain why standard optimization techniques fail when appl
 Verify your understanding of how training amplifies edge constraints:
 
 - [ ] Why does on-device training typically require 4$\times$ to 12$\times$ more memory than on-device inference for the same model?
-- [ ] What is the "Data Stall" risk in edge intelligence, and how does it relate to the device's NPU throughput?
-- [ ] If a smartphone has 8 GB of RAM, why might a 100M parameter model still trigger out-of-memory errors during the backward pass?
+- [ ] How can a fast NPU still sit idle if the training pipeline cannot keep data and activations moving within the device's memory budget?
+- [ ] If a smartphone has `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` of RAM, why might a 100M parameter model still trigger out-of-memory errors during the backward pass?
 - [ ] True or False: Gradient checkpointing reduces the total energy consumed by on-device training.
 
 :::
@@ -611,27 +825,54 @@ Resource-constrained devices use a two-stage learning process. Offline pretraini
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Model constraints — MobileNetV2 and STM32 sizing.
-# │ Exports: mobilenetv2_*_str, stm32_hidden_*_str
-from mlsysim.fmt import check, fmt, fmt_int, fmt_params, fmt_percent, fmt_qty, fmt_qty_int
+# │ Exports: mobilenetv2_*_str, imagenet_rgb_*,
+# │          stm32_hidden_*_str
+from mlsysim import BYTES_FP32, BYTES_INT8, Datasets, KB, MB, Models, param
+from mlsysim.fmt import (
+    check,
+    fmt_int,
+    fmt_math,
+    fmt_params,
+    fmt_percent,
+    fmt_qty,
+    fmt_qty_int,
+)
 
 class EdgeMobilenetSizing:
-    mobilenetv2_alpha10_params = 3_504_872
-    mobilenetv2_alpha05_total_params = 1_968_680
-    mobilenetv2_alpha05_feature_params = 687_680
+    mobilenetv2_alpha10_params = int(Models.Vision.MobileNetV2.parameters.to(param).magnitude)
+    mobilenetv2_alpha05_total_params = int(Models.Vision.MobileNetV2_Alpha0_5.parameters.to(param).magnitude)
+    mobilenetv2_alpha05_feature_params = int(Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters.to(param).magnitude)
     stm32_sram_kb = 192
     stm32_hidden_inputs = 1_000
     stm32_hidden_outputs = 10
+    imagenet = Datasets.ImageNet
+    imagenet_width_px = imagenet.image_width
+    imagenet_height_px = imagenet.image_height
+    imagenet_channels = imagenet.image_channels
+    bytes_per_channel = BYTES_INT8
 
     alpha10 = mobilenetv2_alpha10_params * BYTES_FP32
     alpha05_total = mobilenetv2_alpha05_total_params * BYTES_FP32
     alpha05_feature = mobilenetv2_alpha05_feature_params * BYTES_FP32
+    imagenet_rgb_image = (
+        imagenet_width_px
+        * imagenet_height_px
+        * imagenet_channels
+        * bytes_per_channel
+    )
     stm32_hidden_params = stm32_hidden_inputs * stm32_hidden_outputs + stm32_hidden_outputs
     stm32_hidden = stm32_hidden_params * BYTES_FP32
     stm32_sram = stm32_sram_kb * KB
+    imagenet_rgb_sram_pct = (imagenet_rgb_image / EdgeDeviceSpectrum.mcu_sram).to("").magnitude
+    imagenet_rgb_sram_pct_rounded = round(imagenet_rgb_sram_pct * 10) / 10
     stm32_hidden_sram_pct = (stm32_hidden / stm32_sram).to_base_units().magnitude * 100
 
     check(alpha10 > alpha05_total > alpha05_feature,
           "MobileNetV2 storage variants should shrink in the expected order")
+    check(imagenet_width_px == 224 and imagenet_height_px == 224 and imagenet_channels == 3,
+          "ImageNet RGB input shape should remain 224x224x3.")
+    check(0.55 <= imagenet_rgb_sram_pct <= 0.60,
+          f"ImageNet RGB SRAM share drifted: {imagenet_rgb_sram_pct:.2f}.")
     check(20 <= stm32_hidden_sram_pct <= 21,
           f"STM32 hidden-layer SRAM share drifted: {stm32_hidden_sram_pct:.1f}%")
 
@@ -642,18 +883,23 @@ class EdgeMobilenetSizing:
     mobilenetv2_alpha05_total_mb_str = fmt_qty(alpha05_total, MB, precision=1, commas=False)
     mobilenetv2_alpha05_feature_params_m_str = fmt_params(mobilenetv2_alpha05_feature_params, scale="M", precision=2, commas=False)
     mobilenetv2_alpha05_feature_mb_str = fmt_qty(alpha05_feature, MB, precision=1, commas=False)
+    imagenet_rgb_shape_math = fmt_math(
+        rf"{imagenet_width_px}{{\times}}{imagenet_height_px}{{\times}}{imagenet_channels}"
+    )
+    imagenet_rgb_image_kb_str = fmt_qty_int(imagenet_rgb_image, unit=KB, approx=True, commas=False)
+    imagenet_rgb_sram_pct_str = fmt_percent(imagenet_rgb_sram_pct_rounded, precision=0, commas=False, style='prose')
     stm32_hidden_inputs_str = fmt_int(stm32_hidden_inputs, commas=False)
     stm32_hidden_kb_str = fmt_qty(stm32_hidden, KB, precision=3, commas=False)
     stm32_hidden_sram_pct_str = fmt_percent(stm32_hidden_sram_pct/100, precision=3, commas=False, style='prose')
-    model_budget = 4 * MB
+    model_budget = 4 * MB  # scenario assumption: compact on-device model budget
     model_budget_mb_str = fmt_qty_int(model_budget, MB, commas=False)
 ```
 
 The structure and size of the machine learning model directly determine whether on-device training is possible. Cloud-deployed models can span billions of parameters and rely on multi-gigabyte memory budgets; models intended for on-device learning must conform to tight constraints on memory, storage, and computational complexity. These constraints tighten further during training, where gradient computation, parameter updates, and optimizer state management all demand additional resources beyond inference.
 
-The scale of these constraints becomes concrete across the device spectrum. MobileNetV2, commonly used in mobile vision tasks, requires approximately `{python} EdgeMobilenetSizing.mobilenetv2_alpha10_mb_str` of storage in its standard configuration. While feasible for modern smartphones with gigabytes of available RAM, this far exceeds the 256 KB of SRAM and 1 MB of flash storage on microcontrollers such as the Arduino Nano 33 BLE Sense[^fn-arduino-memory-wall]. On such severely constrained platforms, even a single convolutional layer may exceed available RAM during training due to intermediate feature maps and gradient storage.
+The scale of these constraints becomes concrete across the device spectrum. MobileNetV2, commonly used in mobile vision tasks, requires approximately `{python} EdgeMobilenetSizing.mobilenetv2_alpha10_mb_str` of storage in its standard configuration. While feasible for modern smartphones with gigabytes of available RAM, this far exceeds the `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` of SRAM and `{python} EdgeDeviceSpectrum.arduino_flash_mb_str` of flash storage on microcontrollers such as the Arduino Nano 33 BLE Sense[^fn-arduino-memory-wall]. On such severely constrained platforms, even a single convolutional layer may exceed available RAM during training due to intermediate feature maps and gradient storage.
 
-[^fn-arduino-memory-wall]: **Arduino Nano 33 BLE Sense**\index{Arduino Nano 33 BLE Sense}: With 256 KB SRAM, roughly 65,000$\times$ smaller than a flagship smartphone's 16 GB, a single $224{\times}224{\times}3$ RGB image (150 KB) consumes 60 percent of available memory. Activation and gradient storage alone can add several times overhead, and full training budgets can reach 4--12$\times$ inference memory once optimizer state is included. This means even a tiny convolutional neural network (CNN) layer can exceed total SRAM during backpropagation. This memory wall forces 8-bit or 4-bit quantization as a prerequisite, not an optimization. \index{Arduino!memory constraint}
+[^fn-arduino-memory-wall]: **Arduino Nano 33 BLE Sense**\index{Arduino Nano 33 BLE Sense}: With `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` SRAM, roughly `{python} EdgeDeviceSpectrum.memory_ratio_mult_str` smaller than a flagship smartphone's `{python} EdgeDeviceSpectrum.flagship_ram_gb_str`, a single `{python} EdgeMobilenetSizing.imagenet_rgb_shape_math` RGB image occupies `{python} EdgeMobilenetSizing.imagenet_rgb_image_kb_str` and consumes roughly `{python} EdgeMobilenetSizing.imagenet_rgb_sram_pct_str` of available memory. Activation and gradient storage add several more live tensors, and optimizer state can push the training footprint far beyond the inference footprint. This means even a tiny convolutional neural network (CNN) layer can exceed total SRAM during backpropagation. This memory wall forces 8-bit or 4-bit quantization as a prerequisite, not an optimization. \index{Arduino!memory constraint}
 
 The training process itself dramatically expands the effective memory footprint. Standard backpropagation caches activations for each layer during the forward pass, then reuses them during gradient computation in the backward pass. As the amplification analysis above established, this activation caching multiplies memory requirements compared to inference-only deployment. A seemingly modest 10-layer convolutional model processing $64{\times}64$ images may require 1 to 2 MB, well beyond the SRAM capacity of most embedded systems.
 
@@ -1059,14 +1305,14 @@ class EdgeBattery:
 
 **Math**:
 
-1. **Total Energy**: `{python} EdgeBattery.battery_power_w_str` $\times$ `{python} EdgeBattery.battery_duration_h_str` = `{python} EdgeBattery.battery_energy_wh_str`.
+1. **Total energy**: `{python} EdgeBattery.battery_power_w_str` $\times$ `{python} EdgeBattery.battery_duration_h_str` = `{python} EdgeBattery.battery_energy_wh_str`.
 2. **Battery Impact**\index{Battery!on-device training impact}: `{python} EdgeBattery.battery_energy_wh_str`/`{python} EdgeBattery.battery_total_wh_str` = `{python} EdgeBattery.battery_drain_pct_str`.
 
 **Systems insight**: Consuming `{python} EdgeBattery.battery_drain_pct_str` of a user's battery for a background task is a severe violation of mobile UX principles—it is equivalent to losing an hour of screen-on time. This is why on-device training is typically restricted to **Opportunistic Scheduling**\index{Opportunistic Scheduling}: it only runs when the device is plugged in, connected to Wi-Fi, and thermally stable. Designing for the edge means respecting the user's energy budget as strictly as the model's accuracy budget.
 
 :::
 
-Because these energy constraints are a primary driver of sustainable system design, we provide a detailed quantitative analysis of the Battery Wall\index{Battery Wall}, the Energy Hierarchy (compute vs. communication), and the feasibility of on-device fine-tuning in @sec-sustainable-ai-edge-learning-battery.
+This battery calculation is the local edge-learning version of a broader energy constraint: training must fit the user's energy budget, not only the model's accuracy target. A production design therefore has to account for energy at scheduling time, compare local computation against communication cost, and defer learning when the user's device cannot absorb the update.
 
 ::: {.column-margin}
 ![](images/svg/edge_intelligence_device_memory_ladder.svg){width="100%" fig-alt="Vertical ladder of four blue bars on a log scale showing device-class memory shrinking by orders of magnitude: smartphone 8 GB, IoT 1 GB, microcontroller flash 4 MB, microcontroller SRAM 520 KB."}
@@ -1078,7 +1324,7 @@ Because these energy constraints are a primary driver of sustainable system desi
 
 Complementing the thermal and power challenges, memory hierarchy constraints create another fundamental bottleneck that shapes on-device learning system design. As established in the constraint amplification analysis above, these limitations affect both static model storage and the dynamic memory requirements during training, often pushing systems beyond their practical limits.
 
-The device memory hierarchy spans several orders of magnitude across different device classes, each presenting distinct constraints for on-device learning. The iPhone 15 Pro provides 8 GB total system memory, but only approximately 2--4 GB remains available for application workloads after accounting for operating system requirements and background processes. Budget Android devices operate with 4 GB total system memory, leaving just 1--2 GB available for ML workloads after OS overhead consumes significant resources. IoT embedded systems provide 64 MB--1 GB total memory that must be shared between system tasks and application data, creating severe constraints for any learning algorithms. Microcontrollers offer only 256 KB--2 MB SRAM, requiring extreme optimization and careful memory management that fundamentally limits the complexity of models that can adapt on such platforms.
+The device memory hierarchy spans several orders of magnitude across different device classes, each presenting distinct constraints for on-device learning. A flagship phone provides about `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` total system memory, but only part of that remains available for application workloads after accounting for operating system requirements and background processes. Budget Android devices operate with about `{python} EdgeAdaptationTierProfile.budget_phone_ram_gb_str` total system memory, leaving roughly `{python} EdgeAdaptationTierProfile.budget_phone_available_low_gb_str`--`{python} EdgeAdaptationTierProfile.budget_phone_available_high_gb_str` available for ML workloads after OS overhead consumes significant resources. IoT embedded systems provide `{python} EdgeAdaptationTierProfile.iot_memory_low_mb_str`--`{python} EdgeAdaptationTierProfile.iot_memory_high_gb_str` total memory that must be shared between system tasks and application data, creating severe constraints for any learning algorithms. Microcontrollers offer only `{python} EdgeDeviceSpectrum.mcu_sram_kb_str`--`{python} EdgeDeviceSpectrum.mcu_sram_high_mb_str` SRAM, requiring extreme optimization and careful memory management that fundamentally limits the complexity of models that can adapt on such platforms.
 
 The memory expansion during training creates particularly acute challenges that often determine system feasibility. Standard backpropagation requires caching intermediate activations for each layer during the forward pass, which are then reused during gradient computation in the backward pass, creating substantial memory overhead. A MobileNetV2 model requiring just 14 MB for inference balloons to 50–70 MB during training, often exceeding the available memory budget on many mobile devices and making training impossible without aggressive optimization. This dramatic expansion necessitates sophisticated model compression techniques that must compound multiplicatively: INT8 quantization provides 4$\times$ memory reduction, structured pruning achieves 10$\times$ parameter reduction, and knowledge distillation enables 5$\times$ model size reduction while maintaining accuracy within 2--5 percent of the original model. These techniques must be carefully combined to achieve the aggressive compression ratios required for practical deployment.
 
@@ -1086,7 +1332,7 @@ Cache optimization therefore becomes critical for achieving acceptable performan
 
 The memory bandwidth limitations become particularly acute during training. While inference workloads primarily read model weights sequentially, training requires bidirectional data flow for gradient computation and weight updates. This increased memory traffic can saturate the memory subsystem, creating bottlenecks that limit training throughput regardless of computational capacity. Advanced implementations employ techniques such as gradient checkpointing[^fn-gradient-checkpoint-edge] to trade computation for memory, and mixed-precision training to reduce bandwidth requirements while maintaining numerical stability.
 
-[^fn-gradient-checkpoint-edge]: **Gradient Checkpointing**: Trades computation for memory by recomputing intermediate activations during the backward pass instead of storing them, reducing memory requirements by 50--80 percent at the cost of 20--30 percent additional compute. On edge devices where memory is the binding constraint and compute cycles are relatively cheap, this trade-off is almost always favorable: it can make the difference between a model that fits in 2 GB RAM and one that requires 8 GB. \index{Gradient Checkpointing!edge memory}
+[^fn-gradient-checkpoint-edge]: **Gradient Checkpointing**: Trades computation for memory by recomputing intermediate activations during the backward pass instead of storing them, reducing memory requirements by 50--80 percent at the cost of 20--30 percent additional compute. On edge devices where memory is the binding constraint and compute cycles are relatively cheap, this trade-off is almost always favorable: it can make the difference between a model that fits in `{python} EdgeAdaptationTierProfile.budget_keyboard_phone_ram_gb_str` RAM and one that requires `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str`. \index{Gradient Checkpointing!edge memory}
 
 #### Mobile AI accelerator optimization {#sec-edge-intelligence-mobile-ai-accelerator-optimization-67fe}
 
@@ -1114,13 +1360,7 @@ However, most current edge accelerators remain primarily optimized for inference
 
 ### Holistic resource management strategies {#sec-edge-intelligence-holistic-resource-management-strategies-9e4b}
 
-The constraint analysis above reveals three challenge categories that define the on-device learning design space. Each constraint category drives a corresponding solution pillar.
-
-The resource amplification effects, where training increases memory requirements by 4--12$\times$, computational costs by 2--3$\times$, and energy consumption proportionally, directly necessitate Model Adaptation approaches. When traditional training becomes impossible due to resource constraints, systems must fundamentally reduce the scope of parameter updates while preserving learning capability.
-
-The information scarcity constraints, including limited local datasets, non-IID distributions, privacy restrictions on data sharing, and minimal supervision, directly drive Data Efficiency solutions. When conventional data-hungry approaches fail due to insufficient local information, systems must extract maximum learning signal from minimal examples.
-
-The coordination challenges, such as device heterogeneity, intermittent connectivity, distributed validation complexity, and scalability requirements, directly motivate Federated Coordination mechanisms. When isolated on-device learning limits collective intelligence, systems must enable privacy-preserving collaboration across device populations.
+The constraint analysis above reveals three challenge categories that define the on-device learning design space, and each category drives a corresponding solution pillar. Resource amplification, where training increases memory requirements by 4--12$\times$, computational costs by 2--3$\times$, and energy consumption proportionally, necessitates Model Adaptation approaches that reduce the scope of parameter updates while preserving learning capability. Information scarcity, including limited local datasets, non-IID distributions, privacy restrictions on data sharing, and minimal supervision, drives Data Efficiency solutions that extract maximum learning signal from minimal examples. Coordination challenges, such as device heterogeneity, intermittent connectivity, distributed validation complexity, and scalability requirements, motivate Federated Coordination mechanisms that enable privacy-preserving collaboration across device populations.
 
 @Tbl-constraint-solution-mapping reveals how this constraint-to-solution mapping creates a systematic engineering framework: Model Adaptation addresses memory and compute limits through selective parameter updates, Data Efficiency maximizes learning from scarce private samples, and Federated Coordination enables privacy-preserving collaboration. Rather than viewing these as independent techniques, successful systems orchestrate all three approaches to create coherent adaptive systems that operate effectively within edge constraints.
 
@@ -1138,7 +1378,7 @@ Each solution pillar extends model optimization principles and distributed syste
 
 ## Model Adaptation {#sec-edge-intelligence-model-adaptation-6a82}
 
-Personalizing a billion-parameter model on a smartwatch with 500 MB of total system memory is impossible without abandoning the goal of updating the complete model. The answer is that we do not update the whole model. We freeze the vast majority of the network and only train a tiny, strategically placed set of new parameters. This is the essence of resource-efficient model adaptation.
+Personalizing a billion-parameter model on a smartwatch with `{python} EdgeAdaptationTierProfile.wearable_system_memory_mb_str` of total system memory is impossible without abandoning the goal of updating the complete model. The answer is that we do not update the whole model. We freeze the vast majority of the network and only train a tiny, strategically placed set of new parameters. This is the essence of resource-efficient model adaptation.
 
 ```{python}
 #| echo: false
@@ -1185,7 +1425,7 @@ class StorageWall:
     ls_total_savings_ratio_mult_str = fmt_multiple(total_storage_savings, precision=1, commas=False)
 ```
 
-::: {#nbk-edge-intelligence-hidden-cost-personalization .callout-notebook title="The hidden cost of personalization"}
+:::: {#nbk-edge-intelligence-hidden-cost-personalization .callout-notebook title="The hidden cost of personalization"}
 
 **Problem**: A team is deploying a 10M parameter vision model to a smartphone with support for `{python} StorageWall.ls_contexts_str` different "User Contexts" (Home, Office, Car, etc.). If a full fine-tuned model requires `{python} StorageWall.ls_full_mb_str`, how much storage does using **Residual Adapters**\index{Residual Adapter!parameter efficient finetuning} save instead?
 
@@ -1204,11 +1444,11 @@ class StorageWall:
 *Adapters make per-user personalization cheap versus full model copies.*
 :::
 
-:::
+::::
 
 The engineering challenge centers on navigating a fundamental trade-off space: adaptation expressivity vs. resource consumption. At one extreme, updating all parameters provides maximum flexibility but exceeds edge device capabilities. At the other extreme, no adaptation preserves resources but fails to capture user-specific patterns. Effective on-device learning systems must operate in the middle ground, selecting adaptation strategies based on three key engineering criteria.
 
-First, available memory, compute, and energy determine which adaptation approaches are feasible. A smartwatch with 1 MB RAM requires fundamentally different strategies than a smartphone with 8 GB. Second, the degree of user-specific variation drives adaptation complexity needs. Simple preference learning may require only bias updates, while complex domain shifts demand more sophisticated approaches. Third, adaptation techniques must integrate with existing inference pipelines, federated coordination protocols, and operational monitoring systems for model deployment and lifecycle management.
+First, available memory, compute, and energy determine which adaptation approaches are feasible. A tiny wearable-class device with `{python} EdgeAdaptationTierProfile.tiny_wearable_ram_mb_str` RAM requires fundamentally different strategies than a smartphone with `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str`. Second, the degree of user-specific variation drives adaptation complexity needs. Simple preference learning may require only bias updates, while complex domain shifts demand more sophisticated approaches. Third, adaptation techniques must integrate with existing inference pipelines, federated coordination protocols, and operational monitoring systems for model deployment and lifecycle management.
 
 The selection of adaptation techniques follows the same logic, starting with lightweight approaches (@sec-edge-intelligence-weight-freezing-3407) and progressing to more expressive but resource-intensive methods (@sec-edge-intelligence-sparse-updates-879b). Each technique represents a different point in the engineering trade-off space.
 
@@ -1625,17 +1865,45 @@ $$
 
 This formulation is commonly used in LoRA (Low-Rank Adaptation)[^fn-lora-parameter-efficiency] techniques, originally developed for transformer models [@hu2021lora] but broadly applicable across architectures. From a systems engineering perspective, LoRA addresses critical connectivity and resource trade-offs in on-device learning deployment.
 
-[^fn-lora-parameter-efficiency]: **LoRA**: @hu2021lora learns rank-$r$ decomposition matrices $A$ and $B$ instead of updating full weight matrices, reducing trainable parameters by 100--10,000$\times$ while maintaining much of the adaptation quality. For on-device learning, this compression is decisive, but it affects adapter state rather than the full model footprint: a 7B-parameter model has about a 14 GB FP16 weight footprint before gradients, optimizer state, and activations, while rank-16 LoRA can reduce the trainable adapter parameters to tens or hundreds of megabytes. Practical phone deployment still requires storing, quantizing, or offloading the frozen base model. \index{LoRA!parameter efficiency}
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: LoRA parameter efficiency prose.
+# │ Exports: EdgeLoraParameterEfficiency.base_model_params_b_str,
+# │          EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str
+from mlsysim.fmt import check, fmt_memory, fmt_params
 
-Consider a mobile deployment where a 7B parameter language model has a 14 GB FP16 weight footprint, before accounting for the additional gradients, optimizer states, and activations required by full fine-tuning. That footprint is impossible on typical smartphones with 6–8 GB total memory unless the base model is aggressively quantized, partitioned, or offloaded. LoRA with rank-16 can reduce the trainable adapter parameters to tens or hundreds of megabytes, making local adaptation plausible only when the frozen base model is handled separately.
+class EdgeLoraParameterEfficiency:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    base_model = Models.Language.Llama2_7B
+    base_model_params = base_model.parameters
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    fp16_weight_footprint = base_model_params * BYTES_FP16
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(6.5 <= base_model_params.to(Bparam).magnitude <= 7.5,
+          "LoRA footprint example should remain 7B-parameter class.")
+    check(13 <= fp16_weight_footprint.to(GB).magnitude <= 15,
+          "FP16 footprint should remain about 14 GB.")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    base_model_params_b_str = fmt_params(base_model_params, scale="B", precision=0, commas=False)
+    fp16_weight_footprint_gb_str = fmt_memory(fp16_weight_footprint, unit=GB, precision=0, commas=False)
+```
 
-LoRA's efficiency becomes critical in intermittent connectivity scenarios. A full model update over cellular networks would require 14 GB download (potential cost \$140+ in mobile data charges), while LoRA adapter updates are typically 10–50 MB. Small adapter updates can synchronize in under a minute on good mobile links; larger 10–50 MB adapters typically require LTE or Wi-Fi for sub-minute coordination and may take minutes on 3G. This is still dramatically more practical than hours-long full model transfers.
+[^fn-lora-parameter-efficiency]: **LoRA**: @hu2021lora learns rank-$r$ decomposition matrices $A$ and $B$ instead of updating full weight matrices, reducing trainable parameters by 100--10,000$\times$ while maintaining much of the adaptation quality. For on-device learning, this compression is decisive, but it affects adapter state rather than the full model footprint: a model with `{python} EdgeLoraParameterEfficiency.base_model_params_b_str` parameters has about a `{python} EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str` FP16 weight footprint before gradients, optimizer state, and activations, while rank `{python} EdgeAdaptationTierProfile.mid_tier_lora_rank_str` LoRA can reduce the trainable adapter parameters to tens or hundreds of megabytes. Practical phone deployment still requires storing, quantizing, or offloading the frozen base model. \index{LoRA!parameter efficiency}
 
-Systems typically deploy different adapter configurations based on device capabilities. Flagship phones use wider bottlenecks for higher expressivity, mid-range devices use moderate bottlenecks for balanced performance, and budget devices use narrow bottlenecks to stay within 2 GB memory limits. These residual adapter modules can be implemented efficiently on edge devices, particularly when the down-projection and up-projection matrices are small and fixed-point representations are supported. @Lst-lowrank-adapter implements this residual bottleneck approach, showing how a compact down/up projection adds trainable capacity without updating the frozen backbone.\index{Low-Rank Adapter}
+Consider a mobile deployment where a language model with `{python} EdgeLoraParameterEfficiency.base_model_params_b_str` parameters has a `{python} EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str` FP16 weight footprint, before accounting for the additional gradients, optimizer states, and activations required by full fine-tuning. That footprint is impossible on smartphones with about `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` total memory unless the base model is aggressively quantized, partitioned, or offloaded. LoRA with rank `{python} EdgeAdaptationTierProfile.mid_tier_lora_rank_str` can reduce the trainable adapter parameters to tens or hundreds of megabytes, making local adaptation plausible only when the frozen base model is handled separately.
+
+LoRA's efficiency becomes critical in intermittent connectivity scenarios. A full model update over cellular networks would require a `{python} EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str` download and corresponding data-plan cost, while the tier-profile adapter update is `{python} EdgeAdaptationTierProfile.federated_lora_update_mb_str`. Small adapter updates can synchronize in under a minute on good mobile links; larger adapter updates typically require LTE or Wi-Fi for sub-minute coordination and may take minutes on 3G. This is still dramatically more practical than hours-long full model transfers.
+
+Systems typically deploy different adapter configurations based on device capabilities. Flagship phones use wider bottlenecks for higher expressivity, mid-range devices use moderate bottlenecks for balanced performance, and budget devices use narrow bottlenecks to stay within about `{python} EdgeAdaptationTierProfile.budget_keyboard_phone_ram_gb_str` memory limits. These residual adapter modules can be implemented efficiently on edge devices, particularly when the down-projection and up-projection matrices are small and fixed-point representations are supported. @Lst-lowrank-adapter implements this residual bottleneck approach, showing how a compact down/up projection adds trainable capacity without updating the frozen backbone.\index{Low-Rank Adapter}
 
 ::: {#exmp-edge-intelligence-device-keyboard-learning .callout-example title="On-device keyboard learning"}
 
-Large-scale mobile keyboard systems are a canonical deployment pattern for federated and on-device learning. A keyboard can adapt next-word prediction without uploading raw keystrokes, but only if training is strictly constrained: it runs during idle, charging, Wi-Fi-connected windows and transmits compressed updates rather than text. Production systems typically combine secure aggregation with privacy accounting or noise addition so that the server learns population-level update statistics, not individual typing histories. The result is a practical path for learning new slang and usage patterns while keeping the raw interaction stream on the device.
+**Scenario**: Large-scale mobile keyboard systems are a canonical deployment pattern for federated and on-device learning.
+
+**System**: A keyboard can adapt next-word prediction without uploading raw keystrokes, but only if training is strictly constrained: it runs during idle, charging, Wi-Fi-connected windows and transmits compressed updates rather than text. Production systems typically combine secure aggregation with privacy accounting or noise addition so that the server learns population-level update statistics, not individual typing histories.
+
+**Systems lesson**: On-device learning is viable only when the training schedule, communication payload, and privacy boundary are engineered together. The model update is a systems protocol, not just a local optimization step.
 
 :::
 
@@ -1730,11 +1998,7 @@ $$
 \end{cases}
 $$
 
-The challenge lies in selecting the optimal subset $\mathcal{S}$ given memory and compute constraints.
-
-#### Layer selection {#sec-edge-intelligence-layer-selection-ab3c}
-
-A principled strategy for selecting $\mathcal{S}$ is to use contribution analysis\index{Contribution Analysis!layer selection}, an empirical method that estimates how much each layer contributes to downstream performance improvement. For example, one can measure the marginal gain from updating each layer independently:
+The challenge lies in selecting the optimal subset $\mathcal{S}$ given memory and compute constraints. A principled strategy is contribution analysis\index{Contribution Analysis!layer selection}, an empirical method that estimates how much each layer contributes to downstream performance improvement. For example, one can measure the marginal gain from updating each layer independently:
 
 1. Freeze the entire model.
 2. Unfreeze one candidate layer.
@@ -1745,9 +2009,7 @@ This layer-wise profiling yields a ranking from which $\mathcal{S}$ can be const
 
 A concrete example is TinyTrain, a method designed to allow rapid adaptation on-device [@kwon2024tinytrain]. TinyTrain pretrains a model along with meta-gradients that capture which layers are most sensitive to new tasks. At runtime, the system dynamically selects layers to update based on task characteristics and available resources.
 
-#### Selective layer update implementation {#sec-edge-intelligence-selective-layer-update-implementation-eed2}
-
-@Lst-selective-update extends this pattern to profiling-driven layer selection, demonstrating how hardware profiling determines which layers to update based on contribution scores and memory constraints.\index{Selective Layer Updating}
+In implementation, selective layer updating\index{Selective Layer Updating} turns the ranking into `requires_grad` decisions or equivalent graph masks. @Lst-selective-update extends this pattern to profiling-driven layer selection, demonstrating how hardware profiling determines which layers to update based on contribution scores and memory constraints.
 
 ::: {#lst-selective-update lst-cap="**Selective Layer Updating**: This technique allows fine-tuning specific layers of a pretrained model while keeping others frozen, optimizing computational resources for targeted improvements. Source: PyTorch Documentation."}
 
@@ -1768,19 +2030,9 @@ for name, param in model.named_parameters():
 
 :::
 
-#### TinyTrain personalization {#sec-edge-intelligence-tinytrain-personalization-66f2}
+TinyTrain makes the runtime motivation concrete. Consider a scenario where a user wears an augmented reality headset that performs real-time object recognition. As lighting and environments shift, the system must adapt to maintain accuracy, but training must occur during brief idle periods or while charging. TinyTrain addresses this constraint through meta-training during offline preparation: the model learns both to perform the task and which parameters are most important to adapt. At deployment, the device performs task-adaptive sparse updates, modifying only the layers most relevant for its current environment. The approach keeps adaptation fast, energy-efficient, and memory-aware.
 
-Consider a scenario where a user wears an augmented reality headset that performs real-time object recognition. As lighting and environments shift, the system must adapt to maintain accuracy, but training must occur during brief idle periods or while charging.
-
-TinyTrain addresses this through meta-training during offline preparation: the model learns both to perform the task and which parameters are most important to adapt. At deployment, the device performs task-adaptive sparse updates, modifying only the layers most relevant for its current environment. The approach keeps adaptation fast, energy-efficient, and memory-aware.
-
-#### Adaptation strategy trade-offs {#sec-edge-intelligence-adaptation-strategy-tradeoffs-cb23}
-
-Task-adaptive sparse updates introduce several system-level considerations. The overhead of contribution analysis, although primarily incurred during pretraining or initial profiling, represents a nontrivial computational cost. Since it occurs offline, the overhead is typically acceptable but must be factored into the deployment pipeline.
-
-Stability also requires attention: if too few parameters are selected for updating, the model may underfit the target distribution. Careful validation of the selected parameter subset before deployment, potentially incorporating minimum thresholds for adaptation capacity, mitigates this risk.
-
-The selection of updatable parameters must also account for hardware-specific execution costs. Some parameters show high contribution scores but prove expensive to update on certain architectures, requiring a selection strategy that balances statistical utility with runtime efficiency. Despite these tradeoffs, task-adaptive sparse updates provide a practical mechanism to scale adaptation across deployment contexts from microcontrollers to mobile devices [@diao2023sparse].
+Task-adaptive sparse updates still introduce system-level tradeoffs. Contribution analysis has a nontrivial computational cost even when it occurs during pretraining or initial profiling, so the deployment pipeline must budget for it. Stability also requires attention: if too few parameters are selected for updating, the model may underfit the target distribution, so teams need validation thresholds for the selected subset before deployment. The selection policy must also account for hardware-specific execution costs because some parameters show high contribution scores but prove expensive to update on certain architectures. Despite these tradeoffs, task-adaptive sparse updates provide a practical mechanism to scale adaptation across deployment contexts from microcontrollers to mobile devices [@diao2023sparse].
 
 #### Adaptation strategy comparison {#sec-edge-intelligence-adaptation-strategy-comparison-1faf}
 
@@ -1848,7 +2100,7 @@ Few-shot and streaming adaptation form the foundation for more advanced memory a
 
 ### Experience replay {#sec-edge-intelligence-experience-replay-737e}
 
-::: {#dfn-edge-intelligence-catastrophic-forgetting .callout-definition title="Catastrophic forgetting"}
+:::: {#dfn-edge-intelligence-catastrophic-forgetting .callout-definition title="Catastrophic forgetting"}
 
 ***Catastrophic Forgetting***\index{Catastrophic Forgetting!definition} is the phenomenon in which a neural network trained sequentially on new tasks or data distributions rapidly loses performance on previously learned tasks, because gradient updates that optimize the new objective overwrite weight configurations that supported the old ones.
 
@@ -1862,9 +2114,9 @@ Few-shot and streaming adaptation form the foundation for more advanced memory a
 *Learning the new task erodes accuracy on the old one.*
 :::
 
-:::
+::::
 
-Experience replay addresses catastrophic forgetting in continuous learning scenarios by maintaining a buffer of representative examples from previous learning episodes. This technique, originally developed for reinforcement learning [@mnih2015], proves essential in on-device learning where sequential data streams can cause models to overfit to recent examples. We introduce experience replay here to address immediate stability needs; the deeper challenge of lifelong adaptation without forgetting receives comprehensive treatment in the bio-inspired learning section below (@sec-edge-intelligence-lifelong-adaptation-without-forgetting-9200).
+Experience replay addresses catastrophic forgetting in continuous learning scenarios by maintaining a buffer of representative examples from previous learning episodes. This technique, originally developed for reinforcement learning [@mnih2015], proves essential in on-device learning where sequential data streams can cause models to overfit to recent examples. Here, experience replay addresses the immediate stability need; the bio-inspired learning section below (@sec-edge-intelligence-lifelong-adaptation-without-forgetting-9200) returns to lifelong adaptation without forgetting.
 
 Unlike server-side replay strategies that rely on large datasets and extensive compute, on-device replay must operate with extremely limited capacity, often with tens or hundreds of samples, and must avoid interfering with user experience [@rolnick2019experience]. Buffers may store only compressed features or distilled summaries, and updates must occur opportunistically (e.g., during idle cycles or charging). These system-level constraints reshape how replay is implemented and evaluated in the context of embedded ML.
 
@@ -1978,7 +2230,7 @@ Consider a voice assistant deployed to 10 million homes. Each device adapts loca
 
 Individual on-device learning, while effective for local personalization, faces fundamental limitations when devices operate in isolation. Each device observes only a narrow slice of the full data distribution, limiting generalization. Device capabilities vary dramatically, creating learning imbalances across the population. Valuable insights learned on one device cannot benefit others, reducing overall system intelligence. Without coordination, models may diverge or degrade over time due to local biases.
 
-Federated learning addresses these coordination constraints through privacy-preserving collaboration: devices contribute to collective intelligence without sharing raw data. The approach transforms data locality from a limitation into a privacy feature, allowing systems to learn from population-scale data while keeping individual information secure. The privacy requirements connect directly to the security and privacy principles examined in @sec-security-privacy.
+Federated learning addresses these coordination constraints through privacy-preserving collaboration: devices contribute to collective intelligence without sharing raw data. The approach transforms data locality from a limitation into a privacy feature, allowing systems to learn from population-scale data while keeping individual information secure. That promise only holds if the system treats gradients and participation metadata as sensitive outputs, because those signals can still reveal information about local users.
 
 ::: {#dfn-edge-intelligence-federated-learning .callout-definition title="Federated learning"}
 
@@ -2946,7 +3198,7 @@ To mitigate such risks, modern federated ML systems commonly employ protective m
 
 [^fn-secure-aggregation-privacy]: **Secure Aggregation**: Cryptographic protocol where client pairs exchange random masks that cancel in the server-side sum, revealing only the aggregate gradient without exposing individual contributions. Google's Gboard implementation handles millions of clients with $<$10 percent communication overhead, but requires at least 100 participants per round for security guarantees. This minimum-participation constraint shapes federated round scheduling: the system must wait for enough eligible devices before aggregation can proceed. \index{Secure Aggregation!federated privacy}
 
-While these techniques enhance privacy, they introduce additional system complexity and tradeoffs between model utility, communication cost, and robustness. @Fig-secure-agg illustrates the secure aggregation protocol, showing how pairs of clients exchange shared random masks that cancel out during server-side summation, revealing only the aggregate gradient without exposing individual contributions. The security treatment in @sec-security-privacy-federated-learning-3834 examines these attacks, defenses, and their implications for distributed ML systems in greater depth.
+While these techniques enhance privacy, they introduce additional system complexity and tradeoffs between model utility, communication cost, and robustness. @Fig-secure-agg illustrates the secure aggregation protocol, showing how pairs of clients exchange shared random masks that cancel out during server-side summation, revealing only the aggregate gradient without exposing individual contributions.
 
 ::: {#fig-secure-agg fig-env="figure" fig-pos="htb" fig-cap="**Secure Aggregation Protocol**: A simplified view of how cryptographic masking protects individual updates. Pairs of clients agree on shared random masks that are added by one and subtracted by the other. The central server sums the masked updates; the masks mathematically cancel out in the aggregate, revealing the global update sum without ever exposing the raw value of any single client's contribution." fig-alt="Secure aggregation diagram. Two clients exchange shared mask. Client A adds mask to weights, Client B subtracts. Server receives masked updates; summing cancels masks to reveal true aggregate without exposing individual contributions."}
 
@@ -2992,16 +3244,19 @@ The asynchronous nature of federated coordination introduces additional complexi
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Federated heterogeneity — flagship NPU reference.
-# │ Exports: EdgeFedNpuRecap.mobile_npu_tops_str, compute_ratio_mult_str
+# │ Exports: EdgeFedNpuRecap.mobile_npu_tops_str,
+# │          EdgeFedNpuRecap.iot_compute_tops_str,
+# │          EdgeFedNpuRecap.compute_ratio_mult_str
 class EdgeFedNpuRecap:
-    from mlsysim.fmt import check, fmt_int, fmt_ops_rate
+    from mlsysim.fmt import check, fmt_multiple, fmt_ops_rate
     mobile_npu_rate = Hardware.Mobile.iPhone15Pro.compute.peak_flops
     mobile_npu_tops = mobile_npu_rate.to(TOPS).magnitude
-    iot_tops = 0.03 * TOPS
+    iot_tops = ReferenceStats.EdgeDeviceSpectrum.IotMicrocontrollerComputeLow
     compute_ratio = mobile_npu_tops / iot_tops.to(TOPS).magnitude
     check(1000 < compute_ratio < 2000, f"Flagship-to-IoT compute ratio unexpected: {compute_ratio:.0f}x")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mobile_npu_tops_str = fmt_ops_rate(mobile_npu_rate, unit=TOPS, precision=0, commas=False)
+    iot_compute_tops_str = fmt_ops_rate(iot_tops, unit=TOPS, precision=2, commas=False)
     compute_ratio_mult_str = fmt_multiple(compute_ratio, precision=1, commas=True)
 ```
 
@@ -3045,7 +3300,7 @@ class EdgeFedPowerEnvelopeRecap:
 
 Million-device orchestration is a tiering decision: the system must decide which clients can train, which can only report lightweight updates, and how much bias that selection introduces. The difficulty is that hardware capabilities, network conditions, data distributions, and availability patterns vary simultaneously, challenging traditional distributed machine learning assumptions about homogeneous participants operating under similar conditions.
 
-Real-world federated learning deployments face multi-dimensional device heterogeneity that creates extreme variation across every system dimension. Computational variation spans about `{python} EdgeFedNpuRecap.compute_ratio_mult_str` differences in processing power between flagship smartphones running at `{python} EdgeFedNpuRecap.mobile_npu_tops_str` and IoT microcontrollers operating at just 0.03 TOPS, fundamentally limiting what models can train on different device tiers. Memory constraints exhibit even more dramatic differences in available RAM across device categories, up to roughly 65,000$\times$ between 256 KB microcontrollers and 16 GB premium smartphones, determining whether devices can perform any local training at all or must rely purely on inference. Energy limitations force training sessions to be carefully scheduled around charging patterns, thermal constraints, and battery preservation requirements: background adaptation often targets roughly `{python} EdgeFedPowerEnvelopeRecap.background_range_str`, even though phones may sustain `{python} EdgeFedPowerEnvelopeRecap.sustained_range_str` for foreground ML workloads and burst higher briefly. Network diversity introduces orders-of-magnitude performance differences as WiFi, 4G, 5G, and satellite connectivity exhibit vastly different bandwidth (ranging from 1 Mbps to 1 Gbps), latency (10 ms to 600 ms), and reliability characteristics that determine feasible update frequencies and compression requirements.
+Real-world federated learning deployments face multi-dimensional device heterogeneity that creates extreme variation across every system dimension. Computational variation spans about `{python} EdgeFedNpuRecap.compute_ratio_mult_str` differences in processing power between flagship smartphones running at `{python} EdgeFedNpuRecap.mobile_npu_tops_str` and IoT microcontrollers operating at just `{python} EdgeFedNpuRecap.iot_compute_tops_str`, fundamentally limiting what models can train on different device tiers. Memory constraints exhibit even more dramatic differences in available RAM across device categories, up to roughly `{python} EdgeDeviceSpectrum.memory_ratio_mult_str` between `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` microcontrollers and `{python} EdgeDeviceSpectrum.flagship_ram_gb_str` premium smartphones, determining whether devices can perform any local training at all or must rely purely on inference. Energy limitations force training sessions to be carefully scheduled around charging patterns, thermal constraints, and battery preservation requirements: background adaptation often targets roughly `{python} EdgeFedPowerEnvelopeRecap.background_range_str`, even though phones may sustain `{python} EdgeFedPowerEnvelopeRecap.sustained_range_str` for foreground ML workloads and burst higher briefly. Network diversity introduces orders-of-magnitude performance differences as WiFi, 4G, 5G, and satellite connectivity exhibit vastly different bandwidth (ranging from 1 Mbps to 1 Gbps), latency (10 ms to 600 ms), and reliability characteristics that determine feasible update frequencies and compression requirements.
 
 Adaptive coordination protocols address this heterogeneity through sophisticated tiered participation strategies that optimize resource utilization across the device spectrum. High-capability devices such as flagship smartphones can perform complex local training with large batch sizes and multiple epochs, while resource-constrained IoT devices contribute through lightweight updates, specialized subtasks, or even simple data aggregation. This creates a natural computational hierarchy where powerful devices act as "super-peers" performing disproportionate computation, while edge devices contribute specialized local knowledge and coverage.
 
@@ -3057,7 +3312,7 @@ With robust orchestration managing the heterogeneity and intermittency of millio
 
 ## Production Integration {#sec-edge-intelligence-production-integration-beb5}
 
-It is one thing to write a proof-of-concept script that fine-tunes an adapter on a Raspberry Pi. It is an entirely different discipline to ship that capability to 50 million consumer devices within a strict CI/CD pipeline, ensuring that a bad gradient update does not brick the app. Production integration is where the theoretical elegance of edge intelligence collides with the unforgiving realities of mobile software engineering.
+It is one thing to write a proof-of-concept script that fine-tunes an adapter on a Raspberry Pi. It is an entirely different discipline to ship that capability to `{python} EdgeAdaptationTierProfile.fleet_devices_million_str` within a strict CI/CD pipeline, ensuring that a bad gradient update does not brick the app. Production integration is where the theoretical elegance of edge intelligence collides with the unforgiving realities of mobile software engineering.
 
 ### MLOps integration challenges {#sec-edge-intelligence-mlops-integration-challenges-bb4e}
 
@@ -3143,15 +3398,11 @@ The shadow validation approach described earlier operates as a continuous compar
 
 Successful on-device learning deployments build on proven MLOps methodologies while adapting them to the unique challenges of distributed, heterogeneous learning environments. This evolutionary approach ensures operational reliability while enabling the benefits of edge learning.
 
-### Bio-inspired learning efficiency {#sec-edge-intelligence-bioinspired-learning-efficiency-55ad}
+### Data-efficient continual adaptation {#sec-edge-intelligence-bioinspired-learning-efficiency-55ad}
 
-The operational patterns examined above are attempts to make continual learning fit an extreme efficiency target. The human brain operates at 20 watts while continuously learning from limited supervision without catastrophic forgetting. This comparison does not make biology a deployment recipe; it explains why edge systems keep returning to sparsity, replay, and opportunistic updates.
+The operational patterns examined above are attempts to make continual learning fit an extreme efficiency target. The human brain operates at approximately 20 watts while continuously learning from limited supervision without catastrophic forgetting[^fn-brain-power-efficiency]. This comparison does not make biology a deployment recipe; it explains why edge systems keep returning to sparsity, replay, and opportunistic updates.
 
 Biological analogies are useful only when they clarify engineering choices. Sparse representations mirror the selective parameter updates that keep mobile adaptation low cost. Replay buffers parallel memory-consolidation mechanisms that stabilize continual learning. Local-global coordination echoes the need for individual adaptation without abandoning population-level improvement. The point is to recognize why the same constraints keep producing similar design patterns.
-
-#### Learning from biological neural efficiency {#sec-edge-intelligence-learning-biological-neural-efficiency-74b5}
-
-The human brain operates at approximately 20 watts while continuously learning from limited supervision, precisely the efficiency target for on-device learning systems[^fn-brain-power-efficiency]. This efficiency emerges from several architectural principles that directly inform edge learning design, demonstrating what is theoretically achievable with highly optimized learning systems.
 
 ```{python}
 #| echo: false
@@ -3240,27 +3491,28 @@ Following this systematic flowchart yields a functional deployment, but exposing
 
 A billion-user predictive text model that learns from live keyboard inputs can be poisoned if a coordinated group of malicious users repeatedly types a specific slur and those local updates enter the global federated aggregate. The shift to on-device learning exposes the system to unprecedented security and robustness threats. Engineering mitigations must actively defend against both adversarial attacks and the natural statistical drift of the real world.
 
-A concrete way to bound these risks is to integrate the chapter's three pillars by device tier rather than deploy one adaptation policy everywhere. Consider a production voice assistant deployment across 50 million heterogeneous devices, where each layer constrains what the others are allowed to do.
+A concrete way to bound these risks is to integrate the chapter's three pillars by device tier rather than deploy one adaptation policy everywhere. Consider a production voice assistant deployment across `{python} EdgeAdaptationTierProfile.fleet_devices_million_str`, where each layer constrains what the others are allowed to do.
 
-The model adaptation layer stratifies techniques by device capability, matching sophistication to available resources. Flagship phones representing the top 20 percent of the deployment use LoRA rank-32 adapters that enable sophisticated voice pattern learning through high-dimensional parameter updates. Mid-tier devices comprising 60 percent of the fleet employ rank-16 adapters that balance adaptation expressiveness with the tighter memory constraints typical of mainstream smartphones. Budget devices making up the remaining 20 percent rely on bias-only updates that stay comfortably within 1 GB memory limits while still enabling basic personalization.
+The model adaptation layer stratifies techniques by device capability, matching sophistication to available resources. Flagship phones representing the top `{python} EdgeAdaptationTierProfile.flagship_share_pct_str` of the deployment use LoRA adapters of rank `{python} EdgeAdaptationTierProfile.flagship_lora_rank_str` that enable sophisticated voice pattern learning through high-dimensional parameter updates. Mid-tier devices comprising `{python} EdgeAdaptationTierProfile.mid_tier_share_pct_str` of the fleet employ adapters of rank `{python} EdgeAdaptationTierProfile.mid_tier_lora_rank_str` that balance adaptation expressiveness with the tighter memory constraints typical of mainstream smartphones. Budget devices making up the remaining `{python} EdgeAdaptationTierProfile.budget_share_pct_str` rely on bias-only updates that stay comfortably within `{python} EdgeAdaptationTierProfile.budget_device_memory_limit_gb_str` memory limits while still enabling basic personalization.
 
-The data efficiency layer implements adaptive strategies across the entire device population while respecting individual resource constraints. All devices implement experience replay[^fn-replay-forgetting], but with device-appropriate buffer sizes, 10 MB on budget devices vs. 100 MB on flagship models, ensuring that memory-constrained devices can still benefit from replay-based learning. Few-shot learning enables rapid adaptation to new users within their first 10 interactions, reducing the cold-start problem[^fn-cold-start-personalization] that plagues systems requiring extensive training data. Streaming updates accommodate continuous voice pattern evolution as users' speaking styles naturally change over time or as they use the assistant in new acoustic environments.
+The data efficiency layer implements adaptive strategies across the entire device population while respecting individual resource constraints. All devices implement experience replay[^fn-replay-forgetting], but with device-appropriate buffer sizes, `{python} EdgeAdaptationTierProfile.budget_replay_buffer_mb_str` on budget devices vs. `{python} EdgeAdaptationTierProfile.flagship_replay_buffer_mb_str` on flagship models, ensuring that memory-constrained devices can still benefit from replay-based learning. Few-shot learning enables rapid adaptation to new users within their first `{python} EdgeAdaptationTierProfile.few_shot_interactions_range_str`, reducing the cold-start problem[^fn-cold-start-personalization] that plagues systems requiring extensive training data. Streaming updates accommodate continuous voice pattern evolution as users' speaking styles naturally change over time or as they use the assistant in new acoustic environments.
 
 [^fn-replay-forgetting]: **Experience Replay**: Borrowed from reinforcement learning, stores past input-output pairs in a buffer and interleaves them with new training data to prevent catastrophic forgetting. Memory-efficient implementations store compressed embeddings (64--512 dimensions) rather than raw inputs, reducing per-example storage from MB to KB. The buffer size directly determines forgetting rate: too small and old tasks degrade, too large and it competes with model weights for scarce edge memory. \index{Experience Replay!forgetting prevention}
 
-[^fn-cold-start-personalization]: **Cold-Start Problem**\index{Cold-Start Problem}: New users or devices have no local data for personalization, reducing initial engagement by 30--50 percent compared to personalized users. Meta-learned initializations (MAML) or privacy-preserving population statistics can bootstrap personalization, but the fundamental trade-off remains: faster cold-start requires more information from the global model, which may not represent the new user's distribution. Few-shot adaptation from 5--10 interactions offers the best balance of speed and local relevance. \index{Cold-Start Problem!personalization}
+[^fn-cold-start-personalization]: **Cold-Start Problem**\index{Cold-Start Problem}: New users or devices have no local data for personalization, reducing initial engagement by 30--50 percent compared to personalized users. Meta-learned initializations (MAML) or privacy-preserving population statistics can bootstrap personalization, but the fundamental trade-off remains: faster cold-start requires more information from the global model, which may not represent the new user's distribution. Few-shot adaptation from `{python} EdgeAdaptationTierProfile.few_shot_interactions_range_str` offers the best balance of speed and local relevance. \index{Cold-Start Problem!personalization}
 
-The federated coordination layer orchestrates privacy-preserving collaboration across the device population. Devices participate in federated training rounds opportunistically based on connectivity status and battery level, ensuring that coordination does not degrade user experience. LoRA adapters aggregate efficiently with just 50 MB per update compared to 14 GB for full model synchronization, making federated learning practical over mobile networks. Privacy-preserving aggregation protocols ensure that individual voice patterns never leave devices while still enabling population-scale improvements in accent recognition and language understanding that benefit all users.
+The federated coordination layer orchestrates privacy-preserving collaboration across the device population. Devices participate in federated training rounds opportunistically based on connectivity status and battery level, ensuring that coordination does not degrade user experience. LoRA adapters aggregate efficiently with just `{python} EdgeAdaptationTierProfile.federated_lora_update_mb_str` per update compared to `{python} EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str` for full model synchronization, making federated learning practical over mobile networks. Privacy-preserving aggregation protocols ensure that individual voice patterns never leave devices while still enabling population-scale improvements in accent recognition and language understanding that benefit all users.
 
-These layers only work as a system when the integration policy protects against capability mismatch, component failure, resource conflicts, and untested emergent behavior:
+These layers only work as a system when the integration policy protects against capability mismatch, component failure, resource conflicts, and untested emergent behavior. @Tbl-edge-integration-controls maps each system risk to the control that keeps a tiered deployment from becoming a collection of disconnected techniques.
 
-1. **Hierarchical Capability Matching**\index{Hierarchical Capability Matching}: Deploy more sophisticated techniques on capable devices while ensuring basic functionality across the device spectrum. Never assume uniform capabilities.
+| **Integration risk** | **Control**                                                              | **Why it matters**                                                                                                                                   |
+|:---------------------|:-------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| Capability mismatch  | Hierarchical capability matching\index{Hierarchical Capability Matching} | Deploys more sophisticated techniques on capable devices while preserving basic functionality across the full device spectrum.                       |
+| Component failure    | Graceful degradation\index{Graceful Degradation}                         | Keeps local adaptation useful when connectivity is poor or battery constraints force the system into a minimal adaptation mode.                      |
+| Resource conflict    | Explicit priority policy                                                 | Prevents model adaptation and replay buffers from competing for the same memory, energy, or latency budget without a predefined owner.               |
+| Emergent behavior    | Performance validation\index{Validation!performance}                     | Tests combinations of device tier, network state, and adaptation policy because integrated systems fail in ways individual techniques do not expose. |
 
-2. **Graceful Degradation**\index{Graceful Degradation}: Systems must operate effectively when individual components fail. Poor connectivity should not prevent local adaptation; low battery should trigger minimal adaptation modes.
-
-3. **Conflict Resolution**: Model adaptation and data efficiency techniques can conflict (limited memory vs. buffer size). Systematic resource allocation prevents these conflicts through predefined priority hierarchies.
-
-4. **Performance Validation**\index{Validation!performance}: Integration creates emergent behaviors that individual techniques do not exhibit. Systems require comprehensive testing across device combinations and network conditions.
+: **Edge-Learning Integration Controls**\index{Edge Learning!integration controls}: A tiered edge-learning deployment needs explicit controls for capability matching, graceful degradation, resource conflicts, and validation across device and network combinations. {#tbl-edge-integration-controls}
 
 This integrated approach transforms on-device learning from a collection of techniques into a coherent systems capability that provides robust personalization within real-world deployment constraints. A tiered adaptation strategy (@fig-tiered-adaptation) maps these techniques to device capabilities.
 
@@ -3330,7 +3582,7 @@ Heterogeneity is not background variation; it determines which devices can train
 
 At the hardware level, devices differ in terms of memory capacity, processor architecture (for example, ARM Cortex-M vs. A-series)[^fn-arm-cortex-heterogeneity], instruction set support (for example, availability of SIMD or floating-point units), and the presence or absence of AI accelerators. Some clients may possess powerful NPUs capable of running small training loops, while others may rely solely on low-frequency CPUs with minimal RAM. These differences affect the feasible size of models, the choice of training algorithm, and the frequency of updates.
 
-[^fn-arm-cortex-heterogeneity]: **ARM Cortex Spectrum**\index{ARM Cortex Spectrum}: Spans 6 orders of magnitude: Cortex-M0+ (48 MHz, 32 KB RAM, approximately 10 $\mu$W) to Cortex-A78 (3 GHz, multi-core NEON SIMD, 1--5 W). This diversity forces federated learning to tier algorithms by device class: quantized inference only on M0+, lightweight bias-only training on M7, and full backpropagation on A78. A single federated round must accommodate all three simultaneously without biasing the global model toward any tier. \index{ARM Cortex!device heterogeneity}
+[^fn-arm-cortex-heterogeneity]: **ARM Cortex Spectrum**\index{ARM Cortex Spectrum}: Representative endpoints span nearly six orders of magnitude, from Cortex-M-class devices around `{python} EdgeDeviceSpectrum.tiny_clock_mhz_str`, `{python} EdgeDeviceSpectrum.tiny_ram_kb_str` RAM, and `{python} EdgeDeviceSpectrum.sensor_power_uw_str` power to mobile-class devices around `{python} EdgeDeviceSpectrum.mobile_clock_ghz_str`, `{python} EdgeDeviceSpectrum.flagship_ram_gb_str` RAM, and `{python} EdgeDeviceSpectrum.phone_power_w_str` [@warden2020tinyml; @lai2018cmsis]. This diversity forces federated learning to tier algorithms by device class: quantized inference on the smallest microcontrollers, lightweight bias-only updates on larger embedded or wearable tiers, and fuller adapter or backpropagation loops only on mobile-class SoCs. A single federated round must accommodate these tiers simultaneously without biasing the global model toward any one tier. \index{ARM Cortex!device heterogeneity}
 
 Software heterogeneity compounds the challenge. Devices may run different versions of operating systems, kernel-level drivers, and runtime libraries. Some environments support optimized ML runtimes like TensorFlow Lite[^fn-tflite-mobile-inference] Micro or ONNX Runtime Mobile[^fn-onnx-portable-inference], while others rely on custom inference stacks or restricted APIs. These discrepancies can lead to subtle inconsistencies in behavior, especially when models are compiled differently or when floating-point precision varies across platforms.
 
@@ -3342,7 +3594,7 @@ In addition to computational heterogeneity, devices exhibit variation in connect
 
 Finally, system fragmentation affects reproducibility and testing. With such a wide range of execution environments, it is difficult to ensure consistent model behavior or to debug failures reliably. This makes monitoring, validation, and rollback mechanisms more important, but also more difficult to implement uniformly across the fleet.
 
-Consider a federated learning deployment for mobile keyboards. A high-end smartphone might feature 8 GB of RAM, a dedicated AI accelerator, and continuous Wi-Fi access. In contrast, a budget device may have just 2 GB of RAM, no hardware acceleration, and rely on intermittent mobile data. These disparities influence how long training runs can proceed, how frequently models can be updated, and even whether training is feasible at all. To support such a range, the system must dynamically adjust training schedules, model formats, and compression strategies, ensuring equitable model improvement across users while respecting each device's limitations.
+Consider a federated learning deployment for mobile keyboards. A high-end smartphone might feature `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` of RAM, a dedicated AI accelerator, and continuous Wi-Fi access. In contrast, a budget device may have just `{python} EdgeAdaptationTierProfile.budget_keyboard_phone_ram_gb_str` of RAM, no hardware acceleration, and rely on intermittent mobile data. These disparities influence how long training runs can proceed, how frequently models can be updated, and even whether training is feasible at all. To support such a range, the system must dynamically adjust training schedules, model formats, and compression strategies, ensuring equitable model improvement across users while respecting each device's limitations.
 
 ### Non-IID data distribution challenges {#sec-edge-intelligence-noniid-data-distribution-challenges-42cd}
 
@@ -3354,7 +3606,7 @@ These challenges necessitate robust algorithms that can handle heterogeneity and
 
 ### Distributed system observability {#sec-edge-intelligence-distributed-system-observability-2270}
 
-Monitoring and observability frameworks must be fundamentally reimagined for distributed edge environments. Traditional centralized monitoring approaches that rely on unified data collection and real-time visibility become impractical when devices operate intermittently connected and data cannot be centralized. The drift detection and performance monitoring techniques established in MLOps provide conceptual foundations, but require adaptation to handle the distributed, privacy-preserving nature of on-device learning systems.
+Monitoring and observability frameworks must be fundamentally reimagined for distributed edge environments. Traditional centralized MLOps monitors collect prediction, label, and performance telemetry in one control plane; that approach becomes impractical when devices operate intermittently connected and data cannot be centralized. Edge systems still need drift detection and performance monitoring, but those techniques must be adapted to the distributed, privacy-preserving nature of on-device learning.
 
 Unlike centralized machine learning systems, where model updates can be continuously evaluated against held-out validation sets, on-device learning introduces a core shift in visibility and observability. Once deployed, models operate in highly diverse and often disconnected environments, where internal updates may proceed without external monitoring. This creates significant challenges for ensuring that model adaptation is both beneficial and safe.
 
@@ -3413,11 +3665,13 @@ class EdgeAdaptationPowerMetrics:
     )
 ```
 
-Beyond traditional inference metrics, adaptive systems require specialized training metrics that capture learning efficiency under edge constraints. Adaptation efficiency measures accuracy improvement per training sample consumed, quantified as the slope of the learning curve under resource constraints. A system achieving 2 percent accuracy gain per 100 training samples demonstrates higher adaptation efficiency than one requiring 500 samples for the same improvement, directly translating to faster personalization and reduced data collection requirements. Memory-constrained convergence evaluates the validation loss achieved within specified RAM budgets, such as "convergence within 512 KB training footprint," capturing how effectively systems learn given fixed memory allocations, critical for comparing adaptation strategies across device classes from microcontrollers to smartphones. Energy-per-update quantifies millijoules consumed per gradient update, a metric critical for battery-powered devices where training energy directly impacts user experience. Background adaptation commonly budgets `{python} EdgeAdaptationPowerMetrics.background_range_str`, translating to roughly `{python} EdgeAdaptationPowerMetrics.background_energy_per_hour_str` of adaptation before noticeably affecting battery life. Time-to-adaptation measures wall-clock time from receiving new data to achieving measurable improvement, accounting for opportunistic scheduling constraints that defer training to idle periods, this metric captures real-world adaptation speed including waiting for device idleness, charging status, and thermal headroom rather than just raw computational throughput.
+Beyond traditional inference metrics, adaptive systems require measures that explain whether local learning is worth the resource cost. Adaptation efficiency is the first test: how much accuracy improves per training sample consumed. A system that gains 2 percent accuracy from 100 local samples is more useful on a device than one that needs 500 samples for the same improvement, because fewer samples mean faster personalization, less local storage, and fewer training windows competing with user-facing work.
 
-Evaluating whether local adaptation actually improves over global models requires personalization gain metrics that justify the overhead of on-device learning. Per-user performance delta measures accuracy improvement for the adapted model vs. the global baseline on user-specific holdout data, systems should demonstrate statistically significant improvements, typically exceeding 2 percent accuracy gains, to justify the computational overhead, energy consumption, and complexity that adaptation introduces. Personalization-privacy trade-off quantifies accuracy gain per unit of local data exposure, measuring the value extracted from privacy-sensitive information, this metric helps assess whether adaptation benefits outweigh the privacy costs of retaining user data locally, particularly important for applications handling sensitive information like health data or personal communications. Catastrophic forgetting rate measures degradation on the original task as the model adapts to local distributions through retention testing, acceptable forgetting rates depend on the application domain but typically should remain below 5 percent accuracy loss on original tasks to ensure that personalization does not come at the expense of the model's general capabilities.
+The second test is whether the improvement fits inside the device envelope. Memory-constrained convergence evaluates validation loss under a fixed RAM budget, such as "convergence within 512 KB training footprint," so methods can be compared across microcontrollers, wearables, and smartphones. Energy-per-update measures millijoules consumed per gradient step; background adaptation commonly budgets `{python} EdgeAdaptationPowerMetrics.background_range_str`, translating to roughly `{python} EdgeAdaptationPowerMetrics.background_energy_per_hour_str` of adaptation before noticeably affecting battery life. Time-to-adaptation extends the same idea to scheduling: it measures wall-clock time from new data to measurable improvement, including waiting for idleness, charging status, and thermal headroom rather than only raw accelerator throughput.
 
-When devices coordinate through the federated protocols examined in @sec-edge-intelligence-federated-learning-6e7e, federated coordination cost metrics become critical for assessing system viability. Communication efficiency measures model accuracy improvement per byte transmitted, capturing the effectiveness of gradient compression and selective update strategies, modern federated systems achieve 10--100$\times$ compression through quantization and sparsification techniques while maintaining 95 percent or more of uncompressed accuracy, making the difference between practical and impractical mobile deployment. Stragglers impact quantifies convergence delay caused by slow or unreliable devices, measured as the difference in convergence time with vs. without participation filters, effective straggler mitigation through asynchronous aggregation and selective participation reduces convergence time by 30--50 percent compared to synchronous approaches that wait for all devices. Aggregation quality evaluates global model performance as a function of device participation rate, revealing minimum viable participation thresholds below which federated learning fails to converge effectively, most federated systems require 10--20 percent device participation per round to maintain stable convergence, establishing clear requirements for client selection and availability management strategies.
+The third test is whether personalization improves the right behavior without damaging the base model. Per-user performance delta compares the adapted model against the global baseline on user-specific holdout data, and deployments typically need statistically significant gains, often above 2 percent accuracy, before accepting the compute and energy overhead. Personalization-privacy trade-off measures accuracy gain per unit of local data exposure, which matters most for health, location, or personal-communication workloads. Catastrophic forgetting rate measures degradation on the original task after local adaptation; acceptable thresholds depend on the domain, but many systems target less than 5 percent accuracy loss on the original task so personalization does not erase general capability.
+
+When devices coordinate through the federated protocols examined in @sec-edge-intelligence-federated-learning-6e7e, the metrics shift from one device to the population. Communication efficiency measures accuracy improvement per byte transmitted, capturing whether gradient compression and selective updates make mobile deployment practical; modern systems often target 10--100$\times$ compression while retaining at least 95 percent of uncompressed accuracy. Straggler impact measures convergence delay caused by slow or unreliable devices, while aggregation quality tracks global model performance as participation rate changes. Together, these metrics reveal the minimum viable participation threshold, commonly 10--20 percent of devices per round, below which federated learning becomes unstable.
 
 These training-specific benchmarks complement inference metrics including latency, throughput, and accuracy, creating complete performance characterization for adaptive systems. Practical benchmarking must measure both dimensions: a system that achieves fast inference but slow adaptation, or efficient adaptation but poor final accuracy, fails to meet real-world requirements. The integration of inference and training benchmarks enables holistic evaluation of on-device learning systems across their full operational lifecycle.
 
@@ -3471,7 +3725,7 @@ In addition to compliance challenges, on-device learning introduces new security
 
 Maintaining model integrity over time is particularly difficult in decentralized settings, where central monitoring and validation are limited. Autonomous updates could, without external visibility, cause models to drift into unsafe or biased states. These risks are compounded by compliance obligations such as the GDPR's right to erasure: if user data subtly influences a model through adaptation, tracking and reversing that influence becomes complex.
 
-The security and integrity of self-adapting models, particularly at the edge, pose important open challenges. A comprehensive treatment of these threats and corresponding mitigation strategies requires specialized security frameworks for distributed ML systems.
+The immediate design obligation is to treat model state, replay buffers, and adaptation triggers as security-sensitive assets. Edge learning cannot rely on central inspection after the fact; it needs local integrity checks, protected storage, and conservative update policies before adaptation begins.
 
 Privacy regulations also interact with on-device learning in nontrivial ways. While local adaptation can reduce the need to transmit sensitive data, it may still require storage and processing of personal information, including sensor traces or behavioral logs, on the device itself. These privacy considerations require careful attention to security frameworks and regulatory compliance. Depending on jurisdiction, this may invoke additional requirements for data retention, user consent, and auditability. Systems must be designed to satisfy these requirements without compromising adaptation effectiveness, which often involves encrypting stored data, enforcing retention limits, or implementing user-controlled reset mechanisms.
 
@@ -3505,13 +3759,11 @@ First, unlike centralized systems where failures are localized and observable, o
 
 Second, the federated coordination mechanisms that enable collaborative learning also create new attack surfaces. Adversarial clients can inject poisoned gradients[^fn-byzantine-fl-resilience] designed to degrade global model performance. Model inversion attacks can extract private information from shared updates despite aggregation. The distributed nature of on-device learning makes these attacks both easier to execute (compromising client devices) and harder to detect (no centralized validation).
 
-[^fn-byzantine-fl-resilience]: **Byzantine Fault Tolerance in FL**: Named after the Byzantine Generals Problem [@lamport1982byzantine], this property enables useful aggregation despite malicious or faulty participants. Krum has a condition such as $2f + 2 < n$ in the original analysis, while coordinate-wise median and trimmed-mean aggregators use different robustness assumptions; the tolerated Byzantine fraction depends on the aggregation rule, dimensionality, and statistical model. These defenses can increase communication costs by 2--5$\times$ and compute overhead by 3--10$\times$. This overhead is the price of trust in open federated systems where any client device could be compromised. \index{Byzantine Fault Tolerance!federated learning}
+[^fn-byzantine-fl-resilience]: **Byzantine Fault Tolerance in FL**: Named after the Byzantine Generals Problem [@lamport1982byzantine], this property enables useful aggregation despite malicious or faulty participants. Krum's original analysis requires conditions such as $2f + 2 < n$ [@blanchard2017machine], while coordinate-wise median and trimmed-mean aggregators use different robustness assumptions; the tolerated Byzantine fraction depends on the aggregation rule, dimensionality, and statistical model. These defenses can increase communication costs by 2--5$\times$ and compute overhead by 3--10$\times$. This overhead is the price of trust in open federated systems where any client device could be compromised. \index{Byzantine Fault Tolerance!federated learning}
 
 Third, on-device systems must handle distribution shifts and environmental changes without access to labeled validation data. Models may confidently drift into failure modes, adapting to local biases or temporary anomalies. The non-IID data distributions across devices mean that local drift on individual devices may not trigger global alarms, allowing silent degradation.
 
-These reliability threats demand systematic approaches that ensure on-device learning systems remain robust despite autonomous adaptation, malicious manipulation, and environmental uncertainty. @Sec-robust-ai examines these challenges comprehensively, establishing principles for fault-tolerant AI systems that can maintain reliability despite hardware faults, adversarial attacks, and distribution shifts. The techniques developed there, Byzantine-resilient aggregation, adversarial training, and drift detection, become essential components of production-ready on-device learning systems rather than optional enhancements.
-
-The privacy-preserving aspects of these robustness mechanisms, including secure aggregation and differential privacy, connect directly to @sec-security-privacy, which establishes the cryptographic foundations and privacy guarantees necessary for deploying self-learning systems at scale while maintaining user trust and regulatory compliance.
+These reliability threats demand systematic approaches that keep local adaptation bounded even when devices are faulty, malicious, or operating under environmental shift. The local lesson is that robust aggregation, drift checks, conservative update policies, secure aggregation, and differential privacy are part of the edge-learning architecture, not optional add-ons after deployment.
 
 ## Fallacies and Pitfalls {#sec-edge-intelligence-fallacies-pitfalls-6c6d}
 
@@ -3519,9 +3771,9 @@ A team attempts to port their massive cloud-based recommendation engine directly
 
 **Fallacy**: *On-device learning provides the same adaptation capabilities as cloud-based training.*
 
-Teams expect local learning to match centralized training's model improvements, ignoring fundamental resource constraints. On-device learning amplifies resource needs by 4--12$\times$ compared to inference-only deployment due to activation caching, gradient storage, optimizer state, and bidirectional memory traffic (@sec-edge-intelligence-model-adaptation-6a82). Local datasets are typically small, biased, and nonrepresentative, while compute budgets remain orders of magnitude below cloud GPUs. A smartphone with 8 GB RAM and 5 W power budget cannot replicate the adaptation achieved by data center systems with terabytes of memory and kilowatts of power. Effective on-device learning requires designing adaptation strategies that provide meaningful improvements within these constraints rather than attempting to replicate cloud-scale learning capabilities.
+Teams expect local learning to match centralized training's model improvements, ignoring fundamental resource constraints. On-device learning amplifies resource needs by 4--12$\times$ compared to inference-only deployment due to activation caching, gradient storage, optimizer state, and bidirectional memory traffic (@sec-edge-intelligence-model-adaptation-6a82). Local datasets are typically small, biased, and nonrepresentative, while compute budgets remain orders of magnitude below cloud GPUs. A smartphone with `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` RAM and `{python} EdgeDeviceSpectrum.phone_power_w_str` power budget cannot replicate the adaptation achieved by data center systems with terabytes of memory and kilowatts of power. Effective on-device learning requires designing adaptation strategies that provide meaningful improvements within these constraints rather than attempting to replicate cloud-scale learning capabilities.
 
-**Pitfall**: *Assuming that federated learning automatically preserves privacy without additional safeguards.*
+**Pitfall**: *Assuming federated learning automatically preserves privacy without additional safeguards.*
 
 Practitioners believe that keeping data on local devices inherently provides privacy protection, ignoring what can be inferred from model updates. Gradient and parameter updates leak significant information about local training data through various inference attacks, while device participation patterns reveal sensitive information about users and activities. Stronger privacy preservation requires additional mechanisms: differential privacy provides a tunable probabilistic bound on how much the output distribution can change because of one individual's data, while secure aggregation protocols prevent parameter inspection during coordination (as @fig-secure-agg illustrates with cryptographic masking). Data locality alone is insufficient for privacy protection.
 
@@ -3529,11 +3781,11 @@ Practitioners believe that keeping data on local devices inherently provides pri
 
 This belief assumes that any local adaptation is beneficial regardless of the quality or quantity of local data available. On-device learning with insufficient, noisy, or biased local data can actually degrade model performance compared to well-trained generic models (@sec-edge-intelligence-data-efficiency-c701). Small datasets may not provide enough signal for meaningful learning, while adaptation to local noise can harm generalization. Effective on-device learning systems must include mechanisms to detect when local adaptation is beneficial and fall back to generic models when local data is inadequate for reliable learning.
 
-**Pitfall**: *Ignoring the heterogeneity challenges across different device types and capabilities.*
+**Pitfall**: *Ignoring heterogeneity across different device types and capabilities.*
 
-Teams design on-device learning systems assuming uniform hardware capabilities across deployment devices. Real-world deployments span diverse hardware with varying computational power, memory capacity, energy constraints, and networking capabilities. Edge device capabilities span nearly six orders of magnitude in memory and power, and four orders in CPU throughput: from 32 KB RAM microcontrollers to 16 GB smartphones, 48 MHz ARM Cortex-M0+ (~10 MIPS) to 3 GHz A-series processors (~100,000 MIPS), and 10 μW sensor nodes to 5 W flagship phones. A learning algorithm that works well on high-end smartphones may fail catastrophically on resource-constrained IoT devices. Federated learning algorithms must dynamically adapt through quantized inference on low-end devices, selective participation based on capability, and tiered aggregation strategies that account for 10,000$\times$ performance differences within a single deployment.
+Teams design on-device learning systems assuming uniform hardware capabilities across deployment devices. Real-world deployments span diverse hardware with varying computational power, memory capacity, energy constraints, and networking capabilities. Edge device capabilities span nearly six orders of magnitude in memory and power, and four orders in CPU throughput: from `{python} EdgeDeviceSpectrum.tiny_ram_kb_str` RAM microcontrollers to `{python} EdgeDeviceSpectrum.flagship_ram_gb_str` smartphones, `{python} EdgeDeviceSpectrum.tiny_clock_mhz_str` Cortex-M-class processors (`{python} EdgeDeviceSpectrum.tiny_cpu_mips_str`) to `{python} EdgeDeviceSpectrum.mobile_clock_ghz_str` mobile-class processors (`{python} EdgeDeviceSpectrum.mobile_cpu_mips_str`), and `{python} EdgeDeviceSpectrum.sensor_power_uw_str` sensor nodes to `{python} EdgeDeviceSpectrum.phone_power_w_str` flagship phones [@warden2020tinyml; @lai2018cmsis]. A learning algorithm that works well on high-end smartphones may fail catastrophically on resource-constrained IoT devices. Federated learning algorithms must dynamically adapt through quantized inference on low-end devices, selective participation based on capability, and tiered aggregation strategies that account for `{python} EdgeDeviceSpectrum.cpu_throughput_ratio_mult_str` performance differences within a single deployment.
 
-**Pitfall**: *Underestimating the complexity of orchestrating learning across distributed edge systems.*
+**Pitfall**: *Underestimating the complexity of coordinating learning across distributed edge systems.*
 
 Many teams focus on individual device optimization without considering the system-level challenges of coordinating learning across thousands or millions of edge devices. Edge systems orchestration (@sec-edge-intelligence-largescale-device-orchestration-1360) must handle intermittent connectivity, varying power states, different time zones, and unpredictable device availability patterns that create complex scheduling and synchronization challenges. Device clustering, federated rounds coordination, model versioning across diverse deployment contexts, and handling partial participation from unreliable devices require sophisticated infrastructure beyond simple aggregation servers. Additionally, real-world edge deployments involve multiple stakeholders with different incentives, security requirements, and operational procedures that must be balanced against learning objectives. Effective edge learning systems require robust orchestration frameworks that can maintain system coherence despite constant device churn, network partitions, and operational disruptions.
 
@@ -3541,9 +3793,9 @@ Avoiding these pitfalls, from ignoring thermal throttling to underestimating the
 
 ## Summary {#sec-edge-intelligence-summary-0af9}
 
-Edge Intelligence represents the "physics-limited frontier" of the Machine Learning Fleet. Throughout this book, we have transitioned from logical algorithms (Part I) to data center-scale machines (Part II) and global cloud services (@sec-inference-scale). This chapter has explored what happens when those same principles are pushed to their extreme physical limits: sensors with microwatt power budgets, microcontrollers with kilobyte memory, and smartphones facing the uncompromising "Mobile memory wall."
+Edge intelligence is the physics-limited frontier of the Machine Learning Fleet. The previous chapters moved from data center infrastructure to global serving systems; this chapter showed what changes when the same learning and serving principles encounter sensors with microwatt power budgets, microcontrollers with kilobyte memory, and smartphones facing the mobile memory wall.
 
-We established a three-pillar framework for navigating these constraints: Model Adaptation (reducing the update footprint via TinyTL or LoRA), Data Efficiency (learning from minimal local samples via few-shot or streaming methods), and Federated Coordination (sharing insights without sharing raw data). Success at the edge requires more than algorithmic cleverness; it demands a deep co-design between the software's mathematical requirements and the hardware's thermal, energy, and bandwidth realities. The following key takeaways summarize the essential principles.
+Three design levers make learning possible under those constraints. Model adaptation reduces the update footprint by freezing most of the network or using small adapters. Data efficiency extracts useful signal from few local samples or streaming experience. Federated coordination lets a population improve a shared model without centralizing raw data. Success at the edge requires more than algorithmic cleverness; it demands co-design between the software's mathematical requirements and the hardware's thermal, energy, and bandwidth realities.
 
 Billions of devices already run inference workloads locally, from keyboard prediction on smartphones to anomaly detection on industrial sensors. Edge intelligence addresses requirements that no amount of data center scaling can satisfy: latency-critical applications where cloud round-trips introduce unacceptable delays, privacy-sensitive domains where raw data must never leave the device, and connectivity-constrained environments where network access is intermittent or absent. As on-device capabilities advance through hardware specialization and algorithmic efficiency, the boundary between what requires cloud infrastructure and what can execute locally will continue to shift, making these co-design principles increasingly central to production ML system architecture.
 
@@ -3560,7 +3812,7 @@ Billions of devices already run inference workloads locally, from keyboard predi
 
 ::: {.callout-chapter-connection title="From devices to operations"}
 
-We have pushed intelligence to its physical limits: smartphones constrained by the mobile memory wall, microcontrollers operating on microwatt budgets, and federated fleets spanning billions of heterogeneous devices. Deploying models across this spectrum, from data center GPUs to edge sensors, is only the beginning. Sustaining these deployments at production scale demands systematic operational practices. @Sec-ops-scale examines the platform engineering, monitoring, and lifecycle management frameworks required to keep the entire Machine Learning Fleet running reliably.
+Edge intelligence pushes models to the boundary where hardware diversity, battery budgets, intermittent connectivity, and local autonomy all become first-order constraints. Deploying models across this spectrum, from data center GPUs to edge sensors, is only the beginning. Sustaining these deployments at production scale demands systematic operational practices. @Sec-ops-scale examines the platform engineering, monitoring, and lifecycle management frameworks required to keep the entire Machine Learning Fleet running reliably.
 
 :::
 

@@ -56,7 +56,7 @@ from mlsysim.core.constants import *
 # │          bw_ib_gb_per_s_str, bw_nvme_gb_per_s_str, h100_fp16_tflop_per_s_str, h100_fp8_tflop_per_s_str,
 # │          a100_fp16_tflop_per_s_str, mobile_int8_tops_str, dc_mobile_ratio_mult_str,
 # │          ridge_a100_str, ridge_h100_str, hbm_vs_register_ratio_mult_str,
-# │          ssd_vs_register_ratio_mult_str
+# │          ssd_vs_register_ratio_mult_str, training_state_* strings
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt_int, fmt_int, fmt, fmt_qty, fmt_bandwidth, fmt_ops_rate, MarkdownStr
@@ -127,10 +127,25 @@ class NumbersToKnow:
 
     ridge_a100 = int(h_a100.ridge_point().to(flop/byte).magnitude)
     ridge_h100 = int(h_h100.ridge_point().to(flop/byte).magnitude)
+    training_model_params = Models.Language.Llama2_7B.parameters
+    fp16_bytes_per_param = 2
+    fp32_bytes_per_param = 4
+    adam_state_bytes_per_param = 8
+    training_state_bytes_per_param = (
+        fp16_bytes_per_param
+        + fp16_bytes_per_param
+        + fp32_bytes_per_param
+        + adam_state_bytes_per_param
+    )
+    training_state_footprint = (
+        training_model_params.to(param).magnitude
+        * training_state_bytes_per_param
+        * byte
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Canonical _str forms for prose; raw ints/floats above kept for arithmetic.
-    from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_ops_rate, fmt_qty, fmt_bandwidth
+    from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_ops_rate, fmt_qty, fmt_bandwidth, fmt_count, fmt_memory, fmt_params
     dram_vs_compute_ratio_mult_str = fmt_multiple(dram_vs_compute, precision=0, commas=False)
     fp32_vs_int8_ratio_mult_str = fmt_multiple(fp32_vs_int8, precision=0, commas=False)
     fp32_vs_fp16_ratio_mult_str = fmt_multiple(fp32_vs_fp16, precision=1, commas=False)
@@ -162,6 +177,12 @@ class NumbersToKnow:
 
     ridge_a100_str = fmt(ridge_a100, precision=0, commas=False)
     ridge_h100_str = fmt(ridge_h100, precision=0, commas=False)
+    fp16_bytes_per_param_str = fmt_count(fp16_bytes_per_param, label="byte")
+    fp32_bytes_per_param_str = fmt_count(fp32_bytes_per_param, label="byte")
+    adam_state_bytes_per_param_str = fmt_count(adam_state_bytes_per_param, label="byte")
+    training_state_bytes_per_param_str = fmt_count(training_state_bytes_per_param, label="byte")
+    training_model_params_b_str = fmt_params(training_model_params, scale="B", precision=0, commas=False)
+    training_state_footprint_gb_str = fmt_memory(training_state_footprint, unit=GB, precision=0, commas=False)
 ```
 
 Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean-latency] shaped a generation of systems engineers, these reference numbers provide the order-of-magnitude intuition essential for ML systems design. While absolute values evolve with hardware generations, the *ratios* between categories remain remarkably stable. Memorize the relationships; use the specific numbers as sanity checks.
@@ -169,7 +190,7 @@ Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean
 ::: {#psp-appendix-machine-three-numbers .callout-perspective title="Three numbers that matter most"}
 
 * **Energy ratio**: DRAM access costs ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` more energy than an FP16 FLOP. This is why arithmetic intensity is everything.
-* **Training-state footprint**: Model weights (2 bytes FP16) + gradients (2 bytes FP16) + master weights (4 bytes FP32) + optimizer states for Adaptive Moment Estimation (Adam) at 8 bytes. That totals 16 bytes per parameter, so a 7B model needs 112 GB just to start training.
+* **Training-state footprint**: Model weights (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + gradients (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + master weights (`{python} NumbersToKnow.fp32_bytes_per_param_str` FP32) + optimizer states for Adaptive Moment Estimation (Adam) at `{python} NumbersToKnow.adam_state_bytes_per_param_str`. That totals `{python} NumbersToKnow.training_state_bytes_per_param_str` per parameter, so a `{python} NumbersToKnow.training_model_params_b_str` model needs `{python} NumbersToKnow.training_state_footprint_gb_str` just to start training.
 * **Fiber propagation limit**: Light travels about 200 km/ms in fiber. Cross-country latency is ~40 ms. No optimization can reduce this—it is physics.
 
 :::
@@ -183,6 +204,11 @@ These relationships are governed by physics or arithmetic—they will still be t
 #### Speed of light tax {.unnumbered}
 
 @Tbl-speed-of-light-ref shows the irreducible latency floor for any distributed system.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.45}
+```
 
 | Distance           | Round-Trip Latency | Implication                   |
 |:-------------------|:------------------:|:------------------------------|
@@ -206,7 +232,7 @@ These relationships are governed by physics or arithmetic—they will still be t
 
 : **The Energy Wall**: Moving data costs ~580$\times$ more energy than computing on it. This ratio is physics, not engineering. {#tbl-energy-ratios-ref tbl-colwidths="[35,10,55]"}
 
-[^fn-horowitz-energy-app]: **Energy hierarchy source**: Energy numbers from @horowitz2014, "Computing's Energy Problem" (ISSCC, 45nm process). While absolute values scale with process node, the *ratios* between memory access and compute remain remarkably stable because wire capacitance (distance) dominates.
+[^fn-horowitz-energy-app]: **Energy Hierarchy Source**: Energy numbers from @horowitz2014, "Computing's Energy Problem" (ISSCC, 45nm process). While absolute values scale with process node, the *ratios* between memory access and compute remain remarkably stable because wire capacitance (distance) dominates.
 
 #### Memory hierarchy {.unnumbered}
 
@@ -220,6 +246,10 @@ These relationships are governed by physics or arithmetic—they will still be t
 | Accelerator memory BW vs. CPU↔Accelerator link |  ~`{python} NumbersToKnow.gpu_bw_vs_pcie_ratio_mult_str` faster  | Architectural investment priority |
 
 : **The Latency Hierarchy**: Selected latency relationships in the memory hierarchy. The largest gaps come from crossing physical boundaries: off-chip memory, peripheral links, storage, and network fabric. {#tbl-memory-ratios-ref tbl-colwidths="[47,23,30]"}
+
+```{=latex}
+\endgroup
+```
 
 #### Scaling laws {.unnumbered}
 
@@ -236,7 +266,7 @@ These relationships are governed by physics or arithmetic—they will still be t
 
 : **Scaling Rules**: These are arithmetic, not hardware-specific. Training memory includes FP16 weights (2 bytes), FP16 gradients (2 bytes), FP32 master weights (4 bytes), and Adam optimizer states (8 bytes for momentum + variance). {#tbl-scaling-rules-ref tbl-colwidths="[33,33,33]"}
 
-[^fn-training-memory]: **Training memory (Adam)**: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
+[^fn-training-memory]: **Training Memory (Adam)**: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
 
 ### Latency budgets: The nonnegotiables {.unnumbered}
 
@@ -320,9 +350,9 @@ The Roofline Model [@williams2009] answers a deceptively simple question: *how f
 
 Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because each loaded element is reused many times. Element-wise operations like rectified linear unit (ReLU) have low intensity because each operation loads a number, performs one computation, and writes it back. As @fig-roofline illustrates, each workload is bounded by either memory bandwidth or compute throughput, and its arithmetic intensity determines which ceiling it hits first.
 
-::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Performance ceiling for a hypothetical accelerator. The sloped line represents memory bandwidth limits; the horizontal line represents peak compute. Every workload can be plotted on this diagram to determine its optimization strategy." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled memory bound, and a horizontal line labeled compute bound. They meet at the ridge point."}
+::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline model**: Performance ceiling for a hypothetical accelerator. The sloped line represents memory bandwidth limits; the horizontal line represents peak compute. Every workload can be plotted on this diagram to determine its optimization strategy." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled memory bound, and a horizontal line labeled compute bound. They meet at the ridge point."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9]
   \tikzset{
     Axis/.style={line width=1.0pt, draw=GrayLine, ->, >=Latex},
     Guide/.style={dashed, draw=GrayLine!60, line width=0.6pt},
@@ -330,8 +360,8 @@ Every operation has an **arithmetic intensity**: the ratio of computations perfo
     Dot/.style={circle, fill=#1, draw=white, line width=0.5pt, minimum size=5pt, inner sep=0pt}
   }
   \draw[step=0.5, gray!15, very thin] (0,0) grid (6,4);
-  \draw[Axis] (0,0) -- (6,0) node[right,text=TextBlack,font=\footnotesize\usefont{T1}{phv}{m}{n}] {Arithmetic Intensity (FLOP/byte)};
-  \draw[Axis] (0,0) -- (0,4.2) node[above, text=black,font=\footnotesize\usefont{T1}{phv}{m}{n}] {Performance (FLOP/s)};
+  \draw[Axis] (0,0) -- (6,0) node[right,align=left,text=TextBlack,font=\fontsize{8pt}{10}\usefont{T1}{phv}{m}{n}] {Arithmetic Intensity\\ (FLOP/byte)};
+  \draw[Axis] (0,0) -- (0,4.2) node[above, text=black,font=\fontsize{8pt}{9}\usefont{T1}{phv}{m}{n}] {Performance (FLOP/s)};
   \draw[BlueLine, line width=2pt] (0,0) -- (3,3);
   \draw[RedLine, line width=2pt] (3,3) -- (5.8,3);
   \node[Label, text=BlueLine, rotate=45, anchor=south, yshift=2pt] at (1.5, 1.5) {\textbf{Memory Bound}};
@@ -395,13 +425,7 @@ class A100RooflineExample:
 
 Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} A100RooflineExample.a100_fp16_tflop_per_s_str` and HBM2e bandwidth of `{python} A100RooflineExample.a100_bw_tb_per_s_str`. The ridge point is `{python} A100RooflineExample.a100_fp16_tflop_per_s_str`/`{python} A100RooflineExample.a100_bw_tb_per_s_str` = `{python} A100RooflineExample.ridge_point_flops_per_byte_str` (the Tera prefixes cancel, yielding FLOP/byte).
 
-Consider two common operations:
-
-**General matrix multiply (GEMM)**: For two square matrices of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, arithmetic intensity is approximately `{python} A100RooflineExample.gemm_intensity_str`. Since `{python} A100RooflineExample.gemm_intensity_str` > `{python} A100RooflineExample.ridge_point_flops_per_byte_str`, this operation is compute bound. You are using the hardware efficiently.
-
-**ReLU (Element-wise)**: For a square tensor of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, intensity is approximately `{python} A100RooflineExample.relu_intensity_str`. Since `{python} A100RooflineExample.relu_intensity_str` ≪ `{python} A100RooflineExample.ridge_point_flops_per_byte_str`, this operation is severely memory bound, achieving only about `{python} A100RooflineExample.relu_util_str` of peak TFLOP/s. The hardware is mostly waiting for data.
-
-This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
+Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM) on two square matrices of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} A100RooflineExample.gemm_intensity_str`, so `{python} A100RooflineExample.gemm_intensity_str` > `{python} A100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU on a square tensor of the same size has intensity of only `{python} A100RooflineExample.relu_intensity_str`, so `{python} A100RooflineExample.relu_intensity_str` ≪ `{python} A100RooflineExample.ridge_point_flops_per_byte_str` and the operation is severely memory bound, achieving only about `{python} A100RooflineExample.relu_util_str` of peak TFLOP/s. This contrast explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
 
 ### Dimensional analysis {#sec-appdx-machine-foundations-dimensional-analysis-76b3}
 
@@ -413,8 +437,8 @@ $$ T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\
 We verify correctness by confirming that every term resolves to time (seconds):
 $$ T [s] = \underbrace{ \frac{D_{\text{vol}} [\text{bytes}]}{\text{BW} [\text{bytes/s}]} }_{\text{seconds}} + \underbrace{ \frac{O [\text{FLOPs}]}{R_{\text{peak}} [\text{FLOP/s}] \cdot \eta_{\text{hw}} [1]} }_{\text{seconds}} + \underbrace{ L_{\text{lat}} [s] }_{\text{seconds}} $$
 
-*   **Data Term**: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \mathbf{s}$
-*   **Compute Term**: $\frac{\text{FLOPs}}{\text{FLOP/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOP}} = \mathbf{s}$
+*   **Data term**: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \mathbf{s}$
+*   **Compute term**: $\frac{\text{FLOPs}}{\text{FLOP/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOP}} = \mathbf{s}$
 *   **Overhead Term**: Already in seconds.
 
 The equation is physically consistent. Apply this technique to any systems equation: if the dimensions do not match, the formula is wrong. "FLOPs" and "Bandwidth" cannot be traded directly because they have different units. Any such trade-off must convert through Time, which is precisely what the iron law quantifies.
@@ -527,6 +551,9 @@ No matter how many accelerators are added, this fixed workload cannot run faster
 
 **Weak scaling**\index{Weak scaling!definition} answers the question: *If I add more processors, how much larger of a problem can I solve in the same amount of time?*
 
+```{=latex}
+\newpage
+```
 This is the reality of Large Language Models. Rather than using 1,000 accelerators to train a model on a small dataset in milliseconds, they are used to train on a dataset 1,000$\times$ larger in reasonable time.
 
 Gustafson's Law [@gustafson1988] models this "scaled speedup":[^fn-gustafson]
@@ -1034,7 +1061,10 @@ Fetching a 32-bit value from DRAM costs roughly `{python} ArchReferenceTables.en
 Bandwidth (throughput) and latency (delay) are distinct constraints. Total transfer time follows:
 $$ T = L_{\text{lat}} + \frac{D_{\text{vol}}}{\text{BW}} $$
 
-For small transfers (for example, single-token inference), latency dominates. For large transfers (for example, loading weights), bandwidth dominates.
+The crossover point is the transfer size where the two terms are equal:
+$$ D_{\text{cross}} = L_{\text{lat}} \times \text{BW} $$
+
+For transfers below $D_{\text{cross}}$ (for example, single-token inference), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
 
 ```{python}
 #| echo: false
@@ -1049,7 +1079,8 @@ For small transfers (for example, single-token inference), latency dominates. Fo
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # │ Imports: (none—pure scalars)
-# │ Exports: bw_gbit_per_s_str, ping_ms_str, data_kb_str
+# │ Exports: bw_gbit_per_s_str, ping_ms_str, data_kb_str,
+# │          crossover_data_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_qty
 
@@ -1063,7 +1094,7 @@ class BandwidthLatencySetup:
     data = 1 * KB           # scenario assumption: packet size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # No derived values—only string formatting.
+    crossover_data = (ping_latency * link_bandwidth).to(MB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # No check() calls needed—values are definitional constants.
@@ -1071,10 +1102,11 @@ class BandwidthLatencySetup:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bw_gbit_per_s_str = fmt_bandwidth(link_bandwidth, unit=Gbps, precision=0, commas=False)
     ping_ms_str = fmt_time(ping_latency, 'millisecond', precision=0, commas=False)
-    data_kb_str = fmt_qty(data, KB, precision=0, commas=False)
+    data_kb_str = fmt_qty(data, unit=KB, precision=0, commas=False)
+    crossover_data_mb_str = fmt_qty(crossover_data, unit=MB, precision=1, commas=False)
 ```
 
-Consider sending data over a `{python} BandwidthLatencySetup.bw_gbit_per_s_str` link with `{python} BandwidthLatencySetup.ping_ms_str` ping (latency). The dominant bottleneck depends entirely on the transfer size:
+Consider sending data over a `{python} BandwidthLatencySetup.bw_gbit_per_s_str` link with `{python} BandwidthLatencySetup.ping_ms_str` ping (latency). The crossover size is `{python} BandwidthLatencySetup.crossover_data_mb_str`, so the dominant bottleneck depends entirely on which side of that threshold the transfer falls:
 
 ```{python}
 #| echo: false
@@ -1157,7 +1189,7 @@ IEEE 754 formats such as FP32 and FP16, together with AI-specific formats such a
 
 ::: {#fig-float-formats fig-env="figure" fig-pos="htb" fig-cap="**Numerical Format Bit Layouts**: A visual comparison of bit allocations. Note how BF16 (Brain Float 16) preserves the 8-bit exponent of FP32, ensuring the same dynamic range for training stability. FP16 trades range for precision, often requiring loss scaling to prevent underflow." fig-alt="Stacked horizontal bars showing bit breakdown. FP32: 1 Sign, 8 Exp, 23 Mantissa. BF16: 1 Sign, 8 Exp, 7 Mantissa. FP16: 1 Sign, 5 Exp, 10 Mantissa. INT8: 8 Integer bits."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.0]
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, every node/.append style={scale=0.9}]
   \tikzset{
     BitBox/.style={draw=white, line width=0.8pt, minimum height=0.6cm, align=center, font=\scriptsize\bfseries\usefont{T1}{phv}{m}{n}, text=white},
     Label/.style={text=TextBlack, font=\small\bfseries\usefont{T1}{phv}{m}{n}, anchor=east}
@@ -1208,9 +1240,9 @@ Beyond bit width, the allocation of bits between exponent and mantissa determine
 
 The choice of numerical format is a direct application of the iron law of ML systems (Principle \ref{pri-iron-law}). Reducing precision from FP32 to BF16 or FP16 halves the data volume term, potentially doubling throughput on memory-bound workloads. However, the *type* of 16-bit format determines the engineering complexity:
 
-*   **Dynamic Range (The Exponent)**: BF16 preserves the eight-bit exponent of FP32. This means it can represent the same range of extremely large and extremely small values (gradients).
-*   **Precision (The Mantissa)**: FP16 has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, is a major constraint; gradients often "vanish" to zero (underflow) because the exponent cannot represent them. To solve this, FP16 training requires **Loss Scaling**\index{Loss Scaling!FP16 training}, an operational overhead where gradients are multiplied by a large constant to push them into the representable range.
-*   **Energy Efficiency**: INT8 operations are significantly more energy-efficient than floating-point equivalents because they use simpler integer ALUs and require less silicon area. Moving to INT8 for inference is the primary lever for deploying large language models (LLMs) on battery-constrained edge devices.
+*   **Dynamic range (the exponent)**: BF16 preserves the eight-bit exponent of FP32. This means it can represent the same range of extremely large and extremely small values (gradients).
+*   **Precision (the mantissa)**: FP16 has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, is a major constraint; gradients often "vanish" to zero (underflow) because the exponent cannot represent them. To solve this, FP16 training requires **Loss Scaling**\index{Loss Scaling!FP16 training}, an operational overhead where gradients are multiplied by a large constant to push them into the representable range.
+*   **Energy efficiency**: INT8 operations are significantly more energy-efficient than floating-point equivalents because they use simpler integer ALUs and require less silicon area. Moving to INT8 for inference is the primary lever for deploying large language models (LLMs) on battery-constrained edge devices.
 
 :::
 
@@ -1238,7 +1270,7 @@ With the full toolkit assembled---reference numbers, performance models, archite
 ::: {.callout-takeaways title="Numbers every engineer should know"}
 
 * **Energy dominates**: Moving data costs ~600$\times$ more energy than computing on it. Arithmetic intensity—the ratio of compute to data movement—is the single most important metric for ML workload performance.
-* **The Roofline Model**: The Roofline Model reveals whether a workload is compute bound or memory bound. Most inference workloads fall below the ridge point and are memory bound; batch size is the primary lever to shift toward compute-bound operation.
+* **The Roofline model**: The Roofline Model reveals whether a workload is compute bound or memory bound. Most inference workloads fall below the ridge point and are memory bound; batch size is the primary lever to shift toward compute-bound operation.
 * **Amdahl's Law**: Amdahl's Law caps strong-scaling speedup at $1/s$ (where $s$ is the serial fraction). Gustafson's Law shows that scaling the problem alongside hardware yields near-linear throughput gains—the paradigm that makes large-scale training feasible.
 * **Little's Law**: The relationship $N_{\text{req}} = \lambda_{\text{arr}} L_{\text{lat}}$ directly sizes inference infrastructure: concurrency, memory, and maximum throughput are all linked by this simple identity.
 * **Memory hierarchy**: The memory hierarchy spans five orders of magnitude in latency (register at ~0.3 ns to SSD at ~100,000 ns). Keeping data close to compute is not an optimization—it is the optimization.

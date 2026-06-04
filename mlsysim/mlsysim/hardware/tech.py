@@ -26,13 +26,14 @@ from ..core.loader import load_collection
 
 
 class MemoryTier(BaseModel):
-    """On-chip / off-chip memory technology tier: access latency + access energy."""
+    """Memory technology tier: access latency, access energy, and generic bandwidth."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     latency: Optional[Quantity] = None            # access latency
     energy_per_access: Optional[Quantity] = None  # pJ per access
     energy_per_byte: Optional[Quantity] = None    # pJ per byte
+    bandwidth: Optional[Quantity] = None          # representative interface bandwidth
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("latency", mode="after")
@@ -49,6 +50,11 @@ class MemoryTier(BaseModel):
     @classmethod
     def _validate_energy_per_byte(cls, v):
         return require_unit_family(v, ureg.joule / ureg.byte, "energy_per_byte", "data")
+
+    @field_validator("bandwidth", mode="after")
+    @classmethod
+    def _validate_bandwidth(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "bandwidth", "data")
 
 
 class StorageTier(BaseModel):
