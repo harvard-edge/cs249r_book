@@ -1,7 +1,7 @@
 """Software runtime and framework overhead assumptions."""
 
 from ..core import provenance_catalog as pc
-from ..core.provenance import sourced_qty
+from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core.units import ureg
 
@@ -26,4 +26,21 @@ class RuntimeOverheads(Registry):
         pc.FRAMEWORK_RUNTIME_OVERHEAD_REFERENCE,
         name="Tiny memory access overhead",
         description="Reference memory-access overhead term used in small-operation fusion models.",
+    )
+
+
+class MemoryProtection(Registry):
+    """Reusable memory-protection policy overheads."""
+
+    EccParityOverhead = sourced(
+        0.125,
+        pc.MEMORY_PROTECTION_OVERHEADS,
+        name="ECC parity overhead",
+        description="Reference SECDED-style ECC parity fraction for protected memory.",
+    )
+    NoEccOverhead = sourced(
+        0.0,
+        pc.MEMORY_PROTECTION_OVERHEADS,
+        name="No-ECC bandwidth overhead",
+        description="Reference overhead for memory configurations without ECC protection.",
     )

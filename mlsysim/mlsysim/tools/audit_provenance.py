@@ -37,7 +37,7 @@ from mlsysim.models.registry import (
     VisionModels,
 )
 from mlsysim.ops.monitoring import Monitoring
-from mlsysim.ops.runtime import RuntimeOverheads
+from mlsysim.ops.runtime import MemoryProtection, RuntimeOverheads
 from mlsysim.ops.training import TrainingRunOverheads
 from mlsysim.platforms.registry import Platforms
 from mlsysim.scenarios.registry import ReferenceStats
@@ -258,6 +258,7 @@ def audit_ops_sourced() -> list[str]:
     for prefix, reg in (
         ("Ops.Monitoring", Monitoring),
         ("Ops.RuntimeOverheads", RuntimeOverheads),
+        ("Ops.MemoryProtection", MemoryProtection),
         ("Ops.TrainingRunOverheads", TrainingRunOverheads),
     ):
         for item in _registry_nodes(reg):

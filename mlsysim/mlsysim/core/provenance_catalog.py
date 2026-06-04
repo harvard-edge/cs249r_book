@@ -663,6 +663,24 @@ ENERGY_HIERARCHY_CONVENTIONS = _conv(
     notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
 )
 
+MEMORY_INTERFACE_BANDWIDTH_TIERS = _conv(
+    "prov:memory-interface-bandwidth-tiers",
+    "Representative memory-interface bandwidth tiers",
+    notes=(
+        "Technology-class bandwidth anchors for DDR4-3200, HBM2, HBM3, and "
+        "GDDR6X used in memory-protection and hierarchy examples."
+    ),
+)
+
+MEMORY_PROTECTION_OVERHEADS = _conv(
+    "prov:memory-protection-overheads",
+    "Memory protection overhead conventions",
+    notes=(
+        "SECDED-style ECC reserve is represented as 12.5 percent parity overhead; "
+        "no-ECC profile is included for comparative GDDR-style examples."
+    ),
+)
+
 WUE_ANCHORS = _conv(
     "prov:wue-anchors",
     "Water-usage effectiveness (WUE) tiers for sustainability examples",
@@ -699,6 +717,15 @@ MODEL_LOADING_SCENARIO_ASSUMPTIONS = _est(
         "Representative cold-start loading anchors for serialized model checkpoints; "
         "values are teaching-scale assumptions and should be calibrated from fleet "
         "measurements for production sizing."
+    ),
+)
+
+CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS = _est(
+    "prov:checkpoint-archetype-scenario-assumptions",
+    "Reference checkpoint-size archetype assumptions",
+    notes=(
+        "Representative checkpoint footprints and bytes-per-parameter policy used "
+        "to compare fault-tolerance overhead across model families."
     ),
 )
 

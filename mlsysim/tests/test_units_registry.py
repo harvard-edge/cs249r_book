@@ -212,6 +212,19 @@ def test_model_loading_anchors():
     assert loading.StableDiffusionV15CheckpointSize.provenance.ref
 
 
+def test_checkpoint_archetype_anchors():
+    from mlsysim import ReferenceStats
+    from mlsysim.core.units import byte, param
+
+    ckpt = ReferenceStats.CheckpointArchetypes
+
+    assert ckpt.MixedPrecisionOptimizerBytesPerParameter.to(byte / param).magnitude == pytest.approx(12.0)
+    assert ckpt.Dense20BTransformerCheckpointSize.to(GB).magnitude == pytest.approx(240.0)
+    assert ckpt.EmbeddingHeavyRecommenderCheckpointSize.to(TB).magnitude == pytest.approx(4.0)
+    assert ckpt.MediumVisionTransformerCheckpointSize.to(GB).magnitude == pytest.approx(1.2)
+    assert ckpt.Dense20BTransformerCheckpointSize.provenance.ref
+
+
 def test_mobilenetv2_variant_model_profiles():
     from mlsysim import Models
     from mlsysim.core.units import param

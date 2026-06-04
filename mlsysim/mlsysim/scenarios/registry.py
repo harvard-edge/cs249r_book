@@ -219,6 +219,35 @@ class ModelLoading(Registry):
     )
 
 
+class CheckpointArchetypes(Registry):
+    """Reusable checkpoint-size scenario anchors for fault-tolerance examples."""
+
+    MixedPrecisionOptimizerBytesPerParameter = sourced_qty(
+        12 * (byte / param),
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Mixed-precision optimizer checkpoint bytes per parameter",
+        description="Reference checkpoint footprint for FP32 master weights plus optimizer state.",
+    )
+    Dense20BTransformerCheckpointSize = sourced_qty(
+        240 * GB,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="20B dense transformer checkpoint size",
+        description="Representative checkpoint footprint for a 20B dense transformer class model.",
+    )
+    EmbeddingHeavyRecommenderCheckpointSize = sourced_qty(
+        4 * TB,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Embedding-heavy recommender checkpoint size",
+        description="Representative checkpoint footprint for an embedding-heavy recommender.",
+    )
+    MediumVisionTransformerCheckpointSize = sourced_qty(
+        1.2 * GB,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Medium vision-transformer checkpoint size",
+        description="Representative checkpoint footprint for a medium vision transformer.",
+    )
+
+
 class MobilePower(Registry):
     """Mobile/edge device + workload power-envelope reference figures."""
 
@@ -271,6 +300,7 @@ class ReferenceStats(Registry):
     TrainingScaleProfiles = TrainingScaleProfiles
     StorageTrainingCorpus = StorageTrainingCorpus
     ModelLoading = ModelLoading
+    CheckpointArchetypes = CheckpointArchetypes
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
 
