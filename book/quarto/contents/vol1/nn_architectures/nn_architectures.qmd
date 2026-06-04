@@ -1181,63 +1181,9 @@ def mlp_layer_compute(X, W, b):
 
 :::
 
-```{python}
-#| echo: false
-#| label: a100-tensor-core-specs
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ A100 TENSOR CORE SPECS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Footnote [^fn-tensor-cores] explaining mixed-precision acceleration
-# │
-# │ Goal: Contrast peak throughput across numerical precisions and ridge point.
-# │ Show: The FP16 Tensor Core vs FP32 CUDA throughput gap on A100.
-# │ How: Compare A100 specs for FP32, TF32, FP16, INT8, and HBM bandwidth.
-# │
-# │ Imports: mlsysim.core.constants (A100 specs), mlsysim.book (fmt)
-# │ Exports: a100_fp16_tflop_per_s_str, a100_fp32_tflop_per_s_str,
-# │          fp16_vs_fp32_ratio_mult_str, a100_ridge_fp16_str
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import fmt_int, fmt, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class A100Specs:
-    """
-    Namespace for A100 Tensor Core Specs.
-    Scenario: Comparing mixed-precision throughput.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # A100 performance at various precisions
-    fp16_tensor = Hardware.Cloud.A100.compute.peak_flops
-    int8_tops = Hardware.Cloud.A100.compute.precision_flops["int8"]
-    fp32_cuda = Hardware.Cloud.A100.compute.precision_flops["fp32"]
-    tf32_tensor = Hardware.Cloud.A100.compute.precision_flops["tf32"]
-    hbm_bw = Hardware.Cloud.A100.memory.bandwidth
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fp16_vs_fp32_ratio = (fp16_tensor / fp32_cuda).to("").magnitude
-    a100_ridge_fp16 = (fp16_tensor / hbm_bw).to(flop / byte).magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(int8_tops >= fp16_tensor > tf32_tensor > fp32_cuda,
-          "A100 precision throughput ordering should be INT8 >= FP16 > TF32 > FP32.")
-    check(a100_ridge_fp16 > 100,
-          f"A100 FP16 ridge point should exceed 100 FLOP/byte, got {a100_ridge_fp16:.1f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(fp16_tensor, unit=TFLOP / second, precision=0, commas=False)
-    a100_fp32_tflop_per_s_str = fmt_flop_rate(fp32_cuda, unit=TFLOP / second, precision=1, commas=False)
-    fp16_vs_fp32_ratio_mult_str = fmt_multiple(fp16_vs_fp32_ratio, precision=0, commas=False)
-    a100_ridge_fp16_str = fmt_int(round(a100_ridge_fp16), commas=False)
-
-# Note: Use A100Specs.a100_fp16_tflop_per_s_str directly.
-```
-
 [^fn-dnn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: This standard API for matrix operations enables the use of highly optimized libraries (for example, cuBLAS) to accelerate the 784 multiply-accumulates per neuron. These libraries are tuned for large, square matrices and hit an "efficiency cliff" with the $784{\times}100$ matrix of the MNIST example. This nonstandard shape fails to saturate the hardware's parallel compute units, yielding utilization far below the 80–95 percent of peak throughput achieved in larger transformer layers. \index{BLAS!neural networks}\index{BLAS!utilization}
 
-[^fn-tensor-cores]: **Tensor Cores**\index{Tensor Core!mixed precision}: Specialized units in NVIDIA GPUs that accelerate the thousands of multiply-accumulate operations described by fusing them into single, highly parallelized matrix instructions. Tensor Cores are most efficient when matrix dimensions meet datatype- and architecture-specific alignment multiples; modern cuBLAS/cuDNN can still use Tensor Cores for many nonaligned cases, often with lower efficiency or internal padding. On an A100 GPU, this creates roughly a `{python} A100Specs.fp16_vs_fp32_ratio_mult_str` performance gap between the `{python} A100Specs.a100_fp16_tflop_per_s_str` from Tensor Cores and the `{python} A100Specs.a100_fp32_tflop_per_s_str` from standard CUDA cores. \index{Tensor Core!dimension constraints}
+[^fn-tensor-cores]: **Tensor Cores**\index{Tensor Core!mixed precision}: Specialized units in NVIDIA GPUs that accelerate the thousands of multiply-accumulate operations described by fusing them into single, highly parallelized matrix instructions. Tensor Cores are most efficient when matrix dimensions meet datatype- and architecture-specific alignment multiples; modern cuBLAS/cuDNN can still use Tensor Cores for many nonaligned cases, often with lower efficiency or internal padding. The durable lesson is architectural rather than vendor-specific: specialized matrix units reward dense, aligned GEMMs and penalize small, irregular shapes that cannot keep the units full. \index{Tensor Core!dimension constraints}
 
 ### System implications {#sec-network-architectures-system-implications-0550}
 
@@ -1297,7 +1243,7 @@ $$
 \text{Intensity} \approx \frac{2 \cdot M \cdot N \text{ FLOPs}}{4 \cdot M \cdot N \text{ bytes}} = 0.5 \text{ FLOP/byte}
 $$ {#eq-dense-intensity}
 
-Since modern accelerators (like the A100) require intensities around `{python} A100Specs.a100_ridge_fp16_str` FLOP/byte to saturate FP16 Tensor Cores, dense layers are almost always memory-bandwidth-bound unless batch sizes exceed several hundred. This explains why "fully connected" layers are often the performance bottleneck in inference workloads, despite performing fewer total FLOPs than convolutional layers.
+Since modern accelerators often require arithmetic intensities in the hundreds of FLOP/byte to saturate low-precision matrix units, dense layers are almost always memory-bandwidth-bound unless batch sizes exceed several hundred. This explains why "fully connected" layers are often the performance bottleneck in inference workloads, despite performing fewer total FLOPs than convolutional layers.
 
 *Dense connectivity thus moves maximum data for minimum compute.* For data with inherent structure, spatial locality in images or temporal order in sequences, specialized architectures can exploit that structure for both better accuracy and better efficiency. The most established such architecture is the convolutional neural network.
 
@@ -2377,15 +2323,9 @@ For a sequence processing task with input dimension 100 and hidden state dimensi
 
 RNNs introduce an inescapable system constraint: *sequential dependency*. Unlike MLPs and CNNs where parallelism scales with the number of neurons or pixels, RNN parallelism is limited by the sequence length. In iron law terms (@sec-introduction-iron-law-ml-systems-c32a), neither increasing $R_{\text{peak}}$ (peak compute rate) nor $\text{BW}$ (memory bandwidth) can help—the bottleneck is *latency* along the sequential critical path.
 
-#### Computation needs: The wall of time {#sec-network-architectures-computation-needs-wall-time-3457}
-
 The core computation $\mathbf{h}_t = \tanh(\mathbf{W}_{\text{hh}}\mathbf{h}_{t-1} + \mathbf{W}_{\text{hx}}\mathbf{x}_t)$ creates a strict ordering. Time step $t$ *cannot* begin until step $t-1$ completes. If processing a document with 1,000 words, the system must execute 1,000 sequential matrix-vector multiplications. No amount of additional hardware (more GPUs, more cores) can accelerate this "critical path" along the time dimension. This limits the parallel width to the batch size, whereas CNNs can exploit parallelism across spatial dimensions, channels, and batches.
 
-#### Memory requirements: Efficient state {#sec-network-architectures-memory-requirements-efficient-state-d4d1}
-
 RNNs are uniquely memory-efficient for long sequences during inference. They maintain a fixed-size hidden state vector (for example, 2 KB for a 512-dim state) regardless of whether the sequence length is 10 or 10,000. This $\mathcal{O}(d_{\text{hidden}})$ state scaling contrasts with full transformer attention during training or prefill, where score interactions scale as $\mathcal{O}(S^2)$; autoregressive transformer serving instead keeps an $\mathcal{O}(S d_{\text{model}})$ key-value cache. The compression comes at a cost, however: the fixed-size state becomes an information bottleneck, forcing the network to compress arbitrary history into a small vector and leading to the vanishing gradient problems that motivated LSTMs and eventually transformers.
-
-#### Data movement: Temporal locality {#sec-network-architectures-data-movement-temporal-locality-b875}
 
 RNNs exhibit high temporal locality for weights (reused every step) but low locality for activations. The weight matrices $\mathbf{W}_{\text{hh}}$ and $\mathbf{W}_{\text{hx}}$ stay in the cache (or on-chip memory) for the entire duration of the sequence processing, achieving high arithmetic intensity if the batch size is large enough. However, the requirement to read and write the hidden state at every step creates a constant stream of low-intensity updates that can strain memory bandwidth if not carefully managed.
 
