@@ -4571,25 +4571,23 @@ The same minimalist core delegates neural network abstractions to companion libr
 \index{JAX!XLA compilation}
 The functional constraints that JAX imposes become advantages in specific domains. Custom differentiation---higher-order gradients, custom VJP/JVP rules---composes cleanly because pure functions make differentiation rules predictable. Research on optimization algorithms benefits from transformations that let researchers manipulate gradient computation as naturally as they manipulate data. Compilation-heavy accelerator workloads use XLA to extract more utilization when the program can be expressed in this functional style. Scientific computing with AD requirements benefits from functional purity that enables mathematical reasoning about code. JAX requires more upfront investment than PyTorch: the functional paradigm has a learning curve, state management requires explicit patterns, and debugging compiled code is harder than eager execution. Teams should choose JAX when its strengths align with project requirements, not as a default.
 
-### Quantitative platform performance analysis {#sec-ml-frameworks-quantitative-platform-performance-analysis-816d}
+### Framework trade-offs under measurement {#sec-ml-frameworks-quantitative-platform-performance-analysis-816d}
 
-The preceding sections described each framework's design philosophy in qualitative terms: graph-first vs. eager-first, stateful vs. functional. Design philosophy claims, however, are only meaningful when backed by measurement. @Tbl-mlfm-comparison quantifies how the architectural choices of TensorFlow, PyTorch, and JAX translate to system characteristics. When examining this comparison, note particularly the differences in execution mode, compilation optimization potential, and distributed scalability---these dimensions most directly impact production deployment decisions.
+The preceding sections described each framework's design philosophy in qualitative terms: graph-first vs. eager-first, stateful vs. functional. The useful comparison is not which framework is fastest in the abstract, because that answer changes with model shape, batch size, hardware backend, and compiler configuration. The useful comparison is what each design lets the system see and optimize. @Tbl-mlfm-comparison therefore maps TensorFlow, PyTorch, and JAX back to the three framework problems: execution visibility, differentiation model, and hardware abstraction path.
 
-| **Aspect**                    | **TensorFlow**                      | **PyTorch**                                  | **JAX**                          |
-|:------------------------------|:------------------------------------|:---------------------------------------------|:---------------------------------|
-| **Graph Type**                | Static (1.x), Dynamic (2.x)         | Dynamic                                      | Functional transformations       |
-| **Programming Model**         | Imperative (2.x), Symbolic (1.x)    | Imperative                                   | Functional                       |
-| **Core Data Structure**       | Tensor (mutable)                    | Tensor (mutable)                             | Array (immutable)                |
-| **Execution Mode**            | Eager (2.x default), Graph          | Eager                                        | Just-in-time compilation         |
-| **Automatic Differentiation** | Reverse mode                        | Reverse mode                                 | Forward and Reverse mode         |
-| **Hardware Acceleration**     | CPU, GPU, TPU                       | CPU, GPU, TPU (via PyTorch/XLA)              | CPU, GPU, TPU                    |
-| **Compilation Optimization**  | XLA: workload dependent             | `torch.compile` / export: workload dependent | XLA: workload dependent          |
-| **Memory Efficiency**         | 70--90 percent (workload dependent) | 70--90 percent (varies)                      | 75--95 percent (with XLA fusion) |
-| **Distributed Scalability**   | High (1024+ GPUs)                   | High                                         | Very High (1024+ GPUs)           |
+| **Aspect**                    | **TensorFlow**                           | **PyTorch**                                  | **JAX**                              |
+|:------------------------------|:-----------------------------------------|:---------------------------------------------|:-------------------------------------|
+| **Graph Type**                | Static roots, dynamic front end in 2.x   | Dynamic                                      | Functional transformations           |
+| **Programming Model**         | Imperative front end, graph capture path | Imperative                                   | Functional                           |
+| **Core Data Structure**       | Tensor with framework-managed state      | Tensor with framework-managed state          | Immutable array                      |
+| **Execution Mode**            | Eager by default, graph for optimization | Eager by default                             | Trace and just-in-time compilation   |
+| **Automatic Differentiation** | Reverse mode over captured computation   | Reverse mode over an eager tape              | Forward and reverse transformations  |
+| **Hardware Abstraction**      | Broad deployment runtimes and XLA paths  | Native GPU path plus export/compile runtimes | XLA-centered accelerator compilation |
+| **Optimization Risk**         | Graph capture and operator coverage      | Graph breaks after eager development         | Purity, shape stability, and tracing |
 
-: **Framework Characteristics**: Each column reflects a distinct answer to the three core problems. TensorFlow's static graph roots enable XLA compilation but constrain dynamic control flow; PyTorch's eager default maximizes debugging flexibility but limits ahead-of-time optimization; JAX's functional model enables composable transformations and achieves the highest memory efficiency through XLA fusion. {#tbl-mlfm-comparison}
+: **Framework Design Trade-Offs**: Each column reflects a distinct answer to the three core problems. TensorFlow makes deployment and graph capture central, PyTorch makes eager execution and debugging central, and JAX makes functional transformation and compiler visibility central. The table is a diagnostic map, not a benchmark ranking. {#tbl-mlfm-comparison}
 
-An important caveat applies to these numbers: GPU utilization and compilation speedups vary significantly by model architecture, batch size, and operation mix. JAX/XLA achieves higher utilization for TPU workloads through aggressive fusion, while PyTorch and TensorFlow perform similarly for most deep learning workloads. These framework-level generalizations provide useful orientation but cannot substitute for profiling specific workloads on target hardware.
+The measurement implication is straightforward: profile the constraint each framework makes most visible. In PyTorch, check whether eager dispatch or graph breaks dominate. In TensorFlow, check whether the captured graph covers the operators and deployment target. In JAX, check whether shapes and purity let XLA compile the program you actually run. A framework-level comparison or leaderboard can orient a decision, but it cannot replace profiling the specific workload on the target hardware.
 
 The same simple network exposes how each design philosophy shapes the code. @Lst-framework-hello-world implements one neural network, a single linear layer mapping ten inputs to one output, across all three frameworks:
 
@@ -4654,24 +4652,24 @@ No framework optimizes all three problems simultaneously; each makes deliberate 
 
 These design differences are not arbitrary; they reflect which term of the iron law each framework prioritizes. TensorFlow's graph compilation minimizes the *Overhead* term through ahead-of-time optimization, PyTorch's eager execution minimizes the *developer iteration* overhead at the cost of runtime optimization, and JAX's XLA backend minimizes the *Data Movement* term through aggressive operation fusion.
 
-### Framework efficiency comparison {#sec-ml-frameworks-quantitative-framework-efficiency-comparison-3b77}
+### Runtime constraint map {#sec-ml-frameworks-quantitative-framework-efficiency-comparison-3b77}
 
-The magnitude of these differences in practice depends on the model, operator mix, input shape, batch size, hardware backend, and compiler configuration. @Tbl-framework-efficiency-matrix therefore compares major framework families qualitatively rather than presenting a single set of benchmark numbers as universal.
+The same principle extends beyond the three general-purpose frameworks. Runtime families differ because they remove different degrees of flexibility in exchange for compiler visibility, smaller binaries, or hardware-specific execution. @Tbl-framework-efficiency-matrix is therefore a constraint map: each row shows what the runtime gives up, what optimization path that enables, and which failure mode to test before committing.
 
-| **Framework family**            | **Typical deployment role**    | **Useful scale anchor**                                           | **Primary optimization path**                 | **Main limitation**                        |
+| **Runtime family**              | **Where it fits**              | **Scale anchor**                                                  | **Optimization path**                         | **Constraint to test**                     |
 |:--------------------------------|:-------------------------------|:------------------------------------------------------------------|:----------------------------------------------|:-------------------------------------------|
-| **PyTorch eager**               | Research and iteration         | Baseline latency; full Python/runtime footprint                   | Dynamic graphs, eager debugging               | Less ahead-of-time optimization by default |
+| **PyTorch eager**               | Research and iteration         | Baseline latency; full Python/runtime footprint                   | Dynamic graphs, eager debugging               | Dispatch overhead and missing graph view   |
 | **Compiled PyTorch/TensorFlow** | Server training and serving    | Often 1.2--3$\times$ speedup when graph capture is clean          | Graph capture, fusion, layout planning        | Operator coverage and graph breaks         |
 | **TensorFlow Lite/Core ML**     | Mobile and edge inference      | Commonly targets tens of ms latency and MB-scale model packages   | Quantization, static graphs, NPU delegates    | Target-specific conversion constraints     |
 | **TF Lite Micro/microTVM**      | Microcontroller inference      | KB-scale RAM budgets, often <256 KB for small TinyML deployments  | Static allocation, INT8 kernels               | Small operator set and fixed memory arena  |
 | **ONNX Runtime**                | Cross-framework serving        | Backend-dependent; can match native runtimes for supported graphs | Standard graph format, execution providers    | Export gaps and custom-operator fallbacks  |
 | **TensorRT/TVM**                | Hardware-specialized inference | Often 2--10$\times$ latency gains over untuned eager baselines    | Kernel fusion, precision lowering, autotuning | Narrower target and conversion assumptions |
 
-: **Framework Efficiency Comparison**: Quantitative anchors for major ML framework families. These are not universal benchmark results: actual latency, memory use, energy, and hardware utilization must be measured for the specific model, hardware, precision, batch size, and compiler configuration. {#tbl-framework-efficiency-matrix tbl-colwidths="[24,20,24,24,22]"}
+: **Runtime Constraint Map**: Quantitative anchors for major ML runtime families. These are not universal benchmark results: actual latency, memory use, energy, and hardware utilization must be measured for the specific model, hardware, precision, batch size, and compiler configuration. {#tbl-framework-efficiency-matrix tbl-colwidths="[24,20,24,24,22]"}
 
 \index{TensorRT!hardware utilization}
 \index{Apache TVM!ML compiler}
-The comparison reveals several important patterns. First, specialized inference frameworks such as TensorRT and TVM can deliver multi-fold latency gains, often in the 2--10$\times$ range, when the model can be converted cleanly and the deployment target is known. Second, mobile-optimized runtimes such as TensorFlow Lite, Core ML, and ExecuTorch reduce runtime footprint by removing training machinery and relying on static graphs, quantization, and platform delegates; moving from a full training framework to an inference-only mobile runtime commonly changes the memory budget from hundreds or thousands of MB to MB-scale packages. Third, hardware utilization depends as much on compiler coverage and operator fusion as on the framework API: unsupported operators, dynamic shapes, or graph breaks can erase the expected advantage of a compiled path.
+The map reveals one systems pattern rather than a product ranking. Each move toward a narrower runtime trades flexibility for a more predictable execution plan. Specialized inference runtimes such as TensorRT and TVM can deliver multi-fold latency gains, often in the 2--10$\times$ range, when the model can be converted cleanly and the deployment target is known. Mobile and microcontroller runtimes reduce footprint by removing training machinery and relying on static graphs, quantization, platform delegates, or fixed memory arenas. The engineering question is always what was removed to make the optimization possible, because unsupported operators, dynamic shapes, or graph breaks can erase the expected advantage.
 
 These efficiency gaps, significant in the data center, become existential as we move beyond the server room. A 2--10$\times$ latency gap between eager execution and a specialized inference engine is an optimization opportunity on a cloud GPU; on a microcontroller with 256 KB of RAM, a framework that requires a full training runtime simply *cannot* run at all. The selection criterion shifts from raw latency to whether the framework fits inside the memory and runtime envelope at all.
 
@@ -4682,18 +4680,18 @@ These efficiency gaps, significant in the data center, become existential as we 
 \index{Edge Deployment!three problems reweighting}
 As ML models move from cloud servers to edge devices, the efficiency gaps measured earlier transform from optimization opportunities into hard deployment constraints. The three core problems reweight dramatically at the edge. The *execution problem* shifts from choosing between eager and graph execution to fitting computation inside 10 ms latency and 50 KB memory budgets. The *differentiation problem* often disappears entirely, since edge devices run inference only. The *abstraction problem* intensifies: targeting ARM vs. x86, mobile NPUs vs. edge TPUs, microcontrollers with kilobytes of memory.
 
-@Tbl-deployment-frameworks is a constraint map rather than a product catalog: each row identifies the runtime family whose assumptions fit the target envelope.
+@Tbl-deployment-frameworks continues the same constraint map across the cloud-to-edge spectrum: each row identifies the runtime assumptions that fit the target envelope.
 
-| **Environment**              | **Primary Frameworks**        | **Key Optimizations**                        | **Typical Constraints**           |
-|:-----------------------------|:------------------------------|:---------------------------------------------|:----------------------------------|
-| **Cloud/Server**             | PyTorch, TensorFlow, JAX      | Graph compilation, batching, lower precision | Throughput, cost                  |
-| **Edge**                     | TensorFlow Lite, ONNX Runtime | Static graphs, lower-precision kernels       | Latency <10 ms, limited memory    |
-| **Mobile**                   | TF Lite, Core ML, ExecuTorch  | Accelerator delegates, compact model formats | Battery, thermal, app size limits |
-| **Microcontroller (TinyML)** | TF Lite Micro, microTVM       | Static allocation, small integer kernels     | <256 KB RAM, no dynamic memory    |
+| **Environment**              | **Runtime assumptions that usually fit** | **Optimization lever**                       | **Binding constraint**            |
+|:-----------------------------|:-----------------------------------------|:---------------------------------------------|:----------------------------------|
+| **Cloud/Server**             | Full training/serving frameworks         | Graph compilation, batching, lower precision | Throughput, cost                  |
+| **Edge**                     | Static graph or portable serving runtime | Static graphs, lower-precision kernels       | Latency <10 ms, limited memory    |
+| **Mobile**                   | App-integrated runtime with delegates    | Accelerator delegates, compact model formats | Battery, thermal, app size limits |
+| **Microcontroller (TinyML)** | Tiny runtime with fixed allocation       | Static allocation, small integer kernels     | <256 KB RAM, no dynamic memory    |
 
-: **Framework Selection by Deployment Target**: Recommended frameworks, optimization techniques, and key constraints for each deployment tier, from cloud servers to microcontrollers. {#tbl-deployment-frameworks tbl-colwidths="[19,27,27,27]"}
+: **Deployment Target Constraint Map**: Runtime assumptions, optimization levers, and binding constraints for each deployment tier, from cloud servers to microcontrollers. {#tbl-deployment-frameworks tbl-colwidths="[19,31,25,25]"}
 
-@Tbl-deployment-frameworks reveals a fragmented landscape: different deployment targets favor different frameworks. The Smart Doorbell KWS model from @sec-ml-frameworks-tinyml-micro-runtimes-2a1b exemplifies the Microcontroller tier, where TF Lite Micro's fixed memory arena and compact C/C++ runtime are a viable path. This fragmentation creates a practical problem when organizations train in one framework but deploy on a target best served by another.
+@Tbl-deployment-frameworks shows why deployment target is a hard constraint rather than a late packaging step. The Smart Doorbell KWS model from @sec-ml-frameworks-tinyml-micro-runtimes-2a1b exemplifies the microcontroller tier: a runtime with a fixed memory arena and compact C/C++ footprint is not a preference but a condition for fitting the device. This constraint creates the practical framework problem that ONNX addresses: organizations often train in one environment but deploy into another whose runtime assumptions are stricter.
 
 \index{ONNX!hub-and-spoke interoperability}
 The **Open Neural Network Exchange (ONNX)**\index{ONNX!definition}\index{ONNX!cross-framework portability}[^fn-onnx-portability] format addresses this fragmentation by enabling model portability across many runtimes [@bai2019onnx]: train in PyTorch, export through ONNX, and deploy through ONNX Runtime or a hardware-specific backend. TensorFlow Lite has its own conversion path rather than being a direct ONNX target in typical workflows. Standard interchange formats reduce manual conversion work when moving between development and production environments, but they do not eliminate compatibility testing, operator coverage gaps, or custom-kernel work. @Fig-onnx captures this hub-and-spoke interoperability model---notice how ONNX sits at the center, accepting models from common training frameworks on the left and dispatching them to ONNX Runtime and other compatible runtimes on the right. Later chapters examine the model-compression and serving-system choices that sit on top of this export boundary.
@@ -4710,11 +4708,11 @@ ONNX reduces the cost of framework fragmentation, but it does not eliminate the 
 
 \index{Framework Selection!trade-off analysis}
 \index{Framework Selection!constrained optimization}
-Framework selection is a constrained optimization problem across technical capabilities, operational requirements, and organizational factors. No single framework dominates across all criteria, which means the goal is not to find the "best" framework but to find the one whose trade-offs align with the project's constraints.
+Framework selection is a constrained optimization problem across the same three framework problems. The question is not which framework is "best"; it is which execution model, differentiation system, and abstraction path survive the project's constraints.
 
 ### The framework selection trade-off space {#sec-ml-frameworks-framework-selection-tradeoff-space-c76e}
 
-Framework selection involves three interconnected tensions. The first is between development velocity and production performance: eager execution (PyTorch) prioritizes iteration speed, while graph compilation (TensorFlow/XLA, JAX/JIT) prioritizes runtime optimization. Research teams that need to test ten architecture variants per day cannot afford minutes of compilation between experiments; production teams that deploy a single model for months cannot afford the throughput penalty of eager dispatch. The optimal point shifts as a project moves through its lifecycle.
+Framework selection involves three interconnected tensions. The first is between development velocity and production performance: eager execution prioritizes iteration speed, while graph compilation prioritizes runtime optimization. Research teams that need to test ten architecture variants per day cannot afford minutes of compilation between experiments; production teams that deploy a single model for months cannot afford the throughput penalty of eager dispatch. The optimal point shifts as a project moves through its lifecycle.
 
 This velocity-performance tension leads directly to the second: flexibility vs. optimization depth. Dynamic graphs enable the arbitrary control flow that makes eager development fast, but they limit the compiler's scope. Static graphs constrain expressiveness but enable aggressive fusion and hardware-specific code generation. As @tbl-mlfm-graphs demonstrated, this trade-off cascades through memory management, utilization, and debugging workflows---it is not a single design decision but a system-wide constraint.
 
@@ -4722,7 +4720,7 @@ The flexibility-optimization tension, in turn, exposes a third: ecosystem breadt
 
 ::: {#psp-frameworks-framework-selection-constraints .callout-perspective title="Framework selection constraints"}
 
-Rather than seeking the "best" framework, effective selection identifies the framework that satisfies hard constraints (deployment target, required operations, team expertise) while optimizing soft preferences (performance, development speed, ecosystem). Hard constraints eliminate options; soft preferences rank remaining candidates.
+Rather than seeking the "best" framework, effective selection first eliminates candidates that cannot satisfy hard constraints: deployment target, required operations, compiler path, and team expertise. Only then should soft preferences such as performance, development speed, and ecosystem rank the survivors.
 
 :::
 
@@ -4741,7 +4739,7 @@ The principle is progressive constraint leading to progressive optimization: few
 
 ### Framework selection criteria {#sec-ml-frameworks-model-requirements-2e01}
 
-Three dimensions structure systematic framework evaluation: what the model requires (supported operations and graph semantics), what the software environment provides (OS, memory management, accelerator delegation), and what the hardware physically permits (compute, memory, power). Each dimension acts as a filter—hard constraints eliminate candidates, and soft preferences rank the survivors.
+Three dimensions structure systematic framework evaluation: what the model requires (supported operations and graph semantics), what the software environment provides (OS, memory management, accelerator delegation), and what the hardware physically permits (compute, memory, power). Each dimension acts as a filter: hard constraints eliminate candidates, and soft preferences rank the survivors.
 
 #### Model requirements {#sec-ml-frameworks-model-requirements-ca8b}
 
@@ -4789,11 +4787,9 @@ These hardware constraints cascade into performance trade-offs that are tightly 
 
 ### Development support and long-term viability assessment {#sec-ml-frameworks-development-support-longterm-viability-assessment-d1d7}
 
-Framework viability over a five-year production deployment depends on more than technical capabilities alone. Community composition shapes framework evolution in measurable ways: PyTorch's academic community drives research-oriented features and reproducibility tools, though production tooling (PyTorch Lightning, TorchServe) has historically lagged; TensorFlow's enterprise community emphasizes production reliability through TFX pipelines, TensorBoard visualization, and TensorFlow Model Analysis; JAX's smaller community concentrates on mathematical rigor, producing specialized research tools (composable transformations, custom VJP rules) but with a steeper onboarding curve.
+Framework viability over a five-year production deployment depends on whether the ecosystem keeps the chosen execution, differentiation, and abstraction paths maintainable. Community composition matters because it determines which problems receive engineering attention: research-heavy ecosystems tend to improve experimentation and reproducibility first, production-heavy ecosystems tend to improve serving, monitoring, and compatibility first, and smaller specialized ecosystems tend to advance narrower mathematical or compiler capabilities faster than broad deployment tooling.
 
-A framework's practical utility, however, often depends more on its surrounding ecosystem than on its core capabilities. Hugging Face provides consistent model APIs across all three major frameworks, making pretrained model availability a near-commodity. Cross-framework tools (Weights & Biases, MLflow for experiment tracking; ONNX Runtime for serving) reduce lock-in, while framework-native tools (XLA, TorchScript, TensorFlow Serving) offer deeper optimization at the cost of portability. Cloud ML services (SageMaker [@ye2020], Vertex AI, Azure ML) provide native integration for specific frameworks, creating operational advantages that compound over time.
-
-These compounding effects make framework migration progressively harder. Integration with existing CI/CD pipelines, monitoring infrastructure, and cloud providers creates operational inertia that resists change. The measurable indicators of viability---contributor diversity (single-company dependence is a risk), backward compatibility track record, and hiring pool alignment with organizational needs---should be evaluated before commitment, not after. The mitigation strategy is defensive: use standardized formats (ONNX), maintain framework-agnostic data pipelines, and document framework-specific customizations to preserve future flexibility.
+A framework's practical utility often depends more on these surrounding paths than on the core tensor API. Model hubs, experiment trackers, serving runtimes, cloud ML services, and interchange formats can reduce lock-in or deepen optimization, but each also adds a dependency that must be maintained. These compounding effects make framework migration progressively harder: CI/CD pipelines, monitoring infrastructure, cloud integrations, and custom operators turn an API choice into an operational commitment. The measurable indicators of viability are therefore contributor diversity, backward compatibility track record, available hiring pool, and the cost of preserving an exit path through standardized formats such as ONNX, framework-agnostic data pipelines, and documented customizations.
 
 The three core problems have so far appeared in isolation: execution, differentiation, and abstraction examined one at a time, with framework choices and selection criteria layered on top. A single training step is where the three problems collide. Tracing one end-to-end reveals how the machinery developed across this chapter operates as one integrated system.
 

@@ -5184,7 +5184,16 @@ In serving systems, quantization is not merely a model-compression technique; it
 
 :::
 
-Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs quantization methods designed for specific serving constraints.
+Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs a decision model, not a method roster. The decision model in @tbl-serving-quantization-decision-model keeps the method choice tied to the serving constraint that actually binds the system.
+
+| **Binding serving constraint** | **Representation change**                       | **Method family**       | **Risk to test before rollout**             |
+|:-------------------------------|:------------------------------------------------|:------------------------|:--------------------------------------------|
+| Model does not fit in memory   | Quantize weights only                           | GPTQ, AWQ               | Calibration mismatch and quality regression |
+| Decode is bandwidth-bound      | Reduce bytes read per token                     | W4A16 weight-only paths | Kernel support and KV-cache headroom        |
+| Prefill is compute-bound       | Quantize weights and activations                | SmoothQuant W8A8        | Activation outliers and INT8 hardware path  |
+| Outliers block low precision   | Change the coordinate basis before quantization | Rotation-based methods  | Transform overhead and limited runtime path |
+
+: **Serving Quantization Decision Model**: Quantization methods are useful only when they relax the resource that actually binds the serving system. The method family follows from the bottleneck: fit, bandwidth, prefill compute, or outlier robustness. {#tbl-serving-quantization-decision-model tbl-colwidths="[24,28,22,26]"}
 
 ### LLM-specific quantization challenges {#sec-inference-scale-llmspecific-quantization-challenges-b7a2}
 
@@ -5195,7 +5204,7 @@ Consider a large language-model layer where most activation values are modest bu
 - **Wide range**: Most typical values collapse into a small number of bins, losing information
 - **Narrow range**: Outliers clip, causing large errors
 
-The outlier distribution motivates the specialized quantization methods that follow.
+The outlier distribution explains why the specialized methods that follow differ: each one protects a different part of the serving contract.
 
 ### GPTQ: Layer-by-layer weight quantization {#sec-inference-scale-gptq-layerbylayer-weight-quantization-9284}
 
@@ -5383,45 +5392,18 @@ $$\text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model si
 
 : **Quantization Deployment Configurations**: Mapping from quantization scheme to deployment target and supporting frameworks. W4A16 dominates consumer and memory-constrained deployments; W8A8 unlocks INT8 Tensor Core throughput; FP8 is the H100/H200 native path; W4A4 remains research territory with limited framework support. {#tbl-quantization-deployment-configurations}
 
-### Framework integration {#sec-inference-scale-framework-integration-945c}
+### Runtime contract for quantized serving {#sec-inference-scale-framework-integration-945c}
 
-Production serving frameworks matter because quantized weights reduce cost only when the runtime selects kernels and memory managers that preserve the theoretical savings.
+Production serving frameworks matter because quantized weights reduce cost only when the runtime preserves the theoretical savings. The durable contract is framework-independent: the serving stack must load the quantized artifact without silently dequantizing it, choose kernels that execute the intended low-precision path, allocate KV cache around the smaller weight footprint, and expose enough telemetry to detect quality or latency regressions. The runtime responsibilities in @tbl-quantized-serving-runtime-contract are the minimum contract a framework must satisfy before quantization becomes a production-serving win.
 
-@Lst-vllm-quantization shows how vLLM loads a prequantized AWQ model.\index{Quantization!vLLM integration}
+| **Runtime responsibility**              | **Why it matters**                                                                |
+|:----------------------------------------|:----------------------------------------------------------------------------------|
+| Preserve the quantized artifact         | Silent dequantization restores the FP16 memory and bandwidth cost.                |
+| Select compatible low-precision kernels | Unsupported operators fall back to slower or higher-precision execution.          |
+| Plan memory around weights and KV cache | The capacity gain matters only if the freed memory becomes useful batch headroom. |
+| Validate quality and latency together   | A lower-bit path that meets latency but fails task quality is not a serving win.  |
 
-::: {#lst-vllm-quantization lst-cap="**vLLM Quantization**: Loading an AWQ-quantized model with automatic kernel selection and KV cache management."}
-
-```{.python}
-from vllm import LLM
-
-# Load AWQ-quantized model
-llm = LLM(
-    model="TheBloke/Llama-2-70B-AWQ",
-    quantization="awq",
-    dtype="float16",  # Activations in FP16
-    gpu_memory_utilization=0.9,
-)
-```
-
-:::
-
-vLLM automatically handles quantized weight loading, kernel selection for W4A16 GEMM operations, and KV cache management.
-
-@Lst-tensorrt-quantization demonstrates the equivalent quantization workflow in TensorRT-LLM.\index{TensorRT!LLM quantization}
-
-::: {#lst-tensorrt-quantization lst-cap="**TensorRT-LLM Quantization**: Offline AWQ quantization with calibration data for optimized INT4 inference."}
-
-```{.bash}
-# Quantize model with AWQ
-python quantize.py --model_dir /path/to/llama-70b \
-                   --output_dir /path/to/llama-70b-awq \
-                   --qformat int4_awq \
-                   --calib_size 512
-```
-
-:::
-
-TensorRT-LLM generates optimized kernels for specific GPU architectures, fuses operations to minimize memory traffic, and supports both weight-only and W8A8 quantization.
+: **Quantized Serving Runtime Contract**: Framework-specific APIs differ, but every production path has to preserve representation, choose supported kernels, plan memory, and validate quality under the deployed traffic mix. {#tbl-quantized-serving-runtime-contract tbl-colwidths="[34,66]"}
 
 Quantized models combine with PagedAttention for maximum memory efficiency:
 
