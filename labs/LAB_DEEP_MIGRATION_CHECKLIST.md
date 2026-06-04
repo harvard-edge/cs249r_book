@@ -41,7 +41,7 @@ Source-of-truth rule:
 - [ ] Add shared report schema checks for required fields across all deep-migrated labs.
 - [ ] Add shared tests that every deep-migrated lab's variants resolve all referenced
   hardware, model, system, and infrastructure refs.
-- [ ] Add browser-facing smoke coverage for at least one representative lab per track.
+- [x] Add browser-facing smoke coverage for at least one representative lab per track.
 - [ ] Keep `labs/LAB_IMPLEMENTATION_NOTES.md` updated after every lab slice.
 
 ## Per-Lab Definition Of Done
@@ -743,7 +743,8 @@ Deep migration tasks:
 - [ ] Run relevant MLSysIM tests separately from `labs/tests`.
 - [x] Verify `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` is rebuilt after shared helper changes.
 - [ ] Verify `wheels/mlsysim-0.1.2-py3-none-any.whl` is rebuilt after MLSysIM changes.
+- [x] Verify every lab renders in a browser smoke pass.
 - [ ] Verify every lab's report can be generated locally.
-- [ ] Verify each track has at least one representative visual/evidence modality.
-- [ ] Verify no lab embeds source-of-truth hardware/model/system facts locally.
-- [ ] Commit final cleanup.
+- [x] Verify each track has at least one representative visual/evidence modality.
+- [x] Verify no lab embeds source-of-truth hardware/model/system facts locally.
+- [x] Commit final cleanup.

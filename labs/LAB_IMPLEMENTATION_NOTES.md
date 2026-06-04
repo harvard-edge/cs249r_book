@@ -1878,3 +1878,41 @@ Tests or checks run:
 - `python3 -m pytest labs/tests/test_system_design_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
 - `python3 -m pytest labs/tests/test_engine.py -q`
 - `git diff --check`
+
+### 2026-06-04 - Overnight Render Feedback and Browser Smoke Pass
+
+Labs:
+- All labs in `labs/vol1` and `labs/vol2`.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/tools/render_lab_smoke.py`
+- `labs/LAB_OVERNIGHT_FEEDBACK_AUDIT.md`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added a repeatable browser smoke tool that starts Marimo apps, opens them in Chromium, clicks through canonical tracks for non-orientation labs, checks runtime-error markers, checks duplicate track selectors, checks overflowing `.mlsysbook-field` cards, verifies four distinct rendered track states, and saves screenshots under `/tmp`.
+- Captured simulated instructor, TA, and student feedback in `LAB_OVERNIGHT_FEEDBACK_AUDIT.md`.
+- Recorded the render-found fixes from the preceding polish pass: duplicate selector removal and long registry-ref wrapping.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. This pass tested rendering, source traces, and track switching behavior.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- `labs/tools/render_lab_smoke.py` can be used before future lab releases to check rendered behavior, not only notebook execution.
+
+Plan updates needed in other labs:
+- Future Volume II refinements should specialize the highest-value shared-renderer labs with richer evidence helpers, while keeping the source-of-truth registry contract unchanged.
+
+Tests or checks run:
+- `python3 -m py_compile labs/tools/render_lab_smoke.py`
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_01_ml_intro.py labs/vol1/lab_09_data_selection.py labs/vol2/lab_01_introduction.py labs/vol2/lab_17_fleet_synthesis.py --output-dir /tmp/mlsysbook-render-smoke`
+- `python3 labs/tools/render_lab_smoke.py --labs $(find labs/vol1 labs/vol2 -maxdepth 1 -name 'lab_*.py' | sort) --port-start 29700 --output-dir /tmp/mlsysbook-render-smoke-all-v2 > /tmp/mlsysbook-render-smoke-all-v2.json`
+- Full catalog browser smoke result: 34 passed, 0 failed; every non-orientation lab had four distinct rendered track states.
+- `python3 -m pytest labs/tests/test_static.py -q`
