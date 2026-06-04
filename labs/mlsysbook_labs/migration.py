@@ -8,7 +8,7 @@ from .reports import build_lab_report, report_export_panel
 from .schemas import LabMetadata, LabReport, LabTrackVariant, TrackProfile
 from .ui import big_takeaways as big_takeaways_panel
 from .ui import learning_objectives as learning_objectives_panel
-from .ui import scenario_brief, source_trace, track_context
+from .ui import scenario_brief, track_arc_context, track_context
 
 
 def baseline_learning_objectives(metadata: LabMetadata, variant: LabTrackVariant) -> tuple[str, ...]:
@@ -16,7 +16,7 @@ def baseline_learning_objectives(metadata: LabMetadata, variant: LabTrackVariant
     return (
         f"Identify the {metadata.title} system decision for the selected track.",
         f"Compare the primary metric ({variant.primary_metric}) against the guardrail ({variant.guardrail_metric}).",
-        "Defend a local engineering decision with source-traced evidence.",
+        "Defend a local engineering decision with validation evidence and residual risk.",
     )
 
 
@@ -25,7 +25,7 @@ def baseline_big_takeaways(metadata: LabMetadata, variant: LabTrackVariant) -> t
     return (
         f"{metadata.title} changes when the deployment track changes.",
         f"The primary metric is {variant.primary_metric}, but the guardrail is {variant.guardrail_metric}.",
-        "Hardware, model, system, and scenario facts should come from shared registries.",
+        "A good answer connects the track, workload, validation plan, and residual risk.",
     )
 
 
@@ -110,7 +110,8 @@ def legacy_migration_panel(
 
     objectives = tuple(learning_objectives or baseline_learning_objectives(metadata, variant))
     takeaways = tuple(big_takeaways or baseline_big_takeaways(metadata, variant))
-    trace = variant_source_trace(variant, profile)
+    model_label = variant.model_ref.rsplit(".", 1)[-1].replace("_", " ") if variant.model_ref else "track model"
+    guardrail_label = variant.guardrail_metric.replace("sla", "SLA")
     report = build_migration_report(
         metadata,
         profile,
@@ -128,28 +129,28 @@ def legacy_migration_panel(
         [
             learning_objectives_panel(objectives),
             track_context(profile),
+            track_arc_context(profile, metadata.lab_id),
             scenario_brief(
                 "Scenario Brief",
                 stakeholder=variant.stakeholder,
                 objective=variant.objective,
                 constraints={
                     "Workload": variant.workload_summary,
-                    "Model source": variant.model_ref,
-                    "Hardware source": variant.hardware_ref,
-                    "System source": variant.system_ref or "single-device profile",
-                    "Primary metric": variant.primary_metric,
-                    "Guardrail metric": variant.guardrail_metric,
+                    "Model under pressure": model_label,
+                    "Primary goal": variant.primary_metric,
+                    "Release guardrail": guardrail_label,
+                    "First decision": "Which system choice should move first for this track?",
+                    "Validation question": "What evidence would make the decision safe enough to defend?",
                 },
             ),
-            source_trace(trace),
             big_takeaways_panel(takeaways),
             mo.Html(
                 """
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-report-panel">
   <h2>Download Report</h2>
   <p class="mlsysbook-source-summary">
-    This report is generated locally from the current track variant and marks
-    any remaining migration gaps under Incomplete Fields.
+    Save a local report after you make the track-specific decision. The report
+    records your predictions, evidence, decision, reflection, and residual risk.
   </p>
 </div>
 """

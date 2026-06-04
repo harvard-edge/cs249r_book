@@ -793,6 +793,34 @@ def track_context(track: str | TrackProfile) -> mo.Html:
     )
 
 
+def track_arc_context(track: str | TrackProfile, lab_id: str) -> mo.Html:
+    """Render the selected track's cross-lab narrative without registry provenance."""
+    profile = track if isinstance(track, TrackProfile) else get_track_profile(track)
+    from .track_arcs import track_arc_context_summary
+
+    summary = track_arc_context_summary(profile.track_id, lab_id)
+    fields = _render_compact_fields(
+        {
+            "Journey": summary["Track mission"],
+            "This lab's role": summary["This lab's role"],
+            "Carry forward": summary["Carry forward"],
+            "System goal": summary["System goal"],
+        }
+    )
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel mlsysbook-launch-panel">
+  <div class="mlsysbook-section-label">Where This Fits</div>
+  <h2>{html.escape(profile.label)} Journey</h2>
+  <div class="mlsysbook-scenario-narrative">
+    <p>{html.escape(summary["Volume arc"])}</p>
+  </div>
+  <div class="mlsysbook-compact-fields is-brief">{fields}</div>
+</div>
+"""
+    )
+
+
 def part_header(part: str, concept: str, systems_question: str, track_frame: str = "") -> mo.Html:
     """Render the required part anchor and systems question."""
     heading = _part_heading(part, concept)

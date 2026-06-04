@@ -13,6 +13,7 @@ from mlsysbook_labs import (
     scenario_slice,
     scenario_thread,
     track_selector,
+    track_arc_context,
     source_trace,
     what_you_need_to_know,
 )
@@ -56,6 +57,13 @@ def test_lab_level_helpers_render_contract_headers():
     assert "Decision path" in flow
     assert "Choose recipe" in flow
     assert "Report risk" in flow
+
+    arc = html_text(track_arc_context("iphone", "v1_10_compression_paradox"))
+    assert "Where This Fits" in arc
+    assert "iPhone Journey" in arc
+    assert "Compression recipe" in arc
+    assert "Source Trace" not in arc
+    assert "MLSysIM" not in arc
 
     rendered_map = html_text(
         lab_map(
