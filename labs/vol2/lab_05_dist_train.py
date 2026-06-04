@@ -61,7 +61,6 @@ def _(ledger, track_selector):
     _saved_track = ledger.get_track()
     _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
     track_picker = track_selector(default=_default_track)
-    track_picker
     return (track_picker,)
 
 

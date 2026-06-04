@@ -105,6 +105,12 @@ ACADEMIC_LAB_CSS = mo.Html(
   border: 1px solid #EDF0F5;
   border-radius: 8px;
   padding: 12px;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.mlsysbook-field code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .mlsysbook-field strong {
   display: block;
