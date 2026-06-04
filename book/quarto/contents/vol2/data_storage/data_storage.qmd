@@ -2246,24 +2246,33 @@ While model serving dictates its own economic calculus, the training phase intro
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Checkpoint section intro — model scale and checkpoint size
-# │ Exports: CheckpointModelIntro.gpt3_params_b_str, .ckpt_total_gb_str
-from mlsysim import Models
-from mlsysim.fmt import fmt
+# │ Exports: CheckpointModelIntro.gpt3_params_b_str,
+# │          CheckpointModelIntro.ckpt_total_gb_str,
+# │          CheckpointModelIntro.weights_fp16_gb_str,
+# │          CheckpointModelIntro.optimizer_state_gb_str
+from mlsysim import Models, ReferenceStats
+from mlsysim.core.units import BYTES_ADAM_STATE, BYTES_FP16, GB
+from mlsysim.fmt import check, fmt_memory, fmt_params
 
 class CheckpointModelIntro:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     gpt3_params = Models.Language.GPT3.parameters
+    weights_fp16 = gpt3_params * BYTES_FP16
+    optimizer_state = gpt3_params * BYTES_ADAM_STATE
     ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+    check(weights_fp16 + optimizer_state == ckpt_total, "Checkpoint component bytes must sum to total.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
     ckpt_total_gb_str = fmt_memory(ckpt_total, unit=GB, precision=0, commas=True)
+    weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
+    optimizer_state_gb_str = fmt_memory(optimizer_state, unit=GB, precision=0, commas=True)
 ```
 
 ## Checkpoint Storage {#sec-storage-checkpointing}
 
-\index{Checkpoint!storage architecture}After a thousand GPUs have been training for six hours, a power supply failure turns checkpoint storage into the difference between resuming quickly and repeating hours of work. The decisive storage questions are how quickly the most recent checkpoint was saved, where it resides, and whether it can be read back. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. This section focuses on the storage architecture that minimizes $T_{\text{write}}$, the time the training pipeline pauses to save a checkpoint.
+After a thousand GPUs have been training for six hours, a power supply failure turns checkpoint storage\index{Checkpoint!storage architecture} into the difference between resuming quickly and repeating hours of work. The decisive storage questions are how quickly the most recent checkpoint was saved, where it resides, and whether it can be read back. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. This section focuses on the storage architecture that minimizes $T_{\text{write}}$, the time the training pipeline pauses to save a checkpoint.
 
-A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes model weights (`350` GB in FP16), optimizer state (momentum and variance, `1,400` GB in FP32), learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
+A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.optimizer_state_gb_str` of FP32 optimizer state for momentum and variance, learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
 
 ::: {.column-margin}
 ![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Margin ladder comparing a naive checkpoint storm taking about 23.9 minutes with a ZeRO-3 sharded write taking about 11.2 seconds, annotated as a 128 times reduction."}
