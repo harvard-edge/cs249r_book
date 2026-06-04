@@ -2780,17 +2780,11 @@ The idealized protocol above assumes step 2 completes quickly. At scale, this ba
 
 :::
 
-The basic protocol has a subtle correctness bug. If the coordinator crashes after some workers confirm but before writing metadata, those workers believe the checkpoint succeeded while the system has no valid checkpoint.
-
-Production systems use two-phase commit[^fn-two-phase-commit-checkpoint] to ensure correctness. Two-phase commit is a classic distributed systems protocol [@gray1978]:
+The basic protocol has a subtle correctness bug: if the coordinator crashes after some workers confirm but before writing metadata, those workers believe the checkpoint succeeded while the system has no valid checkpoint. Production systems use two-phase commit[^fn-two-phase-commit-checkpoint], a classic distributed systems protocol [@gray1978], to make the checkpoint decision atomic:
 
 [^fn-two-phase-commit-checkpoint]: **Two-Phase Commit (2PC)**: Formalized by @gray1978, 2PC ensures all participants either commit or abort atomically. The protocol's known weakness is blocking: if the coordinator fails between prepare and commit, participants wait indefinitely. For distributed checkpointing this blocking is acceptable because a stuck checkpoint can be timed out and retried, whereas the alternative (partial checkpoint writes) would leave the system with an unrecoverable inconsistent state. \index{Two-Phase Commit!checkpoint atomicity}
 
-In the prepare phase, workers write to staging location and report success to coordinator. In the commit phase, coordinator atomically renames or commits all shards together. For example, the coordinator moves files from `staging/` to `checkpoints/`. If the coordinator fails between phases, workers detect during next heartbeat\index{Heartbeat} and rollback staged writes.
-
-This ensures atomic checkpoint commits. Either all shards are committed together, or none are.
-
-Consistency is a critical consideration in this protocol. In distributed training with synchronous gradient updates, workers naturally reach consistent states at step boundaries. Checkpointing at step boundaries ensures all workers have applied the same updates. With asynchronous training or pipeline parallelism, defining and reaching consistent states requires more careful coordination.
+In the prepare phase, workers write to a staging location and report success to the coordinator. In the commit phase, the coordinator atomically renames or commits all shards together, moving files from `staging/` to `checkpoints/`, for example. If the coordinator fails between phases, workers detect the failure during the next heartbeat\index{Heartbeat} and roll back staged writes, so either all shards commit together or none do. Consistency remains a separate requirement: synchronous gradient updates naturally create step boundaries where all workers have applied the same updates, but asynchronous training and pipeline parallelism require more careful coordination to define a consistent cut.
 
 #### Sharded checkpointing {#sec-fault-tolerance-reliability-reliability-sharded-checkpointing-58d0}
 
@@ -3199,15 +3193,18 @@ Horovod Elastic extends Horovod's [@sergeev2018horovod] data parallel training w
 
 ### Model-specific training fault tolerance {#sec-fault-tolerance-reliability-reliability-modelspecific-training-fault-tolerance-4b70}
 
-The checkpoint and recovery strategies developed above require adaptation because workloads lose different kinds of state when they fail. The design question is therefore not simply how often to checkpoint, but which state variable would make a restart mathematically or economically wrong. LLMs protect optimizer state and curriculum position, recommendation systems protect embedding freshness, vision models protect augmentation and normalization state, and scientific workloads protect exploration or simulator state.
+The checkpoint and recovery strategies developed above require adaptation because workloads lose different kinds of state when they fail. The design question is therefore not simply how often to checkpoint, but which state variable would make a restart mathematically or economically wrong. @Tbl-training-recovery-state-invariants turns that question into a compact recovery map.
 
-LLM training puts the greatest pressure on checkpoint I/O because optimizer state and long training duration make each restart expensive. Mixed-precision checkpoints reduce the bytes written for weights while preserving FP32 optimizer state where precision matters; ZeRO/FSDP sharding spreads writes across workers; asynchronous checkpointing moves serialization off the critical path; and incremental checkpointing records only changed state. These mechanisms solve different parts of the same bottleneck, so the durable requirement is that recovery preserve both optimizer state and the model's position in the data schedule. Curriculum learning, document position, and long-context schedules must be included in the checkpoint, because resuming with the wrong data order can change the optimization trajectory even when the weights reload correctly.
+| **Workload**   | **State at Risk**                                                                                  | **Checkpoint Implication**                                                                                                                                                                                                 |
+|:---------------|:---------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| LLM training   | Optimizer state, curriculum position, document position, long-context schedule                     | Preserve the FP32 optimizer state where precision matters, shard writes with ZeRO/FSDP, move serialization off the critical path, and include the data-schedule position so the optimization trajectory resumes correctly. |
+| Recommendation | Embedding freshness, feature-store version                                                         | Favor freshness over full-state exactness with incremental checkpointing\index{Checkpointing!incremental}, tiered checkpointing\index{Checkpointing!tiered}, and embedding versioning\index{Embedding!versioning}.         |
+| Vision         | Augmentation seeds, shuffling order, batch-normalization statistics, progressive-resizing schedule | Capture the stochastic and normalization state that controls the input stream; weights alone are not enough to reproduce the training trajectory.                                                                          |
+| Scientific ML  | Simulator state, search frontier, explored configurations, validation seeds                        | Treat the model, simulator, search process, and random state as one consistency unit so recovery does not duplicate exploration or invalidate comparisons.                                                                 |
 
-Recommendation training reverses the priority. A full snapshot of trillion-parameter embedding tables may be too large to write frequently, while stale embeddings can degrade revenue-sensitive ranking quality within hours. The checkpoint design therefore favors freshness over full-state exactness: **incremental checkpointing**\index{Checkpointing!incremental} records only embeddings that changed since the last checkpoint, **tiered checkpointing**\index{Checkpointing!tiered} saves dense parameters more often than sparse tables, and **embedding versioning**\index{Embedding!versioning} stores compact deltas that let recovery reconstruct recent user and item state. Because many RecSys models train continuously on streaming data, recovery must also record feature-store versions so that model state and training features remain semantically aligned after restart.
+: **Training Recovery State Invariants**: Workloads require different checkpoint contents because they make different state variables quality-bearing. The correct recovery policy starts from the state that would make a restart wrong, then chooses sharding, incrementality, or domain-state capture accordingly. {#tbl-training-recovery-state-invariants}
 
-Vision workloads usually have smaller checkpoints, but reproducibility depends on state outside the model weights. Data augmentation seeds, current augmentation parameters, shuffling order, synchronized batch-normalization statistics, and progressive-resizing schedules all shape the training trajectory. A recovered vision run that reloads weights but changes augmentation or normalization state may still produce a different model, so checkpoint design must capture the stochastic and schedule state that controls the input stream.
-
-Scientific and specialized workloads push this requirement even further because the ML model is often coupled to a search or simulation process. Protein-structure, molecular-design, and climate-modeling runs may need to remember which configurations have already been explored, which simulator state produced the current examples, and which random seeds support reproducible validation. Losing that domain state creates duplicate exploration or invalid comparisons, so recovery must treat the model, simulator, search frontier, and random state as one consistency unit.
+The common pattern is that recovery correctness is broader than weight restoration. LLMs can reload weights but resume with the wrong curriculum position; recommendation models can reload dense parameters but serve stale embeddings; vision models can reload weights but alter augmentation or normalization state; and scientific models can reload a neural network while losing the simulator state that made the data meaningful.
 
 Elasticity and checkpointing provide the necessary resilience for long-running batch training jobs, but the operational calculus changes completely once the model is deployed to users. The challenge shifts from protecting *weeks of batch computation* to protecting *milliseconds of real-time latency*.
 
@@ -3376,9 +3373,17 @@ During a major regional network outage, an e-commerce site suddenly loses access
 
 ### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
 
-A degradation plan must name which service property will be sacrificed before an incident begins. Quality is the most visible lever: the system serves predictions from simpler, faster models, such as falling back from a sophisticated multi-tower recommender to a collaborative-filtering model. Latency can also become the sacrifice; under high load, batching more requests together preserves throughput and model quality while accepting slower responses.
+A degradation plan must name which service property will be sacrificed before an incident begins. @Tbl-graceful-degradation-dimensions summarizes the main levers. The table is a pre-incident design checklist, not an outage-time brainstorming aid: each sacrificed property needs a measured quality budget, an activation condition, and a recovery path before the failure occurs.
 
-Other degradation dimensions preserve a useful answer by narrowing what the system promises. Coverage degradation returns partial results, such as top-10 search results instead of top-100. Freshness degradation serves cached or stale results rather than real-time computation, as when news recommendations use hour-old candidates during a recommendation-service outage. Feature degradation keeps inference running with fewer inputs, such as using content features when user history is unavailable.
+| **Dimension**        | **What the System Sacrifices**    | **Typical Fallback**                                                                           |
+|:---------------------|:----------------------------------|:-----------------------------------------------------------------------------------------------|
+| Quality              | Model accuracy or ranking quality | Use a simpler model, such as a collaborative-filtering fallback for a multi-tower recommender. |
+| Latency              | Response speed                    | Batch more requests together to preserve throughput and model quality under high load.         |
+| Coverage             | Result completeness               | Return top-10 search results instead of top-100.                                               |
+| Freshness            | Recency of computed results       | Serve cached or stale candidates, such as hour-old news recommendations during an outage.      |
+| Feature completeness | Input richness                    | Use content features when user history or real-time context is unavailable.                    |
+
+: **Graceful Degradation Dimensions**: Degradation plans choose which service property can be reduced while still returning a useful answer. Naming the dimension in advance prevents the system from treating every failure as a binary serve-or-crash decision. {#tbl-graceful-degradation-dimensions}
 
 ### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
 
@@ -3469,11 +3474,7 @@ Distributed systems exhibit nondeterministic behavior[^fn-heisenbug-ml] from mul
 
 [^fn-heisenbug-ml]: **Heisenbug**: Coined in hacker culture circa 1983, formalized by Jim Gray in his 1985 analysis of computer failures, as a pun on Heisenberg's uncertainty principle. The bug disappears under observation because adding instrumentation changes timing. In distributed ML training, this is especially pernicious: inserting gradient logging alters NCCL collective timing, masking the very race condition that caused the silent corruption. \index{Heisenbug!distributed debugging}
 
-Partial failures turn that nondeterminism into a recovery problem. Unlike single-machine systems where failures are typically total, distributed systems experience partial failures where some components fail while others continue, and the interaction between working and failed components produces complex failure modes.
-
-Scale then removes manual inspection as a viable debugging method. With thousands of components, automated tools must filter relevant information from massive telemetry streams and identify the few signals that explain the incident.
-
-ML systems add model behavior to the same diagnostic problem. Silent accuracy degradation produces wrong results without errors, numerical issues like NaN and infinity propagate through computation, data-dependent bugs manifest only for specific inputs, and learning causes expected behavior changes that can resemble bugs.
+Partial failures turn that nondeterminism into a recovery problem. Unlike single-machine systems where failures are typically total, distributed systems experience partial failures where some components fail while others continue, and the interaction between working and failed components produces complex failure modes. Scale then removes manual inspection as a viable debugging method: with thousands of components, automated tools must filter massive telemetry streams and identify the few signals that explain the incident. ML systems add model behavior to the same diagnostic problem because silent accuracy degradation produces wrong results without errors, numerical issues like NaN and infinity propagate through computation, data-dependent bugs manifest only for specific inputs, and learning causes expected behavior changes that can resemble bugs.
 
 ### Observability pillars {#sec-fault-tolerance-reliability-reliability-observability-pillars-0e45}
 
@@ -3594,11 +3595,29 @@ The observability pillars above enable detection of recurring failure patterns t
 ![](images/svg/training-failure-signatures.svg)
 :::
 
-A training-loss signature is useful because it maps a curve to a recovery decision. A loss spike followed by recovery typically indicates a transient data issue or numerical instability; the job may continue, but the incident should be investigated to rule out a systematic input problem. A spike followed by a plateau is more serious because the learning rate may be too high, a checkpoint may be corrupted, or a data bug may have changed the training objective, so rollback to an earlier checkpoint may be necessary. Gradual divergence is harder to catch with threshold alerts because silent data corruption, hardware error, or distributed training desynchronization can accumulate slowly. A hang without an error points instead to a deadlock in collective communication or a crashed worker blocking synchronization, which means timeout detection becomes the diagnostic mechanism.
+A training-loss signature is useful because it maps a curve to a recovery decision. @Tbl-training-failure-response-map makes that mapping explicit: the curve is evidence, and the recovery action depends on what kind of system failure could have produced it.
+
+| **Signature**              | **Likely Interpretation**                                                         | **Recovery Response**                                                                          |
+|:---------------------------|:----------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------|
+| Spike followed by recovery | Transient data issue or numerical instability                                     | Continue training, but investigate the incident to rule out a systematic input problem.        |
+| Spike followed by plateau  | Learning rate too high, corrupted checkpoint, or data bug                         | Roll back to an earlier checkpoint and validate the data path before resuming.                 |
+| Gradual divergence         | Silent data corruption, hardware error, or distributed-training desynchronization | Isolate the failing rank, validate checkpoint integrity, and compare telemetry across workers. |
+| Hang without an error      | Collective deadlock or crashed worker blocking synchronization                    | Use timeout detection and restart or reconstruct the worker group.                             |
+
+: **Training Failure Response Map**: Training-loss curves are operational evidence only when they lead to different recovery actions. The response map ties each signature to the failure class most likely to explain it and to the first action operators should take. {#tbl-training-failure-response-map}
 
 #### Serving failures {#sec-fault-tolerance-reliability-reliability-serving-failures-3322}
 
-Serving failures require the same symptom-to-action mapping under much tighter latency constraints. Latency spikes can arise from resource contention, garbage collection, cold caches, or model reloads; individual spikes may be transient, but repeated occurrences indicate a capacity or placement problem. Rising error rates point to dependency failure, data-format changes, or model bugs and require immediate investigation because errors compound rapidly across dependent services. Silent quality degradation is different: model drift, feature degradation, or data-pipeline faults erode predictions without raising error-rate alarms, so the serving system needs quality monitoring beyond standard operational metrics. Cascade failures occur when one failing component causes others to fail through timeout exhaustion, resource depletion, or error propagation, which makes circuit breakers and isolation boundaries part of the fault-tolerance design rather than an after-the-fact operations layer.
+Serving failures require the same symptom-to-action mapping under much tighter latency constraints. @Tbl-serving-failure-response-map separates the common symptoms by what they reveal and what the serving system must do first.
+
+| **Symptom**                | **Likely Interpretation**                                                               | **Immediate Response**                                                                         |
+|:---------------------------|:----------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------|
+| Latency spikes             | Resource contention, garbage collection, cold caches, or model reloads                  | Check placement and capacity; repeated spikes usually mean the problem is no longer transient. |
+| Rising error rates         | Dependency failure, data-format change, or model bug                                    | Investigate immediately because errors compound across dependent services.                     |
+| Silent quality degradation | Model drift, feature degradation, or data-pipeline fault                                | Use quality monitoring beyond standard operational metrics.                                    |
+| Cascade failure            | Timeout exhaustion, resource depletion, or error propagation from one failing component | Trip circuit breakers and preserve isolation boundaries before the failure spreads.            |
+
+: **Serving Failure Response Map**: Serving incidents must be classified quickly because every diagnosis competes with a user-facing latency budget. The table ties each symptom to the first operational response rather than treating all serving failures as generic errors. {#tbl-serving-failure-response-map}
 
 Cascade failures are particularly insidious because the root cause is obscured by the symptoms it generates. A concrete diagnosis shows how the three observability pillars work together to trace a cascade back to its origin.
 
