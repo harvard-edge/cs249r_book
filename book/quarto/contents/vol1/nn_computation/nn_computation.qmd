@@ -1461,7 +1461,7 @@ class MacAcceleratorSpecLocal:
     h100_fp16_tmacs_tflop_per_s_str = fmt_flop_rate(h100_fp16_macs_rate, unit=TFLOPs / second, precision=1, commas=False)
 ```
 
-[^fn-multiply-accumulate]: **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Modern accelerators are often marketed in FLOPs because a fused multiply-add is counted as two floating-point operations. On that convention, a high-end training accelerator can be rated at `{python} MacAcceleratorSpecLocal.h100_fp16_tflop_per_s_str` dense FP16, or about `{python} MacAcceleratorSpecLocal.h100_fp16_tmacs_tflop_per_s_str` trillion MAC/s if one MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
+[^fn-multiply-accumulate]: **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Modern accelerators are often marketed in FLOPs because a fused multiply-add is counted as two floating-point operations. On that convention, an NVIDIA H100 is rated at `{python} MacAcceleratorSpecLocal.h100_fp16_tflop_per_s_str` dense FP16, or about `{python} MacAcceleratorSpecLocal.h100_fp16_tmacs_tflop_per_s_str` trillion MAC/s if one MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
 
 The transition from individual neurons to integrated systems requires navigating the central trade-off\index{Neural Network!capacity vs. cost trade-off} between representational capacity and computational cost. While silicon transistors operate at gigahertz frequencies, millions of times faster than biological chemical signaling, the sheer volume of operations in deep networks creates unique bottlenecks.
 
@@ -2147,7 +2147,7 @@ class TpuHardwareFootnoteLocal:
     tpuv1_tdp_w_str = fmt_power(tpuv1_tdp, unit=watt, precision=0, commas=False)
 ```
 
-[^fn-tpu-tensor-hardware]: **Tensor Processing Unit (TPU)**: Google's custom accelerator, first deployed internally in 2015, was optimized specifically for the matrix multiplications that dominate neural network workloads. The TPU v1 achieved high inference throughput at low power by sacrificing general-purpose flexibility for maximum throughput on the operation neural networks need most. Later hardware chapters quantify these device-level trade-offs in detail. \index{TPU!design trade-off}
+[^fn-tpu-tensor-hardware]: **Tensor Processing Unit (TPU)**: Google's custom accelerator, first deployed internally in 2015, was optimized specifically for the matrix multiplications that dominate neural network workloads. The TPU v1 achieved `{python} TpuHardwareFootnoteLocal.tpuv1_tops_str` for INT8 inference at `{python} TpuHardwareFootnoteLocal.tpuv1_tdp_w_str`, a power-efficiency point that general-purpose GPUs of the era could not match. The name "Tensor Processing Unit" reflects the design decision to sacrifice general-purpose flexibility for maximum throughput on the operation neural networks need most. \index{TPU!design trade-off}
 
 The convergence of data availability, algorithmic innovation, and computational infrastructure created the foundation for modern deep learning. Understanding the computational operations that drive these infrastructure requirements is essential: when scaled across millions of parameters and billions of training examples, simple mathematical operations create the massive computational demands that shaped this evolution.
 
@@ -2767,7 +2767,7 @@ As data flows through the network, it is transformed at each layer to extract me
 
 The learnable parameters[^fn-parameter-memory-cost] of neural networks, weights and biases, determine how information flows through the network and how transformations are applied to input data. Their organization directly impacts both learning capacity and computational requirements.
 
-[^fn-parameter-memory-cost]: **Parameter Memory Cost**: Parameter count is a misleading proxy for memory importance. Small scale-and-shift parameters in normalization layers add little to the raw byte count, yet changing or freezing them can noticeably affect accuracy. Conversely, the bulk of parameters (dense weight matrices) require additional training state beyond the stored weight itself, so a model that fits in memory for inference may require several times more memory for training. \index{Parameter!memory multiplier}
+[^fn-parameter-memory-cost]: **Parameter Memory Cost**: Parameter count is a misleading proxy for memory importance. Normalization-layer parameters, such as BatchNorm's $\gamma$ and $\beta$ or LayerNorm's scale and bias, add only two parameters per feature dimension, making them negligible for memory budgeting. Yet freezing them during fine-tuning can cause 5--15 percent accuracy degradation, so they matter far beyond their byte count. Conversely, the bulk of parameters (dense weight matrices) each require 12 bytes of additional state during Adaptive Moment Estimation (Adam) training: gradient plus two moment vectors beyond the 4-byte weight itself. A model that fits in memory for inference may therefore require 3$\times$ more memory for training. \index{Parameter!memory multiplier}
 
 #### Weight matrices {#sec-neural-computation-weight-matrices-9f9a}
 
@@ -4915,26 +4915,43 @@ These computational differences manifest directly in hardware requirements and d
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Training-GPU and edge-accelerator footnotes immediately below
 # │ Exports: GpuSpecsFootnote.*
-from mlsysim import Hardware, watt, ReferenceStats
-from mlsysim.fmt import check, fmt_multiple
+from mlsysim import Hardware, TOPS, watt, ReferenceStats
+from mlsysim.fmt import check, fmt_multiple, fmt_ops_rate, fmt_power
 
 class GpuSpecsFootnote:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    h_edge_tpu = Hardware.Edge.Coral
     a100_tdp_w_value = Hardware.Cloud.A100.tdp.to(watt).magnitude
+    h100_tdp_w_value = Hardware.Cloud.H100.tdp.to(watt).magnitude
     mobile_inference_tdp_high_w_value = ReferenceStats.MobilePower.MobileNpuPeak.to(watt).magnitude
+    edge_tpu_tops_value = h_edge_tpu.compute.peak_flops.to(TOPS).magnitude
+    edge_tpu_tdp_w_value = h_edge_tpu.tdp.to(watt).magnitude
+    jetson_orin_tops_value = Hardware.Edge.JetsonAGXOrin.compute.precision_flops["int8"].to(TOPS).magnitude
+    jetson_orin_tdp_low_w_value = Hardware.Edge.JetsonAGXOrin.tdp_min.to(watt).magnitude
+    jetson_orin_tdp_high_w_value = Hardware.Edge.JetsonAGXOrin.tdp_max.to(watt).magnitude
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     training_mobile_ratio = a100_tdp_w_value / mobile_inference_tdp_high_w_value
+    edge_throughput_ratio = jetson_orin_tops_value / edge_tpu_tops_value
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(training_mobile_ratio >= 100, f"Training GPU should be >=100x mobile power, got {training_mobile_ratio:.1f}x")
+    check(edge_throughput_ratio > 60, f"Jetson Orin should be >60x Edge TPU throughput, got {edge_throughput_ratio:.1f}x")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    a100_tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
+    h100_tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
     training_mobile_ratio_mult_str = fmt_multiple(training_mobile_ratio, precision=0, commas=False)
+    edge_tpu_tops_str = fmt_ops_rate(h_edge_tpu.compute.peak_flops, unit=TOPS, precision=0, commas=False)
+    edge_tpu_tdp_w_str = fmt_power(h_edge_tpu.tdp, unit=watt, precision=0, commas=False)
+    jetson_orin_tops_str = fmt_ops_rate(Hardware.Edge.JetsonAGXOrin.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
+    jetson_orin_tdp_low_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_min, unit=watt, precision=0, commas=False)
+    jetson_orin_tdp_high_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_max, unit=watt, precision=0, commas=False)
+    edge_throughput_ratio_mult_str = fmt_multiple(edge_throughput_ratio, precision=1, commas=False)
 ```
 
-[^fn-training-gpu-power]: **Training GPU Power Budget**: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "substantial cooling infrastructure," as a single high-end training GPU consumes hundreds of watts. Even compared with a 4 W mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget. \index{GPU!training, power budget}
+[^fn-training-gpu-power]: **Training GPU Power Budget**: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "substantial cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`--`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a 4 W mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget. \index{GPU!training, power budget}
 
-[^fn-edge-tpu-efficiency]: **Edge Inference Accelerators**: Mobile and embedded inference accelerators operate in a much smaller power tier than training GPUs. Battery-class chips trade generality and peak throughput for single-digit-watt operation, while edge servers deliver much higher throughput but require fixed power infrastructure rather than battery operation. This power-tier gap determines whether inference can run on battery-powered devices or requires wired deployment. \index{Edge Inference!power tiers}
+[^fn-edge-tpu-efficiency]: **Edge Inference Accelerators**: The Edge TPU (Google Coral) operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` by hardwiring the multiply-accumulate datapath for INT8 inference. Edge servers occupy a different tier: the NVIDIA Jetson AGX Orin delivers `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` more throughput but requiring fixed power infrastructure rather than battery operation. This power-tier gap determines whether inference can run on battery-powered devices or requires wired deployment. \index{Edge TPU!inference efficiency}\index{Edge Inference!power tiers}
 
-[^fn-inference-quantization]: **Reduced Precision**: Reducing numerical precision from 32-bit values to smaller representations can reduce memory per parameter and increase throughput on hardware with matching datapaths. Trained models often tolerate some precision loss during inference because inference does not accumulate rounding errors across gradient updates the way training does. The trade-off is not free: overly aggressive reduction can degrade accuracy on tail-distribution inputs, requiring calibration datasets to find the precision floor for each deployment. @Sec-model-compression later develops quantization techniques in detail. \index{Precision!inference reduction}
+[^fn-inference-quantization]: **Reduced Precision**: Reducing numerical precision from 32-bit values to INT8 yields 4$\times$ less memory per parameter and up to 4$\times$ higher throughput on hardware with INT8 datapaths. Trained models often tolerate some precision loss during inference because inference does not accumulate rounding errors across gradient updates the way training does. The trade-off is not free: overly aggressive reduction, especially below four bits, can degrade accuracy on tail-distribution inputs, requiring calibration datasets to find the precision floor for each deployment. @Sec-model-compression later develops quantization techniques in detail. \index{Precision!inference reduction}
 
 ```{python}
 #| echo: false
@@ -5763,7 +5780,7 @@ Data scientists develop models with unlimited time budgets, assuming deployment 
 \index{Arithmetic Intensity!GPU utilization}
 **Pitfall**: *Assuming more compute automatically means faster training.*
 
-Teams purchase expensive GPUs expecting proportional speedups, then discover workloads are memory bound. Arithmetic intensity determines which resource constrains performance. The MNIST forward-pass analysis in @tbl-nn-computation-mnist-flops and the roofline model in @sec-appdx-machine-foundations-roofline-model-2529 show why small networks like MNIST (784 to 128 to 64 to 10) have arithmetic intensity of approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str` FLOP/byte, far below the balance point for high-end accelerators. For memory-bound workloads, a commodity CPU can match an expensive accelerator; for compute-bound large models, accelerators provide the large speedups they were built for. This mismatch explains why teams report widely varying utilization depending on model architecture.
+Teams purchase expensive GPUs expecting proportional speedups, then discover workloads are memory bound. Arithmetic intensity determines which resource constrains performance. The MNIST forward-pass analysis in @tbl-nn-computation-mnist-flops and the roofline model in @sec-appdx-machine-foundations-roofline-model-2529 show why small networks like MNIST (784 to 128 to 64 to 10) have arithmetic intensity of approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str` FLOP/byte, far below the A100 and H100 dense-FP16 ridge points of about `{python} FallacyQuantExamples.a100_ridge_str` and `{python} FallacyQuantExamples.h100_ridge_str` FLOP/byte. For memory-bound workloads, a commodity CPU can match an expensive accelerator; for compute-bound GPT-scale models, accelerators provide the large speedups they were built for. This mismatch explains why teams report widely varying utilization depending on model architecture.
 
 **Pitfall**: *Extrapolating accuracy improvements without considering diminishing returns.*
 
