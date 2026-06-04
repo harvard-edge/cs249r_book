@@ -1968,3 +1968,57 @@ Tests or checks run:
 - `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_01_ml_intro.py labs/vol2/lab_17_fleet_synthesis.py --port-start 30100 --output-dir /tmp/mlsysbook-feedback-cue-check > /tmp/mlsysbook-feedback-cue-check/results.json`
 - `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol1/lab_09_data_selection.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py labs/vol2/lab_11_edge_intelligence.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_17_fleet_synthesis.py --port-start 30200 --output-dir /tmp/mlsysbook-feedback-pass-20260604-after-cue > /tmp/mlsysbook-feedback-pass-20260604-after-cue/results.json`
 - Post-fix cluster browser smoke result: 9 passed, 0 failed; every non-orientation lab had four distinct rendered track states and no overflowing `.mlsysbook-field` cards.
+
+### 2026-06-04 - Shared Pedagogy Shell UI and Report Contract Pass
+
+Labs:
+- Shared lab UI components used by track-aware labs.
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/lab-plan-dashboard.html`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/tests/test_report_contract.py`
+- `labs/lab-plan-dashboard.html`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Moved the screenshot feedback into shared UI components instead of per-lab embedded style patches.
+- `learning_objectives()` now renders visible bullet lists.
+- `lab_header()` separates metadata chips from topic chips and filters out the implementation label `Track-aware`.
+- Shared panels now use a consistent panel width, so lab sections line up as one reading window.
+- `track_context()` and `scenario_brief()` now use a short narrative plus compact source-of-truth facts table instead of a wall of uneven cards.
+- Added final-row spanning in compact fact tables so odd field counts do not leave blank cells.
+- Completed the lab-plan dashboard's Volume I/II coverage sections with canonical track materialization and one row per implemented lab.
+- Added report contract tests that generate every catalog lab report for every canonical track and statically check required `build_lab_report()` schema fields.
+- Filled the missing Volume II collective communication `evidence_summary` field required by the report schema.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were added in this pass.
+- The UI continues to display hardware, model, system, metric, guardrail, and constraint facts from `mlsysbook_labs` track/variant registries and MLSysIM references.
+
+Notebook-local constants removed:
+- None in this pass.
+- The V1-10 part body still has legacy inline presentation inside the older tab implementation; future migration should replace those part bodies with shared reusable part components rather than copying styles into the notebook.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.ui.lab_header()`
+- `mlsysbook_labs.ui.learning_objectives()`
+- `mlsysbook_labs.ui.track_context()`
+- `mlsysbook_labs.ui.scenario_brief()`
+
+Plan updates needed in other labs:
+- Migrate older bespoke part bodies, especially V1-10 tabs, to shared reusable part components for narrative callouts, prediction blocks, evidence panels, metric cards, plots, and reflections.
+- Continue using report-contract tests as a release gate when labs are specialized further.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py`
+- `python3 -m pytest labs/tests/test_report_contract.py -q`
+- Browser render of V1-10 on `http://127.0.0.1:30311`: relevant-only chips, visible bullet objectives, consistent 840px shell panels, compact track/scenario tables, no page errors, no stale marker on clean load.
+- Browser click check of V1-10 Part A prediction: no persistent stale marker or visible red stale overlay in the captured after-click screenshots.

@@ -32,6 +32,7 @@ ACADEMIC_LAB_CSS = mo.Html(
 .mlsysbook-lab-shell {
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--mlsysbook-ink);
+  width: min(var(--mlsysbook-panel-width), 100%);
   max-width: min(var(--mlsysbook-panel-width), 100%);
   margin-left: auto;
   margin-right: auto;
@@ -44,6 +45,7 @@ ACADEMIC_LAB_CSS = mo.Html(
   padding: 22px 26px;
   margin: 0 auto 18px auto;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  width: min(var(--mlsysbook-panel-width), 100%);
   max-width: min(var(--mlsysbook-panel-width), 100%);
 }
 .mlsysbook-meta {
@@ -71,6 +73,12 @@ ACADEMIC_LAB_CSS = mo.Html(
   gap: 8px;
   margin-top: 14px;
 }
+.mlsysbook-chip-row + .mlsysbook-chip-row {
+  margin-top: 8px;
+}
+.mlsysbook-topic-row .mlsysbook-chip {
+  background: #FFFFFF;
+}
 .mlsysbook-chip {
   border: 1px solid var(--mlsysbook-line);
   background: var(--mlsysbook-soft);
@@ -87,6 +95,7 @@ ACADEMIC_LAB_CSS = mo.Html(
   border-radius: 8px;
   padding: 18px 20px;
   margin: 12px auto;
+  width: min(var(--mlsysbook-panel-width), 100%);
   max-width: min(var(--mlsysbook-panel-width), 100%);
 }
 .mlsysbook-recap h2,
@@ -98,6 +107,7 @@ ACADEMIC_LAB_CSS = mo.Html(
 .mlsysbook-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: stretch;
   gap: 12px;
 }
 .mlsysbook-field {
@@ -136,11 +146,58 @@ ACADEMIC_LAB_CSS = mo.Html(
   margin-left: auto;
   margin-right: auto;
 }
+.mlsysbook-scenario-narrative {
+  max-width: min(var(--mlsysbook-readable-width), 100%);
+  margin: 0 auto 14px auto;
+  color: #344054;
+  line-height: 1.6;
+}
+.mlsysbook-scenario-narrative p {
+  margin: 8px 0;
+}
+.mlsysbook-compact-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0;
+  border: 1px solid var(--mlsysbook-line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #FFFFFF;
+}
+.mlsysbook-compact-field {
+  min-height: 86px;
+  padding: 12px 14px;
+  border-right: 1px solid #EDF0F5;
+  border-bottom: 1px solid #EDF0F5;
+  overflow-wrap: anywhere;
+}
+.mlsysbook-compact-field strong {
+  display: block;
+  color: #475467;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.mlsysbook-compact-field:last-child:nth-child(3n + 1) {
+  grid-column: 1 / -1;
+}
+.mlsysbook-compact-field:last-child:nth-child(3n + 2) {
+  grid-column: span 2;
+}
 .mlsysbook-list {
   margin: 8px 0 0 0;
   padding-left: 20px;
+  list-style-position: outside;
+}
+ul.mlsysbook-list {
+  list-style-type: disc;
+}
+ol.mlsysbook-list {
+  list-style-type: decimal;
 }
 .mlsysbook-list li {
+  display: list-item;
   margin: 6px 0;
   line-height: 1.5;
 }
@@ -256,7 +313,14 @@ marimo-callout-output {
   .mlsysbook-readable,
   .lab-hud,
   marimo-callout-output {
+    width: 100%;
     max-width: 100%;
+  }
+  .mlsysbook-compact-fields {
+    grid-template-columns: 1fr;
+  }
+  .mlsysbook-compact-field:last-child:nth-child(n) {
+    grid-column: auto;
   }
 }
 </style>
@@ -337,6 +401,24 @@ def _render_fields(items: Mapping[str, Any]) -> str:
     return "".join(rows)
 
 
+def _render_compact_fields(items: Mapping[str, Any]) -> str:
+    rows = []
+    for key, value in items.items():
+        if isinstance(value, Mapping):
+            value = "; ".join(f"{nested_key}: {nested_value}" for nested_key, nested_value in value.items())
+        elif isinstance(value, (list, tuple, set)):
+            value = ", ".join(str(item) for item in value)
+        rows.append(
+            f'<div class="mlsysbook-compact-field"><strong>{html.escape(str(key).replace("_", " "))}</strong>{html.escape(str(value))}</div>'
+        )
+    return "".join(rows)
+
+
+def _student_facing_chips(chips: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    hidden = {"track-aware", "track aware", "track_aware"}
+    return tuple(chip for chip in chips if chip.strip().lower() not in hidden)
+
+
 def _part_value(part: Any, *keys: str, default: str = "") -> str:
     for key in keys:
         if isinstance(part, Mapping) and key in part:
@@ -369,7 +451,11 @@ def _constraint_status(status: str) -> tuple[str, str]:
 
 def lab_header(metadata: LabMetadata, subtitle: str, *, chips: tuple[str, ...] = ()) -> mo.Html:
     """Render the shared professional academic lab header."""
-    chip_html = "".join(f'<span class="mlsysbook-chip">{html.escape(chip)}</span>' for chip in chips)
+    topic_chips = _student_facing_chips(chips)
+    topic_chip_html = "".join(f'<span class="mlsysbook-chip">{html.escape(chip)}</span>' for chip in topic_chips)
+    topic_row = ""
+    if topic_chip_html:
+        topic_row = f'<div class="mlsysbook-chip-row mlsysbook-topic-row">{topic_chip_html}</div>'
     return mo.Html(
         f"""
 <div class="mlsysbook-lab-shell">
@@ -384,8 +470,8 @@ def lab_header(metadata: LabMetadata, subtitle: str, *, chips: tuple[str, ...] =
       <span class="mlsysbook-chip">Lab v{html.escape(metadata.lab_version)}</span>
       <span class="mlsysbook-chip">Updated {html.escape(metadata.updated_at)}</span>
       <span class="mlsysbook-chip">MLSysIM {html.escape(metadata.mlsysim_version)}</span>
-      {chip_html}
     </div>
+    {topic_row}
   </div>
 </div>
 """
@@ -398,9 +484,9 @@ def learning_objectives(objectives: tuple[str, ...] | list[str]) -> mo.Html:
         f"""
 <div class="mlsysbook-panel">
   <h2>Learning Objectives</h2>
-  <ol class="mlsysbook-list">
+  <ul class="mlsysbook-list">
     {_render_list(objectives)}
-  </ol>
+  </ul>
 </div>
 """
     )
@@ -437,14 +523,16 @@ def chapter_recap(recap: ChapterRecap) -> mo.Html:
 
 
 def scenario_brief(title: str, stakeholder: str, objective: str, constraints: dict[str, Any]) -> mo.Html:
-    rows = _render_fields(constraints)
+    rows = _render_compact_fields(constraints)
     return mo.Html(
         f"""
 <div class="mlsysbook-panel">
   <h2>{html.escape(title)}</h2>
-  <div class="mlsysbook-callout"><strong>Stakeholder:</strong> {html.escape(stakeholder)}</div>
-  <div class="mlsysbook-callout"><strong>Objective:</strong> {html.escape(objective)}</div>
-  <div class="mlsysbook-grid">{rows}</div>
+  <div class="mlsysbook-scenario-narrative">
+    <p><strong>Stakeholder:</strong> {html.escape(stakeholder)}</p>
+    <p><strong>Objective:</strong> {html.escape(objective)}</p>
+  </div>
+  <div class="mlsysbook-compact-fields">{rows}</div>
 </div>
 """
     )
@@ -494,29 +582,34 @@ def track_selector(default: str = DEFAULT_TRACK_ID):
 def track_context(track: str | TrackProfile) -> mo.Html:
     """Render the selected track profile and its MLSysIM source references."""
     profile = track if isinstance(track, TrackProfile) else get_track_profile(track)
-    metrics = ", ".join(html.escape(metric) for metric in profile.primary_metrics)
-    guardrails = ", ".join(html.escape(metric) for metric in profile.guardrail_metrics)
-    constraints = ", ".join(html.escape(constraint) for constraint in profile.dominant_constraints)
+    metrics = ", ".join(profile.primary_metrics)
+    guardrails = ", ".join(profile.guardrail_metrics)
+    constraints = ", ".join(profile.dominant_constraints)
     system_ref = profile.system_ref or "single-device profile"
     track_delta = (
         f"Watch {profile.primary_metrics[0]} first, protect {profile.guardrail_metrics[0]}, "
         f"and test {profile.dominant_constraints[0]} before treating the design as feasible."
     )
+    fields = _render_compact_fields(
+        {
+            "Track": f"{profile.label} ({profile.category})",
+            "Stakeholder": profile.stakeholder,
+            "Hardware source": profile.hardware_ref,
+            "System source": system_ref,
+            "Primary metrics": metrics,
+            "Guardrails": guardrails,
+            "Dominant constraints": constraints,
+        }
+    )
     return mo.Html(
         f"""
 <div class="mlsysbook-panel">
   <h2>Your Track</h2>
-  <div class="mlsysbook-grid">
-    <div class="mlsysbook-field"><strong>Track</strong>{html.escape(profile.label)} ({html.escape(profile.category)})</div>
-    <div class="mlsysbook-field"><strong>Stakeholder</strong>{html.escape(profile.stakeholder)}</div>
-    <div class="mlsysbook-field"><strong>Hardware source</strong><code>{html.escape(profile.hardware_ref)}</code></div>
-    <div class="mlsysbook-field"><strong>System source</strong><code>{html.escape(system_ref)}</code></div>
-    <div class="mlsysbook-field"><strong>Primary metrics</strong>{metrics}</div>
-    <div class="mlsysbook-field"><strong>Guardrails</strong>{guardrails}</div>
-    <div class="mlsysbook-field"><strong>Dominant constraints</strong>{constraints}</div>
-    <div class="mlsysbook-field"><strong>Narrative</strong>{html.escape(profile.narrative)}</div>
-    <div class="mlsysbook-field"><strong>What changed because of your track</strong>{html.escape(track_delta)}</div>
+  <div class="mlsysbook-scenario-narrative">
+    <p><strong>{html.escape(profile.label)}:</strong> {html.escape(profile.narrative)}</p>
+    <p>{html.escape(track_delta)}</p>
   </div>
+  <div class="mlsysbook-compact-fields">{fields}</div>
   <div class="mlsysbook-version">{html.escape(profile.source_policy)}</div>
 </div>
 """

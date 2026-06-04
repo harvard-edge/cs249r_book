@@ -691,6 +691,17 @@ def _(
                 "binding_term": _vals["binding_term"],
                 "failure_state": _vals["failure_state"],
             },
+            evidence_summary={
+                "best_algorithm": _vals["best_algorithm"],
+                "best_ms": round(_vals["best_ms"], 4),
+                "binding_term": _vals["binding_term"],
+                "failure_state": _vals["failure_state"],
+                "fabric": _fabric_label(),
+                "participants": n_gpus.value,
+                "message_gb": message_gb.value,
+                "overlap_pct": overlap_pct.value,
+                "compression_ratio": compression_ratio.value,
+            },
             decisions={"communication_strategy": _decision},
             reflections={
                 "part_a_operation_anatomy": partA_reflection.value,
