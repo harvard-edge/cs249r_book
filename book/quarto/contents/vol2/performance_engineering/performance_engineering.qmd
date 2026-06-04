@@ -42,8 +42,8 @@ Model compression reduces the size of what we compute. Performance engineering r
 - Explain how Operator Fusion and Tiling (FlashAttention) overcome HBM bandwidth limitations by keeping intermediate data in on-chip SRAM
 - Evaluate FP8 formats (E4M3, E5M2) and block-wise quantization (LLM.int8(), GPTQ, AWQ) as precision choices under bandwidth, compute, and quality constraints
 - Apply Graph Compilation frameworks (torch.compile, Accelerated Linear Algebra (XLA), TensorRT) to automate operator fusion, memory planning, and kernel selection
-- Evaluate Speculative Decoding strategies to reduce inference latency by trading extra compute for lower latency using small draft models
-- Design Mixture of Experts (MoE) systems that decouple model capacity from inference cost through sparse activation and expert parallelism
+- Explain how Speculative Decoding changes autoregressive decode arithmetic intensity and where acceptance-rate and batching constraints limit speedup
+- Explain how Mixture of Experts (MoE) decouples model capacity from active compute while introducing routing, memory, and AllToAll bottlenecks
 - Diagnose performance bottlenecks using System Profiling tools (Nsight Systems, PyTorch Profiler) and roofline plots
 
 :::
@@ -1532,13 +1532,17 @@ New time per token: `{python} CompilationDividend.gemm_ms_str` + `{python} Compi
 
 :::
 
-Graph compilation automates what manual kernel engineering achieves for individual operations, applying it systematically across the entire model graph. An orthogonal class of optimizations changes the fundamental algorithm itself: speculative decoding trades cheap compute for lower latency, and mixture of experts decouples model capacity from per-token cost.
+Graph compilation automates what manual kernel engineering achieves for individual operations, applying it systematically across the entire model graph. It also exposes a boundary: compilers can reorganize known operations, but they cannot invent a different computation. The next section turns to optimizations that cross that boundary.
 
 ::: {.content-visible when-format="pdf"}
 {{< pagebreak >}}
 :::
 
-## Speculative Decoding {#sec-performance-engineering-speculative}
+## Algorithmic Performance Transformations {#sec-performance-engineering-algorithmic-transformations}
+
+The preceding sections optimized the same dense computation by moving fewer bytes, using narrower formats, or letting compilers reorganize kernels. Algorithmic transformations change the work itself. Speculative decoding attacks the memory-bound decode loop by trying to accept multiple tokens per target-model pass, while MoE attacks dense-model cost by activating only the experts a token needs. Both techniques can improve the iron-law budget, but both can also create new bottlenecks if their extra control logic, communication, or imbalance exceeds the work they remove.
+
+### Speculative decoding {#sec-performance-engineering-speculative}
 
 ::: {.column-margin}
 ![](images/svg/performance_engineering_specdec_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits on the memory-bound slope, shifted rightward toward the ridge."}
@@ -1546,9 +1550,11 @@ Graph compilation automates what manual kernel engineering achieves for individu
 *Speculative decoding shifts decode toward the compute-bound ridge.*
 :::
 
-Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. The performance-engineering relevance is that speculative decoding raises the effective arithmetic intensity of the decode phase: a single forward pass of the target model now processes $k$ candidate tokens for the same weight-streaming cost as one token, shifting the operating point from deeply memory-bound toward the ridge point on the roofline. The speedup is bounded by the draft model's acceptance rate and breaks down when the draft model is too inaccurate (too many rejected tokens) or too expensive (verification becomes compute-bound). It also interacts with batching: at large batch sizes the decode phase is already closer to compute-bound, so the marginal benefit of speculation shrinks. This chapter uses speculative decoding as a performance transformation; the inference chapter later treats it as a serving policy with admission control and SLA consequences.
+Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. The performance-engineering relevance is arithmetic intensity: a single target-model forward pass can process $k$ candidate tokens for roughly the same weight-streaming cost as one token, shifting the decode operating point from the memory-bound slope toward the roofline ridge.
 
-## Mixture of Experts {#sec-performance-engineering-moe}
+The transformation is useful only when the draft model is accurate enough and cheap enough. If too many draft tokens are rejected, the target model still loads its weights but accepts little useful work. If the draft model is too expensive, verification becomes compute-bound and erases the bandwidth benefit. Batching changes the calculation as well: at large batch sizes the decode phase is already closer to compute-bound, so the marginal benefit of speculation shrinks. This chapter uses speculative decoding to show how an algorithm can alter the performance equation; @sec-inference-scale-speculative-decoding-c438 treats it as a serving policy with admission control and SLA consequences.
+
+### Mixture of experts {#sec-performance-engineering-moe}
 
 A 1-trillion parameter dense model delivers superior reasoning capabilities, but its latency and compute costs are prohibitive for most serving budgets. The **Mixture of Experts (MoE)**\index{Mixture of Experts}\index{MoE} architecture resolves this tension by training a massive model but activating only a small, relevant fraction of it for any given token. By routing inputs to specialized sub-networks, MoE breaks the iron link between model size and inference cost.
 
