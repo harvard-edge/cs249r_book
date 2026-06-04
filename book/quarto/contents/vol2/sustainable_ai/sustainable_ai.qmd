@@ -998,36 +998,7 @@ class GpuEmissionsScenario:
 
 Carbon intensity varies across geographic locations and time periods, creating optimization opportunities. Temporal scheduling can reduce emissions by 50–80 percent by aligning compute workloads with renewable energy availability, such as peak solar generation during daylight hours [@Patterson2022carbonaware]. Carbon-aware scheduling systems can automatically shift nonurgent training jobs to regions and times with lower carbon intensity.
 
-Development-time carbon tracking\index{Carbon Footprint!tracking} matters when it feeds placement and complexity decisions rather than becoming a report after the fact. @Lst-carbon-tracking demonstrates how the CodeCarbon library wraps model training to capture real-time emissions data, enabling data-driven sustainability decisions.
-
-::: {#lst-carbon-tracking lst-cap="**Carbon Footprint Tracking**: Example implementation using CodeCarbon library to measure emissions during model training, enabling data-driven sustainability decisions."}
-
-```{.python}
-from codecarbon import EmissionsTracker
-import torch
-
-# Initialize carbon tracking
-tracker = EmissionsTracker()
-tracker.start()
-
-# Your model training code
-model = torch.nn.Linear(100, 10)
-optimizer = torch.optim.Adam(model.parameters())
-
-for epoch in range(100):
-    # Training step
-    loss = model(data).mean()
-    loss.backward()
-    optimizer.step()
-
-# Get emissions report
-emissions = tracker.stop()
-print(f"Training emissions: {emissions:.4f} kg CO2")
-```
-
-:::
-
-The purpose of such tracking is to make environmental cost visible while model complexity, region, and schedule are still adjustable, before the training run has already consumed its energy.
+Development-time carbon tracking\index{Carbon Footprint!tracking} matters when it feeds placement and complexity decisions rather than becoming a report after the fact. Tools such as CarbonTracker [@anthony2020carbontracker] and CodeCarbon wrap the workload boundary, estimate energy from hardware counters or utilization models, attach the local grid intensity, and record the resulting emissions alongside the experiment metadata. The important systems pattern is not the API call but the timing of the measurement: the estimate must appear while model size, training duration, region, and schedule are still adjustable, before the run has already consumed its energy.
 
 ### Power modeling fundamentals {#sec-sustainable-ai-power-modeling-fundamentals-67cb-67cb}
 
@@ -1413,100 +1384,13 @@ Quantifying AI system energy consumption requires measurement at multiple levels
 
 Modern processors include dedicated circuitry for power measurement that software can query through manufacturer-provided interfaces. These hardware counters measure actual power draw rather than estimating from activity, providing ground-truth energy consumption data at microsecond resolution.
 
-Intel's **Running Average Power Limit (RAPL)**\index{RAPL Energy Measurement} interface exposes power measurements for CPU packages, DRAM, and integrated graphics through model-specific registers (MSRs). RAPL reports energy consumption in microjoules with updates every millisecond, enabling fine-grained attribution of energy to specific code regions. @Lst-rapl-measurement demonstrates how to read RAPL counters and calculate average power draw during a training loop:
-
-::: {#lst-rapl-measurement lst-cap="**RAPL Energy Measurement**: Reading Intel RAPL counters to measure CPU and DRAM energy consumption during model training."}
-
-```{.python}
-import subprocess
-import time
-
-
-def read_rapl_energy():
-    """Read current RAPL energy counters.
-
-    Requires root or perf permissions.
-    """
-    result = subprocess.run(
-        [
-            "cat",
-            "/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    return int(result.stdout.strip())  # Returns microjoules
-
-
-# Measure training energy
-start_energy = read_rapl_energy()
-start_time = time.time()
-
-# Training loop
-for epoch in range(num_epochs):
-    train_one_epoch(model, dataloader, optimizer)
-
-end_energy = read_rapl_energy()
-end_time = time.time()
-
-energy_joules = (
-    ((end_energy - start_energy) * ureg.microjoule)
-    .to(ureg.joule)
-    .magnitude
-)
-avg_power_watts = energy_joules / (end_time - start_time)
-print(
-    f"Training energy: {energy_joules:.2f} J, Average power: {avg_power_watts:.2f} W"
-)
-```
-
-:::
-
-RAPL measurements exclude discrete GPUs, which require separate monitoring through vendor-specific interfaces.
+Intel's **Running Average Power Limit (RAPL)**\index{RAPL Energy Measurement} interface exposes energy measurements for CPU packages, DRAM, and integrated graphics through model-specific registers (MSRs). RAPL reports cumulative energy, so the measurement pattern is boundary based: sample the counter before a controlled workload region, run the workload, sample it again, and divide the energy delta by elapsed time to recover average power. This makes RAPL useful for CPU preprocessing, data loading, and host-side training work, but it also defines its boundary. RAPL does not cover discrete GPU energy, can require elevated permissions, and must be interpreted with awareness of package scope and counter rollover.
 
 #### GPU power monitoring {#sec-sustainable-ai-gpu-power-monitoring-88fe-88fe}
 
-NVIDIA GPUs expose power measurements through the NVIDIA Management Library (NVML), accessible via the `nvidia-smi` command-line tool or programmatic bindings. GPU power monitoring\index{GPU!power monitoring} reports instantaneous power draw, which can vary significantly during computation due to dynamic voltage and frequency scaling. @Lst-gpu-power implements a measurement loop that samples power at regular intervals, computing average and peak power over the inference workload:
+NVIDIA GPUs expose power measurements through the NVIDIA Management Library (NVML), accessible via the `nvidia-smi` command-line tool or programmatic bindings. GPU power monitoring\index{GPU!power monitoring} usually starts with instantaneous power draw, which can vary significantly during computation because dynamic voltage and frequency scaling changes the device state from one kernel to the next. A reliable measurement therefore treats the inference or training interval as a trace: synchronize the workload boundary, sample power at a fixed cadence, integrate those samples over time, and report both average and peak power. When data-center GPUs expose accumulated energy counters, those counters are preferable because they avoid aliasing short kernels between samples.
 
-::: {#lst-gpu-power lst-cap="**GPU Power Monitoring**: Using NVIDIA's pynvml library to measure GPU power consumption during inference."}
-
-```{.python}
-import pynvml
-import torch
-import time
-
-pynvml.nvmlInit()
-handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # First GPU
-
-
-def measure_inference_power(model, input_data, num_iterations=100):
-    """Measure average GPU power during inference."""
-    power_readings = []
-
-    model.eval()
-    with torch.no_grad():
-        for _ in range(num_iterations):
-            # Run inference
-            _ = model(input_data)
-            torch.cuda.synchronize()
-
-            # Sample power and convert mW → W via pint.
-            power_mw = pynvml.nvmlDeviceGetPowerUsage(handle)
-            power_readings.append(
-                (power_mw * milliwatt).to(watt).magnitude
-            )
-
-    avg_power = sum(power_readings) / len(power_readings)
-    return avg_power
-
-
-avg_power = measure_inference_power(model, sample_input)
-print(f"Average inference power: {avg_power:.1f} W")
-```
-
-:::
-
-For accurate energy measurement rather than instantaneous power sampling, integrate power readings over time or use NVIDIA's energy counter when available on data center GPUs. Edge devices and microcontrollers present fundamentally different measurement challenges: they lack built-in power counters, operate at milliwatt rather than kilowatt scales, and require external instrumentation for accurate energy profiling. The relevant decision is how much temporal resolution, rail attribution, and cost the workload justifies. INA219 and INA226 I2C-based current sensors provide affordable measurement for development and validation, sampling at rates sufficient to capture inference-level energy consumption. For research requiring nanosecond-resolution measurements of individual operations, instruments like the Joulescope JS220 measure current from sub-microamp sleep states through ampere-level active peaks, enabling characterization of the full dynamic range of edge AI workloads. As TinyML deployments expand to billions of devices, edge energy measurement becomes essential for comprehensive sustainability assessment.
+Edge devices and microcontrollers present a different measurement problem. They often lack built-in power counters, operate at milliwatt rather than kilowatt scales, and require external instrumentation for accurate energy profiling. The relevant decision is how much temporal resolution, rail attribution, and cost the workload justifies. INA219 and INA226 I2C-based current sensors provide affordable measurement for development and validation, sampling at rates sufficient to capture inference-level energy consumption. For research requiring nanosecond-resolution measurements of individual operations, instruments like the Joulescope JS220 measure current from sub-microamp sleep states through ampere-level active peaks, enabling characterization of the full dynamic range of edge AI workloads. As TinyML deployments expand to billions of devices, edge energy measurement becomes essential for comprehensive sustainability assessment.
 
 #### Mobile platform energy profiling {#sec-sustainable-ai-mobile-platform-energy-profiling-7f9d}
 
