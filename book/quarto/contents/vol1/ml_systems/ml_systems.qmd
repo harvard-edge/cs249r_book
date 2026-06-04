@@ -1183,12 +1183,9 @@ Compression matters more, not less, as the hardware budget tightens. As systems 
 # │       TPU v4 Pod (Cloud), DGX Spark (Edge), and ESP32-CAM (TinyML).
 # │ Show: The roughly 8-order-of-magnitude power gap (MW cloud to sub-watt TinyML)
 # │       and 8-order-of-magnitude cost gap ($millions to $10) across tiers.
-# │ How: Read memory, power, and cost from mlsysim.core.constants for each platform;
-# │      assign threshold strings for the decision boundary table.
+# │ How: Read memory, power, and cost from MLSysIM platform and hardware registries.
 # │
-# │ Imports: mlsysim.core.constants (Systems.Pods.TPUv4_4096.memory, Systems.Pods.TPUv4_4096.power, Systems.Pods.TPUv4_4096.chips,
-# │          Hardware.Workstation.DGX_Spark.memory.capacity, Hardware.Workstation.DGX_Spark.storage.capacity, Hardware.Workstation.DGX_Spark.tdp, Hardware.Workstation.DGX_Spark.unit_cost, Hardware.Workstation.DGX_Spark.unit_cost_max,
-# │          Hardware.Tiny.ESP32_S3.memory.sram_capacity, Hardware.Tiny.ESP32_S3.memory.flash_capacity, Hardware.Tiny.ESP32_S3.tdp_min, Hardware.Tiny.ESP32_S3.tdp_max, Hardware.Tiny.ESP32_S3.unit_cost)
+# │ Imports: mlsysim Systems, Hardware, ReferenceStats, units, and formatters
 # │ Exports: HardwareSpectrumSetup.tpu_chips_str,
 # │          HardwareSpectrumSetup.cloud_mem_tb_str,
 # │          HardwareSpectrumSetup.cloud_pwr_mw_str,
@@ -1202,24 +1199,17 @@ Compression matters more, not less, as the hardware budget tightens. As systems 
 # │          HardwareSpectrumSetup.tiny_pwr_max_w_str,
 # │          HardwareSpectrumSetup.tiny_price_str,
 # │          HardwareSpectrumSetup.cloud_compute_envelope_str,
-# │          HardwareSpectrumSetup.edge_compute_envelope_str,
-# │          HardwareSpectrumSetup.tiny_thresh_tops_str,
-# │          HardwareSpectrumSetup.tiny_thresh_mw_str
+# │          HardwareSpectrumSetup.edge_compute_envelope_str
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Hardware, ReferenceStats, Systems
 from mlsysim.fmt import (
-    fmt_percent,
-    fmt_int,
     fmt_usd,
     fmt,
-    check,
     MarkdownStr,
     fmt_qty,
     fmt_power,
-    fmt_qty_int,
     fmt_flop_rate,
-    fmt_bandwidth,
-    fmt_ops_rate,
 )
 from mlsysim.core.units import (
     TB,
@@ -1227,11 +1217,9 @@ from mlsysim.core.units import (
     MB,
     watt,
     MW,
-    milliwatt,
     USD,
     EFLOP,
     PFLOP,
-    TOPS,
     second,
 )
 
@@ -1242,10 +1230,6 @@ class HardwareSpectrumSetup:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     cloud_peak_flops = Systems.Pods.TPUv4_4096.chips * Hardware.Cloud.TPUv4.compute.peak_flops
     edge_peak_ai_flops = Hardware.Workstation.DGX_Spark.compute.precision_flops["fp4"]
-    cloud_threshold_bw = 1000 * (GB / second)  # scenario assumption: cloud deployment boundary
-    edge_threshold_bw = 270 * (GB / second)  # scenario assumption: edge deployment boundary
-    tiny_threshold_compute = 1 * TOPS  # scenario assumption: TinyML deployment boundary
-    tiny_threshold_power = 1 * milliwatt  # scenario assumption: TinyML always-on target
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tpu_chips_str = fmt(Systems.Pods.TPUv4_4096.chips, precision=0)
@@ -1263,40 +1247,20 @@ class HardwareSpectrumSetup:
     tiny_flash_mb_str = fmt_qty(Hardware.Tiny.ESP32_S3.memory.flash_capacity, MB, precision=0, commas=False)
     tiny_pwr_min_w_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_min, unit=watt, precision=2, commas=False)
     tiny_pwr_max_w_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_max, unit=watt, precision=1, commas=False)
-    tiny_price_str = fmt_usd(10, precision=0, commas=False)
+    tiny_price_str = fmt_usd(
+        ReferenceStats.EdgeDeviceSpectrum.MicrocontrollerBoardCost.to(USD).magnitude,
+        precision=0,
+        commas=False,
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cloud_compute_envelope_str = MarkdownStr(
         f"{tpu_chips_str} TPU v4 chips, "
         f"{fmt_flop_rate(cloud_peak_flops, unit=EFLOP / second, precision=1, commas=False)}"
     )
-    cloud_thresh_bw_gb_per_s_str = fmt_bandwidth(
-        cloud_threshold_bw,
-        unit=GB / second,
-        precision=0,
-        commas=False,
-    )
     edge_compute_envelope_str = MarkdownStr(
         f"GB10 Grace Blackwell, "
         f"{fmt_flop_rate(edge_peak_ai_flops, unit=PFLOP / second, precision=0, commas=False)} AI"
-    )
-    edge_thresh_bw_gb_per_s_str = fmt_bandwidth(
-        edge_threshold_bw,
-        unit=GB / second,
-        precision=0,
-        commas=False,
-    )
-    tiny_thresh_tops_str = fmt_ops_rate(
-        tiny_threshold_compute,
-        unit=TOPS,
-        precision=0,
-        commas=False,
-    )
-    tiny_thresh_mw_str = fmt_power(
-        tiny_threshold_power,
-        unit=milliwatt,
-        precision=0,
-        commas=False,
     )
 ```
 
@@ -1309,14 +1273,15 @@ class HardwareSpectrumSetup:
 # │
 # │ Goal: Mobile RAM, storage, and TDP for the hardware spectrum table.
 # │ Show: Smartphone resource ranges and 2–5 W TDP envelope.
-# │ How: Read mobile constants; derive NPU/bw not needed on this row.
+# │ How: Read mobile platform ranges from MLSysIM Platforms.
 # │
-# │ Imports: mlsysim.Hardware, mlsysim.core.constants, mlsysim.fmt
+# │ Imports: mlsysim Platforms and formatters
 # │ Exports: RepresentativeSystemsMobileRow.mobile_ram_range_str,
 # │          RepresentativeSystemsMobileRow.mobile_storage_range_str,
 # │          RepresentativeSystemsMobileRow.mobile_tdp_range_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, MarkdownStr
+from mlsysim import Platforms
+from mlsysim.fmt import MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RepresentativeSystemsMobileRow:
@@ -1352,12 +1317,13 @@ Each paradigm occupies a distinct region of the deployment spectrum, governed by
 # │
 # │ Goal: Populate the deployment decision thresholds table from source constants.
 # │ Show: Compute, memory bandwidth, power, and latency ranges per tier.
-# │ How: Load latency/TDP from constants; derive mobile NPU/bw from phone twins.
+# │ How: Load deployment thresholds from Platforms; derive mobile NPU/bw from
+# │      phone twins.
 # │
-# │ Imports: mlsysim.core.constants, mlsysim.Hardware, mlsysim.fmt
+# │ Imports: mlsysim Platforms, Hardware, units, and formatters
 # │ Exports: DeploymentThresholdsTable.*_str values used by the table below
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Infrastructure
+from mlsysim import Hardware, Platforms
 from mlsysim.fmt import (
     fmt,
     check,
@@ -1375,12 +1341,12 @@ class DeploymentThresholdsTable:
     """Deployment decision thresholds for @tbl-deployment-thresholds."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    cloud_compute_threshold = 1000 * (TFLOPs / second)  # scenario assumption: cloud deployment boundary
-    cloud_bandwidth_threshold = 1000 * (GB / second)  # scenario assumption: cloud deployment boundary
-    edge_compute_threshold = 1 * (PFLOP / second)  # scenario assumption: edge deployment boundary
-    edge_bandwidth_threshold = 270 * (GB / second)  # scenario assumption: edge deployment boundary
-    tiny_compute_threshold = 1 * TOPS  # scenario assumption: TinyML compute boundary
-    tiny_power_threshold = 1 * milliwatt  # scenario assumption: TinyML always-on target
+    cloud_compute_threshold = Platforms.Cloud.compute_threshold
+    cloud_bandwidth_threshold = Platforms.Cloud.bandwidth_threshold
+    edge_compute_threshold = Platforms.Edge.compute_threshold
+    edge_bandwidth_threshold = Platforms.Edge.bandwidth_threshold
+    tiny_compute_threshold = Platforms.Tiny.compute_threshold
+    tiny_power_threshold = Platforms.Tiny.power_threshold
     representative_phones = [
         Hardware.Mobile.Pixel8,
         Hardware.Mobile.iPhone15Pro,
@@ -1394,6 +1360,12 @@ class DeploymentThresholdsTable:
     mobile_bw_hi = max(representative_phones, key=lambda p: p.memory.bandwidth.to(GB / second).magnitude).memory.bandwidth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cloud_compute_threshold is not None, "Cloud compute threshold must be set.")
+    check(cloud_bandwidth_threshold is not None, "Cloud bandwidth threshold must be set.")
+    check(edge_compute_threshold is not None, "Edge compute threshold must be set.")
+    check(edge_bandwidth_threshold is not None, "Edge bandwidth threshold must be set.")
+    check(tiny_compute_threshold is not None, "TinyML compute threshold must be set.")
+    check(tiny_power_threshold is not None, "TinyML power threshold must be set.")
     check(mobile_npu_hi.to(TOPS).magnitude > mobile_npu_lo.to(TOPS).magnitude, "Mobile NPU range collapsed to a single value.")
     check(mobile_bw_hi.to(GB / second).magnitude > mobile_bw_lo.to(GB / second).magnitude, "Mobile bandwidth range collapsed to a single value.")
 

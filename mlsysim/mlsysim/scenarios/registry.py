@@ -11,7 +11,23 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
-from ..core.units import ureg, GB, GiB, KiB, MB, MWh, TB, TOPS, byte, count, day, minute, param, TRILLION
+from ..core.units import (
+    ureg,
+    GB,
+    GiB,
+    KiB,
+    MB,
+    MWh,
+    TB,
+    TOPS,
+    USD,
+    byte,
+    count,
+    day,
+    minute,
+    param,
+    TRILLION,
+)
 
 _hour = ureg.hour
 _joule = ureg.joule
@@ -412,6 +428,12 @@ class EdgeDeviceSpectrum(Registry):
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
         name="Tiny sensor power endpoint",
         description="Lower power endpoint used for edge device-spectrum examples.",
+    )
+    MicrocontrollerBoardCost = sourced_qty(
+        10 * USD,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Microcontroller board cost endpoint",
+        description="Representative low-cost microcontroller board price used in hardware-spectrum examples.",
     )
     FlagshipPhonePowerHigh = sourced_qty(
         5 * ureg.watt,

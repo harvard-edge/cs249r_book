@@ -25,6 +25,7 @@ from mlsysim.core.units import (
     TOPS,
     Tparam,
     US,
+    USD,
     ZFLOP,
     byte,
     count,
@@ -260,9 +261,25 @@ def test_edge_device_spectrum_anchors():
     assert float(spectrum.TinyCpuThroughputMips) == pytest.approx(10.0)
     assert float(spectrum.MobileCpuThroughputMips) == pytest.approx(100_000.0)
     assert spectrum.SensorPowerLow.to(microwatt).magnitude == pytest.approx(10.0)
+    assert spectrum.MicrocontrollerBoardCost.to(USD).magnitude == pytest.approx(10.0)
     assert spectrum.FlagshipPhonePowerHigh.to(watt).magnitude == pytest.approx(5.0)
     assert spectrum.IotMicrocontrollerComputeLow.to(TOPS).magnitude == pytest.approx(0.03)
     assert spectrum.TinyRamLow.provenance.ref
+
+
+def test_platform_threshold_anchors():
+    from mlsysim import Platforms
+
+    assert Platforms.Cloud.compute_threshold.to(TFLOP / second).magnitude == pytest.approx(
+        1000.0
+    )
+    assert Platforms.Cloud.bandwidth_threshold.to(GB / second).magnitude == pytest.approx(
+        1000.0
+    )
+    assert Platforms.Edge.compute_threshold.to(PFLOP / second).magnitude == pytest.approx(1.0)
+    assert Platforms.Edge.bandwidth_threshold.to(GB / second).magnitude == pytest.approx(270.0)
+    assert Platforms.Tiny.compute_threshold.to(TOPS).magnitude == pytest.approx(1.0)
+    assert Platforms.Tiny.power_threshold.to(milliwatt).magnitude == pytest.approx(1.0)
 
 
 def test_mobilenetv2_variant_model_profiles():
