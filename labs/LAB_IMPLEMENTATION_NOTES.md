@@ -1916,3 +1916,55 @@ Tests or checks run:
 - `python3 labs/tools/render_lab_smoke.py --labs $(find labs/vol1 labs/vol2 -maxdepth 1 -name 'lab_*.py' | sort) --port-start 29700 --output-dir /tmp/mlsysbook-render-smoke-all-v2 > /tmp/mlsysbook-render-smoke-all-v2.json`
 - Full catalog browser smoke result: 34 passed, 0 failed; every non-orientation lab had four distinct rendered track states.
 - `python3 -m pytest labs/tests/test_static.py -q`
+
+### 2026-06-04 - First User Activity Feedback Execution Pass
+
+Labs:
+- `labs/vol1/lab_00_introduction.py`
+- `labs/vol1/lab_01_ml_intro.py`
+- `labs/vol1/lab_09_data_selection.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/vol2/lab_10_inference.py`
+- `labs/vol2/lab_11_edge_intelligence.py`
+- `labs/vol2/lab_13_security_privacy.py`
+- `labs/vol2/lab_15_sustainable_ai.py`
+- `labs/vol2/lab_17_fleet_synthesis.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/LAB_USER_ACTIVITY_FEEDBACK_PASS_2026_06_04.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Executed the first simulated feedback loop from `LAB_USER_ACTIVITY_FEEDBACK_LOOP.md` across orientation, Mobile ML, TinyML, RoboTaxi/autonomy, edge, cloud/fleet, privacy, sustainability, and capstone scenarios.
+- Captured expert feedback packets and backward requirements in `LAB_USER_ACTIVITY_FEEDBACK_PASS_2026_06_04.md`.
+- Added a shared `track_context()` cue: `What changed because of your track`.
+- The cue is generated from canonical `TrackProfile` fields, so no notebook-local hardware, model, system, latency, cost, energy, or scenario facts were added.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required for this pass.
+- Follow-up requirements call for report schema/generation tests and variant ref resolution tests.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.ui.track_context()` now tells students which primary metric, guardrail, and dominant constraint changed because of the selected track.
+
+Plan updates needed in other labs:
+- The next engineering pass should prioritize report schema/generation tests across deep labs.
+- Targeted modality refinements should focus on V2-03 topology/fabric visuals, V2-13 threat/control stack, V2-15 region/carbon evidence, and V2-17 final fleet design review.
+
+Tests or checks run:
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol1/lab_09_data_selection.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py labs/vol2/lab_11_edge_intelligence.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_17_fleet_synthesis.py --port-start 29900 --output-dir /tmp/mlsysbook-feedback-pass-20260604 > /tmp/mlsysbook-feedback-pass-20260604/results.json`
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py`
+- `python3 -m pytest labs/tests/test_static.py -q`
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_01_ml_intro.py labs/vol2/lab_17_fleet_synthesis.py --port-start 30100 --output-dir /tmp/mlsysbook-feedback-cue-check > /tmp/mlsysbook-feedback-cue-check/results.json`
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol1/lab_09_data_selection.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py labs/vol2/lab_11_edge_intelligence.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_17_fleet_synthesis.py --port-start 30200 --output-dir /tmp/mlsysbook-feedback-pass-20260604-after-cue > /tmp/mlsysbook-feedback-pass-20260604-after-cue/results.json`
+- Post-fix cluster browser smoke result: 9 passed, 0 failed; every non-orientation lab had four distinct rendered track states and no overflowing `.mlsysbook-field` cards.

@@ -498,6 +498,10 @@ def track_context(track: str | TrackProfile) -> mo.Html:
     guardrails = ", ".join(html.escape(metric) for metric in profile.guardrail_metrics)
     constraints = ", ".join(html.escape(constraint) for constraint in profile.dominant_constraints)
     system_ref = profile.system_ref or "single-device profile"
+    track_delta = (
+        f"Watch {profile.primary_metrics[0]} first, protect {profile.guardrail_metrics[0]}, "
+        f"and test {profile.dominant_constraints[0]} before treating the design as feasible."
+    )
     return mo.Html(
         f"""
 <div class="mlsysbook-panel">
@@ -511,6 +515,7 @@ def track_context(track: str | TrackProfile) -> mo.Html:
     <div class="mlsysbook-field"><strong>Guardrails</strong>{guardrails}</div>
     <div class="mlsysbook-field"><strong>Dominant constraints</strong>{constraints}</div>
     <div class="mlsysbook-field"><strong>Narrative</strong>{html.escape(profile.narrative)}</div>
+    <div class="mlsysbook-field"><strong>What changed because of your track</strong>{html.escape(track_delta)}</div>
   </div>
   <div class="mlsysbook-version">{html.escape(profile.source_policy)}</div>
 </div>
