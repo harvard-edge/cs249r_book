@@ -2024,11 +2024,11 @@ AllReduce creates a global barrier and assumes all participants contribute ident
 
 Pipeline parallelism replaces AllReduce with point-to-point activation transfers between adjacent stages, and the per-message cost is genuinely cheaper. Pipeline introduces a different overhead: bubble idleness. With $p$ pipeline stages, at least $(p-1)/(p-1+m)$ of GPU-time is idle while the pipeline fills and drains, where $m$ is the number of microbatches. For deep pipelines ($p \geq 8$), this requires $m \geq 32$ microbatches to keep the bubble below 20 percent, which constrains batch size, activation memory, and convergence. The choice between data parallelism and pipeline parallelism is not "communication vs. no communication" but a trade between bandwidth-bound AllReduce and time-bound bubble overhead.
 
-**Fallacy**: *Ring AllReduce is always optimal.*
+**Pitfall**: *Using Ring AllReduce by default without checking message size and topology.*
 
 Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but pays $\mathcal{O}(N)$ latency. For a 1 MB gradient across 64 GPUs with $\alpha = 10\ \mu\text{s}$, Tree AllReduce wins because Ring's 1,260 μs latency penalty exceeds Tree's 1,000 μs bandwidth penalty. The log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ determines when to switch algorithms; $N\alpha\beta$ is only a coarse upper-scale heuristic.
 
-**Pitfall**: *Compressing gradients without error feedback.*
+**Fallacy**: *Gradient compression is safe without error feedback.*
 
 Top-k sparsification can achieve 99 percent compression, but naively discarding small gradients causes divergence. Without error feedback ($e_{t+1} = (g_t + e_t) - v_t$), gradients below the threshold are lost forever, accumulating systematic bias that eventually destabilizes training.
 
@@ -2068,7 +2068,7 @@ A flat Ring AllReduce treats all links as equal, routing data across `{python} C
 
 The ring AllReduce cost model assumes a logical ring topology, which matches the inter-node communication pattern across InfiniBand. It does not match intra-node communication. Within a DGX-class node, GPUs talk through NVLink and NVSwitch, which provides all-to-all connectivity rather than a ring. The actual intra-node AllReduce often uses a single-step reduce through the NVSwitch crossbar, with latency closer to a single hop than to the $\mathcal{O}(N)$ ring cost. Capacity planning that applies the ring formula uniformly overstates intra-node communication time by an order of magnitude and pushes the parallelism boundary outward unnecessarily. Use the crossbar model inside the node, the ring or tree model across nodes, and the hierarchical sum for global AllReduce.
 
-**Pitfall**: *Ignoring rank-to-GPU mapping for topology-aware routing.*
+**Fallacy**: *Rank-to-GPU mapping does not affect collective performance.*
 
 If the job scheduler assigns ranks to GPUs without considering the physical topology, hierarchical AllReduce and rail-optimized routing may route traffic suboptimally. A common symptom is that `nccl-tests` achieves full bandwidth on the cluster, but the actual training job achieves only 50--60 percent because ranks are assigned across nodes in a way that prevents rail alignment. Always verify that rank assignment matches the expected topology (e.g., ranks 0--7 on Node 0, ranks 8--15 on Node 1) before benchmarking communication performance.
 
