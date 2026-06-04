@@ -217,6 +217,12 @@ class ModelLoading(Registry):
         name="Stable Diffusion v1.5 Safetensors load time",
         description="Reference cold-start load time for the memory-mapped tensor path.",
     )
+    PcieSwapReferenceModelSize = sourced_qty(
+        10 * GB,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="PCIe model-swap reference model size",
+        description="Reference model footprint for host-to-device model-swap latency examples.",
+    )
 
 
 class ServingProfiles(Registry):
