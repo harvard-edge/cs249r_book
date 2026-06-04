@@ -5,11 +5,13 @@ from mlsysbook_labs import (
     big_takeaways,
     checkpoint_card,
     constraint_check,
+    decision_flow,
     evidence_summary,
     lab_map,
     learning_objectives,
     part_header,
     scenario_slice,
+    scenario_thread,
     track_selector,
     source_trace,
     what_you_need_to_know,
@@ -39,6 +41,21 @@ def test_lab_level_helpers_render_contract_headers():
     )
     assert "Learning Objectives" in objectives
     assert "Diagnose which constraint binds first." in objectives
+
+    thread = html_text(
+        scenario_thread(
+            "iPhone compression decision",
+            "Keep the recipe tied to the selected workload.",
+            callout="Battery is the release gate.",
+        )
+    )
+    assert "Scenario Thread" in thread
+    assert "Battery is the release gate." in thread
+
+    flow = html_text(decision_flow("Decision path", ("Choose recipe", "Validate", "Report risk")))
+    assert "Decision path" in flow
+    assert "Choose recipe" in flow
+    assert "Report risk" in flow
 
     rendered_map = html_text(
         lab_map(

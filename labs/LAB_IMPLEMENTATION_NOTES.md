@@ -2072,3 +2072,62 @@ Tests or checks run:
 - Result: 818 passed, 4 skipped, 5 xfailed.
 - `python3 -m build --wheel labs`
 - `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+### 2026-06-04 - Lab 10 Track-First Visual Flow Feedback Pass
+
+Labs:
+- `labs/vol1/lab_10_model_compress.py` as the pilot.
+- Shared UI helpers used by all track-aware labs.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/tests/test_ui_helpers.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Kept red for the lab header, blue for preparation, and moved the track mission, case start, lab map, and reading instructions into green launch panels.
+- Removed visible source-trace, evidence-summary, and MLSysIM wording from the Lab 10 student launch flow.
+- Removed the MLSysIM chip/footer from shared header and track context rendering.
+- Added reusable `scenario_thread()` and `decision_flow()` helpers, with tab-safe inline critical styling, so each part can tie back to the selected track and show a compact decision path without relying on Mermaid rendering.
+- Added scenario threads and decision paths to Lab 10 Parts A-E plus synthesis.
+- Made synthesis explain the final recipe decision without source/tooling language.
+- Gave big takeaways and download-report panels distinct visual treatments.
+
+MLSysIM facts/APIs needed:
+- No new facts or APIs were added.
+- Provenance remains available inside structured report data, but it is not visually emphasized in the student launch flow.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- `scenario_thread()`
+- `decision_flow()`
+- `lab_header()`
+- `track_context()`
+- `scenario_brief()`
+- `lab_map()`
+- `big_takeaways()`
+
+Plan updates needed in other labs:
+- Use the Lab 10 pilot as the pattern for future part-body migrations: track thread first, concept explanation second, decision flow third, then prediction/control/evidence/reflection.
+- Keep source/provenance information out of the visible launch path unless an instructor explicitly wants an audit/debug view.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py labs/mlsysbook_labs/__init__.py labs/vol1/lab_10_model_compress.py labs/tests/test_ui_helpers.py`
+- `python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_static.py labs/tests/test_report_contract.py -q`
+- Result: 823 passed, 4 skipped, 5 xfailed.
+- Browser screenshots: `/tmp/mlsysbook-lab10-final-top.png`, `/tmp/mlsysbook-lab10-final-instruction.png`, `/tmp/mlsysbook-lab10-final-part-a.png`, `/tmp/mlsysbook-lab10-final-synthesis.png`, `/tmp/mlsysbook-lab10-final-report.png`.
+- DOM checks on Lab 10: no visible `Evidence Summary`, `Source Trace`, `source trace`, or `MLSysIM`; zero horizontal overflow and zero offscreen panels.
+- `python3 labs/tools/interaction_lab_smoke.py --labs labs/vol1/lab_10_model_compress.py --html-pages labs/lab-plan-dashboard.html --port-start 31200 --output-dir /tmp/mlsysbook-lab10-final-audit --max-radios 0 > /tmp/mlsysbook-lab10-final-audit/results.json`
+- Focused result: 1/1 lab passed and 1/1 HTML page passed.
+- `python3 labs/tools/interaction_lab_smoke.py --port-start 31300 --output-dir /tmp/mlsysbook-style-final-all --max-radios 0 > /tmp/mlsysbook-style-final-all/results.json`
+- Full result: 34/34 labs passed and 2/2 HTML pages passed; 118 part checks passed.
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`

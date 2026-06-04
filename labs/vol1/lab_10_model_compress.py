@@ -44,7 +44,7 @@ async def _():
         big_takeaways,
         build_lab_report,
         chapter_recap,
-        evidence_summary,
+        decision_flow,
         get_lab_track_variant,
         get_track_profile,
         lab_header,
@@ -53,7 +53,7 @@ async def _():
         report_export_panel,
         resolve_mlsysim_ref,
         scenario_brief,
-        source_trace,
+        scenario_thread,
         track_context,
         track_selector,
     )
@@ -91,11 +91,11 @@ async def _():
         MOBILENET_FLOPS, MOBILENET_PARAMS,
         RESNET50_FLOPS, RESNET50_PARAMS,
         apply_plotly_theme, big_takeaways, build_lab_report,
-        chapter_recap, evidence_summary, get_lab_track_variant,
+        chapter_recap, decision_flow, get_lab_track_variant,
         get_track_profile, go, lab_header, lab_map,
         learning_objectives, ledger, math, mo, np,
         report_export_panel, resolve_mlsysim_ref,
-        scenario_brief, source_trace, track_context, track_selector,
+        scenario_brief, scenario_thread, track_context, track_selector,
     )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -116,7 +116,7 @@ def _(ChapterRecap, LabMetadata):
         "Quantify how quantization, pruning, and distillation change size, quality, and deployment feasibility.",
         "Diagnose when a compression method fails because hardware support or a guardrail does not match the theory.",
         "Compare compression candidates against the selected track's primary metric and guardrail metric.",
-        "Defend a track-specific compression recipe using evidence, source trace, and residual risk.",
+        "Defend a track-specific compression recipe using evidence, validation testing, and residual risk.",
     )
     chapter_10_recap = ChapterRecap(
         emphasis="Compression changes representation, structure, or training targets; it is only useful when the deployment system can exploit the change.",
@@ -252,7 +252,6 @@ def _(ACADEMIC_LAB_CSS, LAB_CSS, lab_header, lab_metadata, mo):
 def _(
     chapter_10_recap,
     chapter_recap,
-    evidence_summary,
     lab_learning_objectives,
     lab_map,
     learning_objectives,
@@ -263,11 +262,7 @@ def _(
     pD_pred,
     pE_pred,
     scenario_brief,
-    source_trace,
     track_context,
-    v1_10_candidate_rows,
-    v1_10_compression_sweep,
-    v1_10_size_limit,
     v1_10_track_picker,
     v1_10_track_profile,
     v1_10_variant,
@@ -288,20 +283,6 @@ def _(
         ),
     }
     _system_ref = v1_10_variant.system_ref or "single-device profile"
-    _source_trace = {
-        "summary": "Track profile and scenario variant come from mlsysbook_labs; hardware and model refs point to MLSysIM registries.",
-        "track_id": v1_10_track_profile.track_id,
-        "scenario_id": v1_10_variant.scenario_id,
-        "hardware_ref": v1_10_variant.hardware_ref,
-        "system_ref": _system_ref,
-        "model_ref": v1_10_variant.model_ref,
-        "defaults": dict(v1_10_variant.defaults),
-        "assumptions": dict(v1_10_variant.assumptions),
-        "equations": "model_size = parameters * bytes_per_parameter; compression_ratio = baseline_size / compressed_size",
-        "solver": "CompressionModel.sweep",
-        "implementation_status": "Track-specific candidate evidence comes from MLSysIM; Parts A-E visuals still use the legacy notebook formulas until the part-internal migration.",
-    }
-    _feasible_count = sum(1 for row in v1_10_candidate_rows if row["feasible"])
     mo.vstack(
         [
             learning_objectives(lab_learning_objectives),
@@ -362,18 +343,6 @@ def _(
                 ),
                 _part_completion,
             ),
-            source_trace(_source_trace),
-            evidence_summary(
-                {
-                    "Best feasible frontier candidate": v1_10_compression_sweep.best_candidate_label or "No feasible frontier candidate",
-                    "Frontier candidates": ", ".join(v1_10_compression_sweep.frontier_labels) or "None",
-                    "Dominated candidates": ", ".join(v1_10_compression_sweep.dominated_labels) or "None",
-                    "Feasible candidates": f"{_feasible_count} of {len(v1_10_candidate_rows)}",
-                    "Size limit": f"{v1_10_size_limit.to('MB').magnitude:.3g} MB",
-                    "Guardrail source": "V1-10 LabTrackVariant.defaults",
-                },
-                caption="Track-specific compression candidates are evaluated through MLSysIM before the detailed part migration.",
-            ),
         ]
     )
     return
@@ -388,13 +357,16 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
-
-    - **Chapter 10: Model Compression** -- quantization levels, pruning types
-      (structured vs. unstructured), knowledge distillation, and the Pareto frontier.
-    - **Chapter 5: Neural Computation** -- weight representation and memory hierarchy.
-    """), kind="info")
+    mo.Html("""
+<div class="mlsysbook-panel mlsysbook-launch-panel">
+  <div class="mlsysbook-section-label">Instructions</div>
+  <h2>Recommended Reading</h2>
+  <ul class="mlsysbook-list">
+    <li><strong>Chapter 10: Model Compression</strong> -- quantization levels, pruning types, knowledge distillation, and the Pareto frontier.</li>
+    <li><strong>Chapter 5: Neural Computation</strong> -- weight representation and memory hierarchy.</li>
+  </ul>
+</div>
+""")
     return
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -408,7 +380,8 @@ def _(
     LLAMA3_8B_PARAMS,
     MOBILENET_FLOPS, MOBILENET_PARAMS,
     RESNET50_FLOPS, RESNET50_PARAMS,
-    apply_plotly_theme, go, math, mo, np,
+    apply_plotly_theme, decision_flow, go, math, mo, np, scenario_thread,
+    v1_10_track_profile, v1_10_variant,
 ):
     # ── Widgets ───────────────────────────────────────────────────────────
     pA_pred = mo.ui.radio(
@@ -518,6 +491,15 @@ def _(
     pD_hw, pD_precision_e, pD_pred, pE_pred,
     pE_temp,
 ):
+    _track_label = v1_10_track_profile.label
+    _track_metric = v1_10_variant.primary_metric
+    _track_guardrail = v1_10_variant.guardrail_metric.replace("sla", "SLA")
+    _track_objective = v1_10_variant.objective
+    _track_workload = v1_10_variant.workload_summary.rstrip(".")
+    _metric_hint = (
+        f"For {_track_label}, the compression choice is not just a size reduction. "
+        f"It must improve {_track_metric} while keeping {_track_guardrail} acceptable."
+    )
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A: Quantization Free Lunch
@@ -537,6 +519,15 @@ def _(
             </div>
         </div>
         """))
+        items.append(scenario_thread(
+            f"{_track_label} compression decision",
+            (
+                f"{_track_objective} Start by asking whether a lower-precision model "
+                f"helps this workload: {_track_workload}. Do not keep the recipe "
+                "unless it protects the guardrail."
+            ),
+            callout=_metric_hint,
+        ))
         items.append(mo.md("""
         ## The Quantization Free Lunch
 
@@ -551,6 +542,15 @@ def _(
         INT8 has 256 discrete levels -- far more than needed for typical weight distributions
         that cluster tightly around zero.
         """))
+        items.append(decision_flow(
+            "Part A decision path",
+            (
+                "Pick precision",
+                "Compute model size",
+                "Check accuracy cliff",
+                "Keep or reject for track",
+            ),
+        ))
         items.append(pA_pred)
         if pA_pred.value is None:
             items.append(mo.callout(mo.md("Select your prediction to unlock the quantization explorer."), kind="warn"))
@@ -695,6 +695,17 @@ FP32 to INT8 = 4x compression. Below 4 bits, $\\Delta$ grows large enough to col
             </div>
         </div>
         """))
+        items.append(scenario_thread(
+            f"{_track_label} hardware check",
+            (
+                "A smaller file only helps this deployment if the selected hardware "
+                "can turn sparsity into actual latency, energy, or thermal relief."
+            ),
+            callout=(
+                f"Treat {_track_metric} as the win condition and {_track_guardrail} "
+                "as the release gate."
+            ),
+        ))
         items.append(mo.md("""
         ## The Pruning Hardware Trap
 
@@ -707,6 +718,15 @@ FP32 to INT8 = 4x compression. Below 4 bits, $\\Delta$ grows large enough to col
 
         The hardware cannot skip sparse multiplications without specialized support.
         """))
+        items.append(decision_flow(
+            "Part B decision path",
+            (
+                "Choose sparsity",
+                "Choose pruning pattern",
+                "Ask if hardware can skip it",
+                "Accept only real speedup",
+            ),
+        ))
         items.append(pB_pred)
         if pB_pred.value is None:
             items.append(mo.callout(mo.md("Select your prediction to unlock the pruning simulator."), kind="warn"))
@@ -847,6 +867,17 @@ Dense GPU kernels cannot skip zero multiplications. Only structured sparsity wit
             </div>
         </div>
         """))
+        items.append(scenario_thread(
+            f"{_track_label} feasible set",
+            (
+                "Now compare compression recipes as deployment candidates. A candidate "
+                "that is smaller but misses the guardrail is not a solution for this track."
+            ),
+            callout=(
+                f"The final answer must balance {_track_metric} against "
+                f"{_track_guardrail}."
+            ),
+        ))
         items.append(mo.md("""
         ## The Compression Pareto Frontier
 
@@ -862,6 +893,15 @@ Dense GPU kernels cannot skip zero multiplications. Only structured sparsity wit
 
         Memory accounting must include KV cache, activations, and runtime overhead.
         """))
+        items.append(decision_flow(
+            "Part C decision path",
+            (
+                "List candidates",
+                "Remove dominated options",
+                "Apply track limit",
+                "Keep frontier recipes",
+            ),
+        ))
         items.append(pC_pred)
         if pC_pred.value is None:
             items.append(mo.callout(mo.md("Select your prediction to unlock the Pareto explorer."), kind="warn"))
@@ -969,6 +1009,18 @@ At INT4, Llama-3 8B weighs 4 GB -- just barely fitting a 4 GB device with minima
             </div>
         </div>
         """))
+        items.append(scenario_thread(
+            f"{_track_label} energy and thermal pressure",
+            (
+                "After size and quality, ask what the bits cost during repeated "
+                "inference. Compression should reduce movement, heat, or battery drain "
+                "for the actual track workload."
+            ),
+            callout=(
+                f"Use {_track_metric} as the benefit and {_track_guardrail} "
+                "as the constraint you must defend."
+            ),
+        ))
         items.append(mo.md("""
         ## The Energy Dividend: Bits are Joules
 
@@ -982,6 +1034,15 @@ At INT4, Llama-3 8B weighs 4 GB -- just barely fitting a 4 GB device with minima
         INT8 inference uses up to **20x less energy** than FP32 because the
         dominant cost is data movement, not arithmetic.
         """))
+        items.append(decision_flow(
+            "Part D decision path",
+            (
+                "Estimate data movement",
+                "Estimate compute energy",
+                "Compare precision choices",
+                "Defend battery or thermal result",
+            ),
+        ))
         items.append(pD_pred)
         if pD_pred.value is None:
             items.append(mo.callout(mo.md("Select your prediction to unlock the energy analyzer."), kind="warn"))
@@ -1104,6 +1165,18 @@ At FP32: $E_{\\text{mem}} / E_{\\text{comp}} = (4 \\times 640) / 3.7 \\approx 69
             </div>
         </div>
         """))
+        items.append(scenario_thread(
+            f"{_track_label} fallback strategy",
+            (
+                "If compression alone cannot satisfy the deployment, switch from "
+                "shrinking the same model to training a smaller student that was built "
+                "for the track."
+            ),
+            callout=(
+                f"The student only works if it preserves {_track_guardrail} while "
+                f"improving {_track_metric}."
+            ),
+        ))
         items.append(mo.md("""
         ## Dark Knowledge Transfer
 
@@ -1119,6 +1192,15 @@ At FP32: $E_{\\text{mem}} / E_{\\text{comp}} = (4 \\times 640) / 3.7 \\approx 69
         Temperature T controls how much of the dark knowledge transfers. Higher T
         softens the distribution, revealing more inter-class relationships.
         """))
+        items.append(decision_flow(
+            "Part E decision path",
+            (
+                "Choose teacher",
+                "Train student",
+                "Measure retained quality",
+                "Use only if track improves",
+            ),
+        ))
         items.append(pE_pred)
         if pE_pred.value is None:
             items.append(mo.callout(mo.md("Select your prediction to unlock the distillation dashboard."), kind="warn"))
@@ -1226,10 +1308,33 @@ The $T^2$ factor compensates for gradient magnitude reduction at high temperatur
     def build_synthesis():
         return mo.vstack([
             mo.md("---"),
+            scenario_thread(
+                f"{_track_label} compression recipe review",
+                (
+                    "You have now tested the same deployment problem from five angles: "
+                    "precision, sparsity, feasibility, energy, and student-model transfer. "
+                    "The synthesis is the place to choose one recipe and defend why it is "
+                    "credible for this track."
+                ),
+                callout=(
+                    f"Your answer should name the expected {_track_metric} improvement, "
+                    f"the {_track_guardrail} guardrail, and the risk you would test before release."
+                ),
+            ),
+            decision_flow(
+                "Synthesis decision path",
+                (
+                    "Choose recipe",
+                    "Name validation test",
+                    "State tradeoff",
+                    "Record residual risk",
+                ),
+            ),
             mo.Html(f"""
-            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+            <div style="background: #F7FAFF; border: 1px solid #C9D8EE;
+                        border-left: 4px solid {COLORS['BlueLine']};
+                        border-radius: 8px; padding: 24px 28px; margin: 16px 0;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
                     Key Takeaways
                 </div>
@@ -1336,8 +1441,9 @@ def _(mo, v1_10_candidate_rows, v1_10_compression_sweep, v1_10_defaults):
 <div class="mlsysbook-panel">
   <h2>Synthesis</h2>
   <p class="mlsysbook-source-summary">
-    Choose a compression recipe from the feasible MLSysIM candidates, name the
-    validation test you would run before release, and record a short reflection.
+    Choose a compression recipe for your selected track, name the validation
+    test you would run before release, and record a short reflection about the
+    tradeoff you are accepting.
   </p>
 </div>
 """
@@ -1449,13 +1555,12 @@ def _(
             big_takeaways(lab_big_takeaways),
             mo.Html(
                 """
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-report-panel">
   <h2>Download Report</h2>
   <p class="mlsysbook-source-summary">
-    This local report records the selected track, scenario variant, MLSysIM
-    candidate evidence, final recipe, source trace, and any predictions or
-    reflections you have made. If a required field is empty, the Markdown report
-    marks it under Incomplete Fields.
+    This local report records your selected track, final compression recipe,
+    validation test, predictions, reflections, and residual risk. If a required
+    field is empty, the Markdown report marks it under Incomplete Fields.
   </p>
 </div>
 """

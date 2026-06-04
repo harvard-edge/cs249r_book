@@ -23,6 +23,8 @@ ACADEMIC_LAB_CSS = mo.Html(
   --mlsysbook-line: #D9DEE8;
   --mlsysbook-panel: #FFFFFF;
   --mlsysbook-soft: #F6F8FB;
+  --mlsysbook-intro: #F7FAFF;
+  --mlsysbook-launch: #FBFCFE;
   --mlsysbook-ok: #247A4D;
   --mlsysbook-warn: #9A5B00;
   --mlsysbook-danger: #B42318;
@@ -104,6 +106,99 @@ ACADEMIC_LAB_CSS = mo.Html(
   font-size: 1.05rem;
   letter-spacing: 0;
 }
+.mlsysbook-section-label {
+  color: var(--mlsysbook-blue);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.mlsysbook-intro-panel {
+  background: linear-gradient(180deg, #FFFFFF 0%, var(--mlsysbook-intro) 100%);
+  border-color: #C9D8EE;
+  border-left: 4px solid var(--mlsysbook-blue);
+}
+.mlsysbook-track-panel {
+  background: linear-gradient(135deg, #F8FFFB 0%, #FFFFFF 72%);
+  border-color: #B8D8C6;
+  border-left: 6px solid var(--mlsysbook-ok);
+  box-shadow: 0 6px 16px rgba(31, 64, 122, 0.08);
+  margin-top: 22px;
+}
+.mlsysbook-launch-panel {
+  background: linear-gradient(135deg, #F8FFFB 0%, var(--mlsysbook-launch) 76%);
+  border-color: #B8D8C6;
+  border-left: 4px solid var(--mlsysbook-ok);
+}
+.mlsysbook-track-panel .mlsysbook-section-label,
+.mlsysbook-launch-panel .mlsysbook-section-label,
+.mlsysbook-thread-panel .mlsysbook-section-label {
+  color: var(--mlsysbook-ok);
+}
+.mlsysbook-thread-panel {
+  background: #F8FFFB;
+  border: 1px solid #B8D8C6;
+  border-left: 4px solid var(--mlsysbook-ok);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 12px auto;
+  width: min(var(--mlsysbook-panel-width), 100%);
+  max-width: min(var(--mlsysbook-panel-width), 100%);
+}
+.mlsysbook-thread-panel h3 {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+}
+.mlsysbook-thread-panel p {
+  color: #344054;
+  line-height: 1.55;
+  margin: 6px 0;
+}
+.mlsysbook-flow {
+  border: 1px solid var(--mlsysbook-line);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px auto;
+  width: min(var(--mlsysbook-panel-width), 100%);
+  max-width: min(var(--mlsysbook-panel-width), 100%);
+  background: #FFFFFF;
+}
+.mlsysbook-flow h3 {
+  margin: 0 0 10px 0;
+  font-size: 1rem;
+}
+.mlsysbook-flow-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.mlsysbook-flow-step {
+  border: 1px solid #B8D8C6;
+  border-radius: 8px;
+  background: #F8FFFB;
+  color: #123524;
+  font-size: 0.86rem;
+  font-weight: 650;
+  line-height: 1.35;
+  min-width: 140px;
+  padding: 10px 12px;
+}
+.mlsysbook-flow-arrow {
+  color: var(--mlsysbook-ok);
+  font-weight: 800;
+}
+.mlsysbook-takeaway-panel {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F7FAFF 100%);
+  border-color: #C9D8EE;
+  border-left: 4px solid var(--mlsysbook-blue);
+}
+.mlsysbook-report-panel {
+  background: #FFFBF2;
+  border-color: #F4C27A;
+  border-left: 4px solid var(--mlsysbook-warn);
+}
 .mlsysbook-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -184,6 +279,48 @@ ACADEMIC_LAB_CSS = mo.Html(
 }
 .mlsysbook-compact-field:last-child:nth-child(3n + 2) {
   grid-column: span 2;
+}
+.mlsysbook-compact-fields.is-brief {
+  background: #FFFFFF;
+}
+.mlsysbook-compact-fields.is-brief .mlsysbook-compact-field {
+  background: #FFFFFF;
+  min-height: 64px;
+}
+.mlsysbook-map-list {
+  border: 1px solid var(--mlsysbook-line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #FFFFFF;
+}
+.mlsysbook-map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #EDF0F5;
+}
+.mlsysbook-map-row:last-child {
+  border-bottom: 0;
+}
+.mlsysbook-map-title {
+  font-weight: 760;
+}
+.mlsysbook-map-question {
+  color: var(--mlsysbook-muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+.mlsysbook-evidence-panel details {
+  border-top: 1px solid #EDF0F5;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+.mlsysbook-evidence-panel summary {
+  cursor: pointer;
+  color: var(--mlsysbook-blue);
+  font-weight: 750;
 }
 .mlsysbook-list {
   margin: 8px 0 0 0;
@@ -469,7 +606,6 @@ def lab_header(metadata: LabMetadata, subtitle: str, *, chips: tuple[str, ...] =
       <span class="mlsysbook-chip">{html.escape(metadata.book_anchor)}</span>
       <span class="mlsysbook-chip">Lab v{html.escape(metadata.lab_version)}</span>
       <span class="mlsysbook-chip">Updated {html.escape(metadata.updated_at)}</span>
-      <span class="mlsysbook-chip">MLSysIM {html.escape(metadata.mlsysim_version)}</span>
     </div>
     {topic_row}
   </div>
@@ -482,7 +618,8 @@ def learning_objectives(objectives: tuple[str, ...] | list[str]) -> mo.Html:
     """Render the required measurable objectives block."""
     return mo.Html(
         f"""
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-intro-panel">
+  <div class="mlsysbook-section-label">Before You Begin</div>
   <h2>Learning Objectives</h2>
   <ul class="mlsysbook-list">
     {_render_list(objectives)}
@@ -497,7 +634,7 @@ def chapter_recap(recap: ChapterRecap) -> mo.Html:
     terms = ", ".join(html.escape(term) for term in recap.key_terms)
     return mo.Html(
         f"""
-<div class="mlsysbook-recap">
+<div class="mlsysbook-recap mlsysbook-intro-panel">
   <h2>Chapter Recap</h2>
   <div class="mlsysbook-grid">
     <div class="mlsysbook-field">
@@ -526,13 +663,53 @@ def scenario_brief(title: str, stakeholder: str, objective: str, constraints: di
     rows = _render_compact_fields(constraints)
     return mo.Html(
         f"""
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-launch-panel">
+  <div class="mlsysbook-section-label">Start The Case</div>
   <h2>{html.escape(title)}</h2>
   <div class="mlsysbook-scenario-narrative">
     <p><strong>Stakeholder:</strong> {html.escape(stakeholder)}</p>
     <p><strong>Objective:</strong> {html.escape(objective)}</p>
   </div>
-  <div class="mlsysbook-compact-fields">{rows}</div>
+  <div class="mlsysbook-compact-fields is-brief">{rows}</div>
+</div>
+"""
+    )
+
+
+def scenario_thread(title: str, body: str, *, callout: str = "") -> mo.Html:
+    """Render a short track/scenario reminder inside a lab part."""
+    callout_html = (
+        f'<p style="color:#344054; line-height:1.55; margin:6px 0;">'
+        f"<strong>Track consequence:</strong> {html.escape(callout)}</p>"
+        if callout
+        else ""
+    )
+    return mo.Html(
+        f"""
+<div class="mlsysbook-thread-panel" style="background:#F8FFFB; border:1px solid #B8D8C6; border-left:4px solid #247A4D; border-radius:8px; padding:14px 16px; margin:12px auto; width:min(var(--mlsysbook-panel-width), 100%); max-width:min(var(--mlsysbook-panel-width), 100%);">
+  <div class="mlsysbook-section-label" style="color:#247A4D; font-size:0.72rem; font-weight:800; letter-spacing:0.12em; margin-bottom:8px; text-transform:uppercase;">Scenario Thread</div>
+  <h3 style="margin:0 0 8px 0; font-size:1rem;">{html.escape(title)}</h3>
+  <p style="color:#344054; line-height:1.55; margin:6px 0;">{html.escape(body)}</p>
+  {callout_html}
+</div>
+"""
+    )
+
+
+def decision_flow(title: str, steps: tuple[str, ...] | list[str]) -> mo.Html:
+    """Render a compact, renderer-independent flow diagram."""
+    step_html = []
+    for index, step in enumerate(steps):
+        if index:
+            step_html.append('<span class="mlsysbook-flow-arrow" style="color:#247A4D; font-weight:800;">-></span>')
+        step_html.append(
+            f'<div class="mlsysbook-flow-step" style="border:1px solid #B8D8C6; border-radius:8px; background:#F8FFFB; color:#123524; font-size:0.86rem; font-weight:650; line-height:1.35; min-width:140px; padding:10px 12px;">{html.escape(step)}</div>'
+        )
+    return mo.Html(
+        f"""
+<div class="mlsysbook-flow" style="border:1px solid #D9DEE8; border-radius:8px; padding:12px; margin:12px auto; width:min(var(--mlsysbook-panel-width), 100%); max-width:min(var(--mlsysbook-panel-width), 100%); background:#FFFFFF;">
+  <h3 style="margin:0 0 10px 0; font-size:1rem;">{html.escape(title)}</h3>
+  <div class="mlsysbook-flow-steps" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">{"".join(step_html)}</div>
 </div>
 """
     )
@@ -552,18 +729,20 @@ def lab_map(parts: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]], comp
         heading = _part_heading(part_label, concept)
         rows.append(
             f"""
-    <div class="mlsysbook-field">
-      <strong>{html.escape(heading)}</strong>
+    <div class="mlsysbook-map-row">
+      <div>
+        <div class="mlsysbook-map-title">{html.escape(heading)}</div>
+        <div class="mlsysbook-map-question">{html.escape(question)}</div>
+      </div>
       <span class="mlsysbook-status {html.escape(status_class)}">{html.escape(status_label)}</span>
-      <div class="mlsysbook-version">{html.escape(question)}</div>
     </div>
 """
         )
     return mo.Html(
         f"""
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-launch-panel">
   <h2>Lab Map</h2>
-  <div class="mlsysbook-grid">
+  <div class="mlsysbook-map-list">
     {"".join(rows)}
   </div>
 </div>
@@ -576,7 +755,7 @@ def track_selector(default: str = DEFAULT_TRACK_ID):
     selected = normalize_track_id(default)
     options = track_options()
     selected_label = next((label for label, track_id in options.items() if track_id == selected), "iPhone")
-    return mo.ui.radio(options=options, value=selected_label, label="Your Track", inline=True)
+    return mo.ui.radio(options=options, value=selected_label, label="Choose Your Track", inline=True)
 
 
 def track_context(track: str | TrackProfile) -> mo.Html:
@@ -603,14 +782,14 @@ def track_context(track: str | TrackProfile) -> mo.Html:
     )
     return mo.Html(
         f"""
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-track-panel">
+  <div class="mlsysbook-section-label">Track Mission</div>
   <h2>Your Track</h2>
   <div class="mlsysbook-scenario-narrative">
-    <p><strong>{html.escape(profile.label)}:</strong> {html.escape(profile.narrative)}</p>
-    <p>{html.escape(track_delta)}</p>
+    <p><strong>You are deploying for {html.escape(profile.label)}.</strong> {html.escape(profile.narrative)}</p>
+    <p><strong>Your job in this lab:</strong> {html.escape(track_delta)}</p>
   </div>
-  <div class="mlsysbook-compact-fields">{fields}</div>
-  <div class="mlsysbook-version">{html.escape(profile.source_policy)}</div>
+  <div class="mlsysbook-compact-fields is-brief">{fields}</div>
 </div>
 """
     )
@@ -791,12 +970,15 @@ def evidence_summary(items: Mapping[str, Any], *, caption: str = "") -> mo.Html:
     caption_html = f'<div class="mlsysbook-source-summary">{html.escape(caption)}</div>' if caption else ""
     return mo.Html(
         f"""
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-evidence-panel">
   <h2>Evidence Summary</h2>
   {caption_html}
-  <div class="mlsysbook-grid">
-    {_render_fields(items)}
-  </div>
+  <details>
+    <summary>Show precomputed evidence</summary>
+    <div class="mlsysbook-grid">
+      {_render_fields(items)}
+    </div>
+  </details>
 </div>
 """
     )
@@ -820,7 +1002,7 @@ def big_takeaways(takeaways: tuple[str, ...] | list[str]) -> mo.Html:
     """Render the required end-of-lab carry-forward takeaways."""
     return mo.Html(
         f"""
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-takeaway-panel">
   <h2>Big Takeaways</h2>
   <ul class="mlsysbook-list">
     {_render_list(takeaways)}
