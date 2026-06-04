@@ -2743,11 +2743,7 @@ Recovery from distributed checkpoints for sharded models requires understanding 
 
 #### Centralized checkpointing {#sec-fault-tolerance-reliability-reliability-centralized-checkpointing-83a7}
 
-In centralized checkpointing, workers send their state to a coordinator process that assembles and writes the complete checkpoint. This approach simplifies checkpoint management and produces self-contained checkpoint files but creates scalability bottlenecks.
-
-All state flows through the coordinator, creating a network bottleneck. The coordinator must have memory for the entire checkpoint, creating a memory bottleneck. Coordinator failure loses the checkpoint operation, creating a single point of failure.
-
-Centralized checkpointing works acceptably for small-scale distributed training but becomes impractical at large scale. Tens of workers can be supported, but not hundreds or thousands.
+In centralized checkpointing, workers send their state to a coordinator process that assembles and writes the complete checkpoint. This approach simplifies checkpoint management and produces self-contained checkpoint files, but every benefit is paid for at the coordinator: all state crosses the coordinator's network links, the coordinator needs memory for the entire checkpoint, and coordinator failure loses the checkpoint operation. The pattern works acceptably for tens of workers, where the management simplicity may outweigh the bottleneck, but it becomes impractical for hundreds or thousands of workers because the coordinator becomes both the throughput limiter and the single point of failure.
 
 #### Distributed checkpointing {#sec-fault-tolerance-reliability-reliability-distributed-checkpointing-5dcc}
 
@@ -3332,7 +3328,15 @@ The choice depends on state size, update frequency, and the quality impact of st
 
 ### Model-specific serving fault tolerance {#sec-fault-tolerance-reliability-reliability-modelspecific-serving-fault-tolerance-3245}
 
-Model-specific serving differences follow from what state is expensive to lose and how quickly the user needs a response. The extremes are LLM sessions that carry large live context, recommendation systems that depend on fresh user and item features, and vision services that are often stateless but sensitive to preprocessing and device health.
+Model-specific serving differences follow from what state is expensive to lose and how quickly the user needs a response. The policy question is therefore a state-loss budget: which state can be rebuilt, which state must be replicated, and which state may be degraded temporarily without violating the product contract. @Tbl-serving-recovery-state-invariants maps that question across the three common regimes.
+
+| **Serving workload** | **State expensive to lose**                    | **Fault-tolerance policy**                                                                                  | **Degradation path**                                                   |
+|:---------------------|:-----------------------------------------------|:------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|
+| LLM conversation     | KV cache, conversation context, prefix state   | Replicate or checkpoint high-value session state; regenerate only when the latency budget allows.           | Rebuild from transcript, reuse cached prefixes, or ask for retry.      |
+| Recommendation       | Fresh user features, item features, embeddings | Replicate feature stores, cache hot features, and monitor freshness as a reliability signal.                | Serve stale or default features with measured quality loss.            |
+| Vision service       | Preprocessing state, device health, edge input | Retry stateless requests on healthy replicas and fail closed on preprocessing or accelerator-health faults. | Use a smaller local model, defer prediction, or return low confidence. |
+
+: **Serving Recovery State Invariants**: Serving fault tolerance starts from the state whose loss changes user-visible quality. LLMs protect live context, recommendation systems protect feature freshness, and vision services protect preprocessing and device correctness. {#tbl-serving-recovery-state-invariants}
 
 The KV cache[^fn-kv-cache-serving-ft] can be substantial (gigabytes for long contexts across attention layers). Losing the KV cache requires regenerating all previous turns, which can take seconds to minutes.
 
@@ -3457,7 +3461,18 @@ Degradation should increase progressively as conditions worsen rather than switc
 
 Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results.
 
-The monitoring surface must expose how much service quality has been traded away: the share of requests served by fallback models, the share of features using defaults, the request drop rate from load shedding, and the quality gap between primary and fallback paths. Alerting thresholds should reflect duration and blast radius. A short activation can remain informational, sustained degradation beyond 5 minutes can trigger a warning, severe degradation affecting over 50 percent of requests can trigger a critical alert, and degradation beyond 1 hour should escalate. After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence.
+The monitoring surface must expose how much service quality has been traded away. @Tbl-degradation-monitoring-action-map turns that surface into an action map: fallback share reveals how often model quality was reduced, default-feature share reveals input-quality loss, drop rate reveals capacity protection, and the primary-vs-fallback quality gap reveals whether the degraded path remains acceptable.
+
+| **Signal**                      | **Quality trade exposed**                       | **Escalation rule**                                                              | **Postincident question**                              |
+|:--------------------------------|:------------------------------------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------|
+| Fallback-model request share    | Model capability reduced to preserve serving    | Sustained activation beyond 5 minutes becomes a warning.                         | Did the fallback preserve enough user value?           |
+| Default-feature request share   | Input richness reduced because dependencies lag | Severe degradation affecting over 50 percent of requests becomes critical.       | Which feature dependency needs replication or caching? |
+| Load-shed request rate          | Coverage reduced to protect the service         | Any growth after the circuit breaker opens triggers capacity investigation.      | Was admission control early enough to prevent cascade? |
+| Primary-vs-fallback quality gap | Product quality lost during the incident        | Degradation beyond 1 hour escalates even when availability metrics look healthy. | Is the fallback path still a valid product experience? |
+
+: **Degradation Monitoring Action Map**: Graceful degradation is safe only when the quality trade is observable. Each signal ties a degraded serving mode to the escalation and postincident question that prevent silent quality loss. {#tbl-degradation-monitoring-action-map}
+
+After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence.
 
 Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
 
@@ -3556,7 +3571,9 @@ Mixed-precision training[^fn-mixed-precision-ft] can introduce numerical issues.
 
 [^fn-mixed-precision-ft]: **Mixed-Precision Numerical Issues**\index{Mixed-Precision!numerical issues}: FP16's dynamic range spans only $6 \times 10^{-8}$ to 65,504, compared to FP32's $1.2 \times 10^{-38}$ to $3.4 \times 10^{38}$. Loss scaling (multiplying loss by 1,024 before backpropagation, then dividing gradients) prevents underflow, but overflow still triggers automatic step-skipping that wastes computation. BF16 mitigates this by matching FP32's exponent range at the cost of reduced mantissa precision, trading numerical resolution for training stability. \index{Mixed-Precision!numerical fault tolerance}
 
-ML bugs also originate in data, where silent corruption and distribution shift surface as valid-looking but wrong inputs. Validation at the pipeline boundary is the first line of defense: the pipeline checks inputs for expected format, shape, value ranges, required fields, and encoding before they reach the model. Teams then track feature distributions over time so that distribution shift (feature values drifting), missing features (null rates rising), and outliers (extreme values appearing) are caught as they emerge rather than after they have degraded the model. Finally, data-debugging instrumentation traces transformations end to end: logging intermediate shapes and statistics, validating that each transform produces the expected result, and comparing pipeline outputs against known-good data.
+#### Data debugging and validation {#sec-fault-tolerance-data-debugging-validation}
+
+Data bugs surface as valid-looking but wrong inputs, so the debugging target is not just numerical validity but semantic correctness at each pipeline boundary. Validation checks expected format, shape, value ranges, required fields, and encoding before data reaches the model; distribution monitors track feature drift, null-rate changes, and outliers as they emerge; and transformation instrumentation logs intermediate shapes and statistics so teams can compare each stage against known-good data. This separates a corrupted input path from a numerical failure inside the model.
 
 #### Straggler detection and analysis {#sec-fault-tolerance-reliability-reliability-straggler-detection-analysis-6925}
 
@@ -3665,6 +3682,8 @@ Microsoft's DeepSpeed library illustrates how fault tolerance must be architecte
 Rather than treating node failures as fatal, DeepSpeed combines ZeRO sharding with persistent state offload to CPU memory and NVMe storage. Because each rank holds only its $1/N$ partition of the optimizer state, the framework can checkpoint and restore state without serializing the entire model on any single device. When a node failure is detected, the framework pauses rather than aborting and triggers an elastic resizing event. The system queries the resource manager for a replacement node; if one is found, the missing state shards are reconstructed from the persistent offload buffer. If no replacement is available, the framework redistributes the state shards among the remaining $N-1$ nodes and adjusts the gradient accumulation steps to maintain the original effective global batch size, preserving mathematical consistency.
 
 This elasticity is automated and transparent to the data scientist. By keeping the fault tolerance machinery resident in the training framework rather than the user's application code, DeepSpeed makes it practical to run large-model training jobs on low-priority "spot" instances in the cloud, where preemption is common. A job running on 100 GPUs can lose 10 GPUs and continue training on 90 GPUs with only a momentary pause for state redistribution rather than a full crash-and-restart cycle. Building elasticity into the memory-management layer shifts resilience from the user's application code into the framework layer, reducing the need for bespoke recovery engineering and making large-model training feasible on unreliable commodity infrastructure.
+
+### Case study synthesis {#sec-fault-tolerance-case-study-synthesis}
 
 These case studies reveal three universal principles. First, detection speed determines recovery cost\index{Fault Tolerance!detection speed}: Meta's 5-minute timeout, Google's automated ICI reconfiguration, and Netflix's chaos experiments all demonstrate that faster detection means less state lost. Second, the atomic unit of failure matters\index{Atomic Unit of Failure}: Google reroutes the communication fabric, DeepSpeed redistributes shards, and Netflix validates service-level fallbacks---each organization chose the granularity that matches its architecture's coupling. Third, fault tolerance is a spectrum, not a binary\index{Fault Tolerance!spectrum}: from Meta's checkpoint-rollback to Netflix's graceful degradation hierarchy, every system implements multiple layers of defense, each trading fidelity for speed. Despite these proven patterns, engineering teams frequently stumble over common misconceptions when designing resilient ML systems.
 
