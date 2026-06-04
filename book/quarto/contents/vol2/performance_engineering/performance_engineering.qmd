@@ -1168,50 +1168,56 @@ The choice depends on the operational regime. For memory-bound inference (small 
 # │
 # │ Goal: Compute KV cache memory per request for a 70B model (Llama-style GQA)
 # │       at FP16, then derive max batch sizes before/after quantization.
-# │ Show: total FP16 KV cache (~1.34 GB), sharded FP16 (~0.34 GB/GPU),
-# │       sharded INT8 (~0.17 GB/GPU), and max batch FP16 vs INT8.
-# │ How: Compute KV cache bytes from layers, KV heads, head width, sequence length, and element size.
+# │ Show: total FP16 KV cache (~1.34 GB), sharded FP16 (~0.17 GB/GPU),
+# │       sharded INT8 (~0.08 GB/GPU), and max batch FP16 vs INT8.
+# │ How: Load the model, H100 memory budget, and serving-shape profile from
+# │      MLSysIM; compute KV cache bytes from layers, KV heads, head width,
+# │      sequence length, and element size.
 # │
-# │ Imports: mlsysim.fmt (check), mlsysim.core.constants (Llama/H100/precision constants),
-# │          mlsysim.physics (calc_kv_cache_size, model_memory),
-# │          mlsysim.models.registry (Models)
-# │ Exports: kv_fp16_gb_str, max_batch_fp16_str, max_batch_int8_str,
-# │          batch_ratio_mult_str
+# │ Imports: mlsysim public API (Models, ReferenceStats, units, physics,
+# │          formatters, checks)
+# │ Exports: KV cache, weight-shard, available-memory, and batch-size *_str values
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_kv_cache_size, model_memory
-from mlsysim.models.registry import Models
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim import *
+
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KVCacheAnalysis:
     """KV cache sizing and max batch capacity."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Models, Hardware
-    from mlsysim.physics import calc_kv_cache_size
-
     model = Models.Language.Llama2_70B
-    seq_len = 4096
-
-    # Capacity per GPU (H100 80 GB)
-    tensor_parallel_degree = 4
-    gpu_total = 80 * GB  # scenario assumption: vendor-facing H100 memory budget
-    int4_bits = 4
-    fp16_bits = 16
+    profile = ReferenceStats.ServingProfiles
+    seq_len = int(profile.PrecisionDividendContextLengthTokens)
+    tensor_parallel_degree = int(profile.PrecisionDividendTensorParallelDegree)
+    baseline_policy_batch = int(profile.PrecisionDividendBaselinePolicyBatchLimit)
+    optimized_policy_batch = int(profile.PrecisionDividendOptimizedPolicyBatchLimit)
+    speculation_policy_batch = int(profile.PrecisionDividendSpeculationBatchThreshold)
+    gpu_total = profile.PrecisionDividendGpuMemoryBudget
+    int4_bits = BYTES_INT4.to(byte).magnitude * 8
+    fp16_bits = BYTES_FP16.to(byte).magnitude * 8
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Base size per request (full model)
     kv_cache_qty_f16 = calc_kv_cache_size(
-        model.layers, model.kv_heads, model.hidden_dim // model.heads,
-        seq_len, 1, bytes_per_elem=BYTES_FP16
+        model.layers,
+        model.kv_heads,
+        model.hidden_dim // model.heads,
+        seq_len,
+        1,
+        bytes_per_elem=BYTES_FP16,
     )
 
     kv_cache_qty_i8 = calc_kv_cache_size(
-        model.layers, model.kv_heads, model.hidden_dim // model.heads,
-        seq_len, 1, bytes_per_elem=BYTES_INT8
+        model.layers,
+        model.kv_heads,
+        model.hidden_dim // model.heads,
+        seq_len,
+        1,
+        bytes_per_elem=BYTES_INT8,
     )
 
-    # Shard weights (4-way TP)
+    # Shard weights by the profile tensor-parallel degree.
     weight_fp16_shard = model.size_in_bytes(BYTES_FP16) / tensor_parallel_degree
     weight_int4_shard = model.size_in_bytes(BYTES_INT4) / tensor_parallel_degree
 
@@ -1227,13 +1233,11 @@ class KVCacheAnalysis:
     batch_ratio = max_batch_int8_val / max_batch_fp16_val
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check
     check(kv_cache_qty_f16 > 0.1 * GB,
           f"KV cache size too low, got {kv_cache_qty_f16.to(GB).magnitude:.2f}")
     check(max_batch_int8_val > max_batch_fp16_val, "INT8 should increase batch size")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory
     kv_fp16_gb_str = fmt_memory(kv_cache_qty_f16, unit=GB, precision=2, commas=False)
     kv_fp16_per_gpu_gb_str = fmt_memory(kv_cache_qty_f16 / tensor_parallel_degree, unit=GB, precision=2, commas=False)
     kv_int8_total_gb_str = fmt_memory(kv_cache_qty_i8, unit=GB, precision=2, commas=False)
@@ -1241,15 +1245,19 @@ class KVCacheAnalysis:
     max_batch_fp16_str = fmt_int(max_batch_fp16_val, commas=False)
     max_batch_int8_str = fmt_int(max_batch_int8_val, commas=False)
     batch_ratio_mult_str = fmt_multiple(batch_ratio, precision=1, commas=False)
-    avail_fp16_gb_str = fmt_memory(avail_fp16, unit=GB, precision=0, commas=False)
-    weight_int4_gb_str = fmt_memory(weight_int4_shard, unit=GB, precision=2, commas=False)
-    avail_int8_gb_str = fmt_memory(avail_int8, unit=GB, precision=2, commas=False)
-    weight_fp16_shard_gb_str = fmt_memory(weight_fp16_shard, unit=GB, precision=0, commas=False)
+    avail_fp16_gb_str = fmt_memory(avail_fp16, unit=GB, precision=1, commas=False)
+    weight_int4_gb_str = fmt_memory(weight_int4_shard, unit=GB, precision=1, commas=False)
+    avail_int8_gb_str = fmt_memory(avail_int8, unit=GB, precision=1, commas=False)
+    weight_fp16_shard_gb_str = fmt_memory(weight_fp16_shard, unit=GB, precision=1, commas=False)
     weight_fp16_total_gb_str = fmt_memory(weight_fp16_shard * tensor_parallel_degree, unit=GB, precision=0, commas=False)
     tensor_parallel_degree_str = fmt_count(tensor_parallel_degree, commas=False)
     gpu_total_gb_str = fmt_memory(gpu_total, unit=GB, precision=0, commas=False)
     int4_scale_num_str = fmt_int(int4_bits, commas=False)
     int4_scale_den_str = fmt_int(fp16_bits, commas=False)
+    context_len_tokens_str = fmt_int(seq_len, commas=False)
+    baseline_policy_batch_size_str = fmt_int(baseline_policy_batch, commas=False)
+    optimized_policy_batch_size_str = fmt_int(optimized_policy_batch, commas=False)
+    speculation_policy_batch_size_str = fmt_int(speculation_policy_batch, commas=False)
 ```
 
 A capacity calculation makes the serving impact of precision choices concrete.
@@ -2286,12 +2294,12 @@ To illustrate how the diagnostic sequence and combining principles work in pract
 
 #### Baseline measurement {#sec-performance-engineering-case-baseline}
 
-The initial deployment uses FP16 weights, standard PyTorch eager execution, and tensor parallelism across 8 GPUs. The 70B model in FP16 requires 140 GB of weight storage, distributed as approximately 17.5 GB per GPU. The baseline performance metrics are:
+The initial deployment uses FP16 weights, standard PyTorch eager execution, and tensor parallelism across `{python} KVCacheAnalysis.tensor_parallel_degree_str` GPUs. The 70B model in FP16 requires `{python} KVCacheAnalysis.weight_fp16_total_gb_str` of weight storage, distributed as approximately `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` per GPU. The baseline performance metrics are:
 
 - **TTFT**: 1,200 ms (well above the 500 ms target)
 - **ITL**: 85 ms (above the 50 ms target)
 - **Throughput**: 280 tokens/second (below the 1,000 token/second target)
-- **Maximum batch size**\index{Batch Size!maximum}: 4 (limited by KV cache memory)
+- **Maximum batch size**\index{Batch Size!maximum}: `{python} KVCacheAnalysis.baseline_policy_batch_size_str` (limited by KV cache memory)
 
 A Nsight Systems trace reveals the following time breakdown for a single decode step at batch size 1:
 
@@ -2305,9 +2313,9 @@ The roofline analysis confirms that decode is deeply memory-bound, with arithmet
 
 #### Optimization round 1: Precision engineering {#sec-performance-engineering-case-round1}
 
-The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the per-GPU weight footprint from 17.5 GB to about 4.4 GB on an 8-GPU node. The raw weight-read traffic drops by 4$\times$, and the effective bandwidth for weight reads roughly doubles once on-the-fly dequantization to FP16 is included.
+The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the per-GPU weight footprint from `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` to about `{python} KVCacheAnalysis.weight_int4_gb_str` on an `{python} KVCacheAnalysis.tensor_parallel_degree_str`-GPU node. The raw weight-read traffic drops by 4$\times$, and the effective bandwidth for weight reads roughly doubles once on-the-fly dequantization to FP16 is included.
 
-Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately 75.6 GB available for KV cache, up from 62.5 GB. Under the 4K-context GQA cache calculation from @sec-performance-engineering-kv-cache, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from 4 to approximately 32.
+Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately `{python} KVCacheAnalysis.avail_int8_gb_str` available for KV cache, up from `{python} KVCacheAnalysis.avail_fp16_gb_str`. Under the `{python} KVCacheAnalysis.context_len_tokens_str`-token GQA cache calculation from @sec-performance-engineering-kv-cache, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from `{python} KVCacheAnalysis.baseline_policy_batch_size_str` to approximately `{python} KVCacheAnalysis.optimized_policy_batch_size_str`.
 
 Postoptimization metrics at batch size 1:
 
@@ -2342,7 +2350,7 @@ $$
 
 The result is a 3.1$\times$ improvement over the Round 2 ITL of 32 ms.
 
-However, speculative decoding interacts with batching. At batch size 32, the verification step is no longer "free" because the GPU is closer to compute saturation. The system therefore applies speculation only when the current batch size is below 16, falling back to standard autoregressive decoding at higher loads. This adaptive policy maintains both the latency benefit at low load and the throughput benefit at high load.
+However, speculative decoding interacts with batching. At batch size `{python} KVCacheAnalysis.optimized_policy_batch_size_str`, the verification step is no longer "free" because the GPU is closer to compute saturation. The system therefore applies speculation only when the current batch size is below `{python} KVCacheAnalysis.speculation_policy_batch_size_str`, falling back to standard autoregressive decoding at higher loads. This adaptive policy maintains both the latency benefit at low load and the throughput benefit at high load.
 
 #### Lessons from the case study {#sec-performance-engineering-case-lessons}
 

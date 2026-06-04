@@ -212,6 +212,20 @@ def test_model_loading_anchors():
     assert loading.StableDiffusionV15CheckpointSize.provenance.ref
 
 
+def test_serving_profile_anchors():
+    from mlsysim import ReferenceStats
+
+    profile = ReferenceStats.ServingProfiles
+
+    assert float(profile.PrecisionDividendTensorParallelDegree) == pytest.approx(8.0)
+    assert float(profile.PrecisionDividendContextLengthTokens) == pytest.approx(4096.0)
+    assert profile.PrecisionDividendGpuMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
+    assert float(profile.PrecisionDividendBaselinePolicyBatchLimit) == pytest.approx(4.0)
+    assert float(profile.PrecisionDividendOptimizedPolicyBatchLimit) == pytest.approx(32.0)
+    assert float(profile.PrecisionDividendSpeculationBatchThreshold) == pytest.approx(16.0)
+    assert profile.PrecisionDividendTensorParallelDegree.provenance.ref
+
+
 def test_checkpoint_archetype_anchors():
     from mlsysim import ReferenceStats
     from mlsysim.core.units import byte, param

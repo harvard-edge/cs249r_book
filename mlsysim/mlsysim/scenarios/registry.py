@@ -219,6 +219,47 @@ class ModelLoading(Registry):
     )
 
 
+class ServingProfiles(Registry):
+    """Reusable serving-shape profiles for performance-engineering examples."""
+
+    PrecisionDividendTensorParallelDegree = sourced(
+        8,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Precision-dividend tensor-parallel degree",
+        description="H100 tensor-parallel degree for the 70B LLM KV-cache precision-dividend example.",
+    )
+    PrecisionDividendContextLengthTokens = sourced(
+        4096,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Precision-dividend context length",
+        description="Reference context length in tokens for the 70B LLM KV-cache precision-dividend example.",
+    )
+    PrecisionDividendGpuMemoryBudget = sourced_qty(
+        80 * GB,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Precision-dividend GPU memory budget",
+        description="Vendor-facing H100 memory budget used for decimal-GB serving capacity arithmetic.",
+    )
+    PrecisionDividendBaselinePolicyBatchLimit = sourced(
+        4,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Baseline policy batch limit",
+        description="Baseline maximum admitted batch size in the 70B LLM serving case study.",
+    )
+    PrecisionDividendOptimizedPolicyBatchLimit = sourced(
+        32,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Optimized policy batch limit",
+        description="Post-precision maximum admitted batch size in the 70B LLM serving case study.",
+    )
+    PrecisionDividendSpeculationBatchThreshold = sourced(
+        16,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="Speculation policy batch threshold",
+        description="Batch-size threshold below which the case-study policy enables speculative decoding.",
+    )
+
+
 class CheckpointArchetypes(Registry):
     """Reusable checkpoint-size scenario anchors for fault-tolerance examples."""
 
@@ -300,6 +341,7 @@ class ReferenceStats(Registry):
     TrainingScaleProfiles = TrainingScaleProfiles
     StorageTrainingCorpus = StorageTrainingCorpus
     ModelLoading = ModelLoading
+    ServingProfiles = ServingProfiles
     CheckpointArchetypes = CheckpointArchetypes
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery

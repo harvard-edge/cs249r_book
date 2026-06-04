@@ -720,6 +720,15 @@ MODEL_LOADING_SCENARIO_ASSUMPTIONS = _est(
     ),
 )
 
+LLM_SERVING_PRECISION_DIVIDEND_PROFILE = _est(
+    "prov:llm-serving-precision-dividend-profile",
+    "Reference LLM serving precision-dividend profile",
+    notes=(
+        "Reusable deployment-shape assumptions for the performance-engineering "
+        "70B LLM KV-cache and batch-size example."
+    ),
+)
+
 CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS = _est(
     "prov:checkpoint-archetype-scenario-assumptions",
     "Reference checkpoint-size archetype assumptions",
