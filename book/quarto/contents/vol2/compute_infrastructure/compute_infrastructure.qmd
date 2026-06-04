@@ -3284,6 +3284,88 @@ A team is planning to deploy 256 H100 GPUs (32 nodes) in an existing air-cooled 
 
 :::
 
+The checkpoint's PUE calculation has an economic consequence: cooling overhead is paid every hour the fleet runs.
+
+```{python}
+#| echo: false
+#| label: rack-cooling-tax
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RACK COOLING TAX (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-compute-rack—PUE and rack-level cooling economics.
+# │ Goal: Quantify the facility-power and electricity-cost effect of air vs.
+# │       liquid cooling for the 1K training-cluster reference.
+# │ How: IT power × (PUE_air - PUE_liquid), using registry-backed GPU,
+# │      cooling-profile, and electricity-price values.
+# │ Exports: RackCoolingTax.cluster_gpus_str,
+# │          RackCoolingTax.h100_tdp_w_str,
+# │          RackCoolingTax.air_pue_str,
+# │          RackCoolingTax.liquid_pue_str,
+# │          RackCoolingTax.air_overhead_pct_str,
+# │          RackCoolingTax.liquid_overhead_pct_str,
+# │          RackCoolingTax.it_power_kw_str,
+# │          RackCoolingTax.air_total_kw_str,
+# │          RackCoolingTax.liquid_total_kw_str,
+# │          RackCoolingTax.savings_kw_str,
+# │          RackCoolingTax.electricity_rate_usd_str,
+# │          RackCoolingTax.annual_savings_usd_str,
+# │          RackCoolingTax.three_year_savings_usd_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Infrastructure, Systems
+from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_power, fmt_usd
+
+class RackCoolingTax:
+    """Cooling overhead for the registry-backed 1K H100 training cluster."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    n_gpus = Systems.Clusters.Training_1K.total_accelerators
+    gpu_tdp = Hardware.Cloud.H100.tdp
+    air_pue = Infrastructure.FacilityCooling.SimpleAir.pue
+    liquid_pue = Infrastructure.FacilityCooling.StateOfArt.pue
+    electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate
+    lifecycle_years = 3
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    it_power = n_gpus * gpu_tdp
+    air_total = it_power * air_pue
+    liquid_total = it_power * liquid_pue
+    savings = air_total - liquid_total
+    annual_savings_usd = (savings * HOURS_PER_YEAR * hour * electricity_rate).to(USD)
+    three_year_savings_usd = annual_savings_usd * lifecycle_years
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(n_gpus == 1024, "Training_1K should represent the 1,024-GPU reference cluster")
+    check(air_pue > liquid_pue, "Air-cooled PUE should exceed liquid-cooled PUE")
+    check(280 < savings.to(kW).magnitude < 290, "Cooling savings should be about 287 kW")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    cluster_gpus_str = fmt_count(n_gpus, label="GPU")
+    h100_tdp_w_str = fmt_power(gpu_tdp, unit=watt, precision=0, commas=False)
+    air_pue_str = fmt(air_pue, precision=2, commas=False)
+    liquid_pue_str = fmt(liquid_pue, precision=2, commas=False)
+    air_overhead_pct_str = fmt_percent(air_pue - 1, precision=0, commas=False, style='prose')
+    liquid_overhead_pct_str = fmt_percent(liquid_pue - 1, precision=0, commas=False, style='prose')
+    it_power_kw_str = fmt_power(it_power, unit=kilowatt, precision=1, commas=False)
+    air_total_kw_str = fmt_power(air_total, unit=kilowatt, precision=1, commas=False)
+    liquid_total_kw_str = fmt_power(liquid_total, unit=kilowatt, precision=1, commas=False)
+    savings_kw_str = fmt_power(savings, unit=kilowatt, precision=1, commas=False)
+    electricity_rate_usd_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
+    annual_savings_usd_str = fmt_usd(annual_savings_usd, scale="K", precision=0, commas=False)
+    three_year_savings_usd_str = fmt_usd(three_year_savings_usd, scale="K", precision=0, commas=False)
+```
+
+::: {#nbk-compute-infrastructure-cooling-tax .callout-notebook title="The cooling tax"}
+
+For the chapter's `{python} RackCoolingTax.cluster_gpus_str` reference cluster, each H100 dissipates `{python} RackCoolingTax.h100_tdp_w_str`.
+
+1.  **IT power**\index{IT Power}: `{python} RackCoolingTax.cluster_gpus_str` $\times$ `{python} RackCoolingTax.h100_tdp_w_str` = `{python} RackCoolingTax.it_power_kw_str`.
+2.  **Air-cooled facility**: PUE `{python} RackCoolingTax.air_pue_str` adds `{python} RackCoolingTax.air_overhead_pct_str` overhead, raising facility draw to `{python} RackCoolingTax.air_total_kw_str`.
+3.  **Liquid-cooled facility**: PUE `{python} RackCoolingTax.liquid_pue_str` adds `{python} RackCoolingTax.liquid_overhead_pct_str` overhead, raising facility draw to `{python} RackCoolingTax.liquid_total_kw_str`.
+
+**Systems insight**: The cooling choice changes continuous power by `{python} RackCoolingTax.savings_kw_str`. At `{python} RackCoolingTax.electricity_rate_usd_str`, that saves about `{python} RackCoolingTax.annual_savings_usd_str` per year, or `{python} RackCoolingTax.three_year_savings_usd_str` over a three-year hardware lifecycle. The thermodynamic requirement and the economic argument point in the same direction: high-density AI racks should be designed for liquid cooling from the start.
+
+:::
+
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4029,6 +4111,64 @@ To mitigate these synchronization risks, experienced infrastructure teams use **
 
 These logistical contortions are driven by the **time value of compute**\index{Time value of compute}. In the race for frontier model development, the cost of delay is the loss of strategic position, exceeding the interest on capital. If a frontier model is projected to generate \$10 million per month in value -- whether through direct inference revenue or downstream product capabilities -- a three-month construction delay represents a \$30 million loss, often exceeding the cost of the facility's electrical infrastructure entirely. This calculus justifies aggressive expediting measures, such as paying 2--3$\times$ premiums for prefabricated modular data centers or leasing temporary colocation space to bridge the gap between silicon delivery and facility readiness.
 
+#### Build-vs-buy TCO threshold {#sec-compute-infrastructure-build-vs-buy-tco}
+
+The same timing problem shapes the build-vs-buy decision. Cloud rental converts scarce accelerators into an operating expense and is attractive when demand is bursty, uncertain, or urgent. Owning a cluster converts the same capacity into capital expense and only wins when utilization is high enough to amortize the node, power, cooling, networking, staffing, and facility risk over the hardware lifecycle.
+
+```{python}
+#| echo: false
+#| label: compute-infrastructure-build-buy-tco
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BUILD-VS-BUY TCO THRESHOLD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-compute-infrastructure-build-vs-buy-tco and chapter summary.
+# │ Goal: Estimate the utilization threshold where owning a DGX H100 node beats
+# │       renting equivalent cloud H100 hours under a simplified model.
+# │ How: annualized node CapEx / (cloud annual cost at 100% utilization -
+# │      on-prem electricity cost at 100% utilization).
+# │ Exports: BuildBuyTcoThreshold.node_gpus_str,
+# │          BuildBuyTcoThreshold.node_price_usd_str,
+# │          BuildBuyTcoThreshold.amortization_years_str,
+# │          BuildBuyTcoThreshold.cloud_h100_hourly_usd_str,
+# │          BuildBuyTcoThreshold.electricity_rate_usd_str,
+# │          BuildBuyTcoThreshold.breakeven_util_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Infrastructure, Systems
+from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_usd
+
+class BuildBuyTcoThreshold:
+    """Simplified per-node build-vs-buy utilization threshold."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    cloud_h100_hourly = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    dgx_h100_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
+    amortization_years = 3
+    facility_pue = Infrastructure.FacilityCooling.StateOfArt.pue
+    onprem_elec = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude
+    node_power = Hardware.Cloud.H100.tdp * gpus_per_node * 1.2
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    annual_cloud_cost = cloud_h100_hourly * gpus_per_node * HOURS_PER_YEAR
+    annual_power_cost = node_power.to(kW).magnitude * HOURS_PER_YEAR * onprem_elec * facility_pue
+    annual_capex = dgx_h100_price / amortization_years
+    breakeven_util = annual_capex / (annual_cloud_cost - annual_power_cost)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(0 < breakeven_util < 1, "Breakeven utilization must be a fraction")
+    check(annual_cloud_cost > annual_power_cost, "Cloud cost must exceed on-prem power cost")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    node_gpus_str = fmt_count(gpus_per_node, label="GPU")
+    node_price_usd_str = fmt_usd(dgx_h100_price, scale="M", precision=1, commas=False)
+    amortization_years_str = fmt(amortization_years, precision=0, commas=False)
+    cloud_h100_hourly_usd_str = fmt_usd(cloud_h100_hourly, precision=2, commas=False, per="GPU-hour")
+    electricity_rate_usd_str = fmt_usd(onprem_elec, precision=2, commas=False, per="kWh")
+    breakeven_util_pct_str = fmt_percent(breakeven_util, precision=1, commas=False, style='prose')
+```
+
+This simplified threshold deliberately omits facility construction, network fabric, staffing, financing, and resale value so the direction of the trade-off is visible. A DGX H100 node with `{python} BuildBuyTcoThreshold.node_gpus_str`, costing about `{python} BuildBuyTcoThreshold.node_price_usd_str` and amortized over `{python} BuildBuyTcoThreshold.amortization_years_str` years, becomes cheaper than renting equivalent cloud H100 capacity at `{python} BuildBuyTcoThreshold.cloud_h100_hourly_usd_str` when sustained utilization exceeds roughly `{python} BuildBuyTcoThreshold.breakeven_util_pct_str`, before the omitted fleet-level costs are added. The engineering lesson is not that this threshold is universal; it is that utilization, power price (`{python} BuildBuyTcoThreshold.electricity_rate_usd_str` here), and facility readiness determine whether ownership turns into leverage or idle capital.
+
 These physical and logistical constraints have defined the current generation of warehouse-scale computers. The next generation will not remove the walls; it will move them. Emerging technologies matter here because they change where the memory, communication, or power constraint binds.
 
 ## Emerging Infrastructure Technologies {#sec-compute-emerging}
@@ -4196,7 +4336,7 @@ Operators of legacy facilities assume air cooling can scale to modern AI racks w
 
 **Pitfall**: *Rejecting liquid cooling on budget grounds without modeling operating cost.*
 
-Organizations often reject liquid cooling based on the upfront capital cost (10--15 percent higher than air-cooled facilities) without performing a TCO analysis. As the cooling tax napkin math showed, liquid cooling saves 294 kW of continuous power for a 1,000-GPU cluster, translating to approximately \$180,000 per year in electricity savings. Over a three-year lifecycle, the savings of \$540,000 typically exceed the incremental capital cost of the liquid cooling infrastructure. At larger scales, the savings multiply proportionally, making liquid cooling both thermodynamically necessary and economically advantageous.
+Organizations often reject liquid cooling based on the upfront capital cost (10--15 percent higher than air-cooled facilities) without performing a TCO analysis. The Rack section's cooling-tax calculation showed that liquid cooling saves `{python} RackCoolingTax.savings_kw_str` of continuous power for the `{python} RackCoolingTax.cluster_gpus_str` reference cluster, translating to about `{python} RackCoolingTax.annual_savings_usd_str` per year in electricity savings. Over a three-year lifecycle, the savings reach `{python} RackCoolingTax.three_year_savings_usd_str`, which can exceed the incremental capital cost of the liquid cooling infrastructure. At larger scales, the savings multiply proportionally, making liquid cooling both thermodynamically necessary and economically advantageous.
 
 Beyond the direct electricity savings, liquid cooling enables higher rack densities (120+ kW per rack vs. 20--30 kW for air), which reduces the data center floor space required. Smaller floor areas reduce building construction costs, land acquisition costs, and cabling distances. When all these secondary savings are included, liquid cooling is often cheaper on a total-cost basis even for clusters as small as 64 GPUs.
 
@@ -4371,30 +4511,9 @@ class InfraFrontierClosingRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Our `{python} InfraFrontierClosingRecap.frontier_params_b_str`-parameter model has served as the persistent architectural forcing function connecting every layer of this hierarchy. At the accelerator level, processing a single token requires about 350 billion floating-point operations, yet the arithmetic is not the limiting resource on modern Tensor Cores. At the memory level, the 350 GB FP16 weight tensor exceeds a single accelerator's HBM capacity and saturates HBM bandwidth once it is sharded or compressed for serving; streaming this volume at `{python} SummaryScaleScenario.h100_bw_tb_per_s_str` creates a bandwidth-floor latency of over 100 ms per token for one accelerator-equivalent HBM path. Moving to the node level, the full training state -- comprising weights, gradients, optimizer states, and activations -- expands beyond 2 TB, shattering the 80 GB limit of individual chips and requiring tensor parallelism, data-parallel sharding, and memory offload. At the rack level, the thermal density of 32 such accelerators drawing `{python} SummaryScaleScenario.h100_tdp_w_str` each necessitates `{python} SummaryScaleScenario.rack_power_kw_str` of power delivery and liquid cooling infrastructure. At the pod level, training within a viable two-week window requires synchronizing over 1,000 GPUs across a non-blocking InfiniBand fabric, where the statistical certainty of hardware failure forces a checkpointing strategy that trades compute cycles for reliability. At the economics level, bursty cloud rental can beat ownership, while owned clusters become compelling only when sustained utilization is high enough to amortize the \$63M three-year cost. Every constraint in this chapter -- from the width of the HBM bus to the topology of the data center network -- traces back to the single arithmetic fact that this model does not fit on a single chip.
+Our `{python} InfraFrontierClosingRecap.frontier_params_b_str`-parameter model has served as the persistent architectural forcing function connecting every layer of this hierarchy. At the accelerator level, processing a single token requires about 350 billion floating-point operations, yet the arithmetic is not the limiting resource on modern Tensor Cores. At the memory level, the 350 GB FP16 weight tensor exceeds a single accelerator's HBM capacity and saturates HBM bandwidth once it is sharded or compressed for serving; streaming this volume at `{python} SummaryScaleScenario.h100_bw_tb_per_s_str` creates a bandwidth-floor latency of over 100 ms per token for one accelerator-equivalent HBM path. Moving to the node level, the full training state -- comprising weights, gradients, optimizer states, and activations -- expands beyond 2 TB, shattering the 80 GB limit of individual chips and requiring tensor parallelism, data-parallel sharding, and memory offload. At the rack level, the thermal density of 32 such accelerators drawing `{python} SummaryScaleScenario.h100_tdp_w_str` each necessitates `{python} SummaryScaleScenario.rack_power_kw_str` of power delivery and liquid cooling infrastructure. At the pod level, training within a viable two-week window requires synchronizing over 1,000 GPUs across a non-blocking InfiniBand fabric, where the statistical certainty of hardware failure forces a checkpointing strategy that trades compute cycles for reliability. At the economics level, bursty cloud rental can beat ownership, while owned clusters become compelling only when sustained utilization is high enough to amortize hardware, power, cooling, and facility risk. Every constraint in this chapter -- from the width of the HBM bus to the topology of the data center network -- traces back to the single arithmetic fact that this model does not fit on a single chip.
 
 The practical method transfers beyond this particular model. Identify the binding constraint at each level, quantify its effect, and propagate the consequence upward through the stack. Selecting the fastest accelerator is counterproductive if the cooling infrastructure cannot remove its heat. Building the densest rack is futile if the power grid cannot supply its demand. Deploying the widest network is wasteful if the workload's communication pattern does not use the bandwidth. Infrastructure engineering is therefore systems engineering in its purest form: a quantitative discipline for reasoning about how chip-level choices alter rack power, facility cooling, network topology, reliability strategy, and total cost of ownership.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: TcoSummaryBreakevenRecap.breakeven_util_str
-class TcoSummaryBreakevenRecap:
-    cloud_h100_hourly = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    dgx_h100_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
-    amortization_years = 3
-    facility_pue = Infrastructure.FacilityCooling.StateOfArt.pue
-    onprem_elec = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude
-    node_power = Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node * 1.2
-    denominator = (
-        cloud_h100_hourly * gpus_per_node * HOURS_PER_YEAR
-        - node_power.to(kW).magnitude * HOURS_PER_YEAR * onprem_elec * facility_pue
-    )
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    breakeven_util_str = fmt_percent((dgx_h100_price / amortization_years) / denominator, precision=1, commas=False, style='prose')
-```
 
 ::: {.callout-takeaways title="The data center is the computer"}
 
@@ -4404,7 +4523,7 @@ class TcoSummaryBreakevenRecap:
 * **Peak vs. sustained**: Model FLOPs Utilization (MFU)\index{MFU!sustained vs. peak} of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.
 * **Facility efficiency is part of the computer**: Liquid cooling achieves PUE of 1.05--1.10, delivering 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. At pod scale, network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 * **Failure at scale**: A 10,000-GPU cluster\index{Failure!at scale} experiences roughly one GPU failure every five hours. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
-* **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing, not just the purchase price. Under a simplified per-node hardware-plus-electricity model, owning becomes favorable above approximately `{python} TcoSummaryBreakevenRecap.breakeven_util_str` sustained utilization; adding facility, network, and staffing costs to a full fleet TCO raises that threshold further.
+* **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing, not just the purchase price. Under the simplified per-node hardware-plus-electricity model in @sec-compute-infrastructure-build-vs-buy-tco, owning becomes favorable above approximately `{python} BuildBuyTcoThreshold.breakeven_util_pct_str` sustained utilization; adding facility, network, and staffing costs to a full fleet TCO raises that threshold further.
 
 :::
 
