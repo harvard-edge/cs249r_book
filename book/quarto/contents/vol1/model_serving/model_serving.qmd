@@ -3893,7 +3893,7 @@ class CarbonCostH100Tdp:
 # │ Exports: cc_concurrent_str, cc_tokens_req_tokens_per_s_str, cc_total_tokens_per_s_str,
 # │          cc_host_overhead_w_str, cc_total_power_w_str, cc_joules_token_j_str,
 # │          cc_response_tokens_str, cc_response_joules_j_str, cc_smartphone_j_str,
-# │          cc_boiling_j_str, cc_low_util_str, cc_idle_power_w_str, cc_low_util_joules_j_str
+# │          cc_boiling_j_str, cc_low_util_pct_str, cc_idle_power_w_str, cc_low_util_joules_j_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import ReferenceStats
 from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty, check, fmt_percent, fmt_rate, fmt_power, fmt_energy
@@ -3937,15 +3937,14 @@ class CarbonCostCalc:
     cc_response_joules_j_str = fmt_energy(cc_response_joules, unit=joule, precision=1, commas=False)
     cc_smartphone_j_str = fmt_energy(ENERGY_SMARTPHONE_CHARGE_J, unit=joule, precision=0)
     cc_boiling_j_str = fmt_energy(ENERGY_BOILING_WATER_J, unit=joule, precision=0)
-    cc_low_util_str = fmt_percent(cc_low_util_pct_value/100, precision=0, commas=False, style='symbol')
+    cc_low_util_pct_str = fmt_percent(cc_low_util_pct_value/100, precision=0, commas=False, style='symbol')
     cc_idle_power_w_str = fmt_power(cc_idle_power, unit=watt, precision=0, commas=False)
     cc_low_util_joules_j_str = fmt_qty(cc_low_util_joules, joule, precision=1, commas=False, per='token')
 ```
 
 ::: {#nbk-carbon-chat .callout-notebook title="The carbon cost of a chat"}
 
-*J per token: the green metric*:
-As LLMs scale, energy efficiency becomes a first-class operational metric alongside latency. For an H100 GPU (`{python} CarbonCostH100Tdp.h100_tdp_str` W TDP), we can quantify the energy footprint of serving:
+**Metric**: As LLMs scale, joules per token becomes a first-class operational metric alongside latency. For an H100 GPU (`{python} CarbonCostH100Tdp.h100_tdp_str` W TDP), we can quantify the energy footprint of serving:
 
 1.  **Throughput**: `{python} CarbonCostCalc.cc_concurrent_str` concurrent requests $\times$ `{python} CarbonCostCalc.cc_tokens_req_tokens_per_s_str` per request ≈ `{python} CarbonCostCalc.cc_total_tokens_per_s_str`.
 2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_str` W (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
@@ -3958,7 +3957,7 @@ As LLMs scale, energy efficiency becomes a first-class operational metric alongs
 - For comparison, charging a smartphone consumes ≈ `{python} CarbonCostCalc.cc_smartphone_j_str`.
 - Boiling a cup of water consumes ≈ `{python} CarbonCostCalc.cc_boiling_j_str`.
 
-*The engineering lever*: The primary way to reduce J/token is to *increase hardware utilization* and *eliminate redundant compute*. If the GPU sits at `{python} CarbonCostCalc.cc_low_util_str` utilization due to poor batching, the "Idle Power" is still ~`{python} CarbonCostCalc.cc_idle_power_w_str`, causing the energy-per-token to skyrocket to >`{python} CarbonCostCalc.cc_low_util_joules_j_str`. Furthermore, architectural optimizations like prefix caching skip the energy-intensive prefill phase for shared context, directly reducing the energy footprint of RAG and chat applications. The serving lesson is that efficiency is not only a latency or cost metric; it also determines how much energy each useful token consumes.
+The primary way to reduce J/token is to increase hardware utilization and eliminate redundant compute. If the GPU sits at `{python} CarbonCostCalc.cc_low_util_pct_str` utilization due to poor batching, the idle power is still ~`{python} CarbonCostCalc.cc_idle_power_w_str`, causing the energy per token to rise to >`{python} CarbonCostCalc.cc_low_util_joules_j_str`. Architectural optimizations like prefix caching also skip the energy-intensive prefill phase for shared context, directly reducing the energy footprint of retrieval-augmented generation (RAG) and chat applications. The serving lesson is that efficiency is not only a latency or cost metric; it also determines how much energy each useful token consumes.
 
 :::
 
@@ -4224,19 +4223,15 @@ class PrecisionTradeoffCalc:
 
 :::
 
-#### Layer sensitivity {#sec-model-serving-layer-sensitivity-6a31}
+#### Precision selection constraints {#sec-model-serving-layer-sensitivity-6a31}
 
-Not\index{Quantization!layer sensitivity}\index{Layer Sensitivity!precision tolerance} all layers tolerate reduced precision equally. Empirically, quantization error for a layer scales with weight magnitude and gradient sensitivity, captured by the following proportionality in @eq-quant-error:
+Precision selection is constrained by layer sensitivity\index{Quantization!layer sensitivity}\index{Layer Sensitivity!precision tolerance}, calibration data, and runtime policy. Not all layers tolerate reduced precision equally. Empirically, quantization error for a layer scales with weight magnitude and gradient sensitivity, captured by the following proportionality in @eq-quant-error:
 $$\epsilon_{\text{quant}} \propto \alpha \cdot \|W\|_2 \cdot 2^{-b}$$ {#eq-quant-error}
 where $\alpha$ is a layer-specific sensitivity coefficient (determined empirically or via Fisher information), $\|W\|_2$ is the weight L2 norm, and $b$ is the bit width. This explains observed patterns where first convolutional layers with high gradients and large sensitivity coefficients are precision-sensitive and often kept at FP16, middle layers with stable gradients and low sensitivity coefficients tolerate INT8 well, and final classification layers with small weights but high task sensitivity benefit from FP16 or higher precision.
 
-#### Calibration requirements {#sec-model-serving-calibration-requirements-06b0}
+Post-training\index{Calibration!INT8 quantization}\index{Post-Training Quantization!calibration}\index{Calibration!dataset, representative traffic} quantization adds a data constraint. The calibration dataset determines the scale factors used for INT8 conversion, so it must represent actual serving traffic rather than merely reuse convenient training or validation data. A model calibrated on ImageNet-style validation images can lose several percentage points when served on wildlife camera images with different lighting and backgrounds, a failure mode revisited in @sec-model-serving-fallacies-pitfalls-336b.
 
-Post-training\index{Calibration!INT8 quantization}\index{Post-Training Quantization!calibration}\index{Calibration!dataset, representative traffic} quantization requires a calibration dataset to determine optimal scale factors for INT8 conversion. Production experience shows that calibration data must be representative of actual serving traffic, not just training data. Using ImageNet validation images to calibrate a model serving wildlife camera images resulted in a 3.2 percentage point accuracy degradation in one production system.
-
-#### Dynamic precision selection {#sec-model-serving-dynamic-precision-selection-dc60}
-
-Advanced\index{Precision!dynamic, adaptive quality} serving systems select precision per request based on runtime conditions. If the system is ahead of latency SLO, it uses higher precision for better accuracy. For low-confidence INT8 results, it recomputes at FP16. Different customer tiers may receive different precision levels. This pattern enables adaptive quality-latency trade-offs while maximizing throughput during normal operation.
+Advanced\index{Precision!dynamic, adaptive quality} serving systems turn precision into a runtime policy. If the system is ahead of its latency SLO, it can use higher precision for better accuracy. For low-confidence INT8 results, it can recompute at FP16. Different customer tiers may receive different precision levels. This pattern enables adaptive quality-latency trade-offs while maximizing throughput during normal operation.
 
 The precision decision has direct infrastructure consequences: INT8 inference achieves roughly 3$\times$ higher throughput than FP32, meaning a workload requiring 30 GPUs at FP32 needs only 10 at INT8. This 3$\times$ reduction in hardware translates directly to a 3$\times$ reduction in operating costs. The connection between model-level optimization and infrastructure economics is why precision selection cannot be treated as purely a model concern.
 
@@ -4257,7 +4252,11 @@ These are not independent tricks. They are places where a measured trace can exp
 
 Inference engines like TensorRT were introduced in @sec-model-serving-inference-runtime-selection-5eef. These engines achieve 2--5$\times$ speedups because serving changes the compiler problem. Training computation graphs are *dynamic and mutable*, whereas serving graphs are usually *static*. Once shapes and operators are fixed, the compiler can spend deployment-time work to remove runtime work.
 
-The first gain is operator fusion\index{Operator Fusion!graph compilation}. Memory bandwidth often limits performance more than compute (@sec-hardware-acceleration), so a chain such as `Conv2D` -> `BiasAdd` -> `ReLU` should not write an intermediate tensor to VRAM after each operation. Fusion collapses the chain into one kernel launch, keeps intermediate values in registers or cache, and turns several global-memory round trips into one. The same static graph also enables constant folding\index{Constant Folding!compile-time optimization}\index{Optimization!compile-time, constant folding}: if a subexpression depends only on fixed weights or constants, such as `x * (sqrt(2) / 2)`, the compiler replaces it with the precomputed multiplication `x * 0.707...`. Memory planning\index{Memory Planning!tensor allocation} applies the same idea to allocation rather than arithmetic. Since the tensor lifetimes are known, the runtime can precalculate memory offsets and reuse buffers instead of allocating reactively during the request.
+The first gain is operator fusion\index{Operator Fusion!graph compilation}. Memory bandwidth often limits performance more than compute (@sec-hardware-acceleration), so a chain such as `Conv2D` -> `BiasAdd` -> `ReLU` should not write an intermediate tensor to VRAM after each operation. Fusion collapses the chain into one kernel launch, keeps intermediate values in registers or cache, and turns several global-memory round trips into one.
+
+The same static graph also enables constant folding\index{Constant Folding!compile-time optimization}\index{Optimization!compile-time, constant folding}. If a subexpression depends only on fixed weights or constants, such as `x * (sqrt(2) / 2)`, the compiler replaces it with the precomputed multiplication `x * 0.707...`. This removes work from every request without changing the model's mathematical output.
+
+Memory planning\index{Memory Planning!tensor allocation} applies the same idea to allocation rather than arithmetic. Since the tensor lifetimes are known, the runtime can precalculate memory offsets and reuse buffers instead of allocating reactively during the request. The result is not just fewer operations, but a more predictable serving path with fewer allocator stalls and less memory fragmentation.
 
 These optimizations lead to a deployment choice. Just-in-time compilation adapts to the shapes observed at runtime, but the first request pays the compilation penalty. Ahead-of-time compilation removes that startup spike by shipping an optimized artifact, but the deployment must explicitly cover every shape profile the service will accept.
 
