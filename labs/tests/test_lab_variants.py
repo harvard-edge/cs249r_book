@@ -405,3 +405,42 @@ def test_v2_06_variants_define_collective_defaults():
         assert "residual_risk" in variant.defaults
         assert "validation_tests" in variant.defaults
         assert variant.assumptions["report_artifact"] == "communication design review"
+
+
+def test_remaining_v2_variants_define_system_design_defaults():
+    lab_ids = (
+        "v2_01_scale_illusion",
+        "v2_02_compute_wall",
+        "v2_03_network_fabric_design",
+        "v2_04_data_pipeline_wall",
+        "v2_05_parallelism_design",
+        "v2_07_failure_budget_engineering",
+        "v2_08_fleet_orchestration",
+        "v2_09_optimization_trap",
+        "v2_12_silent_fleet",
+        "v2_13_price_of_privacy",
+        "v2_14_robustness_budget",
+        "v2_15_carbon_budget",
+        "v2_16_fairness_budget",
+        "v2_17_fleet_synthesis",
+    )
+    for lab_id in lab_ids:
+        for variant in list_lab_variants(lab_id):
+            assert "concept_label" in variant.defaults
+            assert "decision_story" in variant.defaults
+            assert "knob_label" in variant.defaults
+            assert "knob_unit" in variant.defaults
+            assert "default_knob" in variant.defaults
+            assert "knob_min" in variant.defaults
+            assert "knob_max" in variant.defaults
+            assert "knob_step" in variant.defaults
+            assert "capacity_budget" in variant.defaults
+            assert "latency_budget_ms" in variant.defaults
+            assert "cost_budget" in variant.defaults
+            assert "quality_floor_pct" in variant.defaults
+            assert "guardrail_floor_pct" in variant.defaults
+            assert "decision_options" in variant.defaults
+            assert "validation_tests" in variant.defaults
+            assert variant.assumptions["system_design_variant"] is True
+            assert variant.assumptions.get("fallback_variant") is not True
+            assert variant.assumptions["report_artifact"]

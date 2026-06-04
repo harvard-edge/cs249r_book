@@ -1805,3 +1805,76 @@ Plan updates needed in other labs:
 Tests or checks run:
 - `python3 -m py_compile labs/vol1/lab_09_data_selection.py labs/mlsysbook_labs/selection.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
 - `python3 -m pytest labs/tests/test_engine.py -k "lab_09_data_selection" -q`
+
+### 2026-06-03 - Remaining Volume II Shared System-Design Migration
+
+Labs:
+- `labs/vol2/lab_01_introduction.py`
+- `labs/vol2/lab_02_compute_infra.py`
+- `labs/vol2/lab_03_communication.py`
+- `labs/vol2/lab_04_data_storage.py`
+- `labs/vol2/lab_05_dist_train.py`
+- `labs/vol2/lab_07_fault_tolerance.py`
+- `labs/vol2/lab_08_fleet_orch.py`
+- `labs/vol2/lab_09_perf_engineering.py`
+- `labs/vol2/lab_12_ops_scale.py`
+- `labs/vol2/lab_13_security_privacy.py`
+- `labs/vol2/lab_14_robust_ai.py`
+- `labs/vol2/lab_15_sustainable_ai.py`
+- `labs/vol2/lab_16_responsible_ai.py`
+- `labs/vol2/lab_17_fleet_synthesis.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/system_design.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_system_design_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- the 14 Volume II notebooks listed above
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.system_design`, a shared helper layer for remaining Volume II labs that resolves catalog metadata, canonical tracks, typed variants, MLSysIM hardware/model refs, decision options, feasibility frontiers, scaling curves, residual-risk memos, ledger saves, and local report exports.
+- Added generated-but-typed hand-authored variants for the remaining Volume II labs. Each lab has its own concept label, knob, track narrative, decision options, validation tests, and report artifact, while hardware/model refs and track budgets come from the canonical track registry.
+- Replaced the large standalone V2 notebooks with small Marimo shells that create track/control cells and render through the shared helper. This removes notebook-local hardware/model/system constants from those labs.
+- Added a shared prior-decision ledger summary used by V2-17 so the capstone can surface earlier Volume II decisions when they exist and degrade gracefully when the local ledger is empty.
+- Extended the wheel contract to include `mlsysbook_labs/system_design.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The labs resolve the canonical track refs:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Lab-specific knobs, budgets, decision options, validation tests, and report artifacts live in typed `mlsysbook_labs` variants.
+
+Notebook-local constants removed:
+- The remaining V2 notebooks no longer embed fixed H100/edge/device constants, ad hoc training/network/storage/failure/security/carbon/fairness formulas, or local decision-option tables.
+- Displayed stress ratios, latency/cost budgets, feasibility, validation requirements, residual risk, and report payloads now come from `mlsysbook_labs.system_design` and typed variants.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.system_design` provides a common Volume II decision lab modality: track context, source trace, prediction lock, frontier plot, scaling curve, decision memo, validation tests, reflection, ledger save, and download report.
+- The ledger summary helper is reusable by future Volume II capstone refinements.
+
+Plan updates needed in other labs:
+- Future refinements can specialize any shared-renderer V2 lab into a richer lab-specific helper without changing the track registry or notebook shell pattern.
+- Report schema validation should next assert that every deep lab includes track, scenario, source trace, evidence summary, final decision, reflection, and residual risk.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/system_design.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m py_compile labs/vol2/lab_01_introduction.py labs/vol2/lab_02_compute_infra.py labs/vol2/lab_03_communication.py labs/vol2/lab_04_data_storage.py labs/vol2/lab_05_dist_train.py labs/vol2/lab_07_fault_tolerance.py labs/vol2/lab_08_fleet_orch.py labs/vol2/lab_09_perf_engineering.py labs/vol2/lab_12_ops_scale.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_14_robust_ai.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_16_responsible_ai.py labs/vol2/lab_17_fleet_synthesis.py`
+- `python3 -m pytest labs/tests/test_system_design_helpers.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -q -k "lab_01_introduction or lab_02_compute_infra or lab_03_communication or lab_04_data_storage or lab_05_dist_train or lab_07_fault_tolerance or lab_08_fleet_orch or lab_09_perf_engineering or lab_12_ops_scale or lab_13_security_privacy or lab_14_robust_ai or lab_15_sustainable_ai or lab_16_responsible_ai or lab_17_fleet_synthesis"`
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+- `python3 -m pytest labs/tests/test_migration_shell.py -q`
+- `python3 -m pytest labs/tests/test_*_helpers.py -q`
+- `python3 -m pytest labs/tests/test_system_design_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -q`
+- `git diff --check`

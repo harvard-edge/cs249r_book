@@ -84,8 +84,8 @@ For each lab:
 - [x] 5. V1-13 Tail Latency Trap: extends serving and SLA evidence.
 - [x] 6. V1-14 Silent Degradation: adds monitoring and drift evidence.
 - [x] 7. V2-06 Collective Communication: upgrade existing rich wrapper to canonical tracks.
-- [ ] 8. Finish remaining Volume I labs by dependency order.
-- [ ] 9. Finish remaining Volume II labs by dependency order.
+- [x] 8. Finish remaining Volume I labs by dependency order.
+- [x] 9. Finish remaining Volume II labs by dependency order.
 - [ ] 10. Run catalog-wide QA and final cleanup.
 
 ## Volume I Labs
@@ -402,86 +402,96 @@ Deep migration tasks:
 Path: `labs/vol2/lab_01_introduction.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Reframe scale as track-specific rather than only cloud-scale.
-- [ ] Add shared scale-envelope helper if reused.
-- [ ] Track examples:
+- [x] Reframe scale as track-specific rather than only cloud-scale.
+- [x] Add shared scale-envelope helper if reused.
+- [x] Track examples:
   - iPhone: millions of installed devices.
   - Oura Ring: always-on fleet telemetry with tiny payloads.
   - RoboTaxi: city-scale autonomous fleet operations.
   - Cloud Fleet: GPU/service fleet scaling.
-- [ ] Update parts so scale changes reliability, coordination, and cost differently by track.
-- [ ] Update report with the selected scale failure mode.
+- [x] Update parts so scale changes reliability, coordination, and cost differently by track.
+- [x] Update report with the selected scale failure mode.
 
 ### V2-02 - The Compute Infrastructure Wall
 
 Path: `labs/vol2/lab_02_compute_infra.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Tie compute infrastructure limits to track-specific hardware/system refs.
-- [ ] Add missing infrastructure facts to MLSysIM if displayed.
-- [ ] Compare compute, bandwidth, memory, and utilization limits by track.
-- [ ] Show where adding more compute stops helping.
-- [ ] Update report with infrastructure bottleneck and mitigation.
-- [ ] Add tests for any shared compute infrastructure helper.
+- [x] Tie compute infrastructure limits to track-specific hardware/system refs.
+- [x] Add missing infrastructure facts to MLSysIM if displayed.
+- [x] Compare compute, bandwidth, memory, and utilization limits by track.
+- [x] Show where adding more compute stops helping.
+- [x] Update report with infrastructure bottleneck and mitigation.
+- [x] Add tests for any shared compute infrastructure helper.
 
 ### V2-03 - Network Fabric Design
 
 Path: `labs/vol2/lab_03_communication.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make communication fabric meaningful for every track.
-- [ ] Add or reuse network/fabric refs in MLSysIM.
-- [ ] Track examples:
+- [x] Make communication fabric meaningful for every track.
+- [x] Add or reuse network/fabric refs in MLSysIM.
+- [x] Track examples:
   - iPhone: device-to-cloud uplink constraints.
   - Oura Ring: BLE/mobile relay payload constraints.
   - RoboTaxi: vehicle-edge-cloud synchronization.
   - Cloud Fleet: east-west datacenter fabric.
-- [ ] Display bandwidth, latency, payload, and retry tradeoffs.
-- [ ] Update report with selected communication strategy and residual risk.
+- [x] Display bandwidth, latency, payload, and retry tradeoffs.
+- [x] Update report with selected communication strategy and residual risk.
 
 ### V2-04 - The Data Pipeline Wall
 
 Path: `labs/vol2/lab_04_data_storage.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Connect data storage and freshness to each track.
-- [ ] Add shared pipeline/storage budget helper if needed.
-- [ ] Track examples:
+- [x] Connect data storage and freshness to each track.
+- [x] Add shared pipeline/storage budget helper if needed.
+- [x] Track examples:
   - iPhone: privacy-preserving local cache and upload policy.
   - Oura Ring: compressed time-series summaries.
   - RoboTaxi: high-volume sensor logs and incident upload.
   - Cloud Fleet: feature store and training data lake.
-- [ ] Add plots/tables for storage growth, freshness, and bandwidth.
-- [ ] Update report with data pipeline decision and residual risk.
+- [x] Add plots/tables for storage growth, freshness, and bandwidth.
+- [x] Update report with data pipeline decision and residual risk.
 
 ### V2-05 - The Parallelism Puzzle
 
 Path: `labs/vol2/lab_05_dist_train.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make parallelism choice relevant to track deployment lifecycle.
-- [ ] Distinguish training-time parallelism from inference-time deployment target.
-- [ ] Add shared parallelism strategy descriptors if useful.
-- [ ] Track examples:
+- [x] Make parallelism choice relevant to track deployment lifecycle.
+- [x] Distinguish training-time parallelism from inference-time deployment target.
+- [x] Add shared parallelism strategy descriptors if useful.
+- [x] Track examples:
   - iPhone/Oura Ring/RoboTaxi: centralized or federated training feeding edge deployment.
   - Cloud Fleet: data/model/pipeline parallelism in service of large model training.
-- [ ] Update report with training strategy, scaling bottleneck, and residual risk.
-- [ ] Add tests for any shared parallelism helper.
+- [x] Update report with training strategy, scaling bottleneck, and residual risk.
+- [x] Add tests for any shared parallelism helper.
 
 ### V2-06 - Collective Communication
 
@@ -509,54 +519,60 @@ Deep migration tasks:
 Path: `labs/vol2/lab_07_fault_tolerance.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make failure modes and recovery decisions track-specific.
-- [ ] Add shared reliability/failure-budget helper if needed.
-- [ ] Track examples:
+- [x] Make failure modes and recovery decisions track-specific.
+- [x] Add shared reliability/failure-budget helper if needed.
+- [x] Track examples:
   - iPhone: offline mode, app crashes, OS updates.
   - Oura Ring: battery depletion, sensor dropout, sync gaps.
   - RoboTaxi: sensor faults, degraded mode, safety fallback.
   - Cloud Fleet: node failures and retry storms.
-- [ ] Display failure-rate, recovery-time, or availability evidence.
-- [ ] Update report with failure budget and recovery decision.
+- [x] Display failure-rate, recovery-time, or availability evidence.
+- [x] Update report with failure budget and recovery decision.
 
 ### V2-08 - The Scheduling Trap
 
 Path: `labs/vol2/lab_08_fleet_orch.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Connect scheduling/orchestration to each track's fleet shape.
-- [ ] Add shared fleet/orchestration descriptors if needed.
-- [ ] Track examples:
+- [x] Connect scheduling/orchestration to each track's fleet shape.
+- [x] Add shared fleet/orchestration descriptors if needed.
+- [x] Track examples:
   - iPhone: staged rollout and device eligibility.
   - Oura Ring: background job timing and battery-aware scheduling.
   - RoboTaxi: vehicle dispatch, update windows, and safety constraints.
   - Cloud Fleet: GPU scheduling and bin packing.
-- [ ] Display utilization, queueing, rollout, or availability tradeoffs.
-- [ ] Update report with scheduling policy and residual risk.
+- [x] Display utilization, queueing, rollout, or availability tradeoffs.
+- [x] Update report with scheduling policy and residual risk.
 
 ### V2-09 - The Optimization Trap
 
 Path: `labs/vol2/lab_09_perf_engineering.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make optimization targets differ by track.
-- [ ] Add shared performance-counter or bottleneck taxonomy helper if useful.
-- [ ] Track examples:
+- [x] Make optimization targets differ by track.
+- [x] Add shared performance-counter or bottleneck taxonomy helper if useful.
+- [x] Track examples:
   - iPhone: optimize latency without thermal regression.
   - Oura Ring: optimize energy without missing sensing events.
   - RoboTaxi: optimize latency while preserving safety margin.
   - Cloud Fleet: optimize throughput/cost without p99 regression.
-- [ ] Update plots to show local optimum vs system optimum.
-- [ ] Update report with chosen optimization and unintended side effect.
+- [x] Update plots to show local optimum vs system optimum.
+- [x] Update report with chosen optimization and unintended side effect.
 
 ### V2-10 - The Inference Economy
 
@@ -607,113 +623,125 @@ Deep migration tasks:
 Path: `labs/vol2/lab_12_ops_scale.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make fleet observability and operations track-specific.
-- [ ] Add shared fleet health/telemetry helper if needed.
-- [ ] Track examples:
+- [x] Make fleet observability and operations track-specific.
+- [x] Add shared fleet health/telemetry helper if needed.
+- [x] Track examples:
   - iPhone: app/device version segments.
   - Oura Ring: sensor quality and sync coverage.
   - RoboTaxi: route/geography/weather fleet slices.
   - Cloud Fleet: service shards, regions, and model versions.
-- [ ] Display fleet health dashboard evidence by track.
-- [ ] Update report with monitoring slice, action threshold, and residual risk.
+- [x] Display fleet health dashboard evidence by track.
+- [x] Update report with monitoring slice, action threshold, and residual risk.
 
 ### V2-13 - The Price of Privacy
 
 Path: `labs/vol2/lab_13_security_privacy.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make security/privacy controls track-specific.
-- [ ] Add shared privacy/security control catalog if needed.
-- [ ] Track examples:
+- [x] Make security/privacy controls track-specific.
+- [x] Add shared privacy/security control catalog if needed.
+- [x] Track examples:
   - iPhone: local processing and permission boundary.
   - Oura Ring: health-derived sensor data and consent.
   - RoboTaxi: location/video logs and incident retention.
   - Cloud Fleet: tenant isolation and data governance.
-- [ ] Display accuracy, latency, cost, or utility impact of privacy controls.
-- [ ] Update report with selected privacy control and residual risk.
+- [x] Display accuracy, latency, cost, or utility impact of privacy controls.
+- [x] Update report with selected privacy control and residual risk.
 
 ### V2-14 - The Robustness Budget
 
 Path: `labs/vol2/lab_14_robust_ai.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Tie robustness budget to track-specific failure consequences.
-- [ ] Add shared robustness scenario/helper if needed.
-- [ ] Track examples:
+- [x] Tie robustness budget to track-specific failure consequences.
+- [x] Add shared robustness scenario/helper if needed.
+- [x] Track examples:
   - iPhone: varied lighting/device/user context.
   - Oura Ring: sensor noise and physiological variation.
   - RoboTaxi: weather, occlusion, and out-of-distribution scenes.
   - Cloud Fleet: prompt/user/data distribution shift.
-- [ ] Display robustness-cost tradeoffs.
-- [ ] Update report with robustness budget and unresolved hazard.
+- [x] Display robustness-cost tradeoffs.
+- [x] Update report with robustness budget and unresolved hazard.
 
 ### V2-15 - The Carbon Budget
 
 Path: `labs/vol2/lab_15_sustainable_ai.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make sustainability accounting track-specific.
-- [ ] Add shared energy/carbon helper if the lab displays computed carbon evidence.
-- [ ] Track examples:
+- [x] Make sustainability accounting track-specific.
+- [x] Add shared energy/carbon helper if the lab displays computed carbon evidence.
+- [x] Track examples:
   - iPhone: battery energy and charging externality.
   - Oura Ring: tiny battery and lifecycle duty cycle.
   - RoboTaxi: vehicle compute energy and fleet update cadence.
   - Cloud Fleet: datacenter energy, utilization, and region mix.
-- [ ] Display energy/carbon tradeoffs with source trace.
-- [ ] Update report with carbon budget decision and residual risk.
+- [x] Display energy/carbon tradeoffs with source trace.
+- [x] Update report with carbon budget decision and residual risk.
 
 ### V2-16 - The Fairness Budget
 
 Path: `labs/vol2/lab_16_responsible_ai.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make fairness tradeoffs specific to each deployment track.
-- [ ] Reuse or extend the fairness metric helper from V1-15 if created.
-- [ ] Track examples:
+- [x] Make fairness tradeoffs specific to each deployment track.
+- [x] Reuse or extend the fairness metric helper from V1-15 if created.
+- [x] Track examples:
   - iPhone: accessibility and device/user variation.
   - Oura Ring: physiological and demographic variation.
   - RoboTaxi: neighborhood, pedestrian, weather, and safety exposure.
   - Cloud Fleet: service quality across user cohorts/regions.
-- [ ] Display fairness/utility/safety tradeoffs.
-- [ ] Update report with fairness budget, mitigation, and residual risk.
+- [x] Display fairness/utility/safety tradeoffs.
+- [x] Update report with fairness budget, mitigation, and residual risk.
 
 ### V2-17 - The Fleet Synthesis
 
 Path: `labs/vol2/lab_17_fleet_synthesis.py`
 
 Current status:
-- [x] Baseline track/report panel installed.
+- [x] Deep shared system-design renderer installed.
+- [x] Typed system-design variants cover all canonical tracks.
+- [x] Track selector, source trace, decision frontier, scaling curve, reflection, ledger save, prior Volume II decision summary, and local report export installed.
 
 Deep migration tasks:
-- [ ] Make this the Volume II capstone for the selected canonical track.
-- [ ] Add or reuse ledger summary helper to gather prior Volume II decisions.
-- [ ] Track examples should synthesize scale, infrastructure, communication, failure,
+- [x] Make this the Volume II capstone for the selected canonical track.
+- [x] Add or reuse ledger summary helper to gather prior Volume II decisions.
+- [x] Track examples should synthesize scale, infrastructure, communication, failure,
   operations, privacy, robustness, sustainability, and responsibility.
-- [ ] Confirm missing ledger entries degrade gracefully.
-- [ ] Generate a final fleet architecture report.
-- [ ] Add tests for fleet synthesis report schema and ledger fallback.
+- [x] Confirm missing ledger entries degrade gracefully.
+- [x] Generate a final fleet architecture report.
+- [x] Add tests for fleet synthesis report schema and ledger fallback.
 
 ## Final Catalog QA
 
-- [ ] Run `python3 -m pytest labs/tests/test_static.py -q`.
-- [ ] Run all shared helper tests in `labs/tests`.
+- [x] Run `python3 -m pytest labs/tests/test_static.py -q`.
+- [x] Run all shared helper tests in `labs/tests`.
 - [ ] Run relevant MLSysIM tests separately from `labs/tests`.
-- [ ] Verify `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` is rebuilt after shared helper changes.
+- [x] Verify `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` is rebuilt after shared helper changes.
 - [ ] Verify `wheels/mlsysim-0.1.2-py3-none-any.whl` is rebuilt after MLSysIM changes.
 - [ ] Verify every lab's report can be generated locally.
 - [ ] Verify each track has at least one representative visual/evidence modality.

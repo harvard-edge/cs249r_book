@@ -25,9 +25,23 @@ PILOT_LAB_IDS = (
     "v1_14_silent_degradation",
     "v1_15_no_free_fairness",
     "v1_16_architects_audit",
+    "v2_01_scale_illusion",
+    "v2_02_compute_wall",
+    "v2_03_network_fabric_design",
+    "v2_04_data_pipeline_wall",
+    "v2_05_parallelism_design",
     "v2_06_collective_communication",
+    "v2_07_failure_budget_engineering",
+    "v2_08_fleet_orchestration",
+    "v2_09_optimization_trap",
     "v2_10_inference_economy",
     "v2_11_edge_thermodynamics",
+    "v2_12_silent_fleet",
+    "v2_13_price_of_privacy",
+    "v2_14_robustness_budget",
+    "v2_15_carbon_budget",
+    "v2_16_fairness_budget",
+    "v2_17_fleet_synthesis",
 )
 
 ALL_LAB_IDS = tuple(metadata.lab_id for metadata in LAB_CATALOG.values())
@@ -70,6 +84,275 @@ def _variant(
         defaults=defaults,
         assumptions=assumptions,
     )
+
+
+_SYSTEM_DESIGN_LAB_CONFIGS = {
+    "v2_01_scale_illusion": {
+        "title": "Scale Illusion",
+        "concept_label": "Scale coordination",
+        "knob_label": "fleet load",
+        "knob_unit": "x baseline",
+        "report_artifact": "scale failure-mode memo",
+        "focus": "scale changes reliability, coordination, and cost in track-specific ways",
+        "options": ("Local-only scale-up", "Tiered rollout", "Aggressive central scaling"),
+        "validation_tests": ("load replay", "coordination audit", "failure-mode review", "rollback drill"),
+    },
+    "v2_02_compute_wall": {
+        "title": "Compute Infrastructure Wall",
+        "concept_label": "Compute infrastructure bottleneck",
+        "knob_label": "compute demand",
+        "knob_unit": "x baseline",
+        "report_artifact": "compute infrastructure mitigation memo",
+        "focus": "more compute stops helping once memory, bandwidth, utilization, or guardrails bind",
+        "options": ("Add raw compute", "Balance compute and memory", "Reduce demand at source"),
+        "validation_tests": ("roofline check", "utilization trace", "memory bandwidth audit", "mitigation replay"),
+    },
+    "v2_03_network_fabric_design": {
+        "title": "Network Fabric Design",
+        "concept_label": "Communication fabric",
+        "knob_label": "payload pressure",
+        "knob_unit": "x baseline",
+        "report_artifact": "communication strategy memo",
+        "focus": "bandwidth, latency, retries, and synchronization differ across device, edge, and cloud fabrics",
+        "options": ("Raw payload push", "Compressed staged sync", "Delay-tolerant aggregation"),
+        "validation_tests": ("bandwidth replay", "latency audit", "retry simulation", "payload budget check"),
+    },
+    "v2_04_data_pipeline_wall": {
+        "title": "Data Pipeline Wall",
+        "concept_label": "Storage and freshness pipeline",
+        "knob_label": "data freshness demand",
+        "knob_unit": "x baseline",
+        "report_artifact": "data pipeline decision memo",
+        "focus": "storage growth, freshness, and upload bandwidth create different walls by track",
+        "options": ("Retain raw stream", "Summarize and cache", "Tiered retention policy"),
+        "validation_tests": ("storage growth replay", "freshness audit", "upload budget check", "retention review"),
+    },
+    "v2_05_parallelism_design": {
+        "title": "Parallelism Puzzle",
+        "concept_label": "Training parallelism lifecycle",
+        "knob_label": "parallel workload",
+        "knob_unit": "x baseline",
+        "report_artifact": "parallelism strategy memo",
+        "focus": "training-time parallelism must feed the selected deployment track rather than becoming an end in itself",
+        "options": ("Single-worker baseline", "Data-parallel training", "Hybrid parallel lifecycle"),
+        "validation_tests": ("scaling efficiency run", "communication trace", "checkpoint audit", "deployment handoff review"),
+    },
+    "v2_07_failure_budget_engineering": {
+        "title": "Failure Budget Engineering",
+        "concept_label": "Failure and recovery budget",
+        "knob_label": "failure pressure",
+        "knob_unit": "x baseline",
+        "report_artifact": "failure recovery memo",
+        "focus": "failure modes and recovery policies differ across apps, wearables, vehicles, and cloud fleets",
+        "options": ("Best-effort retry", "Graceful degradation", "Redundant safety path"),
+        "validation_tests": ("failure injection", "recovery-time audit", "offline-mode replay", "fallback drill"),
+    },
+    "v2_08_fleet_orchestration": {
+        "title": "Scheduling Trap",
+        "concept_label": "Scheduling and orchestration",
+        "knob_label": "scheduling pressure",
+        "knob_unit": "x baseline",
+        "report_artifact": "scheduling policy memo",
+        "focus": "orchestration can optimize utilization while violating battery, safety, rollout, or SLA guardrails",
+        "options": ("Greedy utilization", "Guardrail-aware scheduler", "Staged control policy"),
+        "validation_tests": ("queue replay", "rollout simulation", "utilization audit", "guardrail check"),
+    },
+    "v2_09_optimization_trap": {
+        "title": "Optimization Trap",
+        "concept_label": "Local versus system optimization",
+        "knob_label": "optimization intensity",
+        "knob_unit": "x baseline",
+        "report_artifact": "optimization side-effect memo",
+        "focus": "a local speedup can regress thermal, energy, safety, cost, p99, or quality at the system level",
+        "options": ("Optimize local metric", "Constrained optimization", "System-level guardrail optimization"),
+        "validation_tests": ("before/after replay", "side-effect audit", "p99/energy check", "quality regression"),
+    },
+    "v2_12_silent_fleet": {
+        "title": "Silent Fleet",
+        "concept_label": "Fleet observability",
+        "knob_label": "telemetry volume",
+        "knob_unit": "x baseline",
+        "report_artifact": "fleet monitoring memo",
+        "focus": "fleet health depends on choosing the right slices, signals, thresholds, and action paths",
+        "options": ("Aggregate dashboard", "Slice-aware telemetry", "Action-threshold monitoring"),
+        "validation_tests": ("telemetry coverage audit", "alert replay", "slice drift review", "rollback drill"),
+    },
+    "v2_13_price_of_privacy": {
+        "title": "Price of Privacy",
+        "concept_label": "Privacy and security control",
+        "knob_label": "privacy control strength",
+        "knob_unit": "x baseline",
+        "report_artifact": "privacy control memo",
+        "focus": "privacy controls change latency, utility, governance, data access, and residual risk differently by track",
+        "options": ("Broad data access", "Privacy-preserving control", "Strict isolation"),
+        "validation_tests": ("privacy threat model", "latency/utility audit", "deletion lineage check", "consent review"),
+    },
+    "v2_14_robustness_budget": {
+        "title": "Robustness Budget",
+        "concept_label": "Robustness budget",
+        "knob_label": "stress exposure",
+        "knob_unit": "x baseline",
+        "report_artifact": "robustness budget memo",
+        "focus": "robustness spend should match the track-specific cost of failure and likely distribution shifts",
+        "options": ("Average-case hardening", "Targeted stress coverage", "Safety-first robustness budget"),
+        "validation_tests": ("stress replay", "OOD audit", "coverage review", "fallback drill"),
+    },
+    "v2_15_carbon_budget": {
+        "title": "Carbon Budget",
+        "concept_label": "Energy and carbon accounting",
+        "knob_label": "energy demand",
+        "knob_unit": "x baseline",
+        "report_artifact": "carbon budget memo",
+        "focus": "sustainability accounting spans device energy, fleet duty cycle, datacenter utilization, and region mix",
+        "options": ("Max throughput", "Energy-aware policy", "Carbon-constrained scheduling"),
+        "validation_tests": ("energy trace", "carbon accounting", "region/utilization audit", "quality regression"),
+    },
+    "v2_16_fairness_budget": {
+        "title": "Fairness Budget",
+        "concept_label": "Fairness and utility tradeoff",
+        "knob_label": "mitigation strength",
+        "knob_unit": "x baseline",
+        "report_artifact": "fairness budget memo",
+        "focus": "fairness mitigation should be tied to who is harmed and what system constraints limit mitigation",
+        "options": ("Global utility policy", "Targeted mitigation", "Guardrail-first fairness policy"),
+        "validation_tests": ("subgroup audit", "utility regression", "latency/cost check", "governance review"),
+    },
+    "v2_17_fleet_synthesis": {
+        "title": "Fleet Synthesis",
+        "concept_label": "Fleet architecture synthesis",
+        "knob_label": "system complexity",
+        "knob_unit": "x baseline",
+        "report_artifact": "final fleet architecture report",
+        "focus": "the Volume II capstone combines scale, infrastructure, communication, failure, operations, privacy, robustness, sustainability, and responsibility",
+        "options": ("Patch individual risks", "Integrated architecture", "Governed adaptive fleet"),
+        "validation_tests": ("ledger replay", "architecture review", "risk register audit", "capstone report check"),
+    },
+}
+
+
+def _track_design_budgets(profile: TrackProfile) -> dict[str, float]:
+    return {
+        "iphone": {
+            "latency_budget_ms": 180.0,
+            "cost_budget": 120.0,
+            "quality_floor_pct": 86.0,
+            "guardrail_floor_pct": 84.0,
+        },
+        "oura_ring": {
+            "latency_budget_ms": 500.0,
+            "cost_budget": 55.0,
+            "quality_floor_pct": 80.0,
+            "guardrail_floor_pct": 86.0,
+        },
+        "robotaxi": {
+            "latency_budget_ms": 55.0,
+            "cost_budget": 240.0,
+            "quality_floor_pct": 92.0,
+            "guardrail_floor_pct": 92.0,
+        },
+        "cloud_fleet": {
+            "latency_budget_ms": 130.0,
+            "cost_budget": 520.0,
+            "quality_floor_pct": 88.0,
+            "guardrail_floor_pct": 86.0,
+        },
+    }[profile.track_id]
+
+
+def _system_design_variant_defaults(config: dict[str, object], profile: TrackProfile) -> dict[str, object]:
+    budgets = _track_design_budgets(profile)
+    cost_budget = budgets["cost_budget"]
+    quality_floor = budgets["quality_floor_pct"]
+    guardrail_floor = budgets["guardrail_floor_pct"]
+    option_a, option_b, option_c = tuple(config["options"])  # type: ignore[index]
+    return {
+        "concept_label": config["concept_label"],
+        "decision_story": f"{config['focus']} for {profile.label}: {profile.narrative}",
+        "knob_label": config["knob_label"],
+        "knob_unit": config["knob_unit"],
+        "default_knob": 1.0,
+        "knob_min": 0.5,
+        "knob_max": 2.0,
+        "knob_step": 0.05,
+        "capacity_budget": 1.0,
+        "latency_budget_ms": budgets["latency_budget_ms"],
+        "cost_budget": cost_budget,
+        "quality_floor_pct": quality_floor,
+        "guardrail_floor_pct": guardrail_floor,
+        "decision_options": {
+            "local_baseline": {
+                "label": option_a,
+                "emphasis": "simple local or baseline policy",
+                "capacity": 0.80,
+                "base_load": 0.82,
+                "base_latency_ms": budgets["latency_budget_ms"] * 0.60,
+                "base_cost": cost_budget * 0.38,
+                "quality_pct": quality_floor + 1.0,
+                "guardrail_pct": guardrail_floor - 3.0,
+                "mitigation": "limit scope and add a manual escalation path",
+                "validation_requirement": "baseline replay plus guardrail audit",
+                "residual_risk": "baseline simplicity can hide scale or edge-case failures",
+            },
+            "balanced_policy": {
+                "label": option_b,
+                "emphasis": "balanced capacity, cost, and guardrail policy",
+                "capacity": 1.45,
+                "base_load": 1.00,
+                "base_latency_ms": budgets["latency_budget_ms"] * 0.58,
+                "base_cost": cost_budget * 0.56,
+                "quality_pct": quality_floor + 5.0,
+                "guardrail_pct": guardrail_floor + 6.0,
+                "mitigation": "reserve headroom and validate the highest-risk slices",
+                "validation_requirement": "track-specific replay, cost check, and rollback drill",
+                "residual_risk": "headroom assumptions can drift as the fleet or workload changes",
+            },
+            "scale_first": {
+                "label": option_c,
+                "emphasis": "aggressive scale or automation policy",
+                "capacity": 2.10,
+                "base_load": 1.30,
+                "base_latency_ms": budgets["latency_budget_ms"] * 0.85,
+                "base_cost": cost_budget * 0.92,
+                "quality_pct": quality_floor + 6.0,
+                "guardrail_pct": guardrail_floor - 1.0,
+                "mitigation": "add staged rollout and automatic rollback gates",
+                "validation_requirement": "stress replay and guardrail regression",
+                "residual_risk": "scale-first optimization can outpace validation evidence",
+            },
+        },
+        "validation_tests": config["validation_tests"],
+    }
+
+
+def _system_design_variants() -> tuple[LabTrackVariant, ...]:
+    variants: list[LabTrackVariant] = []
+    for lab_id, config in _SYSTEM_DESIGN_LAB_CONFIGS.items():
+        for profile in CANONICAL_TRACKS:
+            variants.append(
+                _variant(
+                    lab_id=lab_id,
+                    track_id=profile.track_id,
+                    scenario_id=f"{lab_id}_{profile.track_id}_system_design",
+                    stakeholder=profile.stakeholder,
+                    workload_summary=(
+                        f"{config['title']} for {profile.label}: {config['focus']}. "
+                        f"{profile.narrative}"
+                    ),
+                    objective=(
+                        f"Choose a {config['concept_label']} policy for {profile.label} "
+                        "and defend the mitigation, validation requirement, and residual risk."
+                    ),
+                    primary_metric=profile.primary_metrics[0],
+                    guardrail_metric=profile.guardrail_metrics[0],
+                    model_ref=_MODEL_REF_BY_TRACK[profile.track_id],
+                    defaults=_system_design_variant_defaults(config, profile),
+                    assumptions={
+                        "report_artifact": config["report_artifact"],
+                        "system_design_variant": True,
+                    },
+                )
+            )
+    return tuple(variants)
 
 
 _HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
@@ -3673,6 +3956,7 @@ _HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
         defaults={"placements": ("centralized", "edge_cache", "edge_offload", "hybrid"), "adaptation_options": ("centralized_retrain", "edge_feedback", "federated")},
         assumptions={"central_service_baseline": True, "report_artifact": "edge architecture memo"},
     ),
+    *_system_design_variants(),
 )
 
 

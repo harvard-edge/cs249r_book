@@ -33,7 +33,8 @@ def test_variant_source_trace_is_serializable_and_registry_backed():
     assert trace["track_id"] == "robotaxi"
     assert trace["hardware_ref"] == "Hardware.Edge.RoboTaxi"
     assert trace["model_ref"] == "Models.Vision.YOLOv8_Nano"
-    assert trace["assumptions"]["fallback_variant"] is True
+    assert trace["assumptions"]["system_design_variant"] is True
+    assert trace["assumptions"].get("fallback_variant") is not True
 
 
 def test_build_migration_report_marks_baseline_gaps():
@@ -54,5 +55,5 @@ def test_build_migration_report_marks_baseline_gaps():
     assert "## Source Trace" in report.markdown
     assert "Hardware.Cloud.H100" in report.markdown
     assert "## Incomplete Fields" in report.markdown
-    assert "Hand-authored track variant" in report.snapshot["incomplete_fields"]
+    assert "Hand-authored track variant" not in report.snapshot["incomplete_fields"]
     assert "Deep notebook part checkpoints" in report.snapshot["incomplete_fields"]

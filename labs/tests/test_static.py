@@ -269,6 +269,7 @@ class TestWheelConsistency:
             "mlsysbook_labs/roofline.py",
             "mlsysbook_labs/serving.py",
             "mlsysbook_labs/selection.py",
+            "mlsysbook_labs/system_design.py",
             "mlsysbook_labs/ui.py",
             "mlsysbook_labs/reports.py",
             "mlsysbook_labs/versions.py",
@@ -340,7 +341,13 @@ class TestLabCatalog:
                 and "build_lab_report" in source
                 and ("track_context" in source or "track_selector" in source)
             )
-            if not (has_baseline_panel or has_deep_surface):
+            has_shared_renderer_surface = (
+                "render_system_design_lab" in source
+                and "system_design_context" in source
+                and "system_design_controls" in source
+                and "track_selector" in source
+            )
+            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface):
                 missing.append(path)
         assert not missing, f"Missing track/report surface: {missing}"
 
