@@ -267,7 +267,7 @@ class ValidateCommand:
             Scope("capitalized", "_run_mitpress_capitalized_refs",
                   note='"chapter 12" lowercase in prose (§10.3.2)'),
             Scope("xref-case", "_run_xref_sentence_start_case",
-                  note="@fig- at sentence start should be @Fig- (MIT Press lowercase prefix)"),
+                  note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
         ],
         "labels": [
             # duplicates and orphans are both curated, but each carries its
@@ -6059,16 +6059,34 @@ class ValidateCommand:
         )
 
     def _run_xref_sentence_start_case(self, root: Path) -> ValidationRunResult:
-        """Flag lowercase @fig-/@tbl-/@sec-/@eq-/@lst- at sentence starts.
+        """Flag crossref prefix casing that fights sentence position.
 
-        With crossref prefixes configured to lowercase, sentence-start refs
-        must use the capitalized Quarto syntax (@Fig-, @Tbl-, @Sec-, @Eq-,
-        @Lst-) so the rendered prefix is uppercase.
+        Crossref prefixes render lowercase, so the casing of the @-prefix is
+        purely a function of sentence position (.claude/rules/cross-references.md
+        -> Prefix Casing). This check enforces BOTH directions:
+
+          * Sentence start -- a lowercase @sec-/@fig-/@tbl-/@eq-/@lst-/@alg-
+            must be capitalized (@Sec-, @Fig-, ...) so the rendered prefix
+            ("Section", "Figure") leads the sentence with a capital.
+          * Mid-sentence -- a capitalized @Sec-/@Fig-/... after a comma,
+            semicolon, open paren, or a lowercase word renders a stray capital
+            ("...as Table 2 shows") and must be lowercased (@sec-, @fig-, ...).
+
+        Both halves share one is_sentence_start / is_mid_sentence computation so
+        they stay consistent by construction. Algorithm refs (@alg-) are covered
+        for forward-compat even though the corpus carries none yet. Sentence
+        position is intentionally classified conservatively: clause boundaries
+        that are genuinely ambiguous (em-dash, a heading line, a preceding
+        acronym) are left unflagged in the mid-sentence direction rather than
+        risk a false positive.
+
+        Reverse (mid-sentence) direction + @alg- added 2026-06-04 to mirror the
+        documented Prefix Casing policy; the forward direction predates it.
         """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
-        xref_re = re.compile(r"@(fig|tbl|sec|eq|lst)-[\w-]+")
+        xref_re = re.compile(r"@([Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lg)-[\w-]+")
         footnote_def = re.compile(r"^\s*\[\^fn-")
 
         for file in files:
@@ -6087,49 +6105,101 @@ class ValidateCommand:
                     continue
                 if footnote_def.match(line):
                     continue
+                # Heading lines are governed by heading-case (Title Case for
+                # H1/H2, sentence case for H3+), not by sentence position; their
+                # crossref casing is out of scope for the mid-sentence rule.
+                on_heading = stripped.startswith("#")
 
                 for m in xref_re.finditer(line):
                     col = m.start()
                     before = line[:col].rstrip()
+                    ref_type = m.group(1)
+                    is_capitalized = ref_type[0].isupper()
+                    type_lower = ref_type.lower()
+
                     is_sentence_start = False
+                    is_mid_sentence = False
 
                     if not before:
-                        # Line-start ref: check preceding line
+                        # Line-start ref: classify by the preceding non-blank
+                        # line. A blank line, a sentence-final prev line, a
+                        # heading, or a div close => sentence start. Only call
+                        # mid-sentence when the prev line genuinely ends inside a
+                        # clause (lowercase word, digit, comma, semicolon) -- a
+                        # symmetric-conservative test that mirrors the same-line
+                        # rule and avoids treating metadata (a standalone
+                        # \index{} line) as running prose.
                         prev = ""
+                        prev_blank = False
                         for pi in range(idx - 2, -1, -1):
                             ps = lines[pi].strip()
                             if not ps:
-                                is_sentence_start = True
+                                prev_blank = True
                                 break
                             prev = ps
                             break
-                        if not is_sentence_start and prev:
-                            if prev[-1] in ".?!":
-                                is_sentence_start = True
-                            elif prev.startswith("#"):
-                                is_sentence_start = True
-                            elif prev.endswith(":::"):
-                                is_sentence_start = True
+                        # Strip trailing \index{...} tags -- they are metadata
+                        # appended to the paragraph, not sentence content.
+                        prev = re.sub(r'(\s*\\index\{[^}]*\})+\s*$', '', prev)
+                        if prev_blank or not prev:
+                            is_sentence_start = True
+                        elif (prev[-1] in ".?!"
+                                or prev.startswith("#")
+                                or prev.endswith(":::")):
+                            is_sentence_start = True
+                        elif prev[-1].islower() or prev[-1].isdigit() or prev[-1] in ",;":
+                            is_mid_sentence = True
                     else:
+                        last = before[-1]
                         if re.search(r'[.?!]\s*$', before):
                             is_sentence_start = True
+                        elif last in ",;":
+                            is_mid_sentence = True
+                        elif last == "(":
+                            # Parenthetical: "(see @sec-x)" lowercases, but
+                            # "Foo. (@Sec-x ...)" opens a sentence inside parens.
+                            head = before[:-1].rstrip()
+                            if head and head[-1] in ".?!":
+                                is_sentence_start = True
+                            else:
+                                is_mid_sentence = True
+                        elif last.islower() or last.isdigit():
+                            # Preceded by a lowercase word or a number -> the ref
+                            # sits inside a clause. (Uppercase/acronym before is
+                            # left unflagged on purpose -- it may end a clause.)
+                            is_mid_sentence = True
                         elif re.search(r':\s*$', before):
                             after_ref = line[m.end():].strip()
                             if after_ref and after_ref[0] not in ".,;:)]":
                                 is_sentence_start = True
+                        # otherwise (em-dash, other punctuation): neutral, no flag
 
-                    if is_sentence_start:
-                        ref_type = m.group(1)
-                        cap_form = f"@{ref_type[0].upper()}{ref_type[1:]}-"
-                        context = line.strip()[:100]
+                    context = line.strip()[:100]
+                    if not is_capitalized and is_sentence_start:
+                        cap_form = f"@{type_lower[0].upper()}{type_lower[1:]}-"
                         issues.append(
                             ValidationIssue(
                                 file=self._relative_file(file),
                                 line=idx,
                                 code="xref_sentence_start_case",
                                 message=(
-                                    f"Lowercase @{ref_type}- at sentence start "
+                                    f"Lowercase @{type_lower}- at sentence start "
                                     f"-- use {cap_form} for uppercase prefix"
+                                ),
+                                severity="warning",
+                                context=context,
+                            )
+                        )
+                    elif is_capitalized and is_mid_sentence and not on_heading:
+                        low_form = f"@{type_lower}-"
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="xref_midsentence_case",
+                                message=(
+                                    f"Capitalized @{ref_type}- mid-sentence "
+                                    f"-- use {low_form} for lowercase prefix"
                                 ),
                                 severity="warning",
                                 context=context,
@@ -6138,7 +6208,7 @@ class ValidateCommand:
 
         return ValidationRunResult(
             name="xref-sentence-start-case",
-            description="Flag lowercase crossref prefixes at sentence starts (MIT Press convention)",
+            description="Flag crossref prefix casing that fights sentence position (MIT Press convention)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
