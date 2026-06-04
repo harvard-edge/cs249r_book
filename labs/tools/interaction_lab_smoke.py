@@ -524,8 +524,6 @@ def inspect_visible_part(page, label: str, clicked: bool = True, note: str = "")
     text = body[start:] if start >= 0 else visible_text
     if len(text.strip()) < len(visible_text.strip()):
         text = visible_text
-    lower = text.lower()
-    categories: list[str] = []
     category_patterns = {
         "narrative": ("scenario", "stakeholder", "incoming message", "objective", "systems question"),
         "prediction": ("prediction", "predict", "select your prediction", "what do you expect", "how much", "which"),
@@ -534,9 +532,26 @@ def inspect_visible_part(page, label: str, clicked: bool = True, note: str = "")
         "source_math": ("source", "math", "formula", "calculation", "solver", "mlsysim"),
         "reflection": ("reflection", "checkpoint", "decision", "takeaway", "report", "residual risk", "synthesis"),
     }
-    for category, patterns in category_patterns.items():
-        if any(pattern in lower for pattern in patterns):
-            categories.append(category)
+
+    def detected_categories(value: str) -> list[str]:
+        lower = value.lower()
+        return [
+            category
+            for category, patterns in category_patterns.items()
+            if any(pattern in lower for pattern in patterns)
+        ]
+
+    categories = detected_categories(text)
+    words = len(re.findall(r"\b\w+\b", text))
+    if words < 45 or len(categories) < 3:
+        combined_text = f"{text}\n{visible_text}"
+        combined_categories = detected_categories(combined_text)
+        combined_words = len(re.findall(r"\b\w+\b", combined_text))
+        if len(combined_categories) > len(categories) or combined_words > words:
+            text = combined_text
+            categories = combined_categories
+            words = combined_words
+
     if int(data["visibleControls"]) > 0 and "controls" not in categories:
         categories.append("controls")
     if int(data["visiblePlots"]) > 0 and "evidence" not in categories:
@@ -544,8 +559,9 @@ def inspect_visible_part(page, label: str, clicked: bool = True, note: str = "")
     if int(data["visibleFields"]) > 0 and "evidence" not in categories:
         categories.append("evidence")
 
-    words = len(re.findall(r"\b\w+\b", text))
-    has_multiple_pieces = words >= 45 and len(categories) >= 3
+    lower = text.lower()
+    has_synthesis_checkpoint = words >= 100 and "reflection" in categories
+    has_multiple_pieces = (words >= 45 and len(categories) >= 3) or has_synthesis_checkpoint
     return PartCheck(
         label=label,
         clicked=clicked,

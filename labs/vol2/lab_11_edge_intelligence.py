@@ -1210,6 +1210,34 @@ $$
         """))
 
         items.append(mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-takeaway-panel">
+          <h2>Synthesis Checkpoint</h2>
+          <div class="mlsysbook-grid">
+            <div class="mlsysbook-field">
+              <strong>Prediction thread</strong>
+              Compare the memory, storage, energy, and federation predictions against
+              the computed result before writing the report.
+            </div>
+            <div class="mlsysbook-field">
+              <strong>Evidence summary</strong>
+              Use the active memory budget, adaptation storage curve, energy budget
+              use, and non-IID round count as the evidence set.
+            </div>
+            <div class="mlsysbook-field">
+              <strong>Decision</strong>
+              Choose the adaptation strategy, execution target, and communication
+              policy that you would defend for {v2_11_profile.label}.
+            </div>
+            <div class="mlsysbook-field">
+              <strong>Residual risk</strong>
+              State which measurement or rollout validation would still be needed
+              before treating the edge architecture as deployable.
+            </div>
+          </div>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 280px; background: white;
                         border: 1px solid {COLORS['Border']}; border-radius: 12px;
@@ -1222,6 +1250,8 @@ $$
                     <strong>Lab V2-12: The Silent Fleet</strong> &mdash; You learned to adapt
                     on a single device. Now manage 200 models in production where silent failures
                     cost $1M/day and operational complexity grows quadratically with model count.
+                    Carry forward the prediction, budget controls, evidence summary, decision,
+                    report reflection, and residual risk from this edge architecture review.
                 </div>
             </div>
             <div style="flex: 1; min-width: 280px; background: white;
@@ -1460,7 +1490,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V2-11 report is generated locally from the selected track, current controls, "
-                "MLSysIM hardware refs, and shared `mlsysbook_labs.edge` calculations."
+                "computed evidence, final decision, and residual risk."
             ),
             kind="info",
         ),
