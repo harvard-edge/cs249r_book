@@ -848,6 +848,7 @@ def check_html_page(playwright, path: Path, screenshot: Path) -> HtmlPageCheck:
                   const v2Rows = document.querySelectorAll('#activityBody tr').length;
                   return {
                     trackCards: document.querySelectorAll('#trackGrid .track-card').length === 4,
+                    arcCards: document.querySelectorAll('#arcGrid .track-card').length === 4,
                     coverageRows: document.querySelectorAll('#coverageBody tr').length === 34,
                     conceptRows: document.querySelectorAll('#conceptBody tr').length === 14,
                     activityRowsBeforeFilter: before === 103,

@@ -30,6 +30,60 @@ Follow-up:
 
 ## Notes
 
+### 2026-06-04 - Whole-Track Arc Coherence Pass
+
+Lab:
+- All Volume I and Volume II labs.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/track_arcs.py`
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/migration.py`
+- `labs/mlsysbook_labs/system_design.py`
+- Direct hand-written lab notebooks in `labs/vol1` plus V2-06, V2-10, and V2-11.
+- `labs/lab-plan-dashboard.html`
+- `labs/LAB_TRACK_COHERENCE_AUDIT_2026_06_04.md`
+- `labs/LAB_USER_ACTIVITY_FEEDBACK_LOOP.md`
+- `labs/LAB_OVERNIGHT_FEEDBACK_AUDIT.md`
+
+What changed:
+- Added a reusable `TrackArc` registry and `LabArcStep` sequence covering all 34 catalog labs.
+- Added `track_arc_context()` as the shared student-facing "Where This Fits" panel.
+- Wired the arc panel into direct labs, shared migration panels, and the shared Volume II system-design renderer.
+- Removed visible source-trace/source-ref panels from hand-written lab launch flows while preserving internal report provenance.
+- Updated the dashboard with a new Volume Track Arcs section and smoke-test coverage for 4 arc cards.
+- Recorded simulated instructor, TA, student, and domain-expert feedback in the coherence audit.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were added in this pass.
+- The pass reinforces that hardware/model/system facts stay in MLSysIM or typed `mlsysbook_labs` registries; learner-facing copy should describe device/model families and decisions rather than implementation refs.
+
+Notebook-local constants removed:
+- No computational constants were removed in this pass.
+- Visible provenance/source-trace panels were removed from launch flows where they distracted from the case narrative.
+
+Reusable component or modality improved:
+- `track_arc_context()` gives every lab a shared, testable cross-volume journey panel.
+- `track_arc_context_summary()` gives docs/tests/UI the same arc copy from one registry.
+- The dashboard now exposes the track arc before the 34-row lab coverage table.
+
+Plan updates needed in other labs:
+- Future deep migrations should use `track_arc_context()` after `track_context()`.
+- When a lab needs a new device/model fact, add it to MLSysIM or a typed registry before putting it in notebook prose.
+- Preserve provenance in report snapshots and tests; keep student launch copy scenario-focused.
+
+Tests or checks run:
+- `python3 -m py_compile` on the edited shared files and direct notebooks.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_track_arcs.py labs/tests/test_ui_helpers.py labs/tests/test_static.py labs/tests/test_lab_variants.py labs/tests/test_report_contract.py labs/tests/test_migration_shell.py -q` -> 856 passed, 4 skipped, 5 xfailed.
+
+Follow-up:
+- Browser-smoke the updated dashboard and representative/all lab pages after rebuilding the labs wheel.
+- Add release-mode browser smoke to CI or a documented pre-release command.
+- Specialize the highest-value remaining shared Volume II labs after the arc baseline is stable.
+
 ### 2026-06-03 - Planning Baseline
 
 Lab:

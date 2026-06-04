@@ -75,7 +75,7 @@ be compared across labs and tracks.
 | Activity performed | What the reviewer clicked, changed, read, or graded. |
 | Expected learning | What the reviewer thinks the lab is trying to teach. |
 | Observed learning | What the rendered lab actually made visible. |
-| Strongest evidence | Plot, table, source trace, report field, or decision card that best supported learning. |
+| Strongest evidence | Plot, table, report field, decision card, or scenario text that best supported learning. |
 | Confusion or defect | Missing context, weak narrative, bad default, unclear graph, grading problem, or source-truth issue. |
 | Expert correction | Domain-specific correction or missing assumption. |
 | Requirement generated | Concrete implementation requirement. |
@@ -95,7 +95,7 @@ Steps:
 - Open `labs/vol1/lab_00_introduction.py`.
 - Read the opening structure.
 - Select one track.
-- Inspect the track profile and source policy.
+- Inspect the track profile and where the track fits across the course.
 - Download or preview the first local report artifact if available.
 
 Feedback to collect:
@@ -106,11 +106,11 @@ Feedback to collect:
 
 Backward requirements:
 - Lab 00 must explicitly preview the rhythm: prediction, evidence, decision,
-  report, source trace.
+  reflection, and report.
 - Lab 00 should show the four tracks as course identities and explain why there
   are not many more tracks.
-- If report export is demonstrated in Lab 00, the report should include track ID,
-  hardware ref, system ref when present, and source policy.
+- If report export is demonstrated in Lab 00, the report should include track,
+  scenario, predictions, evidence, decision, reflection, and residual risk.
 
 ### Activity 2 - Student Completes V1-01 On iPhone
 
@@ -137,7 +137,7 @@ Expert feedback required:
 Backward requirements:
 - The final report should include the selected D-A-M bottleneck.
 - The lab should include a concise "what changed because of iPhone" statement.
-- Hardware-derived values must resolve through MLSysIM refs.
+- Hardware-derived values must resolve through shared registry refs.
 
 Current example in place:
 - V1-01 variants already differentiate iPhone, Oura Ring, RoboTaxi, and Cloud
@@ -221,7 +221,7 @@ Persona:
 Steps:
 - Open a downloaded Markdown report.
 - Identify selected track, lab ID, predictions, evidence, decision, residual
-  risk, and source trace.
+  risk, and any caveats.
 - Grade without opening the notebook.
 
 Feedback to collect:
@@ -234,7 +234,8 @@ Backward requirements:
 - Add formal report schema tests across all deep labs.
 - Add rubric fields that match report fields.
 - Reports should mark missing required fields rather than silently omitting them.
-- The report should preserve enough source trace for domain assumptions.
+- The report should preserve enough internal provenance for domain assumptions,
+  without requiring the notebook page to show implementation refs.
 
 Current gap:
 - Rendered report export exists, but exhaustive report-generation and schema
@@ -274,7 +275,7 @@ Persona:
 
 Steps:
 - Select Cloud Fleet in V2-10 Inference Economy or V2-17 Fleet Synthesis.
-- Inspect capacity, latency, cost, utilization, and source trace.
+- Inspect capacity, latency, cost, utilization, and residual risk.
 - Review the final report artifact.
 
 Feedback to collect:
@@ -290,7 +291,7 @@ Backward requirements:
 
 Current examples in place:
 - Shared Volume II renderer provides frontier, scaling curve, decision memo,
-  validation tests, residual risk, source trace, ledger save, and report export.
+  validation tests, residual risk, ledger save, and report export.
 
 ### Activity 8 - Edge Expert Reviews V2-03, V2-06, And V2-11
 
@@ -408,7 +409,7 @@ Each track should repeatedly teach different system instincts.
 | Volume | Student level | Feedback target |
 |---|---|---|
 | Volume I | Senior undergraduate | Make one core ML systems concept visible through a concrete track-specific decision. Reports should show prediction, evidence, bottleneck, decision, and residual risk. |
-| Volume II | Senior/Master's/Ph.D. | Make fleet/system design trade-offs visible. Reports should include capacity, reliability, cost, operational risk, source trace, and defensible system policy. |
+| Volume II | Senior/Master's/Ph.D. | Make fleet/system design trade-offs visible. Reports should include capacity, reliability, cost, operational risk, validation caveats, and defensible system policy. |
 
 Volume I should be concrete and approachable. Volume II can be more systems-rich,
 but it still needs clear student artifacts.
@@ -423,7 +424,7 @@ Use a 0-2 score for each dimension.
 | Chapter pedagogy | Concept unclear. | Concept present but not central. | Lab clearly teaches one chapter systems idea. |
 | Prediction discipline | No prediction. | Prediction exists but is not used. | Prediction is compared to computed evidence and misconception. |
 | Evidence modality fit | Visual feels generic. | Visual partly supports the lesson. | Visual is the right representation for the concept. |
-| Source trace | Facts are hidden. | Some refs visible. | Hardware/model/system/scenario provenance is visible and reportable. |
+| Source-of-truth discipline | Facts are hidden or notebook-local. | Some refs resolve centrally but leak into learner copy. | Facts resolve centrally while learner copy stays scenario-focused and reports preserve provenance. |
 | Report usefulness | Report is missing or vague. | Report captures outputs but weak reasoning. | Report can be graded without opening the notebook. |
 | Domain realism | Expert finds major mismatch. | Acceptable with caveats. | Expert agrees the scenario is pedagogically realistic and caveated. |
 | Accessibility fallback | Visual-only. | Some text/table support. | Table/text fallback contains exact values and status labels. |
@@ -431,7 +432,7 @@ Use a 0-2 score for each dimension.
 
 Release target:
 - No P0 issue in any dimension.
-- Score 2 on track differentiation, chapter pedagogy, source trace, and report
+- Score 2 on track differentiation, chapter pedagogy, source-of-truth discipline, and report
   usefulness for every stable lab.
 - Score 2 on domain realism for the primary track narrative in each lab.
 
@@ -443,7 +444,7 @@ Release target:
 | Student clicks controls but cannot name the lesson | Strengthen chapter recap, systems translation, and misconception reveal. |
 | TA cannot grade the report | Add report schema tests and rubric-aligned fields. |
 | Instructor cannot assign the lab standalone | Add assignment mode, expected report, timebox, common misconception, and rubric sketch to the track plan or instructor guide. |
-| Domain expert rejects assumptions | Move the assumption to MLSysIM or typed variants, label it as an estimate, and update source trace. |
+| Domain expert rejects assumptions | Move the assumption to MLSysIM or typed variants, label it as an estimate, and update report provenance. |
 | Expert says track is too generic | Add track-specific failure mode and final decision framing. |
 | Volume II labs feel too mechanically similar | Specialize high-value shared-renderer labs with concept-specific modalities. |
 | Plot is visually interesting but not gradeable | Add table fallback and report snapshot. |
@@ -486,7 +487,7 @@ P2:
 | V1-12 Benchmarking Trap | Benchmark visuals expose sustained behavior, tails, and misleading metrics. |
 | V2-11 Edge Intelligence | Memory and energy budgets become concrete for local adaptation. |
 | V2-17 Fleet Synthesis | Capstone behavior can summarize prior ledger decisions. |
-| Shared Volume II renderer | Gives a common grammar: track context, source trace, frontier, scaling curve, decision, validation, residual risk, report export. |
+| Shared Volume II renderer | Gives a common grammar: track context, where-this-fits arc, frontier, scaling curve, decision, validation, residual risk, report export. |
 
 ## Operating Loop
 

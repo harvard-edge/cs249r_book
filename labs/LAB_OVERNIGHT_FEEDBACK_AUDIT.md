@@ -40,14 +40,14 @@ Screenshots:
 ### Volume I Instructor: Senior Undergraduate ML Systems
 
 What works:
-- The repeated track card gives students a stable mental model: stakeholder, hardware source, system source, metrics, guardrails, and dominant constraints.
+- The repeated track card gives students a stable mental model: stakeholder, device family, model family, metrics, guardrails, and dominant constraints.
 - Volume I labs now feel like engineering worksheets rather than isolated model exercises.
 - V1-01 and V1-09 make the core level appropriate for senior undergraduates: students can reason from constraints without needing distributed-systems depth.
 
 Concerns:
 - Students need a clean first screen. Repeated widgets or clipped registry names make the lab feel less polished and distract from the learning objective.
 - The same track selector should not appear twice.
-- Long source refs must wrap because they are part of the source-trace pedagogy, not incidental debug text.
+- Implementation provenance should not dominate the opening screen; the learner path should read as a case, then preserve provenance in reports and tests.
 
 Implemented:
 - Removed duplicate track selector rendering from shared Volume II wrappers.
@@ -65,13 +65,13 @@ Concerns:
 - The first grad-level refinement target should be adding stronger evidence modalities to the most conceptually important V2 labs, not changing the track registry.
 
 Deferred:
-- Lab-specific V2 refinements should be separate future commits. The shared renderer is now a working baseline with source-traced decisions.
+- Lab-specific V2 refinements should be separate future commits. The shared renderer is now a working baseline with track arcs, decisions, validation, and residual risk.
 
 ### TA/Grading Feedback
 
 What works:
 - Local report export exists in rendered labs.
-- Source traces expose track, hardware, model, helper, and source policy.
+- Reports preserve track, scenario, hardware/model refs, helper outputs, and caveats for grading without making those refs the main student-facing copy.
 - The common report fields are suitable for rubric-based grading.
 
 Concerns:
@@ -84,9 +84,9 @@ Implemented:
 ### Student Feedback Simulation
 
 Likely positive reactions:
-- The track choice visibly changes the story, stakeholder, hardware source, and narrative.
+- The track choice visibly changes the story, stakeholder, model family, device family, and narrative.
 - The same track names recur, so students understand that they are carrying a perspective through the course.
-- The source trace helps explain where facts come from.
+- The where-this-fits arc helps explain how one lab connects to the larger Volume I or Volume II journey.
 
 Likely confusion:
 - Lab 00 is orientation and does not use the same "Your Track" rendered selector pattern as later labs. This is acceptable but the smoke tool must treat it differently.
