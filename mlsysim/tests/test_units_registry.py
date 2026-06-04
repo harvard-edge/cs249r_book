@@ -7,8 +7,10 @@ import pytest
 from mlsysim.core.units import (
     Bparam,
     GB,
+    GFLOPs,
     GW,
     GiB,
+    KiB,
     Gbps,
     Kparam,
     L,
@@ -24,6 +26,7 @@ from mlsysim.core.units import (
     TOPS,
     Tparam,
     US,
+    USD,
     ZFLOP,
     byte,
     count,
@@ -168,6 +171,23 @@ def test_clinical_imaging_photo_size_anchor():
     assert anchor.provenance.ref
 
 
+def test_oura_sleep_study_anchors():
+    from mlsysim import ReferenceStats
+    from mlsysim.core.provenance import scalar_value
+
+    study = ReferenceStats.OuraSleepStudy
+
+    assert scalar_value(study.Participants) == pytest.approx(106)
+    assert scalar_value(study.RecordingNights) == pytest.approx(440)
+    assert study.RecordingHours.to(hour).magnitude == pytest.approx(3444)
+    assert scalar_value(study.CrossValidationFolds) == pytest.approx(5)
+    assert scalar_value(study.AccelOnlyAccuracy) == pytest.approx(0.57)
+    assert scalar_value(study.EnhancedAccuracy) == pytest.approx(0.79)
+    assert scalar_value(study.PsgScorerAgreementLow) == pytest.approx(0.82)
+    assert scalar_value(study.PsgScorerAgreementHigh) == pytest.approx(0.83)
+    assert study.EnhancedAccuracy.provenance.ref
+
+
 def test_storage_training_corpus_anchor():
     from mlsysim import ReferenceStats
     from mlsysim.core.units import byte, day, minute, param
@@ -184,6 +204,87 @@ def test_storage_training_corpus_anchor():
     assert corpus.CompressedSource.provenance.ref
 
 
+def test_model_loading_anchors():
+    from mlsysim import ReferenceStats
+
+    loading = ReferenceStats.ModelLoading
+
+    assert loading.StableDiffusionV15CheckpointSize.to(GB).magnitude == pytest.approx(5.0)
+    assert loading.StableDiffusionV15PickleLoadTime.to(second).magnitude == pytest.approx(15.0)
+    assert loading.StableDiffusionV15SafetensorsLoadTime.to(second).magnitude == pytest.approx(0.5)
+    assert loading.PcieSwapReferenceModelSize.to(GB).magnitude == pytest.approx(10.0)
+    assert loading.StableDiffusionV15CheckpointSize.provenance.ref
+
+
+def test_serving_profile_anchors():
+    from mlsysim import ReferenceStats
+
+    profile = ReferenceStats.ServingProfiles
+
+    assert profile.H100VendorMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
+    assert float(profile.PrecisionDividendTensorParallelDegree) == pytest.approx(8.0)
+    assert float(profile.PrecisionDividendContextLengthTokens) == pytest.approx(4096.0)
+    assert profile.PrecisionDividendGpuMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
+    assert float(profile.PrecisionDividendBaselinePolicyBatchLimit) == pytest.approx(4.0)
+    assert float(profile.PrecisionDividendOptimizedPolicyBatchLimit) == pytest.approx(32.0)
+    assert float(profile.PrecisionDividendSpeculationBatchThreshold) == pytest.approx(16.0)
+    assert float(profile.HeterogeneousRoutingH100Servers) == pytest.approx(10.0)
+    assert float(profile.HeterogeneousRoutingA100Servers) == pytest.approx(20.0)
+    assert float(profile.HeterogeneousRoutingH100CapacityQps) == pytest.approx(1000.0)
+    assert float(profile.HeterogeneousRoutingA100CapacityQps) == pytest.approx(600.0)
+    assert float(profile.HeterogeneousRoutingTargetQps) == pytest.approx(15000.0)
+    assert profile.PrecisionDividendTensorParallelDegree.provenance.ref
+
+
+def test_checkpoint_archetype_anchors():
+    from mlsysim import ReferenceStats
+    from mlsysim.core.units import byte, param
+
+    ckpt = ReferenceStats.CheckpointArchetypes
+
+    assert ckpt.MixedPrecisionOptimizerBytesPerParameter.to(byte / param).magnitude == pytest.approx(12.0)
+    assert ckpt.Dense20BTransformerCheckpointSize.to(GB).magnitude == pytest.approx(240.0)
+    assert ckpt.EmbeddingHeavyRecommenderCheckpointSize.to(TB).magnitude == pytest.approx(4.0)
+    assert ckpt.MediumVisionTransformerCheckpointSize.to(GB).magnitude == pytest.approx(1.2)
+    assert ckpt.Dense20BTransformerCheckpointSize.provenance.ref
+
+
+def test_edge_device_spectrum_anchors():
+    from mlsysim import ReferenceStats
+
+    spectrum = ReferenceStats.EdgeDeviceSpectrum
+
+    assert spectrum.TinyRamLow.to(KiB).magnitude == pytest.approx(32.0)
+    assert spectrum.MicrocontrollerSram.to(KiB).magnitude == pytest.approx(256.0)
+    assert spectrum.FlagshipSmartphoneRamHigh.to(GiB).magnitude == pytest.approx(16.0)
+    assert spectrum.CortexMClock.to(ureg.megahertz).magnitude == pytest.approx(48.0)
+    assert spectrum.MobileClassClock.to(ureg.gigahertz).magnitude == pytest.approx(3.0)
+    assert float(spectrum.TinyCpuThroughputMips) == pytest.approx(10.0)
+    assert float(spectrum.MobileCpuThroughputMips) == pytest.approx(100_000.0)
+    assert spectrum.SensorPowerLow.to(microwatt).magnitude == pytest.approx(10.0)
+    assert spectrum.MicrocontrollerBoardCost.to(USD).magnitude == pytest.approx(10.0)
+    assert spectrum.LowEndEdgeRam.to(MB).magnitude == pytest.approx(512.0)
+    assert spectrum.LowEndEdgeCompute.to(GFLOPs / second).magnitude == pytest.approx(1.0)
+    assert spectrum.FlagshipPhonePowerHigh.to(watt).magnitude == pytest.approx(5.0)
+    assert spectrum.IotMicrocontrollerComputeLow.to(TOPS).magnitude == pytest.approx(0.03)
+    assert spectrum.TinyRamLow.provenance.ref
+
+
+def test_platform_threshold_anchors():
+    from mlsysim import Platforms
+
+    assert Platforms.Cloud.compute_threshold.to(TFLOP / second).magnitude == pytest.approx(
+        1000.0
+    )
+    assert Platforms.Cloud.bandwidth_threshold.to(GB / second).magnitude == pytest.approx(
+        1000.0
+    )
+    assert Platforms.Edge.compute_threshold.to(PFLOP / second).magnitude == pytest.approx(1.0)
+    assert Platforms.Edge.bandwidth_threshold.to(GB / second).magnitude == pytest.approx(270.0)
+    assert Platforms.Tiny.compute_threshold.to(TOPS).magnitude == pytest.approx(1.0)
+    assert Platforms.Tiny.power_threshold.to(milliwatt).magnitude == pytest.approx(1.0)
+
+
 def test_mobilenetv2_variant_model_profiles():
     from mlsysim import Models
     from mlsysim.core.units import param
@@ -193,18 +294,3 @@ def test_mobilenetv2_variant_model_profiles():
     assert Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters.to(param).magnitude == pytest.approx(687_680)
     assert Models.Vision.MobileNetV2.metadata.provenance.ref
     assert Models.Vision.MobileNetV2_Alpha0_5.metadata.provenance.ref
-
-
-def test_oura_sleep_study_case_anchors():
-    from mlsysim import ReferenceStats
-    from mlsysim.core.provenance import scalar_value
-
-    study = ReferenceStats.OuraSleepStudy
-    assert scalar_value(study.Participants) == pytest.approx(106)
-    assert scalar_value(study.RecordingNights) == pytest.approx(440)
-    assert scalar_value(study.RecordingHours) == pytest.approx(3400)
-    assert scalar_value(study.AccelOnlyAccuracy) == pytest.approx(0.57)
-    assert scalar_value(study.EnhancedAccuracy) == pytest.approx(0.79)
-    assert scalar_value(study.PsgScorerAgreementLow) == pytest.approx(0.82)
-    assert scalar_value(study.PsgScorerAgreementHigh) == pytest.approx(0.83)
-    assert study.EnhancedAccuracy.provenance.ref

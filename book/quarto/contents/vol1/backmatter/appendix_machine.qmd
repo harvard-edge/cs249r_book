@@ -211,7 +211,7 @@ These relationships are governed by physics or arithmetic—they will still be t
 
 : **The Energy Wall**: Moving data costs ~580$\times$ more energy than computing on it. This ratio is physics, not engineering. {#tbl-energy-ratios-ref tbl-colwidths="[35,10,55]"}
 
-[^fn-horowitz-energy-app]: **Energy hierarchy source**: Energy numbers from @horowitz2014, "Computing's Energy Problem" (ISSCC, 45nm process). While absolute values scale with process node, the *ratios* between memory access and compute remain remarkably stable because wire capacitance (distance) dominates.
+[^fn-horowitz-energy-app]: **Energy Hierarchy Source**: Energy numbers from @horowitz2014, "Computing's Energy Problem" (ISSCC, 45nm process). While absolute values scale with process node, the *ratios* between memory access and compute remain remarkably stable because wire capacitance (distance) dominates.
 
 #### Memory hierarchy {.unnumbered}
 
@@ -245,7 +245,7 @@ These relationships are governed by physics or arithmetic—they will still be t
 
 : **Scaling Rules**: These are arithmetic, not hardware-specific. Training memory includes FP16 weights (2 bytes), FP16 gradients (2 bytes), FP32 master weights (4 bytes), and Adam optimizer states (8 bytes for momentum + variance). {#tbl-scaling-rules-ref tbl-colwidths="[33,33,33]"}
 
-[^fn-training-memory]: **Training memory (Adam)**: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
+[^fn-training-memory]: **Training Memory (Adam)**: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
 
 ### Latency budgets: The nonnegotiables {.unnumbered}
 
@@ -404,13 +404,7 @@ class A100RooflineExample:
 
 Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} A100RooflineExample.a100_fp16_tflop_per_s_str` and HBM2e bandwidth of `{python} A100RooflineExample.a100_bw_tb_per_s_str`. The ridge point is `{python} A100RooflineExample.a100_fp16_tflop_per_s_str`/`{python} A100RooflineExample.a100_bw_tb_per_s_str` = `{python} A100RooflineExample.ridge_point_flops_per_byte_str` (the Tera prefixes cancel, yielding FLOP/byte).
 
-Consider two common operations:
-
-**General matrix multiply (GEMM)**: For two square matrices of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, arithmetic intensity is approximately `{python} A100RooflineExample.gemm_intensity_str`. Since `{python} A100RooflineExample.gemm_intensity_str` > `{python} A100RooflineExample.ridge_point_flops_per_byte_str`, this operation is compute bound. You are using the hardware efficiently.
-
-**ReLU (Element-wise)**: For a square tensor of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str`, intensity is approximately `{python} A100RooflineExample.relu_intensity_str`. Since `{python} A100RooflineExample.relu_intensity_str` ≪ `{python} A100RooflineExample.ridge_point_flops_per_byte_str`, this operation is severely memory bound, achieving only about `{python} A100RooflineExample.relu_util_str` of peak TFLOP/s. The hardware is mostly waiting for data.
-
-This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
+Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM) on two square matrices of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} A100RooflineExample.gemm_intensity_str`, so `{python} A100RooflineExample.gemm_intensity_str` > `{python} A100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU on a square tensor of the same size has intensity of only `{python} A100RooflineExample.relu_intensity_str`, so `{python} A100RooflineExample.relu_intensity_str` ≪ `{python} A100RooflineExample.ridge_point_flops_per_byte_str` and the operation is severely memory bound, achieving only about `{python} A100RooflineExample.relu_util_str` of peak TFLOP/s. This contrast explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
 
 ### Dimensional analysis {#sec-appdx-machine-foundations-dimensional-analysis-76b3}
 
@@ -1046,7 +1040,10 @@ Fetching a 32-bit value from DRAM costs roughly `{python} ArchReferenceTables.en
 Bandwidth (throughput) and latency (delay) are distinct constraints. Total transfer time follows:
 $$ T = L_{\text{lat}} + \frac{D_{\text{vol}}}{\text{BW}} $$
 
-For small transfers (for example, single-token inference), latency dominates. For large transfers (for example, loading weights), bandwidth dominates.
+The crossover point is the transfer size where the two terms are equal:
+$$ D_{\text{cross}} = L_{\text{lat}} \times \text{BW} $$
+
+For transfers below $D_{\text{cross}}$ (for example, single-token inference), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
 
 ```{python}
 #| echo: false
@@ -1061,7 +1058,8 @@ For small transfers (for example, single-token inference), latency dominates. Fo
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # │ Imports: (none—pure scalars)
-# │ Exports: bw_gbit_per_s_str, ping_ms_str, data_kb_str
+# │ Exports: bw_gbit_per_s_str, ping_ms_str, data_kb_str,
+# │          crossover_data_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_qty
 
@@ -1075,7 +1073,7 @@ class BandwidthLatencySetup:
     data = 1 * KB           # scenario assumption: packet size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # No derived values—only string formatting.
+    crossover_data = (ping_latency * link_bandwidth).to(MB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # No check() calls needed—values are definitional constants.
@@ -1083,10 +1081,11 @@ class BandwidthLatencySetup:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bw_gbit_per_s_str = fmt_bandwidth(link_bandwidth, unit=Gbps, precision=0, commas=False)
     ping_ms_str = fmt_time(ping_latency, 'millisecond', precision=0, commas=False)
-    data_kb_str = fmt_qty(data, KB, precision=0, commas=False)
+    data_kb_str = fmt_qty(data, unit=KB, precision=0, commas=False)
+    crossover_data_mb_str = fmt_qty(crossover_data, unit=MB, precision=1, commas=False)
 ```
 
-Consider sending data over a `{python} BandwidthLatencySetup.bw_gbit_per_s_str` link with `{python} BandwidthLatencySetup.ping_ms_str` ping (latency). The dominant bottleneck depends entirely on the transfer size:
+Consider sending data over a `{python} BandwidthLatencySetup.bw_gbit_per_s_str` link with `{python} BandwidthLatencySetup.ping_ms_str` ping (latency). The crossover size is `{python} BandwidthLatencySetup.crossover_data_mb_str`, so the dominant bottleneck depends entirely on which side of that threshold the transfer falls:
 
 ```{python}
 #| echo: false

@@ -16,6 +16,9 @@ class PlatformEnvelope(BaseModel):
     ram_range: str | None = None
     storage_range: str | None = None
     tdp_range_w: str | None = None
+    compute_threshold: Quantity | None = None
+    bandwidth_threshold: Quantity | None = None
+    power_threshold: Quantity | None = None
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("ram", "storage", mode="after")
@@ -27,3 +30,28 @@ class PlatformEnvelope(BaseModel):
     @classmethod
     def _validate_latency_budget(cls, v):
         return require_dimensionality(v, ureg.second, "typical_latency_budget")
+
+    @field_validator("compute_threshold", mode="after")
+    @classmethod
+    def _validate_compute_threshold(cls, v):
+        return require_unit_family(
+            v,
+            ureg.count / ureg.second,
+            "compute_threshold",
+            "operation",
+        )
+
+    @field_validator("bandwidth_threshold", mode="after")
+    @classmethod
+    def _validate_bandwidth_threshold(cls, v):
+        return require_unit_family(
+            v,
+            ureg.byte / ureg.second,
+            "bandwidth_threshold",
+            "data",
+        )
+
+    @field_validator("power_threshold", mode="after")
+    @classmethod
+    def _validate_power_threshold(cls, v):
+        return require_dimensionality(v, ureg.watt, "power_threshold")

@@ -217,11 +217,14 @@ $$ \text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Da
 # │ How: Calculate required bandwidth for ResNet-50 inference at peak TFLOP/s.
 # │
 # │ Imports: mlsysim.core.constants, mlsysim.book
-# │ Exports: FeedingProblem.req_bw_gb_per_s_str, FeedingProblem.disk_bw_mb_per_s_str,
-# │          FeedingProblem.feeding_tax_pct_str, FeedingProblem.img_per_s_str
+# │ Exports: FeedingProblem.req_bw_gb_per_s_str,
+# │          FeedingProblem.disk_bw_mb_per_s_str,
+# │          FeedingProblem.feeding_tax_pct_str,
+# │          FeedingProblem.img_per_s_str,
+# │          FeedingProblem.accelerator_peak_tflop_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_rate, fmt_percent
-from mlsysim.core.units import GB, MB, second
+from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_rate, fmt_percent, fmt_flop_rate
+from mlsysim.core.units import GB, MB, second, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FeedingProblem:
@@ -266,13 +269,14 @@ class FeedingProblem:
     disk_bw_mb_per_s_str = fmt_qty(disk_bw, MB/second, precision=0, commas=False)
     feeding_tax_pct_str = fmt_percent(feeding_tax_pct/100, precision=1, commas=False, style='symbol')
     img_per_s_str = fmt_rate(round(img_per_sec), 'img/s', precision=0, commas=True)
+    accelerator_peak_tflop_per_s_str = fmt_flop_rate(h.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
 ```
 
 ### The feeding problem: Flow rate and the "feeding tax" {#sec-data-engineering-feeding-problem}
 
-Data gravity establishes the cost of moving the entire mass; **The Feeding Problem**\index{Feeding Problem!data pipeline throughput} establishes the cost of delivering it. In the Hennessy & Patterson tradition, we analyze this as a **Flow Rate**\index{Flow Rate!data pipeline} problem: the struggle to saturate a high-throughput "Machine" from a low-bandwidth "Data" source.
+Data gravity establishes the cost of moving the entire mass; **The Feeding Problem**\index{Feeding Problem!definition} establishes the cost of delivering it. In the Hennessy & Patterson tradition, we analyze this as a **Flow Rate**\index{Flow Rate!definition} problem: the struggle to saturate a high-throughput "Machine" from a low-bandwidth "Data" source.
 
-According to the iron law, the system is only as fast as its slowest term. If a modern accelerator running ResNet-50 can process `{python} FeedingProblem.img_per_s_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mb_per_s_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!I/O wait cost}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. To saturate a 300 TFLOP/s processor, the pipeline must often sustain `{python} FeedingProblem.req_bw_gb_per_s_str` transfer rates—a requirement that forces the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
+According to the iron law, the system is only as fast as its slowest term. If an A100 running ResNet-50 can process `{python} FeedingProblem.img_per_s_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mb_per_s_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!definition}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. Feeding the `{python} FeedingProblem.accelerator_peak_tflop_per_s_str` accelerator in this example often requires `{python} FeedingProblem.req_bw_gb_per_s_str` transfer rates, forcing the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
 
 These physical properties also carry an energy cost: as data moves farther from the processor, movement increasingly dominates the budget.
 
@@ -509,7 +513,7 @@ Preventing these cascading failures requires more than ad hoc fixes; it demands 
 
 ### Four foundational pillars {#sec-data-engineering-four-foundational-pillars-c119}
 
-Every data engineering decision, from choosing storage formats to designing ingestion pipelines, should be evaluated against four principles. Study @fig-four-pillars to see how these pillars surround and support the central ML data system—note especially the dashed trade-off lines connecting them, which highlight that strengthening one pillar can create tension with another. Balancing these interdependencies is the core challenge of systematic data engineering.
+Every data engineering decision, from choosing storage formats to designing ingestion pipelines, should be evaluated against four principles. In the KWS running example, even a small enrollment choice such as whether to accept a noisy wake-word recording or ask the user to repeat it touches all four pillars at once. @Fig-four-pillars shows why these pillars surround the central ML data system rather than appearing as independent checklist items: each one contributes a necessary capability, and the dashed lines mark the trade-offs created when one pillar is strengthened without regard for the others.
 
 ::: {#fig-four-pillars fig-env="figure" fig-pos="htb" fig-cap="**The Four Pillars of Data Engineering**: Quality, Reliability, Scalability, and Governance form the foundational framework for ML data systems. Each pillar contributes essential capabilities (solid arrows), while trade-offs between pillars (dashed lines) require careful balancing: validation overhead affects throughput, consistency constraints limit distributed scale, privacy requirements impact performance, and bias mitigation may reduce available training data." fig-alt="Four boxes labeled quality, reliability, scalability, and governance surround a central ML data system circle. Solid arrows connect each box to center showing contributions; dashed lines between boxes indicate trade-offs."}
 
@@ -778,33 +782,33 @@ pics/target/.style = {
 
 :::
 
-Data quality provides the foundation, as the cascade pattern in @sec-data-engineering-data-cascades-systematic-foundations-matter-2efe demonstrates: when upstream data is wrong, everything downstream fails. Quality encompasses three dimensions: correctness (are values accurate?), coverage (does the data represent the deployment environment?), and freshness (does the distribution still match production?). The quality pillar motivates validation, monitoring, and drift detection infrastructure examined throughout this chapter.
+Data quality provides the foundation, as the cascade pattern in @sec-data-engineering-data-cascades-systematic-foundations-matter-2efe demonstrates: when upstream data is wrong, everything downstream fails. For KWS enrollment, quality asks whether the recording contains the intended phrase, whether it covers the accents and acoustic environments expected in deployment, and whether the captured distribution remains fresh as microphones and rooms change. Rejecting noisy examples can improve correctness but reduce coverage of real homes; accepting every example improves coverage but can train the detector on mislabeled or low-SNR audio. The quality pillar therefore motivates validation, monitoring, and drift detection infrastructure examined throughout this chapter.
 
-Quality alone is insufficient, however, if the systems delivering that data are fragile. Reliability means building pipelines that continue operating despite component failures, data anomalies, or unexpected load spikes. A pipeline that produces perfect features 99 percent of the time but crashes during traffic surges delivers no value during the most critical moments. Error handling, circuit breakers, and graceful degradation strategies transform brittle pipelines into resilient ones.
+Reliability asks whether the same enrollment pipeline keeps working when the device, network, or user behavior is imperfect. A pipeline that produces excellent wake-word examples in a laboratory but fails during intermittent connectivity, battery pressure, or microphone glitches delivers no value in the user's home. Error handling, retries, local buffering, and graceful degradation turn the quality rule into a usable system: the device can request another utterance, defer upload until connectivity returns, or preserve a known-good enrollment rather than silently accepting corrupted audio.
 
-Even reliable, high-quality pipelines face a third constraint: they must keep pace with growth. Scalability addresses this challenge as ML systems evolve from prototypes handling gigabytes to production services processing petabytes. Systems must handle growing data volumes, user bases, and computational demands without complete redesigns. Scalability must also be cost-effective, since raw capacity means little if infrastructure costs grow faster than business value. Our recommendation lighthouse illustrates this challenge at its most extreme.
+Scalability asks whether that same decision survives growth. A manual review policy that works for a thousand recordings collapses when the product expands to millions of users, dozens of languages, and long-tail acoustic conditions. The system must scale validation, storage, labeling, and retraining without letting infrastructure cost grow faster than the value of better coverage. Our recommendation lighthouse illustrates this challenge at its most extreme.
 
-::: {#lhs-data-engineering-dlrm-recommendation-lighthouse .callout-lighthouse title="DLRM (recommendation lighthouse)"}
+::: {#lhs-data-engineering-dlrm-recommendation-lighthouse .callout-lighthouse title="DLRM recommendation lighthouse"}
 
-**Why it matters**\index{DLRM!scalability challenge}: Recommendation systems like Deep Learning Recommendation Model (DLRM) exemplify the scalability challenge of modern data engineering. They rely on high-cardinality categorical features (like User IDs or Product IDs) that must be mapped to dense vectors via embedding tables. @Tbl-data-engineering-dlrm-scalability summarizes how this stresses memory capacity and sparse-access bandwidth rather than compute:
+**Why it matters**: Recommendation systems\index{Recommendation Systems!scalability challenge} built in the Deep Learning Recommendation Model (DLRM)\index{DLRM!scalability challenge} style exemplify the scalability challenge of modern data engineering. They rely on high-cardinality categorical features, such as user IDs and product IDs, that cannot be treated as ordinary numbers. Each ID indexes an embedding table, which returns a learned dense vector for downstream layers to combine with numeric features. @Tbl-data-engineering-dlrm-scalability summarizes how this representation stresses memory capacity and sparse-access bandwidth rather than compute:
 
-| **Property**   | **Value**            | **System Implication**                                    |
-|:---------------|:---------------------|:----------------------------------------------------------|
-| **Data Scale** | Billion+ users/items | Embedding tables grow to TB/PB scale.                     |
-| **Constraint** | Memory Capacity      | Tables exceed single-GPU memory; requires sharding.       |
-| **Bottleneck** | Sparse Access        | Random lookups stress memory bandwidth more than compute. |
+| **Property**   | **Value**            | **System Implication**                                           |
+|:---------------|:---------------------|:-----------------------------------------------------------------|
+| **Data Scale** | Billion+ users/items | Embedding and lookup tables can grow to TB/PB scale.             |
+| **Constraint** | Memory Capacity      | The tables no longer fit on one machine and must be partitioned. |
+| **Bottleneck** | Sparse Access        | Random lookups stress memory bandwidth more than compute.        |
 
-: **DLRM scalability profile**: Recommendation models like DLRM stress data engineering along memory capacity and sparse-access bandwidth rather than compute, distinguishing them from compute-bound vision models or bandwidth-bound language models and motivating embedding-table sharding as a first-class system concern. {#tbl-data-engineering-dlrm-scalability}
+: **DLRM scalability profile**: DLRM-style recommendation models stress data engineering along memory capacity and sparse-access bandwidth rather than compute, distinguishing them from compute-heavy vision models or stream-heavy language models and making embedding-table partitioning a first-class system concern. {#tbl-data-engineering-dlrm-scalability}
 
-Unlike ResNet (compute bound) or GPT-2 (bandwidth bound), DLRM is limited by memory capacity and the sheer logistics of storing and accessing massive lookup tables efficiently.
+Unlike ResNet-style image models that are often limited by arithmetic throughput or GPT-style language models that can be limited by streaming bandwidth, DLRM-style recommendation systems are limited by memory capacity and the logistics of serving many random embedding-table lookups efficiently.
 
 :::
 
-DLRM shows where the scalability pillar bites hardest: the wall is memory capacity, and sharding the embedding table across machines becomes a first-class design concern rather than an afterthought. Governance provides the framework within which quality, reliability, and scalability operate. A perfectly scalable, reliable, high-quality pipeline that violates the General Data Protection Regulation (GDPR) or perpetuates demographic biases creates liability rather than value. Data governance ensures systems operate within legal, ethical, and business constraints: privacy protection, regulatory compliance, and clear data ownership. Dataset documentation practices such as data statements make part of that governance visible by recording provenance, intended use, collection conditions, and coverage needed for bias analysis and scientific comparison [@bender2018]. Governance also maintains the transparency and accountability necessary to demonstrate compliance when audited.
+The recommendation lighthouse shows where the scalability pillar bites hardest: the wall is memory capacity, and partitioning embedding tables across machines becomes a first-class design concern rather than an afterthought. Governance then defines the boundaries within which quality, reliability, and scalability may operate. For the KWS example, governance determines whether raw voice recordings may leave the device, how long enrollment audio can be retained, which consent record authorizes use, and what documentation proves that the dataset covers relevant accents without exposing private speech. A perfectly scalable, reliable, high-quality pipeline that violates the General Data Protection Regulation (GDPR) or perpetuates demographic biases creates liability rather than value. Dataset documentation practices such as data statements make part of that governance visible by recording provenance, intended use, collection conditions, and coverage needed for bias analysis and scientific comparison [@bender2018].
 
-When ML systems exhibit failures, the four pillars provide a diagnostic lens for identifying root causes. Model accuracy that degrades gradually, not through *sudden breakage* but through *a slow downward trend*, almost always traces to the quality pillar: data drift has shifted the serving distribution away from training, or label quality has degraded as annotator pools change. Pipeline failures that appear intermittent, succeeding most runs but crashing unpredictably, point to the reliability pillar, suggesting inadequate error handling, missing retry logic, or resource exhaustion under peak load. Training that takes too long despite adequate hardware implicates scalability: somewhere in the pipeline a bottleneck (a single-threaded transformation, an unpartitioned shuffle, a storage tier too slow for the data volume) prevents parallel resources from being used. Compliance gaps discovered during audits indicate governance debt: lineage tracking is incomplete, access controls are stale, or data retention policies have not kept pace with regulatory changes.
+When ML systems exhibit failures, the four pillars provide a diagnostic lens for identifying root causes. Gradual accuracy degradation points to quality: data drift has shifted the serving distribution away from training, or label quality has degraded as annotator pools change. Intermittent pipeline failures point to reliability: error handling, retry logic, or resource controls are missing under peak load. Training that takes too long despite adequate hardware points to scalability: a single-threaded transformation, unpartitioned shuffle, or slow storage tier prevents parallel resources from being used. Compliance gaps discovered during audits point to governance debt: lineage tracking is incomplete, access controls are stale, or retention policies have not kept pace with regulatory changes.
 
-The most insidious failures span multiple pillars. Features that differ between training and serving implicate both quality (the values are wrong) and reliability (the computation is inconsistent). Diagnosing such cross-pillar failures requires checking consistency contracts, comparing feature distributions across environments, and tracing transformation lineage, all techniques examined in detail throughout this chapter. The key diagnostic insight is that most practitioners instinctively investigate the model first, but production experience consistently shows that data infrastructure failures outnumber model failures by a wide margin.
+The most insidious failures span multiple pillars. Features that differ between training and serving implicate both quality (the values are wrong) and reliability (the computation is inconsistent). A privacy-motivated deletion policy can also create quality gaps if the retained data no longer covers the deployment population. Diagnosing such cross-pillar failures requires checking consistency contracts, comparing feature distributions across environments, and tracing transformation lineage, all techniques examined in detail throughout this chapter. The key diagnostic insight is that most practitioners instinctively investigate the model first, but production experience consistently shows that data infrastructure failures outnumber model failures by a wide margin.
 
 ### KWS case study {#sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9}
 
@@ -954,18 +958,104 @@ Data quality and diversity ultimately determine whether these constraints can be
 
 ### KWS design space {#sec-data-engineering-kws-design-space-eadd}
 
-These requirements create a multi-dimensional design space where data engineering choices cascade through system performance. @Tbl-kws-design-space quantifies key trade-offs, enabling principled decisions rather than ad-hoc selection.
+These requirements create a multi-dimensional design space where data engineering choices cascade through system performance. @Tbl-kws-design-space quantifies key trade-offs, enabling principled decisions rather than ad-hoc selection. One row uses mel-frequency cepstral coefficients (MFCCs)\index{MFCC!audio features}: compact speech-frequency features whose coefficient count controls feature size, compute cost, and acoustic detail; the processing section later shows how they are extracted.
 
-| **Design Choice**                   | **Quality Impact**          |     **Latency Impact**    |      **Cost Impact**      |    **Memory Impact**     |
-|:------------------------------------|:----------------------------|:-------------------------:|:-------------------------:|:------------------------:|
-| **16 kHz vs. 8 kHz sampling**       | +2–4 percent accuracy       |     2$\times$ storage     |    2$\times$ processing   |  2$\times$ feature size  |
-| **13 vs. 40 MFCC coefficients**     | +3–5 percent accuracy       | 3$\times$ feature compute |          Minimal          | 3$\times$ feature memory |
-| **1M vs. 10M training examples**    | +5–8 percent accuracy       |  10$\times$ training time |  10$\times$ labeling cost |    10$\times$ storage    |
-| **Clean vs. noisy training data**   | +10–15 percent real-world   |          Minimal          | 3$\times$ collection cost |         Minimal          |
-| **Local vs. cloud inference**       | −2 percent accuracy (quant) |      10 ms vs. 100 ms     |   \$0 vs. \$0.001/query   |   16 KB vs. unlimited    |
-| **Synthetic vs. real augmentation** | +3–5 percent robustness     |          Minimal          |     10$\times$ cheaper    |         Minimal          |
+```{python}
+#| echo: false
+#| label: kws-design-space-tradeoffs-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KWS DESIGN SPACE TRADEOFFS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-kws-design-space
+# │
+# │ Goal: Keep KWS design-space arithmetic and scenario anchors in one place.
+# │ Show: Sampling, MFCC, data-volume, latency, cost, and memory trade-offs.
+# │ How: Compute ratios from row endpoints and format table-facing values.
+# │
+# │ Imports: mlsysim.core.constants (KB), mlsysim.fmt
+# │ Exports: KWSDesignSpaceTradeoffs.*_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import (
+    check,
+    fmt_multiple,
+    fmt_percent,
+    fmt_percent_range,
+    fmt_qty,
+    fmt_time,
+    fmt_usd,
+)
 
-: **KWS Data Engineering Design Space**: Each design choice creates quantifiable trade-offs across the four pillars. Higher sampling rates improve quality but double storage and processing (scalability impact). More training data improves accuracy but multiplies labeling costs (governance/cost impact). Local inference eliminates latency but requires aggressive quantization (quality/reliability trade-off). This design space analysis guides systematic optimization rather than intuition-based decisions. {#tbl-kws-design-space tbl-colwidths="[28,24,16,16,16]"}
+# ┌── LEGO ───────────────────────────────────────────────
+class KWSDesignSpaceTradeoffs:
+    """Scenario anchors and derived multipliers for the KWS design-space table."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    sampling_rate_low_khz = 8
+    sampling_rate_high_khz = 16
+    mfcc_coeff_low = 13
+    mfcc_coeff_high = 40
+    examples_low_m = 1
+    examples_high_m = 10
+    local_latency_ms = 10
+    cloud_latency_ms = 100
+    local_query_cost_usd = 0
+    cloud_query_cost_usd = 0.001
+    local_model_memory = 16 * KB
+    noisy_collection_cost_mult = 3
+    synthetic_cost_savings_mult = 10
+    sampling_accuracy_gain = (0.02, 0.04)
+    mfcc_accuracy_gain = (0.03, 0.05)
+    data_volume_accuracy_gain = (0.05, 0.08)
+    noisy_accuracy_gain = (0.10, 0.15)
+    local_accuracy_risk = 0.02
+    synthetic_robustness_gain = (0.03, 0.05)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    sampling_ratio = sampling_rate_high_khz / sampling_rate_low_khz
+    mfcc_ratio = mfcc_coeff_high / mfcc_coeff_low
+    data_volume_ratio = examples_high_m / examples_low_m
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(sampling_ratio == 2, f"KWS sampling ratio drifted: {sampling_ratio}.")
+    check(3.0 <= mfcc_ratio <= 3.1, f"KWS MFCC ratio drifted: {mfcc_ratio:.2f}.")
+    check(data_volume_ratio == 10, f"KWS data-volume ratio drifted: {data_volume_ratio}.")
+    check(local_latency_ms < cloud_latency_ms, "Local KWS inference should remain lower-latency than cloud inference.")
+    check(cloud_query_cost_usd > local_query_cost_usd, "Cloud query cost should exceed local query cost.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    sampling_accuracy_gain_pct_str = fmt_percent_range(*sampling_accuracy_gain, style="prose")
+    sampling_storage_mult_str = fmt_multiple(sampling_ratio, precision=0, commas=False)
+    sampling_processing_mult_str = fmt_multiple(sampling_ratio, precision=0, commas=False)
+    sampling_feature_size_mult_str = fmt_multiple(sampling_ratio, precision=0, commas=False)
+    mfcc_accuracy_gain_pct_str = fmt_percent_range(*mfcc_accuracy_gain, style="prose")
+    mfcc_feature_compute_mult_str = fmt_multiple(mfcc_ratio, precision=0, commas=False)
+    mfcc_feature_memory_mult_str = fmt_multiple(mfcc_ratio, precision=0, commas=False)
+    data_volume_accuracy_gain_pct_str = fmt_percent_range(*data_volume_accuracy_gain, style="prose")
+    data_volume_training_time_mult_str = fmt_multiple(data_volume_ratio, precision=0, commas=False)
+    data_volume_labeling_cost_mult_str = fmt_multiple(data_volume_ratio, precision=0, commas=False)
+    data_volume_storage_mult_str = fmt_multiple(data_volume_ratio, precision=0, commas=False)
+    noisy_accuracy_gain_pct_str = fmt_percent_range(*noisy_accuracy_gain, style="prose")
+    noisy_collection_cost_mult_str = fmt_multiple(noisy_collection_cost_mult, precision=0, commas=False)
+    local_accuracy_risk_pct_str = fmt_percent(local_accuracy_risk, precision=0, commas=False, style="prose")
+    local_latency_ms_str = fmt_time(local_latency_ms, "millisecond", precision=0, commas=False)
+    cloud_latency_ms_str = fmt_time(cloud_latency_ms, "millisecond", precision=0, commas=False)
+    local_inference_cost_usd_per_query_str = fmt_usd(local_query_cost_usd, precision=0, commas=False, per="query")
+    cloud_inference_cost_usd_per_query_str = fmt_usd(cloud_query_cost_usd, precision=3, commas=False, per="query")
+    local_model_memory_kb_str = fmt_qty(local_model_memory, unit=KB, precision=0, commas=False)
+    synthetic_robustness_gain_pct_str = fmt_percent_range(*synthetic_robustness_gain, style="prose")
+    synthetic_cost_savings_mult_str = fmt_multiple(synthetic_cost_savings_mult, precision=0, commas=False)
+```
+
+| **Design Choice**                   | **Quality Impact**                                                                 |                                                  **Latency Impact**                                                 |                                                                     **Cost Impact**                                                                     |                               **Memory Impact**                                |
+|:------------------------------------|:-----------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------------------------------:|
+| **16 kHz vs. 8 kHz sampling**       | +`{python} KWSDesignSpaceTradeoffs.sampling_accuracy_gain_pct_str` accuracy        |                         `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` storage                        |                                        `{python} KWSDesignSpaceTradeoffs.sampling_processing_mult_str` processing                                       | `{python} KWSDesignSpaceTradeoffs.sampling_feature_size_mult_str` feature size |
+| **13 vs. 40 MFCC coefficients**     | +`{python} KWSDesignSpaceTradeoffs.mfcc_accuracy_gain_pct_str` accuracy            |                   `{python} KWSDesignSpaceTradeoffs.mfcc_feature_compute_mult_str` feature compute                  |                                                                         Minimal                                                                         | `{python} KWSDesignSpaceTradeoffs.mfcc_feature_memory_mult_str` feature memory |
+| **1M vs. 10M training examples**    | +`{python} KWSDesignSpaceTradeoffs.data_volume_accuracy_gain_pct_str` accuracy     |                 `{python} KWSDesignSpaceTradeoffs.data_volume_training_time_mult_str` training time                 |                                   `{python} KWSDesignSpaceTradeoffs.data_volume_labeling_cost_mult_str` labeling cost                                   |    `{python} KWSDesignSpaceTradeoffs.data_volume_storage_mult_str` storage     |
+| **Clean vs. noisy training data**   | +`{python} KWSDesignSpaceTradeoffs.noisy_accuracy_gain_pct_str` real-world         |                                                       Minimal                                                       |                                    `{python} KWSDesignSpaceTradeoffs.noisy_collection_cost_mult_str` collection cost                                    |                                    Minimal                                     |
+| **Local vs. cloud inference**       | up to `{python} KWSDesignSpaceTradeoffs.local_accuracy_risk_pct_str` accuracy risk | `{python} KWSDesignSpaceTradeoffs.local_latency_ms_str` vs. `{python} KWSDesignSpaceTradeoffs.cloud_latency_ms_str` | `{python} KWSDesignSpaceTradeoffs.local_inference_cost_usd_per_query_str` vs. `{python} KWSDesignSpaceTradeoffs.cloud_inference_cost_usd_per_query_str` |   `{python} KWSDesignSpaceTradeoffs.local_model_memory_kb_str` vs. unlimited   |
+| **Synthetic vs. real augmentation** | +`{python} KWSDesignSpaceTradeoffs.synthetic_robustness_gain_pct_str` robustness   |                                                       Minimal                                                       |                                        `{python} KWSDesignSpaceTradeoffs.synthetic_cost_savings_mult_str` cheaper                                       |                                    Minimal                                     |
+
+: **KWS Data Engineering Design Space**: Each design choice creates quantifiable trade-offs across the four pillars. Higher sampling rates improve quality but double storage and processing (scalability impact). More training data improves accuracy but multiplies labeling costs (governance/cost impact). Local inference eliminates latency but requires compact model and feature representations (quality/reliability trade-off). This design space analysis guides systematic optimization rather than intuition-based decisions. {#tbl-kws-design-space tbl-colwidths="[28,24,16,16,16]"}
 
 A concrete budget scenario shows how to apply this design space analysis.
 
@@ -1143,7 +1233,7 @@ The resulting configuration in @tbl-data-engineering-kws-configuration balances 
 
 :::
 
-With optimal parameters selected from our design space, implementation requires combining multiple data collection approaches. Our KWS system demonstrates how these approaches work together across the project lifecycle. Preexisting datasets like Google's Speech Commands\index{Speech Commands} [@warden2018speech] provide a foundation for initial development, offering carefully curated voice samples for common wake words. For multilingual coverage, the Multilingual Spoken Words Corpus\index{Multilingual Spoken Words Corpus} (MSWC) [@mazumder2021multilingual] extends this foundation to 50 languages with over 23 million examples. However, even these large-scale datasets often lack diversity in accents, environments, and recording conditions, necessitating additional strategies.
+With optimal parameters selected from our design space, implementation requires combining multiple data collection approaches. Our KWS system demonstrates how these approaches work together across the project lifecycle. Preexisting datasets like Google's Speech Commands\index{Speech Commands} [@warden2018speech] provide a foundation for initial development, offering carefully curated voice samples for common wake words. For multilingual coverage, the Multilingual Spoken Words Corpus\index{Multilingual Spoken Words Corpus} (MSWC) [@mazumder2021multilingual] extends this foundation to a large multilingual corpus. However, even these large-scale datasets often lack diversity in accents, environments, and recording conditions, necessitating additional strategies.
 
 To address coverage gaps, web scraping supplements baseline datasets by gathering diverse voice samples from video platforms and speech databases, capturing natural speech patterns and wake word variations. Crowdsourcing platforms like Amazon Mechanical Turk[^fn-mturk-labeling-scale] enable targeted collection of wake word samples across different demographics and environments [@sheng2019]. This approach is particularly valuable for underrepresented languages or specific acoustic conditions.
 
@@ -1227,7 +1317,7 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 | **Expert medical label**     | `{python} DataEngineeringCostConstants.labeling_cost_medical_range_str` | Per study, radiologist |
 | **S3 storage (Standard)**    |       `{python} DataEngineeringCostConstants.storage_cost_s3_str`       | Hot storage            |
 | **S3 retrieval (Glacier)**   |    `{python} DataEngineeringCostConstants.retrieval_cost_glacier_str`   | Standard: 3-5 hours    |
-| **GPU training hour (A100)** |                                  \$2–4                                  | Cloud spot pricing     |
+| **Cloud GPU training hour**  |                                  \$2–4                                  | Cloud spot pricing     |
 | **Human review hour**        |                                 \$15–50                                 | Depending on expertise |
 
 : **Data Engineering Cost Constants (2024)**: Per-unit costs that ML engineers should memorize in the same way systems engineers memorize latency numbers. Labeling commonly dominates storage and compute, so teams should reason from ratios rather than isolated prices. {#tbl-data-engineering-cost-constants tbl-colwidths="[43,30,37]"}
@@ -1407,18 +1497,63 @@ The four pillars provide a systems lens for every pipeline choice.
 
 The four pillars provide the evaluative lens; the first concrete engineering decision is data provenance. Acquisition strategy determines the raw material that every subsequent stage refines.
 
+```{python}
+#| echo: false
+#| label: kws-acquisition-scale-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KWS ACQUISITION SCALE CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: KWS acquisition prose
+# │
+# │ Goal: Recap the KWS corpus scale at the point where sourcing strategy uses it.
+# │ Show: Millions of examples across many languages require multi-source collection.
+# │ How: Format the MSWC-scale example and language count for prose.
+# │
+# │ Imports: mlsysim (Datasets, count, fmt_count, check)
+# │ Exports: KWSAcquisitionScale.dataset_size_million_samples_str,
+# │          KWSAcquisitionScale.languages_count_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+# ┌── LEGO ───────────────────────────────────────────────
+class KWSAcquisitionScale:
+    """KWS acquisition scale recap for multi-source data collection."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dataset = Datasets.MSWC
+    total_examples = dataset.training_examples
+    languages = dataset.languages
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    total_examples_count = total_examples.to(count).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(total_examples_count > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples_count:.0f}.")
+    check(languages >= 50, f"KWS language coverage unexpectedly narrow: {languages}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dataset_size_million_samples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="audio sample",
+    )
+    languages_count_str = fmt_count(languages, label="language", commas=False)
+```
+
 ## Data Acquisition {#sec-data-engineering-strategic-data-acquisition-418f}
 
-\index{Data Acquisition!strategies}ImageNet's 14.2 million labeled images took 49,000 crowdsourced workers to assemble. GPT-3's training corpus used tens of terabytes of raw Common Crawl text filtered to hundreds of gigabytes, combined with curated web, books, and Wikipedia data [@brown2020language]. Our KWS system needs 23 million audio samples spanning fifty languages, a volume that no single collection method can economically provide. These examples illustrate a recurring reality: data acquisition is a strategic decision that determines a system's capabilities and limitations. Sourcing strategies (existing datasets, web scraping, crowdsourcing, synthetic generation) trade off quality, cost, scale, and ethics differently. No single approach satisfies all requirements; successful ML systems combine multiple strategies, balancing complementary strengths against competing constraints.
+\index{Data Acquisition!strategies}Data acquisition begins when the team names the coverage gap the model must close. The ImageNet benchmark\index{ImageNet!benchmark dataset}[^fn-imagenet-data-scale] [@imagenet_website] contains 14.2 million labeled images and took 49,000 crowdsourced workers to assemble. GPT-3's training corpus used tens of terabytes of raw Common Crawl text filtered to hundreds of gigabytes, combined with curated web, books, and Wikipedia data [@brown2020language]. Our KWS system needs `{python} KWSAcquisitionScale.dataset_size_million_samples_str` spanning `{python} KWSAcquisitionScale.languages_count_str`, but the hard part is not only volume. The model must recognize wake words across accents, microphones, rooms, ages, and background noises that no single collection method can economically cover. Acquisition strategy is therefore a sequence of gap-closing decisions: reuse what already matches deployment, collect what is missing, scrape or synthesize where scale is the binding constraint, and reject sources whose provenance or consent constraints make them unusable.
 
-Our KWS system illustrates these interconnected requirements. Achieving 98 percent accuracy across diverse acoustic environments requires representative data spanning accents, ages, and recording conditions (quality). Maintaining consistent detection despite device variations demands data from varied hardware (reliability). Supporting millions of concurrent users requires data volumes that manual collection cannot economically provide (scalability). Protecting user privacy in always-listening systems constrains collection methods and requires careful anonymization (governance). These interconnected requirements demonstrate why acquisition strategy must be evaluated systematically rather than through ad-hoc source selection.
+The KWS case also shows why acquisition cannot optimize one pillar at a time. Achieving `{python} KWSProblemTargets.kws_accuracy_target_str` accuracy across diverse acoustic environments requires representative data spanning accents, ages, and recording conditions. Maintaining consistent detection despite device variation requires recordings from different microphones and capture paths. Supporting millions of concurrent users requires volumes that manual collection cannot economically provide. Protecting user privacy in always-listening systems constrains which recordings may be retained and how they must be anonymized. A source that improves scale but weakens governance, or improves quality but excludes important speakers, does not solve the acquisition problem.
 
 ### Data source evaluation and selection {#sec-data-engineering-data-source-evaluation-selection-cd87}
 
-The choice\index{Data Acquisition!source evaluation} among curated datasets, expert crowdsourcing, and controlled web scraping turns on a single question: which source best covers the deployment distribution at acceptable cost and domain expertise?
+The choice\index{Data Acquisition!source evaluation} among curated datasets, expert crowdsourcing, controlled web scraping, and synthetic generation turns on a single question: which source best closes the next deployment-distribution gap at acceptable cost, quality, and governance risk?
 
 \index{Fei-Fei Li!ImageNet creation}
-Preexisting datasets from repositories such as Kaggle, UCI [@uci_repo], and ImageNet\index{ImageNet!benchmark dataset}[^fn-imagenet-data-scale] [@imagenet_website] offer cost-efficient starting points when the deployment distribution resembles the benchmark enough to make reuse meaningful. Their value is speed and comparability, not guaranteed coverage.
+Preexisting datasets from repositories such as Kaggle, UCI [@uci_repo], and ImageNet are the first test. They offer speed and comparability when the deployment distribution resembles the benchmark enough to make reuse meaningful. For KWS, a curated speech corpus can establish the baseline model and reveal which words, languages, and acoustic conditions are already covered. Its value is not guaranteed coverage; its value is that it makes the remaining gaps measurable.
 
 [^fn-imagenet-data-scale]: **ImageNet**: The canonical "cost-efficient starting point" -- 14.2 million images labeled by 49,000 Mechanical Turk workers across 21,841 categories (2009). Its value as a benchmark is inseparable from its data engineering: Fei-Fei Li's team spent two years building the labeling infrastructure, yet every subsequent team reuses that investment for free. The catch is benchmark overfitting: models tuned to ImageNet's distribution systematically underperform on production data with different lighting, occlusion, or demographic composition, making it a starting point that must be augmented, never a finishing line. \index{ImageNet!data scale}
 
@@ -2000,45 +2135,7 @@ Synthetic data\index{Synthetic Data!rare event coverage}\index{Synthetic Data!si
 
 :::
 
-```{python}
-#| echo: false
-#| label: kws-acquisition-scale-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ KWS ACQUISITION SCALE CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: KWS multi-source acquisition prose
-# │
-# │ Goal: Recap the KWS corpus scale at the point where sourcing strategy uses it.
-# │ Show: Millions of examples across many languages require multi-source collection.
-# │ How: Format the MSWC-scale example and language count for prose.
-# │
-# │ Imports: mlsysim.core.constants (MILLION), mlsysim.book (fmt, check)
-# │ Exports: KWSAcquisitionScale.dataset_size_m_round_str,
-# │          KWSAcquisitionScale.languages_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class KWSAcquisitionScale:
-    """KWS acquisition scale recap for multi-source data collection."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_size_m = 23.4
-    languages = 50
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples = dataset_size_m * MILLION
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total_examples > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples:.0f}.")
-    check(languages >= 50, f"KWS language coverage unexpectedly narrow: {languages}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_m_round_str = fmt_int(round(dataset_size_m))
-    languages_str = fmt(languages, precision=0, commas=False)
-```
-
-For our KWS system, `{python} KWSAcquisitionScale.dataset_size_m_round_str` million training examples across `{python} KWSAcquisitionScale.languages_str` languages demand a volume that manual collection cannot economically provide. The multi-source strategy introduced in @sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9, combining curated datasets with web scraping, crowdsourcing, and synthetic generation, addresses this scale requirement while maintaining coverage across acoustic environments and speaker demographics.
+For our KWS system, `{python} KWSAcquisitionScale.dataset_size_million_samples_str` spanning `{python} KWSAcquisitionScale.languages_count_str` demand a volume that manual collection cannot economically provide. The multi-source strategy introduced in @sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9, combining curated datasets with web scraping, crowdsourcing, and synthetic generation, addresses this scale requirement while maintaining coverage across acoustic environments and speaker demographics.
 
 ### Coverage and diversity requirements {#sec-data-engineering-coverage-diversity-requirements-ce87}
 
@@ -2345,17 +2442,11 @@ Understanding the three core types of drift enables targeted detection and respo
 *Each drift type traces to the distribution component that shifted.*
 :::
 
-#### Covariate shift {#sec-data-engineering-covariate-shift-b3d9}
+The first case, **covariate shift**\index{Covariate Shift!definition}, changes the input distribution while preserving the relationship between features and labels: $p(x)$ changes but $p(y \mid x)$ stays the same. A medical imaging system trained on one camera model might later receive production images from a different manufacturer. The disease-image relationship remains unchanged, but pixel values shift because sensor characteristics, color calibration, or image processing pipelines differ. Detection therefore focuses on input feature distributions, using metrics such as PSI or KL divergence.
 
-**Covariate shift**\index{Covariate Shift!definition} occurs when input feature distributions change while the relationship between features and labels remains constant: $p(x)$ changes but $p(y \mid x)$ stays the same. A medical imaging system trained on one camera model might see production data from a different camera manufacturer. The disease-image relationship remains unchanged (same pathologies produce same visual indicators), but pixel value distributions shift due to different sensor characteristics, color calibration, or image processing pipelines. Detection focuses on monitoring feature distributions using statistical metrics like PSI or KL divergence applied to input features.
+The second case, **label shift**\index{Label Shift!definition}\index{Distribution Shift!label shift}, changes the output distribution while preserving the relationship between labels and features: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally while symptoms remain consistent predictors of each disease. A recommendation system might see the same pattern when new product categories launch, changing the relative frequency of user preferences without altering what makes products appealing within each category. Detection can often begin without ground truth labels by tracking shifts in the model's prediction distribution.
 
-#### Label shift {#sec-data-engineering-label-shift-dd6c}
-
-**Label shift**\index{Label Shift!definition}\index{Distribution Shift!label shift} occurs when the output label distribution changes while the relationship between labels and features remains constant: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally (flu cases spike in winter) while symptoms remain consistent predictors of each disease. A recommendation system might see label shift when new product categories launch, changing the distribution of user preferences without altering what makes products appealing within each category. Detection monitors prediction distributions for shifts in relative frequencies of predicted classes, which can be done without ground truth labels by tracking model output distributions.
-
-#### Concept drift {#sec-data-engineering-concept-drift-2b83}
-
-**Concept drift**\index{Concept Drift!definition} represents the most challenging case: the relationship between features and labels changes, meaning $p(y \mid x)$ evolves over time [@gama2014]. Medical treatment protocols change, altering disease outcomes for given symptoms. User preferences shift as social trends evolve, changing what product features drive purchases. Fraud patterns evolve as attackers adapt to detection systems. Concept drift requires ground truth labels for detection since we must monitor whether the feature-to-label relationship has changed, making it inherently more difficult and delayed than detecting covariate or label shift.
+The hardest case is **concept drift**\index{Concept Drift!definition}: the relationship between features and labels changes, so $p(y \mid x)$ evolves over time [@gama2014]. Medical treatment protocols change, user preferences shift as social trends evolve, and fraud patterns adapt as attackers respond to detection systems. Unlike covariate or label shift, concept drift requires ground truth labels for detection because the system must observe whether the feature-to-label relationship itself has changed.
 
 ```{python}
 #| echo: false
@@ -2417,7 +2508,7 @@ Mitigation strategies depend on root cause analysis. Annotator retraining addres
 
 [^fn-label-drift-invisible]: **Label Quality Drift**: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade -- annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\kappa)$ over rolling time windows and comparing automated labels against periodic expert audits. \index{Label Quality Drift!silent corruption}
 
-Operationalizing the PSI and KL divergence metrics introduced earlier\index{Population Stability Index!drift detection}\index{KL Divergence!distribution comparison} requires connecting them to automated alerts and retraining workflows. Data engineering is responsible for defining the drift thresholds (PSI > 0.2, KL divergence above a domain-specific threshold), selecting the monitoring window sizes (hourly for sudden shifts, weekly for gradual trends), and instrumenting pipelines to compute these metrics continuously. The operational infrastructure for alerting, escalation, and automated retraining is a core concern of MLOps; @sec-ml-operations provides comprehensive coverage of tiered alerting strategies, cold start monitoring, and automated response orchestration.
+Operationalizing the PSI and KL divergence metrics introduced earlier\index{Population Stability Index!drift detection}\index{KL Divergence!distribution comparison} requires connecting them to automated alerts and retraining workflows. Data engineering is responsible for defining the drift thresholds (PSI > 0.2, KL divergence above a domain-specific threshold), selecting the monitoring window sizes (hourly for sudden shifts, weekly for gradual trends), and instrumenting pipelines to compute these metrics continuously. @Sec-ml-operations later examines how production teams turn these data-engineering signals into tiered alerts, escalation paths, cold-start monitoring, and automated response orchestration.
 
 Drift detection is one dimension of the quality pillar, focused on identifying statistical changes in data distributions over time. Detecting issues, however, is only half the challenge; the other half is ensuring systems continue operating effectively even when problems surface. This leads us from quality monitoring to the reliability pillar, which addresses how pipelines maintain service continuity under adverse conditions.
 
@@ -2487,7 +2578,7 @@ class DataloaderStats:
     resnet_worker_count_str = fmt(resnet_worker_count, precision=0, commas=False)
 ```
 
-If the data pipeline cannot decode images fast enough to keep the GPU busy, the expensive accelerator sits idle. This phenomenon creates a "Choke Point" where adding more GPUs yields zero speedup—a counterintuitive result that frustrates teams who expect linear scaling from hardware investments. This bottleneck frequently occurs in computer vision, where decoding high-resolution JPEG images on the CPU consumes more time than the GPU requires to perform the forward and backward passes of a lightweight model like ResNet-18. Typically, training ResNet-50 on an A100 requires at least `{python} DataloaderStats.resnet_worker_count_str` CPU workers just to keep the GPU from starving.
+If the data pipeline cannot decode images fast enough to keep the GPU busy, the expensive accelerator sits idle. This phenomenon creates a "Choke Point" where adding more GPUs yields zero speedup, a counterintuitive result that frustrates teams who expect linear scaling from hardware investments. This bottleneck frequently occurs in computer vision, where decoding high-resolution JPEG images on the CPU consumes more time than the GPU requires to perform the forward and backward passes of a lightweight model like ResNet-18. Typically, training ResNet-50 on an A100 requires at least `{python} DataloaderStats.resnet_worker_count_str` CPU workers just to keep the accelerator from starving.
 
 Examine @fig-dataloader-choke-point to see this **Dataloader Choke Point**\index{Data Loading!choke point} in action. Notice the "Starvation Region" on the left where the CPU limits performance: no matter how powerful the GPU, training throughput is capped by data loading speed until enough workers are allocated to saturate the accelerator. Throughput levels are representative and vary by model and hardware.
 
@@ -3025,7 +3116,7 @@ The alternative is computing features on the fly during training. Loader-compute
 
 In practice, hybrid patterns\index{Feature Computation!hybrid patterns} predominate. Expensive, stable features (user embeddings requiring matrix factorization, historical aggregations spanning months of data) are precomputed and materialized. Cheap, time-sensitive features such as recency signals, session context, and time-based transformations are computed in the data loader.
 
-For example, a recommendation system precomputes user embedding features (expensive, stable over days) while computing time-since-last-interaction features (cheap, time-sensitive) in the data loader. This balances storage costs, computation time, and feature freshness based on each feature's specific characteristics.
+For example, a recommendation system precomputes stable user representation features (expensive, stable over days) while computing time-since-last-interaction features (cheap, time-sensitive) in the data loader. This balances storage costs, computation time, and feature freshness based on each feature's specific characteristics.
 
 #### Integration strategies and KWS case study {#sec-data-engineering-multisource-integration-strategies-0e8a}
 
@@ -3147,7 +3238,7 @@ Transforming audio data for KWS involves converting raw waveforms into formats s
 
 [^fn-mfcc-dimensionality]: **MFCC (Mel-Frequency Cepstral Coefficients)**: This transformation achieves its compactness and noise resistance by applying mel-scale filtering, which selectively emphasizes the frequencies humans use to distinguish speech. This process reduces thousands of raw audio samples from a small time window (for example, 25 ms) into just 13–39 coefficients, the aggressive dimensionality reduction required for always-on, kilobyte-scale hardware. Any mismatch in the parameters governing this transformation between training and serving will create feature skew, degrading the model's accuracy. \index{MFCC!dimensionality reduction}
 
-[^fn-spectrogram-cnn]: **Spectrogram**: The Short-Time Fourier Transform (STFT) computes this 2D representation, architecturally repurposing standard image-based convolutional neural networks (CNNs) for audio processing by converting the 1D waveform into a visual format. This repurposing creates a rigid dependency: any mismatch in STFT parameters (for example, a 25 ms vs. 30 ms window) between training and serving invalidates the learned patterns, causing performance to collapse. \index{Spectrogram!CNN bridge}
+[^fn-spectrogram-cnn]: **Spectrogram**: The Short-Time Fourier Transform (STFT) computes this 2D representation by converting the one-dimensional waveform into a time-frequency image. This representation lets image-style ML models process audio, but it also creates a rigid dependency: any mismatch in STFT parameters (for example, a 25 ms vs. 30 ms window) between training and serving invalidates the learned patterns, causing performance to collapse. \index{Spectrogram!audio representation}
 
 ::: {#fig-spectrogram-example fig-env="figure" fig-pos="t!" fig-cap="**Audio Feature Transformation**: A raw audio waveform (top) is converted into a spectrogram (middle), a two-dimensional representation where the horizontal axis is time, the vertical axis is frequency, and color intensity indicates signal power, and finally into an MFCC approximation (bottom) that compresses the same energy into a small set of speech-relevant coefficients. This pipeline creates image-like features suitable for ML models." fig-alt="Three stacked plots: a raw audio waveform (amplitude vs. time) at top, its spectrogram (frequency vs. time with power in dB as color) in the middle, and an MFCC approximation at bottom."}
 
@@ -3169,7 +3260,7 @@ Handling partial processing failures requires careful state management. Processi
 
 Deterministic transformations\index{Deterministic Transformations!reproducibility} are those that always produce the same output for the same input, without dependence on external factors like time, random numbers, or mutable global state. Transformations that depend on current time (for example, computing "days since event" based on current date) break determinism because reprocessing historical data would produce different results. The solution is to capture temporal reference points explicitly: instead of "days since event," compute "days from event to reference date" where reference date is fixed and persisted. Random operations should use seeded random number generators where the seed is derived deterministically from input data, ensuring reproducibility.
 
-Reliability in the KWS pipeline requires reproducible feature extraction. Audio preprocessing must be deterministic: given the same raw audio file, the same MFCC features are always computed regardless of when processing occurs or which server executes it. This enables debugging model behavior (can always recreate exact features for a problematic example), reprocessing data when bugs are fixed (produces consistent results), and distributed processing (different workers produce identical features from the same input). The processing code captures all parameters (fast Fourier transform (FFT) window size, hop length, number of MFCC coefficients) in configuration versioned alongside the code, ensuring reproducibility across time and execution environments. However, even with rigorous design, production systems must implement runtime monitoring to detect skew if it emerges; @sec-ml-operations covers the operational infrastructure for shadow scoring and distribution monitoring.
+Reliability in the KWS pipeline requires reproducible feature extraction. Audio preprocessing must be deterministic: given the same raw audio file, the same MFCC features are always computed regardless of when processing occurs or which server executes it. This enables debugging model behavior (can always recreate exact features for a problematic example), reprocessing data when bugs are fixed (produces consistent results), and distributed processing (different workers produce identical features from the same input). The processing code captures all parameters (fast Fourier transform (FFT) window size, hop length, number of MFCC coefficients) in configuration versioned alongside the code, ensuring reproducibility across time and execution environments. Even with rigorous design, production systems must implement runtime monitoring to detect skew if it emerges; @sec-ml-operations covers operational comparison and distribution monitoring at scale.
 
 ### Distributed processing {#sec-data-engineering-scaling-distributed-processing-cb9b}
 
@@ -3237,39 +3328,46 @@ The feature computation placement trade-off introduced in @sec-data-engineering-
 # │ Show: Millions of examples require distributed processing, while edge memory is tiny.
 # │ How: Format corpus scale and always-on island memory limits.
 # │
-# │ Imports: mlsysim.core.constants (MILLION), mlsysim.book (fmt, check)
-# │ Exports: KWSScalabilityTargets.dataset_size_m_round_str,
+# │ Imports: mlsysim (Datasets, KB, count, fmt_count, fmt_qty, check)
+# │ Exports: KWSScalabilityTargets.dataset_size_million_examples_str,
 # │          KWSScalabilityTargets.memory_limit_edge_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty, check
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSScalabilityTargets:
     """KWS scale and edge deployment recap for processing architecture."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_size_m = 23.4
+    dataset = Datasets.MSWC
+    total_examples = dataset.training_examples
     memory_limit_edge_kb = 16
     model_size_limit_kb = 64  # KWS always-on island design limit
     memory_limit_edge = memory_limit_edge_kb * KB
     model_size_limit = model_size_limit_kb * KB
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples = dataset_size_m * MILLION
+    total_examples_count = total_examples.to(count).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total_examples > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples:.0f}.")
+    check(total_examples_count > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples_count:.0f}.")
     check(memory_limit_edge_kb <= 16, f"Edge memory target should remain tiny, got {memory_limit_edge_kb} KB.")
     check(memory_limit_edge_kb < model_size_limit_kb,
           "Edge preprocessing-state budget should be stricter than the model-size design limit.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_m_round_str = fmt_int(round(dataset_size_m))
-    memory_limit_edge_kb_str = fmt_qty(memory_limit_edge, KB, precision=0, commas=False)
-    model_size_limit_kb_str = fmt_qty(model_size_limit, KB, precision=0, commas=False)
+    dataset_size_million_examples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="example",
+    )
+    memory_limit_edge_kb_str = fmt_qty(memory_limit_edge, unit=KB, precision=0, commas=False)
+    model_size_limit_kb_str = fmt_qty(model_size_limit, unit=KB, precision=0, commas=False)
 ```
 
-Scalability in the KWS pipeline manifests at multiple stages. Development uses single-machine processing on sample datasets to iterate rapidly. Training at scale requires distributed processing when dataset size (`{python} KWSScalabilityTargets.dataset_size_m_round_str` million examples) exceeds single-machine capacity or when multiple experiments run concurrently. The processing pipeline parallelizes naturally: audio files are independent, so transforming them requires no coordination between workers. Each worker reads its assigned audio files from distributed storage, computes features, and writes results back—a trivially parallel pattern achieving near-linear scalability. Production deployment adds a stricter `{python} KWSScalabilityTargets.memory_limit_edge_kb_str` preprocessing-state budget alongside the `{python} KWSScalabilityTargets.model_size_limit_kb_str` model-size limit, necessitating careful optimization and quantization to fit processing within device capabilities.
+Scalability in the KWS pipeline manifests at multiple stages. Development uses single-machine processing on sample datasets to iterate rapidly. Training at scale requires distributed processing when dataset size (`{python} KWSScalabilityTargets.dataset_size_million_examples_str`) exceeds single-machine capacity or when multiple experiments run concurrently. The processing pipeline parallelizes naturally: audio files are independent, so transforming them requires no coordination between workers. Each worker reads its assigned audio files from distributed storage, computes features, and writes results back, a trivially parallel pattern achieving near-linear scalability. Production deployment adds a stricter `{python} KWSScalabilityTargets.memory_limit_edge_kb_str` preprocessing-state budget alongside the `{python} KWSScalabilityTargets.model_size_limit_kb_str` model-size limit, necessitating careful footprint optimization to fit processing within device capabilities.
 
 ### Transformation lineage {#sec-data-engineering-tracking-data-transformation-lineage-3b09}
 
@@ -3614,67 +3712,83 @@ These principles manifest at scale across safety-critical domains. Autonomous ve
 # │ Show: Manual labeling would consume tens of person-years even at 10 s/sample.
 # │ How: Convert example count and label time into person-hours and person-years.
 # │
-# │ Imports: mlsysim.core.constants (MILLION, SEC_PER_HOUR), mlsysim.book (fmt, check)
-# │ Exports: KWSAutomatedLabelingScale.dataset_size_m_str,
-# │          KWSAutomatedLabelingScale.dataset_size_m_round_str,
+# │ Imports: mlsysim (Datasets, count, second, fmt_count, fmt_time, fmt_percent, check)
+# │ Exports: KWSAutomatedLabelingScale.dataset_size_million_examples_str,
+# │          KWSAutomatedLabelingScale.dataset_size_million_samples_str,
 # │          KWSAutomatedLabelingScale.label_hours_str,
 # │          KWSAutomatedLabelingScale.label_years_str,
 # │          KWSAutomatedLabelingScale.accuracy_target_str,
-# │          KWSAutomatedLabelingScale.languages_str,
+# │          KWSAutomatedLabelingScale.languages_count_str,
+# │          KWSAutomatedLabelingScale.keywords_count_str,
 # │          KWSAutomatedLabelingScale.sample_duration_ms_low_str,
 # │          KWSAutomatedLabelingScale.sample_duration_ms_high_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_count, check, MarkdownStr
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSAutomatedLabelingScale:
     """KWS automated-labeling scale recap for the MSWC discussion."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_size_m = 23.4
-    languages = 50
+    dataset = Datasets.MSWC
+    total_examples = dataset.training_examples
+    languages = dataset.languages
+    keywords = dataset.keywords
     label_seconds_per_example = 10
     accuracy_target = 98
     sample_duration_ms_low = 500
     sample_duration_ms_high = 800
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples = dataset_size_m * MILLION
-    label_hours = total_examples * label_seconds_per_example / SEC_PER_HOUR
+    total_examples_count = total_examples.to(count).magnitude
+    label_hours = total_examples_count * label_seconds_per_example / SEC_PER_HOUR
     label_years = label_hours / 2000
     sample_duration_window_ms = sample_duration_ms_high - sample_duration_ms_low
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(label_years > 30, f"Manual KWS labeling effort unexpectedly small: {label_years:.1f} person-years.")
+    check(keywords >= 300_000, f"MSWC keyword coverage unexpectedly narrow: {keywords}.")
     check(sample_duration_window_ms > 0, "KWS duration bounds must be ordered.")
     check(accuracy_target > 90, f"KWS accuracy target unexpectedly low: {accuracy_target}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_m_str = MarkdownStr(f"{dataset_size_m}")
-    dataset_size_m_round_str = fmt_int(round(dataset_size_m))
-    label_hours_str = fmt_time(label_hours, "hour", precision=0, commas=True, style="word")
+    dataset_size_million_examples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=1,
+        scale_style="word",
+        label="example",
+        allow_fractional=True,
+    )
+    dataset_size_million_samples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="sample",
+    )
+    label_hours_str = fmt_time(label_hours, unit=hour, precision=0, commas=True, style="word")
     label_years_str = fmt_count(label_years, precision=1, commas=False, label="person-year", plural_label="person-years", allow_fractional=True)
     accuracy_target_str = fmt_percent(accuracy_target/100, precision=0, commas=False, style='symbol')
-    languages_str = fmt(languages, precision=0, commas=False)
-    sample_duration_ms_low_str = fmt_time(sample_duration_ms_low, 'millisecond', precision=0, commas=False)
-    sample_duration_ms_high_str = fmt_time(sample_duration_ms_high, 'millisecond', precision=0, commas=False)
+    languages_count_str = fmt_count(languages, label="language", commas=False)
+    keywords_count_str = fmt_count(keywords, label="keyword", commas=True)
+    sample_duration_ms_low_str = fmt_time(sample_duration_ms_low, unit=millisecond, precision=0, commas=False)
+    sample_duration_ms_high_str = fmt_time(sample_duration_ms_high, unit=millisecond, precision=0, commas=False)
 ```
 
-\index{Keyword Spotting!automated labeling}Our KWS case study has now progressed through problem definition (@sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9), data collection, ingestion, and processing. At the labeling stage, we confront a challenge unique to speech systems at scale. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond the manual and crowdsourced approaches we examined earlier. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling addresses this challenge through its innovative approach to generating labeled wake word data; the corpus contains over `{python} KWSAutomatedLabelingScale.dataset_size_m_str` million one-second spoken examples across 340,000 keywords in `{python} KWSAutomatedLabelingScale.languages_str` different languages.
+\index{Keyword Spotting!automated labeling}Our KWS case study has now progressed through problem definition (@sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9), data collection, ingestion, and processing. At the labeling stage, we confront a challenge unique to speech systems at scale. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond the manual and crowdsourced approaches we examined earlier. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling addresses this challenge through its innovative approach to generating labeled wake word data; the corpus contains over `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` of one-second speech across `{python} KWSAutomatedLabelingScale.keywords_count_str` in `{python} KWSAutomatedLabelingScale.languages_count_str}.
 
-This scale makes manual annotation infeasible: `{python} KWSAutomatedLabelingScale.dataset_size_m_str` million examples at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Achieving `{python} KWSAutomatedLabelingScale.accuracy_target_str` accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} KWSAutomatedLabelingScale.languages_str` languages ensures the technology serves diverse speaker populations.
-
-Walk through the pipeline in @fig-mswc to see how this automated system works. It begins with paired sentence audio recordings and corresponding transcriptions from projects like Common Voice [@mozilla_common_voice] or multilingual captioned content platforms, processing these inputs through forced alignment\index{Forced Alignment!speech labeling}\index{Speech Recognition!forced alignment}[^fn-forced-alignment-kws] to identify precise word boundaries within continuous speech.
+This scale makes manual annotation infeasible: `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Achieving `{python} KWSAutomatedLabelingScale.accuracy_target_str` accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} KWSAutomatedLabelingScale.languages_count_str` ensures the technology serves diverse speaker populations. The automated system in @fig-mswc addresses that scale problem by starting with paired sentence audio recordings and corresponding transcriptions from projects like Common Voice [@mozilla_common_voice] or multilingual captioned content platforms, then processing those inputs through forced alignment\index{Forced Alignment!speech labeling}\index{Speech Recognition!forced alignment}[^fn-forced-alignment-kws] to identify precise word boundaries within continuous speech.
 
 [^fn-forced-alignment-kws]: **Forced Alignment**: Given a known transcription, the algorithm aligns specific words to audio frames with millisecond precision using dynamic programming (Viterbi algorithm), bypassing the harder problem of recognizing what was said. This distinction is what makes automated KWS corpus construction feasible: because the transcription is already known from paired text, forced alignment converts sentence-level audio into word-level training samples at negligible marginal cost -- enabling datasets of millions of labeled keywords without proportional human annotation effort. \index{Forced Alignment!automated labeling}
 
-::: {#fig-mswc fig-env="figure" fig-pos="htb" fig-cap="**Multilingual Data Preparation**: Forced alignment and segmentation transform paired audio-text data into labeled one-second segments, creating a large-scale corpus for training keyword spotting models across `{python} KWSAutomatedLabelingScale.languages_str` languages. This automated process enables scalable development of KWS systems by efficiently generating training examples from readily available speech resources like common voice and multilingual captioned content." fig-alt="Pipeline showing audio waveform and text transcript inputs processed through forced alignment stage, then segmented into individual one-second labeled keyword samples for KWS training."}
+::: {#fig-mswc fig-env="figure" fig-pos="htb" fig-cap="**Multilingual Data Preparation**: Forced alignment and segmentation transform paired audio-text data into labeled one-second segments, creating a large-scale corpus for training keyword spotting models across `{python} KWSAutomatedLabelingScale.languages_count_str`. This automated process enables scalable development of KWS systems by efficiently generating training examples from readily available speech resources like common voice and multilingual captioned content." fig-alt="Pipeline showing audio waveform and text transcript inputs processed through forced alignment stage, then segmented into individual one-second labeled keyword samples for KWS training."}
 
 ![](images/png/data_engineering_kws2.png)
 
 :::
 
-The extraction system uses these precise timing markers to generate clean keyword samples while handling the engineering challenges our problem definition anticipated: background noise interfering with word boundaries, speakers stretching or compressing words unexpectedly beyond our target `{python} KWSAutomatedLabelingScale.sample_duration_ms_low_str`--`{python} KWSAutomatedLabelingScale.sample_duration_ms_high_str` duration, and longer words exceeding the one-second boundary. MSWC provides automated quality assessment that analyzes audio characteristics to identify potential issues with recording quality, speech clarity, or background noise, which is essential for maintaining consistent standards across `{python} KWSAutomatedLabelingScale.dataset_size_m_round_str` million samples without the manual review expenses that would make this scale prohibitive.
+The extraction system uses these precise timing markers to generate clean keyword samples while handling the engineering challenges our problem definition anticipated: background noise interfering with word boundaries, speakers stretching or compressing words unexpectedly beyond our target `{python} KWSAutomatedLabelingScale.sample_duration_ms_low_str`--`{python} KWSAutomatedLabelingScale.sample_duration_ms_high_str` duration, and longer words exceeding the one-second boundary. MSWC provides automated quality assessment that analyzes audio characteristics to identify potential issues with recording quality, speech clarity, or background noise, which is essential for maintaining consistent standards across `{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` without the manual review expenses that would make this scale prohibitive.
 
 Modern voice assistant developers often build on this automated labeling foundation. While automated corpora may not contain the specific wake words a product requires, they provide starting points for KWS prototyping, particularly in underserved languages where commercial datasets do not exist. Production systems typically layer targeted human recording and verification for challenging cases (unusual accents, rare words, or difficult acoustic environments), coordinating between automated processing and human expertise.
 
@@ -3682,7 +3796,7 @@ The pipeline has now produced its compilation artifacts: millions of feature vec
 
 ## Storage Architecture {#sec-data-engineering-strategic-storage-architecture-1a6b}
 
-The labeled datasets from our pipeline (`{python} KWSAutomatedLabelingScale.dataset_size_m_round_str` million audio samples spanning `{python} KWSAutomatedLabelingScale.languages_str` languages for KWS) now require strategic storage decisions that determine training efficiency, serving latency, and long-term maintainability. Storage architecture\index{Storage!architecture} addresses a core tension: batch training requires sequential scans across millions of examples, while real-time serving demands millisecond lookups of individual feature vectors. These competing access patterns shape every storage decision.
+The labeled datasets from our pipeline (`{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` spanning `{python} KWSAutomatedLabelingScale.languages_count_str` for KWS) now require strategic storage decisions that determine training efficiency, serving latency, and long-term maintainability. Storage architecture\index{Storage!architecture} addresses a core tension: batch training requires sequential scans across millions of examples, while real-time serving demands millisecond lookups of individual feature vectors. These competing access patterns shape every storage decision.
 
 ML storage requirements diverge from those of transactional systems. Rather than optimizing for frequent small writes and point lookups that characterize e-commerce or banking, ML workloads prioritize high-throughput sequential reads, large-scale scans, and schema flexibility. A database serving an e-commerce application performs well with millions of individual product lookups per second, but an ML training job scanning that entire catalog repeatedly across epochs requires completely different storage optimization.
 
@@ -3697,7 +3811,7 @@ Optimizing this term requires understanding two core storage performance metrics
 
 The choice between databases, data warehouses, and data lakes is fundamentally a choice about which of these metrics to optimize. Databases (OLTP systems) optimize for high IOPS with small block sizes, making them suited for serving individual feature vectors in real-time where per-request latency dominates. Data warehouses (OLAP systems) optimize for high throughput with large block sizes and sequential access, making them ideal for feature engineering and batch analytics. Data lakes prioritize capacity and throughput for unstructured data, essential for training jobs where the $D_{\text{vol}}$ numerator is measured in petabytes and aggregate bandwidth must scale to thousands of GPUs.
 
-The access-pattern decision becomes concrete when matched to ML workflow stages. For online feature serving, the high-IOPS characteristics of databases enable millisecond lookups of individual records. The DLRM recommendation lighthouse discussed in @sec-network-architectures-sparse-architectures-recommendation-systems-5d19 exemplifies this challenge at its most extreme: its terabyte-scale embedding tables must serve billions of sparse lookups per second, requiring storage architectures that optimize IOPS over sequential throughput. More generally, a recommendation system looking up a user's profile during real-time inference requires random access optimized for per-request latency.
+The access-pattern decision becomes concrete when matched to ML workflow stages. For online feature serving, the high-IOPS characteristics of databases enable millisecond lookups of individual records. Large recommendation systems exemplify this challenge at its most extreme: terabyte-scale lookup data may need to serve billions of sparse reads per second, requiring storage architectures that optimize IOPS over sequential throughput. More generally, a recommendation system looking up a user's profile during real-time inference requires random access optimized for per-request latency.
 
 Structured model training points the decision in the opposite direction: throughput dominates request-level latency. The throughput-optimized design of data warehouses enables high-speed sequential scans over large, clean tables. Training a fraud detection model that processes millions of transactions with hundreds of features per transaction benefits from columnar storage that reads only relevant features efficiently, directly reducing the Data Term by minimizing bytes transferred.
 
@@ -3707,7 +3821,7 @@ Databases\index{Database!OLTP for ML}\index{OLTP} earn their place when transact
 
 Data warehouses\index{Data Warehouse!analytical queries}\index{Data Warehouse!OLAP}\index{OLAP}\index{Storage!columnar, ML training} earn their place when repeated scans over structured features dominate. Modern warehouses like Google BigQuery, Amazon Redshift, and Snowflake use columnar storage formats [@stonebraker2018] that enable reading specific features without loading entire records, essential when tables contain hundreds of columns but training needs only a subset. This columnar organization delivers five to ten times I/O reduction compared to row-based formats for typical ML workloads. Consider a fraud detection dataset with 100 columns where models typically use 20 features, so columnar storage reads only needed columns, achieving 80 percent I/O reduction before even considering compression. Many successful ML systems draw training data from warehouses because the structured environment simplifies exploratory analysis and iterative development. Data analysts can quickly compute aggregate statistics, identify correlations between features, and validate data quality using familiar SQL interfaces.
 
-However, warehouses assume relatively stable schemas and struggle with truly unstructured data (images, audio, free-form text) or rapidly evolving formats common in experimental ML pipelines. When a computer vision team wants to store raw images alongside extracted features, multiple annotation formats from different labeling vendors, intermediate model predictions, and embedding vectors, forcing all these into rigid warehouse schemas creates more friction than value. Schema evolution becomes painful: adding new feature types requires ALTER TABLE operations that may take hours on large datasets, blocking other operations and slowing iteration velocity.
+However, warehouses assume relatively stable schemas and struggle with truly unstructured data (images, audio, free-form text) or rapidly evolving formats common in experimental ML pipelines. When a computer vision team wants to store raw images alongside extracted features, multiple annotation formats from different labeling vendors, intermediate model predictions, and learned representation vectors, forcing all these into rigid warehouse schemas creates more friction than value. Schema evolution becomes painful: adding new feature types requires ALTER TABLE operations that may take hours on large datasets, blocking other operations and slowing iteration velocity.
 
 Data lakes\index{Data Lake!unstructured storage}\index{Data Lake!schema flexibility}\index{Schema-on-Read!flexibility} earn their place when schema flexibility and low-cost retention dominate. They address warehouse limitations by storing structured, semi-structured, and unstructured data in native formats, deferring schema definitions until the point of reading, a pattern called schema-on-read.[^fn-schema-on-read-flexibility]
 
@@ -3748,25 +3862,22 @@ Beyond the functional differences between storage systems, cost and performance 
 # │ Show: Object storage is cheaper, while NVMe buys a 50× loading advantage.
 # │ How: Compute rounded KWS raw-audio size, then compare storage costs and bandwidth.
 # │
-# │ Imports: Infrastructure.Pricing.Storage.*, mlsysim.core.constants (GB, TB, dollar, ureg, byte, MILLION),
-# │          mlsysim.book (fmt, check)
+# │ Imports: mlsysim (Datasets, Infrastructure, Systems, units, formatters)
 # │ Exports: KWSStorageEconomics.dataset_size_gb_str,
 # │          KWSStorageEconomics.storage_s3_cost_str,
 # │          KWSStorageEconomics.storage_nvme_low_cost_str,
 # │          KWSStorageEconomics.storage_nvme_high_cost_str,
 # │          KWSStorageEconomics.load_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
-from mlsysim.fmt import fmt, fmt_usd, fmt_qty, check, fmt_multiple
-from mlsysim.core.units import GB, TB, byte, USD, ureg
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSStorageEconomics:
     """Storage-cost recap for the KWS training dataset."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
     storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
@@ -3776,7 +3887,9 @@ class KWSStorageEconomics:
     obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    total_examples_count = dataset.training_examples.to(count).magnitude
+    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     dataset_size = dataset_size_bytes * byte
     dataset_size_value = dataset_size.to(GB).magnitude
@@ -3791,7 +3904,7 @@ class KWSStorageEconomics:
     check(abs(load_speedup - 50) < 1e-9, f"Expected 50x NVMe/object-store speedup, got {load_speedup:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_gb_str = fmt_qty(dataset_size, GB, precision=0, commas=False)
+    dataset_size_gb_str = fmt_memory(dataset_size, unit=GB, precision=0, commas=False)
     storage_s3_cost_str = fmt_usd(storage_s3_cost, precision=1, commas=False, per="month")
     storage_nvme_low_cost_str = fmt_usd(storage_nvme_low_cost, precision=1, commas=False, per="month")
     storage_nvme_high_cost_str = fmt_usd(storage_nvme_high_cost, precision=1, commas=False, per="month")
@@ -3824,28 +3937,28 @@ class KWSStorageEconomics:
 # │ Show: The 50× speedup available when moving from object storage to NVMe.
 # │ How: Calculate total load time for the computed rounded KWS dataset.
 # │
-# │ Imports: mlsysim.book (fmt, check)
+# │ Imports: mlsysim (Datasets, Systems, units, formatters)
 # │ Exports: StorageLoading.nvme_load_s_str, StorageLoading.obj_load_s_str,
 # │          StorageLoading.load_speedup_mult_str, StorageLoading.nvme_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
-from mlsysim.fmt import fmt, fmt_qty, check, fmt_time, fmt_multiple
-from mlsysim.core.units import GB, byte, second
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageLoading:
     """KWS dataset load time comparison: NVMe vs. object storage."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
     nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
     obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    total_examples_count = dataset.training_examples.to(count).magnitude
+    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     kws_dataset = dataset_size_bytes * byte
     nvme_load = kws_dataset / nvme_bw
@@ -3857,10 +3970,10 @@ class StorageLoading:
     check(obj_load > 3600 * second, f"Object storage load should take hours at 100 MB/s, got {obj_load.to(second).magnitude:.0f}s.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    nvme_load_s_str = fmt_time(nvme_load, 'second', precision=1, commas=False)
-    obj_load_s_str = fmt_time(obj_load, 'second', precision=0, commas=True)
+    nvme_load_s_str = fmt_time(nvme_load, unit=second, precision=1, commas=False)
+    obj_load_s_str = fmt_time(obj_load, unit=second, precision=0, commas=True)
     load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
-    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 The performance difference directly impacts iteration velocity. Training that loads data at `{python} StorageLoading.nvme_bw_gb_per_s_str` completes dataset loading in `{python} StorageLoading.nvme_load_s_str`, compared to `{python} StorageLoading.obj_load_s_str` at typical object storage speeds. This `{python} StorageLoading.load_speedup_mult_str` difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
@@ -3953,11 +4066,11 @@ class ModelStorageScale:
     model_growth_factor_mult_str = fmt_multiple(model_growth_factor, precision=0)
 ```
 
-Modern ML models contain millions to trillions of parameters\index{Model Parameters!storage requirements} requiring storage and retrieval patterns fundamentally different from traditional data. GPT-3 [@brown2020language] requires approximately `{python} ModelStorageScale.gpt3_fp32_gb_str` for model weights when stored in FP32 format (`{python} ModelStorageScale.gpt3_params_b_str` parameters times 4 bytes), though practical deployments typically use FP16 (`{python} ModelStorageScale.gpt3_fp16_gb_str`) or quantized formats for reduced storage and faster inference (see @sec-model-compression for quantization techniques). Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's `{python} ModelStorageScale.alexnet_params_m_str` parameters [@krizhevsky2012imagenet] to GPT-3's `{python} ModelStorageScale.gpt3_params_b_str` parameters [@brown2020language], model size grew approximately `{python} ModelStorageScale.model_growth_factor_mult_str` in eight years. Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple GPUs need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources.
+Modern ML models contain millions to trillions of parameters\index{Model Parameters!storage requirements} requiring storage and retrieval patterns fundamentally different from traditional data. GPT-3 [@brown2020language] requires approximately `{python} ModelStorageScale.gpt3_fp32_gb_str` for model weights when stored in FP32 format (`{python} ModelStorageScale.gpt3_params_b_str` parameters times 4 bytes), though practical deployments often use smaller numeric formats such as FP16 (`{python} ModelStorageScale.gpt3_fp16_gb_str`) to reduce storage and access cost. Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's `{python} ModelStorageScale.alexnet_params_m_str` parameters [@krizhevsky2012imagenet] to GPT-3's `{python} ModelStorageScale.gpt3_params_b_str` parameters [@brown2020language], model size grew approximately `{python} ModelStorageScale.model_growth_factor_mult_str` in eight years. Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple accelerators need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources. @Sec-model-compression later explains the model-side techniques that reduce these footprints further.
 
 The iterative nature of ML development introduces versioning requirements\index{Model Versioning!requirements} qualitatively different from traditional software. Git excels at tracking code changes where files are predominantly text with small incremental modifications, but it fails for large binary files where even small model changes result in entirely new checkpoints. Storing ten versions of a 10 GB model naively would consume 100 GB; ML versioning systems typically keep lightweight metadata pointers in Git or a registry and store artifacts in external content-addressed storage. Identical files can be deduplicated, but changed binary checkpoints are often stored as separate objects unless the backend adds its own delta compression. Tools like DVC (Data Version Control) and MLflow\index{MLflow!model versioning} maintain pointers to model artifacts rather than storing copies, enabling efficient versioning while preserving the ability to reproduce any historical model. A typical ML project generates hundreds of model versions during hyperparameter tuning—one version per training run as engineers explore learning rates, batch sizes, architectures, and regularization strategies. Without systematic versioning capturing training configuration, accuracy metrics, and training data version alongside model weights, reproducing results becomes impossible when yesterday's model performed better than today's but teams cannot identify which configuration produced it. This reproducibility challenge connects directly to the governance requirements addressed by @sec-data-engineering-data-versioning-ml-reproducibility-16d0: regulatory compliance often requires demonstrating exactly which data and process produced specific model predictions.
 
-Large-scale training generates substantial intermediate data requiring storage systems to handle concurrent read/write operations efficiently. When training jobs use multiple GPUs, each processing unit works on different portions of data, requiring storage systems to handle many simultaneous reads and writes. The specific patterns depend on the parallelization strategy employed, which @sec-model-training examines in detail. From a storage perspective, systems must handle concurrent I/O at rates proportional to the number of processing units, with each potentially writing tens to hundreds of megabytes of intermediate results during model updates. Memory optimization strategies like activation checkpointing\index{Activation Checkpointing!memory optimization} (also called gradient checkpointing\index{Gradient Checkpointing}) trade additional computation for lower GPU memory use by discarding selected intermediate activations during the forward pass and recomputing them during backpropagation. This approach reduces GPU memory requirements but increases compute; storage I/O pressure comes from checkpoint files, optimizer-state snapshots, or explicit activation offload strategies rather than standard activation checkpointing itself. Storage systems must provide low-latency access to support efficient coordination. If workers spend more time waiting for storage than performing computations, parallel processing becomes counterproductive regardless of the specific training approach used.
+Large-scale training generates substantial intermediate data requiring storage systems to handle concurrent read/write operations efficiently. When training jobs use multiple accelerators, each processing unit works on different portions of data, requiring storage systems to handle many simultaneous reads and writes. The specific patterns depend on the parallelization strategy employed, which @sec-model-training examines in detail. From a storage perspective, systems must handle concurrent I/O at rates proportional to the number of processing units, with each potentially writing tens to hundreds of megabytes of intermediate results during model updates. Checkpoint files, optimizer-state snapshots, and explicit offload paths create storage pressure when training state no longer fits comfortably in accelerator memory. Storage systems must provide low-latency access to support efficient coordination. If workers spend more time waiting for storage than performing computations, parallel processing becomes counterproductive regardless of the specific training approach used.
 
 The bandwidth hierarchy constrains ML system design at every level, creating bottlenecks that no amount of compute optimization can overcome. While RAM delivers 50 to 200 gigabytes per second bandwidth on modern servers, network storage systems typically provide only one to ten gigabytes per second, and even high-end NVMe SSDs max out at one to seven gigabytes per second sequential throughput. Modern GPUs can process data faster than storage can supply it, creating scenarios where expensive accelerators idle waiting for data. Consider training an image classification model: loading 1,000 images per second at 150 KB each requires 150 MB/s sustained throughput from storage. When the GPU can process images faster than storage delivers them, the *data pipeline*, not the *model*, becomes the bottleneck. A 10-fold mismatch between GPU processing speed and storage bandwidth means expensive accelerators sit idle 90 percent of the time waiting for data. No amount of GPU optimization can overcome this I/O constraint.
 
@@ -3989,7 +4102,7 @@ Understanding these quantitative relationships enables informed architectural de
 # │          StorageBandwidth.s3_workers_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models, Systems
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_qty, fmt_qty_int, fmt_rate, fmt_percent, fmt_flops
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_qty, fmt_rate, fmt_percent, fmt_flops, fmt_flop_rate, fmt_bandwidth
 from mlsysim.core.units import KB, GB, MB, byte, second, flop, GFLOPs, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4027,17 +4140,17 @@ class StorageBandwidth:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     max_img_per_s_str = fmt_rate(max_img_per_sec, 'img/s', precision=0)
-    required_bw_gb_per_s_str = fmt_qty(required_bw, GB/second, precision=1, commas=False)
-    a100_fp16_tflop_per_s_str = fmt_qty_int(h_a100.compute.peak_flops, TFLOP/second, commas=False)
+    required_bw_gb_per_s_str = fmt_bandwidth(required_bw, unit=GB / second, precision=1, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(h_a100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
     resnet_fwdbwd_gflop_str = fmt_flops(m_resnet.inference_flops * 3, unit=GFLOPs, precision=1, commas=False)
-    image_size_kb_str = fmt_qty(image_size, KB, precision=0, commas=False)
-    sata_bw_mb_per_s_str = fmt_qty(sata_bw, MB/second, precision=0, commas=False)
+    image_size_kb_str = fmt_qty(image_size, unit=KB, precision=0, commas=False)
+    sata_bw_mb_per_s_str = fmt_bandwidth(sata_bw, unit=MB / second, precision=0, commas=False)
     sata_max_img_per_s_str = fmt_rate(sata_max_img_sec, 'img/s', precision=0)
     sata_utilization_pct_str = fmt_percent(sata_utilization_pct/100, precision=0, commas=False, style='symbol')
-    s3_bw_mb_per_s_str = fmt_qty(s3_bw, MB/second, precision=0, commas=False)
+    s3_bw_mb_per_s_str = fmt_bandwidth(s3_bw, unit=MB / second, precision=0, commas=False)
     s3_workers_str = fmt_count(s3_workers, commas=False, label="concurrent worker thread")
-    nvme_bw_low_gb_per_s_str = fmt_qty(nvme_bw_low, GB/second, precision=0, commas=False)
-    nvme_bw_high_gb_per_s_str = fmt_qty(nvme_bw_high, GB/second, precision=0, commas=False)
+    nvme_bw_low_gb_per_s_str = fmt_bandwidth(nvme_bw_low, unit=GB / second, precision=0, commas=False)
+    nvme_bw_high_gb_per_s_str = fmt_bandwidth(nvme_bw_high, unit=GB / second, precision=0, commas=False)
 ```
 
 Designing for high-throughput training starts by matching storage throughput to accelerator demand.
@@ -4046,36 +4159,27 @@ Designing for high-throughput training starts by matching storage throughput to 
 
 **Problem**: What storage configuration keeps an NVIDIA A100 from being data-starved while training ResNet-50?
 
-*The compute term (throughput ceiling)*
+Start with the compute ceiling. An NVIDIA A100 can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about four GFLOPs for each forward pass, and including backpropagation raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. Dividing accelerator peak by model cost gives an upper bound of `{python} StorageBandwidth.max_img_per_s_str`.
 
-*   **Hardware peak**: NVIDIA A100 = `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` (FP16 Tensor Core, dense operations).
-*   **Model cost**: ResNet-50 requires approximately four GFLOPs for the forward pass per image; including the backward pass, total is approximately `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per training step.
-*   **Maximum theoretical throughput**: `{python} StorageBandwidth.max_img_per_s_str` (A100 peak FP16 throughput divided by ResNet-50 forward-plus-backward FLOPs per image).
+That compute ceiling becomes a storage requirement once each image must arrive from disk or object storage. With `{python} StorageBandwidth.image_size_kb_str` JPEG-compressed images, the data path must supply
 
-*The data term (bandwidth requirement)*
+`{python} StorageBandwidth.max_img_per_s_str` $\times$ `{python} StorageBandwidth.image_size_kb_str` per image $\approx$ `{python} StorageBandwidth.required_bw_gb_per_s_str`.
 
-*   **Image size**: `{python} StorageBandwidth.image_size_kb_str` (JPEG compressed).
-*   **Required bandwidth**:
-    `{python} StorageBandwidth.max_img_per_s_str` $\times$ `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.required_bw_gb_per_s_str`
+The storage options now have a concrete target: saturating this single A100 requires `{python} StorageBandwidth.required_bw_gb_per_s_str` of sustained bandwidth.
 
-*Storage options:*
-To saturate a single A100, storage must deliver `{python} StorageBandwidth.required_bw_gb_per_s_str`.
-
-*   **S3 Standard**: ~`{python} StorageBandwidth.s3_bw_mb_per_s_str` per thread. The pipeline needs `{python} StorageBandwidth.s3_workers_str`.
-*   **SATA SSD**: ~`{python} StorageBandwidth.sata_bw_mb_per_s_str` sequential. Totally insufficient (bottleneck).
-*   **NVMe SSD**\index{NVMe SSD!data pipeline}: approximately `{python} StorageBandwidth.nvme_bw_low_gb_per_s_str`–`{python} StorageBandwidth.nvme_bw_high_gb_per_s_str`. Required.
+*   S3 Standard delivers about `{python} StorageBandwidth.s3_bw_mb_per_s_str` per thread, so the pipeline needs `{python} StorageBandwidth.s3_workers_str` before software overhead.
+*   SATA SSDs deliver about `{python} StorageBandwidth.sata_bw_mb_per_s_str` sequentially, making them a bottleneck for this accelerator.
+*   NVMe SSDs\index{NVMe SSD!data pipeline} deliver approximately `{python} StorageBandwidth.nvme_bw_low_gb_per_s_str`--`{python} StorageBandwidth.nvme_bw_high_gb_per_s_str`, which is the right class of local storage for the target.
 
 **Systems insight**: With SATA SSDs, maximum throughput is capped at `{python} StorageBandwidth.sata_bw_mb_per_s_str` / `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.sata_max_img_per_s_str`. The \$15,000 GPU will run at `{python} StorageBandwidth.sata_utilization_pct_str` utilization (`{python} StorageBandwidth.sata_max_img_per_s_str` / `{python} StorageBandwidth.max_img_per_s_str`). Storage physics dictates training speed.
 
 :::
 
-The `{python} StorageBandwidth.sata_bw_mb_per_s_str` figure represents SATA III sequential read throughput (the interface maximum is 600 MB/s). Real-world random read performance with small files can be significantly lower.
-
-This calculation illustrates the general principle governing data pipelines: training throughput is bounded by the lower of compute capacity and the data supply rate. The bottleneck relation in @eq-training-throughput captures this limit, with the data supply rate defined in @eq-data-supply.
+The `{python} StorageBandwidth.sata_bw_mb_per_s_str` figure represents SATA III sequential read throughput (the interface maximum is 600 MB/s), and real-world random read performance with small files can be significantly lower. That caveat reinforces the general principle governing data pipelines: training throughput is bounded by the lower of compute capacity and the data supply rate. The bottleneck relation in @eq-training-throughput captures this limit, with the data supply rate defined in @eq-data-supply.
 $$\text{Training Throughput} = \min(\text{Compute Capacity}, \text{Data Supply Rate})$$ {#eq-training-throughput}\index{Throughput!training, compute vs. data}
 $$\text{Data Supply Rate} = \text{Storage Bandwidth} \times (1 - \text{Overhead})$$ {#eq-data-supply}\index{Data Supply Rate!bandwidth constraint}
 
-When storage bandwidth becomes the limiting factor, teams must either improve storage performance through faster media, parallelization, or caching, or reduce data movement requirements through compression, quantization, or architectural changes. Large language model training may require processing hundreds of gigabytes of text per hour, while computer vision models processing high-resolution imagery can demand sustained data rates exceeding 50 gigabytes per second across distributed clusters. These requirements make data loading a systems-placement decision: PyTorch DataLoader parallelizes I/O across worker processes, TensorFlow tf.data pipelines use prefetching and caching to hide latency, and frameworks like NVIDIA DALI\index{NVIDIA DALI} (Data Loading Library) offload data augmentation to GPUs rather than loading preaugmented data from storage.
+When storage bandwidth becomes the limiting factor, teams must either improve storage performance through faster media, parallelization, or caching, or reduce the amount of data that must move. Large language model training may require processing hundreds of gigabytes of text per hour, while computer vision models processing high-resolution imagery can demand sustained data rates exceeding 50 gigabytes per second across distributed clusters. These requirements make data loading a systems-placement decision: framework data loaders parallelize I/O across worker processes, use prefetching and caching to hide latency, and can move expensive augmentation work closer to the accelerator rather than storing every augmented variant.
 
 File format selection dramatically impacts the data term $\left(\frac{D_{\text{vol}}}{\text{BW}}\right)$ of the iron law. We can quantify this impact as *format efficiency* $(\eta_{\text{format}})$, which acts as a multiplier on effective bandwidth.
 
@@ -4348,7 +4452,7 @@ The storage architectures we have examined address where data resides and how it
 
 The core problem feature stores address becomes clear when examining typical ML development workflows. During model development, data scientists write feature engineering logic in notebooks or scripts, often using different libraries and languages than production serving systems. Training might compute a user's "total purchases last 30 days" using SQL aggregating historical data, while serving computes the same feature using a microservice that incrementally updates cached values. These implementations should produce identical results, but subtle differences in handling timezone conversions, dealing with missing data, or rounding numerical values cause training and serving features to diverge. A study of production ML systems found that 30 percent to 40 percent of initial deployments at Uber suffered from training-serving skew, motivating development of their Michelangelo platform with integrated feature stores.
 
-Feature stores (discussed architecturally in @sec-ml-operations-feature-stores-c01c) provide a single source of truth for feature definitions, ensuring consistency across all stages of the ML lifecycle. When data scientists define a feature like "user_purchase_count_30d", the feature store maintains both the definition (SQL query, transformation logic, or computation graph) and executes it consistently whether providing historical feature values for training or real-time values for serving. This architectural pattern eliminates an entire class of subtle bugs that prove notoriously difficult to debug because models train successfully but perform poorly in production without obvious errors. The same centralized approach enables feature reuse across models and teams: when multiple teams build models requiring similar features, the feature store prevents each team from reimplementing identical computations with subtle variations. A recommendation system might compute user embedding vectors across hundreds of dimensions, aggregating months of interaction history. Rather than each model team recomputing these expensive embeddings, the feature store computes them once and serves them to all consumers.
+Feature stores (discussed architecturally in @sec-ml-operations-feature-stores-c01c) provide a single source of truth for feature definitions, ensuring consistency across all stages of the ML lifecycle. When data scientists define a feature like "user_purchase_count_30d", the feature store maintains both the definition (SQL query, transformation logic, or computation graph) and executes it consistently whether providing historical feature values for training or real-time values for serving. This architectural pattern eliminates an entire class of subtle bugs that prove notoriously difficult to debug because models train successfully but perform poorly in production without obvious errors. The same centralized approach enables feature reuse across models and teams: when multiple teams build models requiring similar features, the feature store prevents each team from reimplementing identical computations with subtle variations. A recommendation system might compute stable user representation vectors across hundreds of dimensions, aggregating months of interaction history. Rather than each model team recomputing these expensive representations, the feature store computes them once and serves them to all consumers.
 
 The architectural pattern typically implements dual storage modes\index{Feature Store!offline vs. online stores} optimized for different access patterns. The offline store uses columnar formats like Parquet on object storage, optimized for batch access during training where sequential scanning of millions of examples is common. The online store uses key-value systems like Redis, optimized for random access during serving where individual feature vectors must be retrieved in milliseconds. Synchronization between stores becomes critical. As training generates new models using current feature values, those models deploy to production expecting the online store to serve consistent features. Feature stores typically implement scheduled batch updates propagating new feature values from offline to online stores, with update frequencies depending on feature freshness requirements.
 
@@ -4376,21 +4480,13 @@ The preceding KWS scenario illustrates each of the four categories of data debt.
 
 :::
 
-#### Documentation debt {#sec-data-engineering-documentation-debt-57fa}
+The first category is **documentation debt**\index{Documentation Debt!data provenance}: data provenance, meaning, and quality characteristics go unrecorded. Datasets without data cards [@gebru2021], unlabeled columns, and undocumented transformations create debt that compounds when original authors leave organizations. @sambasivan2021 describe missing metadata, undocumented assumptions, and poor cross-organizational documentation as contributors to data cascades in high-stakes AI systems. The symptoms are unmistakable: columns whose meanings must be reverse-engineered from usage patterns, missing provenance records that block compliance audits, undocumented assumptions that cause silent failures when those assumptions change, and absent quality metrics that prevent informed dataset selection.
 
-\index{Documentation Debt!data provenance}Documentation debt accumulates when data provenance, meaning, and quality characteristics go unrecorded. Datasets without data cards [@gebru2021], unlabeled columns, and undocumented transformations create debt that compounds when original authors leave organizations. @sambasivan2021 describe missing metadata, undocumented assumptions, and poor cross-organizational documentation as contributors to data cascades in high-stakes AI systems. The symptoms are unmistakable: columns whose meanings must be reverse-engineered from usage patterns, missing provenance records that block compliance audits, undocumented assumptions that cause silent failures when those assumptions change, and absent quality metrics that prevent informed dataset selection.
+The second category, **schema debt**\index{Schema Debt!workarounds}, emerges from accumulated schema workarounds and migrations. When upstream systems change data formats, quick fixes such as string parsing instead of proper type handling or NULL coercion instead of error handling accumulate into fragile transformation logic. Teams can diagnose schema debt by looking for telltale patterns: multiple date format handlers for the same logical field, defensive null checks scattered throughout pipeline code, version-specific parsing branches that grow with each upstream change, and undocumented enum value mappings that break when new values appear.
 
-#### Schema debt {#sec-data-engineering-schema-debt-e420}
+The third category, **quality debt**\index{Quality Debt!uncorrected errors}, consists of known data errors that remain uncorrected due to time or resource constraints. A dataset with 3 percent known label errors represents quality debt: each training run on this data produces models carrying those errors. Quality debt compounds through a particularly dangerous feedback loop, because models trained on erroneous data make predictions that become training data for downstream systems, amplifying the original errors across the ecosystem. Concrete indicators include known label error rates not yet corrected, documented biases not yet mitigated, identified duplicates not yet deduplicated, and detected drift not yet addressed through retraining.
 
-\index{Schema Debt!workarounds}Schema debt emerges from accumulated schema workarounds and migrations. When upstream systems change data formats, quick fixes (string parsing instead of proper type handling, NULL coercion instead of error handling) accumulate into fragile transformation logic. Teams can diagnose schema debt by looking for telltale patterns: multiple date format handlers for the same logical field, defensive null checks scattered throughout pipeline code, version-specific parsing branches that grow with each upstream change, and undocumented enum value mappings that break when new values appear.
-
-#### Quality debt {#sec-data-engineering-quality-debt-ce63}
-
-\index{Quality Debt!uncorrected errors}Quality debt consists of known data errors that remain uncorrected due to time or resource constraints. A dataset with 3 percent known label errors represents quality debt: each training run on this data produces models carrying those errors. Quality debt compounds through a particularly dangerous feedback loop: models trained on erroneous data make predictions that become training data for downstream systems, amplifying the original errors across the ecosystem. Concrete indicators include known label error rates not yet corrected, documented biases not yet mitigated, identified duplicates not yet deduplicated, and detected drift not yet addressed through retraining.
-
-#### Freshness debt {#sec-data-engineering-freshness-debt-0e54}
-
-\index{Freshness Debt!distribution divergence}Freshness debt arises when training data diverges from production distributions over time. A model trained on 2023 user behavior deployed in 2025 carries freshness debt: the distribution shift between training and serving degrades performance continuously. Freshness debt is particularly dangerous because it accumulates silently. Unlike code that breaks visibly, stale models degrade gradually until performance drops below acceptable thresholds. Warning signs include time since last retraining exceeding the distribution shift rate, feature staleness from cached features not updated at the required frequency, and reference data lag where lookup tables no longer reflect current state.
+The fourth category, **freshness debt**\index{Freshness Debt!distribution divergence}, arises when training data diverges from production distributions over time. A model trained on 2023 user behavior deployed in 2025 carries freshness debt: the distribution shift between training and serving degrades performance continuously. Freshness debt is particularly dangerous because it accumulates silently. Unlike code that breaks visibly, stale models degrade gradually until performance drops below acceptable thresholds. Warning signs include time since last retraining exceeding the distribution shift rate, feature staleness from cached features not updated at the required frequency, and reference data lag where lookup tables no longer reflect current state.
 
 ### Measuring and projecting data debt {#sec-data-engineering-measuring-data-debt-973c}
 
@@ -4696,9 +4792,30 @@ Engineers price a migration by dividing dataset size by network bandwidth and co
 
 Data distributions drift continuously as user behavior, market conditions, and upstream systems evolve. A preprocessing pipeline validated at launch degrades silently as the world changes around it. Production systems require continuous monitoring (PSI, KL divergence) and automated retraining triggers, not periodic manual audits.
 
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Data serialization pitfall hardware anchor.
+# │ Exports: DataSerializationPitfall.h100_peak_tflop_per_s_str
+from mlsysim.fmt import fmt_flop_rate
+
+class DataSerializationPitfall:
+    """Concrete accelerator peak for the serialization pitfall."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    h100 = Hardware.Cloud.H100
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    h100_peak_tflop_per_s_str = fmt_flop_rate(
+        h100.compute.peak_flops,
+        unit=TFLOPs / second,
+        precision=0,
+        commas=False,
+    )
+```
+
 **Pitfall**: *Ignoring data serialization cost.*
 
-Teams meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. Text-based formats can be at least 10$\times$ slower to decode than columnar binary formats (Parquet, Arrow), and the CPU---not the accelerator---becomes the bottleneck. The consequence is the worst-case profile of the data-throughput hierarchy: an H100 that should sustain hundreds of TFLOP/s instead idles at single-digit utilization waiting for the next batch. The fix is structural, not algorithmic: convert the training corpus to Parquet once, version it, and let every downstream job read the columnar form. A one-time conversion pays back within hours of training time.
+Teams meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. Text-based formats can be at least 10$\times$ slower to decode than columnar binary formats (Parquet, Arrow), and the CPU, not the accelerator, becomes the bottleneck. The consequence is the worst-case profile of the data-throughput hierarchy: an H100 that should sustain `{python} DataSerializationPitfall.h100_peak_tflop_per_s_str` on dense low-precision kernels instead idles at single-digit utilization waiting for the next batch. The fix is structural, not algorithmic: convert the training corpus to Parquet once, version it, and let every downstream job read the columnar form. A one-time conversion pays back within hours of training time.
 
 **Fallacy**: *High training accuracy indicates production readiness.*
 
@@ -4739,12 +4856,10 @@ The technical architecture of data systems demonstrates how engineering decision
 # │          dollar, hour), mlsysim.book (fmt, check)
 # │ Exports: DataEngineeringSummaryRecap.ratio_low_mult_str,
 # │          DataEngineeringSummaryRecap.ratio_high_mult_str,
-# │          DataEngineeringSummaryRecap.kws_dataset_size_m_round_str,
+# │          DataEngineeringSummaryRecap.kws_dataset_size_million_samples_str,
 # │          DataEngineeringSummaryRecap.kws_dataset_size_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_multiple
-from mlsysim.core.units import GB, byte, USD, hour
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataEngineeringSummaryRecap:
@@ -4757,32 +4872,39 @@ class DataEngineeringSummaryRecap:
     train_hours_high = 6
     gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    kws_dataset_size_m = 23.4
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    kws_total_examples = dataset.training_examples
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    kws_total_examples_count = kws_total_examples.to(count).magnitude
+    sample_count = round(kws_total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     kws_dataset_size = dataset_size_bytes * byte
     train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
     train_cost_high = a100_count * train_hours_high * gpu_hour_cost_high
     ratio_low = labeling_budget/train_cost_high
     ratio_high = labeling_budget/train_cost_low
-    kws_total_examples = kws_dataset_size_m * MILLION
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ratio_low > 500, f"Labeling/compute ratio unexpectedly low: {ratio_low:.0f}x.")
     check(ratio_high > ratio_low, "Labeling/compute ratio range must be ordered.")
-    check(kws_total_examples > 20 * MILLION, f"KWS corpus unexpectedly small: {kws_total_examples:.0f}.")
+    check(kws_total_examples_count > 20 * MILLION, f"KWS corpus unexpectedly small: {kws_total_examples_count:.0f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     ratio_low_mult_str = fmt_multiple(round(ratio_low), precision=0, commas=True)
     ratio_high_mult_str = fmt_multiple(round(ratio_high), precision=0, commas=True)
-    kws_dataset_size_m_round_str = fmt_int(round(kws_dataset_size_m))
-    kws_dataset_size_gb_str = fmt_qty(kws_dataset_size, GB, precision=0, commas=False)
+    kws_dataset_size_million_samples_str = fmt_count(
+        kws_total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="audio sample",
+    )
+    kws_dataset_size_gb_str = fmt_memory(kws_dataset_size, unit=GB, precision=0, commas=False)
 ```
 
 ```{python}
@@ -4800,24 +4922,24 @@ class DataEngineeringSummaryRecap:
 # │ Imports: mlsysim.core.constants (MILLION, GB, byte), mlsysim.fmt (fmt, check)
 # │ Exports: StorageLoadingRecap.load_speedup_mult_str, StorageLoadingRecap.nvme_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
-from mlsysim.fmt import fmt, fmt_qty, check, fmt_multiple
-from mlsysim.core.units import GB, byte, second
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageLoadingRecap:
     """Summary recap of NVMe vs. object-storage loading speed."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
     nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
     obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    total_examples_count = dataset.training_examples.to(count).magnitude
+    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     kws_dataset = dataset_size_bytes * byte
     nvme_load = kws_dataset / nvme_bw
@@ -4829,10 +4951,10 @@ class StorageLoadingRecap:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
-    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-Our KWS case study demonstrates these principles in action: multi-source acquisition combining curated datasets with crowdsourcing and synthetic generation; pipeline architecture with consistency validation; tiered storage handling `{python} DataEngineeringSummaryRecap.kws_dataset_size_m_round_str` million audio samples across `{python} DataEngineeringSummaryRecap.kws_dataset_size_gb_str` of raw data; and lineage tracking essential for always-listening devices in users' homes. Data engineering is not a preprocessing step to be completed before "real" ML work begins; it is the foundation upon which model performance, user trust, and regulatory compliance rest. While this chapter focuses on *building* reliable data infrastructure, @sec-data-selection examines *optimizing* data usage through active learning, data pruning, and intelligent sampling strategies.
+Our KWS case study demonstrates these principles in action: multi-source acquisition combining curated datasets with crowdsourcing and synthetic generation; pipeline architecture with consistency validation; tiered storage handling `{python} DataEngineeringSummaryRecap.kws_dataset_size_million_samples_str` across `{python} DataEngineeringSummaryRecap.kws_dataset_size_gb_str` of raw data; and lineage tracking essential for always-listening devices in users' homes. Data engineering is not a preprocessing step to be completed before "real" ML work begins; it is the foundation upon which model performance, user trust, and regulatory compliance rest. While this chapter focuses on *building* reliable data infrastructure, @sec-data-selection examines *optimizing* data usage through active learning, data pruning, and intelligent sampling strategies.
 
 ::: {.callout-takeaways title="Data is the source code"}
 

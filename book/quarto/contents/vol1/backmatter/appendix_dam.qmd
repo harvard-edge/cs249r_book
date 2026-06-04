@@ -84,7 +84,7 @@ Understanding the landscape reveals *where* a technique lives. The next step is 
 The performance of any ML task is governed by the distribution of work across the D·A·M axes. The iron law mapping reveals which component's variables dominate the execution time:
 $$ T = \underbrace{ \frac{D_{\text{vol}}}{\text{BW}} }_{\text{Data (D)}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm (A) / Machine (M)}} + \underbrace{ L_{\text{lat}} }_{\text{Overhead}} $$
 
-Algorithm and Machine share the compute term, separated by which variable the engineer controls. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a **Machine** lever.
+Algorithm and Machine share the compute term, separated by which variable the engineer controls. Reducing the total operations ($O$) is an Algorithm lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a Machine lever.
 
 This equation transforms performance debugging from a qualitative guessing game into a quantitative engineering problem. Every bottleneck hides in one of these terms. A slow system is one that is moving too much data ($D_{\text{vol}}$), lacking bandwidth ($\text{BW}$), executing too many operations ($O$), or failing to use the hardware's peak capability ($\eta_{\text{hw}}$). The levers below map specific optimizations to the variable they improve.
 
@@ -124,7 +124,7 @@ The iron law tells the engineer *how much* time each axis consumes. One critical
 
 The boundary between *Data* (memory bound) and *Machine* (compute bound) is not arbitrary; it is defined mathematically by **arithmetic intensity**[^fn-arith-intensity] ($I$) of the workload.
 
-[^fn-arith-intensity]: **Arithmetic intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte), introduced by @williams2009 as the key parameter in the Roofline Model. It determines whether a workload is memory bound or compute bound by comparison against the hardware's *ridge point* ($R_{\text{peak}}/\text{BW}$).
+[^fn-arith-intensity]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte), introduced by @williams2009 as the key parameter in the Roofline Model. It determines whether a workload is memory bound or compute bound by comparison against the hardware's *ridge point* ($R_{\text{peak}}/\text{BW}$).
 
 @Sec-appdx-machine-foundations-roofline-model-2529 provides rigorous definitions of arithmetic intensity and the roofline model. Use that model to quantitatively distinguish between Data and Machine bottlenecks before applying the optimizations below.
 
@@ -168,57 +168,19 @@ Each anti-pattern follows the same root cause: acting before diagnosing. The fol
 
 ## D·A·M Case Studies {#sec-appdx-dam-taxonomy-dam-case-studies-593f}
 
-Theoretical constraints often manifest as confusing symptoms in production. These real-world scenarios illustrate how to apply the taxonomy.
+Theoretical constraints often manifest as confusing symptoms in production. These real-world scenarios illustrate how to apply the taxonomy. Each case follows the same three diagnostic moves: symptom, diagnosis, and fix.
 
 ### Case 1: The starving accelerator (Data) {#sec-appdx-dam-taxonomy-case-1-starving-accelerator-data-9a56}
 
-#### Symptom {.unnumbered}
-
-A team provisions a large A100 GPU instance to speed up training, but training time hardly improves. `nvidia-smi` shows GPU utilization fluctuating between 10 percent and 40 percent.
-
-#### Diagnosis {.unnumbered}
-
-The **Data** component cannot supply the **Machine** fast enough. The workload is I/O bound.
-
-#### The fix {.unnumbered}
-
-This is not a model or hardware problem. You must optimize the extract, transform, load (ETL) pipeline: move from raw JPEGs (CPU decoding heavy) to TFRecords or WebDataset (sequential reads), increase the number of data loader workers, and prefetch batches to GPU memory.
+A team provisions a large A100 GPU instance to speed up training, but training time hardly improves and `nvidia-smi` shows GPU utilization fluctuating between 10 percent and 40 percent. The accelerator is not the binding resource: the data path cannot supply the machine fast enough, so the workload is I/O bound even though the visible symptom is slow training. The useful intervention is upstream of the model: optimize the extract, transform, load (ETL) path by moving from raw JPEGs with heavy CPU decoding to TFRecords or WebDataset with sequential reads, increasing data loader parallelism, and prefetching batches into accelerator memory.
 
 ### Case 2: The latency cliff (Algorithm) {#sec-appdx-dam-taxonomy-case-2-latency-cliff-algorithm-8ee2}
 
-#### Symptom {.unnumbered}
-
-Your real-time recommendation system fails to meet the 20 ms latency SLA. The accelerator utilization is low, and the batch size is 1.
-
-#### Diagnosis {.unnumbered}
-
-The **Algorithm** is too computationally deep for the sequential deadline. You are latency-bound by serial operations.
-
-#### The fix {.unnumbered}
-
-Throwing more hardware (Machine) will not help because latency is limited by the serial execution of layers. You must change the Algorithm:
-
-*   **Quantization**: Switch to INT8 to reduce memory fetch time.
-*   **Pruning**: Remove redundant heads or channels.
-*   **Knowledge Distillation**: Train a smaller student model.
+A real-time recommendation service fails to meet a 20 ms latency service-level agreement (SLA), while accelerator utilization is low and the batch size is one. That signal does not point to a saturated chip. It points to an algorithm that is too deep for the sequential deadline. Adding more hardware does not remove the serial layer path that dominates latency, so the effective fixes change the algorithmic work itself: quantization reduces memory fetch time by moving to INT8 where accuracy allows, pruning removes redundant heads or channels, and knowledge distillation trains a smaller student model to approximate the larger model's behavior.
 
 ### Case 3: The compute wall (Machine) {#sec-appdx-dam-taxonomy-case-3-compute-wall-machine-3a0a}
 
-#### Symptom {.unnumbered}
-
-Accelerator utilization is pinned at 99 percent. Memory bandwidth is unsaturated. Training is stable but takes three weeks.
-
-#### Diagnosis {.unnumbered}
-
-The system has successfully kept the accelerator fed. It is compute bound.
-
-#### The fix {.unnumbered}
-
-You have hit the physical limits of the single chip.
-
-*   **Scale Up**: Move to a newer generation GPU (for example, A100 to H100).
-*   **Scale Out**: Distribute training across multiple accelerators (Data Parallelism).
-*   **Lower Precision**: Switch from FP32/TF32 training to BF16 where numerically safe; on NVIDIA Tensor Core paths, BF16 peak throughput is typically about 2$\times$ TF32 peak, with realized speedup depending on kernels and bottlenecks.
+Accelerator utilization is pinned at 99 percent, memory bandwidth remains unsaturated, and training is stable but takes three weeks. Here the data path is doing its job: the system has kept the accelerator fed, and the workload is compute bound. The next step has to change the machine term in the iron law. The team can scale up from an A100 to an H100-class accelerator, scale out by distributing training across multiple accelerators through data parallelism, or lower precision from FP32/TF32 to BF16 where numerically safe. On NVIDIA Tensor Core paths, BF16 peak throughput is typically about 2$\times$ TF32 peak, with realized speedup depending on kernels and bottlenecks.
 
 Taken together, the three cases show why the same utilization number can imply different next steps depending on loss behavior, batch size, and memory pressure.
 
@@ -266,7 +228,7 @@ Profiling tools generate raw numbers---utilization percentages, FLOP counts, ban
 
 To move beyond qualitative guessing, the efficiency ratios in @tbl-dam-scorecard grade a system's performance against its theoretical limit. This report-card view standardizes what "good" looks like, anchored by **MFU**[^fn-mfu-scorecard]—the single most important metric for large-scale training.
 
-[^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: The ratio of achieved model FLOP/s to the hardware's theoretical peak FLOP/s, introduced in the PaLM paper [@chowdhery2022palm]. Unlike raw accelerator utilization (which counts any work the accelerator performs), MFU measures only *useful* model computation rate, excluding overhead like gradient synchronization and memory management. @sec-benchmarking covers MFU in depth.
+[^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: The ratio of achieved model FLOP/s to the hardware's theoretical peak FLOP/s, introduced in the PaLM paper [@chowdhery2022palm]. Unlike raw accelerator utilization (which counts any work the accelerator performs), MFU measures only *useful* model computation rate, excluding overhead like gradient synchronization and memory management. @Sec-benchmarking covers MFU in depth.
 
 | **Axis**      | **Metric**        |                       **Definition**                      |  **Failing Grade**  |    **Passing Grade**    |
 |:--------------|:------------------|:---------------------------------------------------------:|:-------------------:|:-----------------------:|
@@ -286,7 +248,7 @@ Systems engineering requires distinguishing between *growth trajectories* and *f
 
 Scaling laws[^fn-scaling-laws] are empirical power laws that predict *how fast* model performance improves as we increase resources. The two landmark results are Kaplan Scaling [@kaplan2020scaling], which showed that performance improves predictably with parameter count ($P$), data ($D$), and total operations ($O$), and Chinchilla Scaling [@hoffmann2022chinchilla], which refined this insight by defining the *optimal ratio* of these resources (for example, $D \approx 20P$ tokens per parameter).
 
-[^fn-scaling-laws]: **Scaling Laws**: Empirical relationships, typically power laws of the form $\mathcal{L}(x) \propto x^{-\alpha}$, that predict model loss as a function of dataset size, parameter count, or compute budget. @kaplan2020scaling studied these relationships for neural language models at OpenAI; @hoffmann2022chinchilla later refined the compute-optimal training tradeoff with the Chinchilla result. @sec-model-training discusses scaling laws in detail.
+[^fn-scaling-laws]: **Scaling Laws**: Empirical relationships, typically power laws of the form $\mathcal{L}(x) \propto x^{-\alpha}$, that predict model loss as a function of dataset size, parameter count, or compute budget. @kaplan2020scaling studied these relationships for neural language models at OpenAI; @hoffmann2022chinchilla later refined the compute-optimal training tradeoff with the Chinchilla result. @Sec-model-training discusses scaling laws in detail.
 
 As economic guides, these laws summarize the tradeoff this way: "If I double my compute budget, my error rate should drop by $X$ percent." They assume the information is there to be learned.
 

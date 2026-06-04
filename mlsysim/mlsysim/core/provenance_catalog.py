@@ -116,18 +116,17 @@ TINYML_ANOMALY_CASE = Provenance(
     ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
     verified="2025-03-06",
 )
-OURA_SLEEP_STAGING_STUDY = Provenance(
-    id="prov:oura-sleep-staging-study-2021",
-    kind=ProvenanceKind.LITERATURE,
-    ref="Altini and Kinnunen (2021), The Promise of Sleep: A Multi-Sensor Approach for Accurate Sleep Stage Detection Using the Oura Ring",
-    url="https://www.mdpi.com/1424-8220/21/13/4302",
-    verified="2026-06-03",
-)
 CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
     id="prov:clinical-imaging-workflow-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Clinical imaging workflow anchors for rural-clinic bandwidth and edge-deployment examples",
     verified="2026-06-01",
+)
+OURA_SLEEP_STAGE_STUDY = _lit(
+    "prov:oura-sleep-stage-study",
+    "Altini and Kinnunen (2021), \"The Promise of Sleep: A Multi-Sensor Approach for Accurate Sleep Stage Detection Using the Oura Ring\"",
+    url="https://doi.org/10.3390/s21134302",
+    verified="2026-06-03",
 )
 ENERGY_SCALE_ANCHORS = Provenance(
     id="prov:energy-scale-anchors",
@@ -140,6 +139,22 @@ MOBILE_DEVICE_ANCHORS = Provenance(
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Mobile/edge device reference figures (flagship phone battery ~15 Wh / 3000 mAh @ 3.7 V, mobile NPU power 3-4 W, object-detector ~2 W) for on-device ML intuition",
     verified="2025-03-06",
+)
+EDGE_DEVICE_SPECTRUM_ANCHORS = _est(
+    "prov:edge-device-spectrum-anchors",
+    "Representative edge-device spectrum anchors for on-device learning heterogeneity examples",
+    notes="Pedagogical class endpoints spanning microcontroller/tiny-sensor and flagship-mobile envelopes; not a single SKU specification.",
+    verified="2026-06-04",
+)
+EDGE_ADAPTATION_TIER_PROFILE = _est(
+    "prov:edge-adaptation-tier-profile",
+    "Reference edge adaptation tier profile",
+    notes=(
+        "Reusable device-tier, wearable, and fleet-mix assumptions for on-device "
+        "learning examples. These are pedagogical deployment-profile anchors, "
+        "not a claim about one production fleet."
+    ),
+    verified="2026-06-04",
 )
 
 # --- Hardware technology-class facts (Hardware.Tech) ---
@@ -155,6 +170,13 @@ MEMORY_LATENCY_HIERARCHY = _conv(
 STORAGE_TIER_CONVENTIONS = _conv(
     "prov:storage-tier-conventions",
     "Generic storage/memory bandwidth tiers (NVMe Gen3/4/5, DDR, host DRAM) from vendor datasheet ranges",
+)
+CXL_PCIE_GEN5_BW = Provenance(
+    id="prov:cxl-pcie-gen5-x16-bw-derived",
+    kind=ProvenanceKind.DERIVED,
+    ref="Reference CXL memory tier over PCIe Gen5 x16 -> 64 GB/s",
+    notes="Teaching anchor for a CXL 3.x memory-expansion link using the same byte-rate convention as the H100 PCIe Gen5 x16 profile.",
+    verified="2026-06-03",
 )
 STORAGE_ACCESS_PATH_REFERENCE = _conv(
     "prov:storage-access-path-reference",
@@ -425,6 +447,12 @@ IMAGENET_DATASET = _lit(
     url="https://arxiv.org/abs/1409.0575",
 )
 
+MSWC_DATASET = _lit(
+    "prov:mswc-2021",
+    "Mazumder et al. (2021), Multilingual Spoken Words Corpus",
+    url="https://datasets-benchmarks-proceedings.neurips.cc/paper_files/paper/2021/hash/fe131d7f5a6b38b23cc967316c13dae2-Abstract-round2.html",
+)
+
 CIFAR10_DATASET = _lit(
     "prov:cifar10-2009",
     "Krizhevsky (2009), Learning Multiple Layers of Features from Tiny Images",
@@ -657,6 +685,24 @@ ENERGY_HIERARCHY_CONVENTIONS = _conv(
     notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
 )
 
+MEMORY_INTERFACE_BANDWIDTH_TIERS = _conv(
+    "prov:memory-interface-bandwidth-tiers",
+    "Representative memory-interface bandwidth tiers",
+    notes=(
+        "Technology-class bandwidth anchors for DDR4-3200, HBM2, HBM3, and "
+        "GDDR6X used in memory-protection and hierarchy examples."
+    ),
+)
+
+MEMORY_PROTECTION_OVERHEADS = _conv(
+    "prov:memory-protection-overheads",
+    "Memory protection overhead conventions",
+    notes=(
+        "SECDED-style ECC reserve is represented as 12.5 percent parity overhead; "
+        "no-ECC profile is included for comparative GDDR-style examples."
+    ),
+)
+
 WUE_ANCHORS = _conv(
     "prov:wue-anchors",
     "Water-usage effectiveness (WUE) tiers for sustainability examples",
@@ -683,6 +729,53 @@ STORAGE_TRAINING_CORPUS_REFERENCE = _conv(
     notes=(
         "Chapter-level storage scenario anchor: 1.5T training tokens, 3 TB compressed "
         "source corpus, 4-byte token IDs, and 10 bytes/parameter checkpoint storage."
+    ),
+)
+
+MODEL_LOADING_SCENARIO_ASSUMPTIONS = _est(
+    "prov:model-loading-scenario-assumptions",
+    "Reference model-loading scenario assumptions",
+    notes=(
+        "Representative cold-start loading anchors for serialized model checkpoints; "
+        "values are teaching-scale assumptions and should be calibrated from fleet "
+        "measurements for production sizing."
+    ),
+)
+
+LLM_SERVING_PRECISION_DIVIDEND_PROFILE = _est(
+    "prov:llm-serving-precision-dividend-profile",
+    "Reference LLM serving precision-dividend profile",
+    notes=(
+        "Reusable deployment-shape assumptions for the performance-engineering "
+        "70B LLM KV-cache and batch-size example."
+    ),
+)
+
+HETEROGENEOUS_ROUTING_SCENARIO = _est(
+    "prov:heterogeneous-routing-scenario",
+    "Reference heterogeneous GPU routing scenario",
+    notes=(
+        "Reusable H100/A100 server counts, per-server service rates, and traffic "
+        "target for the inference weighted-routing example."
+    ),
+)
+
+CIRCUIT_BREAKER_SERVING_PROFILE = _est(
+    "prov:circuit-breaker-serving-profile",
+    "Reference GPU inference circuit-breaker profile",
+    notes=(
+        "Reusable threshold and recovery-window assumptions for teaching "
+        "GPU inference circuit-breaker behavior; production thresholds should "
+        "be calibrated from service SLOs and fleet telemetry."
+    ),
+)
+
+CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS = _est(
+    "prov:checkpoint-archetype-scenario-assumptions",
+    "Reference checkpoint-size archetype assumptions",
+    notes=(
+        "Representative checkpoint footprints and bytes-per-parameter policy used "
+        "to compare fault-tolerance overhead across model families."
     ),
 )
 

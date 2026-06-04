@@ -46,3 +46,13 @@ def test_nvlink_on_cloud_gpus():
     assert Hardware.Cloud.A100.nvlink.bandwidth.m_as(GB / second) == 600.0
     assert Hardware.Cloud.H100.nvlink.bandwidth.m_as(GB / second) == 900.0
     assert Hardware.Cloud.B200.nvlink.bandwidth.m_as(GB / second) == 1800.0
+
+
+def test_memory_tech_bandwidth_tiers():
+    """Memory-interface bandwidth tiers live in Hardware.Tech.Memory."""
+    from mlsysim.core.constants import GB, second
+
+    assert Hardware.Tech.Memory.DDR4_3200.bandwidth.m_as(GB / second) == pytest.approx(51.2)
+    assert Hardware.Tech.Memory.HBM2.bandwidth.m_as(GB / second) == pytest.approx(900)
+    assert Hardware.Tech.Memory.HBM3.bandwidth.m_as(GB / second) == pytest.approx(1600)
+    assert Hardware.Tech.Memory.GDDR6X.bandwidth.m_as(GB / second) == pytest.approx(760)
