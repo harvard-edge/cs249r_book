@@ -2610,13 +2610,9 @@ Across all dimensions, measurement accuracy depends on controlling for hardware 
 
 Despite the availability of well-defined benchmarking methodologies, misleading conclusions recur when teams treat one training metric as a substitute for the whole optimization loop. The following pitfalls show where the benchmark must keep speed, convergence, scaling, and reproducibility tied together.
 
-#### Overemphasis on raw throughput {#sec-benchmarking-overemphasis-raw-throughput-e4df}
+Training benchmark failures usually start when throughput is treated as the objective rather than as one part of the learning process. A system can increase examples per second by using lower numerical precision, reducing synchronization, or even bypassing certain computations, but those changes only help if convergence is preserved. A TF32 run may outpace FP32 per step and still lose overall if numerical instability increases the number of iterations required to reach the target accuracy. The benchmark therefore has to report throughput in relation to time-to-accuracy, ensuring that speed optimizations do not come at the expense of convergence efficiency.
 
-A common mistake in training benchmarks is assuming that higher throughput always translates to better training performance. It is possible to artificially increase throughput by using lower numerical precision, reducing synchronization, or even bypassing certain computations. However, these optimizations do not necessarily lead to faster convergence.
-
-For example, a system using TF32 precision may achieve higher throughput than one using FP32, but if TF32 introduces numerical instability that increases the number of iterations required to reach the target accuracy, the overall training time may be longer. The correct way to evaluate throughput is in relation to time-to-accuracy, ensuring that speed optimizations do not come at the expense of convergence efficiency.
-
-#### Scaling extrapolation {#sec-benchmarking-scaling-extrapolation-9477}
+Scaling creates a second trap because a small-node result can look linear until communication and synchronization dominate. The recap below keeps the earlier 8-GPU example visible for the scaling warning that follows.
 
 ```{python}
 #| echo: false
@@ -2641,15 +2637,7 @@ class ScalingEfficiencyRecap:
 
 As the preceding scaling efficiency calculation demonstrated (where `{python} ScalingEfficiencyRecap.n_gpus_str` achieved only `{python} ScalingEfficiencyRecap.eff_str` efficiency), extrapolating single-node results to clusters is a common error. Google's experience with 4,096-node TPU v4 clusters shows this effect at extreme scale, where synchronization challenges become the dominant performance factor. Proper benchmarking should measure scaling efficiency explicitly rather than assuming linear improvement.
 
-#### Ignoring failures and interference {#sec-benchmarking-ignoring-failures-interference-e488}
-
-Many benchmarks assume idealized conditions where hardware failures, network instability, and workload interference do not occur. In reality, these are routine at scale. Effective benchmarking should account for checkpointing overhead, failure recovery efficiency, and resource contention rather than reporting only best-case performance.
-
-#### Ignoring reproducibility {#sec-benchmarking-ignoring-reproducibility-15c5}
-
-Benchmark results are often reported without verifying their reproducibility across different hardware and software frameworks. Even minor variations in floating-point arithmetic, memory layouts, or optimization strategies can introduce statistical differences in training time and accuracy.
-
-For example, a benchmark run on TensorFlow with Accelerated Linear Algebra (XLA) optimizations may exhibit different convergence characteristics compared to the same model trained using PyTorch with Automatic Mixed Precision (AMP). Proper benchmarking requires evaluating results across multiple frameworks to ensure that software-specific optimizations do not distort performance comparisons.
+The same discipline applies to failures, interference, and reproducibility. Many benchmarks assume idealized conditions where hardware failures, network instability, and workload interference do not occur, even though those events are routine at scale. Effective benchmarking accounts for checkpointing overhead, failure recovery efficiency, and resource contention rather than reporting only best-case performance. It also verifies that results reproduce across hardware and software stacks: a TensorFlow run with Accelerated Linear Algebra (XLA) optimizations may exhibit different convergence behavior than the same model trained in PyTorch with Automatic Mixed Precision (AMP), because floating-point arithmetic, memory layouts, and optimization strategies can all shift training time and accuracy.
 
 Avoiding these pitfalls requires evaluating throughput in relation to accuracy convergence, assessing scaling efficiency holistically, and accounting for real-world failures rather than assuming idealized conditions. A model trained efficiently, however, still requires validation of its deployment performance, which shifts the evaluation framework entirely.
 
@@ -3007,17 +2995,9 @@ The key insight from @tbl-metric-priorities is that the same metric can be prima
 
 Even with well-defined metrics, inference evaluations fail when the benchmark ignores the deployment constraint that dominates the serving system. The following pitfalls show where average latency, memory, energy, cold starts, and scaling assumptions can each invalidate an otherwise plausible result.
 
-#### Overemphasis on average latency {#sec-benchmarking-overemphasis-average-latency-dc31}
+Inference benchmark failures begin when the benchmark averages away the event users actually notice. Tail latency (p95, p99) determines production reliability, not mean latency; a conversational AI system that misses its tail-latency target will produce unacceptable response delays even if its average response time looks healthy. Resource constraints create the same kind of mismatch. A model with excellent cloud throughput may still be unusable on a phone or edge device if its memory footprint or power draw exceeds the deployment budget, so practical inference benchmarks must include memory and energy alongside latency.
 
-As established earlier, tail latency (p95, p99) determines production reliability, not averages. Conversational AI systems failing to maintain tail latency targets will exhibit unacceptable response delays regardless of acceptable average performance.
-
-#### Ignoring memory and energy constraints {#sec-benchmarking-ignoring-memory-energy-constraints-014f}
-
-A model with excellent throughput or latency may be unsuitable for mobile or edge deployments if it requires excessive memory or power. For example, an inference system designed for cloud environments might fail to operate efficiently on a battery-powered device. Proper benchmarks must consider memory footprint and energy consumption to ensure practicality across deployment contexts.
-
-#### Ignoring cold-start performance {#sec-benchmarking-ignoring-coldstart-performance-1e83}
-
-In serverless environments, where models are loaded on demand, cold-start latency[^fn-cold-start] is a critical factor. Ignoring the time it takes to initialize a model and process the first request can result in unrealistic expectations for responsiveness. Evaluating both model load time and first-inference latency ensures that systems are designed to meet real-world responsiveness requirements.
+Serverless and on-demand serving add a separate first-request constraint. Cold-start latency[^fn-cold-start] measures the time required to initialize a model and process the first request, so excluding model load time creates unrealistic expectations for responsiveness. Evaluating both model load time and first-inference latency ensures that systems are designed for the conditions they will actually face.
 
 ```{python}
 #| echo: false
@@ -3068,9 +3048,7 @@ class ColdStartTransferCalc:
 
 [^fn-cold-start]: **Cold-Start Latency**: The initialization time from idle state, dominated by model weight loading from storage to accelerator memory. For a `{python} ColdStartTransferCalc.params_b_str`-parameter model in FP16 (~`{python} ColdStartTransferCalc.model_size_gb_str`), cold start on PCIe 4.0 (`{python} ColdStartTransferCalc.pcie_effective_gb_per_s_str` effective) takes ~`{python} ColdStartTransferCalc.transfer_ms_str` for weight transfer alone, plus framework initialization overhead. This physical lower bound means that cold-start mitigation (model caching, speculative loading) is a systems design requirement, not just an operational convenience. \index{Cold Start Latency!physical lower bound}
 
-#### Isolated metrics evaluation {#sec-benchmarking-isolated-metrics-evaluation-922d}
-
-Benchmarking inference systems often involves balancing competing metrics. For example, maximizing batch throughput might degrade latency, while aggressive precision reduction could reduce accuracy. Focusing on a single metric without considering its impact on others can lead to incomplete or misleading evaluations.
+Inference benchmarks also become misleading when one metric is optimized in isolation. Maximizing batch throughput can degrade latency, while aggressive precision reduction can reduce accuracy. A precision example makes the comparability problem concrete.
 
 ```{python}
 #| echo: false
@@ -3106,21 +3084,13 @@ class TopsFootnoteAnchor:
     h100_int8_tops_str = fmt_ops_rate(Hardware.Cloud.H100.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
 ```
 
-Numerical precision optimization\index{Numerical Precision Optimization|see{Quantization}} exemplifies this challenge particularly well. Individual accelerator benchmarks show INT8 operation throughput[^fn-tops] reaching about 4$\times$ the FP32 floating-point throughput on the same accelerator, creating compelling performance narratives.
+Numerical precision optimization\index{Numerical Precision Optimization|see{Quantization}} exemplifies this challenge particularly well. Individual accelerator benchmarks show INT8 operation throughput[^fn-tops] reaching about 4$\times$ the FP32 floating-point throughput on the same accelerator, creating compelling performance narratives. Those narratives are only valid when the benchmark also checks accuracy, supported operator coverage, and whether the reported operations are comparable across devices.
 
 [^fn-tops]: **TOPS (Tera Operations Per Second)**: A measure of raw computational throughput (trillions of operations/second). The H100 delivers `{python} TopsFootnoteAnchor.h100_int8_tops_str` INT8 vs. the Apple M2 Neural Engine at 15.8 TOPS and Edge TPU at 4 TOPS, but these numbers conflate different operation types—multiply-accumulate (MAC) vs. accumulate vs. activation. TOPS comparisons across vendors are meaningful only when the operation definition, precision, and sparsity assumptions are identical, conditions rarely met in vendor specifications. \index{TOPS!comparability limitation}
 
-#### Linear scaling assumption {#sec-benchmarking-linear-scaling-assumption-6a7a}
+Scaling and application fit require the same skepticism. The linear scaling pitfall discussed for training benchmarks applies equally to inference, though the bottlenecks differ: training scaling is often limited by gradient synchronization, while inference scaling encounters memory bandwidth saturation, thermal throttling under sustained load, and request-routing overhead in distributed serving. As discussed in @sec-hardware-acceleration, these limitations arise from physical hardware constraints and interconnect architectures. A cloud-optimized benchmark can therefore be irrelevant for an edge deployment where energy and memory dominate, so benchmark selection has to follow the application requirement rather than the most convenient leaderboard.
 
-The linear scaling pitfall discussed for training benchmarks applies equally to inference, though the bottlenecks differ. Where training scaling is limited primarily by gradient synchronization overhead, inference scaling encounters bottlenecks from memory bandwidth saturation, thermal throttling under sustained load, and request routing overhead in distributed serving. As discussed in @sec-hardware-acceleration, these limitations arise from physical hardware constraints and interconnect architectures. Benchmarks that assume linear scaling behavior may overestimate system performance, particularly in distributed deployments.
-
-#### Ignoring application requirements {#sec-benchmarking-ignoring-application-requirements-9268}
-
-Generic benchmarking results may fail to account for the specific needs of an application. For instance, a benchmark optimized for cloud inference might be irrelevant for edge devices, where energy and memory constraints dominate. Tailoring benchmarks to the deployment context ensures that results are meaningful and actionable.
-
-#### Statistical significance and noise {#sec-benchmarking-statistical-significance-noise-20ee}
-
-Distinguishing meaningful performance improvements from measurement noise requires proper statistical analysis. Following the evaluation methodology principles established earlier, MLPerf addresses measurement variability by requiring multiple benchmark runs and reporting percentile-based metrics rather than single measurements [@reddi2020]. For instance, MLPerf Inference reports 99th percentile latency alongside mean performance, capturing both typical behavior and worst-case scenarios that single-run measurements might miss. This approach recognizes that system performance naturally varies due to factors like thermal throttling, memory allocation patterns, and background processes.
+Finally, inference results need the same statistical discipline as training results. Following the evaluation methodology principles established earlier, MLPerf addresses measurement variability by requiring multiple benchmark runs and reporting percentile-based metrics rather than single measurements [@reddi2020]. MLPerf Inference, for instance, reports 99th percentile latency alongside mean performance, capturing both typical behavior and worst-case scenarios that single-run measurements might miss. This approach recognizes that system performance naturally varies due to factors such as thermal throttling, memory allocation patterns, and background processes.
 
 Avoiding these pitfalls requires treating benchmarking as a process of balancing multiple priorities (latency, throughput, memory, energy, and accuracy) rather than optimizing for any single metric in isolation.
 
