@@ -3100,10 +3100,12 @@ Health monitoring and augmented reality push mobile ML to its sustained-performa
 # │
 # │ Imports: mlsysim.core.constants, mlsysim.book (fmt, check)
 # │ Exports: MobileResnetPitfallRecap.resnet_fp32_mb_str,
-# │          MobileResnetPitfallRecap.resnet_gflop_str
+# │          MobileResnetPitfallRecap.resnet_gflop_str,
+# │          MobileResnetPitfallRecap.edge_ram_mb_str,
+# │          MobileResnetPitfallRecap.edge_compute_gflop_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty, fmt_count, fmt_flops
-from mlsysim.core.units import byte, MB, GFLOPs, param
+from mlsysim.fmt import fmt, check, fmt_qty, fmt_count, fmt_flops, fmt_flop_rate
+from mlsysim.core.units import byte, MB, GFLOPs, param, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MobileResnetPitfallRecap:
@@ -3112,6 +3114,8 @@ class MobileResnetPitfallRecap:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     resnet_params = Models.Vision.ResNet50.parameters
     resnet_flops = Models.Vision.ResNet50.inference_flops
+    edge_ram = 512 * MB  # scenario assumption: low-end edge target RAM
+    edge_compute = 1 * (GFLOPs / second)  # scenario assumption: low-end edge target compute
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     resnet_fp32_bytes = resnet_params * 4 * byte / param
@@ -3121,13 +3125,17 @@ class MobileResnetPitfallRecap:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(resnet_fp32_bytes >= 90 * MB, f"ResNet-50 FP32 size should be near 100 MB; got {resnet_fp32_value:.0f} MB.")
     check(resnet_flops >= 4 * GFLOPs, f"ResNet-50 compute should be about 4 GFLOPs; got {resnet_gflops_value:.1f}.")
+    check(edge_ram == 512 * MB, "Edge RAM scenario should remain 512 MB.")
+    check(edge_compute == 1 * (GFLOPs / second), "Edge compute scenario should remain 1 GFLOP/s.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_fp32_mb_str = fmt_qty(resnet_fp32_bytes, MB, precision=1, commas=False)
     resnet_gflop_str = fmt_flops(resnet_flops, unit=GFLOPs, precision=1, commas=False)
+    edge_ram_mb_str = fmt_qty(edge_ram, MB, precision=0, commas=False)
+    edge_compute_gflop_per_s_str = fmt_flop_rate(edge_compute, unit=GFLOPs / second, precision=0, commas=False)
 ```
 
-These successes can create a misleading sense of ease. A common pitfall involves attempting to deploy desktop-trained models directly to mobile or edge devices without architecture modifications. Models developed on powerful workstations often fail when deployed to resource-constrained devices. A desktop ResNet-50 pipeline may require gigabytes once activations, batches, preprocessing buffers, and runtime overhead are included, even though the FP32 weights alone are about `{python} MobileResnetPitfallRecap.resnet_fp32_mb_str`. Such a pipeline, requiring `{python} MobileResnetPitfallRecap.resnet_gflop_str` per inference, cannot run unchanged on a device with 512 MB of RAM and a 1 GFLOP/s processor. Beyond simple resource violations, desktop-optimized models may use operations unsupported by mobile hardware, assume numerical formats unavailable on embedded systems, or require batch processing incompatible with single-sample inference. Successful deployment demands architecture-aware design from the beginning: model families, arithmetic formats, and implementation choices must all match the target device.
+These successes can create a misleading sense of ease. A common pitfall involves attempting to deploy desktop-trained models directly to mobile or edge devices without architecture modifications. Models developed on powerful workstations often fail when deployed to resource-constrained devices. A desktop ResNet-50 pipeline may require gigabytes once activations, batches, preprocessing buffers, and runtime overhead are included, even though the FP32 weights alone are about `{python} MobileResnetPitfallRecap.resnet_fp32_mb_str`. Such a pipeline, requiring `{python} MobileResnetPitfallRecap.resnet_gflop_str` per inference, cannot run unchanged on a representative low-end edge target with `{python} MobileResnetPitfallRecap.edge_ram_mb_str` of RAM and a `{python} MobileResnetPitfallRecap.edge_compute_gflop_per_s_str` processor. Beyond simple resource violations, desktop-optimized models may use operations unsupported by mobile hardware, assume numerical formats unavailable on embedded systems, or require batch processing incompatible with single-sample inference. Successful deployment demands architecture-aware design from the beginning: model families, arithmetic formats, and implementation choices must all match the target device.
 
 Mobile ML demonstrates that useful intelligence can operate within a `{python} MobileResourceRecap.mobile_tdp_range_str` thermal envelope on battery power. However, smartphones still cost hundreds of dollars, require gigabytes of memory, and demand user attention to recharge daily. These requirements make them unsuitable for a vast class of applications: monitoring soil moisture across a thousand-acre farm, detecting structural stress in bridge cables, or listening for endangered species in a remote forest. These scenarios demand not just lower power but a qualitatively different engineering regime, one where the device costs dollars instead of hundreds, memory is measured in kilobytes instead of gigabytes, and the system runs unattended for months or years. Mobile optimization methods help, but they cannot bridge a 10,000-fold gap in available memory. What is needed is not a scaled-down smartphone but an entirely different class of hardware and algorithms.
 
