@@ -56,7 +56,7 @@ from mlsysim.core.constants import *
 # │          bw_ib_gb_per_s_str, bw_nvme_gb_per_s_str, h100_fp16_tflop_per_s_str, h100_fp8_tflop_per_s_str,
 # │          a100_fp16_tflop_per_s_str, mobile_int8_tops_str, dc_mobile_ratio_mult_str,
 # │          ridge_a100_str, ridge_h100_str, hbm_vs_register_ratio_mult_str,
-# │          ssd_vs_register_ratio_mult_str
+# │          ssd_vs_register_ratio_mult_str, training_state_* strings
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt_int, fmt_int, fmt, fmt_qty, fmt_bandwidth, fmt_ops_rate, MarkdownStr
@@ -127,10 +127,25 @@ class NumbersToKnow:
 
     ridge_a100 = int(h_a100.ridge_point().to(flop/byte).magnitude)
     ridge_h100 = int(h_h100.ridge_point().to(flop/byte).magnitude)
+    training_model_params = Models.Language.Llama2_7B.parameters
+    fp16_bytes_per_param = 2
+    fp32_bytes_per_param = 4
+    adam_state_bytes_per_param = 8
+    training_state_bytes_per_param = (
+        fp16_bytes_per_param
+        + fp16_bytes_per_param
+        + fp32_bytes_per_param
+        + adam_state_bytes_per_param
+    )
+    training_state_footprint = (
+        training_model_params.to(param).magnitude
+        * training_state_bytes_per_param
+        * byte
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Canonical _str forms for prose; raw ints/floats above kept for arithmetic.
-    from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_ops_rate, fmt_qty, fmt_bandwidth
+    from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_ops_rate, fmt_qty, fmt_bandwidth, fmt_count, fmt_memory, fmt_params
     dram_vs_compute_ratio_mult_str = fmt_multiple(dram_vs_compute, precision=0, commas=False)
     fp32_vs_int8_ratio_mult_str = fmt_multiple(fp32_vs_int8, precision=0, commas=False)
     fp32_vs_fp16_ratio_mult_str = fmt_multiple(fp32_vs_fp16, precision=1, commas=False)
@@ -162,6 +177,12 @@ class NumbersToKnow:
 
     ridge_a100_str = fmt(ridge_a100, precision=0, commas=False)
     ridge_h100_str = fmt(ridge_h100, precision=0, commas=False)
+    fp16_bytes_per_param_str = fmt_count(fp16_bytes_per_param, label="byte")
+    fp32_bytes_per_param_str = fmt_count(fp32_bytes_per_param, label="byte")
+    adam_state_bytes_per_param_str = fmt_count(adam_state_bytes_per_param, label="byte")
+    training_state_bytes_per_param_str = fmt_count(training_state_bytes_per_param, label="byte")
+    training_model_params_b_str = fmt_params(training_model_params, scale="B", precision=0, commas=False)
+    training_state_footprint_gb_str = fmt_memory(training_state_footprint, unit=GB, precision=0, commas=False)
 ```
 
 Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean-latency] shaped a generation of systems engineers, these reference numbers provide the order-of-magnitude intuition essential for ML systems design. While absolute values evolve with hardware generations, the *ratios* between categories remain remarkably stable. Memorize the relationships; use the specific numbers as sanity checks.
@@ -169,7 +190,7 @@ Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean
 ::: {#psp-appendix-machine-three-numbers .callout-perspective title="Three numbers that matter most"}
 
 * **Energy ratio**: DRAM access costs ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` more energy than an FP16 FLOP. This is why arithmetic intensity is everything.
-* **Training-state footprint**: Model weights (2 bytes FP16) + gradients (2 bytes FP16) + master weights (4 bytes FP32) + optimizer states for Adaptive Moment Estimation (Adam) at 8 bytes. That totals 16 bytes per parameter, so a 7B model needs 112 GB just to start training.
+* **Training-state footprint**: Model weights (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + gradients (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + master weights (`{python} NumbersToKnow.fp32_bytes_per_param_str` FP32) + optimizer states for Adaptive Moment Estimation (Adam) at `{python} NumbersToKnow.adam_state_bytes_per_param_str`. That totals `{python} NumbersToKnow.training_state_bytes_per_param_str` per parameter, so a `{python} NumbersToKnow.training_model_params_b_str` model needs `{python} NumbersToKnow.training_state_footprint_gb_str` just to start training.
 * **Fiber propagation limit**: Light travels about 200 km/ms in fiber. Cross-country latency is ~40 ms. No optimization can reduce this—it is physics.
 
 :::

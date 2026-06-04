@@ -1604,11 +1604,16 @@ A concrete GPT-3 synchronization estimate makes the coordination tax visible by 
 # │ Exports: GPT3SyncTax.ib_efficiency_pct_str,
 # │          GPT3SyncTax.eth_efficiency_pct_str,
 # │          GPT3SyncTax.sync_size_gb_str,
+# │          GPT3SyncTax.model_params_b_str,
+# │          GPT3SyncTax.ib_bw_gbit_per_s_str,
+# │          GPT3SyncTax.eth_bw_gbit_per_s_str,
+# │          GPT3SyncTax.energy_per_bit_pj_per_bit_str,
 # │          GPT3SyncTax.sync_energy_j_str,
 # │          GPT3SyncTax.million_steps_str,
-# │          GPT3SyncTax.sync_energy_mj_str
+# │          GPT3SyncTax.sync_energy_mj_str,
+# │          GPT3SyncTax.productivity_window_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_energy, fmt_memory, fmt_percent
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_energy, fmt_memory, fmt_params, fmt_percent, fmt_qty, fmt_time
 
 class GPT3SyncTax:
     """
@@ -1617,10 +1622,12 @@ class GPT3SyncTax:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters.to(param).magnitude
+    model_params = Models.Language.GPT3.parameters
+    params = model_params.to(param).magnitude
     bw_ib = Systems.Fabrics.InfiniBand_HDR.bandwidth  # HDR InfiniBand
-    bw_eth = 100 * Gbps  # scenario assumption
+    bw_eth = Systems.Fabrics.Ethernet_100G.bandwidth
     t_compute_iter = 1.2 * second  # scenario assumption: typical T_compute/N
+    productivity_window = 100 * second  # scenario assumption: easy comparison window
     million_steps = 1_000_000
 
     # Physics: Energy cost of data movement (pJ/bit)
@@ -1655,8 +1662,15 @@ class GPT3SyncTax:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=0, commas=True)
+    model_params_b_str = fmt_params(model_params, scale="B", precision=0, commas=False)
+    ib_bw_gbit_per_s_str = fmt_bandwidth(bw_ib, unit=Gbps, precision=0, commas=False)
+    eth_bw_gbit_per_s_str = fmt_bandwidth(bw_eth, unit=Gbps, precision=0, commas=False)
+    energy_per_bit_pj_per_bit_str = fmt_qty(energy_per_bit, pJ / bit, precision=0, commas=False)
     ib_efficiency_pct_str = fmt_percent(eff_ib/100, precision=1, style='prose')
     eth_efficiency_pct_str = fmt_percent(eff_eth/100, precision=1, style='prose')
+    ib_productive_time_s_str = fmt_time(eff_ib / 100 * productivity_window, second, precision=1, commas=False, style='word')
+    eth_productive_time_s_str = fmt_time(eff_eth / 100 * productivity_window, second, precision=1, commas=False, style='word')
+    productivity_window_s_str = fmt_time(productivity_window, second, precision=0, commas=False, style='word')
     # Formatting energy in Joules (J) for scale impact
     sync_energy_j_str = fmt_energy(sync_energy, unit=joule, precision=0)
     million_steps_str = fmt(million_steps, precision=0)
@@ -1665,15 +1679,15 @@ class GPT3SyncTax:
 
 :::: {#nbk-introduction-coordination-energy-tax .callout-notebook title="The coordination and energy tax"}
 
-**Problem**: Calculate the scaling efficiency and energy cost of training GPT-3 (175B params) on a cluster connected by 100 Gb/s Ethernet vs. 200 Gb/s InfiniBand.
+**Problem**: Calculate the scaling efficiency and energy cost of training GPT-3 (`{python} GPT3SyncTax.model_params_b_str` params) on a cluster connected by `{python} GPT3SyncTax.eth_bw_gbit_per_s_str` Ethernet vs. `{python} GPT3SyncTax.ib_bw_gbit_per_s_str` InfiniBand.
 
 **Physics**:
-To synchronize 175B parameters (FP16), a Ring All-Reduce\index{Ring All-Reduce} must move approximately `{python} GPT3SyncTax.sync_size_gb_str` of data through each participating accelerator endpoint per iteration.
+To synchronize `{python} GPT3SyncTax.model_params_b_str` parameters (FP16), a Ring All-Reduce\index{Ring All-Reduce} must move approximately `{python} GPT3SyncTax.sync_size_gb_str` of data through each participating accelerator endpoint per iteration.
 
 **The comparison (iron law of scale)**:
 
-*   **InfiniBand** (200 Gbps): High bandwidth and low latency yield a scaling efficiency of only `{python} GPT3SyncTax.ib_efficiency_pct_str`, meaning the accelerators compute for just 4 out of every 100 seconds while the rest is consumed by synchronization.
-*   **Ethernet** (100 Gbps): Lower bandwidth and higher overhead collapse the scaling efficiency further to `{python} GPT3SyncTax.eth_efficiency_pct_str`, leaving the accelerators productive for roughly 2 out of every 100 seconds.
+*   **InfiniBand** (`{python} GPT3SyncTax.ib_bw_gbit_per_s_str`): High bandwidth and low latency yield a scaling efficiency of only `{python} GPT3SyncTax.ib_efficiency_pct_str`, meaning the accelerators compute for just `{python} GPT3SyncTax.ib_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str` while the rest is consumed by synchronization.
+*   **Ethernet** (`{python} GPT3SyncTax.eth_bw_gbit_per_s_str`): Lower bandwidth and higher overhead collapse the scaling efficiency further to `{python} GPT3SyncTax.eth_efficiency_pct_str`, leaving the accelerators productive for roughly `{python} GPT3SyncTax.eth_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str`.
 
 ::: {.column-margin}
 ![](images/svg/vol2_introduction_coordination_tax.svg){width="100%" fig-alt="A single horizontal bar of one training step almost entirely filled by a violet synchronization segment, with only a thin compute sliver at the left, showing that at fleet scale the network dominates the step and accelerators sit idle."}
@@ -1682,7 +1696,7 @@ To synchronize 175B parameters (FP16), a Ring All-Reduce\index{Ring All-Reduce} 
 :::
 
 **The thermodynamic cost (energy wall)**:
-Each endpoint's gradient synchronization consumes approximately `{python} GPT3SyncTax.sync_energy_j_str` across the network fabric (at 15 pJ/bit). In a training run of `{python} GPT3SyncTax.million_steps_str` steps, the endpoint network movement alone accounts for about `{python} GPT3SyncTax.sync_energy_mj_str` of energy before multiplying by the number of participating accelerators.
+Each endpoint's gradient synchronization consumes approximately `{python} GPT3SyncTax.sync_energy_j_str` across the network fabric (at `{python} GPT3SyncTax.energy_per_bit_pj_per_bit_str`). In a training run of `{python} GPT3SyncTax.million_steps_str` steps, the endpoint network movement alone accounts for about `{python} GPT3SyncTax.sync_energy_mj_str` of energy before multiplying by the number of participating accelerators.
 
 **Systems insight**: Scale makes the network the primary "processor." If the network is inefficient, the GPUs sit idle, wasting millions of dollars in compute capacity. Furthermore, the thermodynamic cost of data movement (the energy wall) means that "more GPUs" is not a sustainable scaling strategy without communication-hiding and compression.
 

@@ -3695,10 +3695,9 @@ Several strategies mitigate this staleness problem, each with distinct overhead 
 # │ How: Sum latencies for embedding, deduplication, scoring, and selection phases.
 # │
 # │ Imports: mlsysim.fmt (check)
-# │ Exports: t_embed_min_str, t_dedup_min_str, t_score_min_str, t_total_overhead_min_str
+# │ Exports: timing strings and coreset scenario strings
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import minute
-from mlsysim.fmt import check, MarkdownStr, fmt_time
+from mlsysim import *
 
 class DistributedOverheadCalc:
     """8× A100 cluster coreset selection: 67-minute total overhead for 10× training speedup."""
@@ -3708,6 +3707,11 @@ class DistributedOverheadCalc:
     t_dedup = 15 * minute                                      # scenario assumption: distributed hash
     t_score = 30 * minute                                      # scenario assumption: parallel proxy scoring
     t_select = 2 * minute                                      # scenario assumption: centralized selection
+    coreset_fraction = 0.10                                    # scenario selection target
+    dedup_fraction = 0.15                                      # scenario duplicate-removal fraction
+    local_top_fraction = 0.20                                  # scenario local candidate fraction
+    imagenet_images = Datasets.ImageNet.training_examples.to(count).magnitude
+    workers = 8                                                # scenario A100 worker count
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     t_total_overhead = t_embed + t_dedup + t_score + t_select
@@ -3724,20 +3728,25 @@ class DistributedOverheadCalc:
     t_score_min_str = fmt_time(t_score, 'minute', precision=0, commas=False, style='word')
     t_select_min_str = fmt_time(t_select, 'minute', precision=0, commas=False, style='word')
     t_total_overhead_min_str = fmt_time(t_total_overhead, 'minute', precision=0, commas=False, style='word')
+    coreset_pct_str = fmt_percent(coreset_fraction, precision=0, commas=False, style='prose')
+    dedup_pct_str = fmt_percent(dedup_fraction, precision=0, commas=False, style='prose')
+    local_top_pct_str = fmt_percent(local_top_fraction, precision=0, commas=False, style='prose')
+    imagenet_images_m_str = fmt_count(imagenet_images, scale="M", precision=1, commas=False)
+    workers_str = fmt_count(workers, precision=0, commas=False)
 ```
 
 ::: {#exmp-data-selection-distributed-coreset-selection .callout-example title="Distributed coreset selection"}
 
-**Scenario**: Select a 10 percent coreset from ImageNet (1.2M images) using eight A100 workers, one GPU per worker.
+**Scenario**: Select a `{python} DistributedOverheadCalc.coreset_pct_str` coreset from ImageNet (`{python} DistributedOverheadCalc.imagenet_images_m_str` images) using `{python} DistributedOverheadCalc.workers_str` A100 workers, one GPU per worker.
 
 **Architecture**: @Fig-distributed-coreset-architecture shows the coordinator-worker topology.
 
 **Pipeline**:
 
 1. **Embedding phase** (parallel): Each worker computes ResNet-18 embeddings for its shard → store in shared filesystem
-2. **Deduplication phase** (distributed): Coordinator builds FAISS index, workers query for near-duplicates → remove 15 percent duplicates
+2. **Deduplication phase** (distributed): Coordinator builds FAISS index, workers query for near-duplicates → remove `{python} DistributedOverheadCalc.dedup_pct_str` duplicates
 3. **Scoring phase** (parallel): Each worker computes EL2N scores on its deduplicated shard using proxy model
-4. **Selection phase** (centralized): Coordinator collects top-20 percent scores from each worker, re-ranks globally, selects final 10 percent
+4. **Selection phase** (centralized): Coordinator collects top-`{python} DistributedOverheadCalc.local_top_pct_str` scores from each worker, re-ranks globally, selects final `{python} DistributedOverheadCalc.coreset_pct_str`
 5. **Broadcast**: Selected indices distributed to all workers for training
 
 **Performance** (measured on 8$\times$ A100 cluster):
