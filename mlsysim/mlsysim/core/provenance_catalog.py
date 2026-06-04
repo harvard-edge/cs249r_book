@@ -729,6 +729,15 @@ LLM_SERVING_PRECISION_DIVIDEND_PROFILE = _est(
     ),
 )
 
+HETEROGENEOUS_ROUTING_SCENARIO = _est(
+    "prov:heterogeneous-routing-scenario",
+    "Reference heterogeneous GPU routing scenario",
+    notes=(
+        "Reusable H100/A100 server counts, per-server service rates, and traffic "
+        "target for the inference weighted-routing example."
+    ),
+)
+
 CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS = _est(
     "prov:checkpoint-archetype-scenario-assumptions",
     "Reference checkpoint-size archetype assumptions",

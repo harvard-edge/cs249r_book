@@ -222,6 +222,12 @@ class ModelLoading(Registry):
 class ServingProfiles(Registry):
     """Reusable serving-shape profiles for performance-engineering examples."""
 
+    H100VendorMemoryBudget = sourced_qty(
+        80 * GB,
+        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
+        name="H100 vendor-facing serving memory budget",
+        description="Vendor-facing H100 memory budget used for decimal-GB serving capacity arithmetic.",
+    )
     PrecisionDividendTensorParallelDegree = sourced(
         8,
         pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
@@ -234,12 +240,7 @@ class ServingProfiles(Registry):
         name="Precision-dividend context length",
         description="Reference context length in tokens for the 70B LLM KV-cache precision-dividend example.",
     )
-    PrecisionDividendGpuMemoryBudget = sourced_qty(
-        80 * GB,
-        pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
-        name="Precision-dividend GPU memory budget",
-        description="Vendor-facing H100 memory budget used for decimal-GB serving capacity arithmetic.",
-    )
+    PrecisionDividendGpuMemoryBudget = H100VendorMemoryBudget
     PrecisionDividendBaselinePolicyBatchLimit = sourced(
         4,
         pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
@@ -257,6 +258,36 @@ class ServingProfiles(Registry):
         pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
         name="Speculation policy batch threshold",
         description="Batch-size threshold below which the case-study policy enables speculative decoding.",
+    )
+    HeterogeneousRoutingH100Servers = sourced(
+        10,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="Heterogeneous routing H100 servers",
+        description="Number of H100 serving servers in the weighted-routing example.",
+    )
+    HeterogeneousRoutingA100Servers = sourced(
+        20,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="Heterogeneous routing A100 servers",
+        description="Number of A100 serving servers in the weighted-routing example.",
+    )
+    HeterogeneousRoutingH100CapacityQps = sourced(
+        1000,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="H100 per-server routing capacity",
+        description="Workload-specific per-server QPS capacity for H100 routing examples.",
+    )
+    HeterogeneousRoutingA100CapacityQps = sourced(
+        600,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="A100 per-server routing capacity",
+        description="Workload-specific per-server QPS capacity for A100 routing examples.",
+    )
+    HeterogeneousRoutingTargetQps = sourced(
+        15000,
+        pc.HETEROGENEOUS_ROUTING_SCENARIO,
+        name="Heterogeneous routing target traffic",
+        description="Total incoming QPS target for the H100/A100 weighted-routing example.",
     )
 
 

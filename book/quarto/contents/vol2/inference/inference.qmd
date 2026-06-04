@@ -1990,11 +1990,7 @@ class KVCacheCapacityEstimator:
     bytes_per_elem = 2
     context_tokens = 131_072
     node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
-    h100_capacity = Hardware.Cloud.H100.memory.capacity
-    # Scalar boundary: the registry stores H100 as 80 GiB; this worked
-    # example keeps the vendor-labeled 80 GB budget used by the figure and
-    # surrounding prose math.
-    h100_vendor_capacity = h100_capacity.to(GiB) * (GB / GiB)
+    h100_vendor_capacity = ReferenceStats.ServingProfiles.H100VendorMemoryBudget
     total_hbm = node_gpus * h100_vendor_capacity
     weight = _model.size_in_bytes(BYTES_FP16)
     system_reserved = 20 * GB  # scenario reserve
@@ -2489,14 +2485,10 @@ from mlsysim.fmt import fmt_int, check, fmt_memory
 
 class PrecisionDividend:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    int4_bits = 4
-    fp16_bits = 16
+    int4_bits = BYTES_INT4.to(byte).magnitude * 8
+    fp16_bits = BYTES_FP16.to(byte).magnitude * 8
     tensor_parallel_degree = 4
-    h100_capacity = Hardware.Cloud.H100.memory.capacity
-    # Scalar boundary: mlsysim stores H100 as 80 GiB; this worked example keeps
-    # the vendor-labeled 80 GB budget used by the surrounding prose math.
-    h100_vendor_capacity = h100_capacity.to(GiB).magnitude
-    h100_mem = h100_vendor_capacity * GB
+    h100_mem = ReferenceStats.ServingProfiles.H100VendorMemoryBudget
     fp16_weight_total = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)
     fp16_weight_per_gpu = fp16_weight_total / tensor_parallel_degree
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -3316,11 +3308,7 @@ class MoECapacityPlan:
     moe_active_params = _moe.active_parameters
     bytes_fp8 = BYTES_INT8  # FP8 = 1 byte
     node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
-    h100_capacity = Hardware.Cloud.H100.memory.capacity
-    # Scalar boundary: keep the vendor-labeled 80 GB capacity used in this
-    # capacity-planning example while sourcing the value from mlsysim.
-    h100_vendor_capacity = h100_capacity.to(GiB).magnitude
-    h100_mem = h100_vendor_capacity * GB
+    h100_mem = ReferenceStats.ServingProfiles.H100VendorMemoryBudget
     n_gpus = 16
     alltoall_overhead = 0.3 * millisecond  # scenario routing overhead
     h100_bw = Hardware.Cloud.H100.memory.bandwidth
@@ -3933,15 +3921,17 @@ where $w_i$ is the weight, or capacity, of server $i$. Weighted two-choices appl
 # │ Context: "Heterogeneous GPU Cluster" callout in §Weighted Load Balancing.
 # │
 # │ Goal: Demonstrate that capacity-proportional weighting equalizes utilization
-# │   across H100 (1000 QPS) and A100 (600 QPS) servers at 15,000 QPS target,
-# │   versus equal-share routing that overloads A100s.
-# │ Show: total_cap_qps_str="22,000 QPS", h100_util_pct_str="68"%,
-# │   a100_util_pct_str="68"%; a100_util_equal_pct_str="83"%
+# │   across H100 (1,000 QPS) and A100 (600 QPS) servers at 15,000 QPS target,
+# │   versus equal-share routing that reduces A100 latency headroom.
+# │ Show: total_cap_qps_str="22,000 QPS",
+# │   h100_util_pct_str="68.2 percent",
+# │   a100_util_pct_str="68.2 percent",
+# │   a100_util_equal_pct_str="83.3 percent"
 # │   (reduced headroom)—inline in the callout.
 # │ How: Weight each server type by capacity/total_cap; compute per-type load
-# │   and utilization %; compare with naive equal-share routing.
+# │   and utilization; compare with naive equal-share routing.
 # │
-# │ Imports: MLSysIM Hardware registry and fmt helpers
+# │ Imports: MLSysIM public API (Hardware, ReferenceStats, formatters, checks)
 # │ Exports: HeterogeneousGpuCluster.total_cap_qps_str,
 # │   HeterogeneousGpuCluster.h100_weight_pct_str,
 # │   HeterogeneousGpuCluster.a100_weight_pct_str,
@@ -3955,8 +3945,8 @@ where $w_i$ is the weight, or capacity, of server $i$. Weighted two-choices appl
 # │   HeterogeneousGpuCluster.h100_name_str,
 # │   HeterogeneousGpuCluster.a100_name_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.fmt import MarkdownStr, check, fmt_int, fmt_percent, fmt_rate
+from mlsysim import *
+
 
 class HeterogeneousGpuCluster:
     """Demonstrate capacity-proportional weighting equalizes utilization across H100 and A100 servers."""
@@ -3964,11 +3954,12 @@ class HeterogeneousGpuCluster:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h100 = Hardware.Cloud.H100
     a100 = Hardware.Cloud.A100
-    n_h100 = 10
-    n_a100 = 20
-    h100_cap_qps = 1000   # scenario assumption: workload-specific QPS per H100 server
-    a100_cap_qps = 600    # scenario assumption: workload-specific QPS per A100 server
-    target_qps = 15000    # scenario assumption: total incoming traffic
+    profile = ReferenceStats.ServingProfiles
+    n_h100 = int(profile.HeterogeneousRoutingH100Servers)
+    n_a100 = int(profile.HeterogeneousRoutingA100Servers)
+    h100_cap_qps = int(profile.HeterogeneousRoutingH100CapacityQps)
+    a100_cap_qps = int(profile.HeterogeneousRoutingA100CapacityQps)
+    target_qps = int(profile.HeterogeneousRoutingTargetQps)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_cap = n_h100 * h100_cap_qps + n_a100 * a100_cap_qps

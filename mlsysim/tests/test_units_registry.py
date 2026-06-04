@@ -217,12 +217,18 @@ def test_serving_profile_anchors():
 
     profile = ReferenceStats.ServingProfiles
 
+    assert profile.H100VendorMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
     assert float(profile.PrecisionDividendTensorParallelDegree) == pytest.approx(8.0)
     assert float(profile.PrecisionDividendContextLengthTokens) == pytest.approx(4096.0)
     assert profile.PrecisionDividendGpuMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
     assert float(profile.PrecisionDividendBaselinePolicyBatchLimit) == pytest.approx(4.0)
     assert float(profile.PrecisionDividendOptimizedPolicyBatchLimit) == pytest.approx(32.0)
     assert float(profile.PrecisionDividendSpeculationBatchThreshold) == pytest.approx(16.0)
+    assert float(profile.HeterogeneousRoutingH100Servers) == pytest.approx(10.0)
+    assert float(profile.HeterogeneousRoutingA100Servers) == pytest.approx(20.0)
+    assert float(profile.HeterogeneousRoutingH100CapacityQps) == pytest.approx(1000.0)
+    assert float(profile.HeterogeneousRoutingA100CapacityQps) == pytest.approx(600.0)
+    assert float(profile.HeterogeneousRoutingTargetQps) == pytest.approx(15000.0)
     assert profile.PrecisionDividendTensorParallelDegree.provenance.ref
 
 
