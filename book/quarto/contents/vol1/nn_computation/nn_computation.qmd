@@ -4529,14 +4529,7 @@ Neural networks typically process multiple examples simultaneously during traini
 For a batch of size $B$, the loss gradient becomes @eq-batch-gradient:
 $$ \nabla_{\theta}\mathcal{L}_{\text{batch}} = \frac{1}{B}\sum_{i=1}^B \nabla_{\theta}\mathcal{L}_i $$ {#eq-batch-gradient}
 
-With a typical batch size of 32, this means:
-
-1. Process 32 images through forward propagation
-2. Compute loss for all 32 predictions
-3. Average the gradients across all 32 examples
-4. Update weights using this averaged gradient
-
-The choice of batch size directly determines how much hardware parallelism the system can use.
+With a typical batch size of 32, the system performs one forward pass over 32 images, computes 32 per-example losses, averages their gradients, and applies a single weight update. That average smooths noisy per-example gradients, but it also means the accelerator must keep the batch's activations available until the backward pass consumes them. The choice of batch size therefore directly determines how much hardware parallelism the system can use.
 
 ::: {#psp-nn-computation-batch-size-hardware-utilization .callout-perspective title="Batch size and hardware utilization"}
 
@@ -4590,35 +4583,30 @@ class MnistEpochLocal:
 The complete training process combines forward propagation, backward propagation, and weight updates into a systematic training loop\index{Training Loop!iterative learning}. This loop repeats until the network achieves satisfactory performance or reaches a predetermined number of iterations.
 
 \index{Stochastic Gradient Descent!mini-batch procedure}
-A single pass through the entire training dataset is called an epoch\index{Epoch!dataset iteration}[^fn-epoch-training-nn]. For MNIST, with `{python} MnistEpochLocal.training_examples_str` training images and a batch size of `{python} MnistEpochLocal.batch_size_str`, each epoch consists of `{python} MnistEpochLocal.epoch_batches_str` batch iterations. @Lst-minibatch-sgd summarizes the complete mini-batch SGD procedure.
+A single pass through the entire training dataset is called an epoch\index{Epoch!dataset iteration}[^fn-epoch-training-nn]. For MNIST, with `{python} MnistEpochLocal.training_examples_str` training images and a batch size of `{python} MnistEpochLocal.batch_size_str`, each epoch consists of `{python} MnistEpochLocal.epoch_batches_str` batch iterations. [Algorithm @alg-minibatch-sgd] summarizes the complete mini-batch SGD procedure.
 
 [^fn-epoch-training-nn]: **Epoch**: One complete pass through all training data. The number of epochs is a direct multiplier on total compute cost: a 100-epoch MNIST run executes 100$\times$ more forward and backward passes than a single epoch. At frontier scale, this multiplier becomes the binding constraint: GPT-3 trained for only ~1 epoch over 300 billion tokens because the per-epoch cost already consumed thousands of GPU-weeks. \index{Epoch!training cycles}
 
-::: {#lst-minibatch-sgd lst-cap="**Mini-Batch Stochastic Gradient Descent**: The training loop iterates over epochs, shuffling data and processing mini-batches. Each batch undergoes a forward pass, loss computation, backpropagation, and weight update."}
+::: {#alg-minibatch-sgd name="Mini-batch stochastic gradient descent"}
 
-```{.text}
-Algorithm: Mini-Batch Stochastic Gradient Descent
-------------------------------------------------
+**Require:** Training set $T_{\text{train}}=\{(x_i,y_i)\}_{i=1}^N$; learning rate $\eta$; batch size $B$; number of epochs $E$; initial parameters $\theta_0$.
 
-Input:  Training set T_train, learning rate eta, batch size B, number of epochs E
-Output: Trained weights W
+**Output:** Trained parameters $\theta$.
 
-1.  Initialize weights W randomly
-2.  for epoch = 1 to E do
-3.      Shuffle T_train to prevent order-dependent patterns
-4.      for each mini-batch M subset T_train of size B do
-5.          y_hat = ForwardPass(M, W)      ▷ Compute predictions
-6.          batch_loss = (1/B) sum_i per_example_loss(y_hat_i, y_i)
-7.          grad_W = Backprop(batch_loss)         ▷ Compute gradients
-8.          W = W - eta * grad_W                  ▷ Update weights
-9.      end for
-10.     Evaluate on validation set; check for convergence
-11. end for
-```
+1. Set $\theta \gets \theta_0$.
+2. For each epoch $e=1,\ldots,E$, shuffle $T_{\text{train}}$ to reduce order-dependent patterns.
+3. Partition the shuffled data into mini-batches $M$ of size $B$.
+4. For each mini-batch $M$, compute predictions $\hat{y}_i=f_{\theta}(x_i)$ for all $(x_i,y_i)\in M$.
+5. Compute the batch loss $\mathcal{L}_M=\frac{1}{B}\sum_{(x_i,y_i)\in M}\ell(\hat{y}_i,y_i)$.
+6. Backpropagate $\mathcal{L}_M$ to obtain $\nabla_{\theta}\mathcal{L}_M$.
+7. Update parameters: $\theta \gets \theta-\eta\nabla_{\theta}\mathcal{L}_M$.
+8. Evaluate on validation data at the chosen cadence and stop if the convergence criterion is met.
+
+**Systems cost:** The batch size $B$ controls both activation memory and GPU occupancy. Larger $B$ improves matrix utilization until HBM capacity or memory bandwidth becomes the limiting resource.
 
 :::
 
-During training, we monitor several key metrics: training loss tracks the average loss over recent batches, validation accuracy measures performance on held-out test data, and learning progress indicates how quickly the network improves. For our digit recognition task, we might observe accuracy climb from 10 percent (random guessing) to over 95 percent through multiple epochs of training.
+The inner loop in [Algorithm @alg-minibatch-sgd] is the unit that the hardware repeatedly executes. Forward propagation creates activations for every example in the current mini-batch, backward propagation consumes those activations to compute gradients, and the update mutates the parameters once per batch rather than once per example. During training, we monitor several key metrics: training loss tracks the average loss over recent batches, validation accuracy measures performance on held-out test data, and learning progress indicates how quickly the network improves. For our digit recognition task, we might observe accuracy climb from 10 percent (random guessing) to over 95 percent through multiple epochs of training.
 
 #### Convergence and stability considerations {#sec-neural-computation-convergence-stability-considerations-a9b7}
 
