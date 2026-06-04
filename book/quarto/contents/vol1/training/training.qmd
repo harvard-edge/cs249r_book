@@ -1216,7 +1216,7 @@ for epoch in range(num_epochs):
 \index{Gradient Accumulation!framework behavior}
 The `optimizer.zero_grad()` call marks the boundary between one update and the next. Gradients accumulate across calls to `backward()`, so clearing them explicitly prevents stale gradients from contaminating the next batch. The same accumulation behavior later becomes useful for large effective batch sizes, but only when the training loop manages the boundary deliberately.
 
-The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Lst-adam-internals makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
+The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. [algorithm @alg-adam-update] makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
 
 ::: {.column-margin}
 ![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A single stacked memory bar split into three segments, Params, Grads, and Adam optimizer state in a 1 to 1 to 2 ratio, with the optimizer-state segment highlighted as the largest single piece, half the total."}
@@ -1224,68 +1224,22 @@ The `optimizer.step()` method is the other boundary: it consumes the current gra
 *Adam state is the largest piece: 2$\times$ the weights, half of training memory.*
 :::
 
-::: {#lst-adam-internals lst-cap="**Adam Optimizer Internals**: Illustrative pseudocode for the operations implemented by optimizer.step(), showing momentum estimation, variance tracking, bias correction, and parameter updates. Per-parameter optimizer state (momentum_buffer, variance_buffer, step_count) is initialized to zero on the first call and persisted across calls by the framework."}
+::: {#alg-adam-update name="Adam parameter update"}
 
-```{.python}
-# Pseudocode for the operations implemented by optimizer.step() for
-# Adam.
-# In a real implementation these buffers are maintained per-parameter
-# by
-# the framework and persisted across training steps; they are shown
-# here
-# as in-scope variables for readability.
+**Require:** Parameter tensor $\theta_t$; gradient $g_t = \nabla \mathcal{L}(\theta_t)$; step index $t$; learning rate $\eta$; decay rates $\beta_1,\beta_2$; stability constant $\epsilon$.
 
-# Adam hyperparameters (typically β₁=0.9, β₂=0.999, ε=1e-8)
-beta_1, beta_2, epsilon = 0.9, 0.999, 1e-8
-learning_rate = 0.001
+**State:** First moment $m_{t-1}$ and second moment $v_{t-1}$ for the same parameter tensor, initialized to zero and persisted across optimizer steps.
 
-# Per-parameter optimizer state (zero-initialized on the first step,
-# persisted by the framework on subsequent steps; shown here as
-# in-scope variables for readability):
-momentum_buffer = 0.0  # In practice: torch.zeros_like(param.data)
-variance_buffer = 0.0  # In practice: torch.zeros_like(param.data)
-step_count = 0
+1. Update the first moment: $m_t \gets \beta_1 m_{t-1} + (1-\beta_1) g_t$.
+2. Update the second moment: $v_t \gets \beta_2 v_{t-1} + (1-\beta_2) g_t^2$.
+3. Bias-correct the estimates: $\hat{m}_t \gets m_t/(1-\beta_1^t)$ and $\hat{v}_t \gets v_t/(1-\beta_2^t)$.
+4. Update the parameter: $\theta_{t+1} \gets \theta_t - \eta \hat{m}_t/(\sqrt{\hat{v}_t}+\epsilon)$.
 
-# For each parameter tensor in the model:
-for param in model.parameters():
-    if param.grad is not None:
-        grad = param.grad.data  # Current gradient
-        step_count += 1
-
-        # Step 1: Update biased first moment estimate
-        # (momentum)
-        # m_t = β₁ * m_{t-1} + (1-β₁) * ∇𝓛(θₜ)
-        momentum_buffer = (
-            beta_1 * momentum_buffer + (1 - beta_1) * grad
-        )
-
-        # Step 2: Update biased second moment estimate
-        # (squared gradients)
-        # v_t = β₂ * v_{t-1} + (1-β₂) * (∇𝓛(θₜ))²
-        variance_buffer = beta_2 * variance_buffer + (
-            1 - beta_2
-        ) * grad.pow(2)
-
-        # Step 3: Compute bias-corrected estimates
-        momentum_corrected = momentum_buffer / (
-            1 - beta_1**step_count
-        )
-        variance_corrected = variance_buffer / (
-            1 - beta_2**step_count
-        )
-
-        # Step 4: Apply parameter update
-        # θ_{t+1} = θₜ - η * m_t / (√v_t + ε)
-        param.data -= (
-            learning_rate
-            * momentum_corrected
-            / (variance_corrected.sqrt() + epsilon)
-        )
-```
+**Systems cost:** Adam keeps two persistent moment buffers per parameter, so parameter plus optimizer state is roughly 3$\times$ the parameter memory before gradients, activations, and FP32 master weights are counted.
 
 :::
 
-Framework implementations manage the allocator and access patterns for these optimizer states, but they do not remove the cost. Momentum terms and squared-gradient statistics still occupy 2--3$\times$ parameter memory and must be read and written every step. The abstraction reduces implementation burden; the systems budget still pays for the state.
+Framework implementations manage the allocator and access patterns for these optimizer states, but they do not remove the cost. Each Adam step reads the gradient, parameter, first moment, and second moment, then writes back the updated moments and parameter. The abstraction reduces implementation burden; the systems budget still pays for two extra tensors that must occupy memory and move through the hierarchy every step.
 
 #### Learning rate scheduling integration {#sec-model-training-learning-rate-scheduling-integration-451b}
 

@@ -2030,11 +2030,31 @@ In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio
 
 :::
 
-GPipe[^fn-gpipe] [@huang2019gpipe] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@narayanan2019] developed asynchronous approaches with weight stashing. To reduce the bubble overhead, modern systems employ **1F1B (One-Forward-One-Backward)**[^fn-1f1b-memory] scheduling, which interleaves the passes to reclaim memory earlier.
+GPipe[^fn-gpipe] [@huang2019gpipe] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@narayanan2019] developed asynchronous approaches with weight stashing. Modern systems employ **1F1B (One-Forward-One-Backward)**[^fn-1f1b-memory] scheduling to reclaim activation memory earlier; that lower memory pressure makes larger microbatch counts practical, and the larger $m$ is what shrinks the bubble term.
 
 [^fn-1f1b-memory]: **1F1B Scheduling**: "One-Forward-One-Backward." Unlike GPipe (which processes all forward passes before any backward passes), 1F1B interleaves them. This reduces the peak activation memory footprint from $\mathcal{O}(m \times p)$ to $\mathcal{O}(p)$, where $m$ is the number of micro-batches and $p$ is the number of pipeline stages. This memory reclamation is what enables the massive micro-batch counts $(m \gg p)$ required to keep the pipeline bubble small. \index{1F1B Scheduling!memory efficiency}
 
-[^fn-gpipe]: **GPipe**: Published by Google in 2019, GPipe introduced synchronous micro-batch pipelining that trained a 557M-parameter AmoebaNet across 8 Tensor Processing Units (TPUs) with near-linear scaling. The key trade-off GPipe exposed: the pipeline bubble fraction $(p-1)/(m+p-1)$ means that with $p=4$ stages and $m=4$ micro-batches, 43 percent of compute is wasted in idle time -- driving the field toward 1F1B schedules that interleave forward and backward passes to shrink this overhead below 15 percent. \index{GPipe!pipeline parallelism}
+[^fn-gpipe]: **GPipe**: Published by Google in 2019, GPipe introduced synchronous micro-batch pipelining that trained a 557M-parameter AmoebaNet across 8 Tensor Processing Units (TPUs) with near-linear scaling. The key trade-off GPipe exposed: the pipeline bubble fraction $(p-1)/(m+p-1)$ means that with $p=4$ stages and $m=4$ micro-batches, 43 percent of compute is wasted in idle time -- driving the field toward schedules that reduce activation residency and make larger micro-batch counts feasible. \index{GPipe!pipeline parallelism}
+
+At the schedule level, 1F1B is a warmup, steady-state, and drain loop. [algorithm @alg-one-forward-one-backward-pipeline] makes the contract explicit: each stage alternates forward work for newer microbatches with backward work for older microbatches once gradients arrive, so activations can be released before the whole batch has completed.
+
+::: {#alg-one-forward-one-backward-pipeline name="One-forward-one-backward pipeline schedule"}
+
+**Require:** $p$ ordered pipeline stages; $m$ microbatches; point-to-point activation links from stage $j$ to $j+1$ and gradient links from stage $j+1$ to $j$.
+
+**Output:** One optimizer update after gradients have accumulated across all $m$ microbatches.
+
+1. Split the global batch into $m$ microbatches and assign consecutive model layers to the $p$ pipeline stages.
+2. Warm up the pipeline by launching forward passes from stage 0 and forwarding each activation tensor to the next stage as soon as it is produced.
+3. When the last stage finishes a microbatch loss, begin its backward pass and send the activation gradient to the preceding stage.
+4. In steady state, each stage alternates one backward computation for the oldest ready microbatch with one forward computation for the next available microbatch.
+5. Release a microbatch's saved activation on a stage as soon as that stage's backward computation has consumed it.
+6. After all forward microbatches have entered the pipeline, drain the remaining backward computations in reverse stage order.
+7. Apply the optimizer update after every stage has accumulated gradients for all $m$ microbatches.
+
+**Systems cost:** The schedule still pays fill and drain slots, so for fixed $p$ and $m$ the bubble remains approximately $(p-1)/(m+p-1)$. The gain is memory: interleaving backward work frees activations earlier than GPipe-style all-forward-then-all-backward scheduling, which lets the system raise $m$ until activation memory, recomputation, or the global-batch constraint becomes the next limit.
+
+:::
 
 In a transformer model distributed across four devices, device 1 would process blocks 1-6 for microbatch $i+1$ while device 2 computes blocks 7-12 for microbatch $i$. Simultaneously, device 3 executes blocks 13-18 for microbatch $i-1$, and device 4 processes blocks 19-24 for microbatch $i-2$. Each device maintains its assigned transformer blocks but operates on a different microbatch, creating a continuous flow of computation.
 
@@ -2042,7 +2062,7 @@ The transfer of hidden states between devices occurs continuously rather than in
 
 ##### Zero-bubble pipeline parallelism {#sec-distributed-training-systems-systems-zero-bubble}
 
-The classic problem with pipeline parallelism is the pipeline bubble: GPUs at the beginning of the pipeline are idle while waiting for gradients to flow back from the end, and vice versa. These bubbles represent wasted compute. The 1F1B (one forward, one backward) schedule reduces the bubble by interleaving forward and backward microbatches. Once the pipeline is filled, each GPU alternates between executing one forward microbatch and one backward microbatch, keeping SMs busy most of the time.
+The classic problem with pipeline parallelism is the pipeline bubble: GPUs at the beginning of the pipeline are idle while waiting for gradients to flow back from the end, and vice versa. These bubbles represent wasted compute. The 1F1B schedule in [algorithm @alg-one-forward-one-backward-pipeline] keeps SMs busy during the steady state and reduces activation residency, but the fill and drain bubble remains unless the system increases $m$ or schedules useful work into those otherwise idle slots.
 
 **Zero-bubble pipeline schedules**\index{Zero-Bubble Pipeline Parallelism} further reduce idle time by overlapping weight gradient computation with activation gradient communication. In a standard backward pass, the GPU computes $\partial \mathcal{L} / \partial W$ (weight gradient) and $\partial \mathcal{L} / \partial X$ (activation gradient, sent to the previous stage) together. Zero-bubble scheduling splits these into separate kernels: a **B** kernel that computes only the activation gradient $\partial \mathcal{L} / \partial X$ and sends it to the previous stage, and a **W** kernel that computes the weight gradient $\partial \mathcal{L} / \partial W$ locally. The B kernel must execute promptly (it is on the critical path), but the W kernel can be scheduled opportunistically to fill bubbles.
 

@@ -136,12 +136,13 @@ LABEL_DEF_PATTERNS = {
         re.compile(r"\{#(lst-[\w-]+)"),              # {#lst-xyz ...}
         re.compile(r"#\|\s*label:\s*(lst-[\w-]+)"),  # #| label: lst-xyz
     ],
+    "Algorithm": [re.compile(r"\{#(alg-[\w-]+)")],   # {#alg-xyz}
 }
-LABEL_REF_PATTERN = re.compile(r"@((?:[Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st)-[\w-]+)")
+LABEL_REF_PATTERN = re.compile(r"@((?:[Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lg)-[\w-]+)")
 
 EXCLUDED_CITATION_PREFIXES = (
-    "fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-",
-    "Fig-", "Tbl-", "Sec-", "Eq-", "Lst-",
+    "fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "ch-", "nb-",
+    "Fig-", "Tbl-", "Sec-", "Eq-", "Lst-", "Alg-",
 )
 
 # Captionless float baseline: per-file counts of pre-existing violations
