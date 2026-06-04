@@ -1280,11 +1280,63 @@ The equation reveals the **Scaling Wall**: as $N$ increases, the compute term $(
 *Communication energy climbs from HBM out to the network.*
 :::
 
+```{python}
+#| echo: false
+#| label: distributed-training-communication-energy-envelope
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMMUNICATION ENERGY ENVELOPE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @psp-distributed-training-energy-tax-scale.
+# │ Goal: Anchor the communication-energy claim with a source-backed envelope.
+# │ How: aggregate link bandwidth × representative pJ/bit midpoint.
+# │ Exports: DistTrainCommEnergyEnvelope.cluster_gpus_str,
+# │          DistTrainCommEnergyEnvelope.nvlink_aggregate_pb_per_s_str,
+# │          DistTrainCommEnergyEnvelope.ib_aggregate_tb_per_s_str,
+# │          DistTrainCommEnergyEnvelope.nvlink_energy_pj_per_bit_str,
+# │          DistTrainCommEnergyEnvelope.ib_energy_pj_per_bit_str,
+# │          DistTrainCommEnergyEnvelope.nvlink_power_kw_str,
+# │          DistTrainCommEnergyEnvelope.ib_power_kw_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import bit, pJ
+from mlsysim.fmt import fmt_bandwidth, fmt_count, fmt_energy_per_bit, fmt_power
+
+class DistTrainCommEnergyEnvelope:
+    """Order-of-magnitude communication power for a 10K-GPU cluster."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
+    nvlink_aggregate = Hardware.Cloud.H100.nvlink.bandwidth * cluster_gpus
+    ib_aggregate = Systems.Fabrics.InfiniBand_NDR.bandwidth * cluster_gpus
+    nvlink_energy = 7.5 * pJ / bit  # midpoint of the 5--10 pJ/bit range in the prose
+    ib_energy = 35 * pJ / bit       # midpoint of the 20--50 pJ/bit range in the prose
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    def _link_power(traffic, energy_per_bit):
+        bits_per_s = traffic.to(byte / second).magnitude * BITS_PER_BYTE * bit / second
+        return (bits_per_s * energy_per_bit).to(watt)
+
+    nvlink_power = _link_power(nvlink_aggregate, nvlink_energy)
+    ib_power = _link_power(ib_aggregate, ib_energy)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(cluster_gpus == 10_000, "Training_10K should contain 10,000 GPUs")
+    check(nvlink_power > ib_power, "Aggregate NVLink envelope should exceed aggregate InfiniBand envelope")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    cluster_gpus_str = fmt_count(cluster_gpus, label="GPU")
+    nvlink_aggregate_pb_per_s_str = fmt_bandwidth(nvlink_aggregate, unit=PB / second, precision=0, commas=False)
+    ib_aggregate_tb_per_s_str = fmt_bandwidth(ib_aggregate, unit=TB / second, precision=0, commas=False)
+    nvlink_energy_pj_per_bit_str = fmt_energy_per_bit(nvlink_energy, precision=1, commas=False)
+    ib_energy_pj_per_bit_str = fmt_energy_per_bit(ib_energy, precision=0, commas=False)
+    nvlink_power_kw_str = fmt_power(nvlink_power, unit=kilowatt, precision=0, commas=False)
+    ib_power_kw_str = fmt_power(ib_power, unit=kilowatt, precision=0, commas=False)
+```
+
 ::: {#psp-distributed-training-energy-tax-scale .callout-perspective title="The energy tax of scale"}
 
 Distributed training is a race against energy as much as against time. In a single GPU, moving a byte from HBM to the cores costs roughly 1–2 pJ/bit. Moving that same byte across an NVLink interconnect costs 5–10 pJ/bit. Moving it across an InfiniBand network through switches costs 20–50 pJ/bit.
 
-At the scale of 10,000 GPUs, the energy tax of moving gradients becomes a multi-megawatt problem. Communication-Computation Overlap is therefore a necessity for making large-scale AI economically and physically sustainable, not merely a performance optimization. Every bit not moved is a joule saved.
+At the scale of `{python} DistTrainCommEnergyEnvelope.cluster_gpus_str`, the multiplication by aggregate bandwidth is what changes the engineering problem. A full H100 NVLink envelope is roughly `{python} DistTrainCommEnergyEnvelope.nvlink_aggregate_pb_per_s_str` across the cluster; at `{python} DistTrainCommEnergyEnvelope.nvlink_energy_pj_per_bit_str`, that movement represents about `{python} DistTrainCommEnergyEnvelope.nvlink_power_kw_str` before cooling and switch overhead. The aggregate NDR InfiniBand envelope is smaller (`{python} DistTrainCommEnergyEnvelope.ib_aggregate_tb_per_s_str`), but at `{python} DistTrainCommEnergyEnvelope.ib_energy_pj_per_bit_str` it still represents about `{python} DistTrainCommEnergyEnvelope.ib_power_kw_str`. Communication-computation overlap is therefore necessary for wall-clock efficiency, but every byte not moved is the only way to reduce the power term itself.
 
 :::
 
@@ -3032,6 +3084,8 @@ Length variance creates two interacting problems. Fixed-size batching pads all s
 
 Production RLHF systems mitigate this through a combination of sequence packing (concatenating multiple short sequences into a single fixed-length input with attention masking to prevent cross-contamination) and adaptive micro-batching (dynamically adjusting the number of sequences per micro-batch based on the aggregate token count rather than the sequence count). These techniques recover 70--85 percent of the compute lost to padding variance but add complexity to the data pipeline that standard pretraining frameworks do not provide. The interaction between variable-length data and distributed synchronization remains an active area of systems engineering research, because every worker must process the same number of tokens per step to maintain gradient consistency.
 
+RLHF is therefore not a detour from parallelism strategy; it is the case that shows why no strategy is sufficient by itself. The policy model may need tensor and pipeline parallelism, the reference and reward models behave like inference services, the value model may require training state, and the rollout data pipeline changes shape from step to step. With that stress test in view, the final comparison can return to the general engineering question: identify the binding constraint first, then choose the parallelism pattern that moves the least data while fitting the required state.
+
 ## Parallelism Strategy Comparison {#sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a}
 
 The final comparison is a feasibility filter, not a generic ranking. For a new 50-billion parameter model, the decisive questions are which memory state fits, how often communication occurs, where the pipeline bubble appears, and which abstraction cost the engineering team can tolerate. @Tbl-parallelism-compare turns those questions into engineering signals.
@@ -3251,7 +3305,7 @@ The formula sets the optimal checkpoint interval to $\tau_{\text{opt}} = \sqrt{2
 
 ## Summary {#sec-distributed-training-systems-summary}
 
-The chapter opened with a "scaling wall": the point where adding more GPUs eventually makes training slower rather than faster. We have reframed distributed training not as a simple hardware problem, but as a constraint satisfaction problem governed by the interaction between model size, batch size, and interconnect bandwidth.
+The chapter opened with a "scaling wall": the point where adding more GPUs eventually makes training slower rather than faster. Distributed training is not a simple hardware problem; it is a constraint satisfaction problem governed by the interaction between model size, batch size, and interconnect bandwidth.
 
 The 3D Parallelism Cube (@fig-3d-parallelism-cube-summary) is the foundational framework for scaling frontier models. Data parallelism unrolls the outer loop of training to scale throughput; tensor parallelism vectorizes the inner loops of matrix multiplication to fit memory; and pipeline parallelism stages sequential layers to reduce communication frequency. Together, these strategies map models larger than any single memory bank onto a fleet of accelerators with finite bandwidth.
 
