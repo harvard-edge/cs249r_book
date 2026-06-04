@@ -2042,28 +2042,15 @@ The appropriate deployment pattern depends on the number and interdependence of 
 
 : **Deployment Patterns by Scale**\index{Deployment!patterns by scale}: Four patterns addressing different model counts and update frequencies. Single model deployments (1 model, monthly updates) use standard canary rollouts, while platform deployments (100+ models, continuous updates) require automated policy enforcement, cross-model impact analysis, and global rate limiting to prevent simultaneous high-risk deployments. {#tbl-ops-scale-deploy-patterns}
 
-#### Single model deployment {#sec-ml-operations-scale-single-model-deployment-4181}
-
-For isolated models with no dependencies, standard deployment patterns suffice. Canary deployments, **blue-green switches**[^fn-blue-green-deployment], and gradual rollouts all work effectively.
+For isolated models with no dependencies, standard deployment patterns suffice. Canary deployments, **blue-green switches**[^fn-blue-green-deployment], and gradual rollouts all work effectively because rollback means returning one model artifact to its previous version.
 
 [^fn-blue-green-deployment]: **Blue-Green Deployment**: A release pattern that uses two identical production environments ("Blue" and "Green"). Only one environment is live at a time. This enables zero-downtime rollouts and near-instant rollback if the new model fails, at the cost of doubling the required serving infrastructure $(C_{\text{infer}})$. \index{Blue-Green Deployment!ML serving}
 
-#### Pipeline deployment {#sec-ml-operations-scale-pipeline-deployment-127d}
+Pipelines introduce ordering constraints because models execute in sequence and each model's output feeds the next. The deployment rule is compatibility before exposure: deploy upstream models before downstream consumers, validate each stage before proceeding, maintain version compatibility between stages, and roll back the pipeline as a unit if any stage fails.
 
-Pipelines involve models that execute in sequence, where each model's output feeds the next. The deployment rule is compatibility before exposure:
+Ensembles widen the coordination problem because multiple models may execute in parallel or in a graph. Different teams can update components on different schedules, partial updates may change only part of the ensemble, and the system behavior emerges from component interactions. Testing in isolation is therefore insufficient; integration testing becomes the deployment gate.
 
-1. Deploy models in dependency order (upstream before downstream)
-2. Validate each stage before proceeding
-3. Maintain version compatibility between stages
-4. Roll back as a unit if any stage fails
-
-#### Ensemble deployment {#sec-ml-operations-scale-ensemble-deployment-d254}
-
-Ensemble deployment coordinates multiple models that may execute in parallel or in complex graphs. Key considerations include that models may be developed by different teams with different schedules, partial updates that change only some components are common, system behavior emerges from component interactions, and testing in isolation is insufficient while integration testing is essential.
-
-#### Platform deployment {#sec-ml-operations-scale-platform-deployment-5d6c}
-
-At platform scale, continuous deployment means some model is always being updated somewhere, so the platform must prevent independent safe changes from combining into an unsafe fleet state. Platform deployment requires automated rollout policies based on model risk classification, cross-model impact analysis before deployment approval, global rate limiting to prevent simultaneous high-risk deployments, and automated correlation of incidents with recent deployments.
+At platform scale, continuous deployment means some model is always being updated somewhere, so the platform must prevent individually safe changes from combining into an unsafe fleet state. Platform deployment requires automated rollout policies based on model risk classification, cross-model impact analysis before deployment approval, global rate limiting to prevent simultaneous high-risk deployments, and automated correlation of incidents with recent deployments.
 
 ### Cross-model dependencies in practice {#sec-ml-operations-scale-crossmodel-dependencies-practice-fc81}
 
@@ -4512,17 +4499,174 @@ LEFT JOIN LATERAL (
 
 This query retrieves the most recent feature values that existed before each event, ensuring training data reflects production reality.
 
+```{python}
+#| echo: false
+#| label: feature-store-scale-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FEATURE STORE SCALE SCENARIO
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Feature-store scale, data-quality incident, and freshness examples
+# │
+# │ Goal: Keep recurring feature-store quantities in one scenario so storage,
+# │       latency, quality, and incident-impact prose do not drift independently.
+# │ Show: Feature-history volume, lookup rate, latency budget, completeness,
+# │       CTR incident impact, and monitoring-sampling assumptions.
+# │ How: Derive displayed values from one recommendation-platform scenario.
+# │
+# │ Imports: mlsysim.core.constants, mlsysim.core.units, mlsysim.fmt
+# │ Exports: FeatureStoreScale.storage_users_str, .storage_features_str,
+# │          .storage_retention_years_str, .storage_update_interval_hr_str,
+# │          .storage_feature_values_str, .storage_bytes_per_value_str,
+# │          .storage_total_pb_str, .daily_recommendations_str,
+# │          .features_per_recommendation_str, .lookups_per_day_str,
+# │          .avg_lookup_rate_str, .peak_traffic_range_mult_str,
+# │          .recommendation_budget_ms_str, .feature_budget_range_ms_str,
+# │          .network_overhead_range_ms_str, .store_lookup_range_ms_str,
+# │          .expected_events_str, .delivered_events_str,
+# │          .completeness_pct_str, .validation_failure_threshold_pct_str,
+# │          .ctr_drop_pct_str, .incident_days_str, .ctr_before_pct_str,
+# │          .ctr_after_pct_str, .freshness_slo_hr_str, .engagement_before_str,
+# │          .engagement_after_str, .engagement_decline_pct_str,
+# │          .weekly_revenue_usd_str, .revenue_impact_usd_str,
+# │          .alert_detection_hr_str, .impact_reduction_pct_str,
+# │          .feature_shift_threshold_pct_str, .freshness_feature_count_str,
+# │          .freshness_sample_pct_str, .pipeline_feature_count_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import MILLION, BILLION
+from mlsysim.core.units import PB, byte
+from mlsysim.fmt import (
+    check,
+    fmt,
+    fmt_count,
+    fmt_memory,
+    fmt_multiple_range,
+    fmt_percent,
+    fmt_rate,
+    fmt_time,
+    fmt_time_range,
+    fmt_usd,
+)
+
+
+class FeatureStoreScale:
+    """Recommendation feature-store scenario used across the scale discussion."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    storage_users = 100 * MILLION
+    storage_features = 1000
+    storage_retention_years = 1
+    storage_update_interval_hr = 1
+    hours_per_year = 365 * 24
+    storage_bytes_per_value = 100
+
+    daily_recommendations = 1 * BILLION
+    features_per_recommendation = 100
+    seconds_per_day = 24 * 60 * 60
+    peak_traffic_min = 5
+    peak_traffic_max = 10
+
+    recommendation_budget_ms = 50
+    feature_budget_min_ms = 5
+    feature_budget_max_ms = 10
+    network_overhead_min_ms = 1
+    network_overhead_max_ms = 2
+    store_lookup_min_ms = 3
+    store_lookup_max_ms = 8
+
+    expected_events = 10 * MILLION
+    delivered_events = 8.2 * MILLION
+    validation_failure_threshold = 0.05
+
+    ctr_drop = 0.08
+    incident_days = 5
+    ctr_before = 0.042
+    ctr_after = 0.0387
+    freshness_slo_hr = 1
+    engagement_before = 0.42
+    engagement_after = 0.31
+    weekly_revenue = 15 * MILLION
+    alert_detection_hr = 4
+    feature_shift_threshold = 0.10
+
+    freshness_feature_count = 10_000
+    freshness_sample = 0.01
+    pipeline_feature_count = 500
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    storage_versions_per_feature = storage_retention_years * hours_per_year / storage_update_interval_hr
+    storage_feature_values = storage_users * storage_features * storage_versions_per_feature
+    storage_total_bytes = storage_feature_values * storage_bytes_per_value
+
+    lookups_per_day = daily_recommendations * features_per_recommendation
+    avg_lookups_per_s = lookups_per_day / seconds_per_day
+
+    completeness = delivered_events / expected_events
+    engagement_decline = (engagement_before - engagement_after) / engagement_before
+    revenue_impact = ctr_drop * weekly_revenue * incident_days / 7
+    impact_reduction = 1 - (alert_detection_hr / (incident_days * 24))
+    engagement_decline_rounded = round(engagement_decline, 2)
+    revenue_impact_rounded = round(revenue_impact / 1000) * 1000
+    impact_reduction_rounded = round(impact_reduction, 2)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(storage_feature_values == 876_000_000_000_000, "Feature-history count drifted.")
+    check(87 < (storage_total_bytes * byte).to(PB).magnitude < 88, "Storage should remain about 87 PB.")
+    check(1.1 * MILLION < avg_lookups_per_s < 1.2 * MILLION, "Average lookup rate should be about 1.16M/s.")
+    check(abs(completeness - 0.82) < 1e-9, "Completeness example should remain 82%.")
+    check(850_000 < revenue_impact < 860_000, "Revenue-impact example should remain about $857K.")
+    check(0.96 < impact_reduction < 0.98, "Alert reduction should remain about 97%.")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    storage_users_str = fmt_count(storage_users, scale="million", precision=0, scale_style="word", label="user")
+    storage_features_str = fmt_count(storage_features, commas=False, label="feature")
+    storage_retention_years_str = fmt_time(storage_retention_years, "year", precision=0, commas=False, style="word")
+    storage_update_interval_hr_str = fmt_time(storage_update_interval_hr, "hour", precision=0, commas=False, style="word")
+    storage_feature_values_str = fmt_count(storage_feature_values, scale="trillion", precision=0, scale_style="word", label="feature value")
+    storage_bytes_per_value_str = fmt_memory(storage_bytes_per_value * byte, unit=byte, precision=0, commas=False)
+    storage_total_pb_str = fmt_memory(storage_total_bytes * byte, unit=PB, precision=1, commas=False)
+
+    daily_recommendations_str = fmt_count(daily_recommendations, scale="billion", precision=0, scale_style="word", label="daily recommendation")
+    features_per_recommendation_str = fmt_count(features_per_recommendation, commas=False, label="feature")
+    lookups_per_day_str = fmt_count(lookups_per_day, scale="billion", precision=0, scale_style="word", label="feature lookup")
+    avg_lookup_rate_str = fmt_rate(avg_lookups_per_s, "requests/s", scale="M", precision=2, commas=False)
+    peak_traffic_range_mult_str = fmt_multiple_range(peak_traffic_min, peak_traffic_max, precision=0, commas=False)
+
+    recommendation_budget_ms_str = fmt_time(recommendation_budget_ms, "millisecond", precision=0, commas=False)
+    feature_budget_range_ms_str = fmt_time_range(feature_budget_min_ms, feature_budget_max_ms, "millisecond", precision=0, commas=False)
+    network_overhead_range_ms_str = fmt_time_range(network_overhead_min_ms, network_overhead_max_ms, "millisecond", precision=0, commas=False)
+    store_lookup_range_ms_str = fmt_time_range(store_lookup_min_ms, store_lookup_max_ms, "millisecond", precision=0, commas=False)
+
+    expected_events_str = fmt_count(expected_events, scale="million", precision=0, scale_style="word", label="user event")
+    delivered_events_str = fmt_count(delivered_events, scale="million", precision=1, scale_style="word", label="user event", allow_fractional=True)
+    completeness_pct_str = fmt_percent(completeness, precision=0, commas=False, style="prose")
+    validation_failure_threshold_pct_str = fmt_percent(validation_failure_threshold, precision=0, commas=False, style="prose")
+
+    ctr_drop_pct_str = fmt_percent(ctr_drop, precision=0, commas=False, style="prose")
+    incident_days_str = fmt_time(incident_days, "day", precision=0, commas=False, style="word")
+    ctr_before_pct_str = fmt_percent(ctr_before, precision=1, commas=False, style="prose")
+    ctr_after_pct_str = fmt_percent(ctr_after, precision=2, commas=False, style="prose")
+    freshness_slo_hr_str = fmt_time(freshness_slo_hr, "hour", precision=0, commas=False, style="word", attributive=True)
+    engagement_before_str = fmt(engagement_before, precision=2, commas=False)
+    engagement_after_str = fmt(engagement_after, precision=2, commas=False)
+    engagement_decline_pct_str = fmt_percent(engagement_decline_rounded, precision=0, commas=False, style="prose")
+    weekly_revenue_usd_str = fmt_usd(weekly_revenue, scale="M", precision=0, commas=False)
+    revenue_impact_usd_str = fmt_usd(revenue_impact_rounded, scale="K", precision=0, commas=False)
+    alert_detection_hr_str = fmt_time(alert_detection_hr, "hour", precision=0, commas=False, style="word")
+    impact_reduction_pct_str = fmt_percent(impact_reduction_rounded, precision=0, commas=False, style="prose")
+    feature_shift_threshold_pct_str = fmt_percent(feature_shift_threshold, precision=0, commas=False, style="prose")
+
+    freshness_feature_count_str = fmt_count(freshness_feature_count, commas=True, label="feature")
+    freshness_sample_pct_str = fmt_percent(freshness_sample, precision=0, commas=False, style="prose")
+    pipeline_feature_count_str = fmt_count(pipeline_feature_count, commas=False, label="feature")
+```
+
 #### Storage implications {#sec-ml-operations-scale-storage-implications-945f}
 
 Point-in-time correctness requires storing feature history rather than current values alone. The storage implications are substantial:
 
 $$\text{Storage} = N_{\text{entities}} \times N_{\text{features}} \times \frac{T_{\text{retention}}}{T_{\text{update}}}$$
 
-For 100 million users, 1000 features, 1 year retention, and hourly updates:
-
-$$\text{Storage} = 10^8 \times 10^3 \times \frac{365 \times 24}{1} = 8.76 \times 10^{14} \text{ feature values}$$
-
-At 100 bytes per value, this represents approximately 87 petabytes before compression. Efficient feature stores use compression, columnar storage, and retention policies to manage this scale.
+For `{python} FeatureStoreScale.storage_users_str`, `{python} FeatureStoreScale.storage_features_str`, `{python} FeatureStoreScale.storage_retention_years_str` retention, and updates every `{python} FeatureStoreScale.storage_update_interval_hr_str`, the history contains `{python} FeatureStoreScale.storage_feature_values_str`. At `{python} FeatureStoreScale.storage_bytes_per_value_str` per value, this represents approximately `{python} FeatureStoreScale.storage_total_pb_str` before compression. Efficient feature stores use compression, columnar storage, and retention policies to manage this scale.
 
 ### Feature versioning and lineage {#sec-ml-operations-scale-feature-versioning-lineage-624c}
 
@@ -4556,9 +4700,9 @@ The practical pattern is incremental. Historical data is processed in date parti
 
 Feature stores at recommendation system scale face a coupled systems problem: request volume, latency budget, and storage history all bind at once.
 
-The arithmetic behind a large recommender explains why feature stores become serving infrastructure rather than a metadata convenience. One billion daily recommendations with 100 features per recommendation produces 100 billion feature lookups per day. That average load is roughly 1.1 million lookups per second before peak traffic, which commonly reaches 5--10$\times$ the mean.
+The arithmetic behind a large recommender explains why feature stores become serving infrastructure rather than a metadata convenience. `{python} FeatureStoreScale.daily_recommendations_str` with `{python} FeatureStoreScale.features_per_recommendation_str` per recommendation produces `{python} FeatureStoreScale.lookups_per_day_str` per day. That average load is roughly `{python} FeatureStoreScale.avg_lookup_rate_str` before peak traffic, which commonly reaches `{python} FeatureStoreScale.peak_traffic_range_mult_str` the mean.
 
-Feature retrieval must fit inside the overall latency budget because every extra lookup millisecond steals time from ranking. If the recommendation budget is 50 ms, the feature store may receive only 5--10 ms. Network overhead can consume 1--2 ms of that allocation, leaving roughly 3--8 ms for the store lookup itself. Meeting this budget requires in-memory storage, careful batching, and geographic placement close enough to the serving fleet that network latency does not dominate.
+Feature retrieval must fit inside the overall latency budget because every extra lookup millisecond steals time from ranking. If the recommendation budget is `{python} FeatureStoreScale.recommendation_budget_ms_str`, the feature store may receive only `{python} FeatureStoreScale.feature_budget_range_ms_str`. Network overhead can consume `{python} FeatureStoreScale.network_overhead_range_ms_str` of that allocation, leaving roughly `{python} FeatureStoreScale.store_lookup_range_ms_str` for the store lookup itself. Meeting this budget requires in-memory storage, careful batching, and geographic placement close enough to the serving fleet that network latency does not dominate.
 
 Production feature stores also carry two time horizons at once. The online path keeps current values for billions of entities and thousands of features per entity, usually in the terabyte range before replication. The offline path keeps enough historical state to reconstruct training examples, which can push retained feature history into petabytes. Multi-region replication then serves both availability and latency, but it also makes freshness and consistency visible operational concerns.
 
@@ -4568,7 +4712,7 @@ Data quality\index{Data Quality} issues are a major source of production ML prob
 
 #### Data quality metrics {#sec-ml-operations-scale-data-quality-metrics-b0bd}
 
-Data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce 10 million user events but delivering only 8.2 million is 82 percent complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than 5 percent of validation rules because allowing corrupt data through is more expensive than delaying a batch.
+Data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce `{python} FeatureStoreScale.expected_events_str` but delivering only `{python} FeatureStoreScale.delivered_events_str` is `{python} FeatureStoreScale.completeness_pct_str` complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than `{python} FeatureStoreScale.validation_failure_threshold_pct_str` of validation rules because allowing corrupt data through is more expensive than delaying a batch.
 
 Timeliness measures freshness against the SLO of the consuming model. Fraud detection may need features less than 100 milliseconds old, while demographic features can tolerate staleness measured in days; the alert threshold should therefore be tied to the feature's use, not a global constant. Accuracy asks whether values remain correct within expected distributions. Sensor drift after calibration lapses, for example, can leave values well-typed but wrong. Statistical tests such as Kolmogorov-Smirnov for continuous features, chi-square for categorical features, and Maximum Mean Discrepancy for high-dimensional data turn those accuracy checks into recurring gates.
 
@@ -4584,7 +4728,7 @@ Cross-field validation checks logical relationships between fields. If `country=
 
 #### Worked example: Debugging data quality incident {#sec-ml-operations-scale-worked-example-debugging-data-quality-incident-72cd}
 
-A recommendation model's click-through rate (CTR) drops 8 percent over five days. Initial hypothesis focuses on model drift, but data quality investigation reveals the root cause.
+A recommendation model's click-through rate (CTR) drops `{python} FeatureStoreScale.ctr_drop_pct_str` over `{python} FeatureStoreScale.incident_days_str`. Initial hypothesis focuses on model drift, but data quality investigation reveals the root cause.
 
 ::: {.column-margin}
 ![](images/svg/vol2_ops_scale_margin_004.svg){width="100%" fig-alt="Time ladder comparing a late five-day detection window with a four-hour automated alert window, marked as a 30x gap."}
@@ -4592,15 +4736,11 @@ A recommendation model's click-through rate (CTR) drops 8 percent over five days
 *Every minute of delayed detection compounds the cost.*
 :::
 
-The investigation starts with the model symptom and then works backward through the data path. Model metrics confirm that CTR declined from 4.2 percent to 3.87 percent, but freshness checks show that features still arrive within the 1-hour SLO. That rules out a stale pipeline and points to semantic change. Distribution analysis then shows the `user_engagement_score` mean shifting from 0.42 to 0.31, a 26 percent decline, and lineage tracking ties the shift to an upstream pipeline version deployed five days earlier. The root cause is not model drift but a feature computation bug in the new pipeline version.\index{Model Metrics}\index{Data!data freshness}\index{Lineage Tracking}\index{Root Cause}
+The investigation starts with the model symptom and then works backward through the data path. Model metrics confirm that CTR declined from `{python} FeatureStoreScale.ctr_before_pct_str` to `{python} FeatureStoreScale.ctr_after_pct_str`, but freshness checks show that features still arrive within the `{python} FeatureStoreScale.freshness_slo_hr_str` SLO. That rules out a stale pipeline and points to semantic change. Distribution analysis then shows the `user_engagement_score` mean shifting from `{python} FeatureStoreScale.engagement_before_str` to `{python} FeatureStoreScale.engagement_after_str`, a `{python} FeatureStoreScale.engagement_decline_pct_str` decline, and lineage tracking ties the shift to an upstream pipeline version deployed `{python} FeatureStoreScale.incident_days_str` earlier. The root cause is not model drift but a feature computation bug in the new pipeline version.\index{Model Metrics}\index{Data!data freshness}\index{Lineage Tracking}\index{Root Cause}
 
-The quantitative impact is:
+The quantitative impact is the relative CTR loss multiplied by weekly revenue and the fraction of the week exposed: `{python} FeatureStoreScale.ctr_drop_pct_str` of `{python} FeatureStoreScale.weekly_revenue_usd_str`/week over `{python} FeatureStoreScale.incident_days_str` produces `{python} FeatureStoreScale.revenue_impact_usd_str` in lost revenue. Distribution monitoring with automated alerts would detect the shift within `{python} FeatureStoreScale.alert_detection_hr_str`, reducing impact by `{python} FeatureStoreScale.impact_reduction_pct_str`.
 
-$$\text{Revenue impact} = 0.08 \times \$15M\text{/week} \times 5\text{ days}/7 = \$857K$$
-
-Detection latency of five days cost \$857K in revenue. Distribution monitoring with automated alerts would detect the shift within four hours, reducing impact by 97 percent.
-
-The resolution is to roll back the pipeline to the previous version, redeploy models with correctly computed features, and add a distribution validation gate to prevent future pipeline deployments with feature shifts exceeding 10 percent threshold.
+The resolution is to roll back the pipeline to the previous version, redeploy models with correctly computed features, and add a distribution validation gate to prevent future pipeline deployments with feature shifts exceeding the `{python} FeatureStoreScale.feature_shift_threshold_pct_str` threshold.
 
 #### Operational integration {#sec-ml-operations-scale-operational-integration-a2de}
 
@@ -4618,7 +4758,7 @@ At enterprise scale with thousands of features, monitoring must aggregate by lik
 
 #### Freshness tracking at scale {#sec-ml-operations-scale-freshness-tracking-scale-58a2}
 
-Feature freshness monitoring becomes computationally intensive at scale. For 10,000 features updated at different frequencies, continuous freshness checking generates substantial overhead, so efficient implementations reduce the number of checks without losing systemic signal. Sampling 1 percent of representative entities rather than every feature value is usually enough to detect systemic freshness failures. Pipeline-level aggregation is even cheaper when one pipeline updates 500 features, because the pipeline update timestamp captures the freshness state of the group. Threshold stratification reserves per-feature monitoring for revenue-critical features and uses aggregated monitoring for features whose staleness has lower immediate impact.
+Feature freshness monitoring becomes computationally intensive at scale. For `{python} FeatureStoreScale.freshness_feature_count_str` updated at different frequencies, continuous freshness checking generates substantial overhead, so efficient implementations reduce the number of checks without losing systemic signal. Sampling `{python} FeatureStoreScale.freshness_sample_pct_str` of representative entities rather than every feature value is usually enough to detect systemic freshness failures. Pipeline-level aggregation is even cheaper when one pipeline updates `{python} FeatureStoreScale.pipeline_feature_count_str`, because the pipeline update timestamp captures the freshness state of the group. Threshold stratification reserves per-feature monitoring for revenue-critical features and uses aggregated monitoring for features whose staleness has lower immediate impact.
 
 The computational overhead of freshness monitoring scales with the number of distinct features, not the volume of feature values. Efficient implementations maintain $\mathcal{O}(F)$ overhead where $F$ is the feature count, even when feature values scale to billions of entities.
 
