@@ -1233,7 +1233,7 @@ The resulting configuration in @tbl-data-engineering-kws-configuration balances 
 
 :::
 
-With optimal parameters selected from our design space, implementation requires combining multiple data collection approaches. Our KWS system demonstrates how these approaches work together across the project lifecycle. Preexisting datasets like Google's Speech Commands\index{Speech Commands} [@warden2018speech] provide a foundation for initial development, offering carefully curated voice samples for common wake words. For multilingual coverage, the Multilingual Spoken Words Corpus\index{Multilingual Spoken Words Corpus} (MSWC) [@mazumder2021multilingual] extends this foundation to 50 languages with over 23 million examples. However, even these large-scale datasets often lack diversity in accents, environments, and recording conditions, necessitating additional strategies.
+With optimal parameters selected from our design space, implementation requires combining multiple data collection approaches. Our KWS system demonstrates how these approaches work together across the project lifecycle. Preexisting datasets like Google's Speech Commands\index{Speech Commands} [@warden2018speech] provide a foundation for initial development, offering carefully curated voice samples for common wake words. For multilingual coverage, the Multilingual Spoken Words Corpus\index{Multilingual Spoken Words Corpus} (MSWC) [@mazumder2021multilingual] extends this foundation to a large multilingual corpus. However, even these large-scale datasets often lack diversity in accents, environments, and recording conditions, necessitating additional strategies.
 
 To address coverage gaps, web scraping supplements baseline datasets by gathering diverse voice samples from video platforms and speech databases, capturing natural speech patterns and wake word variations. Crowdsourcing platforms like Amazon Mechanical Turk[^fn-mturk-labeling-scale] enable targeted collection of wake word samples across different demographics and environments [@sheng2019]. This approach is particularly valuable for underrepresented languages or specific acoustic conditions.
 
@@ -1509,35 +1509,42 @@ The four pillars provide the evaluative lens; the first concrete engineering dec
 # │ Show: Millions of examples across many languages require multi-source collection.
 # │ How: Format the MSWC-scale example and language count for prose.
 # │
-# │ Imports: mlsysim.core.constants (MILLION), mlsysim.fmt (fmt, fmt_int, check)
-# │ Exports: KWSAcquisitionScale.dataset_size_m_round_str,
-# │          KWSAcquisitionScale.languages_str
+# │ Imports: mlsysim (Datasets, count, fmt_count, check)
+# │ Exports: KWSAcquisitionScale.dataset_size_million_samples_str,
+# │          KWSAcquisitionScale.languages_count_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, check
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSAcquisitionScale:
     """KWS acquisition scale recap for multi-source data collection."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_size_m = 23.4
-    languages = 50
+    dataset = Datasets.MSWC
+    total_examples = dataset.training_examples
+    languages = dataset.languages
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples = dataset_size_m * MILLION
+    total_examples_count = total_examples.to(count).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total_examples > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples:.0f}.")
+    check(total_examples_count > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples_count:.0f}.")
     check(languages >= 50, f"KWS language coverage unexpectedly narrow: {languages}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_m_round_str = fmt_int(round(dataset_size_m))
-    languages_str = fmt(languages, precision=0, commas=False)
+    dataset_size_million_samples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="audio sample",
+    )
+    languages_count_str = fmt_count(languages, label="language", commas=False)
 ```
 
 ## Data Acquisition {#sec-data-engineering-strategic-data-acquisition-418f}
 
-\index{Data Acquisition!strategies}Data acquisition begins when the team names the coverage gap the model must close. The ImageNet benchmark\index{ImageNet!benchmark dataset}[^fn-imagenet-data-scale] [@imagenet_website] contains 14.2 million labeled images and took 49,000 crowdsourced workers to assemble. GPT-3's training corpus used tens of terabytes of raw Common Crawl text filtered to hundreds of gigabytes, combined with curated web, books, and Wikipedia data [@brown2020language]. Our KWS system needs `{python} KWSAcquisitionScale.dataset_size_m_round_str` million audio samples spanning `{python} KWSAcquisitionScale.languages_str` languages, but the hard part is not only volume. The model must recognize wake words across accents, microphones, rooms, ages, and background noises that no single collection method can economically cover. Acquisition strategy is therefore a sequence of gap-closing decisions: reuse what already matches deployment, collect what is missing, scrape or synthesize where scale is the binding constraint, and reject sources whose provenance or consent constraints make them unusable.
+\index{Data Acquisition!strategies}Data acquisition begins when the team names the coverage gap the model must close. The ImageNet benchmark\index{ImageNet!benchmark dataset}[^fn-imagenet-data-scale] [@imagenet_website] contains 14.2 million labeled images and took 49,000 crowdsourced workers to assemble. GPT-3's training corpus used tens of terabytes of raw Common Crawl text filtered to hundreds of gigabytes, combined with curated web, books, and Wikipedia data [@brown2020language]. Our KWS system needs `{python} KWSAcquisitionScale.dataset_size_million_samples_str` spanning `{python} KWSAcquisitionScale.languages_count_str`, but the hard part is not only volume. The model must recognize wake words across accents, microphones, rooms, ages, and background noises that no single collection method can economically cover. Acquisition strategy is therefore a sequence of gap-closing decisions: reuse what already matches deployment, collect what is missing, scrape or synthesize where scale is the binding constraint, and reject sources whose provenance or consent constraints make them unusable.
 
 The KWS case also shows why acquisition cannot optimize one pillar at a time. Achieving `{python} KWSProblemTargets.kws_accuracy_target_str` accuracy across diverse acoustic environments requires representative data spanning accents, ages, and recording conditions. Maintaining consistent detection despite device variation requires recordings from different microphones and capture paths. Supporting millions of concurrent users requires volumes that manual collection cannot economically provide. Protecting user privacy in always-listening systems constrains which recordings may be retained and how they must be anonymized. A source that improves scale but weakens governance, or improves quality but excludes important speakers, does not solve the acquisition problem.
 
@@ -2128,7 +2135,7 @@ Synthetic data\index{Synthetic Data!rare event coverage}\index{Synthetic Data!si
 
 :::
 
-For our KWS system, `{python} KWSAcquisitionScale.dataset_size_m_round_str` million training examples across `{python} KWSAcquisitionScale.languages_str` languages demand a volume that manual collection cannot economically provide. The multi-source strategy introduced in @sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9, combining curated datasets with web scraping, crowdsourcing, and synthetic generation, addresses this scale requirement while maintaining coverage across acoustic environments and speaker demographics.
+For our KWS system, `{python} KWSAcquisitionScale.dataset_size_million_samples_str` spanning `{python} KWSAcquisitionScale.languages_count_str` demand a volume that manual collection cannot economically provide. The multi-source strategy introduced in @sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9, combining curated datasets with web scraping, crowdsourcing, and synthetic generation, addresses this scale requirement while maintaining coverage across acoustic environments and speaker demographics.
 
 ### Coverage and diversity requirements {#sec-data-engineering-coverage-diversity-requirements-ce87}
 
@@ -3321,39 +3328,46 @@ The feature computation placement trade-off introduced in @sec-data-engineering-
 # │ Show: Millions of examples require distributed processing, while edge memory is tiny.
 # │ How: Format corpus scale and always-on island memory limits.
 # │
-# │ Imports: mlsysim.core.constants (MILLION), mlsysim.book (fmt, check)
-# │ Exports: KWSScalabilityTargets.dataset_size_m_round_str,
+# │ Imports: mlsysim (Datasets, KB, count, fmt_count, fmt_qty, check)
+# │ Exports: KWSScalabilityTargets.dataset_size_million_examples_str,
 # │          KWSScalabilityTargets.memory_limit_edge_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty, check
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSScalabilityTargets:
     """KWS scale and edge deployment recap for processing architecture."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_size_m = 23.4
+    dataset = Datasets.MSWC
+    total_examples = dataset.training_examples
     memory_limit_edge_kb = 16
     model_size_limit_kb = 64  # KWS always-on island design limit
     memory_limit_edge = memory_limit_edge_kb * KB
     model_size_limit = model_size_limit_kb * KB
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples = dataset_size_m * MILLION
+    total_examples_count = total_examples.to(count).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total_examples > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples:.0f}.")
+    check(total_examples_count > 20 * MILLION, f"KWS corpus unexpectedly small: {total_examples_count:.0f}.")
     check(memory_limit_edge_kb <= 16, f"Edge memory target should remain tiny, got {memory_limit_edge_kb} KB.")
     check(memory_limit_edge_kb < model_size_limit_kb,
           "Edge preprocessing-state budget should be stricter than the model-size design limit.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_m_round_str = fmt_int(round(dataset_size_m))
-    memory_limit_edge_kb_str = fmt_qty(memory_limit_edge, KB, precision=0, commas=False)
-    model_size_limit_kb_str = fmt_qty(model_size_limit, KB, precision=0, commas=False)
+    dataset_size_million_examples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="example",
+    )
+    memory_limit_edge_kb_str = fmt_qty(memory_limit_edge, unit=KB, precision=0, commas=False)
+    model_size_limit_kb_str = fmt_qty(model_size_limit, unit=KB, precision=0, commas=False)
 ```
 
-Scalability in the KWS pipeline manifests at multiple stages. Development uses single-machine processing on sample datasets to iterate rapidly. Training at scale requires distributed processing when dataset size (`{python} KWSScalabilityTargets.dataset_size_m_round_str` million examples) exceeds single-machine capacity or when multiple experiments run concurrently. The processing pipeline parallelizes naturally: audio files are independent, so transforming them requires no coordination between workers. Each worker reads its assigned audio files from distributed storage, computes features, and writes results back, a trivially parallel pattern achieving near-linear scalability. Production deployment adds a stricter `{python} KWSScalabilityTargets.memory_limit_edge_kb_str` preprocessing-state budget alongside the `{python} KWSScalabilityTargets.model_size_limit_kb_str` model-size limit, necessitating careful footprint optimization to fit processing within device capabilities.
+Scalability in the KWS pipeline manifests at multiple stages. Development uses single-machine processing on sample datasets to iterate rapidly. Training at scale requires distributed processing when dataset size (`{python} KWSScalabilityTargets.dataset_size_million_examples_str`) exceeds single-machine capacity or when multiple experiments run concurrently. The processing pipeline parallelizes naturally: audio files are independent, so transforming them requires no coordination between workers. Each worker reads its assigned audio files from distributed storage, computes features, and writes results back, a trivially parallel pattern achieving near-linear scalability. Production deployment adds a stricter `{python} KWSScalabilityTargets.memory_limit_edge_kb_str` preprocessing-state budget alongside the `{python} KWSScalabilityTargets.model_size_limit_kb_str` model-size limit, necessitating careful footprint optimization to fit processing within device capabilities.
 
 ### Transformation lineage {#sec-data-engineering-tracking-data-transformation-lineage-3b09}
 
@@ -3698,67 +3712,85 @@ These principles manifest at scale across safety-critical domains. Autonomous ve
 # │ Show: Manual labeling would consume tens of person-years even at 10 s/sample.
 # │ How: Convert example count and label time into person-hours and person-years.
 # │
-# │ Imports: mlsysim.core.constants (MILLION, SEC_PER_HOUR), mlsysim.book (fmt, check)
-# │ Exports: KWSAutomatedLabelingScale.dataset_size_m_str,
-# │          KWSAutomatedLabelingScale.dataset_size_m_round_str,
+# │ Imports: mlsysim (Datasets, count, second, fmt_count, fmt_time, fmt_percent, check)
+# │ Exports: KWSAutomatedLabelingScale.dataset_size_million_examples_str,
+# │          KWSAutomatedLabelingScale.dataset_size_million_samples_str,
 # │          KWSAutomatedLabelingScale.label_hours_str,
 # │          KWSAutomatedLabelingScale.label_years_str,
 # │          KWSAutomatedLabelingScale.accuracy_target_str,
-# │          KWSAutomatedLabelingScale.languages_str,
+# │          KWSAutomatedLabelingScale.languages_count_str,
+# │          KWSAutomatedLabelingScale.keywords_count_str,
 # │          KWSAutomatedLabelingScale.sample_duration_ms_low_str,
 # │          KWSAutomatedLabelingScale.sample_duration_ms_high_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_count, check, MarkdownStr
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSAutomatedLabelingScale:
     """KWS automated-labeling scale recap for the MSWC discussion."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_size_m = 23.4
-    languages = 50
+    dataset = Datasets.MSWC
+    total_examples = dataset.training_examples
+    languages = dataset.languages
+    keywords = dataset.keywords
     label_seconds_per_example = 10
     accuracy_target = 98
     sample_duration_ms_low = 500
     sample_duration_ms_high = 800
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples = dataset_size_m * MILLION
-    label_hours = total_examples * label_seconds_per_example / SEC_PER_HOUR
+    total_examples_count = total_examples.to(count).magnitude
+    label_hours = total_examples_count * label_seconds_per_example / SEC_PER_HOUR
     label_years = label_hours / 2000
     sample_duration_window_ms = sample_duration_ms_high - sample_duration_ms_low
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(label_years > 30, f"Manual KWS labeling effort unexpectedly small: {label_years:.1f} person-years.")
+    check(keywords >= 300_000, f"MSWC keyword coverage unexpectedly narrow: {keywords}.")
     check(sample_duration_window_ms > 0, "KWS duration bounds must be ordered.")
     check(accuracy_target > 90, f"KWS accuracy target unexpectedly low: {accuracy_target}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_m_str = MarkdownStr(f"{dataset_size_m}")
-    dataset_size_m_round_str = fmt_int(round(dataset_size_m))
-    label_hours_str = fmt_time(label_hours, "hour", precision=0, commas=True, style="word")
+    dataset_size_million_examples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=1,
+        scale_style="word",
+        label="example",
+        allow_fractional=True,
+    )
+    dataset_size_million_samples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="sample",
+    )
+    label_hours_str = fmt_time(label_hours, unit=hour, precision=0, commas=True, style="word")
     label_years_str = fmt_count(label_years, precision=1, commas=False, label="person-year", plural_label="person-years", allow_fractional=True)
     accuracy_target_str = fmt_percent(accuracy_target/100, precision=0, commas=False, style='symbol')
-    languages_str = fmt(languages, precision=0, commas=False)
-    sample_duration_ms_low_str = fmt_time(sample_duration_ms_low, 'millisecond', precision=0, commas=False)
-    sample_duration_ms_high_str = fmt_time(sample_duration_ms_high, 'millisecond', precision=0, commas=False)
+    languages_count_str = fmt_count(languages, label="language", commas=False)
+    keywords_count_str = fmt_count(keywords, label="keyword", commas=True)
+    sample_duration_ms_low_str = fmt_time(sample_duration_ms_low, unit=millisecond, precision=0, commas=False)
+    sample_duration_ms_high_str = fmt_time(sample_duration_ms_high, unit=millisecond, precision=0, commas=False)
 ```
 
-\index{Keyword Spotting!automated labeling}Our KWS case study has now progressed through problem definition (@sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9), data collection, ingestion, and processing. At the labeling stage, we confront a challenge unique to speech systems at scale. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond the manual and crowdsourced approaches we examined earlier. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling addresses this challenge through its innovative approach to generating labeled wake word data; the corpus contains over `{python} KWSAutomatedLabelingScale.dataset_size_m_str` million one-second spoken examples across 340,000 keywords in `{python} KWSAutomatedLabelingScale.languages_str` different languages.
+\index{Keyword Spotting!automated labeling}Our KWS case study has now progressed through problem definition (@sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9), data collection, ingestion, and processing. At the labeling stage, we confront a challenge unique to speech systems at scale. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond the manual and crowdsourced approaches we examined earlier. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling addresses this challenge through its innovative approach to generating labeled wake word data; the corpus contains over `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` of one-second speech across `{python} KWSAutomatedLabelingScale.keywords_count_str` in `{python} KWSAutomatedLabelingScale.languages_count_str}.
 
-This scale makes manual annotation infeasible: `{python} KWSAutomatedLabelingScale.dataset_size_m_str` million examples at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Achieving `{python} KWSAutomatedLabelingScale.accuracy_target_str` accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} KWSAutomatedLabelingScale.languages_str` languages ensures the technology serves diverse speaker populations.
+This scale makes manual annotation infeasible: `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Achieving `{python} KWSAutomatedLabelingScale.accuracy_target_str` accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} KWSAutomatedLabelingScale.languages_count_str` ensures the technology serves diverse speaker populations.
 
 Walk through the pipeline in @fig-mswc to see how this automated system works. It begins with paired sentence audio recordings and corresponding transcriptions from projects like Common Voice [@mozilla_common_voice] or multilingual captioned content platforms, processing these inputs through forced alignment\index{Forced Alignment!speech labeling}\index{Speech Recognition!forced alignment}[^fn-forced-alignment-kws] to identify precise word boundaries within continuous speech.
 
 [^fn-forced-alignment-kws]: **Forced Alignment**: Given a known transcription, the algorithm aligns specific words to audio frames with millisecond precision using dynamic programming (Viterbi algorithm), bypassing the harder problem of recognizing what was said. This distinction is what makes automated KWS corpus construction feasible: because the transcription is already known from paired text, forced alignment converts sentence-level audio into word-level training samples at negligible marginal cost -- enabling datasets of millions of labeled keywords without proportional human annotation effort. \index{Forced Alignment!automated labeling}
 
-::: {#fig-mswc fig-env="figure" fig-pos="htb" fig-cap="**Multilingual Data Preparation**: Forced alignment and segmentation transform paired audio-text data into labeled one-second segments, creating a large-scale corpus for training keyword spotting models across `{python} KWSAutomatedLabelingScale.languages_str` languages. This automated process enables scalable development of KWS systems by efficiently generating training examples from readily available speech resources like common voice and multilingual captioned content." fig-alt="Pipeline showing audio waveform and text transcript inputs processed through forced alignment stage, then segmented into individual one-second labeled keyword samples for KWS training."}
+::: {#fig-mswc fig-env="figure" fig-pos="htb" fig-cap="**Multilingual Data Preparation**: Forced alignment and segmentation transform paired audio-text data into labeled one-second segments, creating a large-scale corpus for training keyword spotting models across `{python} KWSAutomatedLabelingScale.languages_count_str`. This automated process enables scalable development of KWS systems by efficiently generating training examples from readily available speech resources like common voice and multilingual captioned content." fig-alt="Pipeline showing audio waveform and text transcript inputs processed through forced alignment stage, then segmented into individual one-second labeled keyword samples for KWS training."}
 
 ![](images/png/data_engineering_kws2.png)
 
 :::
 
-The extraction system uses these precise timing markers to generate clean keyword samples while handling the engineering challenges our problem definition anticipated: background noise interfering with word boundaries, speakers stretching or compressing words unexpectedly beyond our target `{python} KWSAutomatedLabelingScale.sample_duration_ms_low_str`--`{python} KWSAutomatedLabelingScale.sample_duration_ms_high_str` duration, and longer words exceeding the one-second boundary. MSWC provides automated quality assessment that analyzes audio characteristics to identify potential issues with recording quality, speech clarity, or background noise, which is essential for maintaining consistent standards across `{python} KWSAutomatedLabelingScale.dataset_size_m_round_str` million samples without the manual review expenses that would make this scale prohibitive.
+The extraction system uses these precise timing markers to generate clean keyword samples while handling the engineering challenges our problem definition anticipated: background noise interfering with word boundaries, speakers stretching or compressing words unexpectedly beyond our target `{python} KWSAutomatedLabelingScale.sample_duration_ms_low_str`--`{python} KWSAutomatedLabelingScale.sample_duration_ms_high_str` duration, and longer words exceeding the one-second boundary. MSWC provides automated quality assessment that analyzes audio characteristics to identify potential issues with recording quality, speech clarity, or background noise, which is essential for maintaining consistent standards across `{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` without the manual review expenses that would make this scale prohibitive.
 
 Modern voice assistant developers often build on this automated labeling foundation. While automated corpora may not contain the specific wake words a product requires, they provide starting points for KWS prototyping, particularly in underserved languages where commercial datasets do not exist. Production systems typically layer targeted human recording and verification for challenging cases (unusual accents, rare words, or difficult acoustic environments), coordinating between automated processing and human expertise.
 
@@ -3766,7 +3798,7 @@ The pipeline has now produced its compilation artifacts: millions of feature vec
 
 ## Storage Architecture {#sec-data-engineering-strategic-storage-architecture-1a6b}
 
-The labeled datasets from our pipeline (`{python} KWSAutomatedLabelingScale.dataset_size_m_round_str` million audio samples spanning `{python} KWSAutomatedLabelingScale.languages_str` languages for KWS) now require strategic storage decisions that determine training efficiency, serving latency, and long-term maintainability. Storage architecture\index{Storage!architecture} addresses a core tension: batch training requires sequential scans across millions of examples, while real-time serving demands millisecond lookups of individual feature vectors. These competing access patterns shape every storage decision.
+The labeled datasets from our pipeline (`{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` spanning `{python} KWSAutomatedLabelingScale.languages_count_str` for KWS) now require strategic storage decisions that determine training efficiency, serving latency, and long-term maintainability. Storage architecture\index{Storage!architecture} addresses a core tension: batch training requires sequential scans across millions of examples, while real-time serving demands millisecond lookups of individual feature vectors. These competing access patterns shape every storage decision.
 
 ML storage requirements diverge from those of transactional systems. Rather than optimizing for frequent small writes and point lookups that characterize e-commerce or banking, ML workloads prioritize high-throughput sequential reads, large-scale scans, and schema flexibility. A database serving an e-commerce application performs well with millions of individual product lookups per second, but an ML training job scanning that entire catalog repeatedly across epochs requires completely different storage optimization.
 
@@ -3832,25 +3864,22 @@ Beyond the functional differences between storage systems, cost and performance 
 # │ Show: Object storage is cheaper, while NVMe buys a 50× loading advantage.
 # │ How: Compute rounded KWS raw-audio size, then compare storage costs and bandwidth.
 # │
-# │ Imports: Infrastructure.Pricing.Storage.*, mlsysim.core.constants (GB, TB, dollar, ureg, byte, MILLION),
-# │          mlsysim.book (fmt, check)
+# │ Imports: mlsysim (Datasets, Infrastructure, Systems, units, formatters)
 # │ Exports: KWSStorageEconomics.dataset_size_gb_str,
 # │          KWSStorageEconomics.storage_s3_cost_str,
 # │          KWSStorageEconomics.storage_nvme_low_cost_str,
 # │          KWSStorageEconomics.storage_nvme_high_cost_str,
 # │          KWSStorageEconomics.load_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
-from mlsysim.fmt import fmt, fmt_usd, fmt_qty, check, fmt_multiple
-from mlsysim.core.units import GB, TB, byte, USD, ureg
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KWSStorageEconomics:
     """Storage-cost recap for the KWS training dataset."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
     storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
@@ -3860,7 +3889,9 @@ class KWSStorageEconomics:
     obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    total_examples_count = dataset.training_examples.to(count).magnitude
+    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     dataset_size = dataset_size_bytes * byte
     dataset_size_value = dataset_size.to(GB).magnitude
@@ -3875,7 +3906,7 @@ class KWSStorageEconomics:
     check(abs(load_speedup - 50) < 1e-9, f"Expected 50x NVMe/object-store speedup, got {load_speedup:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_gb_str = fmt_qty(dataset_size, GB, precision=0, commas=False)
+    dataset_size_gb_str = fmt_memory(dataset_size, unit=GB, precision=0, commas=False)
     storage_s3_cost_str = fmt_usd(storage_s3_cost, precision=1, commas=False, per="month")
     storage_nvme_low_cost_str = fmt_usd(storage_nvme_low_cost, precision=1, commas=False, per="month")
     storage_nvme_high_cost_str = fmt_usd(storage_nvme_high_cost, precision=1, commas=False, per="month")
@@ -3908,28 +3939,28 @@ class KWSStorageEconomics:
 # │ Show: The 50× speedup available when moving from object storage to NVMe.
 # │ How: Calculate total load time for the computed rounded KWS dataset.
 # │
-# │ Imports: mlsysim.book (fmt, check)
+# │ Imports: mlsysim (Datasets, Systems, units, formatters)
 # │ Exports: StorageLoading.nvme_load_s_str, StorageLoading.obj_load_s_str,
 # │          StorageLoading.load_speedup_mult_str, StorageLoading.nvme_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
-from mlsysim.fmt import fmt, fmt_qty, check, fmt_time, fmt_multiple
-from mlsysim.core.units import GB, byte, second
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageLoading:
     """KWS dataset load time comparison: NVMe vs. object storage."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
     nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
     obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    total_examples_count = dataset.training_examples.to(count).magnitude
+    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     kws_dataset = dataset_size_bytes * byte
     nvme_load = kws_dataset / nvme_bw
@@ -3941,10 +3972,10 @@ class StorageLoading:
     check(obj_load > 3600 * second, f"Object storage load should take hours at 100 MB/s, got {obj_load.to(second).magnitude:.0f}s.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    nvme_load_s_str = fmt_time(nvme_load, 'second', precision=1, commas=False)
-    obj_load_s_str = fmt_time(obj_load, 'second', precision=0, commas=True)
+    nvme_load_s_str = fmt_time(nvme_load, unit=second, precision=1, commas=False)
+    obj_load_s_str = fmt_time(obj_load, unit=second, precision=0, commas=True)
     load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
-    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 The performance difference directly impacts iteration velocity. Training that loads data at `{python} StorageLoading.nvme_bw_gb_per_s_str` completes dataset loading in `{python} StorageLoading.nvme_load_s_str`, compared to `{python} StorageLoading.obj_load_s_str` at typical object storage speeds. This `{python} StorageLoading.load_speedup_mult_str` difference determines whether teams can iterate multiple times daily or must wait hours between experiments.
@@ -4836,12 +4867,10 @@ The technical architecture of data systems demonstrates how engineering decision
 # │          dollar, hour), mlsysim.book (fmt, check)
 # │ Exports: DataEngineeringSummaryRecap.ratio_low_mult_str,
 # │          DataEngineeringSummaryRecap.ratio_high_mult_str,
-# │          DataEngineeringSummaryRecap.kws_dataset_size_m_round_str,
+# │          DataEngineeringSummaryRecap.kws_dataset_size_million_samples_str,
 # │          DataEngineeringSummaryRecap.kws_dataset_size_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_multiple
-from mlsysim.core.units import GB, byte, USD, hour
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataEngineeringSummaryRecap:
@@ -4854,32 +4883,39 @@ class DataEngineeringSummaryRecap:
     train_hours_high = 6
     gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    kws_dataset_size_m = 23.4
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    kws_total_examples = dataset.training_examples
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    kws_total_examples_count = kws_total_examples.to(count).magnitude
+    sample_count = round(kws_total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     kws_dataset_size = dataset_size_bytes * byte
     train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
     train_cost_high = a100_count * train_hours_high * gpu_hour_cost_high
     ratio_low = labeling_budget/train_cost_high
     ratio_high = labeling_budget/train_cost_low
-    kws_total_examples = kws_dataset_size_m * MILLION
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ratio_low > 500, f"Labeling/compute ratio unexpectedly low: {ratio_low:.0f}x.")
     check(ratio_high > ratio_low, "Labeling/compute ratio range must be ordered.")
-    check(kws_total_examples > 20 * MILLION, f"KWS corpus unexpectedly small: {kws_total_examples:.0f}.")
+    check(kws_total_examples_count > 20 * MILLION, f"KWS corpus unexpectedly small: {kws_total_examples_count:.0f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     ratio_low_mult_str = fmt_multiple(round(ratio_low), precision=0, commas=True)
     ratio_high_mult_str = fmt_multiple(round(ratio_high), precision=0, commas=True)
-    kws_dataset_size_m_round_str = fmt_int(round(kws_dataset_size_m))
-    kws_dataset_size_gb_str = fmt_qty(kws_dataset_size, GB, precision=0, commas=False)
+    kws_dataset_size_million_samples_str = fmt_count(
+        kws_total_examples_count,
+        scale="million",
+        precision=0,
+        scale_style="word",
+        label="audio sample",
+    )
+    kws_dataset_size_gb_str = fmt_memory(kws_dataset_size, unit=GB, precision=0, commas=False)
 ```
 
 ```{python}
@@ -4897,24 +4933,24 @@ class DataEngineeringSummaryRecap:
 # │ Imports: mlsysim.core.constants (MILLION, GB, byte), mlsysim.fmt (fmt, check)
 # │ Exports: StorageLoadingRecap.load_speedup_mult_str, StorageLoadingRecap.nvme_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
-from mlsysim.fmt import fmt, fmt_qty, check, fmt_multiple
-from mlsysim.core.units import GB, byte, second
+from mlsysim import *
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageLoadingRecap:
     """Summary recap of NVMe vs. object-storage loading speed."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rounded_sample_count_m = 23
-    sample_duration_s = 1
+    dataset = Datasets.MSWC
+    sample_duration = dataset.sample_duration
     sample_rate_hz = 16_000
     bytes_per_sample = 2
     nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
     obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sample_count = rounded_sample_count_m * MILLION
+    total_examples_count = dataset.training_examples.to(count).magnitude
+    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_duration_s = sample_duration.to(second).magnitude
     dataset_size_bytes = sample_count * sample_duration_s * sample_rate_hz * bytes_per_sample
     kws_dataset = dataset_size_bytes * byte
     nvme_load = kws_dataset / nvme_bw
@@ -4926,10 +4962,10 @@ class StorageLoadingRecap:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     load_speedup_mult_str = fmt_multiple(load_speedup, precision=0, commas=False)
-    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw, GB/second, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-Our KWS case study demonstrates these principles in action: multi-source acquisition combining curated datasets with crowdsourcing and synthetic generation; pipeline architecture with consistency validation; tiered storage handling `{python} DataEngineeringSummaryRecap.kws_dataset_size_m_round_str` million audio samples across `{python} DataEngineeringSummaryRecap.kws_dataset_size_gb_str` of raw data; and lineage tracking essential for always-listening devices in users' homes. Data engineering is not a preprocessing step to be completed before "real" ML work begins; it is the foundation upon which model performance, user trust, and regulatory compliance rest. While this chapter focuses on *building* reliable data infrastructure, @sec-data-selection examines *optimizing* data usage through active learning, data pruning, and intelligent sampling strategies.
+Our KWS case study demonstrates these principles in action: multi-source acquisition combining curated datasets with crowdsourcing and synthetic generation; pipeline architecture with consistency validation; tiered storage handling `{python} DataEngineeringSummaryRecap.kws_dataset_size_million_samples_str` across `{python} DataEngineeringSummaryRecap.kws_dataset_size_gb_str` of raw data; and lineage tracking essential for always-listening devices in users' homes. Data engineering is not a preprocessing step to be completed before "real" ML work begins; it is the foundation upon which model performance, user trust, and regulatory compliance rest. While this chapter focuses on *building* reliable data infrastructure, @sec-data-selection examines *optimizing* data usage through active learning, data pruning, and intelligent sampling strategies.
 
 ::: {.callout-takeaways title="Data is the source code"}
 

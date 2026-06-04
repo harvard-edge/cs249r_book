@@ -447,6 +447,12 @@ IMAGENET_DATASET = _lit(
     url="https://arxiv.org/abs/1409.0575",
 )
 
+MSWC_DATASET = _lit(
+    "prov:mswc-2021",
+    "Mazumder et al. (2021), Multilingual Spoken Words Corpus",
+    url="https://datasets-benchmarks-proceedings.neurips.cc/paper_files/paper/2021/hash/fe131d7f5a6b38b23cc967316c13dae2-Abstract-round2.html",
+)
+
 CIFAR10_DATASET = _lit(
     "prov:cifar10-2009",
     "Krizhevsky (2009), Learning Multiple Layers of Features from Tiny Images",

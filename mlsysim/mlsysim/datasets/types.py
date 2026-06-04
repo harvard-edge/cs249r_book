@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 
 from ..core.constants import ureg
-from ..core.types import Metadata, Quantity, require_unit_family
+from ..core.types import Metadata, Quantity, require_dimensionality, require_unit_family
 
 
 class DatasetProfile(BaseModel):
@@ -11,6 +11,9 @@ class DatasetProfile(BaseModel):
     training_examples: Optional[Quantity] = None
     test_examples: Optional[Quantity] = None
     num_classes: Optional[int] = None
+    languages: Optional[int] = Field(default=None, ge=1)
+    keywords: Optional[int] = Field(default=None, ge=1)
+    sample_duration: Optional[Quantity] = None
     image_width: Optional[int] = None
     image_height: Optional[int] = None
     image_channels: Optional[int] = None
@@ -20,3 +23,8 @@ class DatasetProfile(BaseModel):
     @classmethod
     def _validate_example_counts(cls, v, info):
         return require_unit_family(v, ureg.count, info.field_name, "count")
+
+    @field_validator("sample_duration", mode="after")
+    @classmethod
+    def _validate_sample_duration(cls, v, info):
+        return require_dimensionality(v, ureg.second, info.field_name)
