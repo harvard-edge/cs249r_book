@@ -4496,11 +4496,9 @@ class MixedPrecisionHardwareDetail:
     fp32_bw_demand_tb_per_s_str = fmt_bandwidth(fp32_bw_demand, unit=TB / second, precision=0, commas=False)
 ```
 
-Understanding how modern hardware implements reduced-precision arithmetic reveals why mixed-precision achieves substantial speedups beyond mere memory savings. The performance gains from FP16 and BF16 computation stem from specialized hardware units designed explicitly for low-precision tensor operations[^fn-tensor-core-training], with architectural decisions that trade numerical range or precision for dramatic increases in computational throughput.
+Understanding how modern hardware implements reduced-precision arithmetic explains why mixed precision changes wall-clock time, not only memory capacity. The performance gains from FP16 and BF16 computation come from specialized hardware units designed for low-precision tensor operations[^fn-tensor-core-training]. Those units trade numerical range or precision for much higher matrix throughput, while the training recipe keeps numerically sensitive accumulations in safer formats.
 
 [^fn-tensor-core-training]: **Tensor Core**: The specialized hardware unit behind the FP16/BF16 speedups described here. Each Tensor Core performs a fused $4{\times}4$ matrix multiply-accumulate in a single cycle, achieving 8--16$\times$ the throughput of standard CUDA cores. The catch: input matrices must align to multiples of 8 or 16 for peak utilization, meaning misaligned tensor dimensions in a training workload silently forfeit most of this hardware advantage. \index{Tensor Core!training throughput}
-
-##### Tensor Core architecture {#sec-model-training-tensor-core-architecture-14ee}
 
 \index{Tensor Core!mixed precision acceleration}\index{Tensor Core!matrix multiply-accumulate}
 NVIDIA introduced Tensor Cores in their Volta architecture (2017) as dedicated matrix multiplication units optimized for mixed-precision workloads. Unlike standard CUDA cores that process scalar or small vector operations, Tensor Cores perform $4{\times}4$ matrix multiply-accumulate operations in a single clock cycle. For FP16 inputs, a single Tensor Core executes:
@@ -4509,19 +4507,7 @@ $$
 $$
 where $\mathbf{A}_{\text{tc}}$ and $\mathbf{B}_{\text{tc}}$ are $4{\times}4$ FP16 matrices, $\mathbf{C}_{\text{acc}}$ is an FP32 accumulator, and $\mathbf{D}_{\text{tc}}$ is the FP32 result. This accumulation in higher precision prevents catastrophic cancellation\index{Catastrophic Cancellation!mixed precision} errors that would occur if intermediate products were stored in FP16.
 
-##### Throughput scaling {#sec-model-training-throughput-scaling-7e6d}
-
-The computational advantage of Tensor Cores becomes apparent when comparing theoretical peak performance across precisions. An NVIDIA A100 GPU exposes:
-
-- **FP32 throughput**: `{python} MixedPrecisionHardwareDetail.a100_fp32_tflop_per_s_str` (standard CUDA cores)
-- **FP16 Tensor Core throughput**: `{python} MixedPrecisionHardwareDetail.a100_fp16_tflop_per_s_str` (`{python} MixedPrecisionHardwareDetail.a100_fp16_speedup_mult_str` peak ratio)
-- **BF16 Tensor Core throughput**: `{python} MixedPrecisionHardwareDetail.a100_fp16_tflop_per_s_str` (same as FP16)
-
-H100-class accelerators add FP8 Tensor Cores: `{python} MixedPrecisionHardwareDetail.h100_fp8_tflop_per_s_str` without sparsity, about `{python} MixedPrecisionHardwareDetail.h100_fp8_speedup_vs_fp16_mult_str` the H100 FP16/BF16 Tensor Core rate.
-
-This `{python} MixedPrecisionHardwareDetail.a100_fp16_speedup_mult_str` FP16 peak advantage is a hardware upper bound, not an end-to-end training promise. Matrix multiplications, the dominant operation in neural network training, map naturally to Tensor Core operations, so mixed precision can materially improve wall-clock speed. The realized speedup is usually smaller because data movement, non-Tensor-Core kernels, communication, loss scaling, and optimizer work remain. A transformer's attention mechanism computing $\mathbf{Q}\mathbf{K}^T$ for a tensor shaped by batch size $B$, number of heads $N_{\text{heads}}$, sequence length $S$, and head dimension $d_{\text{head}}$ requires $2 \times B \times N_{\text{heads}} \times S^2 \times d_{\text{head}}$ FLOPs; on Tensor Cores, this part can execute much faster than on CUDA cores.
-
-##### BF16 hardware implementation {#sec-model-training-bf16-hardware-implementation-78f3}
+The peak numbers make the upper bound concrete. An NVIDIA A100 GPU exposes `{python} MixedPrecisionHardwareDetail.a100_fp32_tflop_per_s_str` of FP32 throughput on standard CUDA cores and `{python} MixedPrecisionHardwareDetail.a100_fp16_tflop_per_s_str` of FP16 or BF16 Tensor Core throughput, a `{python} MixedPrecisionHardwareDetail.a100_fp16_speedup_mult_str` peak ratio. H100-class accelerators add FP8 Tensor Cores at `{python} MixedPrecisionHardwareDetail.h100_fp8_tflop_per_s_str` without sparsity, about `{python} MixedPrecisionHardwareDetail.h100_fp8_speedup_vs_fp16_mult_str` the H100 FP16/BF16 Tensor Core rate. These figures are hardware ceilings, not end-to-end training promises: matrix multiplications map naturally to Tensor Cores, but data movement, non-Tensor-Core kernels, communication, loss scaling, and optimizer work remain. A transformer's attention mechanism computing $\mathbf{Q}\mathbf{K}^T$ for a tensor shaped by batch size $B$, number of heads $N_{\text{heads}}$, sequence length $S$, and head dimension $d_{\text{head}}$ requires $2 \times B \times N_{\text{heads}} \times S^2 \times d_{\text{head}}$ FLOPs; this portion can accelerate dramatically, while the rest of the step determines the realized speedup.
 
 \index{BF16!dynamic range preservation}\index{BF16!hardware support}
 Brain Float 16 (BF16) maintains FP32's 8-bit exponent while reducing the mantissa to 7 bits. This design choice prioritizes dynamic range preservation over precision, which matters for gradient-based learning where values span many orders of magnitude. Google's TPUs natively support BF16, while NVIDIA's Ampere architecture (A100) and newer provide full hardware support.
@@ -4531,8 +4517,6 @@ The hardware advantage of BF16 over FP16 emerges in gradient summation scenarios
 [^fn-fp16-subnormal]: **FP16 Subnormal Flushing**: To accelerate computation, hardware often flushes any FP16 value smaller than the minimum normal value ($6.1 \times 10^{-5}$) to zero. This flushing is the direct cause of the underflow described in the gradient summation scenario, as any gradient between the hardware floor and the theoretical limit of $6 \times 10^{-8}$ is discarded. This creates a practical precision gap where values are abruptly lost, a gap that does not exist for the BF16 format. \index{FP16!subnormal flushing}
 
 For transformer training where attention gradients vary from $10^{-10}$ to $10^3$, BF16's range prevents the loss scaling complexity required for FP16, simplifying implementation without sacrificing throughput.
-
-##### FP8 precision {#sec-model-training-fp8-precision-0b5c}
 
 \index{FP8!hardware acceleration}\index{FP8!E4M3 and E5M2 formats}
 NVIDIA's Hopper architecture (H100) introduces FP8 support with two formats. E4M3 uses four exponent bits and three mantissa bits (prioritizing precision for forward pass weights and activations), while E5M2 uses five exponent bits and two mantissa bits (prioritizing dynamic range for backward pass gradients).
@@ -4555,8 +4539,6 @@ Reduced precision accelerates computation and alleviates memory bandwidth bottle
 - Actual requirement (with data reuse): Much lower, but bandwidth-limited for operations with low arithmetic intensity
 
 FP16 halves memory traffic for the same computation, effectively doubling available bandwidth. For operations like layer normalization (arithmetic intensity approximately 1 FLOP/byte), this bandwidth doubling directly translates to speedups even without Tensor Core involvement.
-
-##### Practical framework integration {#sec-model-training-practical-framework-integration-0a2a}
 
 Modern frameworks abstract hardware complexity through automatic operation routing, as discussed in @sec-ml-frameworks. The framework runtime determines which operations benefit from reduced precision and which require FP32 for numerical stability. PyTorch's automatic mixed precision manages precision selection and loss scaling transparently, as @lst-mixed-precision illustrates.
 
@@ -4588,12 +4570,7 @@ for batch in dataloader:
 
 :::
 
-The `autocast` context automatically selects precision per operation:
-
-- **FP16/BF16**: Matrix multiplications, convolutions
-- **FP32**: Softmax, layer normalization, loss computation
-
-This selective precision maximizes hardware utilization while maintaining numerical stability.
+The `autocast` context routes matrix multiplications and convolutions to FP16 or BF16 while keeping softmax, layer normalization, and loss computation in FP32. This selective precision maximizes hardware utilization while maintaining numerical stability.
 
 Optimal mixed-precision training requires matching the precision format to hardware capabilities. @Tbl-hw-precision-strategy summarizes the recommended precision strategy for each GPU generation, reflecting the evolution from FP16-only support on Volta to native FP8 on Hopper.
 
@@ -4657,9 +4634,9 @@ The performance impact across generations appears in the throughput numbers: tra
 
 ### Flash attention: IO-aware attention optimization {#sec-model-training-flash-attention-ioaware-attention-optimization-3da0}
 
-\index{FlashAttention!IO-aware algorithm}\index{FlashAttention!memory bandwidth optimization}Mixed-precision training addresses two bottlenecks: compute throughput (Tensor Cores operate faster on FP16) and memory capacity (half the bytes per value). For transformer models during training, however, a third bottleneck often dominates: *memory bandwidth*. The attention mechanism's quadratic intermediate matrices must be repeatedly loaded and stored during the forward pass and accessed again during backpropagation. Even with reduced precision, the sheer volume of memory traffic can leave compute units idle—GPUs waiting for data rather than computing.
+\index{FlashAttention!IO-aware algorithm}\index{FlashAttention!memory bandwidth optimization} Mixed-precision training addresses two bottlenecks: compute throughput, because Tensor Cores operate faster on FP16, and memory capacity, because each value uses fewer bytes. For transformer models during training, however, a third bottleneck often dominates: memory bandwidth. The attention mechanism's quadratic intermediate matrices must be repeatedly loaded and stored during the forward pass and accessed again during backpropagation. Even with reduced precision, the sheer volume of memory traffic can leave compute units idle while the processor waits for data.
 
-Flash Attention[^fn-flashattention-origin] [@dao2022] addresses this bandwidth bottleneck through a radically different approach: rather than optimizing *what precision* to use, it optimizes *how data flows* between memory hierarchies. By processing attention in small tiles that fit in fast on-chip SRAM, Flash Attention avoids materializing the full $S{\times}S$ attention matrix in slow HBM. This algorithmic restructuring achieves 2--4$\times$ training speedups while enabling training on sequences that would otherwise cause out-of-memory errors\index{Out-of-Memory Error!training constraint}.
+Flash Attention[^fn-flashattention-origin] [@dao2022] addresses this bandwidth bottleneck by optimizing how data flows between memory hierarchies. By processing attention in small tiles that fit in fast on-chip SRAM, Flash Attention avoids materializing the full $S{\times}S$ attention matrix in slow HBM. This algorithmic restructuring achieves 2--4$\times$ training speedups while enabling training on sequences that would otherwise cause out-of-memory errors\index{Out-of-Memory Error!training constraint}.
 
 [^fn-flashattention-origin]: [offset=-35mm] **FlashAttention**: Introduced by @dao2022, achieving 2--4$\times$ wall-clock speedups without changing the mathematical output of attention. The key insight was treating attention as an IO problem rather than a compute problem: by never materializing the $S{\times}S$ score matrix in HBM and instead computing in SRAM-sized tiles, the algorithm shifted the operation from memory-bound to compute-bound on the roofline model. FlashAttention-2 [@dao2023flashattention2] further improved throughput to 50--73 percent of theoretical peak on A100. \index{FlashAttention!origin and engineering insight}
 
@@ -4759,12 +4736,8 @@ The online softmax algorithm enables this decomposition. Traditional softmax req
 
 #### Memory and IO complexity analysis {#sec-model-training-memory-io-complexity-analysis-5da5}
 
-Flash Attention achieves asymptotic improvements in both memory footprint and memory IO operations, the true bottleneck in bandwidth-limited scenarios.
-
-##### Memory complexity {#sec-model-training-memory-complexity-ad72}
-
-- **Standard Attention**: $\mathcal{O}(S^2)$ memory for storing score matrices $\mathbf{Z}_{\text{attn}}$ and attention-probability matrices $A_{\text{attn}}$ across all sequence positions
-- **Flash Attention**: $\mathcal{O}(S)$ memory, storing only input/output tensors $(Q, K, V, Y)$ plus a small constant SRAM buffer
+\index{FlashAttention!IO complexity reduction}
+Flash Attention improves both activation memory and memory IO, which are the limiting costs in bandwidth-bound attention. Standard attention requires $\mathcal{O}(S^2)$ memory to store score matrices $\mathbf{Z}_{\text{attn}}$ and attention-probability matrices $A_{\text{attn}}$ across all sequence positions. Flash Attention reduces the stored activation footprint to $\mathcal{O}(S)$ by keeping only input and output tensors $(Q, K, V, Y)$ plus a small SRAM buffer for the current tile.
 
 ```{python}
 #| echo: false
@@ -4809,22 +4782,11 @@ class FlashAttentionCalc:
     fa_reduction_mult_str = fmt_multiple(fa_reduction, precision=1, commas=False)
 ```
 
-\index{FlashAttention!IO complexity reduction}
 For $S = 4096$, $d_{\text{head}} = 64$: Standard attention requires $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` per head. Flash Attention requires only $(3 \times 4096{\times}64) \times 4$ bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` per head, a `{python} FlashAttentionCalc.fa_reduction_mult_str` reduction.
 
-##### IO complexity (memory reads/writes) {#sec-model-training-io-complexity-memory-readswrites-4af5}
-
-Standard attention performs:
-
-- Forward pass: Read $Q$, $K$, $V$ from HBM, write score, probability, and output matrices to HBM: $\mathcal{O}(S \cdot d + S^2)$ bytes
-- Backward pass: Read $Q$, $K$, $V$, score, probability, output, and output-gradient matrices from HBM, write $dQ$, $dK$, $dV$: $\mathcal{O}(S \cdot d + S^2)$ bytes
-- Total: $\mathcal{O}(S \cdot d + S^2)$ HBM accesses
-
-Flash Attention performs different memory operations. It tiles the computation so the score and probability blocks are formed in SRAM and never written as full $S \times S$ tensors to HBM. In the backward pass, it recomputes the needed score and probability blocks rather than reading stored full matrices. The exact HBM IO complexity depends on tile size and available SRAM: key and value blocks are streamed repeatedly across query blocks, so the bound is not simply $\mathcal{O}(S \cdot d)$.
+The IO pattern changes for the same reason. Standard attention reads $Q$, $K$, and $V$ from HBM, writes score, probability, and output matrices during the forward pass, then rereads those stored matrices during the backward pass before writing $dQ$, $dK$, and $dV$. The resulting HBM traffic includes the same $\mathcal{O}(S^2)$ term that made the activation footprint large. Flash Attention forms score and probability blocks in SRAM and never writes the full $S \times S$ tensors to HBM. In the backward pass, it recomputes the needed blocks rather than reading stored full matrices. The exact HBM IO complexity depends on tile size and available SRAM because key and value blocks are streamed repeatedly across query blocks, so the bound is not simply $\mathcal{O}(S \cdot d)$.
 
 For large sequence lengths, Flash Attention reduces HBM traffic by avoiding writes and rereads of the $S \times S$ score and probability matrices. With $S = 4096$ and $d_{\text{head}} = 64$, the activation memory footprint falls from hundreds of MB per head for stored attention matrices to a few MB for tiled inputs and outputs, while the precise bandwidth reduction depends on hardware and kernel tiling.
-
-##### Computational complexity {#sec-model-training-computational-complexity-7d3b}
 
 Both approaches require the same $\mathcal{O}(S^2 d)$ asymptotic FLOPs for attention computation. Flash Attention's backward pass recomputes attention activations from the saved $Q, K, V$ rather than storing the full score and probability matrices, trading a small amount of recomputation for dramatically reduced HBM traffic. By converting the workload from bandwidth-bound to compute-bound, Flash Attention achieves net speedups since modern GPUs have abundant compute capacity but limited memory bandwidth.
 
@@ -6519,27 +6481,18 @@ Synchronizing gradients across a fleet of GPUs means moving megabytes of data ac
 
 :::
 
-Once training crosses the node boundary, the strategy must match communication frequency to available bandwidth. The remaining strategies reduce the communication tax by changing where work waits, how tensors split, or how multiple forms of parallelism compose:
-
-#### Pipeline parallelism {#sec-model-training-pipeline-parallelism-b711}
-
-\index{Pipeline Parallelism!microbatching}\index{Pipeline Parallelism!microbatch scheduling}
-Pipeline parallelism solves the idle time problem in model parallelism through microbatching. Instead of processing one batch and waiting for it to traverse all devices, pipeline parallelism splits each batch into smaller microbatches and overlaps their execution. While Device one processes microbatch two, Device two processes microbatch 1. This interleaving keeps all devices busy, achieving 70--90 percent utilization compared to 25--50 percent for naive model parallelism. The trade-off is increased memory usage (multiple microbatches in flight) and implementation complexity. GPipe[^fn-gpipe-training] and PipeDream pioneered these techniques for training models too large for single GPUs while maintaining reasonable efficiency.
+Once training crosses the node boundary, the strategy must match communication frequency to available bandwidth. Pipeline parallelism\index{Pipeline Parallelism!microbatching}\index{Pipeline Parallelism!microbatch scheduling} addresses the idle time problem in model parallelism through microbatching. Instead of processing one batch and waiting for it to traverse all devices, the system splits each batch into smaller microbatches and overlaps their execution. While one device processes the second microbatch, the next device can process the first. This interleaving keeps devices busy, achieving 70--90 percent utilization compared to 25--50 percent for naive model parallelism. The trade-off is increased memory usage from multiple microbatches in flight and higher implementation complexity. GPipe[^fn-gpipe-training] and PipeDream pioneered these techniques for training models too large for single GPUs while maintaining reasonable efficiency.
 
 [^fn-gpipe-training]: **GPipe (2019)**: GPipe implements the described microbatching strategy, staggering execution to fill the idle "bubbles" in naive model parallelism and thus boost utilization. The key trade-off it manages is increased memory for storing the activations of multiple in-flight microbatches. It preserves large-batch training dynamics by accumulating gradients before the weight update, achieving 80–93 percent hardware efficiency when scaling across 2--4 accelerators. \index{GPipe!pipeline parallelism}
-
-#### Tensor parallelism {#sec-model-training-tensor-parallelism-5c91}
 
 \index{Tensor Parallelism!operation splitting}\index{Tensor Parallelism!intra-layer splitting}
 Tensor parallelism takes a finer-grained approach: rather than assigning whole layers to devices, it splits individual operations across devices. Consider a transformer's feed-forward layer with a large matrix multiplication $Y = XW$. Tensor parallelism splits the weight matrix $W$ column-wise across GPUs, so each accelerator computes a portion of the output. The results are then gathered to form the complete output. This strategy is particularly effective for the massive attention and feed-forward layers in large transformers, where a single operation may involve matrices too large for one GPU's memory. Megatron-LM demonstrated that tensor parallelism enables training models with hundreds of billions of parameters by distributing individual attention heads and feed-forward blocks across devices.
 
-#### Hybrid strategies {#sec-model-training-hybrid-strategies-d23a}
-
 Hybrid strategies combine these approaches because each has different scaling characteristics. A common pattern in production systems: tensor parallelism within a node (exploiting NVLink's high bandwidth for the frequent communication tensor parallelism requires), pipeline parallelism across nodes within a rack (moderate communication at layer boundaries), and data parallelism across racks (gradient synchronization once per iteration). This hierarchical approach matches communication intensity to available bandwidth at each level.
 
-The implementation details of gradient synchronization algorithms (AllReduce\index{AllReduce!gradient synchronization}\index{Ring AllReduce!bandwidth optimization}[^fn-allreduce-training], ring-reduce), communication patterns (parameter server, peer-to-peer), fault tolerance mechanisms, and scaling efficiency analysis for training runs spanning thousands of GPUs constitute a specialized domain that builds on the foundations established here.
+Data-parallel systems also rely on collective operations such as AllReduce\index{AllReduce!gradient synchronization}\index{Ring AllReduce!bandwidth optimization}[^fn-allreduce-training] to combine gradients across devices. The implementation details of collective algorithms, parameter-server and peer-to-peer communication patterns, fault tolerance mechanisms, and scaling-efficiency analysis for training runs spanning thousands of GPUs constitute a specialized domain that builds on the foundations established here.
 
-[^fn-allreduce-training]: **AllReduce**: A collective communication primitive that sums data across all devices and distributes the result back to each. Ring AllReduce, popularized by Baidu's AI Lab in 2017, achieves bandwidth-optimal performance by passing gradients in a ring topology: each device sends and receives only $2(N_{\text{GPU}}{-}1)/N_{\text{GPU}}$ of the total gradient volume, making communication cost nearly independent of GPU count. This constant scaling property is why data-parallel training remains practical at cluster scale. \index{AllReduce!ring topology}
+[^fn-allreduce-training]: **AllReduce**: A collective communication primitive that sums data across all devices and distributes the result back to each device. Ring AllReduce is one common implementation: devices pass gradient shards around a logical ring so each participant sends and receives bounded chunks rather than a full copy of every gradient tensor at once. This is the communication primitive that makes large data-parallel training practical, but its detailed cost model belongs with distributed training. \index{AllReduce!ring topology}
 
 ### The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
 
