@@ -4236,7 +4236,26 @@ While forward propagation computes predictions, backward propagation determines 
 
 The process begins at the network's output, where we compare predicted digit probabilities with the true label. This error then flows backward through the network, with each layer's weights receiving an update signal based on their contribution to the final prediction. The computation follows the chain rule\index{Chain Rule!gradient decomposition}\index{Gradient!chain rule} of calculus, breaking down the complex relationship between weights and final error into manageable steps.
 
-The mathematical foundations of backpropagation provide the theoretical basis for training neural networks, but practical implementation requires software support. Modern frameworks implement automatic differentiation systems that handle gradient computation automatically, eliminating manual derivative implementation [@wengert1964]. @Sec-appdx-algorithm-foundations-chain-rule-automatic-differentiation-e0eb derives the chain rule formally and shows why reverse-mode automatic differentiation computes all parameter gradients in a single backward pass, and @sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7 walks through the backward-pass algorithm step by step and explains why it costs roughly twice the FLOPs of the forward pass. @Sec-ml-frameworks-framework-implementation-automatic-differentiation-1407 later examines the systems engineering aspects of these frameworks. The same backward traversal also forces the system to store intermediate values\index{Storage!activation, backpropagation}\index{Memory Footprint!training overhead}, which has significant implications for memory requirements during training:
+The mathematical foundations of backpropagation provide the theoretical basis for training neural networks, but practical implementation requires software support. Modern frameworks implement automatic differentiation systems that handle gradient computation automatically, eliminating manual derivative implementation [@wengert1964]. @Sec-appdx-algorithm-foundations-chain-rule-automatic-differentiation-e0eb derives the chain rule formally and shows why reverse-mode automatic differentiation computes all parameter gradients in a single backward pass, and @sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7 walks through the backward-pass algorithm step by step and explains why it costs roughly twice the FLOPs of the forward pass. @Sec-ml-frameworks-framework-implementation-automatic-differentiation-1407 later examines the systems engineering aspects of these frameworks. The core implementation contract is shown in [Algorithm @alg-backpropagation-training-step]: the forward pass must save the values that the backward pass will need.
+
+::: {#alg-backpropagation-training-step name="Backpropagation training step"}
+
+**Require:** Mini-batch inputs $\mathbf{X}$; labels $\mathbf{y}$; $L$ network layers with parameters $\{\mathbf{W}^{(\ell)},\mathbf{b}^{(\ell)}\}_{\ell=1}^L$; loss function $\mathcal{L}$.
+
+**Output:** Parameter gradients $\{\nabla_{\mathbf{W}^{(\ell)}}\mathcal{L},\nabla_{\mathbf{b}^{(\ell)}}\mathcal{L}\}_{\ell=1}^L$ for the optimizer.
+
+1. Set $\mathbf{A}^{(0)} \gets \mathbf{X}$.
+2. For each layer $\ell=1,\ldots,L$, compute $\mathbf{Z}^{(\ell)}$ and $\mathbf{A}^{(\ell)}$, then save the activation and any local values needed by that layer's derivative.
+3. Compute the batch loss $\mathcal{L}(\mathbf{A}^{(L)},\mathbf{y})$ and seed the output gradient $\nabla_{\mathbf{A}^{(L)}}\mathcal{L}$.
+4. For each layer $\ell=L,\ldots,1$, use the saved forward values and the incoming gradient to compute $\nabla_{\mathbf{W}^{(\ell)}}\mathcal{L}$ and $\nabla_{\mathbf{b}^{(\ell)}}\mathcal{L}$.
+5. Propagate the gradient to the previous activation so the next layer in the reverse traversal can repeat the same local calculation.
+6. Return the accumulated parameter gradients to the optimizer.
+
+**Systems cost:** Every saved activation remains live until its layer's backward calculation consumes it. Peak activation memory therefore scales with batch size, layer count, and activation width, which is why training can exceed inference memory even when the parameter count is unchanged.
+
+:::
+
+The word "save" in [Algorithm @alg-backpropagation-training-step] is where the systems cost enters. The same backward traversal that computes gradients also forces the system to store intermediate values\index{Storage!activation, backpropagation}\index{Memory Footprint!training overhead}, which has significant implications for memory requirements during training:
 
 ::: {#psp-nn-computation-memory-cost-backprop .callout-perspective title="The memory cost of backprop"}
 
@@ -4331,14 +4350,7 @@ $$\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(1)}} = \mathbf{x}^T \cdot \f
 
 :::
 
-While understanding these mathematical details is essential for debugging and optimization, modern practitioners rarely implement gradients manually. The systems breakthrough lies in how frameworks automatically implement these calculations. Consider a simple operation like matrix multiplication followed by ReLU activation: `output = torch.relu(input @ weight)`. The mathematical gradient involves computing the derivative of ReLU (0 for negative inputs, 1 for positive) and applying the chain rule for matrix multiplication. The framework handles this automatically by:
-
-1. Recording the operation in a computation graph during forward pass
-2. Storing necessary intermediate values (pre-ReLU activations for gradient computation)
-3. Automatically generating the backward pass function for each operation
-4. Optimizing memory usage and computation order across the entire graph
-
-This automation transforms gradient computation from a manual, error-prone process requiring deep mathematical expertise into a reliable system capability that enables rapid experimentation and deployment. The framework ensures correctness while optimizing for computational efficiency, memory usage, and hardware utilization.
+While understanding these mathematical details is essential for debugging and optimization, modern practitioners rarely implement gradients manually. The systems breakthrough lies in how frameworks automatically implement these calculations. Consider a simple operation like matrix multiplication followed by ReLU activation: `output = torch.relu(input @ weight)`. The mathematical gradient involves computing the derivative of ReLU (0 for negative inputs, 1 for positive) and applying the chain rule for matrix multiplication. The framework records the operation in a computation graph during the forward pass, stores the pre-ReLU activations needed for gradient computation, attaches the backward rule for each operation, and schedules the reverse traversal to balance correctness, memory usage, and hardware utilization. This automation transforms gradient computation from a manual, error-prone process requiring deep mathematical expertise into a reliable system capability that enables rapid experimentation and deployment.
 
 #### Computational implementation details {#sec-neural-computation-computational-implementation-details-1ecc}
 
