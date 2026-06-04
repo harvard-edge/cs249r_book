@@ -1446,7 +1446,7 @@ The architecture works because three governance paths share the model serving st
 
 [^fn-k-anonymity]: **k-Anonymity**: A privacy guarantee [@sweeney2002] ensuring each record is indistinguishable from at least $k-1$ others by generalizing quasi-identifiers (for example, replacing exact ages with ranges, locations with regions). The systems trade-off: achieving $k$-anonymity reduces data utility by 10--30 percent through information loss, and higher $k$ values provide stronger privacy but degrade the training signal further. For ML preprocessing pipelines, $k$-anonymity adds a transformation stage that must balance privacy guarantees against the accuracy impact of coarser features. \index{k-Anonymity!privacy technique}
 
-Real-time fairness monitoring updates prediction-only metrics such as demographic parity for each prediction, maintaining rolling statistics across protected groups. Label-dependent metrics such as equalized odds and equality of opportunity update asynchronously when delayed outcomes or audited labels arrive. The system flags disparities that exceed configurable policy thresholds, while its storage and compute footprint scales with the number of protected groups, decision segments, and retention windows.
+Real-time fairness monitoring updates prediction-only metrics such as demographic parity for each prediction, maintaining rolling statistics across protected groups. Label-dependent metrics such as equalized odds and equality of opportunity update asynchronously when delayed outcomes or audited labels arrive, and they remain inactive for groups whose labeled windows are too small to support a stable estimate. The system flags disparities that exceed configurable policy thresholds, while its storage and compute footprint scales with the number of protected groups, decision segments, and retention windows.
 
 The explanation engine generates SHAP or LIME explanations for model decisions, particularly for negative outcomes requiring user recourse. Exact explanations often exceed inline serving budgets, so production systems rely on approximation, caching, sampling, or asynchronous generation to trade latency against fidelity. The implementation that follows should be read as an architectural pattern rather than an API to memorize.
 
@@ -1469,9 +1469,15 @@ import numpy as np
 
 
 class RealTimeFairnessMonitor:
-    def __init__(self, window_size=1000, alert_threshold=0.05):
+    def __init__(
+        self,
+        window_size=1000,
+        alert_threshold=0.05,
+        min_labeled_per_group=30,
+    ):
         self.window_size = window_size
         self.alert_threshold = alert_threshold
+        self.min_labeled_per_group = min_labeled_per_group
         self.window = []
 
     async def process_prediction(
@@ -1517,8 +1523,35 @@ class RealTimeFairnessMonitor:
         }
 
     def _equalized_odds_gap(self, by_group):
-        # Compute TPR/FPR gaps from delayed labels in production.
-        return 0.0
+        tpr_values = []
+        fpr_values = []
+
+        for data in by_group.values():
+            labeled = data["labels"]
+            if len(labeled) < self.min_labeled_per_group:
+                continue
+
+            preds = np.array([pred for pred, _ in labeled])
+            labels = np.array([label for _, label in labeled])
+
+            positives = labels == 1
+            negatives = labels == 0
+            if positives.any():
+                tpr_values.append(np.mean(preds[positives] == 1))
+            if negatives.any():
+                fpr_values.append(np.mean(preds[negatives] == 1))
+
+        tpr_gap = (
+            max(tpr_values) - min(tpr_values)
+            if len(tpr_values) > 1
+            else 0.0
+        )
+        fpr_gap = (
+            max(fpr_values) - min(fpr_values)
+            if len(fpr_values) > 1
+            else 0.0
+        )
+        return max(tpr_gap, fpr_gap)
 
     async def _trigger_bias_alert(self, metrics):
         print(f"[AUDIT] bias alert: {metrics}")
@@ -2461,6 +2494,17 @@ At its core, this challenge reflects a deeper tension between human and machine 
 However, these goals can place human interests at risk when systems operate in dynamic, uncertain environments where full specification of safe behavior is infeasible. This difficulty is formally captured by the frame problem and qualification problem, both of which highlight the impossibility of enumerating all the preconditions and contingencies needed for real-world action to succeed [@mccarthy1981]. In practice, such limitations manifest as brittle autonomy: systems that appear competent under nominal conditions but fail silently or dangerously when faced with ambiguity or distributional shift.
 
 To address this, researchers have proposed formal safety frameworks such as **Responsibility-Sensitive Safety**\index{Responsibility-Sensitive Safety!framework} (RSS) [@shalev2017formal], which decompose abstract safety goals into mathematically defined constraints on system behavior, such as minimum distances, braking profiles, and right-of-way conditions. These formulations allow safety properties to be verified under specific assumptions and scenarios. However, such approaches remain vulnerable to the same limitations they aim to solve: they are only as good as the assumptions encoded into them and often require extensive domain modeling that may not generalize well to unanticipated edge cases.
+
+For an ML systems team, the practical artifact is a safety case rather than a statement of trust. @Tbl-autonomous-safety-case shows the pattern: name the operating envelope, the evidence that the model has been tested inside that envelope, and the controls that halt or roll back the fleet when the evidence no longer holds.
+
+| **Safety-case element** | **Systems evidence**                                                                              | **Operational gate**                                                          |
+|:------------------------|:--------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------|
+| Operating envelope      | Operational design domain, sensor assumptions, weather, geography, speed, and autonomy level      | Block deployment outside validated envelope                                   |
+| Scenario coverage       | Rare-event corpus, simulation coverage, replay logs, disengagements, and near-miss telemetry      | Require coverage thresholds before canary expansion                           |
+| Runtime guardrails      | RSS-style distance rules, confidence thresholds, fallback maneuvers, and human override latency   | Trigger safe stop, human takeover, or constrained mode when guardrails trip   |
+| Fleet control           | Canary rollout, centralized safety dashboard, violation budget, and circuit-breaker rollback path | Halt rollout or revert model when fleet-level safety metrics exceed threshold |
+
+: **Autonomous System Safety Case**: Trustworthy autonomy is operationalized as an auditable safety case: a validated operating envelope, coverage evidence, runtime guardrails, and fleet-level rollback controls. The same pattern applies beyond vehicles to drones, robots, trading systems, and other ML systems that act faster than continuous human review permits. {#tbl-autonomous-safety-case}
 
 An alternative approach emphasizes human-centered system design, ensuring that human judgment and oversight remain central to autonomous decision-making. **Value-Sensitive Design**\index{Value-Sensitive Design!methodology} [@friedman1996] proposes incorporating user values into system design by explicitly considering factors like capability, complexity, misrepresentation, and the fluidity of user control. More recently, the **METUX model**\index{METUX Model!user experience} (Motivation, Engagement, and Thriving in the User Experience) extends this thinking by identifying six "spheres of technology experience" (Adoption, Interface, Tasks, Behavior, Life, and Society), which affect how technology supports or undermines human flourishing [@peters2018]. These ideas are rooted in **Self-Determination Theory**\index{Self-Determination Theory!autonomy} (SDT), which defines autonomy not as control in a technical sense, but as the ability to act in accordance with one's values and goals [@ryan2000].
 
