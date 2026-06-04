@@ -643,17 +643,13 @@ Beyond these patterns, @sculley2015hidden identify warning signs, or *common sme
 
 The debt patterns described earlier are not theoretical constructs. They have played a critical role in shaping real-world machine learning systems. In practice, unseen dependencies and misaligned assumptions can accumulate quietly, only to become major liabilities over time:
 
-#### Production debt patterns {#sec-ml-operations-youtube-feedback-loop-debt-ffdc}
+#### Production debt patterns {#sec-ml-operations-production-debt-patterns-ffdc}
 
-\index{Feedback Loop!YouTube case study}YouTube's recommendation engine shows the feedback-loop version of this problem. Recommendations influence user behavior, those behaviors become future training data, and the system can amplify sensational or polarizing content unless cohort-based evaluation, delayed labeling, and ranking objectives break the loop.
+The first pair exposes coupling through model behavior. YouTube's recommendation engine\index{Feedback Loop!YouTube case study} shows the feedback-loop version of this problem: recommendations influence user behavior, those behaviors become future training data, and the system can amplify sensational or polarizing content unless cohort-based evaluation, delayed labeling, and ranking objectives break the loop. Zillow's home valuation model (Zestimate)\index{Correction Cascades!Zillow case study} exposed the correction-cascade version during its iBuying venture[^fn-zillow-correction-cascade]. Initial valuation errors propagated into purchasing decisions; retroactive corrections then destabilized inventory and pricing decisions, forcing data revalidation, model redesign, and eventually a full rollback when the company shut down the iBuying arm in 2021.
 
-\index{Correction Cascades!Zillow case study}Zillow's home valuation model (Zestimate) exposed the correction-cascade version during its iBuying venture[^fn-zillow-correction-cascade]. Initial valuation errors propagated into purchasing decisions; retroactive corrections then destabilized inventory and pricing decisions, forcing data revalidation, model redesign, and eventually a full rollback when the company shut down the iBuying arm in 2021.
+The second pair exposes coupling through ownership and configuration. Tesla's early Autopilot deployments\index{Undeclared Consumers!Tesla case study} illustrate undeclared consumer debt from a safety-critical direction. Model outputs were repurposed across subsystems without clear interface boundaries, so over-the-air updates could silently affect lane centering, braking, and other behavior at once. Facebook's News Feed iterations\index{Configuration Debt!Facebook case study} show the configuration version of the same governance failure. Rapid experimentation produced opaque ranking settings, making behavioral changes difficult to trace and allowing misaligned configurations to create unintended consequences.
 
 [^fn-zillow-correction-cascade]: **Zillow iBuying Failure**: Zillow reported losses exceeding \$500 million in Q3 2021 when its Zestimate algorithm systematically overvalued homes, triggering purchasing errors that cascaded through inventory and pricing decisions. The company laid off approximately 2,000 employees (25 percent of workforce) and took a \$304 million inventory write-down. The failure illustrates correction cascade debt at scale: each model error altered the training distribution for subsequent predictions, creating a positive feedback loop that no single retraining cycle could break. \index{Zillow!correction cascade}
-
-\index{Undeclared Consumers!Tesla case study}Tesla's early Autopilot deployments illustrate undeclared consumer debt from a different direction. Model outputs were repurposed across subsystems without clear interface boundaries, so over-the-air updates could silently affect lane centering, braking, and other safety-critical behavior at once.
-
-\index{Configuration Debt!Facebook case study}Facebook's News Feed iterations show the configuration version of the same governance failure. Rapid experimentation produced opaque ranking settings, making behavioral changes difficult to trace and allowing misaligned configurations to create unintended consequences.
 
 These examples are not cautionary tales from careless organizations. They are the predictable consequences of deploying probabilistic systems without the infrastructure to manage them. YouTube, Zillow, Tesla, and Facebook each encountered specific debt patterns (feedback loops, correction cascades, undeclared consumers, and configuration sprawl) that cost hundreds of millions of dollars and years of remediation precisely because no systematic operational discipline existed to detect them early.
 
@@ -1648,7 +1644,7 @@ For stateful systems, implement "rollback checkpoints" that capture consistent s
 
 A/B testing\index{A/B Testing!statistical model validation} provides the statistical foundation for deployment decisions by comparing model versions under controlled conditions. Unlike canary deployments (which validate operational stability), A/B tests measure whether a new model improves business outcomes with statistical confidence.
 
-###### Experimental design {.unnumbered}
+###### Experiment setup and decision rules {.unnumbered}
 
 ```{python}
 #| echo: false
@@ -1722,7 +1718,7 @@ class ABSampleSize:
     detectable_pct_points_str = fmt_pp(detectable_pct_points, precision=1, commas=False, style="symbol")
 ```
 
-A valid A/B test requires:
+A valid A/B test starts with four controls that make the later deployment decision statistically meaningful:
 
 1. **Randomization Unit**\index{A/B Testing!randomization unit}: Define what gets randomly assigned to treatment vs. control. User-level randomization ensures consistent experience but requires larger sample sizes. Request-level randomization enables faster experiments but can confuse users seeing different results.
 
@@ -1734,7 +1730,7 @@ where $\delta$ is the minimum detectable effect, $\sigma$ is outcome standard de
 
 4. **Runtime**: Run tests until reaching statistical significance, typically 1–2 weeks minimum to capture weekly patterns. Avoid "peeking" at results and stopping early, as this inflates false positive rates.
 
-A/B testing ML models introduces complications absent from traditional software experiments. Conversion events may arrive days after prediction, so a recommendation shown Monday can drive a purchase Friday and the attribution window must be part of the test design.\index{A/B Testing!delayed feedback, A/B testing challenges} Novelty effects can also inflate early performance as users engage with fresh recommendations, which is why mature experiments include a burn-in period before measurement.\index{Novelty Effects!A/B testing bias}
+Those controls establish the statistical envelope, but ML systems add failure modes that ordinary web experiments can hide. Conversion events may arrive days after prediction, so a recommendation shown Monday can drive a purchase Friday and the attribution window must be part of the test design.\index{A/B Testing!delayed feedback, A/B testing challenges} Novelty effects can also inflate early performance as users engage with fresh recommendations, which is why mature experiments include a burn-in period before measurement.\index{Novelty Effects!A/B testing bias}
 
 Recommendation and ranking systems add interference effects because showing an item to one user can affect what remains available or salient for another, violating the independence assumption behind standard A/B analysis. Segment heterogeneity creates a second analysis problem: an overall neutral result may hide strong positive effects for one cohort and negative effects for another. These complications do not invalidate A/B testing, but they make guardrails, segment analysis, and preregistered decisions part of the experiment rather than after-the-fact interpretation.
 
@@ -4104,13 +4100,15 @@ ClinAIOps extends beyond technical infrastructure to support complex sociotechni
 
 : **Clinical AI Operations**: Traditional MLOps focuses on model performance, while ClinAIOps integrates technical systems with clinical workflows, ethical considerations, and ongoing feedback loops to ensure safe, trustworthy AI assistance in healthcare settings. ClinAIOps prioritizes human oversight and accountability alongside automation, addressing unique challenges in clinical decision-making that standard MLOps pipelines often overlook. {#tbl-clinical_ops tbl-colwidths="[18,36,46]"}
 
-Successfully deploying AI in healthcare requires aligning systems with clinical workflows, human expertise, and patient needs. Technical performance alone is insufficient; deployment must account for ethical oversight and continuous adaptation to dynamic clinical contexts.
-
-The ClinAIOps framework specifically addresses the operational challenges identified earlier by changing the governing constraint from device efficiency to clinical accountability. The model participates in care, but it cannot own the clinical decision. Every recommendation must therefore be reproducible from input data, model version, confidence score, and clinician action; otherwise the system cannot support audit, review, or outcome analysis. Separation of concerns becomes a safety mechanism rather than only a software design preference: automated data collection from wearables, AI recommendations, clinician diagnosis, treatment decisions, and developer workflow improvement each need explicit boundaries and human gates at critical decision points.
+The table's central distinction is that clinical deployment changes who owns the risk. Technical performance remains necessary, but it is not sufficient when a recommendation affects care decisions. The ClinAIOps framework therefore changes the governing constraint from device efficiency to clinical accountability. The model participates in care, but it cannot own the clinical decision. Every recommendation must be reproducible from input data, model version, confidence score, and clinician action; otherwise the system cannot support audit, review, or outcome analysis. Separation of concerns becomes a safety mechanism rather than only a software design preference: automated data collection from wearables, AI recommendations, clinician diagnosis, treatment decisions, and developer workflow improvement each need explicit boundaries and human gates at critical decision points.
 
 The same accountability requirement changes monitoring. Standardized clinical data pipelines preserve training-serving parity, but clinical validation also has to compare recommendations against standard-of-care outcomes, prospective evidence, and cohort-specific effects. Observable degradation is measured through blood pressure control, adverse events, clinician overrides, and subgroup outcomes, not just model metrics. Feedback loops are therefore not technical debt in this setting; patient treatment, clinician oversight, and developer feedback loops are intentional mechanisms that improve care while keeping authority with humans. Cost-aware automation operates inside those gates: updates can be automated only when their expected benefit justifies validation cost and patient risk, and conservative recommendations or uncertainty flags must route low-confidence cases back to clinical review.
 
-The Oura Ring and ClinAIOps cases demonstrate MLOps principles applied under domain-specific constraints. Production ML systems more commonly fail, and the failure modes stem from predictable misconceptions: intuitions that work for traditional software but break down for probabilistic systems.
+### Case study synthesis {#sec-ml-operations-case-study-synthesis}
+
+The Oura Ring and ClinAIOps cases separate stable MLOps principles from the deployment constraints that reshape their implementation. Oura is a resource-envelope case: the operational system must preserve reproducibility, consistency, and observable degradation while battery, telemetry, and weak ground truth limit what can be measured and updated on the device. ClinAIOps is an accountability-envelope case: the same principles apply, but validation, audit trails, and human gates dominate because the model influences clinical action.
+
+The shared engineering lesson is that MLOps maturity is not tool accumulation. It is the ability to identify the governing constraint, choose the operational controls that match it, and preserve evidence when the model changes. Production ML systems more commonly fail when teams import intuitions from deterministic software into probabilistic systems, which is why the chapter closes by naming the fallacies and pitfalls that these two case studies help expose.
 
 ## Fallacies and Pitfalls {#sec-ml-operations-fallacies-pitfalls-e4e0}
 
