@@ -3778,9 +3778,7 @@ class KWSAutomatedLabelingScale:
 
 \index{Keyword Spotting!automated labeling}Our KWS case study has now progressed through problem definition (@sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9), data collection, ingestion, and processing. At the labeling stage, we confront a challenge unique to speech systems at scale. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond the manual and crowdsourced approaches we examined earlier. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling addresses this challenge through its innovative approach to generating labeled wake word data; the corpus contains over `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` of one-second speech across `{python} KWSAutomatedLabelingScale.keywords_count_str` in `{python} KWSAutomatedLabelingScale.languages_count_str}.
 
-This scale makes manual annotation infeasible: `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Achieving `{python} KWSAutomatedLabelingScale.accuracy_target_str` accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} KWSAutomatedLabelingScale.languages_count_str` ensures the technology serves diverse speaker populations.
-
-Walk through the pipeline in @fig-mswc to see how this automated system works. It begins with paired sentence audio recordings and corresponding transcriptions from projects like Common Voice [@mozilla_common_voice] or multilingual captioned content platforms, processing these inputs through forced alignment\index{Forced Alignment!speech labeling}\index{Speech Recognition!forced alignment}[^fn-forced-alignment-kws] to identify precise word boundaries within continuous speech.
+This scale makes manual annotation infeasible: `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Achieving `{python} KWSAutomatedLabelingScale.accuracy_target_str` accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} KWSAutomatedLabelingScale.languages_count_str` ensures the technology serves diverse speaker populations. The automated system in @fig-mswc addresses that scale problem by starting with paired sentence audio recordings and corresponding transcriptions from projects like Common Voice [@mozilla_common_voice] or multilingual captioned content platforms, then processing those inputs through forced alignment\index{Forced Alignment!speech labeling}\index{Speech Recognition!forced alignment}[^fn-forced-alignment-kws] to identify precise word boundaries within continuous speech.
 
 [^fn-forced-alignment-kws]: **Forced Alignment**: Given a known transcription, the algorithm aligns specific words to audio frames with millisecond precision using dynamic programming (Viterbi algorithm), bypassing the harder problem of recognizing what was said. This distinction is what makes automated KWS corpus construction feasible: because the transcription is already known from paired text, forced alignment converts sentence-level audio into word-level training samples at negligible marginal cost -- enabling datasets of millions of labeled keywords without proportional human annotation effort. \index{Forced Alignment!automated labeling}
 
@@ -4161,24 +4159,17 @@ Designing for high-throughput training starts by matching storage throughput to 
 
 **Problem**: What storage configuration keeps an NVIDIA A100 from being data-starved while training ResNet-50?
 
-*The compute term (throughput ceiling)*
+Start with the compute ceiling. An NVIDIA A100 can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about four GFLOPs for each forward pass, and including backpropagation raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. Dividing accelerator peak by model cost gives an upper bound of `{python} StorageBandwidth.max_img_per_s_str`.
 
-*   **Hardware peak**: NVIDIA A100 = `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` (dense FP16 operations).
-*   **Model cost**: ResNet-50 requires approximately four GFLOPs for the forward pass per image; including the backward pass, total is approximately `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per training step.
-*   **Maximum theoretical throughput**: `{python} StorageBandwidth.max_img_per_s_str` (A100 peak throughput divided by ResNet-50 forward-plus-backward FLOPs per image).
+That compute ceiling becomes a storage requirement once each image must arrive from disk or object storage. With `{python} StorageBandwidth.image_size_kb_str` JPEG-compressed images, the data path must supply
 
-*The data term (bandwidth requirement)*
+`{python} StorageBandwidth.max_img_per_s_str` $\times$ `{python} StorageBandwidth.image_size_kb_str` per image $\approx$ `{python} StorageBandwidth.required_bw_gb_per_s_str`.
 
-*   **Image size**: `{python} StorageBandwidth.image_size_kb_str` (JPEG compressed).
-*   **Required bandwidth**:
-    `{python} StorageBandwidth.max_img_per_s_str` $\times$ `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.required_bw_gb_per_s_str`
+The storage options now have a concrete target: saturating this single A100 requires `{python} StorageBandwidth.required_bw_gb_per_s_str` of sustained bandwidth.
 
-*Storage options:*
-To saturate a single A100, storage must deliver `{python} StorageBandwidth.required_bw_gb_per_s_str`.
-
-*   **S3 Standard**: ~`{python} StorageBandwidth.s3_bw_mb_per_s_str` per thread. The pipeline needs `{python} StorageBandwidth.s3_workers_str`.
-*   **SATA SSD**: ~`{python} StorageBandwidth.sata_bw_mb_per_s_str` sequential. Totally insufficient (bottleneck).
-*   **NVMe SSD**\index{NVMe SSD!data pipeline}: approximately `{python} StorageBandwidth.nvme_bw_low_gb_per_s_str`–`{python} StorageBandwidth.nvme_bw_high_gb_per_s_str`. Required.
+*   S3 Standard delivers about `{python} StorageBandwidth.s3_bw_mb_per_s_str` per thread, so the pipeline needs `{python} StorageBandwidth.s3_workers_str` before software overhead.
+*   SATA SSDs deliver about `{python} StorageBandwidth.sata_bw_mb_per_s_str` sequentially, making them a bottleneck for this accelerator.
+*   NVMe SSDs\index{NVMe SSD!data pipeline} deliver approximately `{python} StorageBandwidth.nvme_bw_low_gb_per_s_str`--`{python} StorageBandwidth.nvme_bw_high_gb_per_s_str`, which is the right class of local storage for the target.
 
 **Systems insight**: With SATA SSDs, maximum throughput is capped at `{python} StorageBandwidth.sata_bw_mb_per_s_str` / `{python} StorageBandwidth.image_size_kb_str` per image ≈ `{python} StorageBandwidth.sata_max_img_per_s_str`. The \$15,000 GPU will run at `{python} StorageBandwidth.sata_utilization_pct_str` utilization (`{python} StorageBandwidth.sata_max_img_per_s_str` / `{python} StorageBandwidth.max_img_per_s_str`). Storage physics dictates training speed.
 
