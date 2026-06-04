@@ -201,6 +201,17 @@ def test_storage_training_corpus_anchor():
     assert corpus.CompressedSource.provenance.ref
 
 
+def test_model_loading_anchors():
+    from mlsysim import ReferenceStats
+
+    loading = ReferenceStats.ModelLoading
+
+    assert loading.StableDiffusionV15CheckpointSize.to(GB).magnitude == pytest.approx(5.0)
+    assert loading.StableDiffusionV15PickleLoadTime.to(second).magnitude == pytest.approx(15.0)
+    assert loading.StableDiffusionV15SafetensorsLoadTime.to(second).magnitude == pytest.approx(0.5)
+    assert loading.StableDiffusionV15CheckpointSize.provenance.ref
+
+
 def test_mobilenetv2_variant_model_profiles():
     from mlsysim import Models
     from mlsysim.core.units import param

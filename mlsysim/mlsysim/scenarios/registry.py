@@ -11,7 +11,7 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
-from ..core.units import ureg, MB, MWh, TB, byte, count, day, minute, param, TRILLION
+from ..core.units import ureg, GB, MB, MWh, TB, byte, count, day, minute, param, TRILLION
 
 _hour = ureg.hour
 _joule = ureg.joule
@@ -196,6 +196,29 @@ class StorageTrainingCorpus(Registry):
     )
 
 
+class ModelLoading(Registry):
+    """Reusable cold-start model-loading scenario anchors."""
+
+    StableDiffusionV15CheckpointSize = sourced_qty(
+        5 * GB,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="Stable Diffusion v1.5 serialized checkpoint size",
+        description="Representative checkpoint footprint for cold-start model-loading examples.",
+    )
+    StableDiffusionV15PickleLoadTime = sourced_qty(
+        15 * ureg.second,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="Stable Diffusion v1.5 Pickle load time",
+        description="Reference cold-start load time for the object-reconstruction path.",
+    )
+    StableDiffusionV15SafetensorsLoadTime = sourced_qty(
+        0.5 * ureg.second,
+        pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
+        name="Stable Diffusion v1.5 Safetensors load time",
+        description="Reference cold-start load time for the memory-mapped tensor path.",
+    )
+
+
 class MobilePower(Registry):
     """Mobile/edge device + workload power-envelope reference figures."""
 
@@ -247,6 +270,7 @@ class ReferenceStats(Registry):
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
     StorageTrainingCorpus = StorageTrainingCorpus
+    ModelLoading = ModelLoading
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
 

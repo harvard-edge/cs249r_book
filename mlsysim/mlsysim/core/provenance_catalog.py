@@ -692,6 +692,16 @@ STORAGE_TRAINING_CORPUS_REFERENCE = _conv(
     ),
 )
 
+MODEL_LOADING_SCENARIO_ASSUMPTIONS = _est(
+    "prov:model-loading-scenario-assumptions",
+    "Reference model-loading scenario assumptions",
+    notes=(
+        "Representative cold-start loading anchors for serialized model checkpoints; "
+        "values are teaching-scale assumptions and should be calibrated from fleet "
+        "measurements for production sizing."
+    ),
+)
+
 CLOUD_PRICING_2024 = Provenance(
     id="prov:cloud-pricing-2024",
     kind=ProvenanceKind.ILLUSTRATIVE,

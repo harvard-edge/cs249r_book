@@ -4315,14 +4315,15 @@ Building on this zero-copy principle, Safetensors[^fn-safetensors-loading]\index
 # │ Context: @exmp-model-serving-loading-speed-safetensors-vs-pickle and
 # │          [^fn-safetensors-loading] in Node-Level Optimization.
 # │
-# │ Goal: Keep the model-size, load-time, and storage-bandwidth values in the
+# │ Goal: Keep the checkpoint-size, load-time, and storage-bandwidth values in the
 # │       loading-speed example traceable and consistently formatted.
 # │ Show: Pickle vs. Safetensors load times for Stable Diffusion v1.5.
-# │ How: Use the MLSysIM Stable Diffusion v1.5 model entry, scenario load-time
-# │      assumptions, and the Gen3 NVMe storage registry to compute the speedup.
+# │ How: Use the MLSysIM Stable Diffusion v1.5 model entry, the reusable
+# │      cold-start loading scenario, and the Gen3 NVMe storage registry to
+# │      compute the speedup.
 # │
 # │ Imports: mlsysim public API (units, Systems registry, fmt helpers, checks)
-# │ Exports: model_size_gb_str, pickle_load_s_str, safetensors_load_s_str,
+# │ Exports: checkpoint_size_gb_str, pickle_load_s_str, safetensors_load_s_str,
 # │          nvme_bw_gb_per_s_str, load_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -4333,9 +4334,10 @@ class SafetensorsLoadingSpeed:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     model = Models.GenerativeVision.StableDiffusion_v1_5
-    model_size = model.size_in_bytes(BYTES_FP16)
-    pickle_load = 15 * second  # scenario assumption: object reconstruction path
-    safetensors_load = 0.5 * second  # scenario assumption: memory-mapped tensor path
+    loading_scenario = ReferenceStats.ModelLoading
+    checkpoint_size = loading_scenario.StableDiffusionV15CheckpointSize
+    pickle_load = loading_scenario.StableDiffusionV15PickleLoadTime
+    safetensors_load = loading_scenario.StableDiffusionV15SafetensorsLoadTime
     nvme_bw = Systems.Storage.LocalNvmeGen3.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -4344,9 +4346,13 @@ class SafetensorsLoadingSpeed:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(safetensors_load < pickle_load, "Safetensors example should load faster than Pickle.")
     check(load_speedup.to("").magnitude > 1, "Loading speedup must exceed 1x.")
+    check(
+        checkpoint_size >= model.size_in_bytes(BYTES_FP16),
+        "Serialized checkpoint should be at least as large as raw FP16 model weights.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
+    checkpoint_size_gb_str = fmt_memory(checkpoint_size, unit=GB, precision=0, commas=False)
     pickle_load_s_str = fmt_time(pickle_load, second, precision=0, commas=False)
     safetensors_load_s_str = fmt_time(safetensors_load, second, precision=1, commas=False)
     nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=1, commas=False)
@@ -4355,7 +4361,7 @@ class SafetensorsLoadingSpeed:
 
 ::: {#exmp-model-serving-loading-speed-safetensors-vs-pickle .callout-example title="Loading speed: Safetensors vs. Pickle"}
 
-**Scenario**: A cold-start replica has to load a `{python} SafetensorsLoadingSpeed.model_size_gb_str` Stable Diffusion model before it can absorb traffic.
+**Scenario**: A cold-start replica has to load a `{python} SafetensorsLoadingSpeed.checkpoint_size_gb_str` Stable Diffusion v1.5 checkpoint before it can absorb traffic.
 
 **Trace**:
 
