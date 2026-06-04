@@ -140,6 +140,12 @@ MOBILE_DEVICE_ANCHORS = Provenance(
     ref="Mobile/edge device reference figures (flagship phone battery ~15 Wh / 3000 mAh @ 3.7 V, mobile NPU power 3-4 W, object-detector ~2 W) for on-device ML intuition",
     verified="2025-03-06",
 )
+EDGE_DEVICE_SPECTRUM_ANCHORS = _est(
+    "prov:edge-device-spectrum-anchors",
+    "Representative edge-device spectrum anchors for on-device learning heterogeneity examples",
+    notes="Pedagogical class endpoints spanning microcontroller/tiny-sensor and flagship-mobile envelopes; not a single SKU specification.",
+    verified="2026-06-04",
+)
 
 # --- Hardware technology-class facts (Hardware.Tech) ---
 HOROWITZ_ENERGY = _lit(

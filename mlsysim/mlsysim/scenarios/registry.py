@@ -11,7 +11,7 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
-from ..core.units import ureg, GB, MB, MWh, TB, byte, count, day, minute, param, TRILLION
+from ..core.units import ureg, GB, GiB, KiB, MB, MWh, TB, TOPS, byte, count, day, minute, param, TRILLION
 
 _hour = ureg.hour
 _joule = ureg.joule
@@ -320,6 +320,71 @@ class CheckpointArchetypes(Registry):
     )
 
 
+class EdgeDeviceSpectrum(Registry):
+    """Reusable device-class range endpoints for edge-learning heterogeneity."""
+
+    TinyRamLow = sourced_qty(
+        32 * KiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Tiny sensor-class RAM endpoint",
+        description="Lower memory endpoint used for edge device-spectrum examples.",
+    )
+    MicrocontrollerSram = sourced_qty(
+        256 * KiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Microcontroller SRAM endpoint",
+        description="Representative microcontroller SRAM endpoint used in memory-wall examples.",
+    )
+    FlagshipSmartphoneRamHigh = sourced_qty(
+        16 * GiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Flagship smartphone RAM endpoint",
+        description="Upper mobile memory endpoint used for edge device-spectrum examples.",
+    )
+    CortexMClock = sourced_qty(
+        48 * ureg.megahertz,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Cortex-M-class clock endpoint",
+        description="Representative Cortex-M-class clock endpoint used for device-spectrum prose.",
+    )
+    MobileClassClock = sourced_qty(
+        3 * ureg.gigahertz,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Mobile-class CPU clock endpoint",
+        description="Representative mobile-class CPU clock endpoint used for device-spectrum prose.",
+    )
+    TinyCpuThroughputMips = sourced(
+        10,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Tiny CPU throughput endpoint",
+        description="Representative MIPS endpoint for tiny Cortex-M-class processors.",
+    )
+    MobileCpuThroughputMips = sourced(
+        100_000,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Mobile CPU throughput endpoint",
+        description="Representative MIPS endpoint for high-end mobile-class processors.",
+    )
+    SensorPowerLow = sourced_qty(
+        10 * ureg.microwatt,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Tiny sensor power endpoint",
+        description="Lower power endpoint used for edge device-spectrum examples.",
+    )
+    FlagshipPhonePowerHigh = sourced_qty(
+        5 * ureg.watt,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="Flagship phone power endpoint",
+        description="Upper mobile power endpoint used for edge device-spectrum examples.",
+    )
+    IotMicrocontrollerComputeLow = sourced_qty(
+        0.03 * TOPS,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="IoT microcontroller compute endpoint",
+        description="Representative low-end compute endpoint for federated heterogeneity examples.",
+    )
+
+
 class MobilePower(Registry):
     """Mobile/edge device + workload power-envelope reference figures."""
 
@@ -374,6 +439,7 @@ class ReferenceStats(Registry):
     ModelLoading = ModelLoading
     ServingProfiles = ServingProfiles
     CheckpointArchetypes = CheckpointArchetypes
+    EdgeDeviceSpectrum = EdgeDeviceSpectrum
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
 

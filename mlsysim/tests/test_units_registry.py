@@ -9,6 +9,7 @@ from mlsysim.core.units import (
     GB,
     GW,
     GiB,
+    KiB,
     Gbps,
     Kparam,
     L,
@@ -243,6 +244,24 @@ def test_checkpoint_archetype_anchors():
     assert ckpt.EmbeddingHeavyRecommenderCheckpointSize.to(TB).magnitude == pytest.approx(4.0)
     assert ckpt.MediumVisionTransformerCheckpointSize.to(GB).magnitude == pytest.approx(1.2)
     assert ckpt.Dense20BTransformerCheckpointSize.provenance.ref
+
+
+def test_edge_device_spectrum_anchors():
+    from mlsysim import ReferenceStats
+
+    spectrum = ReferenceStats.EdgeDeviceSpectrum
+
+    assert spectrum.TinyRamLow.to(KiB).magnitude == pytest.approx(32.0)
+    assert spectrum.MicrocontrollerSram.to(KiB).magnitude == pytest.approx(256.0)
+    assert spectrum.FlagshipSmartphoneRamHigh.to(GiB).magnitude == pytest.approx(16.0)
+    assert spectrum.CortexMClock.to(ureg.megahertz).magnitude == pytest.approx(48.0)
+    assert spectrum.MobileClassClock.to(ureg.gigahertz).magnitude == pytest.approx(3.0)
+    assert float(spectrum.TinyCpuThroughputMips) == pytest.approx(10.0)
+    assert float(spectrum.MobileCpuThroughputMips) == pytest.approx(100_000.0)
+    assert spectrum.SensorPowerLow.to(microwatt).magnitude == pytest.approx(10.0)
+    assert spectrum.FlagshipPhonePowerHigh.to(watt).magnitude == pytest.approx(5.0)
+    assert spectrum.IotMicrocontrollerComputeLow.to(TOPS).magnitude == pytest.approx(0.03)
+    assert spectrum.TinyRamLow.provenance.ref
 
 
 def test_mobilenetv2_variant_model_profiles():
