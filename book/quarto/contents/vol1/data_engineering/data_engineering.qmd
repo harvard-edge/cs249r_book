@@ -960,14 +960,100 @@ Data quality and diversity ultimately determine whether these constraints can be
 
 These requirements create a multi-dimensional design space where data engineering choices cascade through system performance. @Tbl-kws-design-space quantifies key trade-offs, enabling principled decisions rather than ad-hoc selection.
 
-| **Design Choice**                   | **Quality Impact**        |     **Latency Impact**    |      **Cost Impact**      |    **Memory Impact**     |
-|:------------------------------------|:--------------------------|:-------------------------:|:-------------------------:|:------------------------:|
-| **16 kHz vs. 8 kHz sampling**       | +2–4 percent accuracy     |     2$\times$ storage     |    2$\times$ processing   |  2$\times$ feature size  |
-| **13 vs. 40 MFCC coefficients**     | +3–5 percent accuracy     | 3$\times$ feature compute |          Minimal          | 3$\times$ feature memory |
-| **1M vs. 10M training examples**    | +5–8 percent accuracy     |  10$\times$ training time |  10$\times$ labeling cost |    10$\times$ storage    |
-| **Clean vs. noisy training data**   | +10–15 percent real-world |          Minimal          | 3$\times$ collection cost |         Minimal          |
-| **Local vs. cloud inference**       | −2 percent accuracy risk  |      10 ms vs. 100 ms     |   \$0 vs. \$0.001/query   |   16 KB vs. unlimited    |
-| **Synthetic vs. real augmentation** | +3–5 percent robustness   |          Minimal          |     10$\times$ cheaper    |         Minimal          |
+```{python}
+#| echo: false
+#| label: kws-design-space-tradeoffs-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KWS DESIGN SPACE TRADEOFFS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-kws-design-space
+# │
+# │ Goal: Keep KWS design-space arithmetic and scenario anchors in one place.
+# │ Show: Sampling, MFCC, data-volume, latency, cost, and memory trade-offs.
+# │ How: Compute ratios from row endpoints and format table-facing values.
+# │
+# │ Imports: mlsysim.core.constants (KB), mlsysim.fmt
+# │ Exports: KWSDesignSpaceTradeoffs.*_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import (
+    check,
+    fmt_multiple,
+    fmt_percent,
+    fmt_percent_range,
+    fmt_qty,
+    fmt_time,
+    fmt_usd,
+)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class KWSDesignSpaceTradeoffs:
+    """Scenario anchors and derived multipliers for the KWS design-space table."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    sampling_rate_low_khz = 8
+    sampling_rate_high_khz = 16
+    mfcc_coeff_low = 13
+    mfcc_coeff_high = 40
+    examples_low_m = 1
+    examples_high_m = 10
+    local_latency_ms = 10
+    cloud_latency_ms = 100
+    local_query_cost_usd = 0
+    cloud_query_cost_usd = 0.001
+    local_model_memory = 16 * KB
+    noisy_collection_cost_mult = 3
+    synthetic_cost_savings_mult = 10
+    sampling_accuracy_gain = (0.02, 0.04)
+    mfcc_accuracy_gain = (0.03, 0.05)
+    data_volume_accuracy_gain = (0.05, 0.08)
+    noisy_accuracy_gain = (0.10, 0.15)
+    local_accuracy_risk = 0.02
+    synthetic_robustness_gain = (0.03, 0.05)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    sampling_ratio = sampling_rate_high_khz / sampling_rate_low_khz
+    mfcc_ratio = mfcc_coeff_high / mfcc_coeff_low
+    data_volume_ratio = examples_high_m / examples_low_m
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(sampling_ratio == 2, f"KWS sampling ratio drifted: {sampling_ratio}.")
+    check(3.0 <= mfcc_ratio <= 3.1, f"KWS MFCC ratio drifted: {mfcc_ratio:.2f}.")
+    check(data_volume_ratio == 10, f"KWS data-volume ratio drifted: {data_volume_ratio}.")
+    check(local_latency_ms < cloud_latency_ms, "Local KWS inference should remain lower-latency than cloud inference.")
+    check(cloud_query_cost_usd > local_query_cost_usd, "Cloud query cost should exceed local query cost.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    sampling_accuracy_gain_pct_str = fmt_percent_range(*sampling_accuracy_gain, style="prose")
+    sampling_storage_mult_str = fmt_multiple(sampling_ratio, precision=0, commas=False)
+    sampling_processing_mult_str = fmt_multiple(sampling_ratio, precision=0, commas=False)
+    sampling_feature_size_mult_str = fmt_multiple(sampling_ratio, precision=0, commas=False)
+    mfcc_accuracy_gain_pct_str = fmt_percent_range(*mfcc_accuracy_gain, style="prose")
+    mfcc_feature_compute_mult_str = fmt_multiple(mfcc_ratio, precision=0, commas=False)
+    mfcc_feature_memory_mult_str = fmt_multiple(mfcc_ratio, precision=0, commas=False)
+    data_volume_accuracy_gain_pct_str = fmt_percent_range(*data_volume_accuracy_gain, style="prose")
+    data_volume_training_time_mult_str = fmt_multiple(data_volume_ratio, precision=0, commas=False)
+    data_volume_labeling_cost_mult_str = fmt_multiple(data_volume_ratio, precision=0, commas=False)
+    data_volume_storage_mult_str = fmt_multiple(data_volume_ratio, precision=0, commas=False)
+    noisy_accuracy_gain_pct_str = fmt_percent_range(*noisy_accuracy_gain, style="prose")
+    noisy_collection_cost_mult_str = fmt_multiple(noisy_collection_cost_mult, precision=0, commas=False)
+    local_accuracy_risk_pct_str = fmt_percent(local_accuracy_risk, precision=0, commas=False, style="prose")
+    local_latency_ms_str = fmt_time(local_latency_ms, "millisecond", precision=0, commas=False)
+    cloud_latency_ms_str = fmt_time(cloud_latency_ms, "millisecond", precision=0, commas=False)
+    local_inference_cost_usd_per_query_str = fmt_usd(local_query_cost_usd, precision=0, commas=False, per="query")
+    cloud_inference_cost_usd_per_query_str = fmt_usd(cloud_query_cost_usd, precision=3, commas=False, per="query")
+    local_model_memory_kb_str = fmt_qty(local_model_memory, unit=KB, precision=0, commas=False)
+    synthetic_robustness_gain_pct_str = fmt_percent_range(*synthetic_robustness_gain, style="prose")
+    synthetic_cost_savings_mult_str = fmt_multiple(synthetic_cost_savings_mult, precision=0, commas=False)
+```
+
+| **Design Choice**                   | **Quality Impact**                                                                 |                                                  **Latency Impact**                                                 |                                                                     **Cost Impact**                                                                     |                               **Memory Impact**                                |
+|:------------------------------------|:-----------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------------------------------:|
+| **16 kHz vs. 8 kHz sampling**       | +`{python} KWSDesignSpaceTradeoffs.sampling_accuracy_gain_pct_str` accuracy        |                         `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` storage                        |                                        `{python} KWSDesignSpaceTradeoffs.sampling_processing_mult_str` processing                                       | `{python} KWSDesignSpaceTradeoffs.sampling_feature_size_mult_str` feature size |
+| **13 vs. 40 MFCC coefficients**     | +`{python} KWSDesignSpaceTradeoffs.mfcc_accuracy_gain_pct_str` accuracy            |                   `{python} KWSDesignSpaceTradeoffs.mfcc_feature_compute_mult_str` feature compute                  |                                                                         Minimal                                                                         | `{python} KWSDesignSpaceTradeoffs.mfcc_feature_memory_mult_str` feature memory |
+| **1M vs. 10M training examples**    | +`{python} KWSDesignSpaceTradeoffs.data_volume_accuracy_gain_pct_str` accuracy     |                 `{python} KWSDesignSpaceTradeoffs.data_volume_training_time_mult_str` training time                 |                                   `{python} KWSDesignSpaceTradeoffs.data_volume_labeling_cost_mult_str` labeling cost                                   |    `{python} KWSDesignSpaceTradeoffs.data_volume_storage_mult_str` storage     |
+| **Clean vs. noisy training data**   | +`{python} KWSDesignSpaceTradeoffs.noisy_accuracy_gain_pct_str` real-world         |                                                       Minimal                                                       |                                    `{python} KWSDesignSpaceTradeoffs.noisy_collection_cost_mult_str` collection cost                                    |                                    Minimal                                     |
+| **Local vs. cloud inference**       | up to `{python} KWSDesignSpaceTradeoffs.local_accuracy_risk_pct_str` accuracy risk | `{python} KWSDesignSpaceTradeoffs.local_latency_ms_str` vs. `{python} KWSDesignSpaceTradeoffs.cloud_latency_ms_str` | `{python} KWSDesignSpaceTradeoffs.local_inference_cost_usd_per_query_str` vs. `{python} KWSDesignSpaceTradeoffs.cloud_inference_cost_usd_per_query_str` |   `{python} KWSDesignSpaceTradeoffs.local_model_memory_kb_str` vs. unlimited   |
+| **Synthetic vs. real augmentation** | +`{python} KWSDesignSpaceTradeoffs.synthetic_robustness_gain_pct_str` robustness   |                                                       Minimal                                                       |                                        `{python} KWSDesignSpaceTradeoffs.synthetic_cost_savings_mult_str` cheaper                                       |                                    Minimal                                     |
 
 : **KWS Data Engineering Design Space**: Each design choice creates quantifiable trade-offs across the four pillars. Higher sampling rates improve quality but double storage and processing (scalability impact). More training data improves accuracy but multiplies labeling costs (governance/cost impact). Local inference eliminates latency but requires compact model and feature representations (quality/reliability trade-off). This design space analysis guides systematic optimization rather than intuition-based decisions. {#tbl-kws-design-space tbl-colwidths="[28,24,16,16,16]"}
 
