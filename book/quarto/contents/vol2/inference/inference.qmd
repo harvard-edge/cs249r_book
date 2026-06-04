@@ -1520,14 +1520,14 @@ Even with modern frameworks, diagnosing tail latency anomalies requires systemat
 # │ Show: "80" GB, "2" TB/s, "600" GB/s NVLink, "32" GB/s PCIe Gen4.
 # │ How: pulling constants from mlsysim.core.constants.
 # │
-# │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, Hardware.Cloud.A100.memory.bandwidth, Hardware.Cloud.A100.nvlink.bandwidth,
-# │          Hardware.Cloud.A100.interconnect.bandwidth, GB, GiB, TB, second)
+# │ Imports: mlsysim
 # │ Exports: A100HardwareScenario.a100_mem_gb_str,
 # │          A100HardwareScenario.a100_mem_bw_tb_per_s_str,
 # │          A100HardwareScenario.nvlink_a100_gb_per_s_str,
-# │          A100HardwareScenario.pcie_gen4_gb_per_s_str
+# │          A100HardwareScenario.pcie_gen4_gb_per_s_str,
+# │          A100HardwareScenario.* latency and batching scenario strings
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_memory_capacity, fmt_time, fmt_qty_int
+from mlsysim import *
 
 class A100HardwareScenario:
     """A100 hardware reference."""
@@ -1537,7 +1537,22 @@ class A100HardwareScenario:
     bw = Hardware.Cloud.A100.memory.bandwidth
     nvlink = Hardware.Cloud.A100.nvlink.bandwidth
     pcie = Hardware.Cloud.A100.interconnect.bandwidth
+    num_gpus = 4  # scenario topology
+    p50_latency = 100 * millisecond  # scenario latency observation
+    p95_latency = 180 * millisecond  # scenario latency observation
+    p99_latency = 500 * millisecond  # scenario latency observation
+    p99_target = 200 * millisecond  # scenario SLO target
+    gpu_utilization = 0.85  # scenario utilization observation
     activation_transfer = 100 * MB  # scenario payload
+    max_batch_size = 32  # scenario batching policy
+    batch_timeout = 50 * millisecond  # scenario batching policy
+    affected_batch_share = 0.05  # scenario tail fraction
+    short_token_threshold = 50  # scenario classification threshold
+    medium_token_threshold = 200  # scenario classification threshold
+    short_batch_size = 8  # scenario revised policy
+    medium_batch_size = 16  # scenario revised policy
+    long_batch_size = 32  # scenario revised policy
+    p99_after = 185 * millisecond  # scenario post-mitigation result
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     pcie_transfer = (activation_transfer / pcie).to(millisecond)
@@ -1552,24 +1567,39 @@ class A100HardwareScenario:
     a100_mem_bw_tb_per_s_str = fmt_bandwidth(bw, unit=TB / second, precision=1, commas=False)
     nvlink_a100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
     pcie_gen4_gb_per_s_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)
+    num_gpus_str = fmt_count(num_gpus, precision=0, commas=False)
+    p50_latency_ms_str = fmt_time(p50_latency, millisecond, precision=0, commas=False)
+    p95_latency_ms_str = fmt_time(p95_latency, millisecond, precision=0, commas=False)
+    p99_latency_ms_str = fmt_time(p99_latency, millisecond, precision=0, commas=False)
+    p99_target_ms_str = fmt_time(p99_target, millisecond, precision=0, commas=False)
+    gpu_utilization_pct_str = fmt_percent(gpu_utilization, precision=0, commas=False, style='prose')
     activation_transfer_mb_str = fmt_memory(activation_transfer, unit=MB, precision=0, commas=False)
     pcie_transfer_ms_str = fmt_time(pcie_transfer, millisecond, precision=1, commas=False)
     nvlink_transfer_ms_str = fmt_time(nvlink_transfer, millisecond, precision=2, commas=False)
+    max_batch_size_str = fmt_count(max_batch_size, precision=0, commas=False)
+    batch_timeout_ms_str = fmt_time(batch_timeout, millisecond, precision=0, commas=False)
+    affected_batch_share_pct_str = fmt_percent(affected_batch_share, precision=0, commas=False, style='prose')
+    short_token_threshold_str = fmt_count(short_token_threshold, precision=0, commas=False)
+    medium_token_threshold_str = fmt_count(medium_token_threshold, precision=0, commas=False)
+    short_batch_size_str = fmt_count(short_batch_size, precision=0, commas=False)
+    medium_batch_size_str = fmt_count(medium_batch_size, precision=0, commas=False)
+    long_batch_size_str = fmt_count(long_batch_size, precision=0, commas=False)
+    p99_after_ms_str = fmt_time(p99_after, millisecond, precision=0, commas=False)
 ```
 
 ::: {#exmp-inference-debugging-high-p99-latency .callout-example title="Debugging high P99 latency"}
 
-**Scenario**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100 ms and P95 is 180 ms, both within SLO, but P99 spikes to 500 ms against a 200 ms target. GPU utilization appears healthy at 85 percent.
+**Scenario**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is `{python} A100HardwareScenario.p50_latency_ms_str` and P95 is `{python} A100HardwareScenario.p95_latency_ms_str`, both within SLO, but P99 spikes to `{python} A100HardwareScenario.p99_latency_ms_str` against a `{python} A100HardwareScenario.p99_target_ms_str` target. GPU utilization appears healthy at `{python} A100HardwareScenario.gpu_utilization_pct_str`.
 
-**System**: The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb_str` connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations, but PCIe limits tensor-parallel communication. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The distribution layer is the real problem: dynamic request-level batching uses max batch size 32 and timeout 50 ms, and the largest 5 percent of batches experience head-of-line blocking because FIFO batching holds short requests behind long-sequence requests.
+**System**: The system runs on `{python} A100HardwareScenario.num_gpus_str` A100-`{python} A100HardwareScenario.a100_mem_gb_str` GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations, but PCIe limits tensor-parallel communication. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The distribution layer is the real problem: dynamic request-level batching uses max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, and the largest `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches experience head-of-line blocking because FIFO batching holds short requests behind long-sequence requests.
 
 **Systems lesson**: The root cause is not the hardware layer but the scheduling policy. Implement priority-aware scheduling with separate batch size limits by request type:
 
-1. **Request classification**\index{Request Classification}: Tag requests by expected output length (short: under 50 tokens, medium: 50 to 200 tokens, long: over 200 tokens) based on prompt patterns or user-provided hints
-2. **Differentiated batching**\index{Batching!differentiated}: Limit short-request batches to 8, medium to 16, long to 32
+1. **Request classification**\index{Request Classification}: Tag requests by expected output length (short: under `{python} A100HardwareScenario.short_token_threshold_str` tokens, medium: `{python} A100HardwareScenario.short_token_threshold_str` to `{python} A100HardwareScenario.medium_token_threshold_str` tokens, long: over `{python} A100HardwareScenario.medium_token_threshold_str` tokens) based on prompt patterns or user-provided hints
+2. **Differentiated batching**\index{Batching!differentiated}: Limit short-request batches to `{python} A100HardwareScenario.short_batch_size_str`, medium to `{python} A100HardwareScenario.medium_batch_size_str`, long to `{python} A100HardwareScenario.long_batch_size_str`
 3. **Priority preemption**\index{Priority Preemption}: Allow short requests to preempt long-running sequences when P99 approaches SLO
 
-After implementing these changes, P99 dropped to 185 ms. High average GPU utilization can mask head-of-line blocking that affects only a small percentage of requests but drives P99; @fig-fleet-stack gives the full isolation framework.
+After implementing these changes, P99 dropped to `{python} A100HardwareScenario.p99_after_ms_str`. High average GPU utilization can mask head-of-line blocking that affects only a small percentage of requests but drives P99; @fig-fleet-stack gives the full isolation framework.
 
 :::
 
@@ -1618,16 +1648,18 @@ Feature-parallel batching is natural when embeddings are sharded across servers:
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RECSYS LATENCY BREAKDOWN (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-inference-recsys-latency-breakdown — Total row.
+# │ Context: @tbl-inference-recsys-latency-breakdown and RecSys batching callout.
 # │
-# │ Goal: Compute total latency as sum of individual phase durations.
-# │ Show: Total = 5.2 ms in the table.
-# │ How: Sum phase durations: 0.2 + 0.5 + 2 + 1 + 1.5.
+# │ Goal: Compute total latency and the embedding lookup rate used by the
+# │       Meta-scale batching example.
+# │ Show: Total = 5.2 ms; 50 million lookups/sec per shard; 50K lookups/batch.
+# │ How: Sum phase durations and divide request-level lookup volume across
+# │      embedding shards.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: RecsysLatencyBreakdown.total_ms_str
+# │ Imports: mlsysim
+# │ Exports: RecsysLatencyBreakdown.total_ms_str plus callout scale strings.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_time
+from mlsysim import *
 
 
 class RecsysLatencyBreakdown:
@@ -1639,6 +1671,12 @@ class RecsysLatencyBreakdown:
     embedding = 2.0 * ms  # scenario table row
     feature = 1.0 * ms  # scenario table row
     ranking = 1.5 * ms  # scenario table row
+    platform_qps = 10_000_000  # scenario assumption: Meta-scale serving rate
+    candidate_items = 100  # scenario assumption: candidates ranked per request
+    lookups_per_item = 50  # scenario assumption: sparse features per candidate
+    embedding_table_size = 100 * TB  # scenario assumption: sharded embedding corpus
+    embedding_shards = 1_000  # scenario assumption: embedding shard count
+    accumulation_window = 1 * millisecond  # scenario batching window
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     total = (
@@ -1648,38 +1686,75 @@ class RecsysLatencyBreakdown:
         + feature
         + ranking
     )
+    lookups_per_request = candidate_items * lookups_per_item
+    lookups_per_shard_per_second = (
+        platform_qps * lookups_per_request / embedding_shards
+    )
+    requests_per_batch = platform_qps * accumulation_window.to(second).magnitude
+    lookups_per_shard_per_batch = (
+        lookups_per_shard_per_second
+        * accumulation_window.to(second).magnitude
+    )
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(abs(total.to(ms).magnitude - 5.2) < 1e-9, f"Total latency mismatch: {total.to(ms).magnitude}")
+    check(lookups_per_request == 5000, "RecSys lookup count should remain 5,000 per request")
+    check(lookups_per_shard_per_second == 50_000_000, "Expected 50M lookups/sec per shard")
+    check(requests_per_batch == 10_000, "Expected 10K requests per 1 ms batch")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     total_ms_str = fmt_time(total, millisecond, precision=1, commas=False)
+    platform_qps_str = fmt_rate(platform_qps, "QPS", scale="million", precision=0, commas=False)
+    candidate_items_str = fmt_count(candidate_items, precision=0, commas=False, label="item")
+    lookups_per_item_str = fmt_count(lookups_per_item, precision=0, commas=False, label="embedding lookup")
+    lookups_per_request_str = fmt_count(lookups_per_request, precision=0, commas=True, label="embedding lookup")
+    embedding_table_size_tb_str = fmt_memory(embedding_table_size, unit=TB, precision=0, commas=False)
+    embedding_shards_str = fmt_count(embedding_shards, precision=0, commas=True, label="shard")
+    accumulation_window_ms_str = fmt_time(accumulation_window, millisecond, precision=0, commas=False)
+    requests_per_batch_str = fmt_count(requests_per_batch, precision=0, commas=True, label="request")
+    lookups_per_shard_per_second_million_str = fmt_count(
+        lookups_per_shard_per_second,
+        scale="million",
+        precision=0,
+        commas=False,
+        scale_style="word",
+        label="lookup",
+    )
+    lookups_per_shard_per_batch_k_str = fmt_count(
+        lookups_per_shard_per_batch,
+        scale="K",
+        precision=0,
+        commas=False,
+        label="lookup",
+    )
 ```
 
 ::: {#exmp-inference-recsys-batching-at-meta-scale .callout-example title="RecSys batching at Meta scale"}
 
-Consider Meta's recommendation infrastructure serving 10 million QPS across the platform:
+Consider Meta's recommendation infrastructure serving `{python} RecsysLatencyBreakdown.platform_qps_str` across the platform:
 
 **Request characteristics**:
 
-- Each request queries ~100 items (candidate ranking)
-- Each item requires 50 embedding lookups (user features, item features, cross features)
-- Total embedding lookups: 5,000 per request
-- Embedding table size: 100 TB across 1,000 shards
+- Each request queries approximately `{python} RecsysLatencyBreakdown.candidate_items_str` (candidate ranking)
+- Each item requires `{python} RecsysLatencyBreakdown.lookups_per_item_str` (user features, item features, cross features)
+- Total per request: `{python} RecsysLatencyBreakdown.lookups_per_request_str`
+- Embedding table size: `{python} RecsysLatencyBreakdown.embedding_table_size_tb_str` across `{python} RecsysLatencyBreakdown.embedding_shards_str`
 
 **Batching strategy**:
 
-With 10M QPS and 1,000 embedding shards, each shard receives:
+With `{python} RecsysLatencyBreakdown.platform_qps_str` and `{python} RecsysLatencyBreakdown.embedding_shards_str`, each shard receives:
 
-$$\text{Lookups per shard} = \frac{10 \times 10^6 \times 5000}{1000} = 50 \text{ million lookups/sec}$$
+$$\text{Lookups per shard} = \frac{\text{QPS} \times \text{lookups/request}}{\text{shards}}$$
+
+In this scenario, the rate is `{python} RecsysLatencyBreakdown.lookups_per_shard_per_second_million_str` per second per shard.
 
 Single-threaded processing cannot sustain that rate. Instead:
 
-**Batch accumulation window**\index{Batching!batch, accumulation window}: 1 ms
-**Requests per batch**: 10,000 (at 10M QPS)
-**Lookups per shard per batch**: 50K
+**Batch accumulation window**\index{Batching!batch, accumulation window}: `{python} RecsysLatencyBreakdown.accumulation_window_ms_str`
+**Batch size**: `{python} RecsysLatencyBreakdown.requests_per_batch_str` (at `{python} RecsysLatencyBreakdown.platform_qps_str`)
+**Lookups per shard per batch**: `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str`
 
-Each embedding shard processes about 50K lookups in a batched operation, achieving high memory bandwidth utilization through sequential memory access patterns.
+Each embedding shard processes about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` in a batched operation, achieving high memory bandwidth utilization through sequential memory access patterns.
 
 As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{Latency!breakdown} composition is:
 
@@ -1692,7 +1767,7 @@ As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{La
 | **Ranking model**                            |                       1.5 ms                       |        Final scoring        |
 | **Total**                                    | **`{python} RecsysLatencyBreakdown.total_ms_str`** |       Within 10 ms SLO      |
 
-: **Latency breakdown for a 10M-QPS recommender request**: Per-phase contribution to end-to-end latency for a single recommender request at 10M QPS with 1,000 embedding shards. {#tbl-inference-recsys-latency-breakdown}
+: **Latency breakdown for a recommender request**: Per-phase contribution to end-to-end latency for a single recommender request at the request volume and shard count in the batching example. {#tbl-inference-recsys-latency-breakdown}
 
 **Systems insight**: Recommendation batching is organized around sparse feature access, not around identical request tensors. The system wins by batching embedding lookups at the shard where memory bandwidth is consumed.
 
