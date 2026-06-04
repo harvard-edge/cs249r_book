@@ -910,15 +910,7 @@ Total system concurrency $=$ `{python} LittlesLawExample.replicas_needed_str` re
 
 :::
 
-The 20-request queue depth and the unresolved question of whether queue wait time fits inside the SLO are exactly what queuing theory formalizes.
-
-### Review: Single-node queuing dynamics {#sec-inference-scale-queuing-review-callout}
-
-::: {#psp-inference-queuing-theory-review .callout-perspective title="Queuing theory as serving foundation"}
-
-At the single-node level, inference behaves like a single-server queue: requests arrive, wait if the replica is busy, and then receive service from the accelerator. The shorthand M/D/1 denotes random arrivals with deterministic service time on one server; M/M/1 denotes random arrivals with exponentially distributed service time. Little's Law ($L = \lambda W$) dictates that the number of requests in the system equals the arrival rate times the processing time. @Sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 derives the M/D/1 wait-time distribution that determines whether queue delay fits inside a serving SLO.
-
-:::
+The 20-request queue depth and the unresolved question of whether queue wait time fits inside the SLO are exactly what queuing theory formalizes; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 derives the M/D/1 wait-time distribution that determines whether queue delay fits inside a serving SLO.
 
 ### Static and dynamic batching for vision models {#sec-inference-scale-static-dynamic-batching-vision-models-4623}
 
@@ -3455,28 +3447,7 @@ class MoECapacityPlan:
 
 #### Expert parallelism and load balancing {#sec-inference-scale-moe-parallelism}
 
-Distributing MoE models across GPUs introduces expert parallelism: each GPU holds a subset of experts, and tokens are routed to the GPU holding their assigned expert. This creates a distinctive AllToAll communication pattern, where each GPU sends different data to every other GPU.
-
-The AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
-
-1.  **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
-2.  Capacity factor\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
-3.  **Expert buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
-
-#### Routing failure modes {#sec-inference-scale-moe-routing-failures}
-
-The router behavior directly impacts both system performance and model quality. Performance engineers must monitor for several failure modes:
-
--   **Expert collapse**\index{Expert Collapse}: The router converges to a small subset of experts, leaving others undertrained. The model effectively degrades to a small dense model with a massive memory footprint.
--   **Routing instability**\index{Routing Instability}: Assignments oscillate during training, preventing experts from specialized learning.
--   **Distribution shift**\index{Distribution Shift}: A router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
--   **Token dropping**\index{Token Dropping}: At high load, capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
-
-These failure modes follow from the basic MoE serving trade-off[^fn-moe-serving]: computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
-
-[^fn-moe-serving]: **MoE (Mixture-of-Experts) Serving Trade-Off**: Only a subset of experts activate per token (typically 2 of 8--16), keeping per-token FLOPs low while total parameter count reaches hundreds of billions. The serving constraint: all expert weights must reside in memory even though most are idle on any given token, inflating memory footprint 4--8$\times$ relative to the active compute. This forces expert parallelism across devices with AllToAll communication at every MoE layer. \index{MoE!serving}
-
-In an MoE layer, a gating network selects $k$ experts (out of $E$ total) for each token:
+Distributing MoE models across GPUs introduces expert parallelism: each GPU holds a subset of experts, and tokens are routed to the GPU holding their assigned expert. In an MoE layer, a gating network selects $k$ experts (out of $E$ total) for each token:
 
 $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{input})$$
 
@@ -3533,7 +3504,24 @@ Expert parallelism distributes experts across devices, with each device hosting 
 
 The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all (*different data to different devices* based on routing).
 
-Load balancing challenge: If gating decisions cluster on certain experts, devices hosting popular experts become bottlenecks while others sit idle. MoE training includes auxiliary losses to encourage balanced routing, but inference still exhibits routing imbalance.
+This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
+
+1.  **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
+2.  Capacity factor\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
+3.  **Expert buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
+
+#### Routing failure modes {#sec-inference-scale-moe-routing-failures}
+
+Router behavior directly impacts both system performance and model quality. Performance engineers must monitor for several failure modes:
+
+-   **Expert collapse**\index{Expert Collapse}: The router converges to a small subset of experts, leaving others undertrained. The model effectively degrades to a small dense model with a massive memory footprint.
+-   **Routing instability**\index{Routing Instability}: Assignments oscillate during training, preventing experts from specialized learning.
+-   **Distribution shift**\index{Distribution Shift}: A router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
+-   **Token dropping**\index{Token Dropping}: At high load, capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
+
+These failure modes follow from the basic MoE serving trade-off[^fn-moe-serving]: computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
+
+[^fn-moe-serving]: **MoE (Mixture-of-Experts) Serving Trade-Off**: Only a subset of experts activate per token (typically 2 of 8--16), keeping per-token FLOPs low while total parameter count reaches hundreds of billions. The serving constraint: all expert weights must reside in memory even though most are idle on any given token, inflating memory footprint 4--8$\times$ relative to the active compute. This forces expert parallelism across devices with AllToAll communication at every MoE layer. \index{MoE!serving}
 
 ```{python}
 #| echo: false
