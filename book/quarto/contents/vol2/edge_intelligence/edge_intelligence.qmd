@@ -829,9 +829,18 @@ Resource-constrained devices use a two-stage learning process. Offline pretraini
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Model constraints — MobileNetV2 and STM32 sizing.
-# │ Exports: mobilenetv2_*_str, stm32_hidden_*_str
-from mlsysim import BYTES_FP32, KB, MB, Models, param
-from mlsysim.fmt import check, fmt_int, fmt_params, fmt_percent, fmt_qty, fmt_qty_int
+# │ Exports: mobilenetv2_*_str, imagenet_rgb_*,
+# │          stm32_hidden_*_str
+from mlsysim import BYTES_FP32, Datasets, KB, MB, Models, byte, param
+from mlsysim.fmt import (
+    check,
+    fmt_int,
+    fmt_math,
+    fmt_params,
+    fmt_percent,
+    fmt_qty,
+    fmt_qty_int,
+)
 
 class EdgeMobilenetSizing:
     mobilenetv2_alpha10_params = int(Models.Vision.MobileNetV2.parameters.to(param).magnitude)
@@ -840,17 +849,34 @@ class EdgeMobilenetSizing:
     stm32_sram_kb = 192
     stm32_hidden_inputs = 1_000
     stm32_hidden_outputs = 10
+    imagenet = Datasets.ImageNet
+    imagenet_width_px = imagenet.image_width
+    imagenet_height_px = imagenet.image_height
+    imagenet_channels = imagenet.image_channels
+    bytes_per_channel = 1 * byte  # scenario assumption: uint8 RGB input tensor
 
     alpha10 = mobilenetv2_alpha10_params * BYTES_FP32
     alpha05_total = mobilenetv2_alpha05_total_params * BYTES_FP32
     alpha05_feature = mobilenetv2_alpha05_feature_params * BYTES_FP32
+    imagenet_rgb_image = (
+        imagenet_width_px
+        * imagenet_height_px
+        * imagenet_channels
+        * bytes_per_channel
+    )
     stm32_hidden_params = stm32_hidden_inputs * stm32_hidden_outputs + stm32_hidden_outputs
     stm32_hidden = stm32_hidden_params * BYTES_FP32
     stm32_sram = stm32_sram_kb * KB
+    imagenet_rgb_sram_pct = (imagenet_rgb_image / EdgeDeviceSpectrum.mcu_sram).to("").magnitude
+    imagenet_rgb_sram_pct_rounded = round(imagenet_rgb_sram_pct * 10) / 10
     stm32_hidden_sram_pct = (stm32_hidden / stm32_sram).to_base_units().magnitude * 100
 
     check(alpha10 > alpha05_total > alpha05_feature,
           "MobileNetV2 storage variants should shrink in the expected order")
+    check(imagenet_width_px == 224 and imagenet_height_px == 224 and imagenet_channels == 3,
+          "ImageNet RGB input shape should remain 224x224x3.")
+    check(0.55 <= imagenet_rgb_sram_pct <= 0.60,
+          f"ImageNet RGB SRAM share drifted: {imagenet_rgb_sram_pct:.2f}.")
     check(20 <= stm32_hidden_sram_pct <= 21,
           f"STM32 hidden-layer SRAM share drifted: {stm32_hidden_sram_pct:.1f}%")
 
@@ -861,6 +887,11 @@ class EdgeMobilenetSizing:
     mobilenetv2_alpha05_total_mb_str = fmt_qty(alpha05_total, MB, precision=1, commas=False)
     mobilenetv2_alpha05_feature_params_m_str = fmt_params(mobilenetv2_alpha05_feature_params, scale="M", precision=2, commas=False)
     mobilenetv2_alpha05_feature_mb_str = fmt_qty(alpha05_feature, MB, precision=1, commas=False)
+    imagenet_rgb_shape_math = fmt_math(
+        rf"{imagenet_width_px}{{\times}}{imagenet_height_px}{{\times}}{imagenet_channels}"
+    )
+    imagenet_rgb_image_kb_str = fmt_qty_int(imagenet_rgb_image, unit=KB, approx=True, commas=False)
+    imagenet_rgb_sram_pct_str = fmt_percent(imagenet_rgb_sram_pct_rounded, precision=0, commas=False, style='prose')
     stm32_hidden_inputs_str = fmt_int(stm32_hidden_inputs, commas=False)
     stm32_hidden_kb_str = fmt_qty(stm32_hidden, KB, precision=3, commas=False)
     stm32_hidden_sram_pct_str = fmt_percent(stm32_hidden_sram_pct/100, precision=3, commas=False, style='prose')
@@ -872,7 +903,7 @@ The structure and size of the machine learning model directly determine whether 
 
 The scale of these constraints becomes concrete across the device spectrum. MobileNetV2, commonly used in mobile vision tasks, requires approximately `{python} EdgeMobilenetSizing.mobilenetv2_alpha10_mb_str` of storage in its standard configuration. While feasible for modern smartphones with gigabytes of available RAM, this far exceeds the `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` of SRAM and `{python} EdgeDeviceSpectrum.arduino_flash_mb_str` of flash storage on microcontrollers such as the Arduino Nano 33 BLE Sense[^fn-arduino-memory-wall]. On such severely constrained platforms, even a single convolutional layer may exceed available RAM during training due to intermediate feature maps and gradient storage.
 
-[^fn-arduino-memory-wall]: **Arduino Nano 33 BLE Sense**\index{Arduino Nano 33 BLE Sense}: With `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` SRAM, roughly `{python} EdgeDeviceSpectrum.memory_ratio_mult_str` smaller than a flagship smartphone's `{python} EdgeDeviceSpectrum.flagship_ram_gb_str`, a single $224{\times}224{\times}3$ RGB image (150 KB) consumes 60 percent of available memory. Activation and gradient storage alone can add several times overhead, and full training budgets can reach 4--12$\times$ inference memory once optimizer state is included. This means even a tiny convolutional neural network (CNN) layer can exceed total SRAM during backpropagation. This memory wall forces 8-bit or 4-bit quantization as a prerequisite, not an optimization. \index{Arduino!memory constraint}
+[^fn-arduino-memory-wall]: **Arduino Nano 33 BLE Sense**\index{Arduino Nano 33 BLE Sense}: With `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` SRAM, roughly `{python} EdgeDeviceSpectrum.memory_ratio_mult_str` smaller than a flagship smartphone's `{python} EdgeDeviceSpectrum.flagship_ram_gb_str`, a single `{python} EdgeMobilenetSizing.imagenet_rgb_shape_math` RGB image occupies `{python} EdgeMobilenetSizing.imagenet_rgb_image_kb_str` and consumes roughly `{python} EdgeMobilenetSizing.imagenet_rgb_sram_pct_str` of available memory. Activation and gradient storage add several more live tensors, and optimizer state can push the training footprint far beyond the inference footprint. This means even a tiny convolutional neural network (CNN) layer can exceed total SRAM during backpropagation. This memory wall forces 8-bit or 4-bit quantization as a prerequisite, not an optimization. \index{Arduino!memory constraint}
 
 The training process itself dramatically expands the effective memory footprint. Standard backpropagation caches activations for each layer during the forward pass, then reuses them during gradient computation in the backward pass. As the amplification analysis above established, this activation caching multiplies memory requirements compared to inference-only deployment. A seemingly modest 10-layer convolutional model processing $64{\times}64$ images may require 1 to 2 MB, well beyond the SRAM capacity of most embedded systems.
 
