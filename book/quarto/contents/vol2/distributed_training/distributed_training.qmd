@@ -900,7 +900,7 @@ Total FSDP communication volume: approximately $3M_{\text{state}}$ bytes (vs. $2
 
 :::
 
-The choice between FSDP and DDP depends on model size and memory constraints. Use DDP when the model fits in GPU memory with room for activations, as it has lower overhead. Use FSDP ZeRO-2 when the model barely fits or requires activation checkpointing. Use FSDP ZeRO-3 when model parameters exceed single-GPU memory. For training 70B+ models on `{python} DistTrainA100Memory.a100_mem_gb_str`, combine FSDP with tensor parallelism.
+The choice between FSDP and DDP depends on model size and memory constraints. When the model fits in GPU memory with room for activations, DDP usually wins because it avoids the repeated AllGather work. As memory pressure rises, ZeRO-2 becomes attractive because it shards gradients and optimizer state while leaving parameters replicated; once parameters themselves exceed single-GPU memory, ZeRO-3/FSDP becomes necessary even though it puts AllGather on the critical path. For training 70B+ models on `{python} DistTrainA100Memory.a100_mem_gb_str`, FSDP typically has to combine with tensor parallelism rather than replace it.
 
 Memory-efficient data parallelism requires careful tuning of sharding strategy (by layer, by transformer block, or flat) and mixed precision settings. The sharding granularity determines the trade-off: finer sharding reduces per-GPU memory but increases communication frequency as more AllGather and ReduceScatter operations must execute per training step.
 
@@ -2190,11 +2190,7 @@ $$M_{\text{act}} = B \times S \times d_{\text{model}} \times \text{sizeof(dtype)
 
 A ring AllReduce transfers approximately $2(t-1)/t \times M_{\text{act}}$ bytes per GPU, which is close to $2M_{\text{act}}$ for large $t$. With $S=2048$, $d_{\text{model}}=4096$, $B=4$, and FP16, the activation payload is $4 \times 2048 \times 4096 \times 2 \approx 67$ MB. Applying the ring factor gives roughly 134 MB per AllReduce. For a 96-layer model with two AllReduce operations per layer, this totals approximately 25.7 GB per forward pass; including the symmetric backward AllReduces brings per-training-step communication to roughly 51 GB, requiring NVLink bandwidth to avoid becoming the bottleneck.
 
-Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because:
-
-- Per-GPU compute falls as tensor parallel degree grows, while collective latency and aggregate traffic rise; per-GPU ring AllReduce bytes approach 2$\times$ the activation tensor size rather than growing linearly without bound.
-- Computation per GPU decreases (less work to hide communication latency)
-- NVLink bandwidth becomes saturated
+Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because the same split that reduces memory also reduces the computation available to hide communication. As the tensor-parallel degree grows, per-GPU work falls while collective latency and aggregate traffic rise; per-GPU ring AllReduce bytes approach 2$\times$ the activation tensor size rather than growing linearly without bound, but the smaller local matrix multiply leaves less useful work to cover that exchange. Once NVLink bandwidth saturates, adding another tensor-parallel shard mainly exposes more synchronization rather than more throughput.
 
 Published systems such as Llama 3 405B use TP=8 within NVLink-connected H100 nodes [@dubey2024llama3], and similar node-local tensor parallelism is a common design pattern for large LLM training [@jiang2024megascale].
 
@@ -2325,11 +2321,7 @@ Numerical precision is itself a distribution lever: halving the bytes per value 
 
 FP8 matters to distributed training when its narrower formats reduce communication without destabilizing optimization. Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. FP8-capable accelerators such as the NVIDIA H100 add support for 8-bit floating point (FP8), offering two formats optimized for different phases of training.
 
-The choice between the two FP8 formats is therefore not an instruction-set detail; it decides which tensors can be narrowed without breaking the optimizer.
-
-The E4M3 format (4-bit exponent, 3-bit mantissa) provides a range of approximately $\pm 448$ with moderate precision. Its tighter range but better precision makes it suitable for representing *weights and activations* in the forward pass, where values cluster in predictable distributions.
-
-The E5M2 format (5-bit exponent, 2-bit mantissa) provides a much larger range of approximately $\pm 57344$ but coarser precision. This wider range accommodates *gradients*, which can span many orders of magnitude during backpropagation. Using E4M3 for gradients would cause frequent overflow and underflow, while E5M2's range captures the full gradient distribution at the cost of slightly noisier updates.
+The choice between the two FP8 formats is therefore not an instruction-set detail; it decides which tensors can be narrowed without breaking the optimizer. E4M3 (4-bit exponent, 3-bit mantissa) provides a range of approximately $\pm 448$ with moderate precision, making it suitable for *weights and activations* in the forward pass where values cluster in predictable distributions. E5M2 (5-bit exponent, 2-bit mantissa) provides a much larger range of approximately $\pm 57344$ but coarser precision, which is why it is used for *gradients* that can span many orders of magnitude during backpropagation. Using E4M3 for gradients would cause frequent overflow and underflow, while E5M2 captures the full gradient distribution at the cost of slightly noisier updates.
 
 Read the format table as a distribution constraint map: each row changes the balance among range, precision, memory traffic, and trainability.
 
@@ -2351,6 +2343,8 @@ For distributed training, FP8 earns its place only when smaller payloads reduce 
 
 ## Hybrid Parallelism {#sec-distributed-training-systems-systems-hybrid-parallelism-12a0}
 
+Training a large model when data parallelism runs out of memory and model parallelism runs out of network bandwidth requires orchestrating both strategies simultaneously across three dimensions. The preceding sections revealed a fundamental tension: data parallelism scales throughput but demands massive memory, while model parallelism enables large models but starves the compute.
+
 ```{python}
 #| echo: false
 class FrontierHybridRecap:
@@ -2360,8 +2354,6 @@ class FrontierHybridRecap:
     check(170 <= params_b <= 180, f"GPT-3 reference should be ~175B params, got {params_b:.1f}B")
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
-
-Training a large model when data parallelism runs out of memory and model parallelism runs out of network bandwidth requires orchestrating both strategies simultaneously across three dimensions. The preceding sections revealed a fundamental tension: data parallelism scales throughput but demands massive memory, while model parallelism enables large models but starves the compute.
 
 Hybrid parallelism\index{Hybrid Parallelism!definition} resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a `{python} FrontierHybridRecap.frontier_params_b_str` parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously, and it is precisely this combination that defines Archetype A training at large-model scale.
 
@@ -2786,6 +2778,8 @@ plt.close()
 
 ## Multi-Model Training: RLHF and Alignment {#sec-distributed-training-rlhf}
 
+The parallelism strategies examined so far assume a single model being trained on a single objective. Reinforcement Learning from Human Feedback\index{Reinforcement Learning from Human Feedback!multi-model coordination} (RLHF) and its variants break this assumption by requiring multiple models to coordinate within a single training loop, each with different memory footprints, compute profiles, and gradient requirements. At a high level, RLHF generates model outputs, scores them with preference-derived reward signals, regularizes updates against a reference model, and then updates the policy; PPO implements this online loop with separate policy, reference, reward, and value models, while DPO-style methods remove much of that rollout and value-model machinery. This creates a heterogeneous fleet management problem that cannot be solved by any single parallelism strategy and represents a qualitatively different distributed systems challenge from standard pretraining.
+
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2817,8 +2811,6 @@ class DistTrainH100Capacity:
     min_gpus_mem_str = fmt_count(min_gpus_mem, commas=False, label="GPU")
     min_gpus_practical_str = MarkdownStr("64--128 GPUs")
 ```
-
-The parallelism strategies examined so far assume a single model being trained on a single objective. Reinforcement Learning from Human Feedback\index{Reinforcement Learning from Human Feedback!multi-model coordination} (RLHF) and its variants break this assumption by requiring multiple models to coordinate within a single training loop, each with different memory footprints, compute profiles, and gradient requirements. At a high level, RLHF generates model outputs, scores them with preference-derived reward signals, regularizes updates against a reference model, and then updates the policy; PPO implements this online loop with separate policy, reference, reward, and value models, while DPO-style methods remove much of that rollout and value-model machinery. This creates a heterogeneous fleet management problem that cannot be solved by any single parallelism strategy and represents a qualitatively different distributed systems challenge from standard pretraining.
 
 ### The multi-model coordination problem {#sec-distributed-training-rlhf-coordination}
 
@@ -3142,8 +3134,6 @@ Beyond the critical batch size (model and dataset dependent, often 8K to 32K for
 
 Engineers assume more GPUs always accelerate training. At scale, statistical efficiency limits overwhelm hardware gains. As @sec-distributed-training-systems-systems-data-parallelism-6132 establishes, data parallelism increases effective batch size proportionally with GPU count $(B_{\text{total}} = N \times B_{\text{local}})$, but gradient quality grows sublinearly beyond model-specific thresholds. A 100K-sample batch may provide only 2$\times$ the gradient information of a 10K-sample batch, not 10$\times$, because samples become redundant within the loss landscape. The critical batch size defines where marginal returns collapse: the chapter's earlier examples put ResNet-50 around 8K--16K and BERT-Large around 32K--65K, with exact thresholds depending on optimizer, schedule, and target quality. Beyond this threshold, doubling GPU count doubles cost but provides minimal convergence acceleration. In a representative cost model, a 1024-GPU run that converges in 18 hours at \$45,000 compute cost may be worse than a 512-GPU run that converges in 19 hours at \$22,000, demonstrating how exceeding critical batch size wastes resources without meaningful time savings.
 
-**Fallacy**: *Memory capacity alone determines the parallelism strategy.*
-
 ```{python}
 #| echo: false
 from mlsysim import Hardware, Models
@@ -3157,6 +3147,8 @@ class A100CapacityFallacies:
     a100_mem_gb_str = fmt_memory_capacity(mem, unit=GiB, precision=0, commas=False)
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
+
+**Fallacy**: *Memory capacity alone determines the parallelism strategy.*
 
 Engineers see that a 70B model exceeds `{python} A100CapacityFallacies.a100_mem_gb_str` memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In a deployed run, the effective strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10--30 percent of cycles. For a `{python} A100CapacityFallacies.frontier_params_b_str` model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23 percent higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
 

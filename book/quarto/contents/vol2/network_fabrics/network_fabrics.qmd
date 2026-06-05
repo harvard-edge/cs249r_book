@@ -664,9 +664,7 @@ plt.close()
 
 :::
 
-The same model also identifies when communication overtakes computation.
-
-The $\alpha$-$\beta$ analysis above focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
+The same model also identifies when communication overtakes computation. The $\alpha$-$\beta$ analysis above focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
 
 ::: {#nbk-allreduce-bottleneck .callout-notebook title="When does AllReduce become the bottleneck?"}
 
@@ -1304,7 +1302,7 @@ class PfcStormRisk:
 ::: {#ws-network-fabrics-microsoft-pfc-deadlock .callout-war-story title="Microsoft's PFC deadlock"}
 **Context**: A team led by Chuanxiong Guo at Microsoft Research deployed RoCEv2 across Microsoft's data centers---a fleet operating at the scale of tens of thousands of servers---to support latency-sensitive services. RoCEv2 requires a lossless fabric, so the network used Priority Flow Control (PFC), and the team developed a DSCP-based PFC mechanism to extend the deployment beyond VLAN boundaries [@guo2016rdma]. DSCP marks packet priority, VLANs define layer-2 traffic boundaries, ARP resolves an IP address to a MAC address, and switches learn MAC-to-port forwarding entries.
 
-**Failure mode**: PFC interacted with Ethernet flooding to create a cyclic buffer dependency. In Microsoft's reported example, a dead server with an incomplete ARP/MAC mapping caused upstream switches to flood lossless packets to every port; PFC PAUSE frames then propagated upstream in response to the flooded traffic, eventually forming a closed loop of paused buffers among switches.
+**Failure**: PFC interacted with Ethernet flooding to create a cyclic buffer dependency. In Microsoft's reported example, a dead server with an incomplete ARP/MAC mapping caused upstream switches to flood lossless packets to every port; PFC PAUSE frames then propagated upstream in response to the flooded traffic, eventually forming a closed loop of paused buffers among switches.
 
 **Consequence**: Once the PFC deadlock formed, restarting servers did not clear it. Microsoft's fix was architectural: block broadcast and multicast traffic from entering lossless traffic classes, and drop lossless packets when the corresponding ARP entry is incomplete rather than fall back to flooding.
 
@@ -1714,8 +1712,6 @@ The deployment timeline is less important than the architectural dependency chai
 
 Designing and operating high-performance fabrics for ML requires unlearning assumptions from traditional data-center networking. The following fallacies and pitfalls capture the most common errors that stall training and degrade cluster productivity.
 
-**Fallacy**: *More bandwidth always means faster training.*
-
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1736,6 +1732,8 @@ class IbBandwidthFallaciesRecap:
     ib_hdr_gbit_per_s_str = fmt_bandwidth(hdr_bw, unit=Gbps, precision=0, commas=False)
     ib_ndr_gbit_per_s_str = fmt_bandwidth(ndr_bw, unit=Gbps, precision=0, commas=False)
 ```
+
+**Fallacy**: *More bandwidth always means faster training.*
 
 Engineers assume upgrading from HDR (`{python} IbBandwidthFallaciesRecap.ib_hdr_gbit_per_s_str`) to NDR (`{python} IbBandwidthFallaciesRecap.ib_ndr_gbit_per_s_str`) will yield proportional gains, but the $\alpha$-$\beta$ model (@sec-network-fabrics-performance-model) reveals this is only true in the bandwidth-dominated regime. For small models or the small-message phases of pipeline parallelism, the latency term $\alpha$, dominated by switch hops and FEC (~1 $\mu\text{s}$), dictates performance. If a workload is latency-bound, a 2$\times$ bandwidth increase may deliver only a small fraction of the line-rate gain while adding substantial power and transceiver cost.
 
@@ -1805,8 +1803,6 @@ Procurement teams compare InfiniBand and high-speed Ethernet on link rate alone 
 
 RoCE over Ethernet can achieve throughput comparable to InfiniBand for large transfers, but the "lossless" property is an approximation maintained by PFC (@sec-network-fabrics-pfc). A misconfigured switch or a firmware bug can trigger a **PFC storm**\index{PFC Storm}, where PAUSE frames propagate in a loop, freezing the entire fabric. InfiniBand's credit-based flow control is inherently immune to such cascades because it operates on per-hop buffer availability rather than reactive signals. Teams deploying RoCE must invest substantially more engineering effort in fabric testing and monitoring to avoid multi-day outages caused by "lossless" deadlocks.
 
-**Pitfall**: *Accepting oversubscription because most traffic is local.*
-
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1824,6 +1820,8 @@ class BisectionWasteRecap:
     waste_m_str = fmt_usd((waste_val) * MILLION, precision=1, commas=False, scale="M")
 ```
 
+**Pitfall**: *Accepting oversubscription because most traffic is local.*
+
 In general-purpose clouds, 4:1 or 8:1 oversubscription at the spine is common because traffic is stochastic. However, ML training is bulk synchronous. When an AllReduce starts, every node attempts to inject full bandwidth simultaneously. As shown in the bisection bottleneck analysis (@sec-network-fabrics-fat-tree), even a 4:1 oversubscription slows the entire synchronization by 4$\times$. For a \$300M cluster where sync accounts for 30 percent of time, this "cost optimization" wastes over `{python} BisectionWasteRecap.waste_m_str` in idle GPU cycles.
 
 **Fallacy**: *TCP bandwidth tests are sufficient for ML fabric validation.*
@@ -1834,9 +1832,13 @@ Standard benchmarks like `iperf` measure kernel-based TCP/IP performance. Becaus
 
 Adaptive routing distributes traffic across available paths, but it cannot create bandwidth that does not exist. If a scheduler places a 1,024-GPU job across two oversubscribed spine groups, adaptive routing will balance the traffic, but it will still be throttled by the group-to-group links. Topology-aware placement, discussed in @sec-fleet-orchestration-topology-aware, and adaptive routing are complementary: the former ensures bandwidth exists, while the latter ensures it is used efficiently.
 
-**Fallacy**: *PFC and ECN counters are optional production details.*
+**Fallacy**: *Network fabric problems always appear as hard failures.*
 
-Network performance issues in ML clusters manifest as subtle training slowdowns rather than errors. A 10 percent reduction in throughput due to intermittent congestion can waste thousands of GPU-hours before being noticed. Operators must alert on PortXmitDiscards and PFC Pause frame rates. A gradual increase in these counters is often the "canary in the coal mine" for a failing transceiver or a routing imbalance that will eventually lead to a job failure.
+Network performance issues in ML clusters often manifest as subtle training slowdowns rather than errors. A 10 percent reduction in throughput due to intermittent congestion can waste thousands of GPU-hours before being noticed, because jobs continue to run while gradients arrive late.
+
+**Pitfall**: *Treating PFC and ECN counters as optional production details.*
+
+Operators must alert on PortXmitDiscards and PFC Pause frame rates. A gradual increase in these counters is often the leading indicator for a failing transceiver or a routing imbalance that will eventually lead to a job failure.
 
 ## Summary {#sec-network-fabrics-summary}
 

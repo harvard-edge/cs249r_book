@@ -2042,8 +2042,6 @@ Python's `dist.all_reduce(..., async_op=True)` only returns control to the CPU. 
 
 Networks are not perfect. A bad cable, faulty NIC, or firmware bug can corrupt data below the level where the training framework sees an explicit error. At 10,000 nodes running 24/7, even very rare bit errors can appear often enough to matter. The communication-specific lesson is that bandwidth tuning is incomplete without end-to-end validation: checksums, collective result checks, gradient-norm sanity tests, and fault-tolerance mechanisms must catch corrupted gradients before they become model updates.
 
-**Fallacy**: *Flat AllReduce is good enough for multi-node training.*
-
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2060,6 +2058,8 @@ class CommInfraRecap:
     ib_ndr_bw_gb_per_s_str = fmt_qty(ib_bw, GB/second, precision=0, commas=False)
 ```
 
+**Fallacy**: *Flat AllReduce is good enough for multi-node training.*
+
 A flat Ring AllReduce treats all links as equal, routing data across `{python} CommInfraRecap.ib_ndr_bw_gb_per_s_str` InfiniBand when `{python} CommInfraRecap.nvlink_h100_bw_gb_per_s_str` NVLink is available within the node. For an 8-node cluster with 8 GPUs per node, hierarchical AllReduce reduces inter-node traffic by 8$\times$ compared to flat Ring, achieving roughly a 6$\times$ speedup. Ignoring the bandwidth hierarchy leaves the majority of intra-node bandwidth unused while overloading the scarce inter-node bandwidth.
 
 **Pitfall**: *Using the ring AllReduce formula for intra-node communication.*
@@ -2069,6 +2069,10 @@ The ring AllReduce cost model assumes a logical ring topology, which matches the
 **Fallacy**: *Rank-to-GPU mapping does not affect collective performance.*
 
 If the job scheduler assigns ranks to GPUs without considering the physical topology, hierarchical AllReduce and rail-optimized routing may route traffic suboptimally. A common symptom is that `nccl-tests` achieves full bandwidth on the cluster, but the actual training job achieves only 50--60 percent because ranks are assigned across nodes in a way that prevents rail alignment. Verify that rank assignment matches the expected topology (e.g., ranks 0--7 on Node 0, ranks 8--15 on Node 1) before benchmarking communication performance.
+
+**Pitfall**: *Benchmarking collectives without recording placement context.*
+
+A collective benchmark is not reusable evidence unless it records rank order, NIC rail binding, NCCL topology configuration, and node allocation. Without that context, teams compare results from different physical layouts and mistake placement differences for library or hardware regressions.
 
 ## Summary {#sec-communication-collective-operations-summary}
 
