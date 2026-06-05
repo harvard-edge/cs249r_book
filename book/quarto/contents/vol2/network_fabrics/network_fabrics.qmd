@@ -457,8 +457,6 @@ Consider a 2,048-GPU training cluster that will run both large language model tr
 
 ### The $\alpha$-$\beta$ performance model {#sec-network-fabrics-performance-model}
 
-\index{Alpha-Beta Model}
-
 Protocol choice determines whether the fabric can behave as a lossless medium; performance modeling then asks how fast that medium can carry a given message. The α-β model\index{Alpha-Beta Model} decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $\alpha$ is the fixed startup latency and $\beta$ is the sustained bandwidth [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers; @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4 later applies the same decomposition to collective algorithms. Topology choice directly shifts both parameters: a fat-tree minimizes $\alpha$ by providing short equal-cost paths, while a ring amplifies $\alpha$ with cluster size as messages traverse $\lfloor H/2 \rfloor$ hops.
 
 ```{python}
@@ -1222,9 +1220,7 @@ Because BSP enforces a global barrier at each superstep, the entire cluster move
 
 ### Priority flow control (PFC) {#sec-network-fabrics-pfc}
 
-\index{Priority Flow Control}
-
-The BSP weakest-link property means that even a single dropped packet can trigger a retransmission timeout that stalls the global barrier for milliseconds, an eternity in a training loop where each compute step finishes in tens of milliseconds. RoCEv2 fabrics solve this by operating in lossless mode: rather than allowing switch buffers to overflow and drop packets, the fabric uses a link-layer backpressure mechanism to pause upstream senders before any buffer saturates.
+The BSP weakest-link property means that even a single dropped packet can trigger a retransmission timeout that stalls the global barrier for milliseconds, an eternity in a training loop where each compute step finishes in tens of milliseconds. RoCEv2 fabrics solve this with priority flow control (PFC)\index{Priority Flow Control}, operating in lossless mode: rather than allowing switch buffers to overflow and drop packets, the fabric uses a link-layer backpressure mechanism to pause upstream senders before any buffer saturates.
 
 ::: {#dfn-network-fabrics-priority-flow-control .callout-definition title="Priority flow control"}
 
@@ -1359,13 +1355,11 @@ This mechanism becomes essential for Mixture-of-Experts (MoE) models. Unlike the
 
 ### The incast problem in ML {#sec-network-fabrics-incast}
 
-\index{Incast}
-
 Congestion control and adaptive routing manage flows that traverse the interior of the fabric. A different failure mode occurs at the edge, where the traffic pattern itself overwhelms a single port regardless of how much capacity the fabric interior provides.
 
 ::: {#dfn-network-fabrics-incast .callout-definition title="Incast"}
 
-***Incast***\index{Incast!definition} is a many-to-one ML cluster traffic pattern in which a large number of senders simultaneously transmit data to a single receiver port, concentrating line-rate traffic from multiple sources into a single switch queue and causing buffer overflow even when the rest of the fabric is uncongested.
+***Incast***\index{Incast}\index{Incast!definition} is a many-to-one ML cluster traffic pattern in which a large number of senders simultaneously transmit data to a single receiver port, concentrating line-rate traffic from multiple sources into a single switch queue and causing buffer overflow even when the rest of the fabric is uncongested.
 
 1.  **Significance (quantitative)**: In the reduce phase of AllReduce, every participating GPU simultaneously sends gradients toward the same aggregation points. With 256 senders each at 50 GB/s targeting one switch port, the instantaneous incast exceeds 12.8 TB/s, orders of magnitude above a 400 Gb/s port's absorption capacity. A 32 MB switch buffer holds about 640 μs of one 400 Gb/s egress stream, but under 256-to-1 incast the net fill rate is roughly 12.75 TB/s after subtracting the single 50 GB/s egress port, so overflow arrives in about 2.5 μs. That sudden overflow triggers either PFC cascade or packet drops that elevate $L_{\text{lat}}$ cluster-wide.
 2.  **Distinction (durable)**: Unlike general congestion (which occurs on shared internal links when aggregate traffic exceeds link capacity), incast is an endpoint bottleneck: it occurs even if every internal spine and leaf link is completely uncongested, because the bottleneck is the single destination port, not the fabric interior.
@@ -1619,8 +1613,6 @@ Higher port rates attack hop count as well as raw bandwidth. XDR InfiniBand push
 
 ### Optical interconnects {#sec-network-fabrics-optical}
 
-\index{Optical Interconnect!co-packaged optics}
-
 ::: {.column-margin}
 ![](images/svg/network_fabrics_physical_reach_ladder.svg){width="100%" fig-alt="Vertical reach ladder with four marked levels: package at millimeters, DAC at 1 to 3 meters, AOC at 3 to 30 meters, and fiber at 100 meters."}
 
@@ -1631,7 +1623,7 @@ Optical interconnects attack the power-per-bit and reach terms that copper makes
 
 The 224 Gb/s-per-lane class pushes copper even harder. At 224 Gb/s, the SerDes power consumption roughly doubles to 15--20 pJ per bit, and the reach shrinks to 1--1.5 meters over passive copper cables. Active electrical cables (which include retimer chips to regenerate the signal mid-cable) extend the reach but add latency and power.
 
-Co-packaged optics (CPO) addresses these limitations by integrating optical transceivers directly into the switch or accelerator package, rather than placing them at the end of a pluggable cable module. In CPO, a silicon photonics chip sits on the same package substrate as the processor, converting electrical signals to light at the die boundary. The optical signal then travels through a fiber at the speed of light, with negligible attenuation over distances of tens of meters, and is converted back to electrical at the receiving package.
+Co-packaged optics (CPO)\index{Optical Interconnect!co-packaged optics} addresses these limitations by integrating optical transceivers directly into the switch or accelerator package, rather than placing them at the end of a pluggable cable module. In CPO, a silicon photonics chip sits on the same package substrate as the processor, converting electrical signals to light at the die boundary. The optical signal then travels through a fiber at the speed of light, with negligible attenuation over distances of tens of meters, and is converted back to electrical at the receiving package.
 
 CPO changes the link budget in three ways. First, the electrical signal path from the SerDes to the optical transceiver is reduced from centimeters (in a pluggable module at the faceplate of a switch) to millimeters (on the package substrate), reducing the power consumed by electrical signal conditioning. Second, optical fiber has no distance-dependent bandwidth degradation over data center-relevant distances (up to 100 meters), eliminating the need for retimers and enabling more flexible physical layouts. Third, fiber is lighter and thinner than copper cables, dramatically simplifying the cable management challenge in dense racks.
 
@@ -1706,9 +1698,7 @@ However, CPO introduces new challenges. Optical components are sensitive to temp
 
 ### Disaggregated and composable architectures {#sec-network-fabrics-disaggregated}
 
-\index{Architecture!disaggregated}
-
-The conventional node architecture bundles a fixed ratio of compute, memory, and networking in each server: 8 GPUs, 640 GB of HBM, 2 TB of DDR, and 8 InfiniBand HCAs in a DGX H100. This fixed bundling is suboptimal for workloads that need a different ratio. Training a 175B model needs more memory capacity per GPU than training a 7B model. Inference serving needs more network bandwidth per GPU (to handle request traffic) than training (which has predictable, batch-oriented communication). The fixed node architecture forces organizations to provision for the most demanding ratio across all workloads, wasting resources on workloads that need a different balance.
+The conventional node architecture bundles a fixed ratio of compute, memory, and networking in each server: 8 GPUs, 640 GB of HBM, 2 TB of DDR, and 8 InfiniBand HCAs in a DGX H100. This fixed bundling is suboptimal for workloads that need a different ratio. Training a 175B model needs more memory capacity per GPU than training a 7B model. Inference serving needs more network bandwidth per GPU (to handle request traffic) than training (which has predictable, batch-oriented communication). The fixed node architecture forces organizations to provision for the most demanding ratio across all workloads, wasting resources on workloads that need a different balance; disaggregated architecture\index{Architecture!disaggregated} tries to relax that fixed ratio.
 
 CXL (Compute Express Link)\index{CXL} is one mechanism that makes this disaggregation plausible rather than just a scheduler abstraction. CXL 3.0 enables memory pooling\index{Memory!pooling}, allowing a processor in one chassis to access memory in another with load/store semantics rather than RDMA message passing. Memory pooling points toward architectures where the rigid distinction between intra-node NVLink domains and inter-node InfiniBand domains softens into a memory fabric, allowing the scheduler to compose virtual nodes with workload-specific resource ratios.
 
