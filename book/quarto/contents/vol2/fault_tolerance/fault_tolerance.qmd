@@ -739,7 +739,7 @@ Silent-corruption detection is the first defense, but the same logic extends to 
 
 Detection of Byzantine failures requires redundant computation. Multiple workers computing gradients for the same data enable comparison of results. Statistical outlier detection can identify workers consistently producing anomalous gradients. These detection mechanisms add computational overhead and may not catch subtle corruption.
 
-Byzantine-resilient distributed training algorithms exist but impose significant overhead. Algorithms such as Krum [@blanchard2017machine] and coordinate-wise trimmed mean [@yin2018byzantine] compute aggregates that are robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. The systems consequence is visible here: corrupted gradients can push the optimizer toward an unreliable model state while the training job appears healthy; @sec-robust-ai-unified-framework-robust-ai-b25d later generalizes this pattern as a model-level robustness failure.[^fn-byzantine-ml-overhead]
+Byzantine-resilient distributed training algorithms exist but impose significant overhead. Algorithms such as Krum [@blanchard2017machine] and coordinate-wise trimmed mean [@yin2018byzantine] compute aggregates that are robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. The systems consequence is visible here: corrupted gradients can push the optimizer toward an unreliable model state while the training job appears healthy. Reliability therefore has to protect semantic correctness, not only process liveness.[^fn-byzantine-ml-overhead]
 
 [^fn-byzantine-ml-overhead]: **Byzantine-Resilient ML**\index{Byzantine-Resilient ML}\index{Byzantine Fault Tolerance!ML overhead}: Named after Lamport's 1982 "Byzantine Generals Problem," these algorithms (Krum\index{Krum}, trimmed mean\index{Trimmed Mean}, signSGD) tolerate a bounded fraction of corrupted workers, typically fewer than 50 percent. The trade-off is concrete: for $N$ workers, Krum requires $\mathcal{O}(N^2)$ pairwise gradient comparisons per step, adding 10--30 percent communication overhead in clusters exceeding 100 workers, which directly competes with the throughput gains of data parallelism.
 
@@ -1112,7 +1112,7 @@ Permanent faults are irreversible hardware defects that persist until the faulty
 
 [^fn-thermal-stress-throttling]: **Thermal Stress**\index{Thermal Stress!training throughput}: Degradation from repeated temperature cycling that cracks solder joints and degrades thermal interface materials. ML accelerators under sustained training loads can experience thermal throttling as clock speeds drop to prevent damage. The trade-off is direct: aggressive cooling (liquid, immersion) extends component lifespan and maintains training throughput but increases data center infrastructure cost, so cooling must be evaluated against both reliability and facility cost.
 
-The Intel Pentium FDIV bug\index{Pentium FDIV Bug!error regions}, discovered in 1994, illustrates the consequences. An error in the lookup table used by the Pentium processor's division unit caused incorrect results for specific operations (@fig-permanent-fault). The error was small, a mistake in the fifth digit, but it compounded across operations, corrupting precision-critical applications. For ML systems, analogous permanent faults in floating-point units introduce persistent errors during training or inference that propagate through the model, leading to inaccurate predictions. This is especially critical in safety-sensitive applications (@sec-responsible-ai).
+The Intel Pentium FDIV bug\index{Pentium FDIV Bug!error regions}, discovered in 1994, illustrates the consequences. An error in the lookup table used by the Pentium processor's division unit caused incorrect results for specific operations (@fig-permanent-fault). The error was small, a mistake in the fifth digit, but it compounded across operations, corrupting precision-critical applications. For ML systems, analogous permanent faults in floating-point units introduce persistent errors during training or inference that propagate through the model. In safety-sensitive applications, the same persistent arithmetic error can become a safety hazard because every downstream decision inherits the biased computation.
 
 ::: {#fig-permanent-fault fig-env="figure" fig-pos="htb" fig-cap="**FDIV Error Regions**: The triangular areas indicate where the Pentium processor's faulty division unit produced incorrect results when calculating 4195835/3145727. Ideally, all values should round to 1.3338, but the bug caused a slight inaccuracy in the fifth digit. Source: *Byte Magazine*." fig-alt="2D plot with triangular regions marking error zones in Intel Pentium FDIV bug. Shaded areas show where division calculations produced incorrect fifth-digit results."}
 
@@ -3094,6 +3094,8 @@ However, killing a slow node and restarting the job implies waiting for a replac
 
 ## Elastic Recovery {#sec-fault-tolerance-reliability-reliability-elastic-training-4f87}
 
+Suppose a 1,024-GPU training job loses an 8-GPU node to a hardware fault, but the cluster has no spare nodes available. Under checkpoint-restart recovery, the remaining 1,016 GPUs sit idle for hours waiting for a repair. Elastic recovery instead allows the job to dynamically resize and continue with slightly less compute, breaking the rigid assumption of a fixed worker count.
+
 ::: {#dfn-fault-tolerance-elastic-training .callout-definition title="Elastic training"}
 
 ***Elastic Training***\index{Elastic training!definition}\index{Training!elastic} is the capability of a distributed training job to dynamically adjust its worker count during execution without requiring a full restart.
@@ -3104,7 +3106,7 @@ However, killing a slow node and restarting the job implies waiting for a replac
 
 :::
 
-Suppose a 1,024-GPU training job loses an 8-GPU node to a hardware fault, but the cluster has no spare nodes available. Under checkpoint-restart recovery, the remaining 1,016 GPUs sit idle for hours waiting for a repair. Elastic recovery instead allows the job to dynamically resize and continue with slightly less compute, breaking the rigid assumption of a fixed worker count. @Fig-elastic-flow traces the recovery sequence: detect the failure, pause, rescale across the surviving workers, and resume.
+@Fig-elastic-flow traces the recovery sequence: detect the failure, pause, rescale across the surviving workers, and resume.
 
 ::: {#fig-elastic-flow fig-env="figure" fig-pos="htb" fig-cap="**Elastic Training Recovery**: Unlike static training which aborts on failure, elastic training adapts. When a worker fails, the job pauses, redistributes the dataset and model shards across the remaining $N-1$ workers, and resumes training from the last consistent state. This capability transforms hard failures into temporary throughput degradations." fig-alt="Flowchart with 5 steps and decision diamond. Training on N workers flows to monitor alert diamond. On failure: pause training, rescale batch and learning rate to N-1 workers, resume training. Loop returns to monitoring. Annotation highlights key step."}
 
@@ -3190,7 +3192,7 @@ Elasticity and checkpointing provide the necessary resilience for long-running b
 
 When a user asks a voice assistant to turn off the lights, they will not tolerate a five-minute pause while the inference server reloads from a checkpoint. Serving models presents a fundamentally different challenge: users expect millisecond-level responsiveness even when backend GPUs crash.
 
-Serving systems rely on replicas, routing, readiness checks, load balancing, KV cache, and graceful degradation as building blocks. Serving fault tolerance asks how those mechanisms behave when replicas, GPUs, or state stores fail under live latency budgets. @Sec-inference-scale-health-checking-failover-070e broadens the same mechanisms into a full distributed inference architecture; the focus here is specifically on fault tolerance and reliability for real-time inference.
+Serving systems rely on replicas, routing, readiness checks, load balancing, KV cache, and graceful degradation as building blocks. Serving fault tolerance asks how those mechanisms behave when replicas, GPUs, or state stores fail under live latency budgets. The focus here is narrower than a complete serving architecture: each mechanism is treated as a reliability boundary for real-time inference.
 
 ### Stateless vs. stateful serving {#sec-fault-tolerance-reliability-reliability-stateless-vs-stateful-serving-0a60}
 
@@ -3325,17 +3327,17 @@ When full redundancy fails (such as when an edge device loses connectivity, or a
 
 ## Graceful Degradation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-9122}
 
+During a major regional network outage, an e-commerce site suddenly loses access to its heavy, GPU-accelerated recommendation cluster. Rather than showing users empty pages or crashing, the site instantly switches to serving precomputed, generic popular items. The serving fault tolerance mechanisms developed above aim to maintain full service, but graceful degradation dictates what happens when those defenses are overwhelmed.
+
 ::: {#dfn-fault-tolerance-graceful-degradation .callout-definition title="Graceful degradation"}
 
 ***Graceful Degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality (falling back to a smaller model, serving cached results, or returning partial outputs) rather than failing completely, maintaining measurable availability at reduced capability.
 
-1.  **Significance (quantitative)**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system that falls back from a 7B-parameter ranker to a collaborative-filtering model on GPU failure may reduce click-through rate by 8–15 percent but maintains 100 percent request availability vs. 0 percent during a hard failure. At \$1M/day in revenue dependent on recommendations, an 8 percent CTR reduction sustained for 10 minutes costs about \$560, while a 10-minute hard outage costs about \$7K total.
+1.  **Significance (quantitative)**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system that falls back from a 7B-parameter ranker to a collaborative-filtering model on GPU failure may reduce click-through rate by 8–15 percent but maintains request availability instead of turning every affected request into an error. The engineering calculation changes from total outage duration to measured quality loss during fallback.
 2.  **Distinction (durable)**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy—each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
 3.  **Common pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
 
 :::
-
-During a major regional network outage, an e-commerce site suddenly loses access to its heavy, GPU-accelerated recommendation cluster. Rather than showing users empty pages or crashing, the site instantly switches to serving precomputed, generic popular items. The serving fault tolerance mechanisms developed above aim to maintain full service, but graceful degradation dictates what happens when those defenses are overwhelmed.
 
 ### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
 
@@ -3350,6 +3352,8 @@ A degradation plan must name which service property will be sacrificed before an
 | Feature completeness | Input richness                    | Use content features when user history or real-time context is unavailable.                    |
 
 : **Graceful Degradation Dimensions**: Degradation plans choose which service property can be reduced while still returning a useful answer. Naming the dimension in advance prevents the system from treating every failure as a binary serve-or-crash decision. {#tbl-graceful-degradation-dimensions}
+
+These dimensions are not interchangeable. A search product may sacrifice coverage by returning fewer results while keeping freshness intact; a recommender may sacrifice freshness by serving cached candidates while preserving latency; and an interactive assistant may sacrifice quality by using a smaller model while keeping the session alive. The correct fallback is therefore workload-specific: it follows the property whose temporary loss least harms the application and whose recovery path can be validated before the incident.
 
 ### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
 
@@ -3658,7 +3662,7 @@ An infrastructure team might spend weeks hardening their storage layer against d
 
 **Fallacy**: *Hardware failures are the main concern.*
 
-This intuition comes from traditional systems where disk failures, power outages, and network partitions dominate. In ML systems, software failures and configuration errors cause the majority of incidents.
+This intuition comes from traditional systems where disk failures, power outages, and network partitions dominate. In ML systems, hardware failures are only one part of a broader incident mix.
 
 Industry experience from large-scale ML systems points to a broader failure mix because ML jobs are long-lived, stateful, and sensitive to small control-plane mistakes. Hardware failures still matter, but software bugs, configuration errors, resource exhaustion, and cross-layer causes often dominate the incident count: a malformed checkpoint path can make recovery impossible, a mismatched collective library can hang all ranks, an undersized shared-memory limit can crash data loaders, and a stale feature schema can silently corrupt training. These failures are not less serious because they are "software"; they can destroy the same multi-day job that hardware redundancy was meant to protect.
 
