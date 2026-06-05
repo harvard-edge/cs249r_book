@@ -76,6 +76,7 @@ The balance is intentionally one track per category. Adding more student-facing 
 | Edge/autonomy expert | RoboTaxi gives edge systems a concrete, memorable story. | Generic edge and safety-critical autonomy should not be treated as interchangeable. | RoboTaxi arc names safety-adjacent validation and explicitly separates autonomy from generic edge. |
 | Cloud/fleet expert | Cloud Fleet covers SLA, utilization, cost, and carbon. | Students may confuse single-accelerator performance with service operation. | Cloud arc carry-forward distinguishes a single accelerator result from service-level operating decisions. |
 | Student proxy | Track choice is easier to remember when it recurs in every lab. | Too many boxes in the opening can overwhelm the first read. | The launch path is now track mission, where-this-fits, scenario, then lab map/parts. |
+| First-time lab user | Long labs make more sense when the work pattern is named before the controls. | Some single-page labs had rich content but did not visibly announce the prediction/control/evidence/decision/reflection loop. | Added reusable `part_workflow()` and applied it to V1-03, V1-04, V1-05, and V1-11. |
 
 ## Release Gates
 
@@ -84,6 +85,8 @@ The balance is intentionally one track per category. Adding more student-facing 
 - Student-facing launch panels do not display `Source Trace`, `Model source`, `Hardware source`, or `System source`.
 - The dashboard renders 4 track cards, 4 arc cards, 34 coverage rows, 14 concept rows, and 103 activity rows.
 - Browser smoke must scroll, click track controls where possible, and catch page errors before a lab pass is considered done.
+- Interaction smoke must exercise Marimo's actual scroll containers, not only `window.scrollY`.
+- Every lab must expose enough visible part structure for at least three learner-action categories, or an explicit synthesis/reflection checkpoint.
 
 ## Current Example
 
@@ -93,3 +96,21 @@ Lab 10 is the most complete visible exemplar:
 - The header tags are split between metadata and chapter concepts; `Track-aware` was removed from the visible tags.
 - The student sees the track mission, where-this-fits arc, scenario brief, lab map, five parts, synthesis, big takeaways, and report export.
 - The launch flow no longer shows source trace or implementation refs, while the report still records source trace internally.
+
+## Latest Browser Pilot
+
+The full interaction pilot passed after the workflow and scroll-harness updates:
+
+| Chunk | Result |
+|---|---|
+| V1-00 through V1-11 | 12/12 labs passed; dashboard/catalog passed |
+| V1-12 through V1-16 | 5/5 labs passed; dashboard/catalog passed |
+| V2-01 through V2-05 | 5/5 labs passed; dashboard/catalog passed |
+| V2-06 through V2-11 | 6/6 labs passed; dashboard/catalog passed |
+| V2-12 through V2-17 | 6/6 labs passed; dashboard/catalog passed |
+
+Total:
+- 34/34 labs passed.
+- All four canonical track choices clicked successfully in non-orientation labs.
+- Visible part/tab checks passed where present.
+- No page errors, console errors, horizontal overflow, offscreen panels, or overflowing fields were reported.

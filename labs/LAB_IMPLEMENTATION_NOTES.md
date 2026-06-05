@@ -30,6 +30,63 @@ Follow-up:
 
 ## Notes
 
+### 2026-06-05 - Full Volume I/II Browser Pilot And Workflow Scaffolding
+
+Lab:
+- All Volume I and Volume II labs, with targeted fixes in V1-03, V1-04, V1-05, and V1-11.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tools/interaction_lab_smoke.py`
+- `labs/vol1/lab_03_ml_workflow.py`
+- `labs/vol1/lab_04_data_engr.py`
+- `labs/vol1/lab_05_nn_compute.py`
+- `labs/vol1/lab_11_hw_accel.py`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added reusable `part_workflow()` scaffolding so labs can consistently show the prediction, controls, evidence, decision, and reflection loop without duplicating HTML.
+- Added the shared workflow scaffold to early single-page Volume I labs where students saw the work but not the explicit sequence.
+- Added per-tab workflow scaffolding to V1-11 so each hardware-roofline part ties the incoming message to controls, evidence, and the decision.
+- Improved `interaction_lab_smoke.py` so browser smoke scrolls Marimo's real scroll containers and accumulates visible text across the page instead of judging only the first viewport.
+- Expanded the smoke category detector to recognize the learner-facing vocabulary now used by the shared scaffold.
+
+MLSysIM facts/APIs needed:
+- No new hardware/model facts were added.
+- The pass continued to keep device/model facts in MLSysIM or typed `mlsysbook_labs` registries.
+
+Notebook-local constants removed:
+- None. This pass changed learner flow and validation rather than computation.
+
+Reusable component or modality improved:
+- `part_workflow()` is now the reusable formula for part-level pedagogy: scenario, prediction, controls, evidence, decision, and reflection.
+- `interaction_lab_smoke.py` now exercises real scrolling, track selection, tab clicks, answer clicks where safe, layout overflow, page errors, and HTML dashboard/catalog checks.
+
+Plan updates needed in other labs:
+- Future bespoke lab parts should use `part_workflow()` or a higher-level wrapper before adding custom HTML.
+- Single-page labs can still be valid, but they need an explicit workflow bridge because students otherwise see a long worksheet rather than a sequence of learning moves.
+
+Tests or checks run:
+- `python3 -m py_compile` on touched notebooks, shared UI files, and the smoke harness.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_track_arcs.py -q` -> 10 passed.
+- `python3 labs/tools/interaction_lab_smoke.py` chunks:
+  - V1-00 through V1-11 -> 12 labs passed, dashboard/catalog passed.
+  - V1-12 through V1-16 -> 5 labs passed, dashboard/catalog passed.
+  - V2-01 through V2-05 -> 5 labs passed, dashboard/catalog passed.
+  - V2-06 through V2-11 -> 6 labs passed, dashboard/catalog passed.
+  - V2-12 through V2-17 -> 6 labs passed, dashboard/catalog passed.
+- Total browser pilot result: 34/34 labs passed with all four track clicks, scroll checks, tab/part checks where present, no page/console errors, and no horizontal overflow.
+- Full aspirational suite check: `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q` -> 120 failed, 1385 passed, 99 skipped, 167 xfailed. The failures are broad protocol/widget expectations that predate this pass: missing `build_synthesis()` functions, missing Synthesis tabs or ledger HUDs in shared-renderer labs, missing prediction reveal/stop gates, and missing Math Peek sections.
+
+Follow-up:
+- Promote the chunked interaction smoke command to a documented release checklist.
+- Consider adding `part_workflow()` to more bespoke tabs where the local prose is strong but the learner loop is implicit.
+- Address the broad aspirational protocol/widget failures separately from this browser-pilot pass.
+
 ### 2026-06-04 - Whole-Track Arc Coherence Pass
 
 Lab:

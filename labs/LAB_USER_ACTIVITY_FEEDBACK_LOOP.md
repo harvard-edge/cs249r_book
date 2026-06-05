@@ -27,9 +27,11 @@ Rendered-browser validation:
 | Check | Result |
 |---|---|
 | Full catalog browser smoke | 34 passed, 0 failed |
+| Full interaction smoke | 34 passed, 0 failed across five chunks |
 | Track switching | Every non-orientation lab produced four distinct rendered track states |
 | Track selector duplication | Checked by browser smoke |
 | Long source-ref overflow | Checked by browser smoke |
+| Part workflow depth | Checked by scroll-aware interaction smoke for prediction/control/evidence/decision/reflection signals |
 
 The four canonical student tracks are the right spine. Do not add more student
 tracks unless the course structure changes.
@@ -142,6 +144,8 @@ Backward requirements:
 Current example in place:
 - V1-01 variants already differentiate iPhone, Oura Ring, RoboTaxi, and Cloud
   Fleet objectives in `mlsysbook_labs/variants.py`.
+- The interaction smoke confirms the lab scrolls, switches all four tracks, opens
+  Part A/B/C/Synthesis, and exposes multiple learner actions per visible part.
 
 ### Activity 3 - Student Completes V1-09 On Oura Ring
 
@@ -176,6 +180,8 @@ Backward requirements:
 Current example in place:
 - V1-09 has a dedicated `mlsysbook_labs.selection` helper and track-specific data
   policy variants.
+- The browser pilot confirms the selected track changes the rendered mission and
+  each part exposes control, evidence, and reflection signals.
 
 ### Activity 4 - Student Completes V1-10 On RoboTaxi
 
@@ -212,6 +218,35 @@ Backward requirements:
 Current example in place:
 - V1-10 uses `CompressionModel` plus track variants; the RoboTaxi track points to
   `Hardware.Edge.RoboTaxi` and `Models.Vision.YOLOv8_Nano`.
+- The browser pilot confirms the V1-10 track selector, five parts, synthesis,
+  and dashboard arc cards all render without page errors or overflow.
+
+### Activity 4b - Student Completes Early Single-Page Labs
+
+Persona:
+- Senior undergraduate student who expects a clear sequence before doing open-ended work.
+
+Observed during browser pilot:
+- V1-03, V1-04, and V1-05 had enough substantive controls and evidence, but the
+  first automated learner pass only saw a long worksheet. The prediction,
+  controls, evidence, decision, and reflection loop was implicit.
+
+Expert feedback required:
+- Instructor checks whether the workflow bridge makes the learning move clear
+  without turning the lab into a rigid checklist.
+- Student proxy checks whether "what do I do next?" is answerable before the
+  student reaches the first plot.
+
+Implemented response:
+- Added reusable `part_workflow()` and used it in V1-03, V1-04, and V1-05.
+- Improved interaction smoke to scroll Marimo containers and gather visible text
+  across the lab, matching actual student behavior better than first-viewport
+  inspection.
+
+Backward requirements:
+- Future single-page labs should include a workflow bridge near the beginning.
+- The bridge should name the active scenario, prediction, controls, evidence,
+  decision, and reflection without exposing implementation provenance.
 
 ### Activity 5 - TA Grades A V1 Report
 
