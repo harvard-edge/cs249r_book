@@ -77,7 +77,7 @@ def _extract_heading_text(line: str) -> str:
     text = re.sub(r'^#+\s*', '', line)
     # Remove {#id ...} block (Quarto heading attribute)
     text = re.sub(r'\{[^}]*\}', '', text)
-    return text.strip()
+    return _to_visible_title_text(text.strip())
 
 
 # Pull the **Bold Title** slice out of a caption line, fig-cap, or tbl-cap.
@@ -86,6 +86,51 @@ def _extract_heading_text(line: str) -> str:
 # reader-facing name of the figure/table — exactly the right link text for a
 # cross-chapter reference.
 _BOLD_TITLE_RE = re.compile(r'\*\*([^*]+?)\*\*')
+_TITLE_TEXT_WRAP_RE = re.compile(r"\\(?:text|mathrm|mathbf|mathit|mathsf|operatorname)\{([^{}]*)\}")
+_TITLE_SPACING_RE = re.compile(r"\\[,;:! ]|\\quad|\\qquad")
+_TITLE_GLYPHS = (
+    (r"\times", "×"),
+    (r"\cdot", "·"),
+    (r"\approx", "≈"),
+    (r"\leq", "≤"),
+    (r"\geq", "≥"),
+    (r"\neq", "≠"),
+    (r"\le", "≤"),
+    (r"\ge", "≥"),
+    (r"\pm", "±"),
+    (r"\sim", "~"),
+    (r"\rightarrow", "→"),
+    (r"\to", "→"),
+    (r"\leftarrow", "←"),
+    (r"\infty", "∞"),
+    (r"\mu", "μ"),
+    (r"\alpha", "α"),
+    (r"\beta", "β"),
+    (r"\rho", "ρ"),
+)
+_TITLE_CURRENCY_SENTINEL = "\x00USD\x00"
+
+
+def _to_visible_title_text(text: str) -> str:
+    """Convert simple inline math in source-extracted titles to visible text.
+
+    Cross-chapter xrefs are patched after rendering, so titles pulled from QMD
+    source do not pass through Pandoc's math parser. This handles short title
+    fragments such as ``$\\times$`` without treating captions themselves as
+    invalid math contexts.
+    """
+    text = text.replace(r"\$", _TITLE_CURRENCY_SENTINEL)
+    for _ in range(3):
+        text, changed = _TITLE_TEXT_WRAP_RE.subn(r"\1", text)
+        if not changed:
+            break
+    text = text.replace(r"\%", "%")
+    for command, glyph in _TITLE_GLYPHS:
+        text = re.sub(re.escape(command) + r"(?![A-Za-z])", glyph, text)
+    text = _TITLE_SPACING_RE.sub("", text)
+    text = text.replace("$$", "").replace("$", "")
+    text = text.replace(_TITLE_CURRENCY_SENTINEL, "$")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _extract_bold_title(text: str) -> str | None:
@@ -95,6 +140,7 @@ def _extract_bold_title(text: str) -> str | None:
     title = m.group(1)
     # Defensive: strip any \index{...} that might have slipped inside the bold span.
     title = re.sub(r'\\index\{[^}]*\}', '', title).strip()
+    title = _to_visible_title_text(title)
     return title or None
 
 

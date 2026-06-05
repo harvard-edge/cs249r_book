@@ -99,7 +99,7 @@ Silent failures have already caused significant damage to production systems acr
 
 ## Real-World Robustness Failures {#sec-robust-ai-realworld-robustness-failures-c119}
 
-Across cloud, edge, and embedded environments, the same pattern recurs: ML systems fail silently, confidently, and catastrophically. These failures demonstrate why fault-tolerant design, rigorous testing, and robust system architectures are nonnegotiable for reliable operation.
+Across cloud, edge, and embedded environments, ML systems fail when an assumption hidden in the stack becomes a dependency the system does not monitor. The incidents below differ in scale and domain, but each shows the same pattern: the system continues to operate while an unobserved condition corrupts the result.
 
 ::: {#ws-robust-ai-google-photos-gorilla-label .callout-war-story title="The label that exposed the test gap"}
 **Context**: In June 2015, Google Photos launched automatic image labeling to organize user photos at consumer scale [@kasperkevic2015googlephotos].
@@ -110,6 +110,8 @@ Across cloud, edge, and embedded environments, the same pattern recurs: ML syste
 
 **Systems lesson**: Robustness is not aggregate accuracy. Production vision systems need slice-level evaluation, harmful-label tests, and safe fallback behavior for labels whose errors carry high social cost---and the "temporary" mitigation often outlives the fix it was meant to bridge.
 :::
+
+That test-gap failure is the model-facing version of a broader reliability problem. In cloud infrastructure, the hidden assumption is often that a shared dependency remains available and correct.
 
 ### Cloud infrastructure failures {#sec-robust-ai-cloud-infrastructure-failures-1c8c}
 
@@ -310,17 +312,17 @@ The fault tolerance mechanisms from @sec-fault-tolerance-reliability, originally
 
 The security frameworks from @sec-security-privacy provide threat modeling principles that inform adversarial defense strategies. Operational monitoring systems from @sec-ops-scale provide the infrastructure foundation for detecting robustness threats in production. The serving infrastructure from @sec-inference-scale creates new attack surfaces: batching, model routing, and pipeline parallelism expose scheduling logic and individual pipeline stages to adversarial queries.
 
-The scale of modern models amplifies these risks. A 175B-parameter model is too large for a single accelerator under typical FP16/BF16 serving precision, so deployments shard weights and activations across multiple devices. Each additional pipeline or tensor-parallel stage increases the fault surface compared with a monolithic deployment: a single bit flip, network partition, or adversarial input targeting one stage can bring down the entire inference request. Efficiency techniques such as INT8 quantization and aggressive pruning compound this problem by reducing the model's **robustness margin**\index{Robustness Margin}, making it more susceptible to small input perturbations that a full-precision model might absorb. Robustness engineering is therefore a constant negotiation with the efficiency and scalability constraints established in previous chapters.
-
 ::: {.column-margin}
-![](images/svg/vol2_robust_ai_margin_001.svg){width="100%" fig-alt="Margin illustration showing One failing shard cascades through pipeline stages to a failed request."}
+![](images/svg/vol2_robust_ai_margin_001.svg){width="100%" fig-alt="One failing shard cascades through pipeline stages to a failed request."}
 
 *In sharded inference, one failed stage fails the whole request.*
 :::
 
+The scale of modern models amplifies these risks. A 175B-parameter model is too large for a single accelerator under typical FP16/BF16 serving precision, so deployments shard weights and activations across multiple devices. Each additional pipeline or tensor-parallel stage increases the fault surface compared with a monolithic deployment: a single bit flip, network partition, or adversarial input targeting one stage can bring down the entire inference request. Efficiency techniques such as INT8 quantization and aggressive pruning compound this problem by reducing the model's **robustness margin**\index{Robustness Margin}, making it more susceptible to small input perturbations that a full-precision model might absorb. Robustness engineering is therefore a constant negotiation with the efficiency and scalability constraints established in previous chapters.
+
 ### From ML performance to system reliability {#sec-robust-ai-ml-performance-system-reliability-7d42}
 
-Bridging the gap between ML performance concepts and reliability engineering principles reveals why traditional metrics are insufficient. Standard ML development focuses on model accuracy, inference latency, and throughput. Real-world deployment introduces an additional dimension: the reliability of the underlying computational substrate that executes the models.
+Once silent failure becomes a systems property, accuracy, latency, and throughput no longer describe the full reliability envelope. The deployed model also depends on the computational substrate that executes it, and that substrate can corrupt a correct model without producing a visible service failure.
 
 ```{python}
 #| echo: false
@@ -338,10 +340,10 @@ from mlsysim.core.constants import *
 # │ How: .to(unit).magnitude from mlsysim.core.constants plus bit-rate arithmetic.
 # │
 # │ Imports: mlsysim.core.constants (*), mlsysim.fmt (*)
-# │ Exports: gpt3_params_b_str, v100_mem_bw_gb_s_str, bits_per_second_math,
+# │ Exports: gpt3_params_b_str, v100_mem_bw_gb_per_s_str, bits_per_second_math,
 # │          base_error_rate_math, expected_errors_per_hour_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_math, fmt_qty, sci_latex
+from mlsysim.fmt import check, fmt, fmt_math, fmt_params, fmt_qty, fmt_rate, sci_latex
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RobustAISetup:
@@ -364,15 +366,15 @@ class RobustAISetup:
     check(gpt3_params_b_val == 175, f"Expected 175B params, got {gpt3_params_b_val}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_math, fmt_qty, sci_latex
-    gpt3_params_b_str = fmt(gpt3_params_b_val, precision=0, commas=False)
-    v100_mem_bw_gb_s_str = fmt_qty(h.memory.bandwidth, GB/second, precision=0, commas=False)
+    from mlsysim.fmt import fmt, fmt_math, fmt_params, fmt_qty, fmt_rate, sci_latex
+    gpt3_params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
+    v100_mem_bw_gb_per_s_str = fmt_qty(h.memory.bandwidth, GB/second, precision=0, commas=False)
     bits_per_second_math = fmt_math(sci_latex(bits_per_second_val, precision=1))
     base_error_rate_math = fmt_math(sci_latex(base_error_rate, precision=1))
-    expected_errors_per_hour_str = fmt(expected_errors_per_hour_val, precision=2, commas=False)
+    expected_errors_per_hour_str = fmt_rate(expected_errors_per_hour_val, "errors/hour", precision=2, commas=False)
 ```
 
-Consider how hardware reliability directly impacts ML performance. As @fig-weight-corruption illustrates, a single bit flip in a critical neural network weight can degrade ResNet-50 classification accuracy from 76 percent (top-1) to 11 percent on ImageNet, while memory subsystem failures during training corrupt gradient updates and prevent model convergence. Modern transformer models such as GPT-3 with `{python} RobustAISetup.gpt3_params_b_str`&nbsp;B parameters execute enormous numbers of floating-point operations and create many opportunities for hardware faults during a forward pass. GPU memory systems operating at up to `{python} RobustAISetup.v100_mem_bw_gb_s_str` bandwidth (such as V100 HBM2) process about `{python} RobustAISetup.bits_per_second_math` bits per second. At a base error rate of `{python} RobustAISetup.base_error_rate_math` errors per bit processed, sustained peak bandwidth would yield about `{python} RobustAISetup.expected_errors_per_hour_str` expected bit errors per hour per device; at fleet scale, those low per-device rates compound into operationally visible fault rates.
+Consider how hardware reliability directly impacts ML performance. As @fig-weight-corruption illustrates, a single bit flip in a critical neural network weight can degrade ResNet-50 classification accuracy from 76 percent (top-1) to 11 percent on ImageNet, while memory subsystem failures during training corrupt gradient updates and prevent model convergence. Modern transformer models such as GPT-3 with `{python} RobustAISetup.gpt3_params_b_str` parameters execute enormous numbers of floating-point operations and create many opportunities for hardware faults during a forward pass. GPU memory systems operating at up to `{python} RobustAISetup.v100_mem_bw_gb_per_s_str` bandwidth (such as V100 HBM2) process about `{python} RobustAISetup.bits_per_second_math` bits per second. At a base error rate of `{python} RobustAISetup.base_error_rate_math` errors per bit processed, sustained peak bandwidth would yield about `{python} RobustAISetup.expected_errors_per_hour_str` per device; at fleet scale, those low per-device rates compound into operationally visible fault rates.
 
 ::: {#fig-weight-corruption fig-env="figure" fig-pos="htb" fig-cap="**Weight Corruption via Bit Flip**: A neural-network forward-pass diagram (left) shows a BIT FLIP on one weight, turning a normal path into a corrupted path whose error propagates to the outputs. The weight-value histogram (right) shows a single corrupted weight landing at the extreme $10^k$ tail, far outside the normal distribution. Flipping an exponent bit with place value $2^k$ in IEEE 754 changes the value by a factor of $2^{\pm 2^k}$, saturating downstream neurons and causing silent misclassification." fig-alt="Left: neural-network forward pass with input, hidden, output neurons; BIT FLIP label on one weight, corrupted path arrows into outputs. Right: histogram of normal weights near zero, with one corrupted weight flagged at 10^k."}
 ![](images/svg/weight-corruption.svg)
@@ -436,18 +438,17 @@ The scale of modern GPU clusters transforms per-device error rates into fleet-le
 # │
 # │ Goal: Plot Pr(>=1 SDC) = 1-(1-p)^N vs N for p=1e-3, 1e-4, 1e-5.
 # │ Show: Three S-curves; semilog x; shaded region; annotations.
-# │ How: N = logspace(0,5,500); Pr_at_least_one = 1-(1-p)^N; viz.setup_plot().
+# │ How: N = logspace(0,5,500); Pr_at_least_one = 1-(1-p)^N; book_style.setup_plot().
 # │
-# │ Imports: numpy (np), matplotlib.pyplot (plt), mlsysim.core.viz (viz)
+# │ Imports: numpy (np), matplotlib.pyplot (plt), book.tools.figures.style (book_style)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot Pr(>=1 SDC) = 1-(1-p)^N vs N for p=1e-3, 1e-4, 1e-5.
 import numpy as np
 import matplotlib.pyplot as plt
-from mlsysim import viz
-
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+from book.tools.figures import style as book_style
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 N = np.logspace(0, 5, 500)  # 1 to 100,000 devices
@@ -524,7 +525,7 @@ The compounding effect at cluster scale motivates a unified framework for robust
 
 ### The three pillars of robust AI {#sec-robust-ai-three-pillars-robust-ai-2626}
 
-Robust AI systems must address three categories of challenges: environmental shifts, input-level attacks, and system-level faults. Software faults are a cross-cutting concern that can amplify or masquerade as any of the three. The **Three Pillars Framework**\index{Three Pillars Framework} in @fig-three-pillars-framework organizes these threats, each representing distinct but interconnected vulnerabilities that require complementary defense strategies:
+The unified framework helps engineers decide which failure signal they are seeing before they choose a defense. Environmental shifts, input-level attacks, and system-level faults produce different evidence and require different responses; software faults cut across all three because they can amplify or masquerade as any of them. The **Three Pillars Framework**\index{Three Pillars Framework} in @fig-three-pillars-framework organizes these threats as interconnected vulnerabilities that require complementary defense strategies:
 
 ::: {#fig-three-pillars-framework fig-env="figure" fig-pos="h" fig-cap="**Three Pillars Framework**: The three core categories of robustness challenges that AI systems must address to ensure reliable operation in real-world deployments. A robust AI system is built upon effectively handling these three challenge areas." fig-alt="Three-pillar diagram showing robustness challenges: software faults on left, adversarial attacks in center, distribution shifts on right, all supporting robust AI system platform."}
 
@@ -609,9 +610,9 @@ Software faults cut across all three categories, encompassing failures originati
 
 ### Common robustness principles {#sec-robust-ai-common-robustness-principles-cb22}
 
-All three categories of challenges stem from different sources but share key characteristics that shape how engineers build resilient systems:
+Across all three categories, the shared engineering problem is deciding which signal triggers which response. Robust systems need a detection threshold, a degradation path, and an adaptation mechanism, each with an explicit cost budget.
 
-Detection and monitoring form the foundation of any robustness strategy. Hardware monitoring systems typically sample metrics at 1--10 Hz frequencies and detect temperature anomalies (±5°C from baseline), voltage fluctuations (±5 percent from nominal), and memory error rates exceeding $10^{-12}$ errors per bit per hour. Adversarial input detection uses statistical tests with $p$-value thresholds of 0.01--0.05 and achieves 85–95 percent detection rates with false positive rates below 2 percent. Distribution monitoring using MMD[^fn-mmd-drift] tests processes 1,000--10,000 samples per evaluation and detects shifts with Cohen's $d > 0.3$ within 95 percent confidence intervals. The same quantitative discipline applies to defense cost: robustness mechanisms must be budgeted, not merely enabled.
+Detection and monitoring form the foundation of that strategy. Hardware monitoring systems typically sample metrics at 1--10 Hz frequencies and detect temperature anomalies (±5°C from baseline), voltage fluctuations (±5 percent from nominal), and memory error rates exceeding $10^{-12}$ errors per bit per hour. Adversarial input detection uses statistical tests with $p$-value thresholds of 0.01--0.05 and achieves 85–95 percent detection rates with false positive rates below 2 percent. Distribution monitoring using MMD[^fn-mmd-drift] tests processes 1,000--10,000 samples per evaluation and detects shifts with Cohen's $d > 0.3$ within 95 percent confidence intervals. The same quantitative discipline applies to defense cost: robustness mechanisms must be budgeted, not merely enabled.
 
 ```{python}
 #| echo: false
@@ -626,10 +627,10 @@ Detection and monitoring form the foundation of any robustness strategy. Hardwar
 # │ How: total time = standard time + PGD steps × standard time.
 # │
 # │ Imports: mlsysim.fmt (check)
-# │ Exports: ap_std_passes_str, ap_n_pgd_steps_str, ap_slowdown_str,
-# │          ap_cert_acc_str, ap_gap_pct_str
+# │ Exports: ap_std_passes_str, ap_n_pgd_steps_str, ap_slowdown_mult_str,
+# │          ap_cert_acc_str, ap_gap_pp_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, MarkdownStr
+from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_percent, fmt_pp, MarkdownStr
 
 class AdversarialPayback:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -648,9 +649,10 @@ class AdversarialPayback:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     ap_std_passes_str = fmt(std_passes, precision=0, commas=False)
     ap_n_pgd_steps_str = fmt(n_pgd_steps, precision=0, commas=False)
-    ap_slowdown_str = fmt(slowdown, precision=0, commas=False)
+    ap_total_passes_str = fmt_count(slowdown, precision=0, commas=False)
+    ap_slowdown_mult_str = fmt_multiple(slowdown, precision=0, commas=False)
     ap_cert_acc_str = fmt_percent(robust_acc, precision=0, commas=False, style='symbol')
-    ap_gap_pct_str = fmt(accuracy_gap_pct, precision=0, commas=False)
+    ap_gap_pp_str = fmt_pp(accuracy_gap_pct, precision=0, commas=False, style='prose', attributive=True)
     ap_std_acc_str = fmt_percent(std_acc, precision=0, commas=False, style='symbol')
 ```
 
@@ -661,19 +663,19 @@ class AdversarialPayback:
 **Math**:
 Generating an adversarial example requires $K$ additional gradient steps per training sample.
 
-1. **Forward/Backward Passes**: `{python} AdversarialPayback.ap_std_passes_str` (Standard) + `{python} AdversarialPayback.ap_n_pgd_steps_str` (Attack Generation) = `{python} AdversarialPayback.ap_slowdown_str` total passes.
-2. **Training Slowdown**\index{Training!slowdown}: `{python} AdversarialPayback.ap_slowdown_str`$\times$ slower.
+1. **Forward/Backward Passes**: `{python} AdversarialPayback.ap_std_passes_str` (Standard) + `{python} AdversarialPayback.ap_n_pgd_steps_str` (Attack Generation) = `{python} AdversarialPayback.ap_total_passes_str` total passes.
+2. **Training Slowdown**\index{Training!slowdown}: `{python} AdversarialPayback.ap_slowdown_mult_str` slower.
 3. **Utility Cost**\index{Adversarial Training!accuracy cost}: Accuracy against the worst-case attack is `{python} AdversarialPayback.ap_cert_acc_str`, compared with `{python} AdversarialPayback.ap_std_acc_str` clean-data accuracy for the standard model.
 
-**Systems insight**: Robustness is an efficiency-utility trade-off. In this PGD-7 example, the team pays `{python} AdversarialPayback.ap_slowdown_str`$\times$ the training cost and exposes a `{python} AdversarialPayback.ap_gap_pct_str` accuracy-point gap between standard clean-data accuracy and robust accuracy under the specified worst-case digital perturbation threat model. In the Machine Learning Fleet, "Robustness" is not a setting that can be flipped on; it is a budget the team spends. This is why most fleets use *detection* (cheaper) rather than *certification* (robust training) for all but the most safety-critical components.
+**Systems insight**: Robustness is an efficiency-utility trade-off. In this PGD-7 example, the team pays `{python} AdversarialPayback.ap_slowdown_mult_str` the training cost and exposes a `{python} AdversarialPayback.ap_gap_pp_str` accuracy gap between standard clean-data accuracy and robust accuracy under the specified worst-case digital perturbation threat model. In the Machine Learning Fleet, "Robustness" is not a setting that can be flipped on; it is a budget the team spends. This is why most fleets use *detection* (cheaper) rather than *certification* (robust training) for all but the most safety-critical components.
 
 :::
 
 [^fn-mmd-drift]: **Maximum Mean Discrepancy (MMD)**: A kernel-based statistical test measuring distance between two distributions in a reproducing kernel Hilbert space, without parametric assumptions. Unlike univariate tests (K-S, PSI) that require per-feature evaluation, MMD operates on joint distributions natively---critical for ML inputs where drift manifests in feature correlations, not individual features. The trade-off is compute: MMD scales $\mathcal{O}(n^2)$ in sample size, making it impractical for real-time monitoring without subsampling or random feature approximations. \index{MMD!drift detection}
 
-Graceful degradation ensures that systems maintain core functionality even when operating under stress. Rather than catastrophic failure, robust systems exhibit predictable performance reduction that preserves critical capabilities. ECC memory systems recover from single-bit errors with 99.9 percent success rates while adding 12.5 percent bandwidth overhead. Model quantization from FP32 to INT8 reduces memory requirements by 75 percent and inference time by 2--4$\times$, trading 1--3 percent accuracy for continued operation under resource constraints. Ensemble fallback systems maintain 85–90 percent of peak performance when primary models fail, with switchover latency under 10&nbsp;ms.
+Graceful degradation turns detection into a bounded operating mode instead of a crash. Robust systems exhibit predictable performance reduction that preserves critical capabilities. ECC memory systems recover from single-bit errors with 99.9 percent success rates while adding 12.5 percent bandwidth overhead. Model quantization from FP32 to INT8 reduces memory requirements by 75 percent and inference time by 2--4$\times$, trading 1--3 percent accuracy for continued operation under resource constraints. Ensemble fallback systems maintain 85–90 percent of peak performance when primary models fail, with switchover latency under 10&nbsp;ms.
 
-Adaptive response enables systems to adjust their behavior based on detected threats or changing conditions. Adaptation might involve activating error correction mechanisms, applying input preprocessing techniques, or dynamically adjusting model parameters. The key principle is that robustness is not static but requires ongoing adjustment to maintain effectiveness.
+Adaptive response completes the loop by changing system behavior when the signal persists. Adaptation might involve activating error correction mechanisms, applying input preprocessing techniques, or dynamically adjusting model parameters. The key principle is that robustness is not static but requires ongoing adjustment to maintain effectiveness.
 
 Detection, degradation, and adaptation extend beyond fault recovery to form a systematic performance adaptation strategy that appears throughout ML system design. As @fig-robustness-taxonomy illustrates, detection strategies form the foundation for monitoring systems, graceful degradation guides fallback mechanisms when components fail, and adaptive response enables systems to evolve with changing conditions.
 
@@ -697,7 +699,7 @@ Robustness is a property enforced across the entire system lifecycle, not a sing
 
 ## Environmental Shifts {#sec-robust-ai-environmental-shifts-a2cf}
 
-The most pervasive robustness challenge arises from the natural evolution of real-world conditions that degrade model performance over time. Unlike the deliberate manipulations of input-level attacks, environmental shifts reflect the inherent challenge of deploying static models in dynamic environments where data distributions, user behavior, and operational contexts continuously evolve. Environmental shifts also interact synergistically with other vulnerability types: a model experiencing distribution shift becomes more susceptible to adversarial attacks, while software errors may manifest differently under changed environmental conditions.
+Training data freezes a past world, while production traffic keeps changing. Environmental shifts are the robustness failures that follow from this mismatch: data distributions, user behavior, and operational contexts move after the model has learned its boundary. These shifts also interact with other vulnerability types: a model experiencing distribution shift becomes more susceptible to adversarial attacks, while software errors may manifest differently under changed environmental conditions.
 
 ### Distribution shift and concept drift {#sec-robust-ai-distribution-shift-concept-drift-55e2}
 
@@ -806,7 +808,7 @@ Standard training by empirical risk minimization (ERM) encourages these shortcut
 
 ### Monitoring and adaptation strategies {#sec-robust-ai-monitoring-adaptation-strategies-f305}
 
-Detecting distribution shift before it degrades predictions requires continuous monitoring of deployment conditions and adaptive mechanisms that maintain model performance as conditions change.
+Drift monitoring earns its place only when it turns a distribution signal into an operating decision: investigate, adapt, retrain, or continue watching.
 
 ```{python}
 #| echo: false
@@ -860,7 +862,7 @@ Statistical distance metrics quantify the degree of distribution shift by measur
 
 [^fn-psi-etymology]: **Population Stability Index (PSI)**: Originally developed in the 1980s for credit scoring to detect whether the demographic of current loan applicants shifted from the historical baseline. In ML monitoring, PSI's symmetric log-ratio formulation makes it a common industry tool for identifying data drift in categorical features, providing a single scalar trigger for retraining workflows. \index{Population Stability Index!drift detection}
 
-Online learning enables models to continuously adapt to new data while maintaining performance on previously learned patterns [@shalev-shwartz2012]. The adaptation budget depends on model size, drift rate, and feedback latency: updating too aggressively can chase noise, while updating too slowly lets performance drift. In production, online-learning systems usually bound update frequency, state size, and serving latency explicitly rather than assuming adaptation is free. Techniques like Elastic Weight Consolidation reduce catastrophic forgetting by penalizing changes to parameters important for previous tasks [@kirkpatrick2017].
+Once a monitor fires, adaptation becomes a budgeted response instead of an automatic retraining command. Online learning enables models to continuously adapt to new data while maintaining performance on previously learned patterns [@shalev-shwartz2012]. The adaptation budget depends on model size, drift rate, and feedback latency: updating too aggressively can chase noise, while updating too slowly lets performance drift. In production, online-learning systems usually bound update frequency, state size, and serving latency explicitly rather than assuming adaptation is free. Techniques like Elastic Weight Consolidation reduce catastrophic forgetting by penalizing changes to parameters important for previous tasks [@kirkpatrick2017].
 
 Adaptive ensemble methods maintain multiple models or hypotheses and weight or select among them using recent performance, making them useful under gradual concept drift [@gama2014]. This approach trades extra serving and monitoring complexity for the ability to respond when a single static model no longer matches the deployment distribution.
 
@@ -868,7 +870,7 @@ Federated learning enables distributed adaptation across multiple deployment env
 
 ### Quantitative drift detection {#sec-robust-ai-quantitative-drift-detection-1e04-1e04}
 
-Production ML systems require rigorous quantitative methods for detecting distribution drift and making principled retraining decisions. The mathematical foundations and operational thresholds below transform drift detection from a subjective judgment into an engineering discipline.
+Quantitative drift detection must answer an operational question: whether the model should keep serving, be monitored more closely, or be retrained. The mathematical foundations and operational thresholds below transform drift detection from a subjective judgment into an engineering discipline.
 
 #### Population stability index (PSI) {#sec-robust-ai-population-stability-index-psi-077d}
 
@@ -1164,13 +1166,7 @@ Decision: Continue monitoring with increased frequency (weekly instead of monthl
 
 #### Retraining decision framework {#sec-robust-ai-retraining-decision-framework-68e3}
 
-::: {.column-margin}
-![](images/svg/robust_ai_psi_drift_knee.svg){width="100%" fig-alt="A line curve that stays nearly flat across the left and rises sharply into a hockey-stick on the right, with a dot marking the knee and the region to the right of the knee shaded to mark a danger zone."}
-
-*Drift stays benign until the index crosses a threshold; past the knee, reliability degrades fast.*
-:::
-
-A systematic decision framework integrates drift metrics with performance monitoring to determine optimal retraining timing. The framework operates on three levels.
+A systematic decision framework integrates drift metrics with performance monitoring to determine optimal retraining timing. The three levels below keep metric alerts from becoming automatic retraining commands.
 
 ##### Level 1: Automated monitoring {#sec-robust-ai-level-1-automated-monitoring-e418}
 
@@ -1187,6 +1183,12 @@ When drift alerts trigger, correlate with model performance:
 - If performance degradation exceeds 3 percent and coincides with drift: Initiate retraining
 - If drift detected but performance stable: Continue monitoring, investigate drift source
 - If performance degrades without detected drift: Investigate concept drift or label shift
+
+::: {.column-margin}
+![](images/svg/robust_ai_psi_drift_knee.svg){width="100%" fig-alt="A line curve that stays nearly flat across the left and rises sharply into a hockey-stick on the right, with a dot marking the knee and the region to the right of the knee shaded to mark a danger zone."}
+
+*Drift stays benign until the index crosses a threshold; past the knee, reliability degrades fast.*
+:::
 
 ##### Level 3: Retraining vs. investigation {#sec-robust-ai-level-3-retraining-vs-investigation-4338}
 
@@ -1211,7 +1213,7 @@ The quantitative framework transforms drift detection from reactive troubleshoot
 
 ### Robustness in generative AI {#sec-robust-ai-robustness-generative-ai-941b}
 
-Large Language Models (LLMs) fundamentally shift the definition of failure from incorrect classification to *semantic reliability*. In generative systems, failure takes the form of a "hallucination": a fluent, confident, but factually baseless assertion. Studies of production LLMs in specialized domains like legal or medical advice indicate hallucination rates ranging from 3 percent to 15 percent, depending on the retrieval context and model temperature. Addressing this requires rigorous **Uncertainty Quantification (UQ)**\index{Hallucination!generative AI}\index{Uncertainty Quantification!generative AI}: a robust system must be self-aware enough to flag when it is guessing. One approach monitors the entropy of the output distribution; a "flat" probability distribution across the vocabulary indicates high uncertainty, which can trigger a fallback to a human operator or a refusal to answer. Log-probabilities at the token level reveal segments where the model transitions from confident generation to speculative completion.
+Large language models (LLMs) shift the failure surface from incorrect classification to semantic reliability: a fluent answer can be factually baseless while the system still appears healthy. Studies of production LLMs in specialized domains like legal or medical advice indicate hallucination rates ranging from 3 percent to 15 percent, depending on the retrieval context and model temperature. Addressing this requires rigorous **Uncertainty Quantification (UQ)**\index{Hallucination!generative AI}\index{Uncertainty Quantification!generative AI}: a robust system must be self-aware enough to flag when it is guessing. One approach monitors the entropy of the output distribution; a "flat" probability distribution across the vocabulary indicates high uncertainty, which can trigger a fallback to a human operator or a refusal to answer. Log-probabilities at the token level reveal segments where the model transitions from confident generation to speculative completion.
 
 More advanced UQ techniques involve **Self-Consistency**\index{Self-Consistency}, where the model is prompted to generate multiple distinct reasoning paths for the same query. If five sampling runs produce five contradictory answers to a factual question, the system treats the output as unstable and suppresses it. This statistical approach transforms the nebulous concept of "truthfulness" into a measurable variance metric that integrates naturally with the MLOps monitoring pipeline (@sec-ops-scale). Predictive entropy---aggregating the Shannon entropy across the full output sequence---provides a scalar score that can be thresholded to route high-risk generations for human review.
 
@@ -1223,7 +1225,7 @@ While prompt injection exploits the linguistic flexibility of generative models,
 
 ## Input-Level Attacks and Model Robustness {#sec-robust-ai-inputlevel-attacks-model-robustness-d6ea}
 
-Adding a microscopic, mathematically calculated layer of noise to an image of a benign skin lesion, noise so subtle a human dermatologist cannot see it, causes a production diagnostic model to diagnose it as malignant with 99.9 percent confidence. The high-dimensional decision boundaries learned by deep neural networks possess counterintuitive blind spots that malicious actors can deliberately exploit. Adversarial attacks expose these blind spots.
+Adding a microscopic, mathematically calculated layer of noise to an image of a benign skin lesion, noise so subtle a human dermatologist cannot see it, causes a production diagnostic model to diagnose it as malignant with 99.9 percent confidence. The high-dimensional decision boundaries learned by deep neural networks possess counterintuitive blind spots that malicious actors can deliberately exploit. The practical question is what the attacker can see or control: gradients, queries, physical sensors, or training data. Adversarial attacks expose these blind spots.
 
 ### Adversarial attacks {#sec-robust-ai-adversarial-attacks-481c}
 
@@ -1237,7 +1239,7 @@ Adding a microscopic, mathematically calculated layer of noise to an image of a 
 
 :::
 
-Adversarial attacks exploit core characteristics of how neural networks learn and represent information, revealing model sensitivity to carefully crafted modifications that remain imperceptible to human observers. @Fig-adversarial-attack-noise-example demonstrates how adding small, carefully designed perturbations to input data can cause high-confidence misclassification, with perturbations invisible to the human eye but devastating to model accuracy.\index{Adversarial Perturbation}
+Adversarial attack categories encode access and cost. A white-box attacker can use gradients directly, a black-box attacker relies on transfer, and a physical attacker must survive cameras, lighting, and distance. @Fig-adversarial-attack-noise-example demonstrates the shared mechanism: small, carefully designed perturbations to input data can cause high-confidence misclassification, with perturbations invisible to the human eye but devastating to model accuracy.\index{Adversarial Perturbation}
 
 ::: {#fig-adversarial-attack-noise-example fig-env="figure" fig-pos="htb" fig-cap="**Adversarial Perturbation**: Subtle, intentionally crafted noise can cause neural networks to misclassify images with high confidence and expose vulnerabilities in model robustness. These perturbations, imperceptible to humans, alter the input in ways that maximize prediction error and highlight the need for defenses against adversarial attacks. Source: Sutanto (2019)." fig-alt="Flow diagram: original cat image classified as 'Cat' by the AI system; adding adversarial noise (generated by an AI-deceiving attack) yields a visually identical adversarial example that the same AI system misclassifies as 'Dog'."}
 
@@ -1322,15 +1324,15 @@ Transfer-based attacks exploit the transferability property[^fn-transferability-
 
 [^fn-transferability-blackbox]: **Transferability**: The property, analyzed in @papernot2016transferability, that adversarial examples crafted for one model fool different architectures with 30--70 percent success rates. This transforms the threat model for deployed ML systems: attackers need not query the target model at all---they can train a substitute locally, craft attacks offline, and transfer them to production APIs. Ensemble adversarial training (training against perturbations from multiple surrogate models) partially mitigates transfer attacks at 3--5$\times$ the training cost. \index{Transferability!black-box attack}
 
-::: {.column-margin}
-![](images/svg/vol2_robust_ai_margin_002.svg){width="100%" fig-alt="Margin illustration showing One surrogate-crafted attack fans out to target models."}
-
-*One surrogate-crafted adversarial example transfers across many models.*
-:::
-
 Transferability underlies the feasibility of black-box attacks, where the adversary cannot query gradients but can still fool a model by crafting attacks on a publicly available or similar substitute model. Transfer-based attacks are particularly relevant in practical threat scenarios, such as attacking commercial ML APIs, where the attacker can observe inputs and outputs but not internal computations.
 
 Attack success often depends on factors like similarity between models, alignment in training data, and the regularization techniques used. Techniques like input diversity (random resizing, cropping) and momentum during optimization can be used to increase transferability.
+
+::: {.column-margin}
+![](images/svg/vol2_robust_ai_margin_002.svg){width="100%" fig-alt="One surrogate-crafted attack fans out to target models."}
+
+*One surrogate-crafted adversarial example transfers across many models.*
+:::
 
 ##### Physical-world attacks {#sec-robust-ai-physicalworld-attacks-97a0}
 
@@ -1344,15 +1346,13 @@ Research into physical-world attacks also includes efforts to develop universal 
 
 ::: {#exmp-robust-ai-stop-sign-attack .callout-example title="The stop sign attack"}
 
-In a striking demonstration of physical adversarial examples, researchers fooled a state-of-the-art object detector into classifying a Stop sign as a Speed Limit 45 sign using only black and white stickers. Unlike digital perturbations invisible to humans, these "adversarial patches" were robust to changing distances (up to 30 feet), viewing angles, and lighting conditions. The attack achieved high misclassification rates during drive-by tests. This revealed a critical fragility in deep learning systems: high-confidence predictions can be manipulated by altering physical semantics in ways that are obvious to humans but catastrophic for the model's feature extractors.
+In a striking demonstration of physical adversarial examples, researchers fooled an object detector into classifying a Stop sign as a Speed Limit 45 sign using only black and white stickers. Unlike digital perturbations invisible to humans, these "adversarial patches" were robust to changing distances (up to 30 feet), viewing angles, and lighting conditions. The attack achieved high misclassification rates during drive-by tests. This revealed a critical fragility in deep learning systems: high-confidence predictions can be manipulated by altering physical semantics in ways that are obvious to humans but catastrophic for the model's feature extractors.
 
 :::
 
 ##### Attack taxonomy overview {#sec-robust-ai-attack-taxonomy-overview-a932}
 
-@Tbl-attack_types summarizes the different categories of adversarial attacks: gradient-based attacks (FGSM, PGD, JSMA), optimization-based attacks (C&W, DeepFool [@moosavi-dezfooli2016], EAD), transfer-based attacks, and physical-world attacks (adversarial patches and objects). Each attack type exploits different model vulnerabilities and requires distinct defensive considerations.
-
-Each attack mechanism targets a specific relationship between the model's decision boundaries, the input data, and the attacker's objectives. Manipulating input data exploits the model's learned sensitivities, producing incorrect predictions that vary in severity depending on the attack's sophistication and the defense measures in place.
+The point of @Tbl-attack_types is defense selection, not vocabulary. The rows identify what the attacker uses to cross the decision boundary: gradients, optimization, surrogate transfer, or physical sensor manipulation. Each mechanism targets a specific relationship between the model's decision boundaries, the input data, and the attacker's objectives, producing incorrect predictions whose severity depends on the attack's sophistication and the defense measures in place.
 
 | **Category**     | **Method**      | **Mechanism**                                             |
 |:-----------------|:----------------|:----------------------------------------------------------|
@@ -1402,7 +1402,15 @@ The presence of adversarial vulnerabilities also complicates the deployment and 
 
 Adversarial vulnerability highlights the urgent need for defense strategies examined in @sec-robust-ai-input-attack-detection-defense-19d3.
 
+\Needspace{14\baselineskip}
+
 ### Data poisoning {#sec-robust-ai-data-poisoning-4b55}
+
+::: {.column-margin}
+![](images/svg/vol2_robust_ai_margin_003.svg){width="100%" fig-alt="Poisoning lifecycle: inject, learn, trigger."}
+
+*Data poisoning runs a lifecycle: inject, learn, trigger.*
+:::
 
 ::: {#dfn-robust-ai-data-poisoning .callout-definition title="Data poisoning"}
 
@@ -1428,13 +1436,7 @@ First formalized by @biggio2012poisoning[^fn-data-poisoning-attack], poisoning a
 
 Data poisoning typically unfolds in three stages. During injection, the attacker introduces poisoned samples into the training dataset---altered versions of existing data or entirely new instances designed to blend in with clean examples. The attacker may target specific classes, insert malicious triggers, or craft outliers intended to distort the decision boundary. During training, the model incorporates these samples and learns spurious or misleading patterns; because the poisoned data is often statistically similar to clean data, the corruption goes unnoticed during standard evaluation. Finally, during deployment, the attacker exploits the compromised model---triggering backdoor misclassifications, degrading overall accuracy, or manipulating predictions in targeted ways that are difficult to trace back to training data.
 
-::: {.column-margin}
-![](images/svg/vol2_robust_ai_margin_003.svg){width="100%" fig-alt="Margin illustration showing Poisoning lifecycle: inject, learn, trigger."}
-
-*Data poisoning runs a lifecycle: inject, learn, trigger.*
-:::
-
-Four main categories of poisoning attacks have been identified in the literature [@oprea2022]. In availability attacks, a substantial portion of the training data is poisoned with the aim of degrading overall model performance. A classic example involves flipping labels, for instance, systematically changing instances with true label $y = 1$ to $y = 0$ in a binary classification task. These attacks render the model unreliable across a wide range of inputs, effectively making it unusable.
+Poisoning categories differ by what the adversary wants the trained model to do [@oprea2022]. In availability attacks, a substantial portion of the training data is poisoned with the aim of degrading overall model performance. A classic example involves flipping labels, for instance, systematically changing instances with true label $y = 1$ to $y = 0$ in a binary classification task. These attacks render the model unreliable across a wide range of inputs, effectively making it unusable.
 
 In contrast, targeted poisoning attacks aim to compromise only specific classes or instances. Here, the attacker modifies just enough data to cause a small set of inputs to be misclassified, while overall accuracy remains relatively stable. The subtlety of targeted attacks makes them especially hard to detect.
 
@@ -1974,11 +1976,11 @@ The mechanics of these input-level attacks, from adversarial perturbations and d
 
 ## Adversarial Defenses {#sec-robust-ai-input-attack-detection-defense-19d3}
 
-Defending against adversarial attacks requires a portfolio approach: adversarial training provides empirical robustness, certified defenses provide mathematical guarantees, and input sanitization provides a practical first line of defense.
+An adversarial defense is a budgeted response to a specific threat model. The stronger the guarantee, the more the system pays in clean accuracy, training compute, inference latency, or operational coverage.
 
 ### Adversarial training and certified defenses {#sec-robust-ai-adversarial-attack-defenses-1dc8}
 
-The most direct defense against adversarial attacks is **adversarial training**\index{Adversarial Training}, which incorporates adversarial examples into the training process itself.
+For model-facing perturbation threats, the most direct defense is **adversarial training**\index{Adversarial Training}, which incorporates adversarial examples into the training process itself.
 
 ```{python}
 #| echo: false
@@ -2013,12 +2015,10 @@ class RobustnessTaxAnalysis:
     check(acc_drop > 20, "Robustness tax should be significant (>20 percentage points)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt
+    from mlsysim.fmt import fmt_percent, fmt_pp
     clean_acc_str = fmt_percent(clean_acc/100, precision=0, commas=False, style='prose')
     robust_acc_str = fmt_percent(robust_acc/100, precision=0, commas=False, style='prose')
-    # acc_drop is a difference of two accuracies = percentage POINTS, not a
-    # percent ratio; prose supplies "percentage points"/"accuracy points".
-    acc_drop_str = fmt(acc_drop, precision=0, commas=False)
+    acc_drop_pp_str = fmt_pp(acc_drop, precision=0, commas=False)
 ```
 
 ::: {#nbk-robust-ai-robustness-tax .callout-notebook title="The robustness tax"}
@@ -2036,7 +2036,7 @@ class RobustnessTaxAnalysis:
 *Adversarial robustness costs roughly 26 points of clean accuracy.*
 :::
 
-**Result**: Gaining robustness against rare adversarial attacks sacrifices `{python} RobustnessTaxAnalysis.acc_drop_str` percentage points of clean accuracy on normal inputs.
+**Result**: Gaining robustness against rare adversarial attacks sacrifices `{python} RobustnessTaxAnalysis.acc_drop_pp_str` of clean accuracy on normal inputs.
 
 *   **Rationale**: The model must learn to ignore "nonrobust features" (like high-frequency textures) that are predictive but brittle.
 *   **Systems insight**: Robustness cannot simply be "turned on" for free. It is a fundamental trade-off between *average-case performance* and *worst-case reliability*.
@@ -2108,7 +2108,7 @@ class RandomizedSmoothingRadius:
 
 ##### Detection techniques {#sec-robust-ai-detection-techniques-0e7e}
 
-Detecting adversarial examples before they reach the model forms the first line of defense. Multiple techniques identify and flag suspicious inputs at different points in the inference pipeline.
+Detecting adversarial examples before they reach the model forms the first line of defense only when the signal reaches a serving decision: reject, transform, route, or audit. Multiple techniques identify and flag suspicious inputs at different points in the inference pipeline.
 
 Statistical methods detect adversarial examples by analyzing the distributional properties of input data. The detector compares the input data distribution to a reference distribution, such as the training data distribution or a known benign distribution. Techniques like the Kolmogorov-Smirnov test[^fn-ks-test-adversarial] [@berger2014kolmogorov] or the Anderson-Darling test can measure the discrepancy between distributions and flag inputs that deviate significantly from the expected distribution.
 
@@ -2134,7 +2134,7 @@ Once the detection layer flags adversarial inputs, defense strategies mitigate t
 
 Training time increases 3--10$\times$ because adversarial example generation during each training step requires additional forward and backward passes through the model. Memory requirements increase 2--3$\times$ for storing both clean and adversarial examples, along with gradients computed during attack generation. Iterative attacks like PGD, which require multiple optimization steps, demand specialized infrastructure for efficient generation.
 
-The clean-accuracy cost depends on the threat model and defense. For strong ImageNet-scale adversarial training at $\epsilon = 8/255$, clean accuracy can drop by roughly `{python} RobustnessTaxAnalysis.acc_drop_str` accuracy points, as in the robustness-tax example above. Lighter defenses, smaller perturbation budgets, or randomized smoothing can impose smaller costs, often in the single digits to mid-teens, but the trade-off remains fundamental to the robust optimization objective. Model size often increases with robustness-enhancing architectural modifications such as wider networks or additional normalization layers that improve gradient stability.
+The clean-accuracy cost depends on the threat model and defense. For strong ImageNet-scale adversarial training at $\epsilon = 8/255$, clean accuracy can drop by roughly `{python} RobustnessTaxAnalysis.acc_drop_pp_str`, as in the robustness-tax example above. Lighter defenses, smaller perturbation budgets, or randomized smoothing can impose smaller costs, often in the single digits to mid-teens, but the trade-off remains fundamental to the robust optimization objective. Model size often increases with robustness-enhancing architectural modifications such as wider networks or additional normalization layers that improve gradient stability.
 
 Hyperparameter tuning grows significantly more complex when balancing robustness and performance objectives. Validation procedures must evaluate both clean and adversarial performance using multiple attack methods, and deployment infrastructure must support the additional computational requirements, including GPU memory for gradient computation and storage for adversarial example caches.
 
@@ -2166,7 +2166,7 @@ The implementation in @lst-adversarial-training generates adversarial examples o
 
 Once adversarial examples are part of the training loop, deployment must coordinate robustness techniques with MLOps pipelines, monitoring strategies, and distributed training infrastructure that synchronizes updates across multiple nodes.
 
-Defensive distillation\index{Defensive Distillation} [@papernot2016] trains a second model (the student) to mimic the behavior of the original model (the teacher). The student trains on the soft labels produced by the teacher, which are less sensitive to small perturbations. Because the student learns to generalize better and is less sensitive to adversarial noise, using it for inference reduces the impact of adversarial perturbations.
+The remaining strategies spend the defense budget at different layers of the pipeline. Defensive distillation\index{Defensive Distillation} [@papernot2016] trains a second model (the student) to mimic the behavior of the original model (the teacher). The student trains on the soft labels produced by the teacher, which are less sensitive to small perturbations. Because the student learns to generalize better and is less sensitive to adversarial noise, using it for inference reduces the impact of adversarial perturbations.
 
 Input preprocessing and transformation techniques remove or mitigate adversarial perturbations before the input reaches the ML model. Image denoising, JPEG compression, random resizing, padding, and random transformations all reduce the impact of adversarial perturbations and improve the model's robustness.
 
@@ -2174,7 +2174,7 @@ Ensemble methods combine multiple models with different architectures, training 
 
 ##### Evaluation and testing {#sec-robust-ai-evaluation-testing-4b54}
 
-Evaluating adversarial defenses requires systematic testing that measures model robustness under controlled attack conditions.
+Evaluating adversarial defenses closes the budget loop: the system must measure which attacks the defense actually covers and what performance it sacrifices under controlled attack conditions.
 
 Adversarial robustness metrics quantify resilience through the model's accuracy on adversarial examples, the average distortion required to fool the model, and performance under different attack strengths. Comparing these metrics across models or defense techniques allows practitioners to assess relative robustness levels.
 
@@ -2335,7 +2335,7 @@ shift={($(LE)!0.35!(DE)+(0,1.1)$)},scale=0.7, every node/.append style={transfor
 
 ### Anomaly detection techniques {#sec-robust-ai-anomaly-detection-techniques-bc27}
 
-Statistical outlier detection methods identify data points that deviate significantly from the bulk of the data, operating on the assumption that poisoned instances are likely statistical outliers. Techniques such as the Z-score method\index{Z-Score Method!anomaly detection}, Tukey's method, and the Mahalanobis distance\index{Mahalanobis Distance!anomaly detection} measure the deviation of each data point from the dataset's central tendency. Data points that exceed a predefined threshold are flagged as potential outliers and considered suspicious for data poisoning.
+Anomaly detection is the first supply-chain control point: it asks whether a candidate training example belongs to the distribution that the pipeline intended to learn from. Statistical outlier detection methods identify data points that deviate significantly from the bulk of the data, operating on the assumption that poisoned instances are likely statistical outliers. Techniques such as the Z-score method\index{Z-Score Method!anomaly detection}, Tukey's method, and the Mahalanobis distance\index{Mahalanobis Distance!anomaly detection} measure the deviation of each data point from the dataset's central tendency. Data points that exceed a predefined threshold are flagged as potential outliers and considered suspicious for data poisoning.
 
 Clustering-based methods group similar data points by features or attributes, operating on the assumption that poisoned instances form distinct clusters or lie far from normal data clusters. Algorithms like K-means, DBSCAN, and hierarchical clustering identify anomalous clusters or data points that do not belong to any cluster, treating these instances as potentially poisoned data.
 
@@ -2499,7 +2499,7 @@ node[below=9pt]{Decoder}(D2);
 
 #### Sanitization and preprocessing {#sec-robust-ai-sanitization-preprocessing-f883}
 
-Data cleaning provides the first line of defense against poisoning by identifying and removing noisy, incomplete, or inconsistent data points. Data deduplication, missing value imputation, and outlier removal improve training data quality, and filtering suspicious or anomalous data points before training reduces the impact of poisoned instances.
+Sanitization turns anomaly signals into training-set changes before the poison reaches optimization. Data cleaning identifies and removes noisy, incomplete, or inconsistent data points. Data deduplication, missing value imputation, and outlier removal improve training data quality, and filtering suspicious or anomalous data points before training reduces the impact of poisoned instances.
 
 Data validation verifies the integrity and consistency of training data by checking data type consistency, range constraints, and cross-field dependencies. Enforcing these validation rules exposes anomalous or inconsistent data points indicative of poisoning and flags them for further investigation.
 
@@ -2527,8 +2527,8 @@ For more granular debugging, **influence functions**\index{Influence Functions!d
 # │      linearly with e.
 # │
 # │ Imports: mlsysim.fmt (check, fmt)
-# │ Exports: normal_error_multiple_str, squared_loss_multiple_str,
-# │          residual_gradient_multiple_str
+# │ Exports: normal_error_mult_str, squared_loss_mult_str,
+# │          residual_gradient_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt
 
@@ -2550,19 +2550,19 @@ class HuberOutlierScaling:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     from mlsysim.fmt import fmt
-    normal_error_multiple_str = fmt(normal_error_multiple, precision=0, commas=False)
-    squared_loss_multiple_str = fmt(squared_loss_multiple, precision=0)
-    residual_gradient_multiple_str = fmt(residual_gradient_multiple, precision=0, commas=False)
+    normal_error_mult_str = fmt_multiple(normal_error_multiple, precision=0, commas=False)
+    squared_loss_mult_str = fmt_multiple(squared_loss_multiple, precision=0, commas=True)
+    residual_gradient_mult_str = fmt_multiple(residual_gradient_multiple, precision=0, commas=False)
 ```
 
-Robust optimization modifies the training objective to minimize the impact of outliers or poisoned instances. Robust loss functions such as the Huber loss[^fn-huber-loss-robust], the Tukey loss [@beaton1974], and the trimmed mean loss down-weight or ignore the contribution of abnormal instances during training. Regularization techniques ($\ell_1$ or $\ell_2$ regularization) constrain model complexity and reduce sensitivity to poisoned data. At a higher level, robust objective functions such as the minimax[^fn-minimax-adversarial] or distributionally robust objective optimize the model's performance under worst-case scenarios, providing formal guarantees against adversarial perturbations.
+If poisoned samples survive sourcing and sanitization, the training objective becomes the last place to limit their influence. Robust optimization modifies the objective to minimize the impact of outliers or poisoned instances. Robust loss functions such as the Huber loss[^fn-huber-loss-robust], the Tukey loss [@beaton1974], and the trimmed mean loss down-weight or ignore the contribution of abnormal instances during training. Regularization techniques ($\ell_1$ or $\ell_2$ regularization) constrain model complexity and reduce sensitivity to poisoned data. At a higher level, robust objective functions such as the minimax[^fn-minimax-adversarial] or distributionally robust objective optimize the model's performance under worst-case scenarios, providing formal guarantees against adversarial perturbations.
 
-[^fn-huber-loss-robust]: **Huber Loss**: This piecewise function transitions from quadratic (MSE) to linear (MAE) at threshold $\delta$ (typically 1.0--1.5), capping gradient magnitude for extreme samples. In poisoned-data settings, Huber loss prevents a small number of malicious samples from generating outsized gradients that would dominate parameter updates---a property standard MSE lacks, since a single outlier with `{python} HuberOutlierScaling.normal_error_multiple_str`$\times$ normal error contributes `{python} HuberOutlierScaling.squared_loss_multiple_str`$\times$ squared-error loss and `{python} HuberOutlierScaling.residual_gradient_multiple_str`$\times$ residual-gradient magnitude. \index{Huber Loss!poisoning defense}
+[^fn-huber-loss-robust]: **Huber Loss**: This piecewise function transitions from quadratic (MSE) to linear (MAE) at threshold $\delta$ (typically 1.0--1.5), capping gradient magnitude for extreme samples. In poisoned-data settings, Huber loss prevents a small number of malicious samples from generating outsized gradients that would dominate parameter updates---a property standard MSE lacks, since a single outlier with `{python} HuberOutlierScaling.normal_error_mult_str` normal error contributes `{python} HuberOutlierScaling.squared_loss_mult_str` squared-error loss and `{python} HuberOutlierScaling.residual_gradient_mult_str` residual-gradient magnitude. \index{Huber Loss!poisoning defense}
 
 [^fn-minimax-adversarial]: **Minimax**: Game-theoretic strategy from @vonneumann1928theorie that minimizes the maximum possible loss. In adversarial robustness, the training objective becomes $\min_\theta \max_{\|\delta\| \leq \epsilon} \mathcal{L}(f_\theta(x + \delta), y)$---the model learns to minimize loss under the worst-case perturbation. This inner maximization is computationally expensive, typically requiring 7--20 PGD steps per training sample, and convergence is not guaranteed, which is why PGD-adversarial training remains 5--10$\times$ slower than standard training. \index{Minimax!adversarial training}
 
 ::: {.column-margin}
-![](images/svg/vol2_robust_ai_margin_004.svg){width="100%" fig-alt="Margin illustration showing MSE curve versus Huber loss curve with gentler tail."}
+![](images/svg/vol2_robust_ai_margin_004.svg){width="100%" fig-alt="MSE curve versus Huber loss curve with gentler tail."}
 
 *Huber loss caps the outlier influence that squared loss amplifies.*
 :::
@@ -2653,17 +2653,17 @@ The chapter traced the arms race between attackers and defenders, moving from em
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Summary takeaways — robustness vs accuracy trade-off.
 # │ Goal: Recap the ImageNet robustness-tax percentage locally.
-# │ Exports: RobustnessTaxRecap.acc_drop_str
+# │ Exports: RobustnessTaxRecap.acc_drop_pp_str
 class RobustnessTaxRecap:
     clean_acc = 76.0
     robust_acc = 50.0
     acc_drop = clean_acc - robust_acc
-    from mlsysim.fmt import fmt
+    from mlsysim.fmt import fmt_pp
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    acc_drop_str = fmt(acc_drop, precision=0, commas=False)
+    acc_drop_pp_str = fmt_pp(acc_drop, precision=0, commas=False)
 ```
 
-* **Robustness vs. accuracy**: Building resilient systems\index{Robustness!accuracy trade-off} requires an explicit trade-off. Strong ImageNet-scale adversarial training can cost roughly `{python} RobustnessTaxRecap.acc_drop_str` accuracy points of clean accuracy, while lighter threat models or randomized smoothing may cost single-digit to mid-teen points; compute costs still rise by 2--10$\times$ due to iterative attack generation or Monte Carlo sampling.
+* **Robustness vs. accuracy**: Building resilient systems\index{Robustness!accuracy trade-off} requires an explicit trade-off. Strong ImageNet-scale adversarial training can cost roughly `{python} RobustnessTaxRecap.acc_drop_pp_str` of clean accuracy, while lighter threat models or randomized smoothing may cost single-digit to mid-teen points; compute costs still rise by 2--10$\times$ due to iterative attack generation or Monte Carlo sampling.
 * **Semantic robustness in LLMs**: Generative AI introduces a failure mode beyond misclassification\index{Robustness!LLM hallucination}: "hallucinations" where the model produces fluent but factually wrong output. Robustness at this level requires uncertainty quantification (UQ), using entropy and self-consistency to detect when a model is guessing rather than producing grounded text.
 * **The drift detection arsenal**: Environmental shift is inevitable. Robust fleets use statistical distance metrics (MMD, PSI) to detect when the real world has diverged from the training assumptions, triggering automated retraining in the MLOps pipeline before users report failures.
 * **Compound threats**: Failures rarely happen in isolation\index{Robustness!compound threats}. A software fault can create a new adversarial vulnerability, and a natural distribution shift can mask a subtle data poisoning attack. Defense must be multi-layered, combining input sanitization, robust training objectives, and output verification.
@@ -2676,9 +2676,7 @@ Building multi-layered defenses against these failure modes transforms a fragile
 
 ::: {.callout-chapter-connection title="From resilience to sustainability"}
 
-We have made our systems robust against the operational chaos of distribution drift, adversarial perturbation, and software faults. Yet a system that survives every failure while consuming a city's worth of power is not a viable long-term solution.
-
-In @sec-sustainable-ai, we confront the efficiency limits of the ML fleet, examining how lifecycle carbon accounting, carbon-aware scheduling, and algorithmic efficiency determine whether our systems remain economically and environmentally viable as they scale.
+We have made our systems robust against the operational chaos of distribution drift, adversarial perturbation, and software faults. Yet a system that survives every failure while consuming a city's worth of power is not a viable long-term solution. In @sec-sustainable-ai, we confront the efficiency limits of the ML fleet, examining how lifecycle carbon accounting, carbon-aware scheduling, and algorithmic efficiency determine whether our systems remain economically and environmentally viable as they scale.
 
 :::
 

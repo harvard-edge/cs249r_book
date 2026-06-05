@@ -46,7 +46,7 @@ CNNs that exploit spatial structure in images:
 
 This milestone has **two parts** that progressively showcase your TinyTorch modules:
 
-### Part 1: TinyDigits (works offline)
+### Part 1: TinyDigits (works offline, default)
 
 **Script:** `01_lecun_tinydigits.py`
 
@@ -62,7 +62,7 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 - Direct proof that spatial operations help
 - ~10% accuracy gain from exploiting locality
 
-### Part 2: CIFAR-10 (requires download)
+### Part 2: CIFAR-10 (optional scale-up, requires download)
 
 **Script:** `02_lecun_cifar10.py`
 
@@ -124,12 +124,14 @@ This is why CNNs remained state-of-the-art for vision until Vision Transformers 
 ## Running the Milestone
 
 ```bash
-cd milestones/04_1998_cnn
+# Default milestone path from the TinyTorch project root
+tito milestone run 04
 
-# Step 1: Prove CNNs > MLPs (run after Module 09)
+# Or run the default script directly
+cd milestones/04_1998_cnn
 python 01_lecun_tinydigits.py
 
-# Step 2: Scale to natural images (run after Module 09)
+# Optional scale-up to natural images
 python 02_lecun_cifar10.py
 ```
 

@@ -85,6 +85,12 @@ class DevTestCommand(BaseCommand):
             help="Full user journey validation (destructive - resets all modules, runs milestones at checkpoints)"
         )
         parser.add_argument(
+            "--release",
+            action="store_true",
+            dest="user_journey",
+            help="Alias for --user-journey; full destructive release validation"
+        )
+        parser.add_argument(
             "--milestone",
             action="store_true",
             help="Run milestone tests (validates milestone scripts execute)"

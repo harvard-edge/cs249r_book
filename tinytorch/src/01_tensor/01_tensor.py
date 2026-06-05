@@ -383,6 +383,10 @@ class Tensor:
             return Tensor(self.data + other)
         ### END SOLUTION
 
+    def __radd__(self, other):
+        """Support natural scalar arithmetic: scalar + tensor."""
+        return self.__add__(other)
+
     def __sub__(self, other):
         """Subtract two tensors element-wise.
 
@@ -409,6 +413,12 @@ class Tensor:
         else:
             return Tensor(self.data - other)
         ### END SOLUTION
+
+    def __rsub__(self, other):
+        """Support natural scalar arithmetic: scalar - tensor."""
+        if isinstance(other, Tensor):
+            return Tensor(other.data - self.data)
+        return Tensor(other - self.data)
 
     def __mul__(self, other):
         """Multiply two tensors element-wise (NOT matrix multiplication).
@@ -437,6 +447,10 @@ class Tensor:
             return Tensor(self.data * other)
         ### END SOLUTION
 
+    def __rmul__(self, other):
+        """Support natural scalar arithmetic: scalar * tensor."""
+        return self.__mul__(other)
+
     def __truediv__(self, other):
         """Divide two tensors element-wise.
 
@@ -463,6 +477,12 @@ class Tensor:
         else:
             return Tensor(self.data / other)
         ### END SOLUTION
+
+    def __rtruediv__(self, other):
+        """Support natural scalar arithmetic: scalar / tensor."""
+        if isinstance(other, Tensor):
+            return Tensor(other.data / self.data)
+        return Tensor(other / self.data)
 
     def _validate_matmul_shapes(self, other):
         """Validate that two tensors are compatible for matrix multiplication.
@@ -922,6 +942,7 @@ Element-wise Operations:
 
 Broadcasting with Scalars (very common in ML):
 [1, 2, 3] * 2     = [2, 4, 6]      (scale all values)
+2 * [1, 2, 3]     = [2, 4, 6]      (same scaling, scalar on the left)
 [1, 2, 3] - 1     = [0, 1, 2]      (shift all values)
 [2, 4, 6] / 2     = [1, 2, 3]      (normalize all values)
 
@@ -957,7 +978,7 @@ before element-wise operations like loss computation.
 """
 ### 🧪 Unit Test: Arithmetic Operations
 
-This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior.
+This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior. Scalar arithmetic should feel natural whether the scalar appears before or after the tensor.
 
 **What we're testing**: Addition, subtraction, multiplication, division with broadcasting
 **Why it matters**: Foundation for batch processing, data normalization, and feature scaling
@@ -977,6 +998,10 @@ def test_unit_arithmetic_operations():
 
     # Test tensor + scalar (very common in ML)
     result = a + 10
+    assert np.array_equal(result.data, np.array([11, 12, 13], dtype=np.float32))
+
+    # Scalar on the left should behave naturally too
+    result = 10 + a
     assert np.array_equal(result.data, np.array([11, 12, 13], dtype=np.float32))
 
     # Test broadcasting with different shapes (matrix + vector)
@@ -1006,9 +1031,19 @@ def test_unit_arithmetic_operations():
     result = a * 2
     assert np.array_equal(result.data, np.array([2, 4, 6], dtype=np.float32))
 
+    result = 2 * a
+    assert np.array_equal(result.data, np.array([2, 4, 6], dtype=np.float32))
+
     # Test division (normalization)
     result = b / 2
     assert np.array_equal(result.data, np.array([2.0, 2.5, 3.0], dtype=np.float32))
+
+    result = 12 / b
+    assert np.allclose(result.data, np.array([3.0, 12.0 / 5.0, 2.0], dtype=np.float32))
+
+    # Order matters for subtraction, but scalar-left arithmetic should still work
+    result = 10 - a
+    assert np.array_equal(result.data, np.array([9, 8, 7], dtype=np.float32))
 
     # Test chaining operations (common in ML pipelines)
     normalized = (a - 2) / 2  # Center and scale

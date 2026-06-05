@@ -88,7 +88,7 @@ The silicon contract (@sec-introduction-iron-law-ml-systems-c32a) established th
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_count
 #| label: mnist-inference-purpose
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST INFERENCE MAC COUNT—PURPOSE OPENING
@@ -101,7 +101,7 @@ from mlsysim.fmt import fmt
 # │ Show: 109,184 multiply-accumulates per digit—logic-free arithmetic.
 # │ How: Sum layer products (784×128 + 128×64 + 64×10).
 # │
-# │ Imports: mlsysim.fmt (fmt)
+# │ Imports: mlsysim.fmt (fmt_count)
 # │ Exports: MNISTInference.total_macs_str
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -119,10 +119,10 @@ class MNISTInference:
     total_macs = input_dim * h1_dim + h1_dim * h2_dim + h2_dim * out_dim
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    total_macs_str = fmt(total_macs, precision=0)
+    total_macs_str = fmt_count(total_macs, precision=0, label="MAC")
 ```
 
-The operators that follow are not abstract theory but a specification for computational workloads. Neural computation represents a qualitative shift in how we process information: instead of executing a sequence of explicit logical instructions (if-then-else), we execute a massive sequence of continuous mathematical transformations (multiply-add-accumulate). This shift from *Logic* to *Arithmetic* changes everything for the systems engineer, creating compute-bound\index{Compute-Bound!workload characteristics} workloads. The "bug" in such a system is rarely a syntax error; it is a numerical instability, a vanishing gradient, or a saturated activation function. Concretely, recognizing a single handwritten digit in the MNIST network we use throughout this chapter requires `{python} MNISTInference.total_macs_str` multiply-accumulate (MAC) operations—not one of which is a logical branch.
+The operators that follow are not abstract theory but a specification for computational workloads. Neural computation represents a qualitative shift in how we process information: instead of executing a sequence of explicit logical instructions (if-then-else), we execute a massive sequence of continuous mathematical transformations (multiply-add-accumulate). This shift from *Logic* to *Arithmetic* changes everything for the systems engineer, creating compute-bound\index{Compute-Bound!workload characteristics} workloads. The "bug" in such a system is rarely a syntax error; it is a numerical instability, a vanishing gradient, or a saturated activation function. Concretely, recognizing a single handwritten digit in the MNIST network we use throughout this chapter requires `{python} MNISTInference.total_macs_str`—not one of which is a logical branch.
 
 Arithmetic without branches is not arithmetic without risk: a number that exceeds the range its format can represent fails silently, and the consequences scale with the system that depends on it. A canonical example comes from outside machine learning entirely.
 
@@ -149,6 +149,8 @@ This arithmetic-first style of computation, where failure hides in numerical reg
 3.  **Common pitfall**: A frequent misconception is that deep learning is "just a big neural network." Scaling a shallow model wider does not replicate what depth provides: compositional feature hierarchies that reuse lower-level representations. The depth, not the parameter count alone, is what makes deep learning a distinct computational paradigm.
 
 :::
+
+This chapter develops deep learning as a computational workload from the ground up: the primitive operations every network reduces to, how those primitives compose into network structure, what the learning process and inference pipeline demand of the hardware, and how the whole maps onto the D·A·M taxonomy, grounded throughout in a single handwritten-digit recognizer that makes each cost concrete.
 
 The landmark *Nature* review by LeCun, Bengio, and Hinton[^fn-deep-learning-pioneers] [@lecun2015] formalized this paradigm.
 
@@ -538,7 +540,7 @@ at($(cell-1-3.south west)!0.8!(cell-1-3.south east)$)(C){};
 
 :::
 
-Beyond individual applications, this rule-based paradigm extends to all traditional programming. Notice the data flow in @fig-traditional: the program takes both rules for processing and input data to produce outputs. Early artificial intelligence research explored whether this approach could scale to solve complex problems by encoding sufficient rules to capture intelligent behavior.
+Beyond individual applications, this rule-based paradigm extends to all traditional programming. The data flow in @fig-traditional makes the constraint explicit: the program takes both rules for processing and input data to produce outputs. Early artificial intelligence research explored whether this approach could scale to solve complex problems by encoding sufficient rules to capture intelligent behavior.
 
 ::: {#fig-traditional fig-env="figure" fig-pos="htb" fig-cap="**Traditional Programming Flow**: Rules and data serve as inputs to a traditional program, which produces answers as output. This input-output pattern formed the basis for early AI systems but lacks the adaptability needed for complex pattern recognition tasks." fig-alt="Flow diagram with three boxes: rules and data as inputs flowing into central traditional programming box, which outputs answers. Arrows show data flow direction from inputs to output."}
 
@@ -595,11 +597,11 @@ Recognizing these limitations, the knowledge engineering approach that character
 # │          @sec-neural-computation-evolution-ml-paradigms-ec9c.
 # │
 # │ Goal: Establish operation and memory counts for each paradigm on one digit.
-# │ Exports: ParadigmSystemsCost.rb_ops_str, ParadigmSystemsCost.rb_mem_bytes_str,
+# │ Exports: ParadigmSystemsCost.rb_comparisons_str, ParadigmSystemsCost.rb_mem_bytes_str,
 # │          ParadigmSystemsCost.hog_*_str, ParadigmSystemsCost.dl_*_str,
 # │          ParadigmSystemsCost.training_examples_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_memory, fmt_qty, fmt_qty_int, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_qty, fmt_qty_int, check, MarkdownStr
 
 _MNIST_DIMS = [784, 128, 64, 10]
 
@@ -643,22 +645,22 @@ class ParadigmSystemsCost:
     check(round(dl_weight_kb) == 438, f"Expected ~438 KB FP32 weight footprint, got {dl_weight_kb:.1f} KB")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    rb_ops_str = fmt(rb_ops, precision=0, commas=False)
+    rb_comparisons_str = fmt_count(rb_ops, precision=0, commas=False, label="comparison")
     rb_mem_bytes_str = fmt_memory(rb_mem, unit=byte, precision=0, commas=True)
     hog_grid_str = MarkdownStr("7")
     hog_bins_str = fmt(hog_bins, precision=0, commas=False)
     hog_features_str = fmt(hog_features, precision=0, commas=True)
-    hog_ops_approx_str = fmt(hog_ops_approx, precision=0, commas=True)
-    hog_ops_ratio_str = fmt(hog_ops_ratio, precision=0, commas=False)
+    hog_ops_approx_str = fmt_count(hog_ops_approx, precision=0, commas=True, label="operation")
+    hog_ops_ratio_mult_str = fmt_multiple(hog_ops_ratio, precision=0, commas=False)
     hog_mem_kb_str = fmt_qty(hog_mem, KB, precision=0, commas=False)
-    dl_total_macs_str = fmt(dl_total_macs, precision=0, commas=True)
-    dl_params_str = fmt(dl_params_with_bias, precision=0, commas=True)
+    dl_total_macs_str = fmt_count(dl_total_macs, precision=0, commas=True, label="MAC")
+    dl_params_str = fmt_count(dl_params_with_bias, label="parameter")
     dl_weight_kb_str = fmt_qty_int(dl_weight, KB, commas=False)
-    dl_ops_ratio_str = fmt(dl_ops_ratio, precision=1, commas=True)
+    dl_ops_ratio_mult_str = fmt_multiple(dl_ops_ratio, precision=1, commas=True)
     training_examples_str = fmt(training_examples, precision=0, commas=True)
 ```
 
-Consider classifying our $28{\times}28$ digit with explicit rules: compare pixel intensities against thresholds, check stroke patterns in specific regions, branch on the results. The entire computation is roughly `{python} ParadigmSystemsCost.rb_ops_str` comparisons over `{python} ParadigmSystemsCost.rb_mem_bytes_str` of pixel data—sequential, predictable, and comfortably within any CPU's L1 cache. No special hardware needed. That simplicity is exactly what disappears as we move toward learned representations.
+Consider classifying our $28{\times}28$ digit with explicit rules: compare pixel intensities against thresholds, check stroke patterns in specific regions, branch on the results. The entire computation is roughly `{python} ParadigmSystemsCost.rb_comparisons_str` over `{python} ParadigmSystemsCost.rb_mem_bytes_str` of pixel data—sequential, predictable, and comfortably within any CPU's L1 cache. No special hardware needed. That simplicity is exactly what disappears as we move toward learned representations.
 
 [^fn-expert-systems]: **Expert Systems**: These systems convert human expertise into explicit `IF-THEN` rules. This 'knowledge engineering' approach fails for tasks like object recognition, as the text notes, because the required knowledge is implicit and resists articulation. Even in a successful system (DEC's XCON), the maintenance of 10,000+ hand-authored rules revealed an unsustainable scaling cost that motivated the shift to learned representations. \index{Expert Systems!maintenance cost}
 
@@ -684,13 +686,13 @@ Complementary methods like SIFT[^fn-sift] [@lowe1999] (Scale-Invariant Feature T
 
 These engineering efforts enabled advances in computer vision during the 2000s. Systems could now recognize objects with some robustness to real-world variations, leading to applications in face detection, pedestrian detection, and object recognition. Despite these successes, the approach had limitations. Experts needed to carefully design feature extractors for each new problem, and the resulting features might miss important patterns that were not anticipated in their design. The bottleneck remained: human expertise could not scale to the complexity and diversity of real-world visual patterns.
 
-Return to the same $28{\times}28$ digit. HOG divides the image into a `{python} ParadigmSystemsCost.hog_grid_str` by `{python} ParadigmSystemsCost.hog_grid_str` grid of $4{\times}4$ cells, computes gradient magnitudes and orientations at each pixel, bins them into `{python} ParadigmSystemsCost.hog_bins_str` orientation histograms per cell, and produces a `{python} ParadigmSystemsCost.hog_features_str`-element feature vector. A linear classifier (SVM) then performs ten dot products over that vector. Total: roughly `{python} ParadigmSystemsCost.hog_ops_approx_str` arithmetic operations and ~`{python} ParadigmSystemsCost.hog_mem_kb_str` of working memory—about `{python} ParadigmSystemsCost.hog_ops_ratio_str`$\times$ more compute than the rule-based approach, but still structured, predictable, and well-served by CPU vector units using single instruction, multiple data (SIMD). Resource demands scale linearly with image count, not with model complexity.
+Return to the same $28{\times}28$ digit. HOG divides the image into a `{python} ParadigmSystemsCost.hog_grid_str` by `{python} ParadigmSystemsCost.hog_grid_str` grid of $4{\times}4$ cells, computes gradient magnitudes and orientations at each pixel, bins them into `{python} ParadigmSystemsCost.hog_bins_str` orientation histograms per cell, and produces a `{python} ParadigmSystemsCost.hog_features_str`-element feature vector. A linear classifier (SVM) then performs ten dot products over that vector. Total: roughly `{python} ParadigmSystemsCost.hog_ops_approx_str` arithmetic operations and ~`{python} ParadigmSystemsCost.hog_mem_kb_str` of working memory—about `{python} ParadigmSystemsCost.hog_ops_ratio_mult_str` more compute than the rule-based approach, but still structured, predictable, and well-served by CPU vector units using single instruction, multiple data (SIMD). Resource demands scale linearly with image count, not with model complexity.
 
 ### Automatic pattern discovery {#sec-neural-computation-deep-learning-automatic-pattern-discovery-214d}
 
 The limitations of handcrafted features motivate a more radical approach\index{Deep Learning!automatic feature learning}: rather than encoding features by hand, the system discovers its own. Neural networks embody exactly this shift—rather than following explicit rules or relying on human-designed feature extractors, the system learns representations directly from raw data.
 
-Deep learning inverts the traditional programming relationship entirely. Traditional programming, as we saw earlier, required both rules and data as inputs to produce answers. Machine learning reverses this: we provide examples (data) and their correct answers, and the system discovers the underlying rules automatically. @Fig-deeplearning makes this inversion tangible—notice how data and answers now serve as the inputs, while rules emerge as the output. This shift eliminates the need for humans to specify what patterns are important.
+Deep learning inverts the traditional programming relationship entirely. Traditional programming, as we saw earlier, required both rules and data as inputs to produce answers. Machine learning reverses this: examples (data) and their correct answers become the inputs, and the system discovers the underlying rules automatically. @Fig-deeplearning makes this inversion tangible by showing rules as the output rather than the input. This shift eliminates the need for humans to specify what patterns are important.
 
 ::: {#fig-deeplearning fig-env="figure" fig-pos="htb" fig-cap="**Data-Driven Rule Discovery**: The flow diagram inverts the traditional programming pattern: data and answers serve as inputs to the machine learning process, which produces learned rules as output. This inversion eliminates the need for manually specified rules and enables automated feature extraction from raw inputs." fig-alt="Flow diagram with three boxes: answers and data as inputs flowing into central machine learning box, which outputs rules. Arrows show inverted flow compared to traditional programming, with rules as output rather than input."}
 
@@ -756,15 +758,14 @@ Deep learning exhibits predictable scaling\index{Scalability!deep learning}: unl
 # │ How: Generate a synthetic curve with a masked U-shape for the classical regime
 # │      and an exponential decay for the modern regime; smooth with convolution.
 # │
-# │ Imports: numpy (np), mlsysim.core.viz (setup_plot, COLORS)
+# │ Imports: numpy (np), book.tools.figures.style (setup_plot, COLORS)
 # │ Exports: (figure only—no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Visualize the U-shape classical regime, the spike at the interpolation
 import numpy as np
-from mlsysim import viz
-
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 5))
+from book.tools.figures import style as book_style
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 x = np.linspace(0.1, 3.0, 200)
@@ -808,7 +809,7 @@ plt.close()
 :::
 
 \index{Overparameterization!generalization benefit}
-Notice the counterintuitive shape: test error initially follows the expected U-curve, but then decreases again in the overparameterized regime. This scaling behavior resolves the central paradox of deep learning. Classical statistical theory predicted that models should be sized to match data complexity: too small and they underfit, too large and they overfit by memorizing noise. This Bias-Variance Trade-off[^fn-bias-variance]\index{Bias-Variance Tradeoff!classical theory} suggested that massive models would inevitably fail on new data. Instead, we observe a 'Double Descent'\index{Double Descent!overparameterized regime} [@belkin2019] where larger models, trained on sufficient data, find smoother solutions that generalize better than smaller ones. The insight is that bigger is better when properly regularized, and it drives the race for 100+ billion-parameter foundation models.
+The counterintuitive shape matters because test error initially follows the expected U-curve, then decreases again in the overparameterized regime. This scaling behavior resolves the central paradox of deep learning. Classical statistical theory predicted that models should be sized to match data complexity: too small and they underfit, too large and they overfit by memorizing noise. The bias-variance trade-off[^fn-bias-variance]\index{Bias-Variance Tradeoff!classical theory} suggested that massive models would inevitably fail on new data. Instead, double descent\index{Double Descent!overparameterized regime} [@belkin2019] shows that larger models, trained on sufficient data, can find smoother solutions that generalize better than smaller ones. The systems consequence is that properly regularized scale can be an engineering lever, but it pushes teams toward 100+ billion-parameter foundation models.
 
 [^fn-bias-variance]: **Bias-Variance Trade-off**\index{Bias-Variance Tradeoff!double descent}: In overparameterized networks (parameter count >> training samples), the classical bias-variance trade-off breaks down: test error decreases again after the interpolation threshold, the Double Descent phenomenon. The systems consequence is that larger models trained longer are often more stable than smaller models stopped early, inverting the conventional wisdom that regularization is always the right response to overfitting. This insight drives the engineering decision to scale model size rather than constrain it—bigger networks with more compute often generalize better, not worse. \index{Bias-Variance Tradeoff!overparameterization}
 
@@ -816,7 +817,7 @@ Neural network performance often follows empirical scaling relationships that im
 
 Learning directly from raw data reshapes AI system construction. Eliminating manual feature engineering introduces new demands: infrastructure to handle massive datasets, high-throughput hardware to process that data, and specialized accelerators to perform mathematical calculations efficiently. These computational requirements have driven the development of specialized chips optimized for neural network operations. Empirical evidence confirms this pattern across domains: the success of deep learning in computer vision, speech recognition, game playing, and natural language understanding has established it as the dominant paradigm in artificial intelligence.
 
-Return to the same $28{\times}28$ digit, now processed by even a modest three-layer neural network (784 → 128 → 64 → 10). The forward pass alone requires `{python} ParadigmSystemsCost.dl_total_macs_str` MAC operations, `{python} ParadigmSystemsCost.dl_ops_ratio_str`$\times$ more than the rule-based approach. The `{python} ParadigmSystemsCost.dl_params_str` learned parameters consume `{python} ParadigmSystemsCost.dl_weight_kb_str` in FP32, exceeding most L1 caches and forcing memory traffic between cache levels on every inference. Training multiplies the cost further: each image must be processed *forward*, then *backward* (computing gradients for all `{python} ParadigmSystemsCost.dl_params_str` parameters), then updated, at roughly 3$\times$ the forward cost per image, repeated over `{python} ParadigmSystemsCost.training_examples_str` training images for multiple epochs. The computation is no longer sequential; it is dominated by dense matrix multiplications that leave a standard CPU mostly idle. This is the systems explosion that drives everything that follows.
+Return to the same $28{\times}28$ digit, now processed by even a modest three-layer neural network (784 → 128 → 64 → 10). The forward pass alone requires `{python} ParadigmSystemsCost.dl_total_macs_str`, `{python} ParadigmSystemsCost.dl_ops_ratio_mult_str` more than the rule-based approach. The `{python} ParadigmSystemsCost.dl_params_str` consume `{python} ParadigmSystemsCost.dl_weight_kb_str` in FP32, exceeding most L1 caches and forcing memory traffic between cache levels on every inference. Training multiplies the cost further: each image must be processed *forward*, then *backward* (computing gradients for all `{python} ParadigmSystemsCost.dl_params_str`), then updated, at roughly 3$\times$ the forward cost per image, repeated over `{python} ParadigmSystemsCost.training_examples_str` training images for multiple epochs. The computation is no longer sequential; it is dominated by dense matrix multiplications that leave a standard CPU mostly idle. This is the systems explosion that drives everything that follows.
 
 The scaling advantage comes with computational costs that raise a practical question about when engineers should invest in neural networks vs. simpler alternatives.
 
@@ -852,7 +853,7 @@ Not every problem benefits from deep learning. Neural networks justify their com
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_count
 #| label: paradigm-infrastructure-recap
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PARADIGM INFRASTRUCTURE RECAP
@@ -861,10 +862,10 @@ from mlsysim.fmt import fmt
 # │          infrastructure-requirements-b5b0 recapping paradigm escalation.
 # │
 # │ Goal: Recap rule-based, HOG, and deep-learning operation counts locally.
-# │ Exports: ParadigmInfrastructureRecap.rb_ops_str,
+# │ Exports: ParadigmInfrastructureRecap.rb_comparisons_str,
 # │          ParadigmInfrastructureRecap.hog_ops_approx_str,
 # │          ParadigmInfrastructureRecap.dl_total_macs_str,
-# │          ParadigmInfrastructureRecap.dl_ops_ratio_str
+# │          ParadigmInfrastructureRecap.dl_ops_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -885,19 +886,19 @@ class ParadigmInfrastructureRecap:
     dl_ops_ratio = dl_total_macs / rb_ops
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    rb_ops_str = fmt(rb_ops, precision=0, commas=False)
-    hog_ops_approx_str = fmt(hog_ops_approx, precision=0, commas=True)
-    dl_total_macs_str = fmt(dl_total_macs, precision=0, commas=True)
-    dl_ops_ratio_str = fmt(dl_ops_ratio, precision=1, commas=True)
+    rb_comparisons_str = fmt_count(rb_ops, precision=0, commas=False, label="comparison")
+    hog_ops_approx_str = fmt_count(hog_ops_approx, precision=0, commas=True, label="operation")
+    dl_total_macs_str = fmt_count(dl_total_macs, precision=0, commas=True, label="MAC")
+    dl_ops_ratio_mult_str = fmt_multiple(dl_ops_ratio, precision=1, commas=True)
 ```
-
-The MNIST running example traced a single digit from ~`{python} ParadigmInfrastructureRecap.rb_ops_str` comparisons (rule-based) through ~`{python} ParadigmInfrastructureRecap.hog_ops_approx_str` structured operations (HOG) to `{python} ParadigmInfrastructureRecap.dl_total_macs_str` matrix MACs (neural network): a `{python} ParadigmInfrastructureRecap.dl_ops_ratio_str`$\times$ escalation in computation, with a corresponding shift from predictable sequential access to bandwidth-hungry parallel matrix operations. @Tbl-evolution generalizes this pattern across every systems dimension.
 
 ::: {.column-margin}
 ![](images/svg/vol1_nn_computation_margin_001.svg){width="100%" fig-alt="Vertical log-scale ladder of orange bars, smallest at bottom: rule-based comparisons, then HOG operations, then neural-network matrix MACs at the top, spanning several orders of magnitude."}
 
 *Learned features buy accuracy by spending far more arithmetic.*
 :::
+
+The MNIST running example traced a single digit from ~`{python} ParadigmInfrastructureRecap.rb_comparisons_str` (rule-based) through ~`{python} ParadigmInfrastructureRecap.hog_ops_approx_str` (HOG) to `{python} ParadigmInfrastructureRecap.dl_total_macs_str` (neural network): a `{python} ParadigmInfrastructureRecap.dl_ops_ratio_mult_str` escalation in computation, with a corresponding shift from predictable sequential access to bandwidth-hungry parallel matrix operations. @Tbl-evolution generalizes this pattern across every systems dimension.
 
 | **System Aspect**    | **Traditional Programming**   | **ML with Features**        | **Deep Learning**               |
 |:---------------------|:------------------------------|:----------------------------|:--------------------------------|
@@ -1436,8 +1437,8 @@ From a systems engineering perspective, this translation reveals *why* neural ne
 # │
 # │ Imports: mlsysim.constants (Hardware.Cloud.H100.compute.peak_flops, TFLOPs, second),
 # │          mlsysim.book (fmt, check)
-# │ Exports: MacAcceleratorSpecLocal.h100_fp16_tflops_str,
-# │          MacAcceleratorSpecLocal.h100_fp16_tmacs_tflops_str
+# │ Exports: MacAcceleratorSpecLocal.h100_fp16_tflop_per_s_str,
+# │          MacAcceleratorSpecLocal.h100_fp16_tmacs_tflop_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_flop_rate, check
 
@@ -1455,12 +1456,12 @@ class MacAcceleratorSpecLocal:
     check(h100_fp16_rate > 900 * (TFLOPs / second), f"H100 FP16 throughput unexpectedly low: {h100_fp16_rate}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    h100_fp16_tflops_str = fmt_flop_rate(h100_fp16_rate, unit=TFLOPs / second, precision=0, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_rate, unit=TFLOPs / second, precision=0, commas=False)
     # Scalar boundary: MLSysIM tracks FLOP/s; prose maps half that rate to MAC/s by convention.
-    h100_fp16_tmacs_tflops_str = fmt_flop_rate(h100_fp16_macs_rate, unit=TFLOPs / second, precision=1, commas=False)
+    h100_fp16_tmacs_tflop_per_s_str = fmt_flop_rate(h100_fp16_macs_rate, unit=TFLOPs / second, precision=1, commas=False)
 ```
 
-[^fn-multiply-accumulate]: **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Modern accelerators are often marketed in FLOPs because a fused multiply-add is counted as two floating-point operations. On that convention, an NVIDIA H100 is rated at `{python} MacAcceleratorSpecLocal.h100_fp16_tflops_str` dense FP16, or about `{python} MacAcceleratorSpecLocal.h100_fp16_tmacs_tflops_str` trillion MAC/s if one MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
+[^fn-multiply-accumulate]: **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Modern accelerators are often marketed in FLOPs because a fused multiply-add is counted as two floating-point operations. On that convention, an NVIDIA H100 is rated at `{python} MacAcceleratorSpecLocal.h100_fp16_tflop_per_s_str` dense FP16, or about `{python} MacAcceleratorSpecLocal.h100_fp16_tmacs_tflop_per_s_str` trillion MAC/s if one MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
 
 The transition from individual neurons to integrated systems requires navigating the central trade-off\index{Neural Network!capacity vs. cost trade-off} between representational capacity and computational cost. While silicon transistors operate at gigahertz frequencies, millions of times faster than biological chemical signaling, the sheer volume of operations in deep networks creates unique bottlenecks.
 
@@ -1512,7 +1513,7 @@ The historical trajectory demonstrates a recurring systems engineering lesson: a
 # │      OLS log-linear trend lines for each era; annotate key models.
 # │
 # │ Imports: pandas (pd), numpy (np), matplotlib.pyplot (plt),
-# │          datetime, os, mlsysim.core.viz (setup_plot, COLORS)
+# │          datetime, os, book.tools.figures.style (setup_plot, COLORS)
 # │ Exports: (figure only—no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -1522,8 +1523,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import os
-from mlsysim.viz import setup_plot, COLORS
-
+from book.tools.figures.style import setup_plot, COLORS
 #—Helper Functions ---
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
@@ -1737,7 +1737,7 @@ else:
 # │ Exports: HistoricalScale.gpt3_params_b_str,
 # │          HistoricalScale.gpt4_params_t_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_params, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HistoricalScale:
@@ -1758,8 +1758,8 @@ class HistoricalScale:
     check(scale_factor >= 5, f"GPT-4 ({gpt4_params_t}T) should be significantly larger than GPT-3 ({gpt3_params_b}B). Ratio: {scale_factor:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpt3_params_b_str = fmt(gpt3_params_b, precision=0, commas=False)
-    gpt4_params_t_str = fmt(gpt4_params_t, precision=1, commas=False)
+    gpt3_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    gpt4_params_t_str = fmt_params(Models.Language.GPT4.parameters, scale="T", precision=1, commas=False)
 ```
 
 ```{python}
@@ -1823,14 +1823,14 @@ While the preceding sections established the technical foundations of deep learn
 
 @Tbl-historical-performance grounds these trends in concrete systems, showing how parameters, compute, and hardware co-evolved across four decades of neural network development.
 
-| **Year** | **System** |                          **Params**                          |       **Train FLOPs**        |              **Hardware** | **Train Time** | **Error/Task**          |
-|:---------|:-----------|:------------------------------------------------------------:|:----------------------------:|--------------------------:|:--------------:|:------------------------|
-| 1989     | LeNet-1    |                            ~9.8K                             |     $10^{11}$–$10^{12}$      |     Sun-4/260 workstation |     3 days     | 1 percent (USPS)        |
-| 1998     | LeNet-5    |                  $60\text{K} \pm 1\text{K}$                  |  $10^{14} \pm 1\text{ OoM}$  | SGI Origin 2000 (200 MHz) |    2–3 days    | 0.95 percent (MNIST)    |
-| 2012     | AlexNet    |                             ~60M                             |      $5 \times 10^{17}$      |    2$\times$ GTX 580 GPUs |    5–6 days    | 15.3 percent (ImageNet) |
-| 2015     | ResNet-152 |                             ~60M                             | $10^{19} \pm 0.5\text{ OoM}$ |  8$\times$ Tesla K80 GPUs |    ~3 weeks    | 3.6 percent (ImageNet)  |
-| 2020     | GPT-3      | `{python} HistoricalScale.gpt3_params_b_str` billion (exact) |      $3 \times 10^{23}$      |            ~10K V100 GPUs |     weeks      | N/A (language)          |
-| 2023     | GPT-4      |  ~`{python} HistoricalScale.gpt4_params_t_str`T (MoE, est.)  |     $10^{24}$–$10^{25}$      |      10--25K A100s (est.) |     months     | N/A (language)          |
+| **Year** | **System** |                         **Params**                        |       **Train FLOPs**        |              **Hardware** | **Train Time** | **Error/Task**          |
+|:---------|:-----------|:---------------------------------------------------------:|:----------------------------:|--------------------------:|:--------------:|:------------------------|
+| 1989     | LeNet-1    |                           ~9.8K                           |     $10^{11}$–$10^{12}$      |     Sun-4/260 workstation |     3 days     | 1 percent (USPS)        |
+| 1998     | LeNet-5    |                 $60\text{K} \pm 1\text{K}$                |  $10^{14} \pm 1\text{ OoM}$  | SGI Origin 2000 (200 MHz) |    2–3 days    | 0.95 percent (MNIST)    |
+| 2012     | AlexNet    |                            ~60M                           |      $5 \times 10^{17}$      |    2$\times$ GTX 580 GPUs |    5–6 days    | 15.3 percent (ImageNet) |
+| 2015     | ResNet-152 |                            ~60M                           | $10^{19} \pm 0.5\text{ OoM}$ |  8$\times$ Tesla K80 GPUs |    ~3 weeks    | 3.6 percent (ImageNet)  |
+| 2020     | GPT-3      |    `{python} HistoricalScale.gpt3_params_b_str` (exact)   |      $3 \times 10^{23}$      |            ~10K V100 GPUs |     weeks      | N/A (language)          |
+| 2023     | GPT-4      | ~`{python} HistoricalScale.gpt4_params_t_str` (MoE, est.) |     $10^{24}$–$10^{25}$      |      10--25K A100s (est.) |     months     | N/A (language)          |
 
 : **Historical Performance**: Four decades of neural network evolution showing the co-scaling of model parameters, training compute, and hardware infrastructure. Training FLOPs increased by approximately $10^{13}\times$ from LeNet-1 to GPT-4, while parameters grew by $10^{8}\times$. Uncertainty notes: Earlier systems (LeNet, AlexNet) have well-documented specifications; recent closed models (GPT-4) have only external estimates (OpenAI has not officially confirmed GPT-4's architecture or parameter count; the ~1.8T MoE estimate is based on public reporting and analysis). "OoM" = order of magnitude uncertainty. {#tbl-historical-performance tbl-colwidths="[6,11,17,18,19,12,17]"}
 
@@ -2102,11 +2102,11 @@ filllcolor=cyan!10,  Linewidth=1.0pt}};
 
 :::
 
-The data revolution transformed what was possible with neural networks. The rise of the internet and digital devices created vast new sources of training data: image sharing platforms provided millions of labeled images, digital text collections enabled language processing at scale, and sensor networks generated continuous streams of real-world data. This abundance provided the raw material neural networks needed to learn complex patterns effectively.
+Data availability supplied the volume of examples that learned representations require. The rise of the internet and digital devices created vast new sources of training data: image sharing platforms provided millions of labeled images, digital text collections enabled language processing at scale, and sensor networks generated continuous streams of real-world data. This abundance provided the raw material neural networks needed to learn complex patterns effectively.
 
-Algorithmic innovations made it possible to use this data effectively. New methods for initializing networks and controlling learning rates made training more stable. Techniques for preventing overfitting allowed models to generalize better to new data. Researchers discovered that neural network performance scaled predictably with model size, computation, and data quantity, leading to increasingly ambitious architectures.
+Algorithmic innovations turned that volume into trainable systems. New methods for initializing networks and controlling learning rates made training more stable. Techniques for preventing overfitting allowed models to generalize better to new data. Researchers discovered that neural network performance scaled predictably with model size, computation, and data quantity, leading to increasingly ambitious architectures.
 
-These algorithmic advances created demand for higher-throughput computing infrastructure, which evolved in response. On the hardware side, GPUs provided the parallel processing capabilities needed for efficient neural network computation, and specialized AI accelerators like TPUs[^fn-tpu-tensor-hardware] [@jouppi2023] pushed performance further. High-bandwidth memory systems and fast interconnects addressed data movement challenges. Software advances matched the hardware evolution: frameworks and libraries simplified building and training networks, distributed computing systems enabled training at scale, and tools for optimizing model deployment reduced the gap between research and production.
+The resulting workloads created demand for higher-throughput computing infrastructure, which evolved in response. On the hardware side, GPUs provided the parallel processing capabilities needed for efficient neural network computation, and specialized AI accelerators like TPUs[^fn-tpu-tensor-hardware] [@jouppi2023] pushed performance further. High-bandwidth memory systems and fast interconnects addressed data movement challenges. Software advances matched the hardware evolution: frameworks and libraries simplified building and training networks, distributed computing systems enabled training at scale, and tools for optimizing model deployment reduced the gap between research and production.
 
 ```{python}
 #| echo: false
@@ -2202,7 +2202,7 @@ Modern architectures balance depth (representational power) against width (paral
 
 Biological visual systems employ the same hierarchical decomposition. The specific architectures examined in @sec-network-architectures formalize different ways to encode this hierarchical structure, from the local connectivity of convolutional networks to the attention mechanisms of transformers.
 
-The intuition for why depth matters motivates the next question: how do neural networks implement this hierarchical processing? The following sections develop the precise mechanics: how neurons compute, how layers connect, and how information flows from input to output.
+Depth explains why layered representations are useful; the remaining mechanics explain how the hierarchy is implemented. The following sections develop the precise mechanics: how neurons compute, how layers connect, and how information flows from input to output.
 
 ### Network architecture fundamentals {#sec-neural-computation-network-architecture-fundamentals-1f58}
 
@@ -2340,7 +2340,7 @@ $$ z = \sum (x_i \cdot w_{ij}) + b $$ {#eq-weighted-sum-bias}
 
 Each neuron thus requires $N$ multiply-accumulate operations and $2N+2$ memory accesses (loading $N$ inputs and $N$ weights, plus the bias and output). A layer of $M$ neurons repeats this $M$ times, so the layer's total cost is $M \times N$ MACs—exactly the matrix multiplication $\mathbf{x}\mathbf{W}$ that hardware must execute.
 
-Activation functions are critical nonlinear transformations that enable neural networks to learn complex patterns by converting linear weighted sums into nonlinear outputs. Without activation functions, multiple linear layers would collapse into a single linear transformation, severely limiting the network's expressive power. Three commonly used element-wise activation functions and one vector-level function (softmax) each exhibit distinct mathematical characteristics that shape their effectiveness in different contexts (@fig-activation-functions).
+Activation functions are where expressiveness, gradient flow, and hardware cost meet. They convert linear weighted sums into nonlinear outputs; without them, multiple linear layers would collapse into a single linear transformation, severely limiting the network's expressive power. @Fig-activation-functions compares three commonly used element-wise activation functions and one vector-level function (softmax), each with mathematical characteristics that shape both learning behavior and execution cost.
 
 ::: {#fig-activation-functions fig-env="figure" fig-pos="htb" fig-cap="**Common Activation Functions**: Four nonlinear activation functions plotted with their output ranges. Sigmoid maps inputs to $(0,1)$ with smooth gradients, tanh provides zero-centered outputs in $(-1,1)$, ReLU introduces sparsity by outputting zero for negative inputs, and softmax (bottom-right) shows one component of a 3-element vector, illustrating how a single logit's probability varies as it changes relative to the other elements." fig-alt="Four plots arranged in 2×2 grid. Top-left: sigmoid S-curve from 0 to 1. Top-right: tanh S-curve from -1 to 1. Bottom-left: ReLU showing zero for negative x, linear for positive x. Bottom-right: softmax showing exponential curve approaching small positive values."}
 
@@ -2541,7 +2541,7 @@ Beyond its mathematical benefits like avoiding vanishing gradients, ReLU's hardw
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: ActivationEfficiency.relu_transistor_str,
 # │          ActivationEfficiency.sigmoid_transistor_str,
-# │          ActivationEfficiency.activation_ratio_str
+# │          ActivationEfficiency.activation_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int,  fmt, check
 
@@ -2569,16 +2569,16 @@ class ActivationLogic:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     relu_transistor_str = fmt(relu_transistors, precision=0, commas=False)
     sigmoid_transistor_str = fmt(sigmoid_transistors, precision=0)
-    activation_ratio_str = fmt_int(ratio, commas=False)
+    activation_ratio_mult_str = fmt_multiple(ratio, commas=False, precision=0)
 ```
 
 ### The transistor tax: Logic unit cost {#sec-neural-computation-transistor-tax}
 
-The hardware dominance extends beyond speed to silicon area. In computer architecture, we measure the **Logic Unit Cost**\index{Logic Unit Cost!activation functions} in terms of transistor count and energy per operation.
+The activation decision has a second cost beyond gradient behavior: silicon area. In computer architecture, we measure the **Logic Unit Cost**\index{Logic Unit Cost!activation functions} in terms of transistor count and energy per operation.
 
 A ReLU unit is computationally trivial: it consists of a single comparator and a multiplexer, requiring approximately `{python} ActivationLogic.relu_transistor_str` transistors. In contrast, a Sigmoid or Tanh unit requires computing an exponential—a complex transcendental function that hardware must approximate using lookup tables or iterative Taylor expansions. A high-precision exponential unit can consume over `{python} ActivationLogic.sigmoid_transistor_str` transistors.
 
-We call this disparity **The Transistor Tax**\index{Transistor Tax!activation functions}: selecting Sigmoid over ReLU increases the silicon "price" of an activation by `{python} ActivationLogic.activation_ratio_str`$\times$. For a systems engineer, this means ReLU is a density optimization that allows hardware architects to pack orders of magnitude more neurons into the same power and area budget. This physical efficiency is the primary reason the deep learning era shifted away from the "biologically plausible" Sigmoid toward the "silicon-efficient" ReLU.
+We call this disparity **The Transistor Tax**\index{Transistor Tax!activation functions}: selecting Sigmoid over ReLU increases the silicon "price" of an activation by `{python} ActivationLogic.activation_ratio_mult_str`. For a systems engineer, this means ReLU is a density optimization that allows hardware architects to pack orders of magnitude more neurons into the same power and area budget. This physical efficiency is the primary reason the deep learning era shifted away from the "biologically plausible" Sigmoid toward the "silicon-efficient" ReLU.
 
 ::: {.column-margin}
 ![](images/svg/vol1_nn_computation_margin_003.svg){width="100%" fig-alt="Vertical log-scale ladder of orange bars: a tiny ReLU comparator at the bottom, a much taller sigmoid exponential unit above it, the transistor-count gap spanning orders of magnitude."}
@@ -2782,7 +2782,7 @@ This matrix organization is more than mathematical convenience; it reflects how 
 
 In the simplest and most common case, each neuron in a layer is connected to every neuron in the previous layer, forming what we call a "dense" or "fully-connected" layer\index{Fully-Connected Layer!dense connectivity}. This pattern means that each neuron has the opportunity to learn from all available features from the previous layer. Fully-connected layers establish foundational principles, but alternative connectivity patterns (explored in @sec-network-architectures) can dramatically improve efficiency for structured data by restricting connections based on problem characteristics.
 
-To make this concrete, examine @fig-connections, which lays out a small three-layer network with every connection weight explicitly labeled. Notice how every input connects to every hidden neuron, and every hidden neuron connects to every output. Each labeled edge represents one learnable weight, making visible the total parameter count and, consequently, why matrix multiplication dominates neural network computation: the weight matrix dimensions directly determine both the layer's storage requirements and its arithmetic cost. The numerical values shown are actual computed activations, demonstrating how inputs transform through the network. For a network with layers of sizes $(n_1, n_2, n_3)$, the weight matrices have these dimensions:
+@Fig-connections makes the dense pattern explicit by laying out a small three-layer network with every connection weight labeled. Every input connects to every hidden neuron, and every hidden neuron connects to every output. Each labeled edge represents one learnable weight, making visible the total parameter count and, consequently, why matrix multiplication dominates neural network computation: the weight matrix dimensions directly determine both the layer's storage requirements and its arithmetic cost. The numerical values shown are actual computed activations, demonstrating how inputs transform through the network. For a network with layers of sizes $(n_1, n_2, n_3)$, the weight matrices have these dimensions:
 
 * Between first and second layer: $\mathbf{W}^{(1)} \in \mathbb{R}^{n_1 \times n_2}$
 * Between second and third layer: $\mathbf{W}^{(2)} \in \mathbb{R}^{n_2 \times n_3}$
@@ -2945,7 +2945,7 @@ If any of these feel unclear, review the earlier sections on Neural Network Fund
 
 ### Architecture design {#sec-neural-computation-architecture-design-523c}
 
-Architecture design addresses the next question: how should individual neurons, activation functions, and weight matrices connect to solve problems that no single layer can handle? The answer has direct systems consequences, because every topological choice (adding a layer, widening a hidden dimension, changing connectivity) multiplies the parameter count and, with it, memory footprint and arithmetic cost.
+Architecture design determines how individual neurons, activation functions, and weight matrices connect to solve problems that no single layer can handle. That design has direct systems consequences, because every topological choice (adding a layer, widening a hidden dimension, changing connectivity) multiplies the parameter count and, with it, memory footprint and arithmetic cost.
 
 Network topology\index{Network Topology!layer organization} describes how individual neurons organize into layers and connect to form complete neural networks. Building intuition begins with a simple problem that became famous in AI history[^fn-xor-depth-requirement].
 
@@ -3252,7 +3252,7 @@ minimum width=46,minimum height=56](\picname){};
 
 #### Layer connectivity design patterns {#sec-neural-computation-layer-connectivity-design-patterns-c66e}
 
-The preceding fully connected architecture connects every neuron to every neuron in the next layer, but this is not the only option. Different connection patterns between layers offer distinct advantages for learning and computation.
+The preceding fully connected architecture maximizes flexibility by connecting every neuron to every neuron in the next layer, but connectivity itself is an engineering decision. Dense, sparse, and skip patterns trade learning flexibility against parameter count, locality, and gradient flow.
 
 Dense connectivity\index{Dense Connectivity!parameter scaling} represents the standard pattern where each neuron connects to every neuron in the subsequent layer. In our MNIST example, connecting our 784-dimensional input layer to a hidden layer of 128 neurons requires 100,352 weight parameters ($784{\times}128$). This full connectivity enables the network to learn arbitrary relationships between inputs and outputs, but the number of parameters scales quadratically with layer width.
 
@@ -3266,7 +3266,7 @@ These connection patterns have significant implications for both the theoretical
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check, MarkdownStr
 #| label: mnist-model-size-local
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST MODEL SIZE—PARAMETER BREAKDOWN
@@ -3320,8 +3320,8 @@ class MnistModelSizeLocal:
     p1_str = fmt(params_per_layer[0], precision=0, commas=True)
     p2_str = fmt(params_per_layer[1], precision=0, commas=True)
     p3_str = fmt(params_per_layer[2], precision=0, commas=True)
-    total_params_str = fmt(total_params, precision=0, commas=True)
-    dl_total_macs_str = fmt(total_macs, precision=0, commas=True)
+    total_params_str = fmt_count(total_params, label="parameter")
+    dl_total_macs_str = fmt_count(total_macs, precision=0, commas=True, label="MAC")
 ```
 
 How parameters\index{Model Size!parameter count}\index{Memory Footprint!computational requirements} (weights and biases) are arranged determines both learning capacity and computational cost—this is the model's side of the silicon contract (@sec-introduction-iron-law-ml-systems-c32a): the parameter count, their numerical precision, and the operations they require collectively define the computational bargain the model strikes with hardware. While topology defines the network's structure, parameter initialization and organization directly affect learning dynamics and final performance.
@@ -3350,7 +3350,7 @@ How parameters\index{Model Size!parameter count}\index{Memory Footprint!computat
 # │          MnistTrainingMemoryCalc.act_*_str,
 # │          MnistTrainingMemoryCalc.total_train_mb_str,
 # │          MnistTrainingMemoryCalc.total_infer_kb_str,
-# │          MnistTrainingMemoryCalc.training_ratio_str
+# │          MnistTrainingMemoryCalc.training_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_qty_int
@@ -3406,12 +3406,12 @@ class MnistTrainingMemoryCalc:
     total_infer_act_kb_str = fmt_qty_int(inf_act, KB, commas=False)
     total_train_mb_str = fmt_qty(training_total, MB, precision=1, commas=False)
     total_infer_kb_str = fmt_qty_int(inference_total, KB, commas=False)
-    training_ratio_str = fmt(training_ratio, precision=1, commas=False)
+    training_ratio_mult_str = fmt_multiple(training_ratio, precision=1, commas=False)
 ```
 
 ::: {#exmp-nn-computation-memory-training-vs-inference .callout-example title="Memory: Training vs. inference"}
 
-**Problem**: In "Computing with Patterns" we showed that a single forward pass through the `{python} MnistModelSizeLocal.mnist_arch_str` network costs `{python} MnistModelSizeLocal.dl_total_macs_str` MACs. What is the memory footprint for this network during training with batch size 32 in 32-bit (4-byte) floating-point precision, and how does it compare to inference requirements?
+**Problem**: In "Computing with Patterns" we showed that a single forward pass through the `{python} MnistModelSizeLocal.mnist_arch_str` network costs `{python} MnistModelSizeLocal.dl_total_macs_str`. What is the memory footprint for this network during training with batch size 32 in 32-bit (4-byte) floating-point precision, and how does it compare to inference requirements?
 
 **Solution**:
 
@@ -3466,7 +3466,7 @@ class MnistTrainingMemoryCalc:
 \endgroup
 ```
 
-**Systems insight**: Training at batch size 32 requires `{python} MnistTrainingMemoryCalc.training_ratio_str`$\times$ more memory than single-sample inference in this example. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size$\times$ layer widths.
+**Systems insight**: Training at batch size 32 requires `{python} MnistTrainingMemoryCalc.training_ratio_mult_str` more memory than single-sample inference in this example. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size$\times$ layer widths.
 
 :::
 
@@ -3492,7 +3492,7 @@ class MnistArchitectureRecap:
     mnist_arch_str = MarkdownStr(f"{mnist_l1_dim} → {mnist_l2_dim} → {mnist_l3_dim} → {mnist_l4_dim}")
 ```
 
-Parameter count grows with network width and depth. For our MNIST example, consider a network with a `{python} MnistArchitectureRecap.mnist_l1_dim_str`-dimensional input layer, hidden layers of `{python} MnistArchitectureRecap.mnist_l2_dim_str` and `{python} MnistArchitectureRecap.mnist_l3_dim_str` neurons, and a `{python} MnistArchitectureRecap.mnist_l4_dim_str`-neuron output layer (`{python} MnistArchitectureRecap.mnist_arch_str`). The first layer requires `{python} MnistModelSizeLocal.w1_str` weights and `{python} MnistModelSizeLocal.b1_str` biases, the second layer `{python} MnistModelSizeLocal.w2_str` weights and `{python} MnistModelSizeLocal.b2_str` biases, and the output layer `{python} MnistModelSizeLocal.w3_str` weights and `{python} MnistModelSizeLocal.b3_str` biases, totaling `{python} MnistModelSizeLocal.total_params_str` parameters. Each must be stored in memory and updated during learning.
+Parameter count grows with network width and depth. For our MNIST example, consider a network with a `{python} MnistArchitectureRecap.mnist_l1_dim_str`-dimensional input layer, hidden layers of `{python} MnistArchitectureRecap.mnist_l2_dim_str` and `{python} MnistArchitectureRecap.mnist_l3_dim_str` neurons, and a `{python} MnistArchitectureRecap.mnist_l4_dim_str`-neuron output layer (`{python} MnistArchitectureRecap.mnist_arch_str`). The first layer requires `{python} MnistModelSizeLocal.w1_str` weights and `{python} MnistModelSizeLocal.b1_str` biases, the second layer `{python} MnistModelSizeLocal.w2_str` weights and `{python} MnistModelSizeLocal.b2_str` biases, and the output layer `{python} MnistModelSizeLocal.w3_str` weights and `{python} MnistModelSizeLocal.b3_str` biases, totaling `{python} MnistModelSizeLocal.total_params_str`. Each must be stored in memory and updated during learning.
 
 The preceding memory requirements seem modest for our small MNIST classifier. Scaling to production-sized models transforms these requirements dramatically, changing the hardware regime.
 
@@ -3523,7 +3523,7 @@ The preceding memory requirements seem modest for our small MNIST classifier. Sc
 # │          MemoryExplosion.gpt2_params_count_str,
 # │          MemoryExplosion.gpt2_params_b_str,
 # │          MemoryExplosion.gpt2_mem_gb_str,
-# │          MemoryExplosion.mem_jump_str
+# │          MemoryExplosion.memory_jump_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import model_memory
@@ -3567,7 +3567,7 @@ class MemoryExplosionCalc:
     gpt2_params_b_str = fmt_params(gpt2_params_count_value, scale="B",
                                    precision=1, commas=False)                 # e.g. "1.6B"
     gpt2_mem_gb_str = fmt_qty(gpt2_mem, GB, precision=0, commas=False)
-    mem_jump_str = fmt(mem_jump_value, precision=1, commas=True)              # e.g. "14,244"
+    memory_jump_factor_mult_str = fmt_multiple(mem_jump_value, precision=1, commas=True)              # e.g. "14,244"
 ```
 
 ::: {#nbk-nn-computation-memory-explosion .callout-notebook title="The memory explosion"}
@@ -3577,7 +3577,7 @@ How does the scale of our Lighthouse Models affect the *Data* $(D_{\text{vol}})$
 -   **MNIST Archetype**: `{python} MemoryExplosionCalc.mnist_params_count_str` parameters $\times$ 4 bytes (FP32) ≈ `{python} MemoryExplosionCalc.mnist_mem_kb_str`. This entire model fits inside the L2 cache of a modern processor.
 -   **GPT-2 Archetype**: `{python} MemoryExplosionCalc.gpt2_params_count_str` parameters $\times$ 4 bytes (FP32) ≈ `{python} MemoryExplosionCalc.gpt2_mem_gb_str`. This requires dedicated GPU VRAM and high-speed memory bandwidth.
 
-**Systems insight**: Moving from ~`{python} MemoryExplosionCalc.mnist_params_k_str` to `{python} MemoryExplosionCalc.gpt2_params_b_str` parameters is a `{python} MemoryExplosionCalc.mem_jump_str`$\times$ jump. The increase represents a phase change in engineering, not merely "more parameters." MNIST is a cache-resident arithmetic problem; GPT-2 is a data movement problem.
+**Systems insight**: Moving from ~`{python} MemoryExplosionCalc.mnist_params_k_str` to `{python} MemoryExplosionCalc.gpt2_params_b_str` parameters is a `{python} MemoryExplosionCalc.memory_jump_factor_mult_str` jump. The increase represents a phase change in engineering, not merely "more parameters." MNIST is a cache-resident arithmetic problem; GPT-2 is a data movement problem.
 
 :::
 
@@ -3681,7 +3681,7 @@ Different architectures impose specific constraints on parameter organization. S
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_count
 #| label: mnist-training-intro-recap
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST TRAINING INTRO RECAP
@@ -3702,15 +3702,15 @@ class MnistTrainingIntroRecap:
     training_examples = Datasets.MNIST.training_examples.to(count).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    total_params_str = fmt(total_params, precision=0, commas=True)
+    total_params_str = fmt_count(total_params, label="parameter")
     training_examples_str = fmt(training_examples, precision=0, commas=True)
 ```
 
-Network architecture, neurons, and parameters are now in place, but a central question remains: the mechanism by which these randomly initialized parameters become useful. A randomly wired network produces outputs no better than chance. Understanding the architecture of a neural network answers *what* the model computes; understanding training answers *how* the model learns. The training process transforms a randomly initialized network into one that captures meaningful patterns in data, and the mechanics of that transformation reveal fundamental systems constraints. Training demands far more memory than inference, gradient computation dominates energy budgets, and batch size is ultimately a hardware decision. The learning process addresses these constraints as networks systematically adjust their weights based on feedback from training data, transforming `{python} MnistTrainingIntroRecap.total_params_str` random numbers into a functioning digit classifier.
+Network architecture, neurons, and parameters are now in place, but a central question remains: the mechanism by which these randomly initialized parameters become useful. A randomly wired network produces outputs no better than chance. Understanding the architecture of a neural network answers *what* the model computes; understanding training answers *how* the model learns. The training process transforms a randomly initialized network into one that captures meaningful patterns in data, and the mechanics of that transformation reveal fundamental systems constraints. Training demands far more memory than inference, gradient computation dominates energy budgets, and batch size is ultimately a hardware decision. The learning process addresses these constraints as networks systematically adjust their weights based on feedback from training data, transforming `{python} MnistTrainingIntroRecap.total_params_str` from random numbers into a functioning digit classifier.
 
 ## Learning Process {#sec-neural-computation-learning-process-0b83}
 
-Our MNIST network currently holds `{python} MnistTrainingIntroRecap.total_params_str` randomly initialized parameters—numbers that encode no knowledge at all. The transformation of these random values into a digit classifier achieving over 95 percent accuracy relies on four operations repeated millions of times: forward propagation computes a prediction, a loss function measures the error, backpropagation assigns blame to each weight, and an optimizer adjusts those weights to reduce the error.
+Our MNIST network currently holds `{python} MnistTrainingIntroRecap.total_params_str` initialized randomly—numbers that encode no knowledge at all. The transformation of these random values into a digit classifier achieving over 95 percent accuracy relies on four operations repeated millions of times: forward propagation computes a prediction, a loss function measures the error, backpropagation assigns blame to each weight, and an optimizer adjusts those weights to reduce the error.
 
 ### Supervised learning from labeled examples {#sec-neural-computation-supervised-learning-labeled-examples-5e6d}
 
@@ -3861,11 +3861,11 @@ The forward pass is only half the story.
 # │       performs 100,352 MACs per image.
 # │ How: Multiply image dimensions and first-hidden-layer width.
 # │
-# │ Imports: mlsysim.book (fmt, check)
+# │ Imports: mlsysim.book (fmt, fmt_count, check)
 # │ Exports: MnistForwardIntroLocal.input_values_str,
 # │          MnistForwardIntroLocal.first_layer_macs_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistForwardIntroLocal:
@@ -3886,14 +3886,14 @@ class MnistForwardIntroLocal:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     input_values_str = fmt(input_values, precision=0, commas=False)
-    first_layer_macs_str = fmt(first_layer_macs, precision=0, commas=True)
+    first_layer_macs_str = fmt_count(first_layer_macs, precision=0, commas=True, label="MAC")
 ```
 
 When an image of a handwritten digit enters our network, it undergoes a series of transformations through the layers. Each transformation combines the weighted inputs with learned patterns to progressively extract relevant features. For the 784-128-64-10 digit classifier, a $28{\times}28$ pixel image is processed through multiple layers to ultimately produce probabilities for each possible digit (0--9).
 
 The process begins with the input layer, where each pixel's grayscale value becomes an input feature. For MNIST, this means `{python} MnistForwardIntroLocal.input_values_str` input values ($28{\times}28$ = `{python} MnistForwardIntroLocal.input_values_str`), each normalized between 0 and 1. These values then propagate forward through the hidden layers, where each neuron combines its inputs according to its learned weights and applies a nonlinear activation function.
 
-Each forward pass through our MNIST network (784-128-64-10) requires substantial matrix operations. The first layer alone performs `{python} MnistForwardIntroLocal.first_layer_macs_str` multiply-accumulate operations per sample. When processing multiple samples in a batch, these operations multiply accordingly, requiring careful management of memory bandwidth and computational resources. Specialized hardware like GPUs executes these operations efficiently through parallel processing.
+Each forward pass through our MNIST network (784-128-64-10) requires substantial matrix operations. The first layer alone performs `{python} MnistForwardIntroLocal.first_layer_macs_str` per sample. When processing multiple samples in a batch, these operations multiply accordingly, requiring careful management of memory bandwidth and computational resources. Specialized hardware like GPUs executes these operations efficiently through parallel processing.
 
 #### Individual layer processing {#sec-neural-computation-individual-layer-processing-7ea9}
 
@@ -3976,7 +3976,7 @@ Understanding how these mathematical operations translate into actual computatio
 
 Consider a batch of 32 images entering our network. Each image starts as a $28{\times}28$ grid of pixel values, which we flatten into a 784-dimensional vector. For the entire batch, this gives us an input matrix $\mathbf{X}$ of size $32{\times}784$, where each row represents one image. The values are typically normalized to lie between 0 and 1.
 
-The transformation at each layer proceeds as follows:
+The transformation at each layer proceeds as a shape-changing sequence; the shapes determine both kernel choice and activation storage:
 
 * **Input Layer Processing**: The network takes our input matrix $\mathbf{X}$ ($32{\times}784$) and transforms it using the first layer's weights. If our first hidden layer has 128 neurons, $\mathbf{W}^{(1)}$ is a $784{\times}128$ matrix. The resulting computation $\mathbf{X}\mathbf{W}^{(1)}$ produces a $32{\times}128$ matrix.
 
@@ -4012,10 +4012,10 @@ For each image in the batch, this produces a probability distribution over the p
 # │          MnistFlopsCalc.l3_mm_str, MnistFlopsCalc.l3_bias_str,
 # │          MnistFlopsCalc.total_mops_str, MnistFlopsCalc.inference_kb_str,
 # │          MnistFlopsCalc.double_total_mops_str,
-# │          MnistFlopsCalc.double_ratio_str, MnistFlopsCalc.double_ratio_exact_str
+# │          MnistFlopsCalc.double_ratio_mult_str, MnistFlopsCalc.double_ratio_exact_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt, fmt_percent, fmt_qty_int, check, MarkdownStr
+from mlsysim.fmt import fmt_int,  fmt, fmt_count, fmt_percent, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistFlopsCalc:
@@ -4113,10 +4113,10 @@ class MnistFlopsCalc:
     batch_h2_str = fmt(batch_h2_values, precision=0, commas=True)
     batch_out_str = fmt(batch_out_values, precision=0, commas=True)
     batch_act_total_str = fmt(batch_act_total_values, precision=0, commas=True)
-    total_params_str = fmt(total_params, precision=0, commas=True)
+    total_params_str = fmt_count(total_params, label="parameter")
     double_total_mops_str = fmt_int(double_total_mops_value, commas=False)
-    double_ratio_str = fmt(double_ratio_value, precision=1, commas=False)
-    double_ratio_exact_str = fmt(double_ratio_value, precision=2, commas=False)
+    double_ratio_mult_str = fmt_multiple(double_ratio_value, precision=1, commas=False)
+    double_ratio_exact_mult_str = fmt_multiple(double_ratio_value, precision=2, commas=False)
     inference_kb_str = fmt_qty_int(inference_total, KB, commas=False)
 ```
 
@@ -4132,25 +4132,25 @@ class MnistFlopsCalc:
 
 1. **Layer 1 dominates**: The first layer accounts for `{python} MnistFlopsCalc.layer1_pct_str` of all operations because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
 2. **Compute vs. Memory**: At `{python} MnistFlopsCalc.per_image_kops_str` KOp per image and ~`{python} MnistFlopsCalc.inference_kb_str` memory, this network has a matmul-dominated arithmetic intensity of ~`{python} MnistFlopsCalc.arith_intensity_str` FLOP/byte—firmly in the memory-bound regime for most hardware (see the Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 for how arithmetic intensity determines whether a workload is memory bound or compute bound). A modern GPU achieving ten TFLOP/s would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
-3. **Scaling intuition**: Doubling the hidden layer widths (784 → 256 → 128 → 10) increases $O$ by ~`{python} MnistFlopsCalc.double_ratio_str`$\times$ to ~`{python} MnistFlopsCalc.double_total_mops_str` MOp. This comes from recomputing each layer: layers 1 and 3 double, layer 2 quadruples, so the total grows by about `{python} MnistFlopsCalc.double_ratio_exact_str`$\times$ rather than 4$\times$.
+3. **Scaling intuition**: Doubling the hidden layer widths (784 → 256 → 128 → 10) increases $O$ by ~`{python} MnistFlopsCalc.double_ratio_mult_str` to ~`{python} MnistFlopsCalc.double_total_mops_str` MOp. This comes from recomputing each layer: layers 1 and 3 double, layer 2 quadruples, so the total grows by about `{python} MnistFlopsCalc.double_ratio_exact_mult_str` rather than 4$\times$.
 
 :::
 
-| **Layer**   | **Operation**  |                **Dimensions**                |                                 **Operations**                                |
-|:------------|:---------------|:--------------------------------------------:|:-----------------------------------------------------------------------------:|
-| **Layer 1** | MatMul         | ($32{\times}784$)$\times$ ($784{\times}128$) | 2 $\times$ 32 $\times$ $784{\times}128$ = `{python} MnistFlopsCalc.l1_mm_str` |
-| **Layer 1** | Bias + ReLU    |               $32{\times}128$                |            $2{\times}4,096$ = `{python} MnistFlopsCalc.l1_bias_str`           |
-| **Layer 2** | MatMul         | ($32{\times}128$)$\times$ ($128{\times}64$)  |  2 $\times$ 32 $\times$ $128{\times}64$ = `{python} MnistFlopsCalc.l2_mm_str` |
-| **Layer 2** | Bias + ReLU    |                $32{\times}64$                |            $2{\times}2,048$ = `{python} MnistFlopsCalc.l2_bias_str`           |
-| **Layer 3** | MatMul         |  ($32{\times}64$)$\times$ ($64{\times}10$)   |  2 $\times$ 32 $\times$ $64{\times}10$ = `{python} MnistFlopsCalc.l3_mm_str`  |
-| **Layer 3** | Bias + Softmax |                $32{\times}10$                |              ~`{python} MnistFlopsCalc.l3_bias_str` (simplified)              |
-| **Total**   |                |                                              |               **~`{python} MnistFlopsCalc.total_mops_str` MOp**               |
+| **Layer**   | **Operation**  |                 **Dimensions**                |                                 **Operations**                                |
+|:------------|:---------------|:---------------------------------------------:|:-----------------------------------------------------------------------------:|
+| **Layer 1** | MatMul         | ($32{\times}784$) $\times$ ($784{\times}128$) | 2 $\times$ 32 $\times$ $784{\times}128$ = `{python} MnistFlopsCalc.l1_mm_str` |
+| **Layer 1** | Bias + ReLU    |                $32{\times}128$                |            $2{\times}4,096$ = `{python} MnistFlopsCalc.l1_bias_str`           |
+| **Layer 2** | MatMul         |  ($32{\times}128$) $\times$ ($128{\times}64$) |  2 $\times$ 32 $\times$ $128{\times}64$ = `{python} MnistFlopsCalc.l2_mm_str` |
+| **Layer 2** | Bias + ReLU    |                 $32{\times}64$                |            $2{\times}2,048$ = `{python} MnistFlopsCalc.l2_bias_str`           |
+| **Layer 3** | MatMul         |   ($32{\times}64$) $\times$ ($64{\times}10$)  |  2 $\times$ 32 $\times$ $64{\times}10$ = `{python} MnistFlopsCalc.l3_mm_str`  |
+| **Layer 3** | Bias + Softmax |                 $32{\times}10$                |              ~`{python} MnistFlopsCalc.l3_bias_str` (simplified)              |
+| **Total**   |                |                                               |               **~`{python} MnistFlopsCalc.total_mops_str` MOp**               |
 
 : **MNIST Forward Pass Operation Count by Layer**: Operation-equivalent breakdown for a single forward pass through the 784-128-64-10 network at batch size 32. Matrix multiplication rows are FLOPs; bias, ReLU, and softmax rows are elementwise operations included to show their negligible contribution. Layer 1's matrix multiply dominates because it multiplies the 784-dimensional input against the widest weight matrix; bias and activation operations contribute under 1 percent of the total. {#tbl-nn-computation-mnist-flops tbl-colwidths="[14,20,28,40]"}
 
 #### Implementation and optimization considerations {#sec-neural-computation-implementation-optimization-considerations-f2ca}
 
-Forward propagation implementation involves practical considerations that affect both computational efficiency and memory usage, particularly when processing large batches or deep networks.
+Forward propagation is easy to state mathematically, but its implementation is constrained by activation storage, batch size, memory layout, and hardware fit.
 
 Memory management plays a central role during forward propagation. Each layer's activations must be stored for the backward pass during training. For our MNIST example (784-128-64-10) with a batch size of 32, the activation storage requirements are:
 
@@ -4249,7 +4249,7 @@ The loss function's gradients with respect to the network's outputs provide the 
 
 The choice of loss function also influences other training decisions. Larger loss gradients may require smaller learning rates to prevent overshooting, while loss averaging across batches affects gradient stability and thus optimal batch size. The loss landscape's curvature shapes which optimization algorithms work best, and the loss value's trajectory determines when training has converged.
 
-Loss functions quantify prediction error, but the error signal alone does not tell the system how to correct it. With `{python} MnistFlopsCalc.total_params_str` parameters in the MNIST network, determining which weights should change, by *how much*, and in *what* direction is intractable without an efficient credit-assignment algorithm. This is the credit assignment problem\index{Credit Assignment Problem!weight responsibility}: determining which of thousands of connections contributed to the error. The next section introduces backpropagation, which solves this problem through the chain rule of calculus, systematically computing each weight's responsibility for the final prediction error.
+Loss functions quantify prediction error, but the error signal alone does not tell the system how to correct it. With `{python} MnistFlopsCalc.total_params_str` in the MNIST network, determining which weights should change, by *how much*, and in *what* direction is intractable without an efficient credit-assignment algorithm. This is the credit assignment problem\index{Credit Assignment Problem!weight responsibility}: determining which of thousands of connections contributed to the error. The next section introduces backpropagation, which solves this problem through the chain rule of calculus, systematically computing each weight's responsibility for the final prediction error.
 
 ### Gradient computation and backpropagation {#sec-neural-computation-gradient-computation-backpropagation-dacf}
 
@@ -4415,7 +4415,7 @@ We established earlier that training requires storing activations for backpropag
 # │          BackpropMemory.bp_total_params_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty_int, check, MarkdownStr
+from mlsysim.fmt import fmt_int,  fmt, fmt_count, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BackpropMemory:
@@ -4453,7 +4453,7 @@ class BackpropMemory:
     bp_h1_kb_str = fmt_qty_int(act_mem[1], KB, commas=False)
     bp_h2_kb_str = fmt_qty_int(act_mem[2], KB, commas=False)
     bp_out_kb_str = fmt_qty_int(act_mem[3], KB, commas=False)
-    bp_total_params_str = fmt(total_params, precision=0)
+    bp_total_params_str = fmt_count(total_params, label="parameter")
 ```
 
 Consider a larger variant of our MNIST network (784 → 512 → 256 → 10) with a batch size of 32. Each layer's activations must be maintained:
@@ -4463,7 +4463,7 @@ Consider a larger variant of our MNIST network (784 → 512 → 256 → 10) with
 * Hidden layer 2: $32{\times}256$ values (~`{python} BackpropMemory.bp_h2_kb_str`)
 * Output layer: $32{\times}10$ values (~`{python} BackpropMemory.bp_out_kb_str`)
 
-Beyond activations, we must store gradients for each parameter. For this larger network with approximately `{python} BackpropMemory.bp_total_params_str` parameters, gradient storage requires several megabytes. Advanced optimizers like Adam\index{Adam Optimizer!momentum and velocity}\index{Optimizer!Adam}[^fn-adam-memory-overhead] roughly double this by maintaining momentum and velocity terms for every parameter.
+Beyond activations, we must store gradients for each parameter. For this larger network with approximately `{python} BackpropMemory.bp_total_params_str`, gradient storage requires several megabytes. Advanced optimizers like Adam\index{Adam Optimizer!momentum and velocity}\index{Optimizer!Adam}[^fn-adam-memory-overhead] roughly double this by maintaining momentum and velocity terms for every parameter.
 
 ```{python}
 #| echo: false
@@ -4516,7 +4516,7 @@ The computational pattern of backward propagation follows a strict sequence: com
 
 \index{Computation Graph!dynamic (eager execution)}
 \index{Computation Graph!static (deferred execution)}
-Modern frameworks handle these computations through sophisticated autograd\index{Autograd!automatic differentiation}\index{Automatic Differentiation!computational graph}[^fn-autograd-dag] engines. When you call `loss.backward()` in PyTorch, the framework automatically manages memory allocation, operation scheduling, and gradient accumulation across the computation graph. The system tracks which tensors require gradients, optimizes memory usage through gradient checkpointing when needed, and schedules operations to maximize hardware utilization. This automated management allows practitioners to focus on model design rather than the intricate details of gradient computation implementation.
+Modern frameworks handle these computations through sophisticated autograd\index{Autograd!automatic differentiation}\index{Automatic Differentiation!computational graph}[^fn-autograd-dag] engines. When a training script calls `loss.backward()` in PyTorch, the framework automatically manages memory allocation, operation scheduling, and gradient accumulation across the computation graph. The system tracks which tensors require gradients, optimizes memory usage through gradient checkpointing when needed, and schedules operations to maximize hardware utilization. This automated management allows practitioners to focus on model design rather than the intricate details of gradient computation implementation.
 
 [^fn-autograd-dag]: **Autograd (Automatic Differentiation)**: Reverse-mode automatic differentiation traces back to Linnainmaa's work on differentiating computer programs [-@linnainmaa1970representation]. Modern autograd engines record forward-pass operations into a directed acyclic graph (DAG), then traverse it backward using the chain rule to compute gradients automatically. The key systems trade-off: PyTorch's dynamic graph rebuilds the DAG each iteration (flexible but harder to optimize), while TensorFlow's original static graph compiled once (rigid but amenable to hardware-specific kernel fusion). This design choice propagates into every deployment decision. \index{Autograd!static vs. dynamic graph}
 
@@ -4968,18 +4968,18 @@ class GpuSpecsFootnote:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
     h100_tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
-    training_mobile_ratio_str = fmt(training_mobile_ratio, precision=0, commas=False)
+    training_mobile_ratio_mult_str = fmt_multiple(training_mobile_ratio, precision=0, commas=False)
     edge_tpu_tops_str = fmt_ops_rate(h_edge_tpu.compute.peak_flops, unit=TOPS, precision=0, commas=False)
     edge_tpu_tdp_w_str = fmt_power(h_edge_tpu.tdp, unit=watt, precision=0, commas=False)
     jetson_orin_tops_str = fmt_ops_rate(Hardware.Edge.JetsonAGXOrin.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
     jetson_orin_tdp_low_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_min, unit=watt, precision=0, commas=False)
     jetson_orin_tdp_high_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_max, unit=watt, precision=0, commas=False)
-    edge_throughput_ratio_str = fmt(edge_throughput_ratio, precision=1, commas=False)
+    edge_throughput_ratio_mult_str = fmt_multiple(edge_throughput_ratio, precision=1, commas=False)
 ```
 
-[^fn-training-gpu-power]: **Training GPU Power Budget**: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "substantial cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`–`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a 4 W mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_str`$\times$ the power budget. \index{GPU!training, power budget}
+[^fn-training-gpu-power]: **Training GPU Power Budget**: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "substantial cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`–`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a 4 W mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget. \index{GPU!training, power budget}
 
-[^fn-edge-tpu-efficiency]: **Edge Inference Accelerators**: The Edge TPU (Google Coral) operates in the mobile/embedded tier at ~`{python} GpuSpecsFootnote.edge_tpu_tdp_w_str` TDP, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` by hardwiring the multiply-accumulate datapath for INT8 inference. Edge *servers* occupy a different tier entirely: the NVIDIA Jetson AGX Orin delivers `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_str`$\times$ more throughput but requiring fixed power infrastructure rather than battery operation. This power-tier gap (single-digit watts vs. tens of watts) determines whether inference can run on battery-powered devices or requires wired deployment. \index{Edge TPU!inference efficiency}\index{Edge Inference!power tiers}
+[^fn-edge-tpu-efficiency]: **Edge Inference Accelerators**: The Edge TPU (Google Coral) operates in the mobile/embedded tier at ~`{python} GpuSpecsFootnote.edge_tpu_tdp_w_str` TDP, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` by hardwiring the multiply-accumulate datapath for INT8 inference. Edge *servers* occupy a different tier entirely: the NVIDIA Jetson AGX Orin delivers `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` more throughput but requiring fixed power infrastructure rather than battery operation. This power-tier gap (single-digit watts vs. tens of watts) determines whether inference can run on battery-powered devices or requires wired deployment. \index{Edge TPU!inference efficiency}\index{Edge Inference!power tiers}
 
 [^fn-inference-quantization]: **Quantization**: From Latin *quantus* ("how much"), reducing numerical precision from 32-bit to eight-bit integers yields 4$\times$ less memory per parameter and up to 4$\times$ higher throughput on hardware with INT8 datapaths. Trained models tolerate this precision loss because inference does not accumulate rounding errors across gradient updates the way training does. The trade-off is not free: aggressive quantization (below four-bit) can degrade accuracy on tail-distribution inputs, requiring calibration datasets to find the precision floor for each deployment. See @sec-model-compression for quantization techniques. \index{Quantization!inference precision}
 
@@ -5000,7 +5000,7 @@ class GpuSpecsFootnote:
 # │
 # │ Imports: mlsysim.book (fmt, check), mlsysim.constants (byte, KB)
 # │ Exports: MnistInferenceResourceLocal.mnist_arch_str,
-# │          MnistInferenceResourceLocal.training_ratio_str,
+# │          MnistInferenceResourceLocal.training_ratio_mult_str,
 # │          MnistInferenceResourceLocal.w1_str,
 # │          MnistInferenceResourceLocal.w2_str,
 # │          MnistInferenceResourceLocal.w3_str,
@@ -5019,7 +5019,7 @@ class GpuSpecsFootnote:
 # │          MnistInferenceResourceLocal.batch_output_act_str,
 # │          MnistInferenceResourceLocal.batch_size_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int,  fmt, fmt_qty_int, check, MarkdownStr
+from mlsysim.fmt import fmt_int,  fmt, fmt_count, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistInferenceResourceLocal:
@@ -5058,14 +5058,14 @@ class MnistInferenceResourceLocal:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     mnist_arch_str = MarkdownStr(f"{in_dim} → {h1_dim} → {h2_dim} → {out_dim}")
-    training_ratio_str = fmt(training_ratio, precision=1, commas=False)
+    training_ratio_mult_str = fmt_multiple(training_ratio, precision=1, commas=False)
     w1_str = fmt(weights[0], precision=0, commas=True)
     w2_str = fmt(weights[1], precision=0, commas=True)
     w3_str = fmt(weights[2], precision=0, commas=True)
     b1_str = fmt(biases[0], precision=0, commas=False)
     b2_str = fmt(biases[1], precision=0, commas=False)
     b3_str = fmt(biases[2], precision=0, commas=False)
-    total_params_str = fmt(total_params, precision=0, commas=True)
+    total_params_str = fmt_count(total_params, label="parameter")
     param_mem_kb_str = fmt_qty_int(param_mem, KB, commas=False)
     total_inf_act_str = fmt(inf_act_elements, precision=0, commas=False)
     total_infer_act_kb_str = fmt_qty_int(inf_act, KB, commas=False)
@@ -5087,7 +5087,7 @@ These architectural differences translate directly into distinct resource profil
 | **Computational Flow** | Structured for gradient computation preparation       | Optimized for direct output generation             |
 | **Resource Profile**   | Higher memory requirements for training operations    | Minimized memory footprint for efficient execution |
 
-: **Training vs. Inference Forward Pass**: Although both phases execute identical mathematical operations layer-by-layer, they differ fundamentally in memory management. Training must preserve all intermediate activations for gradient computation during the backward pass; inference can discard each layer's outputs immediately after computing the next layer, enabling aggressive memory optimization. This distinction explains why training typically requires several times more memory than inference for the same model; the MNIST worked example below is about `{python} MnistInferenceResourceLocal.training_ratio_str`$\times$. {#tbl-forward-pass-comparison}
+: **Training vs. Inference Forward Pass**: Although both phases execute identical mathematical operations layer-by-layer, they differ fundamentally in memory management. Training must preserve all intermediate activations for gradient computation during the backward pass; inference can discard each layer's outputs immediately after computing the next layer, enabling aggressive memory optimization. This distinction explains why training typically requires several times more memory than inference for the same model; the MNIST worked example below is about `{python} MnistInferenceResourceLocal.training_ratio_mult_str`. {#tbl-forward-pass-comparison}
 
 #### Memory and computational resources {#sec-neural-computation-memory-computational-resources-d02b}
 
@@ -5101,7 +5101,7 @@ Memory requirements\index{Memory Footprint!parameter storage}\index{Memory Footp
    * Layer 1: $784{\times}128$ = `{python} MnistInferenceResourceLocal.w1_str` weights + `{python} MnistInferenceResourceLocal.b1_str` biases
    * Layer 2: $128{\times}64$ = `{python} MnistInferenceResourceLocal.w2_str` weights + `{python} MnistInferenceResourceLocal.b2_str` biases
    * Layer 3: $64{\times}10$ = `{python} MnistInferenceResourceLocal.w3_str` weights + `{python} MnistInferenceResourceLocal.b3_str` biases
-   * Total: `{python} MnistInferenceResourceLocal.total_params_str` parameters (≈ `{python} MnistInferenceResourceLocal.param_mem_kb_str` at 32-bit floating point precision[^fn-fp32-precision])
+   * Total: `{python} MnistInferenceResourceLocal.total_params_str` (≈ `{python} MnistInferenceResourceLocal.param_mem_kb_str` at 32-bit floating point precision[^fn-fp32-precision])
 
 [^fn-fp32-precision]: **FP32 (Single Precision)**: The IEEE 754 standard (1985) format using 32 bits (1 sign, 8 exponent, 23 mantissa) that became the default for neural network training because its dynamic range accommodates gradient magnitudes spanning many orders of magnitude. Halving to FP16 or BF16 ("brain floating point," developed at Google Brain) saves 2$\times$ memory and doubles throughput on hardware with 16-bit datapaths; further reduction to INT8 yields 4$\times$ savings but requires posttraining calibration. See @sec-appdx-machine-foundations-numerical-representations-c889 for a detailed comparison of numerical formats and their precision-throughput trade-offs. \index{FP32!numerical precision}
 
@@ -5119,7 +5119,7 @@ Computational requirements follow a fixed pattern for each input:
 * Output layer: `{python} MnistInferenceResourceLocal.inf_madd_l3_str` multiply-adds
 * Total: `{python} MnistInferenceResourceLocal.inf_madd_total_str` multiply-add operations per inference
 
-The resource profile differs markedly from training requirements, where gradient storage and backpropagation overhead multiply resource demands by `{python} MnistInferenceResourceLocal.training_ratio_str`$\times$ or more (see the worked example in @sec-neural-computation-model-size-computational-complexity-1f0f). The predictable, streamlined nature of inference enables optimization opportunities that training cannot exploit.
+The resource profile differs markedly from training requirements, where gradient storage and backpropagation overhead multiply resource demands by `{python} MnistInferenceResourceLocal.training_ratio_mult_str` or more (see the worked example in @sec-neural-computation-model-size-computational-complexity-1f0f). The predictable, streamlined nature of inference enables optimization opportunities that training cannot exploit.
 
 #### Performance enhancement techniques {#sec-neural-computation-performance-enhancement-techniques-692f}
 
@@ -5184,7 +5184,7 @@ Before examining how these concepts integrate in a real-world deployment, verify
 - [ ] Can you trace a single input (for example, MNIST digit image) through the complete system: raw input → preprocessing → forward propagation through layers → output probabilities → postprocessing → final prediction?
 - [ ] Do you understand the distinction between what happens once (loading trained weights) vs. per-input (forward propagation)?
 
-**Self-Test**: For an MNIST digit classifier (`{python} MnistInferenceResourceLocal.mnist_arch_str`) deployed in production: (1) Using the memory analysis from this chapter, explain why training requires ~`{python} MnistInferenceResourceLocal.training_ratio_str`$\times$ more memory than inference, and identify which components (gradients, optimizer state, activations) contribute to this difference. (2) Trace a single digit image from camera capture through preprocessing, inference, and postprocessing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
+**Self-Test**: For an MNIST digit classifier (`{python} MnistInferenceResourceLocal.mnist_arch_str`) deployed in production: (1) Using the memory analysis from this chapter, explain why training requires ~`{python} MnistInferenceResourceLocal.training_ratio_mult_str` more memory than inference, and identify which components (gradients, optimizer state, activations) contribute to this difference. (2) Trace a single digit image from camera capture through preprocessing, inference, and postprocessing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
 
 Use the case study that follows to watch architectural choices, training strategies, and deployment constraints combine into a working ML system.
 
@@ -5199,7 +5199,7 @@ In the early 1990s, the United States Postal Service needed to read handwritten 
 
 The United States Postal Service (USPS) operated at national mail scale, with large daily volumes requiring accurate routing based on handwritten ZIP codes. In the early 1990s, human operators primarily performed this task, making it one of the largest manual data entry operations worldwide. Automating this process through neural networks represented an early, successful large-scale deployment of artificial intelligence.
 
-The complexity of this task becomes evident: a ZIP code recognition system must process images of handwritten digits captured under varying conditions. Scan the samples in @fig-usps-digit-examples to appreciate the wide variation in writing styles, pen types, stroke thickness, and character formation that the system must handle. The system must make accurate predictions quickly enough to maintain mail processing speeds, yet errors in recognition can lead to significant delays and costs from misrouted mail. This real-world constraint meant the system needed both high accuracy and reliable measures of prediction confidence to identify when human intervention was necessary.
+The complexity of this task becomes evident: a ZIP code recognition system must process images of handwritten digits captured under varying conditions. The samples in @fig-usps-digit-examples show the wide variation in writing styles, pen types, stroke thickness, and character formation that the system must handle. The system must make accurate predictions quickly enough to maintain mail processing speeds, yet errors in recognition can lead to significant delays and costs from misrouted mail. This real-world constraint meant the system needed both high accuracy and reliable measures of prediction confidence to identify when human intervention was necessary.
 
 ::: {#fig-usps-digit-examples fig-env="figure" fig-pos="htb" fig-cap="**Handwritten Address Variability**: Real-world USPS mail samples, including handwritten city names (Pasadena, BurBank, Buffalo variants, TULSA, Galveston, Allentown) and five-digit ZIP codes, exhibit significant variations in stroke width, slant, and character formation. These examples demonstrate the need for effective feature extraction and model generalization to achieve high accuracy in optical character recognition (OCR) tasks." fig-alt="Grid of USPS mail samples: handwritten city names (Pasadena, BurBank, Buffalo variants, Tulsa, Galveston, Allentown) and five-digit ZIP codes (14240, 85202, 50350, 47304, and others), showing variation in stroke width, slant, and character formation."}
 
@@ -5561,7 +5561,7 @@ Once captured, the raw images are far from ready for neural network processing. 
 from mlsysim import BYTES_FP32, J, mJ, param, watt
 from mlsysim.physics import model_memory
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, fmt_qty, check, fmt_energy, fmt_power, fmt_time, fmt_usd, fmt_params
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty, check, fmt_energy, fmt_multiple, fmt_multiple_range, fmt_power, fmt_time, fmt_usd, fmt_params
 
 class UspsLenetSpecs:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -5601,7 +5601,7 @@ class UspsLenetSpecs:
     check(round(energy_ratio) == 20_000, f"Expected 20,000x energy ratio, got {energy_ratio:.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    lenet_1_params_str = fmt(lenet_1_params, precision=0)               # e.g. "10,000"
+    lenet_1_params_str = fmt_count(lenet_1_params, label="parameter")
     lenet_1_mem_kb_str = fmt_qty(lenet_1_mem, KB, precision=0, commas=False) # e.g. "40 KB"
     running_mnist_params_k_str = fmt_params(running_mnist_params, scale="K", precision=1, commas=False)
     old_hardware_cost_str = fmt_usd(old_hardware_cost_usd, precision=0, commas=True)
@@ -5617,17 +5617,18 @@ class UspsLenetSpecs:
     modern_energy_per_inference_mj_str = fmt_energy(modern_energy_per_inference_mj * mJ, unit=mJ, precision=1, commas=False)
     old_cost_per_inference_str = fmt_usd(old_cost_per_inference_usd, precision=3, commas=False, approx=True)
     modern_cost_per_inference_str = fmt_usd(modern_cost_per_inference_usd, precision=6, commas=False, approx=True)
-    cost_ratio_str = fmt(cost_ratio, precision=0, commas=True)
-    latency_ratio_str = fmt(latency_ratio, precision=0, commas=True)
-    power_ratio_low_str = fmt(power_ratio_low, precision=0, commas=False)
-    power_ratio_high_str = fmt(power_ratio_high, precision=0, commas=False)
-    training_time_ratio_str = fmt(training_time_ratio, precision=0, commas=True)
-    energy_ratio_str = fmt(energy_ratio, precision=0, commas=True)
-    cost_per_inference_ratio_str = fmt(cost_per_inference_ratio, precision=0, commas=True)
+    cost_ratio_mult_str = fmt_multiple(cost_ratio, precision=0, commas=True)
+    latency_ratio_mult_str = fmt_multiple(latency_ratio, precision=0, commas=True)
+    power_ratio_range_mult_str = fmt_multiple_range(
+        power_ratio_low, power_ratio_high, precision=0, commas=False
+    )
+    training_time_ratio_mult_str = fmt_multiple(training_time_ratio, precision=0, commas=True)
+    energy_ratio_mult_str = fmt_multiple(energy_ratio, precision=0, commas=True)
+    cost_per_inference_ratio_mult_str = fmt_multiple(cost_per_inference_ratio, precision=0, commas=True)
 ```
 
 \index{LeNet!architecture comparison}
-The neural network then processes each normalized digit image. The original 1989 system used an early LeNet variant [@lecun1989] with approximately `{python} UspsLenetSpecs.lenet_1_params_str` parameters—remarkably compact compared to our running example's `{python} UspsLenetSpecs.running_mnist_params_k_str`. The network processes each digit through multiple layers, ultimately producing ten output values representing digit probabilities. This inference process, while computationally intensive by 1990s standards, benefits from the optimization principles we discussed in the previous section.
+The neural network then processes each normalized digit image. The original 1989 system used an early LeNet variant [@lecun1989] with approximately `{python} UspsLenetSpecs.lenet_1_params_str`—remarkably compact compared to our running example's `{python} UspsLenetSpecs.running_mnist_params_k_str`. The network processes each digit through multiple layers, ultimately producing ten output values representing digit probabilities. This inference process, while computationally intensive by 1990s standards, benefits from the optimization principles we discussed in the previous section.
 
 Postprocessing\index{Postprocessing!confidence thresholds}\index{Confidence Threshold!decision making} converts these neural network outputs into sorting decisions. The system applies confidence thresholds to each digit prediction. A complete ZIP code requires high confidence in all five digits; a single uncertain digit flags the entire piece for human review. When confidence meets thresholds, the system transmits sorting instructions to mechanical systems that physically direct the mail to its appropriate bin.
 
@@ -5664,17 +5665,17 @@ The system also revealed important lessons about deploying neural networks in pr
 
 ### Key engineering lessons and design principles {#sec-neural-computation-key-engineering-lessons-design-principles-f84e}
 
-The USPS ZIP code recognition system exemplifies the journey from biological inspiration to practical neural network deployment. It demonstrates how the basic principles of neural computation, from preprocessing through inference to postprocessing, combine to solve real-world problems.
+The USPS ZIP code recognition system's central lesson is that neural computation succeeds only when the surrounding pipeline shares the same operating constraint. Preprocessing, inference, postprocessing, and physical sorting all had to support national-scale throughput with bounded error.
 
 The system's development shows why understanding both theoretical foundations and practical considerations matters. While the biological visual system processes handwritten digits effortlessly, translating this capability into an artificial system required careful consideration of network architecture, training procedures, and system integration.
 
-The success of this early large-scale neural network deployment helped establish many practices we now consider standard: the importance of thorough training data, the need for confidence metrics, the role of pre- and postprocessing, and the critical nature of system-level optimization. These operational considerations are formalized in @sec-ml-operations, which covers production ML system maintenance and monitoring. To appreciate how far the field has come, compare the original deployment with a modern embedded implementation.
+The success of this early large-scale neural network deployment helped establish many practices we now consider standard: the importance of thorough training data, the need for confidence metrics, the role of pre- and postprocessing, and the critical nature of system-level optimization. These operational considerations are formalized in @sec-ml-operations, which covers production ML system maintenance and monitoring. The comparison with a modern embedded implementation separates what changed in the machine from what stayed fixed in the algorithm.
 
 ::: {#exmp-nn-computation-then-vs-now-usps-modern-hardware .callout-example title="Then vs. now: USPS on modern hardware"}
 
 The same neural network computation that required industrial-scale infrastructure in 1990 runs on pocket-sized devices today. @Tbl-then-vs-now quantifies four decades of progress, separating what changed in the surrounding machine from what stayed fixed in the algorithm. The unchanged model-storage row matters as much as the dramatic hardware rows.
 
-**What changed**: Hardware improved dramatically across the table, ranging from `{python} UspsLenetSpecs.power_ratio_low_str`--`{python} UspsLenetSpecs.power_ratio_high_str`$\times$ lower power to `{python} UspsLenetSpecs.energy_ratio_str`$\times$ lower energy per inference, while LeNet's architecture and model storage remain essentially unchanged. This validates a key systems principle: **algorithm-hardware co-design**\index{Algorithm-hardware co-design} means improvements in either dimension multiply together.
+**What changed**: Hardware improved dramatically across the table, ranging from `{python} UspsLenetSpecs.power_ratio_range_mult_str` lower power to `{python} UspsLenetSpecs.energy_ratio_mult_str` lower energy per inference, while LeNet's architecture and model storage remain essentially unchanged. This validates a key systems principle: **algorithm-hardware co-design**\index{Algorithm-hardware co-design} means improvements in either dimension multiply together.
 
 **What stayed the same**: The core engineering challenges persist. Modern smartphone OCR still requires preprocessing for lighting variation, confidence thresholds for uncertain predictions, and fallback to human review for edge cases. The USPS system's architecture (capture, preprocess, inference, postprocess, action) remains the template for every production ML pipeline.
 
@@ -5682,17 +5683,17 @@ The same neural network computation that required industrial-scale infrastructur
 
 :::
 
-| **Aspect**            |                                    **1990s USPS System**                                     |                     **Modern Equivalent**                     |                                            **Improvement**                                            |
-|:----------------------|:--------------------------------------------------------------------------------------------:|:-------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------:|
-| **Hardware cost**     |                    about `{python} UspsLenetSpecs.old_hardware_cost_str`                     |    about `{python} UspsLenetSpecs.modern_hardware_cost_str`   |                            `{python} UspsLenetSpecs.cost_ratio_str`$\times$                           |
-| **Inference latency** |                     ~`{python} UspsLenetSpecs.old_latency_ms_str`/digit                      |     ~`{python} UspsLenetSpecs.modern_latency_ms_str`/digit    |                          `{python} UspsLenetSpecs.latency_ratio_str`$\times$                          |
-| **Power consumption** | `{python} UspsLenetSpecs.old_power_low_w_str`–`{python} UspsLenetSpecs.old_power_high_w_str` |          `{python} UspsLenetSpecs.modern_power_w_str`         | `{python} UspsLenetSpecs.power_ratio_low_str`--`{python} UspsLenetSpecs.power_ratio_high_str`$\times$ |
-| **Training time**     |                       `{python} UspsLenetSpecs.old_training_days_str`                        |     ~`{python} UspsLenetSpecs.modern_training_seconds_str`    |                       `{python} UspsLenetSpecs.training_time_ratio_str`$\times$                       |
-| **Model storage**     |                        ~`{python} UspsLenetSpecs.lenet_1_mem_kb_str`                         |   ~`{python} UspsLenetSpecs.lenet_1_mem_kb_str` (unchanged)   |                                         1$\times$ (same model)                                        |
-| **Energy/inference**  |                  ~`{python} UspsLenetSpecs.old_energy_per_inference_j_str`                   | ~`{python} UspsLenetSpecs.modern_energy_per_inference_mj_str` |                           `{python} UspsLenetSpecs.energy_ratio_str`$\times$                          |
-| **Cost/inference**    |                     `{python} UspsLenetSpecs.old_cost_per_inference_str`                     |    `{python} UspsLenetSpecs.modern_cost_per_inference_str`    |                     `{python} UspsLenetSpecs.cost_per_inference_ratio_str`$\times$                    |
+| **Aspect**            |                                    **1990s USPS System**                                     |                     **Modern Equivalent**                     |                       **Improvement**                       |
+|:----------------------|:--------------------------------------------------------------------------------------------:|:-------------------------------------------------------------:|:-----------------------------------------------------------:|
+| **Hardware cost**     |                    about `{python} UspsLenetSpecs.old_hardware_cost_str`                     |    about `{python} UspsLenetSpecs.modern_hardware_cost_str`   |        `{python} UspsLenetSpecs.cost_ratio_mult_str`        |
+| **Inference latency** |                     ~`{python} UspsLenetSpecs.old_latency_ms_str`/digit                      |     ~`{python} UspsLenetSpecs.modern_latency_ms_str`/digit    |       `{python} UspsLenetSpecs.latency_ratio_mult_str`      |
+| **Power consumption** | `{python} UspsLenetSpecs.old_power_low_w_str`–`{python} UspsLenetSpecs.old_power_high_w_str` |          `{python} UspsLenetSpecs.modern_power_w_str`         |     `{python} UspsLenetSpecs.power_ratio_range_mult_str`    |
+| **Training time**     |                       `{python} UspsLenetSpecs.old_training_days_str`                        |     ~`{python} UspsLenetSpecs.modern_training_seconds_str`    |    `{python} UspsLenetSpecs.training_time_ratio_mult_str`   |
+| **Model storage**     |                        ~`{python} UspsLenetSpecs.lenet_1_mem_kb_str`                         |   ~`{python} UspsLenetSpecs.lenet_1_mem_kb_str` (unchanged)   |                    1$\times$ (same model)                   |
+| **Energy/inference**  |                  ~`{python} UspsLenetSpecs.old_energy_per_inference_j_str`                   | ~`{python} UspsLenetSpecs.modern_energy_per_inference_mj_str` |       `{python} UspsLenetSpecs.energy_ratio_mult_str`       |
+| **Cost/inference**    |                     `{python} UspsLenetSpecs.old_cost_per_inference_str`                     |    `{python} UspsLenetSpecs.modern_cost_per_inference_str`    | `{python} UspsLenetSpecs.cost_per_inference_ratio_mult_str` |
 
-: **Hardware Progress for Neural Network Computation**: The same LeNet computation that required a workstation-class system in 1990 can now run on inexpensive embedded hardware—about `{python} UspsLenetSpecs.cost_ratio_str`$\times$ cheaper, `{python} UspsLenetSpecs.latency_ratio_str`$\times$ faster, and `{python} UspsLenetSpecs.energy_ratio_str`$\times$ more energy-efficient under the illustrative assumptions in the table. Crucially, the algorithm is unchanged; the main improvement came from hardware and systems implementation. This validates the systems principle that algorithm-hardware co-design multiplies gains across both dimensions. {#tbl-then-vs-now tbl-colwidths="[25,30,25,20]"}
+: **Hardware Progress for Neural Network Computation**: The same LeNet computation that required a workstation-class system in 1990 can now run on inexpensive embedded hardware—about `{python} UspsLenetSpecs.cost_ratio_mult_str` cheaper, `{python} UspsLenetSpecs.latency_ratio_mult_str` faster, and `{python} UspsLenetSpecs.energy_ratio_mult_str` more energy-efficient under the illustrative assumptions in the table. Crucially, the algorithm is unchanged; the main improvement came from hardware and systems implementation. This validates the systems principle that algorithm-hardware co-design multiplies gains across both dimensions. {#tbl-then-vs-now tbl-colwidths="[25,30,25,20]"}
 
 While hardware efficiency improved by orders of magnitude, modern edge AI systems face even tighter constraints than the USPS deployment: milliwatt power budgets vs. watts, millisecond latency requirements vs. tens of milliseconds, and deployment on battery-powered devices vs. dedicated infrastructure. Yet the same engineering principles apply—preprocessing for real-world variation, confidence-based routing to human review, and end-to-end pipeline optimization. This historical case study provides a reusable template for reasoning about ML systems deployment across the entire spectrum from cloud to edge to tiny devices. The operational considerations demonstrated here are formalized in @sec-ml-operations.
 
@@ -5742,7 +5743,7 @@ These foundations equip engineers to reason about neural networks from first pri
 # │          FallacyQuantExamples.mnist_arith_intensity_str,
 # │          FallacyQuantExamples.a100_ridge_str,
 # │          FallacyQuantExamples.h100_ridge_str,
-# │          FallacyQuantExamples.training_ratio_str
+# │          FallacyQuantExamples.training_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_time
@@ -5802,7 +5803,7 @@ class FallacyQuantExamples:
     mnist_arith_intensity_str = fmt(mnist_arith_intensity, precision=1, commas=False)
     a100_ridge_str = fmt_int(round(a100_ridge), commas=False)
     h100_ridge_str = fmt_int(round(h100_ridge), commas=False)
-    training_ratio_str = fmt(training_ratio, precision=1, commas=False)
+    training_ratio_mult_str = fmt_multiple(training_ratio, precision=1, commas=False)
 ```
 
 Neural networks replace explicit programming with learned patterns, creating misconceptions about their behavior. Intuitions from traditional software (that bugs are deterministic, that more resources always help, that code inspection reveals problems) fail when applied to statistical learning systems. The following fallacies and pitfalls cause teams to misallocate effort, deploy inappropriate solutions, or encounter production failures that could have been avoided.
@@ -5832,16 +5833,16 @@ Teams treat training as mechanically feeding data through architectures. Network
 
 Data scientists develop models with unlimited time budgets, assuming deployment is straightforward. Production imposes constraints absent from research: latency budgets (50–100 ms end-to-end), memory limits (2–4 GB for edge devices), and concurrent loads (100–1,000 RPS). As shown in @sec-neural-computation-inference-pipeline-5372, the complete pipeline includes preprocessing, inference, and postprocessing. A model achieving `{python} FallacyQuantExamples.model_latency_ms_str` inference fails its `{python} FallacyQuantExamples.pipeline_budget_ms_str` budget when preprocessing adds `{python} FallacyQuantExamples.preprocessing_latency_ms_str` and postprocessing adds `{python} FallacyQuantExamples.postprocessing_latency_ms_str` (`{python} FallacyQuantExamples.pipeline_total_ms_str` total). Teams separating model development from system design waste months optimizing accuracy while ignoring constraints that determine deployment feasibility.
 
-\index{Arithmetic Intensity!GPU utilization}
-**Pitfall**: *Assuming more compute automatically means faster training.*
-
-Teams purchase expensive GPUs expecting proportional speedups, then discover workloads are memory bound. Arithmetic intensity determines which resource constrains performance. The MNIST forward-pass analysis in @tbl-nn-computation-mnist-flops and the roofline model in @sec-appdx-machine-foundations-roofline-model-2529 show why small networks like MNIST (784 to 128 to 64 to 10) have arithmetic intensity of approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str` FLOP/byte, far below the A100 and H100 dense-FP16 ridge points of about `{python} FallacyQuantExamples.a100_ridge_str` and `{python} FallacyQuantExamples.h100_ridge_str` FLOP/byte. For memory-bound workloads, a commodity CPU can match an expensive accelerator; for compute-bound GPT-scale models, accelerators provide the large speedups they were built for. This mismatch explains why teams report widely varying utilization depending on model architecture.
-
 ::: {.column-margin}
 ![](images/svg/vol1_nn_computation_margin_004.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge, then a flat orange compute-bound ceiling, with the MNIST workload dot deep on the memory-bound slope, far left of the ridge."}
 
 *Small neural workloads stay memory-bound even on large GPUs.*
 :::
+
+\index{Arithmetic Intensity!GPU utilization}
+**Pitfall**: *Assuming more compute automatically means faster training.*
+
+Teams purchase expensive GPUs expecting proportional speedups, then discover workloads are memory bound. Arithmetic intensity determines which resource constrains performance. The MNIST forward-pass analysis in @tbl-nn-computation-mnist-flops and the roofline model in @sec-appdx-machine-foundations-roofline-model-2529 show why small networks like MNIST (784 to 128 to 64 to 10) have arithmetic intensity of approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str` FLOP/byte, far below the A100 and H100 dense-FP16 ridge points of about `{python} FallacyQuantExamples.a100_ridge_str` and `{python} FallacyQuantExamples.h100_ridge_str` FLOP/byte. For memory-bound workloads, a commodity CPU can match an expensive accelerator; for compute-bound GPT-scale models, accelerators provide the large speedups they were built for. This mismatch explains why teams report widely varying utilization depending on model architecture.
 
 **Pitfall**: *Extrapolating accuracy improvements without considering diminishing returns.*
 
@@ -5855,7 +5856,7 @@ Deep learning systems engineers need mathematical understanding precisely becaus
 
 Neural networks transform computational approaches by replacing rule-based programming with adaptive systems that learn patterns from data. The biological-to-artificial neuron mapping (weighted sums, nonlinear activations, and gradient-based learning) provides the atomic operations from which all modern architectures are composed.
 
-Neural network architecture demonstrates hierarchical processing, where each layer extracts progressively more abstract patterns from raw data. Training adjusts connection weights through iterative optimization to minimize prediction errors, while inference applies learned knowledge to make predictions on new data. This separation between learning and application phases creates distinct system requirements for computational resources, memory usage, and processing latency that shape system design and deployment strategies. Training requires ~`{python} FallacyQuantExamples.training_ratio_str`$\times$ more memory than inference because gradients, optimizer state, and activations must be stored and updated. The USPS digit recognition case study demonstrated that these mathematical principles combine into production systems where the complete pipeline (preprocessing, neural inference, and postprocessing) must operate within real-world latency and reliability constraints.
+Neural network architecture demonstrates hierarchical processing, where each layer extracts progressively more abstract patterns from raw data. Training adjusts connection weights through iterative optimization to minimize prediction errors, while inference applies learned knowledge to make predictions on new data. This separation between learning and application phases creates distinct system requirements for computational resources, memory usage, and processing latency that shape system design and deployment strategies. Training requires ~`{python} FallacyQuantExamples.training_ratio_mult_str` more memory than inference because gradients, optimizer state, and activations must be stored and updated. The USPS digit recognition case study demonstrated that these mathematical principles combine into production systems where the complete pipeline (preprocessing, neural inference, and postprocessing) must operate within real-world latency and reliability constraints.
 
 ```{python}
 #| echo: false
@@ -5916,13 +5917,13 @@ class MnistWeightsCalc:
 # │ How: Recompute the MLP MACs from layer dimensions and compare to the
 # │      rule-based baseline.
 # │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: SummaryParadigmCostRecap.rb_ops_str,
+# │ Imports: mlsysim.book (fmt, fmt_count, check)
+# │ Exports: SummaryParadigmCostRecap.rb_comparisons_str,
 # │          SummaryParadigmCostRecap.hog_ops_approx_str,
 # │          SummaryParadigmCostRecap.dl_total_macs_str,
-# │          SummaryParadigmCostRecap.dl_ops_ratio_str
+# │          SummaryParadigmCostRecap.dl_ops_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SummaryParadigmCostRecap:
@@ -5946,19 +5947,19 @@ class SummaryParadigmCostRecap:
     check(round(dl_ops_ratio) == 1_092, f"Expected 1,092x ratio, got {dl_ops_ratio:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    rb_ops_str = fmt(rb_ops, precision=0, commas=False)
-    hog_ops_approx_str = fmt(hog_ops_approx, precision=0, commas=True)
-    dl_total_macs_str = fmt(dl_total_macs, precision=0, commas=True)
-    dl_ops_ratio_str = fmt(dl_ops_ratio, precision=1, commas=True)
+    rb_comparisons_str = fmt_count(rb_ops, precision=0, commas=False, label="comparison")
+    hog_ops_approx_str = fmt_count(hog_ops_approx, precision=0, commas=True, label="operation")
+    dl_total_macs_str = fmt_count(dl_total_macs, precision=0, commas=True, label="MAC")
+    dl_ops_ratio_mult_str = fmt_multiple(dl_ops_ratio, precision=1, commas=True)
 ```
 
-The running MNIST example made this escalation tangible: the same $28{\times}28$ digit that required ~`{python} SummaryParadigmCostRecap.rb_ops_str` rule-based comparisons demanded `{python} SummaryParadigmCostRecap.dl_total_macs_str` MACs in even a modest three-layer network—a `{python} SummaryParadigmCostRecap.dl_ops_ratio_str`$\times$ increase that generalizes across the systems dimensions captured in @tbl-evolution. These fundamentals primarily develop the Algorithm axis of the D·A·M taxonomy while revealing how algorithmic choices propagate into Machine constraints.
+The running MNIST example made this escalation tangible: the same $28{\times}28$ digit that required ~`{python} SummaryParadigmCostRecap.rb_comparisons_str` demanded `{python} SummaryParadigmCostRecap.dl_total_macs_str` in even a modest three-layer network—a `{python} SummaryParadigmCostRecap.dl_ops_ratio_mult_str` increase that generalizes across the systems dimensions captured in @tbl-evolution. These fundamentals primarily develop the Algorithm axis of the D·A·M taxonomy while revealing how algorithmic choices propagate into Machine constraints.
 
 The mathematical and systems implications emerge through fully connected architectures. The multilayer perceptrons explored here demonstrate universal function approximation: with enough neurons and appropriate weights, such networks can theoretically learn any continuous function. This mathematical generality comes with computational costs. Consider our MNIST example: a $28{\times}28$ pixel image contains `{python} MnistWeightsCalc.mnist_pixels_str` input values, and a fully connected network treats each pixel independently, learning over `{python} MnistWeightsCalc.fc1_weights_str` weights in the first layer alone (`{python} MnistWeightsCalc.mnist_pixels_str` inputs $\times$ `{python} MnistWeightsCalc.fc1_neurons_str` neurons). Neighboring pixels are highly correlated while distant pixels rarely interact. Fully connected architectures expend computational resources learning irrelevant long-range relationships.
 
 ::: {.callout-takeaways title="The math behind the model"}
 
-* **Each paradigm shift buys representation power at exponential systems cost**: Classifying the same $28{\times}28$ digit escalates from ~`{python} SummaryParadigmCostRecap.rb_ops_str` comparisons (rule-based) through ~`{python} SummaryParadigmCostRecap.hog_ops_approx_str` structured operations (classical ML) to `{python} SummaryParadigmCostRecap.dl_total_macs_str` matrix MACs (deep learning)—a `{python} SummaryParadigmCostRecap.dl_ops_ratio_str`$\times$ increase that reshapes hardware requirements at every level.
+* **Each paradigm shift buys representation power at exponential systems cost**: Classifying the same $28{\times}28$ digit escalates from ~`{python} SummaryParadigmCostRecap.rb_comparisons_str` (rule-based) through ~`{python} SummaryParadigmCostRecap.hog_ops_approx_str` (classical ML) to `{python} SummaryParadigmCostRecap.dl_total_macs_str` (deep learning)—a `{python} SummaryParadigmCostRecap.dl_ops_ratio_mult_str` increase that reshapes hardware requirements at every level.
 * **Neural networks learn patterns, not rules**: These networks replace hand-coded features with hierarchical representations discovered from data. The system adapts to the problem rather than requiring manual engineering.
 * **Training and inference have opposite priorities**: Training optimizes throughput (large batches, hours of compute); inference optimizes latency (single samples, milliseconds). Effective systems account for both phases in their design.
 * **Activation function choice is both a mathematical and a hardware decision**: ReLU dominates because $\max(0,x)$ is orders of magnitude cheaper than $\exp(x)$, and its constant gradient for positive inputs prevents the vanishing gradient problem that plagues sigmoid and tanh in deep networks.

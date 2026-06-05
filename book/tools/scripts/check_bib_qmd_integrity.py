@@ -194,7 +194,7 @@ def extract_qmd_cites(text: str) -> set[str]:
         k = m.group(1).rstrip(".,;:)")
         if not k:
             continue
-        if k.startswith(NON_CITE_PREFIXES):
+        if k.lower().startswith(NON_CITE_PREFIXES):
             continue
         if k in KNOWN_FALSE_POSITIVE_KEYS:
             continue

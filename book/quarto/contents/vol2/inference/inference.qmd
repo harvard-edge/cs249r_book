@@ -26,11 +26,7 @@ engine: jupyter
 
 _Why does inference cost eventually dwarf training cost, and what does this mean for system design?_
 
-Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, each request incurring compute, memory, and energy costs that accumulate into operational expenses far exceeding the original training investment. This economic inversion, where deployment costs dominate development costs, reshapes every engineering decision.
-
-The serving cost dominance law\index{Serving Cost Dominance Law} (Principle \ref{pri-serving-cost-dominance}) captures this economic reality: over a successful model's lifetime, Inference OpEx exceeds Training CapEx by orders of magnitude. Optimization efforts should be disproportionately focused on the inference path, even if they increase training cost or complexity.
-
-Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into substantial savings or costs. Performance Engineering (@sec-performance-engineering) developed the optimization toolkit: fusion, precision, compilation, speculative decoding. This chapter applies those tools to build serving systems that handle millions of requests under strict latency budgets. Reliability requirements intensify because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. The architecture that was optimal for training (large batches, high throughput, tolerance for latency variance) becomes financially unsustainable or user-hostile at serving time. Inference at scale is where ML systems succeed or fail economically.
+Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, each request incurring compute, memory, and energy costs that accumulate into operational expenses far exceeding the original training investment. The serving cost dominance law\index{Serving Cost Dominance Law} (Principle \ref{pri-serving-cost-dominance}) captures this economic reality: over a successful model's lifetime, Inference OpEx exceeds Training CapEx by orders of magnitude, and optimization efforts should be disproportionately focused on the inference path, even when they increase training cost or complexity. Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into substantial savings or costs. Performance engineering developed the optimization toolkit: fusion, precision, compilation, speculative decoding, and this chapter applies those tools to build serving systems that handle millions of requests under strict latency budgets. Reliability requirements intensify because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments, and the architecture that was optimal for training (large batches, high throughput, tolerance for latency variance) becomes financially unsustainable or user-hostile at serving time. Inference at scale is where ML systems succeed or fail economically.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -84,8 +80,8 @@ from mlsysim.fmt import fmt, check
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.memory.capacity, Hardware.Cloud.H100.memory.bandwidth, Hardware.Cloud.A100.memory.bandwidth,
 # │          Hardware.Cloud.H100.nvlink.bandwidth, GiB, GB, TB, second)
-# │ Exports: InferenceSetup.h100_mem_gb_str, InferenceSetup.h100_mem_bw_tbs_str,
-# │          InferenceSetup.a100_mem_bw_tbs_str, InferenceSetup.nvlink_h100_gbs_str
+# │ Exports: InferenceSetup.h100_mem_gb_str, InferenceSetup.h100_mem_bw_tb_per_s_str,
+# │          InferenceSetup.a100_mem_bw_tb_per_s_str, InferenceSetup.nvlink_h100_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_bandwidth, fmt_memory_capacity, fmt_qty_int
 
@@ -108,9 +104,9 @@ class InferenceSetup:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
-    h100_mem_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-    a100_mem_bw_tbs_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=1, commas=False)
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
+    h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    a100_mem_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=1, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
 ```
 
 ## The Economics and Architecture of Inference {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
@@ -133,7 +129,7 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 
 The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4 class models with hundreds of billions of parameters require 200–400 GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's Deep Learning Recommendation Model (DLRM)[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
 
-[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tbs_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tbs_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
+[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tb_per_s_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
 
 [^fn-dlrm-scale]: **DLRM (Deep Learning Recommendation Model)**: Meta's 2019 reference architecture separates dense features—GPU-bound multilayer perceptrons (MLPs)—from sparse features (CPU-bound embedding lookups), creating a hybrid serving topology. Embedding tables can exceed 100 TB, making DLRM memory-capacity-bound rather than compute-bound and forcing distribution strategies fundamentally different from LLM model parallelism. \index{DLRM!scale}
 
@@ -240,7 +236,7 @@ class ServingCostSimple:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     annual_reqs_b_str = fmt(annual_reqs_b, precision=2, commas=False)
     annual_serving_cost_str = fmt_usd(annual_serving_cost)
-    serving_training_ratio_str = fmt(serving_training_ratio, precision=1, commas=False)
+    serving_training_ratio_mult_str = fmt_multiple(serving_training_ratio, precision=1, commas=False)
     efficiency_savings_str = fmt_usd(efficiency_savings, precision=1, commas=False, scale="M")
     training_cost_str = fmt_usd(training_cost)
     dau_str = fmt_int(dau)
@@ -265,7 +261,7 @@ class ServingCostSimple:
 3.  **Cost per Request**\index{Serving Cost!cost per request}: Assume a 70B model on H100 costs $\approx$ `{python} ServingCostSimple.cost_per_request_usd_str` (input + output).
 4.  **Annual Serving Cost**\index{Serving Cost!annual serving cost}: `{python} ServingCostSimple.annual_reqs_b_str` billion requests $\times$ `{python} ServingCostSimple.cost_per_request_usd_str` = `{python} ServingCostSimple.annual_serving_cost_str`.
 
-**Systems insight**: Serving costs `{python} ServingCostSimple.serving_training_ratio_str`$\times$ more than training in just the first year. A `{python} ServingCostSimple.efficiency_gain_pct_str` serving-cost or latency-linked efficiency improvement saves about `{python} ServingCostSimple.efficiency_savings_str` in the first year, nearly paying for the original training run.
+**Systems insight**: Serving costs `{python} ServingCostSimple.serving_training_ratio_mult_str` more than training in just the first year. A `{python} ServingCostSimple.efficiency_gain_pct_str` serving-cost or latency-linked efficiency improvement saves about `{python} ServingCostSimple.efficiency_savings_str` in the first year, nearly paying for the original training run.
 
 :::
 
@@ -291,14 +287,14 @@ where $C_{\text{training}}$ is the one-time cost to train the model, $C_{\text{s
 # │ Exports: InferenceEconomics.lifetime_queries_latex_math,
 # │          InferenceEconomics.serving_cost_total_str,
 # │          InferenceEconomics.training_cost_total_str,
-# │          InferenceEconomics.leverage_ratio_str,
+# │          InferenceEconomics.leverage_ratio_mult_str,
 # │          InferenceEconomics.qps_str,
 # │          InferenceEconomics.serve_duration_days_str,
 # │          InferenceEconomics.cost_per_million_queries_usd_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import Infrastructure
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, check, fmt_math, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_rate, check, fmt_math, MarkdownStr
 from mlsysim.core.units import USD, hour
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -343,8 +339,8 @@ class InferenceEconomics:
         lifetime_queries_latex_math = fmt_math(f"{lifetime_queries_val:,.0f}")
     serving_cost_total_str = fmt_usd(serving_total_cost_val)
     training_cost_total_str = fmt_usd(training_total_cost)
-    leverage_ratio_str = fmt(leverage_ratio, precision=1, commas=False)
-    qps_str = fmt_int(qps)
+    leverage_ratio_mult_str = fmt_multiple(leverage_ratio, precision=1, commas=False)
+    qps_str = fmt_rate(qps, "QPS")
     serve_duration_days_str = fmt_int(serve_duration_days, commas=False)
     cost_per_million_queries_usd_str = fmt_usd(
         cost_per_query * MILLION,
@@ -357,10 +353,10 @@ class InferenceEconomics:
         commas=False,
         per="GPU-hour",
     )
-    engineering_multiplier_str = fmt_int(engineering_multiplier, commas=False)
+    engineering_mult_str = fmt_multiple(engineering_multiplier, commas=False, precision=0)
 ```
 
-The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.n_gpu_hours_str` of hardware at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, amplified by a `{python} InferenceEconomics.engineering_multiplier_str`$\times$ engineering overhead for data and experimentation) and served at `{python} InferenceEconomics.qps_str` QPS for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_str`$\times$ leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
+The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.n_gpu_hours_str` of hardware at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, amplified by a `{python} InferenceEconomics.engineering_mult_str` engineering overhead for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
 
 | **Application**               | **Training Cost** | **Annual Serving Cost** |         **Ratio** |
 |:------------------------------|------------------:|------------------------:|------------------:|
@@ -466,16 +462,15 @@ The cost ratios in @tbl-cost-ratios tell a *static* story, but the *dynamics* of
 # │ How: total_cost = train + serve_per_month*months; vertical markers show
 # │      where the serving portion equals the one-time training cost.
 # │
-# │ Imports: numpy (np), matplotlib.pyplot (plt), mlsysim.core.viz (viz)
+# │ Imports: numpy (np), matplotlib.pyplot (plt), book.tools.figures.style (book_style)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot cumulative cost over 36 months for three scenarios; show
 import numpy as np
 import matplotlib.pyplot as plt
-from mlsysim import viz
-
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 6))
+from book.tools.figures import style as book_style
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9, 6))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 months = np.linspace(0, 36, 500)
@@ -683,15 +678,15 @@ Single-GPU deployment is the simplest topology: the entire model fits in one dev
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Deployment topology — tensor-parallel NVLink bandwidth.
-# │ Exports: InferenceTopologyRecap.nvlink_h100_gbs_str
+# │ Exports: InferenceTopologyRecap.nvlink_h100_gb_per_s_str
 class InferenceTopologyRecap:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
     from mlsysim.fmt import fmt_bandwidth
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gbs_str` on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology is necessary when model weights exceed single-device memory and provides latency reduction proportional to the parallelism degree, at the cost of communication overhead per layer. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
+Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gb_per_s_str` on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology is necessary when model weights exceed single-device memory and provides latency reduction proportional to the parallelism degree, at the cost of communication overhead per layer. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
 
 Disaggregated serving separates the prefill phase (processing the input prompt, which is compute-bound) from the decode phase (generating tokens one at a time, which is memory-bandwidth-bound) onto different hardware pools optimized for each workload profile. Prefill nodes use high-FLOP/s accelerators; decode nodes use high-bandwidth-memory configurations. This separation allows each phase to operate at its hardware's optimal operating point rather than compromising between the two regimes on shared hardware. The disaggregated serving section (@sec-inference-scale-disaggregated-serving-splitting-workload-b8f9) develops this architecture in detail.
 
@@ -1071,7 +1066,7 @@ As @tbl-inference-continuous-batching-throughput shows, the 3$\times$ throughput
 
 :::
 
-## The Logic Wall: Test-Time Compute Scaling {#sec-inference-logic-wall}
+Continuous batching removes waste caused by variable output length, but it does not make every request equally cheap. Reasoning-heavy inference pushes the same problem further: a prompt may demand test-time work proportional to task difficulty, forcing schedulers to budget compute per request instead of only filling decode slots.
 
 ::: {.column-margin}
 ![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in slate. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times."}
@@ -1079,7 +1074,9 @@ As @tbl-inference-continuous-batching-throughput shows, the 3$\times$ throughput
 *Reasoning expands latency about 128 times over fast pattern-matching.*
 :::
 
-Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage]. From a serving-systems perspective, models that transition from "Fast Thinking" (instant pattern matching) to "Slow Thinking" (deliberative reasoning) shift pressure from HBM Bandwidth toward **Test-Time Compute**\index{Test-Time Compute}. This is the **Logic Wall**\index{Logic Wall}: the realization that for complex problems, the fleet must scale compute per request proportional to the difficulty of the task, often through search or "Chain-of-Thought" (CoT) unrolling.
+## The Logic Wall: Test-Time Compute Scaling {#sec-inference-logic-wall}
+
+Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage]. From a serving-systems perspective, the serving-relevant shift is the work issued per request. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or chain-of-thought (CoT) tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second now needs a policy for allocating thinking time.
 
 ```{python}
 #| echo: false
@@ -1104,8 +1101,8 @@ class LogicScaling:
     @classmethod
     def plot(cls):
         """Visualizes the Logic Wall latency expansion."""
-        from mlsysim import viz
-        return viz.bar_compare(
+        from book.tools.figures import style as book_style
+        return book_style.bar_compare(
             labels=["Fast (Pattern)", "Slow (Reasoning)"],
             values=[cls.t_std.to(second).magnitude, cls.t_reasoning.to(second).magnitude],
             title="Inference Scaling: Reasoning Depth",
@@ -1125,9 +1122,11 @@ class LogicScaling:
 
 :::
 
+The batching analysis that follows treats the logic wall as a scheduling problem. Once requests can vary from a short pattern match to a long reasoning trace, the waste created by grouping unequal work becomes the baseline cost that any test-time compute policy must control.
+
 ### Quantitative analysis: Traditional vs. continuous batching {#sec-inference-scale-quantitative-analysis-traditional-vs-continuous-batching-ca70}
 
-The performance gap between traditional and continuous batching becomes quantifiable through careful analysis of wasted compute cycles. The mathematics of batching waste reveals exactly how much throughput is lost and under what conditions continuous batching delivers the greatest improvement.
+The first baseline is traditional LLM batching, where unequal output lengths turn request heterogeneity into wasted decode cycles. The mathematics of batching waste reveals exactly how much throughput is lost and under what conditions continuous batching delivers the greatest improvement.
 
 #### The waste function for traditional batching {#sec-inference-scale-waste-function-traditional-batching-1fb8}
 
@@ -1214,7 +1213,7 @@ class BatchingRequestTotals:
 # │ How: Compute max-output iteration count for traditional; per-output iteration
 # │   count for continuous; derive reduction % and per-request improvement ratios.
 # │
-# │ Imports: (none)
+# │ Imports: mlsysim.fmt
 # │ Exports: BatchingWorkedExample.mean_output_str,
 # │   BatchingWorkedExample.total_batch_time_ms_str,
 # │   BatchingWorkedExample.total_seq_iters_str,
@@ -1222,10 +1221,10 @@ class BatchingRequestTotals:
 # │   BatchingWorkedExample.r1_lat_ms_str, BatchingWorkedExample.r2_lat_str,
 # │   BatchingWorkedExample.r3_lat_str, BatchingWorkedExample.r4_lat_str,
 # │   BatchingWorkedExample.trad_lat_ms_str, BatchingWorkedExample.cont_avg_lat_str,
-# │   BatchingWorkedExample.latency_red_str, BatchingWorkedExample.r1_imp_str,
-# │   BatchingWorkedExample.r3_imp_str, BatchingWorkedExample.r4_imp_str
+# │   BatchingWorkedExample.latency_red_str, BatchingWorkedExample.r1_imp_mult_str,
+# │   BatchingWorkedExample.r3_imp_mult_str, BatchingWorkedExample.r4_imp_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt_int, fmt, fmt_percent, MarkdownStr, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BatchingWorkedExample:
@@ -1281,10 +1280,10 @@ class BatchingWorkedExample:
     # but use the MarkdownStr escape-hatch to preserve render byte-for-byte
     # against any future drift.
     cont_avg_lat_str = fmt_int(cont_avg_latency_ms)
-    latency_red_str = fmt(latency_reduction_pct, precision=1, commas=False)
-    r1_imp_str = fmt_int(r1_improvement, commas=False)
-    r3_imp_str = fmt_int(r3_improvement, commas=False)
-    r4_imp_str = fmt(r4_improvement, precision=2, commas=False)
+    latency_red_str = fmt_percent(latency_reduction_pct / 100, precision=1, commas=False, style='prose')
+    r1_imp_mult_str = fmt_multiple(r1_improvement, precision=0, commas=False)
+    r3_imp_mult_str = fmt_multiple(r3_improvement, precision=0, commas=False)
+    r4_imp_mult_str = fmt_multiple(r4_improvement, precision=2, commas=False)
 ```
 
 **System parameters.**
@@ -1322,9 +1321,9 @@ With continuous batching, sequences depart the batch upon completion, and new re
 
 Request latencies with continuous batching (assuming no queuing delay):
 
-- R1: $50 \times 20$ ms = `{python} BatchingWorkedExample.r1_lat_ms_str` (`{python} BatchingWorkedExample.r1_imp_str`$\times$ improvement over traditional)
-- R3: $100 \times 20$ ms = `{python} BatchingWorkedExample.r3_lat_str` (`{python} BatchingWorkedExample.r3_imp_str`$\times$ improvement)
-- R4: $150 \times 20$ ms = `{python} BatchingWorkedExample.r4_lat_str` (`{python} BatchingWorkedExample.r4_imp_str`$\times$ improvement)
+- R1: $50 \times 20$ ms = `{python} BatchingWorkedExample.r1_lat_ms_str` (`{python} BatchingWorkedExample.r1_imp_mult_str` improvement over traditional)
+- R3: $100 \times 20$ ms = `{python} BatchingWorkedExample.r3_lat_str` (`{python} BatchingWorkedExample.r3_imp_mult_str` improvement)
+- R4: $150 \times 20$ ms = `{python} BatchingWorkedExample.r4_lat_str` (`{python} BatchingWorkedExample.r4_imp_mult_str` improvement)
 - R2: $200 \times 20$ ms = `{python} BatchingWorkedExample.r2_lat_str` (no improvement for longest request)
 
 Average latency comparison
@@ -1416,36 +1415,36 @@ class ContinuousBatchingBenefit:
     code_cv_str = fmt(code_cv, precision=1, commas=False)
     code_k_str = fmt(code_k, precision=1, commas=False)
     code_waste_pct_str = fmt_percent(code_waste_pct/100, precision=1, commas=False, style='prose')
-    code_speedup_str = fmt(code_speedup, precision=1, commas=False)
+    code_speedup_mult_str = fmt_multiple(code_speedup, precision=1, commas=False)
 
     chat_cv_str = fmt(chat_cv, precision=1, commas=False)
     chat_k_str = fmt_int(chat_k, commas=False)
     chat_waste_pct_str = fmt_percent(chat_waste_pct/100, precision=1, commas=False, style='prose')
-    chat_speedup_str = fmt(chat_speedup, precision=1, commas=False)
+    chat_speedup_mult_str = fmt_multiple(chat_speedup, precision=1, commas=False)
 
     text_cv_str = fmt_int(text_cv, commas=False)
     text_k_str = fmt(text_k, precision=1, commas=False)
     text_waste_pct_str = fmt_percent(round(text_waste_pct)/100, precision=0, commas=False, style='prose')
-    text_speedup_str = fmt_int(text_speedup, commas=False)
+    text_speedup_mult_str = fmt_multiple(text_speedup, commas=False, precision=0)
 
     creative_cv_str = fmt(creative_cv, precision=1, commas=False)
     creative_k_str = fmt_int(creative_k, commas=False)
     creative_waste_pct_str = fmt_percent(creative_waste_pct/100, precision=1, commas=False, style='prose')
-    creative_speedup_str = fmt(creative_speedup, precision=1, commas=False)
+    creative_speedup_mult_str = fmt_multiple(creative_speedup, precision=1, commas=False)
 
     rag_cv_str = fmt_int(rag_cv, commas=False)
     rag_k_str = fmt(rag_k, precision=1, commas=False)
     rag_waste_pct_str = fmt_percent(rag_waste_pct/100, precision=1, commas=False, style='prose')
-    rag_speedup_str = fmt(rag_speedup, precision=1, commas=False)
+    rag_speedup_mult_str = fmt_multiple(rag_speedup, precision=1, commas=False)
 ```
 
-| **Workload Type**           |                                               **CV** |                                               **k** |                                           **Waste (Trad.)** |                                          **Speedup (Continuous)** |
-|:----------------------------|-----------------------------------------------------:|----------------------------------------------------:|------------------------------------------------------------:|------------------------------------------------------------------:|
-| **Code completion**         |     `{python} ContinuousBatchingBenefit.code_cv_str` |     `{python} ContinuousBatchingBenefit.code_k_str` |     `{python} ContinuousBatchingBenefit.code_waste_pct_str` |     `{python} ContinuousBatchingBenefit.code_speedup_str`$\times$ |
-| **Chat (short responses)**  |     `{python} ContinuousBatchingBenefit.chat_cv_str` |     `{python} ContinuousBatchingBenefit.chat_k_str` |     `{python} ContinuousBatchingBenefit.chat_waste_pct_str` |     `{python} ContinuousBatchingBenefit.chat_speedup_str`$\times$ |
-| **General text generation** |     `{python} ContinuousBatchingBenefit.text_cv_str` |     `{python} ContinuousBatchingBenefit.text_k_str` |     `{python} ContinuousBatchingBenefit.text_waste_pct_str` |     `{python} ContinuousBatchingBenefit.text_speedup_str`$\times$ |
-| **Creative writing**        | `{python} ContinuousBatchingBenefit.creative_cv_str` | `{python} ContinuousBatchingBenefit.creative_k_str` | `{python} ContinuousBatchingBenefit.creative_waste_pct_str` | `{python} ContinuousBatchingBenefit.creative_speedup_str`$\times$ |
-| **RAG with variable docs**  |      `{python} ContinuousBatchingBenefit.rag_cv_str` |      `{python} ContinuousBatchingBenefit.rag_k_str` |      `{python} ContinuousBatchingBenefit.rag_waste_pct_str` |      `{python} ContinuousBatchingBenefit.rag_speedup_str`$\times$ |
+| **Workload Type**           |                                               **CV** |                                               **k** |                                           **Waste (Trad.)** |                                       **Speedup (Continuous)** |
+|:----------------------------|-----------------------------------------------------:|----------------------------------------------------:|------------------------------------------------------------:|---------------------------------------------------------------:|
+| **Code completion**         |     `{python} ContinuousBatchingBenefit.code_cv_str` |     `{python} ContinuousBatchingBenefit.code_k_str` |     `{python} ContinuousBatchingBenefit.code_waste_pct_str` |     `{python} ContinuousBatchingBenefit.code_speedup_mult_str` |
+| **Chat (short responses)**  |     `{python} ContinuousBatchingBenefit.chat_cv_str` |     `{python} ContinuousBatchingBenefit.chat_k_str` |     `{python} ContinuousBatchingBenefit.chat_waste_pct_str` |     `{python} ContinuousBatchingBenefit.chat_speedup_mult_str` |
+| **General text generation** |     `{python} ContinuousBatchingBenefit.text_cv_str` |     `{python} ContinuousBatchingBenefit.text_k_str` |     `{python} ContinuousBatchingBenefit.text_waste_pct_str` |     `{python} ContinuousBatchingBenefit.text_speedup_mult_str` |
+| **Creative writing**        | `{python} ContinuousBatchingBenefit.creative_cv_str` | `{python} ContinuousBatchingBenefit.creative_k_str` | `{python} ContinuousBatchingBenefit.creative_waste_pct_str` | `{python} ContinuousBatchingBenefit.creative_speedup_mult_str` |
+| **RAG with variable docs**  |      `{python} ContinuousBatchingBenefit.rag_cv_str` |      `{python} ContinuousBatchingBenefit.rag_k_str` |      `{python} ContinuousBatchingBenefit.rag_waste_pct_str` |      `{python} ContinuousBatchingBenefit.rag_speedup_mult_str` |
 
 : **Continuous Batching Benefit by Workload Type**: Higher output length variance (CV) yields greater improvement from continuous batching. Workloads with predictable output lengths (code completion) see modest gains, while highly variable workloads (RAG with documents of varying length) see dramatic improvement. {#tbl-continuous-batching-benefit}
 
@@ -1469,7 +1468,7 @@ Conversely, continuous batching provides minimal benefit when:
 
 #### Implementation complexity trade-offs {#sec-inference-scale-implementation-complexity-tradeoffs-e055}
 
-Continuous batching's performance benefits come with implementation complexity that systems engineers must weigh:
+The same variability that makes continuous batching valuable also makes it harder to operate. Its performance benefits come with implementation complexity that systems engineers must weigh:
 
 Memory management complexity increases substantially. Traditional batching allocates a fixed KV cache region per sequence at batch formation, deallocating only when the entire batch completes. Continuous batching requires dynamic allocation as sequences grow and immediate deallocation upon completion, necessitating sophisticated memory management akin to operating system virtual memory.
 
@@ -1509,9 +1508,9 @@ Even with modern frameworks, diagnosing tail latency anomalies requires systemat
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.A100.memory.capacity, Hardware.Cloud.A100.memory.bandwidth, Hardware.Cloud.A100.nvlink.bandwidth,
 # │          Hardware.Cloud.A100.interconnect.bandwidth, GB, GiB, TB, second)
 # │ Exports: A100HardwareScenario.a100_mem_gb_str,
-# │          A100HardwareScenario.a100_mem_bw_tbs_str,
-# │          A100HardwareScenario.nvlink_a100_gbs_str,
-# │          A100HardwareScenario.pcie_gen4_gbs_str
+# │          A100HardwareScenario.a100_mem_bw_tb_per_s_str,
+# │          A100HardwareScenario.nvlink_a100_gb_per_s_str,
+# │          A100HardwareScenario.pcie_gen4_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_memory_capacity, fmt_time, fmt_qty_int
 
@@ -1535,9 +1534,9 @@ class A100HardwareScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_mem_gb_str = fmt_memory_capacity(mem, unit=GiB, precision=0, commas=False)
-    a100_mem_bw_tbs_str = fmt_bandwidth(bw, unit=TB / second, precision=1, commas=False)
-    nvlink_a100_gbs_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
-    pcie_gen4_gbs_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)
+    a100_mem_bw_tb_per_s_str = fmt_bandwidth(bw, unit=TB / second, precision=1, commas=False)
+    nvlink_a100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
+    pcie_gen4_gb_per_s_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)
     activation_transfer_mb_str = fmt_memory(activation_transfer, unit=MB, precision=0, commas=False)
     pcie_transfer_ms_str = fmt_time(pcie_transfer, millisecond, precision=1, commas=False)
     nvlink_transfer_ms_str = fmt_time(nvlink_transfer, millisecond, precision=2, commas=False)
@@ -1549,7 +1548,7 @@ class A100HardwareScenario:
 
 **Infrastructure Layer Analysis** (Hardware Constraints):
 
-The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb_str` connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gbs_str` per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tbs_str` (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gbs_str` vs. NVLink's `{python} A100HardwareScenario.nvlink_a100_gbs_str`. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe vs. `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink.
+The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb_str` connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` vs. NVLink's `{python} A100HardwareScenario.nvlink_a100_gb_per_s_str`. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe vs. `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink.
 
 **Distribution Layer Analysis** (Algorithmic Behavior):
 
@@ -1585,7 +1584,7 @@ Recommendation systems present a third constraint regime that resembles neither.
 ![](images/svg/feature-parallel-pipeline.svg)
 :::
 
-Recommendation systems have distinct batching requirements from vision or language models. As @fig-feature-parallel-pipeline shows, the computation pattern involves:
+Recommendation systems expose the same scheduling principle under a different bottleneck. As @fig-feature-parallel-pipeline shows, their computation pattern involves:
 
 1. **Sparse feature lookup**\index{Sparse Feature Lookup}: Retrieve embeddings for user, item, and context features
 
@@ -1700,7 +1699,7 @@ As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{La
 
 ### Streaming inference for real-time applications {#sec-inference-scale-streaming-inference-realtime-applications-906c}
 
-Some applications cannot tolerate batching delay of any kind. Real-time speech recognition, video analysis, and robotics require processing inputs as they arrive with minimal latency.
+Streaming workloads define the boundary where batching itself becomes the wrong response. Real-time speech recognition, video analysis, and robotics require processing inputs as they arrive with minimal latency.
 
 Streaming inference processes inputs incrementally without waiting for batch formation:
 
@@ -1747,7 +1746,7 @@ GPU utilization is typically 30--50 percent for streaming workloads, traded for 
 
 ### Adaptive batching strategies {#sec-inference-scale-adaptive-batching-strategies-4fc1}
 
-Production systems rarely use fixed batching parameters. Instead, they adapt batching behavior based on current conditions:
+Once batching is workload-specific, fixed parameters become fragile. Production systems adapt batching behavior based on current conditions:
 
 Traffic-adaptive batching adjusts the batch window based on arrival rate:
 
@@ -1789,7 +1788,7 @@ This optimization weighs both the current queue length and the kernel-efficiency
 
 ### Quantitative summary: Batching strategy selection {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
 
-The choice of batching strategy depends on model characteristics, traffic patterns, and latency requirements. @Fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage.
+The final selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. @Fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage.
 
 ::: {#chk-inference-batching-strategy-trade-offs .callout-checkpoint title="Batching strategy trade-offs"}
 
@@ -1884,6 +1883,12 @@ The memory management techniques that enable efficient LLM serving at scale incl
 
 Increasing the batch size to maximize throughput in LLM serving is bounded by the KV cache wall. As @fig-kv-cache-wall shows, model weights represent a fixed "static tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
 
+::: {.column-margin}
+![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="Memory ladder on a log scale: a single token uses 0.33 MB, a 128K request uses 43 GB, and the available KV budget is 480 GB."}
+
+*The KV cache fills HBM, capping concurrent requests.*
+:::
+
 ::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 84 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the 80 GB line very early (~16K tokens)."}
 
 ```{python}
@@ -1896,20 +1901,19 @@ Increasing the batch size to maximize throughput in LLM serving is bounded by th
 # │ Goal: Plot total GPU memory (weights + KV cache) vs sequence length for
 # │       batch 1/2/4/8; show 80 GB HBM limit; OOM zone.
 # │ Show: fill_between weights; sloped KV lines; capacity dashed line.
-# │ How: KV = 2*80*8*128*2 bytes/token; gb_per_1k_tokens; viz.set_book_style().
+# │ How: KV = 2*80*8*128*2 bytes/token; gb_per_1k_tokens; book_style.set_book_style().
 # │
-# │ Imports: numpy (np), matplotlib.pyplot (plt), mlsysim.core.viz (viz)
+# │ Imports: numpy (np), matplotlib.pyplot (plt), book.tools.figures.style (book_style)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot total GPU memory (weights + KV cache) vs sequence length for
 import numpy as np
 import matplotlib.pyplot as plt
-from mlsysim import viz
-
+from book.tools.figures import style as book_style
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-viz.set_book_style()
-COLORS = viz.COLORS
+book_style.set_book_style()
+COLORS = book_style.COLORS
 
 # Parameters for Llama-70B GQA
 weights_gb = 35.0 # 4-bit
@@ -1968,12 +1972,6 @@ plt.show()
 :::
 
 The visualization reveals why the Distribution Layer must sometimes shard models that would otherwise fit on a single GPU. Sharding provides the memory headroom needed to maintain high batch sizes for long-context requests. Without sharding, a 128K context request effectively "evicts" all other users from the GPU.
-
-::: {.column-margin}
-![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="Memory ladder on a log scale: a single token uses 0.33 MB, a 128K request uses 43 GB, and the available KV budget is 480 GB."}
-
-*The KV cache fills HBM, capping concurrent requests.*
-:::
 
 The same formula can be turned into an explicit batch-size limit for production hardware.
 
@@ -2314,7 +2312,7 @@ All three requests reference the same physical blocks for the system prompt. Onl
 # │   LLM chatbot with 2000-token system prompt and 1000 concurrent users,
 # │   motivating why prefix caching enables order-of-magnitude concurrency gains.
 # │ Show: kv_tb_no_cache_str="~6.6" TB (without), kv_tb_cached_str="~1.3" TB
-# │   (with), memory_reduction_pct_str="80"%, concurrent_multiplier_str="5"—
+# │   (with), memory_reduction_pct_str="80"%, concurrent_mult_str="5"—
 # │   inline in the "Prefix Caching at Scale" callout.
 # │ How: Multiply token count × KV pairs × Llama-70B layers × hidden_dim × bytes/element,
 # │   divide by 1e12 for TB; compare shared-prefix vs per-user-token totals.
@@ -2325,7 +2323,7 @@ All three requests reference the same physical blocks for the system prompt. Onl
 # │   PrefixCachingAnalysis.total_tokens_cached_str,
 # │   PrefixCachingAnalysis.kv_tb_cached_str,
 # │   PrefixCachingAnalysis.memory_reduction_pct_str,
-# │   PrefixCachingAnalysis.concurrent_multiplier_str
+# │   PrefixCachingAnalysis.concurrent_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_count, fmt_int, fmt_memory, fmt_percent
 
@@ -2371,7 +2369,7 @@ class PrefixCachingAnalysis:
     total_tokens_cached_str = fmt_int(total_tokens_cached)
     kv_tb_cached_str = fmt_memory(kv_cached, unit=TB, precision=1, commas=False)
     memory_reduction_pct_str = fmt_percent(memory_reduction_pct_val/100, precision=1, commas=False, style='prose')
-    concurrent_multiplier_str = fmt_int(concurrent_multiplier_val, commas=False)
+    concurrent_mult_str = fmt_multiple(round(concurrent_multiplier_val), commas=False, precision=0)
 ```
 
 ::: {#exmp-inference-prefix-caching-at-scale .callout-example title="Prefix caching at scale"}
@@ -2390,7 +2388,7 @@ Consider a chatbot service with a 2000-token system prompt and 1000 concurrent u
 - Total: $(2000 \times 1) + (500 \times 1000)$ = `{python} PrefixCachingAnalysis.total_tokens_cached_str`
 - Memory: `{python} PrefixCachingAnalysis.total_tokens_cached_str` $\times$ 2 $\times$ 80 $\times$ $8192 \times 2$ = `{python} PrefixCachingAnalysis.kv_tb_cached_str`
 
-**Savings**\index{Savings}: `{python} PrefixCachingAnalysis.memory_reduction_pct_str` reduction in KV cache memory, enabling `{python} PrefixCachingAnalysis.concurrent_multiplier_str`$\times$ more concurrent users.
+**Savings**\index{Savings}: `{python} PrefixCachingAnalysis.memory_reduction_pct_str` reduction in KV cache memory, enabling `{python} PrefixCachingAnalysis.concurrent_mult_str` more concurrent users.
 
 **Prefix hit rate**\index{Prefix Hit Rate} determines effectiveness; @tbl-inference-prefix-caching-workloads contrasts hit rates and memory savings across workloads, showing where prefix caching pays off and where it does not.
 
@@ -2427,7 +2425,7 @@ During autoregressive generation, the Key-Value (KV) cache stores the key and va
 # │
 # │ Imports: mlsysim.book (check)
 # │ Exports: KVCacheCalc.kv_fp16_gb_str, KVCacheCalc.kv_int4_gb_str,
-# │          KVCacheCalc.kv_savings_gb_str, KVCacheCalc.kv_compression_str,
+# │          KVCacheCalc.kv_savings_gb_str, KVCacheCalc.kv_compression_mult_str,
 # │          KVCacheCalc.batch8_kv_fp16_gb_str, KVCacheCalc.gqa_kv_fp16_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -2463,7 +2461,7 @@ class KVCacheCalc:
     kv_fp16_gb_str = fmt_memory(kv_fp16, unit=GB, precision=1, commas=False)
     kv_int4_gb_str = fmt_memory(kv_int4, unit=GB, precision=1, commas=False)
     kv_savings_gb_str = fmt_memory(kv_savings, unit=GB, precision=1, commas=False)
-    kv_compression_str = fmt_int(kv_compression, commas=False)
+    kv_compression_mult_str = fmt_multiple(kv_compression, precision=0, commas=False)
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
     batch8_kv_fp16_gb_str = fmt_memory(batch8_kv_fp16, unit=GB, precision=1, commas=False)
     gqa_kv_fp16_gb_str = fmt_memory(gqa_kv_fp16, unit=GB, precision=1, commas=False)
@@ -2490,7 +2488,7 @@ Reducing the size of cached values through lower precision provides direct memor
 
 Weight-only quantization (GPTQ, AWQ) reduces weight precision while keeping activations in high precision. While effective for storage, this does not reduce the KV cache. **KV cache quantization**\index{KV Cache!quantization} explicitly targets the activations, storing cached keys and values in INT8, FP8, or even INT4.
 
-Compressing the KV cache to INT4 reduces it to approximately `{python} KVCacheCalc.kv_int4_gb_str` per request, a `{python} KVCacheCalc.kv_compression_str`$\times$ reduction. This freed memory directly translates into larger batch sizes and higher serving throughput. KV cache values exhibit different distributions than model weights: KIVI observes channel-wise outliers in keys and uses per-channel key quantization, while values lack the same channel-wise pattern and are quantized per-token.
+Compressing the KV cache to INT4 reduces it to approximately `{python} KVCacheCalc.kv_int4_gb_str` per request, a `{python} KVCacheCalc.kv_compression_mult_str` reduction. This freed memory directly translates into larger batch sizes and higher serving throughput. KV cache values exhibit different distributions than model weights: KIVI observes channel-wise outliers in keys and uses per-channel key quantization, while values lack the same channel-wise pattern and are quantized per-token.
 
 #### Grouped query attention (GQA) {#sec-inference-scale-gqa}
 
@@ -2551,7 +2549,7 @@ class PrecisionDividend:
     max_batch_fp16_str = fmt_int(max_batch_fp16, commas=False)
     max_batch_int8_str = fmt_int(max_batch_int8, commas=False)
     fp16_weight_total_gb_str = fmt_memory(fp16_weight_total, unit=GB, precision=0, commas=False)
-    tensor_parallel_degree_str = fmt_int(tensor_parallel_degree, commas=False)
+    tensor_parallel_degree_str = fmt_count(tensor_parallel_degree, precision=0, commas=False)
 ```
 
 ::: {#nbk-inference-precision-dividend .callout-notebook title="The precision dividend"}
@@ -2576,9 +2574,21 @@ class PrecisionDividend:
 
 :::
 
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
 ### Speculative decoding {#sec-inference-scale-speculative-decoding-c438}
 
 The previous optimization improved capacity by shrinking state; speculative decoding attacks latency by letting the large model verify several proposed tokens in one pass.
+
+::: {.column-margin}
+![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
+
+*Decode is memory-bound; parallel verification moves work toward the ridge.*
+:::
 
 ::: {#dfn-inference-speculative-decoding .callout-definition title="Speculative decoding"}
 
@@ -2603,12 +2613,6 @@ In speculative decoding\index{Speculative Decoding!acceptance rate}\index{Specul
 Autoregressive generation is inherently sequential: each token depends on previous tokens. Speculative decoding[^fn-speculative-cpu-analogy] [@leviathan2023speculative; @chen2023accelerating] breaks this bottleneck by having a small, fast model guess the next several tokens, allowing the massive main model to verify them all in a single parallel step.
 
 [^fn-speculative-cpu-analogy]: **Speculative Execution (CPU to LLM)**: Borrows from CPU branch prediction, where processors execute instructions ahead of confirmation and roll back on misprediction. The critical difference: CPU speculation is invisible to software, while LLM speculation requires explicit draft-verify logic and adds a second model's memory footprint to the serving budget. The trade-off is extra compute and memory for 2--3$\times$ latency reduction, but only when draft acceptance rates exceed roughly 70 percent. \index{Speculative Decoding!CPU analogy}
-
-::: {.column-margin}
-![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
-
-*Decode is memory-bound; parallel verification moves work toward the ridge.*
-:::
 
 The speculative decoding algorithm proceeds in three phases:
 
@@ -2677,7 +2681,7 @@ The mathematical guarantee is crucial: speculative decoding is *provably lossles
 The speedup depends on the **acceptance rate** $\alpha_{\text{acc}}$ (probability that the draft token matches the target model's distribution) and the **draft length** $K$. The expected number of emitted tokens per round, including the target model's correction token, is approximately $\sum_{i=0}^{K} \alpha_{\text{acc}}^i = \frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$.
 
 ::: {.column-margin}
-![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Margin illustration showing Speculative decoding speedup threshold around 70 percent acceptance."}
+![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Speculative decoding speedup threshold around 70 percent acceptance."}
 
 *Speculative decoding's speedup hinges on the acceptance rate.*
 :::
@@ -2698,9 +2702,9 @@ The speedup depends on the **acceptance rate** $\alpha_{\text{acc}}$ (probabilit
 # │       (E[tokens] * t_target) / (t_draft_total + t_target).
 # │
 # │ Imports: mlsysim.book (check)
-# │ Exports: SpeculativeSpeedupAnalysis.sp_high_str,
-# │          SpeculativeSpeedupAnalysis.sp_med_str,
-# │          SpeculativeSpeedupAnalysis.sp_low_str,
+# │ Exports: SpeculativeSpeedupAnalysis.sp_high_mult_str,
+# │          SpeculativeSpeedupAnalysis.sp_med_mult_str,
+# │          SpeculativeSpeedupAnalysis.sp_low_mult_str,
 # │          SpeculativeSpeedupAnalysis.et_high_str,
 # │          SpeculativeSpeedupAnalysis.et_med_str,
 # │          SpeculativeSpeedupAnalysis.et_low_str
@@ -2744,9 +2748,9 @@ class SpeculativeSpeedup:
     check(sp_high > 2.0, f"High acceptance speedup should be >2x, got {sp_high:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    sp_high_str = fmt(sp_high, precision=1, commas=False)
-    sp_med_str = fmt(sp_med, precision=1, commas=False)
-    sp_low_str = fmt(sp_low, precision=1, commas=False)
+    sp_high_mult_str = fmt_multiple(sp_high, precision=1, commas=False)
+    sp_med_mult_str = fmt_multiple(sp_med, precision=1, commas=False)
+    sp_low_mult_str = fmt_multiple(sp_low, precision=1, commas=False)
     et_high_str = fmt_count(et_high, precision=1, commas=False, label="token", allow_fractional=True)
     et_med_str = fmt_count(et_med, precision=1, commas=False, label="token", allow_fractional=True)
     et_low_str = fmt_count(et_low, precision=1, commas=False, label="token", allow_fractional=True)
@@ -2754,9 +2758,9 @@ class SpeculativeSpeedup:
 
 For $K = 5$ draft tokens and a draft model that is 20$\times$ faster than the target:
 
-- **High acceptance** $(\alpha_{\text{acc}} = 0.9)$: Expected `{python} SpeculativeSpeedup.et_high_str` per round, speedup of `{python} SpeculativeSpeedup.sp_high_str`$\times$.
-- **Medium acceptance** $(\alpha_{\text{acc}} = 0.7)$: Expected `{python} SpeculativeSpeedup.et_med_str` per round, speedup of `{python} SpeculativeSpeedup.sp_med_str`$\times$.
-- **Low acceptance** $(\alpha_{\text{acc}} = 0.5)$: Expected `{python} SpeculativeSpeedup.et_low_str` per round, speedup of `{python} SpeculativeSpeedup.sp_low_str`$\times$.
+- **High acceptance** $(\alpha_{\text{acc}} = 0.9)$: Expected `{python} SpeculativeSpeedup.et_high_str` per round, speedup of `{python} SpeculativeSpeedup.sp_high_mult_str`.
+- **Medium acceptance** $(\alpha_{\text{acc}} = 0.7)$: Expected `{python} SpeculativeSpeedup.et_med_str` per round, speedup of `{python} SpeculativeSpeedup.sp_med_mult_str`.
+- **Low acceptance** $(\alpha_{\text{acc}} = 0.5)$: Expected `{python} SpeculativeSpeedup.et_low_str` per round, speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
 
 The acceptance rate varies dramatically by context. Predictable text achieves $\alpha_{\text{acc}} > 0.9$, while creative reasoning or code generation may see $\alpha_{\text{acc}} < 0.5$. In practice, well-aligned model pairs (sharing training data and architecture) commonly achieve average acceptance rates of 0.6--0.8, yielding 1.5--3$\times$ latency improvements.
 
@@ -3105,15 +3109,15 @@ where $T_{\text{compute}}$ is the sequential compute time, $t$ is the tensor-par
 # │ Goal: Compute realized speedup (6.9×) vs theoretical (8×) for 8-way tensor
 # │   parallelism on 8×H100, quantifying the communication overhead cost of
 # │   AllReduce ops vs linear scaling.
-# │ Show: tp_speedup_str="6.9"×, seq_total_ms_str="2,400" ms,
+# │ Show: tp_speedup_mult_str="6.9"×, seq_total_ms_str="2,400" ms,
 # │   tp8_total_ms_str="348" ms—inline in the callout prose.
 # │ How: Divide per-layer prefill-pass compute times; multiply by n_layers
 # │   for full-model timing. This is not decode TPOT.
 # │
 # │ Imports: (none—pure Python arithmetic, no pint quantities)
-# │ Exports: TpSpeedupCalc.tp_speedup_str, TpSpeedupCalc.tp_theoretical_str,
+# │ Exports: TpSpeedupCalc.tp_speedup_mult_str, TpSpeedupCalc.tp_theoretical_mult_str,
 # │   TpSpeedupCalc.n_layers_str, TpSpeedupCalc.seq_total_ms_str,
-# │   TpSpeedupCalc.tp8_total_ms_str, TpSpeedupCalc.nvlink_h100_gbs_str
+# │   TpSpeedupCalc.tp8_total_ms_str, TpSpeedupCalc.nvlink_h100_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class TpSpeedupCalc:
@@ -3144,12 +3148,12 @@ class TpSpeedupCalc:
     check(tp_speedup < tp_theoretical, f"Realized speedup ({tp_speedup:.2f}) must be less than theoretical ({tp_theoretical})")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tp_speedup_str = fmt(tp_speedup, precision=1, commas=False)
+    tp_speedup_mult_str = fmt_multiple(tp_speedup, precision=1, commas=False)
     seq_total_ms_str = fmt_time(round(seq_total_ms), 'millisecond', precision=0, commas=True)
     tp8_total_ms_str = fmt_time(round(tp8_total_ms), 'millisecond', precision=0, commas=True)
-    tp_theoretical_str = fmt_int(tp_theoretical, commas=False)
+    tp_theoretical_mult_str = fmt_multiple(tp_theoretical, precision=0, commas=False)
     n_layers_str = fmt_int(n_layers, commas=False)
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
     parameters_b_str = fmt_int(parameters_b, commas=False)
     attention_heads_str = fmt_int(attention_heads, commas=False)
     hidden_dim_str = fmt_int(hidden_dim)
@@ -3183,7 +3187,7 @@ $$\text{Memory}_{\text{70B}} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
 - Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` for the full prefill pass
 - 8-way TP: `{python} TpSpeedupCalc.tp8_total_ms_str` for the full prefill pass
 
-The `{python} TpSpeedupCalc.tp_speedup_str`$\times$ speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical_str`$\times$) reflects communication overhead. At `{python} TpSpeedupCalc.nvlink_h100_gbs_str`, moving a `{python} TpSpeedupCalc.activation_mb_str` activation payload would take only about 0.01 ms by raw bandwidth math; the 0.3 ms budget shown here includes collective launch, synchronization, ring protocol, and framework overheads.
+The `{python} TpSpeedupCalc.tp_speedup_mult_str` speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical_mult_str`) reflects communication overhead. At `{python} TpSpeedupCalc.nvlink_h100_gb_per_s_str`, moving a `{python} TpSpeedupCalc.activation_mb_str` activation payload would take only about 0.01 ms by raw bandwidth math; the 0.3 ms budget shown here includes collective launch, synchronization, ring protocol, and framework overheads.
 
 **Time-to-first-token** (1024-token prompt):
 
@@ -3270,7 +3274,7 @@ The economics of MoE serving create a paradox: *total parameter count* determine
 # │
 # │ Imports: mlsysim.book (check)
 # │ Exports: MoEEconomics.dense_mem_gb_str, MoEEconomics.moe_mem_gb_str,
-# │          MoEEconomics.compute_ratio_str, MoEEconomics.bw_ratio_str
+# │          MoEEconomics.compute_ratio_mult_str, MoEEconomics.bw_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3300,11 +3304,11 @@ class MoEEconomics:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     dense_mem_gb_str = fmt_memory(dense_mem_fp16, unit=GB, precision=0, commas=False)
     moe_mem_gb_str = fmt_memory(moe_mem_fp16, unit=GB, precision=0, commas=False)
-    compute_ratio_str = fmt(compute_ratio, precision=1, commas=False)
-    bw_ratio_str = fmt(bw_ratio, precision=1, commas=False)
+    compute_ratio_mult_str = fmt_multiple(compute_ratio, precision=1, commas=False)
+    bw_ratio_mult_str = fmt_multiple(bw_ratio, precision=1, commas=False)
 ```
 
-The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} MoEEconomics.dense_mem_gb_str` per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} MoEEconomics.bw_ratio_str`$\times$ reduction in per-token bandwidth. The compute savings are proportional: `{python} MoEEconomics.compute_ratio_str`$\times$ fewer FLOPs per token.
+The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} MoEEconomics.dense_mem_gb_str` per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} MoEEconomics.bw_ratio_mult_str` reduction in per-token bandwidth. The compute savings are proportional: `{python} MoEEconomics.compute_ratio_mult_str` fewer FLOPs per token.
 
 ::: {.column-margin}
 ![](images/svg/vol2_inference_margin_002.svg){width="100%" fig-alt="Memory ladder comparing MoE resident weights at 1342 GB, dense resident weights at 800 GB, and MoE active read at 74 GB."}
@@ -3354,7 +3358,7 @@ class MoECapacityPlan:
     read_per_gpu_gb_str = fmt_memory(read_per_gpu, unit=GB, precision=1, commas=False)
     t_read_ms_str = fmt_time(t_read, millisecond, precision=2, commas=False)
     total_decode_ms_str = fmt_time(total_decode, millisecond, precision=1, commas=False)
-    tokens_per_sec_tokens_s_str = fmt_rate(tokens_per_sec, "tokens/s", precision=0, commas=True)
+    tokens_per_s_str = fmt_rate(tokens_per_sec, "tokens/s", precision=0, commas=True)
     total_weight_gb_str = fmt_memory(total_weight, unit=GB, precision=0, commas=False)
     node_capacity_gb_str = fmt_memory(node_capacity, unit=GB, precision=0, commas=False)
     nodes_needed_str = fmt_int(nodes_needed, commas=False)
@@ -3363,7 +3367,7 @@ class MoECapacityPlan:
     moe_active_params_b_str = fmt_params(moe_active_params, scale="B", precision=0, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
     alltoall_overhead_ms_str = fmt_time(alltoall_overhead, millisecond, precision=1, commas=False)
-    h100_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     h100_mem_gb_str = fmt_memory(h100_mem, unit=GB, precision=0, commas=False)
     moe_total_params_b_str = fmt_params(moe_total_params, scale="B", precision=0, commas=False)
     node_gpus_str = fmt_int(node_gpus, commas=False)
@@ -3376,8 +3380,8 @@ class MoECapacityPlan:
 **Math**:
 
 1.  **Memory**: Total weight memory = `{python} MoECapacityPlan.total_weight_gb_str`. A single node (`{python} MoECapacityPlan.node_capacity_gb_str`) is insufficient. `{python} MoECapacityPlan.nodes_needed_str` provide `{python} MoECapacityPlan.cluster_capacity_gb_str`, leaving enough room for KV caches.
-2.  **Latency**: Each decode step reads `{python} MoECapacityPlan.moe_active_params_b_str` active parameters (`{python} MoECapacityPlan.active_mem_gb_str`). Distributed across `{python} MoECapacityPlan.n_gpus_str`, each reads about `{python} MoECapacityPlan.read_per_gpu_gb_str`. At `{python} MoECapacityPlan.h100_bw_tbs_str` HBM bandwidth, $t_{\text{read}} \approx$ `{python} MoECapacityPlan.t_read_ms_str`. AllToAll routing adds about `{python} MoECapacityPlan.alltoall_overhead_ms_str`.
-3.  **Floor**: Estimated decode latency $\approx$ `{python} MoECapacityPlan.total_decode_ms_str`/token, or `{python} MoECapacityPlan.tokens_per_sec_tokens_s_str` at batch size 1.
+2.  **Latency**: Each decode step reads `{python} MoECapacityPlan.moe_active_params_b_str` active parameters (`{python} MoECapacityPlan.active_mem_gb_str`). Distributed across `{python} MoECapacityPlan.n_gpus_str`, each reads about `{python} MoECapacityPlan.read_per_gpu_gb_str`. At `{python} MoECapacityPlan.h100_bw_tb_per_s_str` HBM bandwidth, $t_{\text{read}} \approx$ `{python} MoECapacityPlan.t_read_ms_str`. AllToAll routing adds about `{python} MoECapacityPlan.alltoall_overhead_ms_str`.
+3.  **Floor**: Estimated decode latency $\approx$ `{python} MoECapacityPlan.total_decode_ms_str`/token, or `{python} MoECapacityPlan.tokens_per_s_str` at batch size 1.
 
 **Systems insight**: MoE allows a 671B model to approach the per-token bandwidth cost of a much smaller dense model, but capacity planning is still driven by the full parameter set that must remain resident.
 
@@ -3471,14 +3475,14 @@ Load balancing challenge: If gating decisions cluster on certain experts, device
 #| echo: false
 #| label: mixtral-8x7b-registry-spec
 from mlsysim import Bparam, Models
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt_int, fmt_params
 
 class Mixtral8x7BSpec:
     """Book-facing Mixtral fields sourced from the model registry."""
 
     _model = Models.Language.Mixtral_8x7B
-    total_params_b_str = fmt_int(_model.parameters.to(Bparam).magnitude, commas=False)
-    active_params_b_str = fmt_int(_model.active_parameters.to(Bparam).magnitude, commas=False)
+    total_params_b_str = fmt_params(_model.parameters, scale="B", precision=1, commas=False)
+    active_params_b_str = fmt_params(_model.active_parameters, scale="B", precision=1, commas=False)
     experts_str = fmt_int(_model.experts, commas=False)
     active_experts_str = fmt_int(_model.active_experts_per_token, commas=False)
 ```
@@ -3489,7 +3493,7 @@ Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer w
 
 **Model characteristics**:
 
-- Total parameters: `{python} Mixtral8x7BSpec.total_params_b_str`B (but only ~`{python} Mixtral8x7BSpec.active_params_b_str`B active per token)
+- Total parameters: `{python} Mixtral8x7BSpec.total_params_b_str` (but only ~`{python} Mixtral8x7BSpec.active_params_b_str` active per token)
 - Experts per layer: `{python} Mixtral8x7BSpec.experts_str`
 - Active experts per token: `{python} Mixtral8x7BSpec.active_experts_str` (top-$k$ = `{python} Mixtral8x7BSpec.active_experts_str`)
 - MoE layers: Every feed-forward layer (each FFN replaced by a `{python} Mixtral8x7BSpec.experts_str`-expert MoE block)
@@ -3772,7 +3776,7 @@ Both equations make clear that the achievable bandwidth $\beta$ and latency $\al
 # │ Exports: AllReduceInterconnect.nvlink_ms_str,
 # │          AllReduceInterconnect.ib_ms_str,
 # │          AllReduceInterconnect.eth_ms_str,
-# │          AllReduceInterconnect.nvlink_bw_gbs_str,
+# │          AllReduceInterconnect.nvlink_bw_gb_per_s_str,
 # │          AllReduceInterconnect.nvlink_pct_str,
 # │          AllReduceInterconnect.ib_pct_str,
 # │          AllReduceInterconnect.eth_pct_str
@@ -3807,7 +3811,7 @@ class AllReduceInterconnect:
     check(eth_pct < 5, f"Raw 100G Ethernet share should remain under 5%, got {eth_pct:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    nvlink_bw_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
     nvlink_ms_str = fmt_time(nvlink_time, millisecond, precision=2, commas=False)
     ib_ms_str = fmt_time(ib_time, millisecond, precision=2, commas=False)
     eth_ms_str = fmt_time(eth_time, millisecond, precision=2, commas=False)
@@ -3851,15 +3855,15 @@ NVLink bandwidth has evolved significantly over GPU generations.[^fn-nvlink-band
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: NVLink bandwidth evolution footnote below.
-# │ Exports: TpNvlinkRecap.nvlink_h100_gbs_str
+# │ Exports: TpNvlinkRecap.nvlink_h100_gb_per_s_str
 class TpNvlinkRecap:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
     from mlsysim.fmt import fmt_bandwidth
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_gbs_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-[^fn-nvlink-bandwidth-inf]: **NVLink Bandwidth Evolution**: From 160 GB/s bidirectional on early NVLink implementations to `{python} TpNvlinkRecap.nvlink_h100_gbs_str` on Hopper-class GPUs to 1.8 TB/s on Blackwell-class GPUs---roughly a 10$\times$ improvement across three hardware generations. This bandwidth growth is what made intra-node tensor parallelism across 8 GPUs practical with less than 5 percent communication overhead, directly determining the maximum model size servable without crossing the slower cross-node interconnect.
+[^fn-nvlink-bandwidth-inf]: **NVLink Bandwidth Evolution**: From 160 GB/s bidirectional on early NVLink implementations to `{python} TpNvlinkRecap.nvlink_h100_gb_per_s_str` on Hopper-class GPUs to 1.8 TB/s on Blackwell-class GPUs---roughly a 10$\times$ improvement across three hardware generations. This bandwidth growth is what made intra-node tensor parallelism across 8 GPUs practical with less than 5 percent communication overhead, directly determining the maximum model size servable without crossing the slower cross-node interconnect.
 
 ### Sharding strategy selection {#sec-inference-scale-sharding-strategy-selection-f69c}
 
@@ -3887,6 +3891,12 @@ Archetype B (DLRM at Scale) is the canonical victim of tail latency. Processing 
 :::
 
 ### Load balancing principles {#sec-inference-scale-load-balancing-principles-63ec}
+
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_003.svg){width="100%" fig-alt="Margin illustration showing Random-assignment tail curve versus two-choices curve."}
+
+*Two-choice routing flattens the tail imbalance of random placement.*
+:::
 
 Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
 
@@ -3928,12 +3938,6 @@ For 1,000 servers:
 - Two choices max queue: ~2 requests
 
 The improvement is exponential: two choices with 1,000 servers achieves better balance than random with just 10 servers.
-
-::: {.column-margin}
-![](images/svg/vol2_inference_margin_003.svg){width="100%" fig-alt="Margin illustration showing Random-assignment tail curve versus two-choices curve."}
-
-*Two-choice routing flattens the tail imbalance of random placement.*
-:::
 
 ::: {.callout-important title="Exponential gain from one change"}
 
@@ -3997,10 +4001,10 @@ A weighted-routing example shows how the policy handles mixed GPU hardware in pr
 # │   HeterogeneousGpuCluster.h100_util_str,
 # │   HeterogeneousGpuCluster.a100_util_str,
 # │   HeterogeneousGpuCluster.equal_load_str,
-# │   HeterogeneousGpuCluster.h100_util_equal_str,
-# │   HeterogeneousGpuCluster.a100_util_equal_str
+# │   HeterogeneousGpuCluster.h100_util_equal_pct_str,
+# │   HeterogeneousGpuCluster.a100_util_equal_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt_percent, fmt_rate
 
 class HeterogeneousGpuCluster:
     """Demonstrate capacity-proportional weighting equalizes utilization across H100 and A100 servers."""
@@ -4044,8 +4048,8 @@ class HeterogeneousGpuCluster:
     h100_util_str = fmt_percent(h100_util/100, precision=1, commas=False, style='prose')
     a100_util_str = fmt_percent(a100_util/100, precision=1, commas=False, style='prose')
     equal_load_str = fmt_int(equal_load, commas=False)
-    h100_util_equal_str = fmt_int(h100_util_equal, commas=False)
-    a100_util_equal_str = fmt(a100_util_equal, precision=1, commas=False)
+    h100_util_equal_pct_str = fmt_percent(h100_util_equal / 100, precision=0, commas=False, style='prose')
+    a100_util_equal_pct_str = fmt_percent(a100_util_equal / 100, precision=1, commas=False, style='prose')
     n_h100_str = fmt_int(n_h100, commas=False)
     n_a100_str = fmt_int(n_a100, commas=False)
     h100_cap_qps_str = fmt_rate(h100_cap_qps, "QPS", commas=False)
@@ -4078,8 +4082,8 @@ Both server types operate at equal utilization, maximizing overall capacity whil
 **Without weighting** (equal distribution):
 
 - Per-server load: 15000/30 = `{python} HeterogeneousGpuCluster.equal_load_str`
-- H100 utilization: `{python} HeterogeneousGpuCluster.h100_util_equal_str` (underutilized)
-- A100 utilization: `{python} HeterogeneousGpuCluster.a100_util_equal_str` (high utilization, reduced latency headroom)
+- H100 utilization: `{python} HeterogeneousGpuCluster.h100_util_equal_pct_str` (underutilized)
+- A100 utilization: `{python} HeterogeneousGpuCluster.a100_util_equal_pct_str` (high utilization, reduced latency headroom)
 
 :::
 
@@ -4441,18 +4445,15 @@ Consider a critical customer-support chatbot running on the same GPU server as a
 
 ### The multi-tenancy challenge {#sec-inference-scale-multitenancy-challenge-8dca}
 
-Multi-tenancy provides significant benefits:
+Multi-tenancy saves cost through cost efficiency\index{Multi-Tenancy!cost efficiency}, operational simplicity\index{Operational Simplicity}, and statistical multiplexing\index{Statistical Multiplexing}. Sharing infrastructure raises utilization, reduces the number of clusters to manage, and makes aggregate traffic more predictable than any one tenant's traffic.
 
-- Cost efficiency\index{Multi-Tenancy!cost efficiency}: Sharing infrastructure across tenants improves utilization
-- **Operational simplicity**\index{Operational Simplicity}: Fewer clusters to manage, monitor, and upgrade
-- **Statistical multiplexing**\index{Statistical Multiplexing}: Aggregate traffic is more predictable than per-tenant traffic
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_004.svg){width="100%" fig-alt="Margin illustration showing One bursting tenant propagates SLO impact through a shared pool."}
 
-However, sharing introduces risks. @Tbl-tenancy-comparison weighs utilization gains against isolation challenges:
+*Bursts starve shared KV cache.*
+:::
 
-- **Noisy neighbors**\index{Noisy Neighbor}: One tenant's burst traffic impacts others
-- **Resource contention**\index{Resource Contention}: GPU memory, network bandwidth, CPU cycles
-- **Security boundaries**\index{Security!boundaries}: Tenant data must remain isolated
-- **SLO complexity**\index{SLO!complexity}: Different tenants have different requirements
+The same sharing creates the isolation problem that @tbl-tenancy-comparison frames: noisy neighbors\index{Noisy Neighbor} can make one tenant's burst degrade others, resource contention\index{Resource Contention} spans GPU memory, network bandwidth, and CPU cycles, security boundaries\index{Security!boundaries} must protect tenant data, and SLO complexity\index{SLO!complexity} increases when tenants have different requirements.
 
 | **Aspect**                                           | **Single-Tenant**      | **Multi-Tenant**       |
 |:-----------------------------------------------------|:-----------------------|:-----------------------|
@@ -4467,12 +4468,6 @@ However, sharing introduces risks. @Tbl-tenancy-comparison weighs utilization ga
 ### Noisy neighbor problems {#sec-inference-scale-noisy-neighbor-problems-1b87}
 
 The noisy neighbor problem occurs when one tenant's workload degrades performance for others sharing the same infrastructure. The interference manifests across three resource dimensions simultaneously.
-
-::: {.column-margin}
-![](images/svg/vol2_inference_margin_004.svg){width="100%" fig-alt="Margin illustration showing One bursting tenant propagates SLO impact through a shared pool."}
-
-*One tenant's burst eats shared KV cache and starves the rest.*
-:::
 
 GPU memory contention is the most severe: a tenant with unexpectedly long sequences can consume a disproportionate share of the KV cache pool. Consider three tenants sharing a 60 GB KV cache pool with equal 20 GB allocations. When one tenant begins issuing long-context requests, its allocation can swell to 45 GB, forcing evictions that reduce the other tenants from 200 concurrent sequences each to 75 -- a 62 percent batch size reduction that directly degrades their throughput. Network bandwidth saturation compounds this effect when a tenant streaming many large responses consumes the available egress capacity. GPU time-sharing between tenants introduces context-switching overhead and unpredictable latency variance. Measuring noisy-neighbor impact requires capturing all three interference dimensions simultaneously.
 
@@ -4493,7 +4488,7 @@ GPU memory contention is the most severe: a tenant with unexpectedly long sequen
 # │ Imports: mlsysim.fmt (check, fmt, MarkdownStr)
 # │ Exports: NoisyNeighborQuotaScenario.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, MarkdownStr, fmt_percent, fmt_time
+from mlsysim.fmt import fmt_int, check, fmt, MarkdownStr, fmt_percent, fmt_rate, fmt_time
 
 class NoisyNeighborQuotaScenario:
     """Resource-quota scenario with computed SLO statuses."""
@@ -4518,7 +4513,7 @@ class NoisyNeighborQuotaScenario:
     slo_ms_str = fmt_time(round(slo_ms), 'millisecond', precision=0, commas=False)
     tenant_base_qps_str = fmt_rate(tenant_base_qps, "QPS", commas=False)
     tenant_burst_qps_str = fmt_rate(tenant_burst_qps, "QPS", commas=False)
-    tenant_throttled_qps_str = fmt_int(tenant_throttled_qps, commas=False)
+    tenant_throttled_qps_str = fmt_rate(tenant_throttled_qps, "QPS", commas=False)
     protected_p99_ms_str = fmt_int(protected_p99_ms, commas=False)
     burst_p99_ms_str = fmt_int(burst_p99_ms, commas=False)
     protected_status_str = MarkdownStr(protected_status)
@@ -5119,7 +5114,7 @@ The split architecture in @fig-spot-aware-routing achieves approximately 18--27 
 
 ### Global inference infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
-Production inference systems serving global user bases must operate across multiple geographic regions. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located. The architectural patterns for multi-region inference deployment address this requirement.
+Global serving becomes necessary when distance, failure domains, or data-residency constraints exceed what one region can hide. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located; the engineering choice is whether to replicate computation, cache repeated work, or centralize the model and pay the network penalty. The architectural patterns are useful only when tied to that choice.
 
 #### Why multi-region matters {#sec-inference-scale-multiregion-matters-d7d3}
 
@@ -5137,6 +5132,8 @@ Single-region deployment creates three fundamental limitations. The most immedia
 For interactive applications (chatbots, autocomplete), these delays compound across multiple model calls per request. Beyond latency, single-region deployment creates a single point of failure: cloud region outages, while rare, affect all users simultaneously. Regulatory constraints add a third dimension, as data residency requirements (the General Data Protection Regulation (GDPR) and data sovereignty laws) may require processing user data within specific geographic boundaries.
 
 #### Multi-region architecture patterns {#sec-inference-scale-multiregion-architecture-patterns-5c67}
+
+The three patterns form a decision ladder. Regional replicas pay the highest deployment cost but minimize RTT and isolate regional failures. Edge caching pays operational complexity only when queries repeat. Cross-region sharding is a last resort for capacity shortages because inter-region latency overwhelms per-stage compute.
 
 #### Pattern 1: Global load balancing with regional replicas {#sec-inference-scale-pattern-1-global-load-balancing-regional-replicas-b7ac}
 
@@ -5272,15 +5269,21 @@ Scaling global infrastructure aggressively is highly effective, but it is also e
 
 ## Weight Quantization for Serving {#sec-inference-scale-weight-quantization-serving-097b}
 
-Weight quantization for serving compresses a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU, by reducing the precision of model weights from 16-bit floats to 8-bit or 4-bit integers. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
+::: {.column-margin}
+![](images/svg/inference_quantization_capacity_ladder.svg){width="100%" fig-alt="Memory ladder comparing a 140 GB FP16 70B model with a 35 GB INT4 70B model, with the 4x capacity reduction marked as a ratio annotation."}
+
+*INT4 turns a two-GPU model into a one-GPU candidate.*
+:::
+
+Weight quantization for serving is a bottleneck-selection decision: reducing weights from 16-bit floats to 8-bit or 4-bit integers can turn a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
 
 ::: {#psp-inference-prior-knowledge-quantization .callout-perspective title="Prior knowledge: Quantization"}
 
-The section assumes familiarity with quantization fundamentals including post-training quantization (PTQ), which quantizes a trained model without retraining, and quantization-aware training (QAT)\index{Quantization!quantization-aware training}, which incorporates quantization effects during training for higher accuracy. Readers should also understand precision formats (FP32, FP16, INT8) and the basic trade-off between numerical precision and memory/compute efficiency. These concepts are covered in standard deep learning optimization references and in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
+The necessary background is quantization fundamentals including post-training quantization (PTQ), which quantizes a trained model without retraining, and quantization-aware training (QAT)\index{Quantization!quantization-aware training}, which incorporates quantization effects during training for higher accuracy. Readers should also understand precision formats (FP32, FP16, INT8) and the basic trade-off between numerical precision and memory/compute efficiency. These concepts are covered in standard deep learning optimization references and in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
 
 :::
 
-Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. While these quantization fundamentals are established techniques, serving at scale introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. The following discussion covers quantization techniques specifically designed for production inference.
+Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs quantization methods designed for specific serving constraints.
 
 ### LLM-specific quantization challenges {#sec-inference-scale-llmspecific-quantization-challenges-b7a2}
 
@@ -5295,7 +5298,7 @@ The outlier distribution motivates the specialized quantization methods that fol
 
 ### GPTQ: Layer-by-layer weight quantization {#sec-inference-scale-gptq-layerbylayer-weight-quantization-9284}
 
-GPTQ [@frantar2023gptq] quantizes LLM weights using Hessian-based[^fn-hessian-quantization] error compensation. Rather than quantizing all weights independently, GPTQ adjusts remaining weights to compensate for errors introduced by quantization.
+GPTQ [@frantar2023gptq] is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. It uses Hessian-based[^fn-hessian-quantization] error compensation, adjusting remaining weights to compensate for errors introduced by quantization rather than quantizing all weights independently.
 
 [^fn-hessian-quantization]: **Hessian Matrix in Quantization**\index{Quantization!Hessian matrix}: The Hessian $H = X^T X$ captures second-order sensitivity: weights with large diagonal entries have outsized impact on model outputs. GPTQ exploits this to quantize insensitive weights aggressively while preserving sensitive ones, achieving 3--4-bit quantization with less than 1 percent perplexity degradation. Without Hessian guidance, naive uniform quantization below 8-bit typically destroys model quality. \index{Hessian!quantization}
 
@@ -5340,7 +5343,7 @@ GPTQ's strengths include fast quantization without retraining, minimal quality l
 
 ### AWQ: Activation-aware weight quantization {#sec-inference-scale-awq-activationaware-weight-quantization-abec}
 
-The central observation is that not all weights are equally important. AWQ [@lin2025] recognizes that weights connected to channels with large activation magnitudes have disproportionate impact on outputs. Rather than protecting weights based on their own magnitude, AWQ protects weights based on the magnitude of activations they produce.
+AWQ [@lin2025] attacks the same weight-only serving goal from the activation side. Weights connected to channels with large activation magnitudes have disproportionate impact on outputs, so AWQ protects weights based on the magnitude of activations they produce rather than on weight magnitude alone.
 
 The AWQ algorithm proceeds in four steps:
 
@@ -5371,7 +5374,7 @@ AWQ typically achieves 0.5-1 percent lower perplexity degradation than GPTQ at t
 
 ### SmoothQuant: Migrating quantization difficulty {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
 
-SmoothQuant [@xiao2023smoothquant] addresses the activation outlier problem by migrating quantization difficulty from activations to weights. Weights have predictable distributions; activations have unpredictable outliers. SmoothQuant transfers the outlier problem to weights where it can be handled with per-channel scaling.
+SmoothQuant [@xiao2023smoothquant] is the serving path for W8A8 deployments where activation quantization matters, especially compute-bound prefill. It addresses the activation outlier problem by migrating quantization difficulty from activations to weights. Weights have predictable distributions; activations have unpredictable outliers. SmoothQuant transfers the outlier problem to weights where it can be handled with per-channel scaling.
 
 The core technique inserts smoothing operations that divide activations by per-channel scales while multiplying weights by the same scales:
 
@@ -5401,7 +5404,7 @@ The critical distinction is that W8A8 provides near 2$\times$ speedup for comput
 
 ### Rotation-based quantization {#sec-inference-scale-rotationbased-quantization-8bee}
 
-Traditional quantization methods (GPTQ, AWQ, SmoothQuant) address outliers through compensation or migration. **Rotation-based quantization**\index{Quantization!rotation-based} [@ashkboos2024quarot] takes a fundamentally different approach: mathematically transforming the weight and activation space to eliminate outliers entirely.
+Traditional quantization methods (GPTQ, AWQ, SmoothQuant) address outliers through compensation or migration. **Rotation-based quantization**\index{Quantization!rotation-based} [@ashkboos2024quarot] is the aggressive path when activation outliers block lower precision: it mathematically transforms the weight and activation space to eliminate outliers entirely.
 
 The crucial realization is that outliers are artifacts of the coordinate basis representation. Rotating to a different basis spreads extreme values uniformly, making all values quantization-friendly.
 
@@ -5450,7 +5453,7 @@ SpinQuant is an extension of QuaRot that learns optimal rotation matrices during
 
 ### Hardware-deployment co-design {#sec-inference-scale-hardwaredeployment-codesign-617f}
 
-Quantization strategies must match target hardware capabilities. Different accelerators support different precisions with varying performance multipliers.
+The quantization method only pays off when the deployment hardware accelerates the chosen precision. Different accelerators support different precisions with varying performance multipliers.
 
 @Tbl-tensor-core-precision-support summarizes NVIDIA Tensor Core precision support across Ampere and Hopper:
 
@@ -5483,7 +5486,7 @@ $$\text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model si
 
 ### Framework integration {#sec-inference-scale-framework-integration-945c}
 
-Production serving frameworks integrate quantization with their batching and memory management systems.
+Production serving frameworks matter because quantized weights reduce cost only when the runtime selects kernels and memory managers that preserve the theoretical savings.
 
 @Lst-vllm-quantization shows how vLLM loads a prequantized AWQ model.\index{Quantization!vLLM integration}
 
@@ -5583,7 +5586,7 @@ A 70B model with 4-bit weights requires approximately `{python} QuantizedServing
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
-Choosing the appropriate quantization method depends on deployment constraints:
+The final selection matches the method to the binding constraint. Deployment constraints determine the appropriate quantization method:
 
 #### Decision framework {#sec-inference-quantization-decision-framework-d3c1}
 
@@ -5623,20 +5626,20 @@ These serving optimizations span continuous batching, PagedAttention, global loa
 
 ## Case Studies {#sec-inference-scale-case-studies-9689}
 
-Production-scale serving systems test the batching, sharding, caching, and routing techniques developed above against real workload variance, latency budgets, and operational constraints. ChatGPT-style services handle unpredictable global request volume; TikTok-style recommenders serve ranked content at sub-100-millisecond latency. The case studies below show how each system combines the chapter's techniques to meet its specific cost and latency targets, working from the iteration-level scheduling popularized by vLLM in 2022 (which transformed LLM serving from a coarse-grained batch process into a fluid, high-utilization stream) through global request routing and embedding-server topologies.
+Production-scale serving systems force the chapter's techniques to meet real workload variance, latency budgets, and operational constraints. The cases bind on different constraints: embedding scale, variable-length generation, cascade cost, or multimodal freshness. The examples show how systems combine batching, sharding, caching, routing, and quantization to meet specific cost and latency targets. The sequence begins with iteration-level scheduling popularized by vLLM in 2022, which transformed LLM serving from a coarse-grained batch process into a fluid, high-utilization stream, and extends through global request routing and embedding-server topologies.
 
 ### Meta recommendation serving {#sec-inference-scale-meta-recommendation-serving-bede}
 
-Meta's recommendation infrastructure serves predictions for feeds, ads, and content ranking across Facebook, Instagram, WhatsApp, and Messenger. This represents one of the largest production inference deployments in the world.
+Meta's recommendation infrastructure binds on embedding scale rather than dense forward-pass compute. It serves predictions for feeds, ads, and content ranking across Facebook, Instagram, WhatsApp, and Messenger, making it one of the largest production inference deployments in the world.
 
-The system operates at the following scale:
+The scale numbers explain why embedding locality dominates the design:
 
 - Request volume: Billions of requests per day
 - Latency target: <10 ms P99
 - Model diversity: Hundreds of model variants
 - Feature cardinality: Trillions of unique entities
 
-The serving stack is organized as follows:
+The serving stack separates sparse lookup from dense ranking:
 
 ```
 User request → Feature collection → Embedding lookup → Model inference → Response
@@ -5667,7 +5670,7 @@ The resulting GPU-CPU hybrid architecture runs dense model computation (ranking 
 
 : **Meta DLRM Hybrid CPU/GPU Architecture**: Hardware-workload mapping for Meta's recommendation serving stack. CPU + SSD handles the bandwidth-bound sparse path; CPU handles low-arithmetic-intensity feature processing; GPU handles the compute-dense ranking forward pass. The three latency budgets sum to ~5 ms, well within typical recommendation SLOs. {#tbl-meta-dlrm-hybrid-hardware}
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Embedding lookup, not model inference, often dominates latency for recommendation systems
 2. Feature-parallel batching achieves higher efficiency than request-level batching
@@ -5675,16 +5678,16 @@ Three lessons emerge from this design:
 
 ### OpenAI API infrastructure {#sec-inference-scale-openai-api-infrastructure-a65e}
 
-OpenAI-style API infrastructure serves GPT-class models to large developer and application workloads. The infrastructure must handle highly variable request sizes (from short prompts to long-context requests) while maintaining quality of service across diverse workloads.
+OpenAI-style API infrastructure binds on request variance: short prompts, long-context requests, and different model sizes share capacity while users expect predictable TTFT. The infrastructure serves GPT-class models to large developer and application workloads while maintaining quality of service across diverse workloads.
 
-The system operates at the following scale:
+The scale numbers explain why continuous batching and admission control dominate:
 
 - Request volume: Millions of requests per hour
 - Latency target: Time-to-first-token (TTFT) <2s, throughput varies by model
 - Model sizes: Billions to hundreds of billions of parameters
 - Context lengths: Up to 128K tokens
 
-The serving stack is organized as follows:
+The serving stack separates routing, scheduling, cache management, and shard groups:
 
 ```
 API Gateway → Rate Limiting → Request Router → Model Cluster → Response Streaming
@@ -5704,7 +5707,7 @@ API Gateway → Rate Limiting → Request Router → Model Cluster → Response 
                               └─────────────┘
 ```
 
-Several key design decisions shape this system.
+The main design decision is to prevent long prompts from blocking decode service for everyone else.
 
 OpenAI was an early adopter of continuous batching (Orca-style) to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation. @Tbl-batching-strategies-comparison contrasts the three approaches:
 
@@ -5737,7 +5740,7 @@ if large_model_queue_depth > threshold:
     reallocate_cluster_capacity(from="smaller-model", to="large-model", fraction=0.2)
 ```
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Continuous batching is essential for LLM serving at scale
 2. Prefix caching provides 2--3$\times$ efficiency for conversational workloads
@@ -5745,9 +5748,9 @@ Three lessons emerge from this design:
 
 ### Google search ranking {#sec-inference-scale-google-search-ranking-aab2}
 
-Google Search uses ensemble serving to combine multiple specialized models for query understanding, document relevance, and result ranking. This represents a different inference pattern: many smaller models coordinated for each request rather than one large model.
+Google Search binds on cascade cost: each query coordinates many smaller models under one end-to-end latency budget rather than serving one large model. The ensemble combines specialized models for query understanding, document relevance, and result ranking.
 
-The system operates at the following scale:
+The scale numbers explain why a cascade is mandatory:
 
 - Request volume: Billions of searches per day
 - Latency target: <200 ms end-to-end
@@ -5788,7 +5791,7 @@ To meet this latency budget while evaluating thousands of documents, the system 
 
 :::
 
-Several key design decisions shape this system.
+The central design decision is progressive refinement.
 
 Rather than running one expensive model on all candidates, Google uses a ranking cascade summarized in @tbl-google-ranking-cascade:
 
@@ -5808,11 +5811,11 @@ Rather than running one expensive model on all candidates, Google uses a ranking
 # │      applying L3 to all 1M candidates with the four-stage cascade budget.
 # │
 # │ Imports: mlsysim.fmt (check, fmt)
-# │ Exports: RankingCascadeCost.final_eval_reduction_str,
+# │ Exports: RankingCascadeCost.final_eval_reduction_mult_str,
 # │          RankingCascadeCost.l3_per_candidate_ms_str,
 # │          RankingCascadeCost.l3_all_s_str,
 # │          RankingCascadeCost.cascade_budget_ms_str,
-# │          RankingCascadeCost.cost_reduction_rounded_str
+# │          RankingCascadeCost.cost_reduction_rounded_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, check, fmt, fmt_time
 
@@ -5841,11 +5844,11 @@ class RankingCascadeCost:
     check(5_500 <= cost_reduction_rounded <= 5_600, "Rounded cascade cost reduction should be about 5,600x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    final_eval_reduction_str = fmt_int(final_eval_reduction)
+    final_eval_reduction_mult_str = fmt_multiple(final_eval_reduction, precision=0, commas=True)
     l3_per_candidate_ms_str = fmt_time(round(l3_per_candidate_ms), 'millisecond', precision=0, commas=False)
     l3_all_s_str = fmt_int(l3_all_s)
     cascade_budget_ms_str = fmt_time(round(cascade_budget_ms), 'millisecond', precision=0, commas=False)
-    cost_reduction_rounded_str = fmt_int(cost_reduction_rounded)
+    cost_reduction_rounded_mult_str = fmt_multiple(cost_reduction_rounded, precision=0, commas=True)
 ```
 
 | **Stage**            | **Model Complexity** |     **Candidates** | **Latency Budget** |
@@ -5857,7 +5860,7 @@ class RankingCascadeCost:
 
 : **Google Ranking Cascade**: Four-stage cascade that filters a million candidates down to ten while spending compute proportional to depth. Each stage uses a more expensive model on fewer candidates, so total cost is dominated by the cheap early stages rather than the expensive final ensemble. {#tbl-google-ranking-cascade}
 
-The cascade reduces final L3 evaluations by `{python} RankingCascadeCost.final_eval_reduction_str`$\times$ compared to running L3 on all candidates. Under this simplified request-budget model, the L3 stage costs `{python} RankingCascadeCost.l3_per_candidate_ms_str` per candidate. Applying L3 to the full million-candidate set would therefore consume about `{python} RankingCascadeCost.l3_all_s_str` of model work, while the cascade budget sums to `{python} RankingCascadeCost.cascade_budget_ms_str`. The resulting model-work reduction is roughly `{python} RankingCascadeCost.cost_reduction_rounded_str`$\times$.
+The cascade reduces final L3 evaluations by `{python} RankingCascadeCost.final_eval_reduction_mult_str` compared to running L3 on all candidates. Under this simplified request-budget model, the L3 stage costs `{python} RankingCascadeCost.l3_per_candidate_ms_str` per candidate. Applying L3 to the full million-candidate set would therefore consume about `{python} RankingCascadeCost.l3_all_s_str` of model work, while the cascade budget sums to `{python} RankingCascadeCost.cascade_budget_ms_str`. The resulting model-work reduction is roughly `{python} RankingCascadeCost.cost_reduction_rounded_mult_str`.
 
 Given tight latency budgets, Google uses speculative execution for model ensembles:
 
@@ -5893,7 +5896,7 @@ If deadline will be missed:
   Return cached/default result rather than timing out
 ```
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Ranking cascades provide dramatic cost reduction for large candidate sets
 2. Deadline propagation and priority scheduling are essential for ensemble serving
@@ -5901,16 +5904,16 @@ Three lessons emerge from this design:
 
 ### TikTok multimodal recommendation {#sec-inference-scale-tiktok-multimodal-recommendation-91e9}
 
-TikTok's recommendation system combines video understanding (vision) with user modeling (recommendation) for personalized content ranking. This represents a multimodal inference challenge where different model types must coordinate.
+TikTok's recommendation system binds on freshness under a tight ranking SLO: video understanding is expensive, new content arrives continuously, and user modeling remains online. It combines video understanding (vision) with user modeling (recommendation) for personalized content ranking, creating a multimodal inference challenge where different model types must coordinate.
 
-The system operates at the following scale:
+The scale numbers explain why online/offline separation matters:
 
 - Request volume: Millions of video rankings per second
 - Latency target: <50 ms P99
 - Content volume: Millions of new videos daily
 - Modalities: Video, audio, text, user signals
 
-The serving stack is organized as follows:
+The serving stack separates content and user paths:
 
 ```
 User request → User embedding → Candidate videos → Video understanding → Ranking
@@ -5965,7 +5968,7 @@ Text embedding (256d)  ─┘
 
 Late fusion allows independent updates to each modality's model without retraining the full system.
 
-Three lessons emerge from this design:
+The design produces three serving lessons:
 
 1. Separating online and offline components enables aggressive caching
 2. Two-tower architectures scale better than joint models for user-item systems
@@ -5973,13 +5976,7 @@ Three lessons emerge from this design:
 
 ### Cross-cutting observations {#sec-inference-scale-crosscutting-observations-742e}
 
-Several patterns emerge across these case studies. @Tbl-case-studies-summary identifies the primary technique and key innovation from each system:
-
-- **Separation of concerns**: All systems separate embedding and retrieval from ranking and generation, enabling specialized optimization for each component.
-- **Hybrid architectures**: No system uses GPUs exclusively. CPU+GPU combinations match hardware to workload characteristics.
-- **Caching at multiple levels**: Embedding caching, result caching, and intermediate representation caching all appear. Caching reduces compute at the cost of staleness.
-- **Progressive refinement**: Cascades and early-exit strategies reduce average compute by quickly filtering unlikely candidates.
-- **Deadline awareness**: All systems propagate deadlines and make explicit trade-offs between quality and latency when under pressure.
+Across these cases, the common pattern is specialization instead of a universal serving stack. Systems separate embedding and retrieval from ranking and generation, use hybrid CPU-GPU architectures to match hardware to workload characteristics, cache at multiple levels while accepting staleness, progressively refine candidate sets to avoid expensive work on unlikely items, and propagate deadlines so quality/latency trade-offs stay explicit under pressure. @Tbl-case-studies-summary identifies the primary technique and key innovation from each system:
 
 | **System** | **Primary Technique** | **Key Innovation**        |
 |:-----------|:----------------------|:--------------------------|
@@ -6039,7 +6036,7 @@ Larger GPU memory enables larger batches only for models whose throughput is cap
 # │ How: pulling constants from mlsysim.core.constants.
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.memory.capacity, Hardware.Cloud.H100.memory.bandwidth, GiB, TB, second)
-# │ Exports: FinalSummaryHardware.h100_mem_gb_str, FinalSummaryHardware.h100_mem_bw_tbs_str
+# │ Exports: FinalSummaryHardware.h100_mem_gb_str, FinalSummaryHardware.h100_mem_bw_tb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class FinalSummaryHardware:
@@ -6055,10 +6052,10 @@ class FinalSummaryHardware:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
-    h100_mem_bw_tbs_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
+    h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
 ```
 
-While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A bandwidth-bound decode workload on an H100 with `{python} FinalSummaryHardware.h100_mem_gb_str` memory eventually plateaus when HBM3 bandwidth (`{python} FinalSummaryHardware.h100_mem_bw_tbs_str`) saturates; adding memory alone does not raise token throughput once that point is reached. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.
+While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A bandwidth-bound decode workload on an H100 with `{python} FinalSummaryHardware.h100_mem_gb_str` memory eventually plateaus when HBM3 bandwidth (`{python} FinalSummaryHardware.h100_mem_bw_tb_per_s_str`) saturates; adding memory alone does not raise token throughput once that point is reached. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.
 
 **Pitfall**: *Neglecting multi-tenancy isolation until production.*
 

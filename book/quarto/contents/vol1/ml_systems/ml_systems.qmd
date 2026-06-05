@@ -62,7 +62,7 @@ from mlsysim.core.constants import *
 # │ How: Read Hardware.Cloud.H100.nvlink.bandwidth from mlsysim constants.
 # │
 # │ Imports: mlsysim.core.constants (Hardware.Cloud.H100.nvlink.bandwidth, GB, second)
-# │ Exports: MLSystemsNvlinkAnchor.nvlink_h100_bw_gb_s_str
+# │ Exports: MLSystemsNvlinkAnchor.nvlink_h100_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_qty_int
 
@@ -71,7 +71,7 @@ class MLSystemsNvlinkAnchor:
     """NVLink bandwidth anchor for the single-node stack hardware layer."""
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_h100_bw_gb_s_str = fmt_qty_int(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, commas=False)
+    nvlink_h100_bw_gb_per_s_str = fmt_qty_int(Hardware.Cloud.H100.nvlink.bandwidth, GB/second, commas=False)
 ```
 
 ## Deployment Paradigm Framework {#sec-ml-systems-deployment-paradigm-framework-0d25}
@@ -88,7 +88,7 @@ Consider two extremes: a wake-word detector on a smartwatch and a recommendation
 
 The physical constraints that govern each environment (latency, power, and memory) force ML deployment into four distinct paradigms, each with its own engineering trade-offs and system design patterns. **Cloud ML**\index{Cloud ML!characteristics} aggregates computational resources in data centers, offering virtually unlimited compute and storage at the cost of network latency. **Edge ML**\index{Edge ML!latency benefits} moves computation closer to where data originates, including factory floors, retail stores, and hospitals, achieving lower latency and keeping sensitive data on-premises. **Mobile ML**\index{Mobile ML!energy constraints} brings intelligence directly to smartphones and tablets, balancing computational capability against battery life and thermal constraints. **TinyML**\index{TinyML!always-on sensing} pushes intelligence to the smallest devices: microcontrollers costing dollars and consuming milliwatts, enabling always-on sensing that runs for months on a coin-cell battery. These four paradigms span nine orders of magnitude in power consumption (megawatts to milliwatts) and memory capacity (terabytes to kilobytes), a range so vast that the engineering principles governing one end of the spectrum barely apply at the other.
 
-These four paradigms exist not because of *engineering choices* but because of *physical laws* that no amount of optimization can overcome. Three fundamental constraints carve the deployment landscape into distinct operating regimes: the speed of light (establishing latency floors), thermodynamic limits on power dissipation (capping computation per watt), and the energy cost of memory signaling (creating the memory wall). These are not design preferences but physical boundaries: a self-driving car *cannot* be served from a data center 36 ms away, and a 1.5-billion-parameter model *cannot* be trained on a microcontroller.
+These four paradigms exist not because of *engineering choices* but because of *physical laws* that no amount of optimization can overcome. Three fundamental constraints carve the deployment landscape into distinct operating regimes: the speed of light (establishing latency floors), thermodynamic limits on power dissipation (capping computation per watt), and the energy cost of memory signaling (creating the memory wall). These are not design preferences but physical boundaries: a self-driving car *cannot* be served from a data center 36 ms away, and a 1.5-billion-parameter model *cannot* be trained on a microcontroller. This chapter examines each paradigm in turn: the physical constraints that force them apart, the workloads each is built to serve, and how to choose among them when a system could plausibly run in more than one.
 
 ## The Architectural Anchor: The Single-Node Stack {#sec-ml-systems-architectural-anchor}
 
@@ -97,13 +97,11 @@ To navigate these operating regimes, we anchor our engineering decisions in a fo
 1.  **Application (The Mission)**: The top layer where high-level requirements (throughput for training loops, latency for inference serving) are defined. This is where the "Dual Mandate" of accuracy and physics is managed (@sec-model-training, @sec-model-serving).
 2.  **ML Framework (The Compiler)**\index{ML Framework!compiler role}: The translation layer (PyTorch, JAX) that maps high-level math to hardware-specific execution plans. It manages the computational graph, automatic differentiation, and memory scheduling (@sec-ml-frameworks).
 3.  **Operating System (The Runtime)**\index{Operating System!runtime role}: The interface between framework and hardware, responsible for the low-level orchestration of resources. This includes the **CUDA Runtime**\index{CUDA Runtime!kernel management} for kernel management and **PCIe DMA**\index{PCIe DMA!data movement} (Direct Memory Access) for efficient data movement between host and device.
-4.  **Hardware (The Silicon)**: The physical foundation where bits are transformed. This layer is defined by HBM (High Bandwidth Memory) capacity and high-speed intra-node interconnects like **NVLink**\index{NVLink!intra-node interconnect} (`{python} MLSystemsNvlinkAnchor.nvlink_h100_bw_gb_s_str`). Here, the memory wall acts as the primary physical constraint (@sec-hardware-acceleration).
+4.  **Hardware (The Silicon)**: The physical foundation where bits are transformed. This layer is defined by HBM (High Bandwidth Memory) capacity and high-speed intra-node interconnects like **NVLink**\index{NVLink!intra-node interconnect} (`{python} MLSystemsNvlinkAnchor.nvlink_h100_bw_gb_per_s_str`). Here, the memory wall acts as the primary physical constraint (@sec-hardware-acceleration).
 
 Every chapter in the first half of this text interrogates one or more of these layers. Mastery of this single-node regime establishes the "silicon contract" that governs all subsequent optimization and scaling efforts.
 
 These physical constraints interact with the iron law of ML systems (@sec-introduction-iron-law-ml-systems-c32a), which decomposes end-to-end latency into data movement, computation, and overhead. Different deployment environments stress different terms of this equation: cloud systems are typically compute bound, mobile systems hit power walls, and TinyML devices are memory-capacity-limited. By pairing the physical constraints with the iron law, we develop a quantitative vocabulary for reasoning about which paradigm fits a given workload and *why*. To anchor this analysis concretely, the chapter introduces five Lighthouse Models\index{Lighthouse Model!reference workloads} (ResNet-50, GPT-2, Deep Learning Recommendation Model (DLRM), MobileNet, and a Keyword Spotter) that span the deployment spectrum and isolate distinct system bottlenecks. These reference workloads recur throughout the book, providing a consistent basis for comparing optimization techniques across chapters.
-
-The physics that creates these paradigm boundaries comes first, followed by the analytical tools (iron law, bottleneck principle, workload archetypes) for mapping workloads to deployment targets. Each paradigm then receives an in-depth treatment covering infrastructure, trade-offs, and representative applications. @Fig-cloud-edge-TinyML-comparison orients the discussion by showing where each paradigm sits along the centralization spectrum. The chapter closes with a comparative decision framework and the hybrid architectures that combine paradigms when no single deployment target satisfies all requirements.
 
 ::: {#fig-cloud-edge-TinyML-comparison fig-env="figure" fig-pos="htb" fig-cap="**Distributed Intelligence Spectrum**: Machine learning deployment spans from centralized cloud infrastructure to resource-constrained TinyML devices, each balancing processing location, device capability, and network dependence. Source: [@abiresearch2024tinyml]." fig-alt="Horizontal spectrum showing five deployment tiers from left to right: ultra-low-power devices and sensors, intelligent device, gateway, on-premise servers, and cloud. Arrows indicate TinyML, edge AI, and cloud AI spans across the spectrum."}
 
@@ -279,6 +277,8 @@ pics/mobile/.style = {
 
 :::
 
+The physics that creates these paradigm boundaries comes first, followed by the analytical tools (iron law, bottleneck principle, workload archetypes) for mapping workloads to deployment targets. Each paradigm then receives an in-depth treatment covering infrastructure, trade-offs, and representative applications. @Fig-cloud-edge-TinyML-comparison orients the discussion by showing where each paradigm sits along the centralization spectrum. The chapter closes with a comparative decision framework and the hybrid architectures that combine paradigms when no single deployment target satisfies all requirements.
+
 These four paradigms function as distinct operating envelopes, each defined by how much power, memory, and network connectivity is available. Every ML application must fit within at least one of these envelopes, and that fit determines which algorithms, hardware, and engineering trade-offs apply. The four paradigms span a continuous spectrum from centralized cloud infrastructure to distributed ultra-low-power devices. @Fig-cloud-edge-TinyML-comparison traces this spectrum visually, mapping where each paradigm sits along the centralization axis, while @tbl-deployment-paradigms-overview pins down the quantitative trade-offs:
 
 ```{python}
@@ -305,10 +305,10 @@ class DeploymentOverviewTable:
     """Latency and power ranges for @tbl-deployment-paradigms-overview."""
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    cloud_latency_range_str = Platforms.Cloud.latency_range_ms
-    edge_latency_range_str = Platforms.Edge.latency_range_ms
-    mobile_latency_range_str = Platforms.Mobile.latency_range_ms
-    tiny_latency_range_str = Platforms.Tiny.latency_range_ms
+    cloud_latency_range_str = MarkdownStr(Platforms.Cloud.latency_range_ms)
+    edge_latency_range_str = MarkdownStr(Platforms.Edge.latency_range_ms)
+    mobile_latency_range_str = MarkdownStr(Platforms.Mobile.latency_range_ms)
+    tiny_latency_range_str = MarkdownStr(Platforms.Tiny.latency_range_ms)
     mobile_tdp_range_str = MarkdownStr(f"{Platforms.Mobile.tdp_range_w} W")
 ```
 
@@ -331,7 +331,6 @@ The nine-order-of-magnitude span in @tbl-deployment-paradigms-overview is not an
 
 \index{Light Barrier!latency floor}The light barrier establishes the absolute latency[^fn-latency-systems] floor. The minimum round-trip time is governed by @eq-latency-physics:
 $$L_{\text{lat,min}} = \frac{2 \times \text{Distance}}{c_{\text{fiber}}} \approx \frac{2 \times \text{Distance}}{200{,}000 \text{ km/s}}$$ {#eq-latency-physics}
-
 where $c_{\text{fiber}} \approx 200{,}000$ km/s is the speed of light in optical fiber, roughly two-thirds of its vacuum value because light propagates more slowly through glass than through a vacuum.
 
 ```{python}
@@ -496,13 +495,8 @@ class MemoryWallTrends:
 ```
 
 \index{Data Movement!energy dominance}
-@eq-memory-wall quantifies this divergence: processors have doubled in compute capacity roughly every `{python} MemoryWallTrends.compute_doubling_months_str`, but memory bandwidth has improved only ~`{python} MemoryWallTrends.mem_bw_growth_pct_str` annually. This widening gap makes data movement the dominant bottleneck and energy cost for most ML workloads. This constraint affects all paradigms but is especially acute for TinyML, where devices have only kilobytes of memory to work with. We examine the hardware architectural responses to the memory wall, including HBM and on-chip SRAM hierarchies, in detail in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9.
+@Eq-memory-wall quantifies this divergence: processors have doubled in compute capacity roughly every `{python} MemoryWallTrends.compute_doubling_months_str`, but memory bandwidth has improved only ~`{python} MemoryWallTrends.mem_bw_growth_pct_str` annually. This widening gap makes data movement the dominant bottleneck and energy cost for most ML workloads. This constraint affects all paradigms but is especially acute for TinyML, where devices have only kilobytes of memory to work with. We examine the hardware architectural responses to the memory wall, including HBM and on-chip SRAM hierarchies, in detail in @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9.
 
-::: {.column-margin}
-![](images/svg/ml_systems_memory_wall_divergence.svg){width="100%" fig-alt="Two diverging trend strokes: a steep red compute-growth curve pulling away from a shallow blue memory-bandwidth curve, the widening gap between them shaded red. The gap is the memory wall."}
-
-*Compute capacity outruns memory bandwidth; the widening gap is the memory wall.*
-:::
 
 ::: {#chk-ml-systems-physical-constraints-deployment .callout-checkpoint title="Physical constraints and deployment"}
 
@@ -515,6 +509,12 @@ Deployment choices are governed by physics, not just preference. Check your unde
 :::
 
 These physical laws explain *why* the four paradigms exist. Physics creates the boundaries; privacy regulation, economic incentives, and data sovereignty requirements reinforce and sharpen them. We examine these additional drivers within each paradigm section, but the central insight is that the paradigms would exist even without those concerns. No regulation can make the speed of light faster, and no economic model can repeal thermodynamics.
+
+::: {.column-margin}
+![](images/svg/ml_systems_memory_wall_divergence.svg){width="100%" fig-alt="Two diverging trend strokes: a steep red compute-growth curve pulling away from a shallow blue memory-bandwidth curve, the widening gap between them shaded red. The gap is the memory wall."}
+
+*Compute capacity outruns memory bandwidth; the widening gap is the memory wall.*
+:::
 
 Knowing that these barriers exist is necessary but not sufficient. Given a specific ML workload (say, a recommendation engine or a wake-word detector), we need to determine which paradigm fits and which barrier the workload will hit first. The answer requires analytical tools that connect workload characteristics to these physical constraints: the iron law to decompose latency, the bottleneck principle to identify the dominant constraint, and a set of workload archetypes to classify where each model falls on the spectrum.
 
@@ -556,7 +556,7 @@ This principle dictates that if a system is memory bound\index{Memory-Bound Work
 # │ Exports: EnergyTransmission.data_mb_str, EnergyTransmission.tx_energy_mj_per_mb_str,
 # │          EnergyTransmission.compute_energy_mj_str,
 # │          EnergyTransmission.cloud_total_mj_str,
-# │          EnergyTransmission.local_total_mj_str, EnergyTransmission.ratio_str
+# │          EnergyTransmission.local_total_mj_str, EnergyTransmission.ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt, check, fmt_qty
 
@@ -588,7 +588,7 @@ class EnergyTransmission:
     compute_energy_mj_str = fmt_qty(local_energy_op, mJ, precision=1, commas=False, per="inference")
     cloud_total_mj_str = fmt_qty(cloud_energy_total, mJ, precision=0, commas=False)
     local_total_mj_str = fmt_qty(local_energy_total, mJ, precision=1, commas=False)
-    ratio_str = fmt(ratio, precision=0, commas=True)
+    ratio_mult_str = fmt_multiple(ratio, precision=0, commas=True)
 ```
 
 ::: {#nbk-ml-systems-energy-transmission .callout-notebook title="The energy of transmission"}
@@ -597,23 +597,20 @@ class EnergyTransmission:
 
 **Variables**:
 
-```{=latex}
-\vspace*{-3pt}
-```
 <!-- lego-ok-block: 1 MB is a round illustrative payload for the transmission-vs-compute ratio, not a literal audio bitrate -->
 *   **Data $(D_{\text{vol}})$**: `{python} EnergyTransmission.data_mb_str` (illustrative payload volume).
 *   **Transmission energy $(E_{\text{tx}})$**: `{python} EnergyTransmission.tx_energy_mj_per_mb_str` (Wi-Fi/LTE).
 *   **Compute energy $(E_{\text{op}})$**: `{python} EnergyTransmission.compute_energy_mj_str` (MobileNet on NPU).
 
+```{=latex}
+\vspace*{-1.0ex}
+```
 **Math**:
 
-```{=latex}
-\vspace*{-3pt}
-```
 1.  **Cloud approach**: $E_{\text{cloud}} \approx D_{\text{vol}} \times E_{\text{tx}}$ = `{python} EnergyTransmission.data_mb_str` $\times$ `{python} EnergyTransmission.tx_energy_mj_per_mb_str` = `{python} EnergyTransmission.cloud_total_mj_str`.
 2.  **Local approach**: $E_{\text{local}} \approx$ Inference = `{python} EnergyTransmission.local_total_mj_str`.
 
-**Systems insight**: Transmitting raw data is `{python} EnergyTransmission.ratio_str`$\times$ more expensive than processing it locally. Even if the cloud had infinite speed $(T \approx 0)$, the energy wall makes cloud offloading physically impossible for always-on battery devices. The "machine" constraint (battery) dictates the "algorithm" choice (TinyML).
+**Systems insight**: Transmitting raw data is `{python} EnergyTransmission.ratio_mult_str` more expensive than processing it locally. Even if the cloud had infinite speed $(T \approx 0)$, the energy wall makes cloud offloading physically impossible for always-on battery devices. The "machine" constraint (battery) dictates the "algorithm" choice (TinyML).
 
 :::
 
@@ -622,7 +619,6 @@ The iron law's variables interact differently across deployment scenarios. Befor
 ::: {#dfn-ml-systems-iron-law .callout-definition title="The iron law"}
 
 ***The iron law***\index{Iron Law!definition} is the fundamental physical constraint governing all machine learning performance, expressed as the total time $T$ required for a workload:
-
 $$T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}$$
 
 1.  **Significance (quantitative)**: It defines the Physical Ceiling for any system by quantifying the relationship between data volume $(D_{\text{vol}})$, compute capacity $(R_{\text{peak}})$, and communication overhead $(L_{\text{lat}})$.
@@ -631,17 +627,18 @@ $$T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\t
 
 :::
 
-The iron law quantifies the *cost of each ingredient*; the bottleneck principle identifies the *speed of the assembly line*. As a rule of thumb, use the **additive form** in @eq-iron-law when analyzing the latency of a single task, and the **max form** in @eq-bottleneck when analyzing the throughput of a continuous stream of tasks.
-
-### Workload archetypes {#sec-ml-systems-workload-archetypes-fd10}
-
-\index{D·A·M Taxonomy!workload classification}
 
 ::: {.column-margin}
 ![](images/svg/ml_systems_dam_locator.svg){width="100%" fig-alt="Triangle diagram with three labeled nodes connected by violet edges: D for data at top, A for algorithm at lower left, M for machine at lower right, showing the three axes are coupled."}
 
 *Data, Algorithm, and Machine are coupled; move one and the others shift.*
 :::
+
+The iron law quantifies the *cost of each ingredient*; the bottleneck principle identifies the *speed of the assembly line*. As a rule of thumb, use the **additive form** in @eq-iron-law when analyzing the latency of a single task, and the **max form** in @eq-bottleneck when analyzing the throughput of a continuous stream of tasks.
+
+### Workload archetypes {#sec-ml-systems-workload-archetypes-fd10}
+
+\index{D·A·M Taxonomy!workload classification}
 
 The bottleneck principle reduces optimization to a single diagnostic: identifying which constraint dominates for a given workload. The answer depends on the D·A·M taxonomy in @tbl-dam-taxonomy, which decomposes every ML system into Data, Algorithm, and Machine. Different deployment environments create different bottlenecks along these axes—a cloud server with terabytes of memory faces algorithm constraints, while a microcontroller with kilobytes faces machine constraints.
 
@@ -653,9 +650,8 @@ The second archetype, the **Bandwidth Hog**\index{Autoregressive Generation!memo
 
 The third archetype, the **Sparse Scatter**\index{Embedding Table!memory capacity bound}\index{Sparse Scatter!definition}, describes workloads with irregular memory access patterns and poor cache locality. Memory capacity and access latency constrain performance. Recommendation systems with massive embedding tables are canonical examples.
 
-These archetypes map naturally to deployment paradigms: compute beasts and sparse scatter workloads gravitate toward cloud ML where resources are abundant. Bandwidth hogs span cloud and edge depending on latency requirements. Tiny constraint workloads are exclusively TinyML territory. To make these abstractions concrete, we anchor each archetype to a specific model that recurs throughout this book as one of five reference workloads.
 
-[^fn-archetype-bottleneck]: **Workload Archetype**: A classification of ML workloads by their dominant iron law bottleneck rather than their model family. The distinction matters because the optimization strategy differs fundamentally: a compute-bound workload benefits from faster arithmetic $(R_{\text{peak}})$, while a bandwidth-bound workload benefits only from wider memory buses $(\text{BW})$. Misidentifying the archetype wastes optimization effort on the wrong term of the iron law, as when teams add accelerator FLOP/s to a memory-bound inference pipeline and observe zero speedup. \index{Archetype!workload classification}
+[^fn-archetype-bottleneck]: [offset=10mm] **Workload Archetype**: A classification of ML workloads by their dominant iron law bottleneck rather than their model family. The distinction matters because the optimization strategy differs fundamentally: a compute-bound workload benefits from faster arithmetic $(R_{\text{peak}})$, while a bandwidth-bound workload benefits only from wider memory buses $(\text{BW})$. Misidentifying the archetype wastes optimization effort on the wrong term of the iron law, as when teams add accelerator FLOP/s to a memory-bound inference pipeline and observe zero speedup. \index{Archetype!workload classification}
 
 \index{Paradigm!deployment regimes}
 
@@ -673,10 +669,6 @@ These archetypes map naturally to deployment paradigms: compute beasts and spars
 
 Throughout this book, we use the five Lighthouse Models summarized in @tbl-ml-systems-lighthouse-archetypes: concrete workloads that span the deployment spectrum and isolate distinct system bottlenecks. @Sec-network-architectures provides full architectural details and model biographies.
 
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25}
-```
 
 | **Lighthouse**             | **Archetype**             | **Deployment Paradigm**        |
 |:---------------------------|:--------------------------|:-------------------------------|
@@ -688,15 +680,13 @@ Throughout this book, we use the five Lighthouse Models summarized in @tbl-ml-sy
 
 : **Five Lighthouse Models**: Recurring workloads used throughout the book to ground the iron law in concrete practice. Each lighthouse pairs an archetype (Compute Beast, Bandwidth Hog, Sparse Scatter, Tiny Constraint) with the deployment paradigm where it predominantly runs, isolating a distinct systems bottleneck. {#tbl-ml-systems-lighthouse-archetypes}
 
-```{=latex}
-\endgroup
-```
-
 :::
+
+These archetypes map naturally to deployment paradigms: compute beasts and sparse scatter workloads gravitate toward cloud ML where resources are abundant. Bandwidth hogs span cloud and edge depending on latency requirements. Tiny constraint workloads are exclusively TinyML territory. To make these abstractions concrete, we anchor each archetype to a specific model that recurs throughout this book as one of five reference workloads.
 
 The fourth archetype, the **Tiny Constraint**\index{Energy per Inference!binding constraint}\index{Always-On Sensing!power constraints}\index{Tiny Constraint!definition}, describes workloads operating under extreme power envelopes ($< 1$ mW) and memory limits ($< 256$ KB). The binding constraint is energy per inference—efficiency, not raw speed. Always-on sensing operates in this regime.
 
-To ground the abstract interdependencies of the iron law in concrete practice, we analyze the Lighthouse Models summarized in @tbl-ml-systems-lighthouse-archetypes. The following summaries recap each workload from a systems perspective, connecting them to the specific iron law bottlenecks they exemplify, as visualized in the scorecard for our central Smart Doorbell narrative (@fig-doorbell-scorecard).
+To ground the abstract interdependencies of the iron law in concrete practice, we analyze these five Lighthouse Models in turn. The following summaries recap each workload from a systems perspective, connecting them to the specific iron law bottlenecks they exemplify, as visualized in the scorecard for our central Smart Doorbell narrative (@fig-doorbell-scorecard).
 
 ::: {#fig-doorbell-scorecard fig-env="figure" fig-pos="htb" fig-cap="**The Hierarchy of Constraints: Smart Doorbell Scorecard**: This visual evaluation of the Smart Doorbell lighthouse reveals the fundamental systems trade-off. While the model successfully fits within the kilobyte-scale memory budget (Level 1: PASS), its 101 ms baseline latency exceeds a strict 50 ms real-time response target on the ESP32-S3 (Level 2: FAIL). This indicates that further optimization—such as quantization or architectural pruning—is mandatory before deployment in this tighter interaction budget." fig-alt="A horizontal bar chart showing two levels of constraints. Level 1: Memory (RAM) shows a green bar (PASS). Level 2: Latency (SLA) shows a red bar (FAIL), exceeding the limit line."}
 
@@ -729,7 +719,7 @@ doorbell_eval = doorbell_strict.evaluate()
 fig, ax = mlsysim.plot_evaluation_scorecard(doorbell_eval)
 
 # graphical adjustments for aesthetics
-fig.set_size_inches(9, 4.5)
+fig.set_size_inches(9, 3.85)
 
 for patch in ax.patches:
     old_h = patch.get_height()
@@ -785,10 +775,10 @@ plt.close()
 # │       size_in_bytes() with 4-byte (FP32) precision.
 # │
 # │ Imports: mlsysim.Models, mlsysim.fmt
-# │ Exports: LighthouseModels.resnet_gflops_str, .resnet_params_m_str,
+# │ Exports: LighthouseModels.resnet_gflop_str, .resnet_params_m_str,
 # │          .resnet_fp32_mb_str, .gpt2_params_b_str, .llama_range_str,
-# │          .dlrm_embedding_gb_str, .mobilenet_flops_reduction_str,
-# │          .mobile_tdp_range_str, .kws_params_str, .kws_flops_m_str,
+# │          .dlrm_embedding_gb_str, .mobilenet_flops_reduction_mult_str,
+# │          .mobile_tdp_range_str, .kws_params_str, .kws_mflop_str,
 # │          .kws_size_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
@@ -820,30 +810,30 @@ class LighthouseModels:
     check(750 <= kws_size_kb <= 850, f"KWS size should be about 800 KB, got {kws_size_kb:.0f} KB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    resnet_gflops_str = fmt_qty(m_resnet.inference_flops, GFLOPs, precision=1)
+    resnet_gflop_str = fmt_qty(m_resnet.inference_flops, GFLOPs, precision=1)
     resnet_params_m_str = fmt_count(m_resnet.parameters, scale="million", precision=1, label="parameter")
     resnet_fp32_mb_str = fmt_qty(resnet_fp32_size, MB, precision=1)
     gpt2_params_b_str = fmt_count(m_gpt2.parameters, scale="billion", precision=1, label="parameter")
     llama_range_str = MarkdownStr("7 to 70 billion parameters")
     dlrm_embedding_gb_str = fmt_qty_int(dlrm_embedding, GB)
-    mobilenet_flops_reduction_str = fmt_multiple(mobilenet_flops_reduction, precision=1)
+    mobilenet_flops_reduction_mult_str = fmt_multiple(mobilenet_flops_reduction, precision=1)
     mobile_tdp_range_str = MarkdownStr("2 to 5 W")
     kws_params_str = fmt_count(m_kws.parameters, scale="K", commas=False, label="parameter")
-    kws_flops_m_str = fmt_qty(m_kws.inference_flops, MFLOPs, precision=0)
+    kws_mflop_str = fmt_qty(m_kws.inference_flops, MFLOPs, precision=0)
     kws_size_kb_str = fmt_qty_int(kws_size, KB)
 ```
 
-The first lighthouse, **ResNet-50**\index{ResNet-50!systems characteristics}, classifies images into one thousand categories, processing each image through approximately `{python} LighthouseModels.resnet_gflops_str` using `{python} LighthouseModels.resnet_params_m_str` (`{python} LighthouseModels.resnet_fp32_mb_str` at FP32). Used in medical imaging diagnostics, autonomous vehicle perception pipelines, and as the backbone for content moderation systems, its regular, compute-dense structure makes it the canonical benchmark for hardware accelerator performance.
+The first lighthouse, **ResNet-50**\index{ResNet-50!systems characteristics}, classifies images into one thousand categories, processing each image through approximately `{python} LighthouseModels.resnet_gflop_str` using `{python} LighthouseModels.resnet_params_m_str` (`{python} LighthouseModels.resnet_fp32_mb_str` at FP32). Used in medical imaging diagnostics, autonomous vehicle perception pipelines, and as the backbone for content moderation systems, its regular, compute-dense structure makes it the canonical benchmark for hardware accelerator performance.
 
 The language models **GPT-2/Llama**\index{GPT-2!autoregressive bottleneck}\index{Llama!memory-bound inference} power chatbots, code assistants, and content generation tools. These models generate text one token at a time, requiring the model to read its full parameter set (`{python} LighthouseModels.gpt2_params_b_str` for GPT-2, `{python} LighthouseModels.llama_range_str` for Llama) from memory for each output token. This sequential memory access pattern creates the autoregressive bottleneck that dominates serving costs.
 
 The recommendation lighthouse, **DLRM**\index{DLRM!memory capacity bound}\index{Recommendation Systems!DLRM} (Deep Learning Recommendation Model), powers the "You might also like" recommendations on platforms like Meta and Netflix. It maps users and items to embedding vectors stored in tables that can exceed `{python} LighthouseModels.dlrm_embedding_gb_str` of embeddings, making memory capacity rather than computation the binding constraint.
 
-The mobile lighthouse, **MobileNet**\index{MobileNet!depthwise separable convolutions}\index{MobileNet!efficiency gains}, runs in smartphone camera apps for real-time photo categorization and on-device visual search. It performs the same image classification task as ResNet but uses depthwise separable convolutions to reduce computation by `{python} LighthouseModels.mobilenet_flops_reduction_str`$\times$, enabling real-time inference on smartphones at `{python} LighthouseModels.mobile_tdp_range_str`.
+The mobile lighthouse, **MobileNet**\index{MobileNet!depthwise separable convolutions}\index{MobileNet!efficiency gains}, runs in smartphone camera apps for real-time photo categorization and on-device visual search. It performs the same image classification task as ResNet but uses depthwise separable convolutions to reduce computation by `{python} LighthouseModels.mobilenet_flops_reduction_mult_str`, enabling real-time inference on smartphones at `{python} LighthouseModels.mobile_tdp_range_str`.
 
 The TinyML lighthouse, **Keyword Spotting (KWS)**\index{Keyword Spotting!TinyML archetype}, represents the always-on sensing archetype. Used in applications like Smart Doorbells, it detects wake words ("Ding Dong", "Hello") using depthwise separable convolutional neural networks for resource-constrained microcontrollers [@zhang2017hello]. In this book's lighthouse setup, the workload has approximately `{python} LighthouseModels.kws_params_str` and fits in about `{python} LighthouseModels.kws_size_kb_str`, placing it in the kilobyte-memory, milliwatt-budget TinyML regime.
 
-The range in compute requirements and memory footprints explains why no single deployment paradigm fits all workloads. A keyword spotter can operate with roughly `{python} LighthouseModels.kws_flops_m_str` and `{python} LighthouseModels.kws_size_kb_str`, while ResNet-50 requires about `{python} LighthouseModels.resnet_gflops_str` and roughly `{python} LighthouseModels.resnet_fp32_mb_str` per image. The reference DLRM example already reaches `{python} LighthouseModels.dlrm_embedding_gb_str`, and production DLRM-style recommendation systems can exceed 100 TB. Language models add a bandwidth-dominated regime: billions of parameters streamed repeatedly from memory during autoregressive inference. These five Lighthouse Models serve as concrete anchors throughout the book, each isolating a distinct system bottleneck revisited in every chapter.
+The range in compute requirements and memory footprints explains why no single deployment paradigm fits all workloads. A keyword spotter can operate with roughly `{python} LighthouseModels.kws_mflop_str` and `{python} LighthouseModels.kws_size_kb_str`, while ResNet-50 requires about `{python} LighthouseModels.resnet_gflop_str` and roughly `{python} LighthouseModels.resnet_fp32_mb_str` per image. The reference DLRM example already reaches `{python} LighthouseModels.dlrm_embedding_gb_str`, and production DLRM-style recommendation systems can exceed 100 TB. Language models add a bandwidth-dominated regime: billions of parameters streamed repeatedly from memory during autoregressive inference. These five Lighthouse Models serve as concrete anchors throughout the book, each isolating a distinct system bottleneck revisited in every chapter.
 
 Analytical tools alone remain abstract until grounded in real silicon. The next step translates the iron law, bottleneck principle, and workload archetypes into quantitative engineering decisions by examining how system balance (the interplay of compute, memory, and I/O) varies across real hardware platforms.
 
@@ -943,6 +933,11 @@ Here, $O$ represents total operations, $R_{\text{peak}}$ is peak compute rate, $
 
 :::
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
+
 | **Paradigm**            | **Dominant Constraint**                                | **Why**                                                    | **Optimization Focus**                       |
 |:------------------------|:-------------------------------------------------------|:-----------------------------------------------------------|:---------------------------------------------|
 | **Cloud Training**      | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ (Compute) | Abundant memory/network; FLOP/s limit throughput           | Maximize accelerator utilization, batch size |
@@ -953,6 +948,10 @@ Here, $O$ represents total operations, $R_{\text{peak}}$ is peak compute rate, $
 
 : **Dominant Bottleneck by Paradigm**: Which iron-law term limits performance in each deployment paradigm, the physical reason it dominates, and the resulting optimization focus. The dominant term shifts the optimization strategy entirely: cloud training maximizes compute utilization, while LLM inference must attack memory bandwidth. {#tbl-ml-systems-paradigm-bottlenecks tbl-colwidths="[18,26,30,26]"}
 
+```{=latex}
+\endgroup
+```
+
 Roofline analysis classifies bottlenecks by comparing a workload's arithmetic intensity against the machine balance point [@williams2009]. We use this framing informally here; @sec-appdx-machine-foundations-roofline-model-2529 derives the model in full, defining arithmetic intensity formally and deriving the ridge point that separates the memory-bound and compute-bound regimes. In that framing, the same ResNet-50 model can shift from *compute-bound*\index{Compute-Bound vs. Memory-Bound!training vs. inference}\index{Roofline Model!bottleneck analysis} training behavior at high batch sizes to more memory-sensitive single-image inference at batch=1. Deployment paradigm selection must account for this shift.
 
 ::: {.column-margin}
@@ -960,6 +959,11 @@ Roofline analysis classifies bottlenecks by comparing a workload's arithmetic in
 
 *Batch-1 inference sits on the memory-bound side of the roofline.*
 :::
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
 
 This shift between training and inference is critical to understand. Recall the D·A·M taxonomy from @tbl-dam-taxonomy: every ML system comprises Data, Algorithm, and Machine. @Tbl-dam-phase shows how each component behaves differently depending on whether the system is training (learning patterns) or serving (applying them).
 
@@ -969,7 +973,11 @@ This shift between training and inference is critical to understand. Recall the 
 | **Algorithm**\index{Training!bidirectional computation} | Bidirectional: forward + backward pass, optimizer state     | Unidirectional: forward pass only, weights frozen       |
 | **Machine**\index{Inference!latency optimization}       | Throughput-optimized: high-bandwidth clusters, large memory | Latency-optimized: edge devices, inference accelerators |
 
-: **D·A·M × Phase**\index{D·A·M Taxonomy!training vs. inference}: The same model imposes starkly different demands on Data, Algorithm, and Machine depending on whether the system is training or serving. When bottlenecks shift unexpectedly, check which phase is currently being optimized. {#tbl-dam-phase tbl-colwidths="[20,40,40]"}
+: **D·A·M $\times$ Phase**\index{D·A·M Taxonomy!training vs. inference}: The same model imposes starkly different demands on Data, Algorithm, and Machine depending on whether the system is training or serving. When bottlenecks shift unexpectedly, check which phase is currently being optimized. {#tbl-dam-phase tbl-colwidths="[14,44,42]"}
+
+```{=latex}
+\endgroup
+```
 
 A quantitative comparison applies this analysis to ResNet-50 inference on a data-center GPU and a mobile NPU.
 
@@ -994,7 +1002,7 @@ A quantitative comparison applies this analysis to ResNet-50 inference on a data
 # │ How: Calculate model size in MB for FP32, FP16, and INT8.
 # │
 # │ Imports: mlsysim.Models, mlsysim.fmt
-# │ Exports: ResnetSetup.resnet_gflops_str, ResnetSetup.resnet_params_m_str,
+# │ Exports: ResnetSetup.resnet_gflop_str, ResnetSetup.resnet_params_m_str,
 # │          ResnetSetup.resnet_fp32_mb_str, ResnetSetup.resnet_fp16_mb_str,
 # │          ResnetSetup.resnet_int8_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1015,14 +1023,14 @@ class ResnetSetup:
     resnet_params_m_value = m.parameters.to(Mparam).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    resnet_gflops_str = fmt_qty(m.inference_flops, GFLOPs, precision=1, commas=False)
+    resnet_gflop_str = fmt_qty(m.inference_flops, GFLOPs, precision=1, commas=False)
     resnet_params_m_str = fmt_count(m.parameters, scale="million", precision=1, commas=False, label="parameter")
     resnet_fp32_mb_str = fmt_qty(resnet_fp32_bytes_value, MB, precision=1, commas=False)
     resnet_fp16_mb_str = fmt_qty(resnet_fp16_bytes_value, MB, precision=1, commas=False)
     resnet_int8_mb_str = fmt_qty(resnet_int8_bytes_value, MB, precision=1, commas=False)
 ```
 
-- ResNet-50: `{python} ResnetSetup.resnet_gflops_str` per inference, `{python} ResnetSetup.resnet_params_m_str` (`{python} ResnetSetup.resnet_fp32_mb_str` FP32, `{python} ResnetSetup.resnet_fp16_mb_str` FP16)
+- ResNet-50: `{python} ResnetSetup.resnet_gflop_str` per inference, `{python} ResnetSetup.resnet_params_m_str` (`{python} ResnetSetup.resnet_fp32_mb_str` FP32, `{python} ResnetSetup.resnet_fp16_mb_str` FP16)
 
 **Analysis**:
 
@@ -1041,7 +1049,7 @@ class ResnetSetup:
 # │ How: Engine.solve for A100 roofline bounds at FP16.
 # │
 # │ Imports: mlsysim (Models, Hardware, Engine), mlsysim.fmt
-# │ Exports: ResnetCloud.a100_tflops_str, .a100_bw_tbs_str, .cloud_ratio_x_str,
+# │ Exports: ResnetCloud.a100_tflop_per_s_str, .a100_bw_tb_per_s_str, .cloud_ratio_mult_str,
 # │          .cloud_ai_frac, .cloud_bottleneck_str, .cloud_compute_frac,
 # │          .cloud_memory_frac
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1070,17 +1078,17 @@ class ResnetCloud:
     cloud_ai_frac = fmt_frac(resnet_flops_latex, resnet_fp16_bytes_latex, f"{round(cloud_ai_display):.0f}", "FLOP/byte")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_str = fmt_qty(p.peak_flops_actual, TFLOPs / second, precision=0, commas=False)
-    a100_bw_tbs_str = fmt_qty(p.peak_bw_actual, TB / second, precision=2, commas=False)
-    cloud_ratio_x_str = fmt(cloud_ratio_x_value, precision=1, commas=False)
+    a100_tflop_per_s_str = fmt_qty(p.peak_flops_actual, TFLOPs / second, precision=0, commas=False)
+    a100_bw_tb_per_s_str = fmt_qty(p.peak_bw_actual, TB / second, precision=2, commas=False)
+    cloud_ratio_mult_str = fmt_multiple(cloud_ratio_x_value, precision=1, commas=False)
     cloud_bottleneck_str = MarkdownStr(p.bottleneck)
 ```
 
-- Peak compute: `{python} ResnetCloud.a100_tflops_str` (FP16)
-- Memory bandwidth: `{python} ResnetCloud.a100_bw_tbs_str` (HBM2e)
+- Peak compute: `{python} ResnetCloud.a100_tflop_per_s_str` (FP16)
+- Memory bandwidth: `{python} ResnetCloud.a100_bw_tb_per_s_str` (HBM2e)
 - Compute time: $T_{\text{comp}}$ = `{python} ResnetCloud.cloud_compute_frac`
 - Memory time: $T_{\text{mem}}$ = `{python} ResnetCloud.cloud_memory_frac`
-- **Bottleneck**: `{python} ResnetCloud.cloud_bottleneck_str` (`{python} ResnetCloud.cloud_ratio_x_str`$\times$ slower than compute)
+- **Bottleneck**: `{python} ResnetCloud.cloud_bottleneck_str` (`{python} ResnetCloud.cloud_ratio_mult_str` slower than compute)
 - **Arithmetic intensity**: `{python} ResnetCloud.cloud_ai_frac`—this ratio of compute operations to bytes loaded measures how efficiently a workload uses the hardware. When arithmetic intensity exceeds the hardware's *compute-to-bandwidth ratio* $(R_{\text{peak}}/\text{BW})$, the workload is compute bound; below it, the workload is memory bound. For single-image inference, the low batch size yields low arithmetic intensity, explaining why even powerful GPUs are memory bound at batch=1.
 
 **(b) Mobile: Flagship NPU (batch=1, INT8)**
@@ -1098,8 +1106,8 @@ class ResnetCloud:
 # │ How: Engine.solve for mobile NPU; duplicate A100 FP16 memory time locally.
 # │
 # │ Imports: mlsysim (Models, Hardware, Engine), mlsysim.fmt
-# │ Exports: ResnetMobile.mobile_tops_str, .mobile_bw_gbs_str, .mobile_ratio_x_str,
-# │          .mobile_bottleneck_str, .bw_advantage_x_str, .inference_speed_x_str,
+# │ Exports: ResnetMobile.mobile_tops_str, .mobile_bw_gb_per_s_str, .mobile_ratio_mult_str,
+# │          .mobile_bottleneck_str, .bw_advantage_mult_str, .inference_speed_mult_str,
 # │          .mobile_compute_frac, .mobile_memory_frac
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
@@ -1134,21 +1142,21 @@ class ResnetMobile:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mobile_tops_str = fmt_qty(p.peak_flops_actual, TOPS, precision=0, commas=False)
-    mobile_bw_gbs_str = fmt_qty(p.peak_bw_actual, GB / second, precision=0, commas=False)
-    mobile_ratio_x_str = fmt(mobile_ratio_x_value, precision=1, commas=False)
+    mobile_bw_gb_per_s_str = fmt_qty(p.peak_bw_actual, GB / second, precision=0, commas=False)
+    mobile_ratio_mult_str = fmt_multiple(mobile_ratio_x_value, precision=1, commas=False)
     mobile_bottleneck_str = MarkdownStr(p.bottleneck)
-    bw_advantage_x_str = fmt(bw_advantage_x_value, precision=1, commas=False)
-    inference_speed_x_str = fmt(inference_speed_x_value, precision=1, commas=False)
+    bw_advantage_mult_str = fmt_multiple(bw_advantage_x_value, precision=1, commas=False)
+    inference_speed_mult_str = fmt_multiple(inference_speed_x_value, precision=1, commas=False)
 ```
 
 - Peak compute: ~`{python} ResnetMobile.mobile_tops_str` (INT8)—representative of modern mobile NPUs
-- Memory bandwidth: ~`{python} ResnetMobile.mobile_bw_gbs_str` (LPDDR5)
+- Memory bandwidth: ~`{python} ResnetMobile.mobile_bw_gb_per_s_str` (LPDDR5)
 - Model size: `{python} ResnetSetup.resnet_int8_mb_str` (INT8 quantized)
 - Compute time: $T_{\text{comp}}$ = `{python} ResnetMobile.mobile_compute_frac`
 - Memory time: $T_{\text{mem}}$ = `{python} ResnetMobile.mobile_memory_frac`
-- **Bottleneck**: `{python} ResnetMobile.mobile_bottleneck_str` (`{python} ResnetMobile.mobile_ratio_x_str`$\times$ slower than compute)
+- **Bottleneck**: `{python} ResnetMobile.mobile_bottleneck_str` (`{python} ResnetMobile.mobile_ratio_mult_str` slower than compute)
 
-**Key Insight**\index{Quantization!deployment benefits}: Both platforms are memory bound for single-image inference! The A100's faster memory bandwidth (`{python} ResnetCloud.a100_bw_tbs_str` vs. `{python} ResnetMobile.mobile_bw_gbs_str` = `{python} ResnetMobile.bw_advantage_x_str`$\times$) translates to roughly `{python} ResnetMobile.inference_speed_x_str`$\times$ faster inference; peak compute alone is not the limiting comparison. This explains why quantization (reducing bytes) often beats faster hardware (increasing FLOP/s) for deployment.
+**Key Insight**\index{Quantization!deployment benefits}: Both platforms are memory bound for single-image inference! The A100's faster memory bandwidth (`{python} ResnetCloud.a100_bw_tb_per_s_str` vs. `{python} ResnetMobile.mobile_bw_gb_per_s_str` = `{python} ResnetMobile.bw_advantage_mult_str`) translates to roughly `{python} ResnetMobile.inference_speed_mult_str` faster inference; peak compute alone is not the limiting comparison. This explains why quantization (reducing bytes) often beats faster hardware (increasing FLOP/s) for deployment.
 
 ResNet-50 becomes compute bound when batching and data reuse raise arithmetic intensity above the hardware balance point, $I > R_{\text{peak}}/\text{BW}$, where $I = O/D_{\text{vol}}$. The crossover is architecture- and implementation-dependent because activation traffic, input/output movement, cache reuse, and kernel fusion all change the effective bytes moved per inference.
 
@@ -1193,8 +1201,8 @@ Compression matters more, not less, as the hardware budget tightens. As systems 
 # │          HardwareSpectrumSetup.tiny_pwr_min_w_str,
 # │          HardwareSpectrumSetup.tiny_pwr_max_w_str,
 # │          HardwareSpectrumSetup.tiny_price_str,
-# │          HardwareSpectrumSetup.cloud_thresh_tflops_str,
-# │          HardwareSpectrumSetup.edge_thresh_pflops_str,
+# │          HardwareSpectrumSetup.cloud_thresh_tflop_per_s_str,
+# │          HardwareSpectrumSetup.edge_thresh_pflop_per_s_str,
 # │          HardwareSpectrumSetup.tiny_thresh_tops_str,
 # │          HardwareSpectrumSetup.tiny_thresh_mw_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1225,10 +1233,10 @@ class HardwareSpectrumSetup:
     tiny_price_str = fmt_usd(10, precision=0, commas=False)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cloud_thresh_tflops_str = MarkdownStr("1000")            # TFLOP/s threshold for cloud
-    cloud_thresh_bw_str = MarkdownStr("1000 GB/s")
-    edge_thresh_pflops_str = MarkdownStr("1")                # PFLOP/s AI compute threshold
-    edge_thresh_bw_str = MarkdownStr("270 GB/s")
+    cloud_thresh_tflop_per_s_str = MarkdownStr("1000")            # TFLOP/s threshold for cloud
+    cloud_thresh_bw_gb_per_s_str = MarkdownStr("1000 GB/s")
+    edge_thresh_pflop_per_s_str = MarkdownStr("1")                # PFLOP/s AI compute threshold
+    edge_thresh_bw_gb_per_s_str = MarkdownStr("270 GB/s")
     tiny_thresh_tops_str = MarkdownStr("1")                  # TOPS compute threshold
     tiny_thresh_mw_str = MarkdownStr("1 mW")
 ```
@@ -1257,12 +1265,12 @@ class RepresentativeSystemsMobileRow:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mobile_ram_range_str = MarkdownStr(f"{Platforms.Mobile.ram_range} GB")
-    mobile_storage_range_str = Platforms.Mobile.storage_range
+    mobile_storage_range_str = MarkdownStr(Platforms.Mobile.storage_range)
     mobile_tdp_range_str = MarkdownStr(f"{Platforms.Mobile.tdp_range_w} W")
 ```
 
 \index{Hardware Spectrum!resource progression}
-These deployment paradigms emerged from decades of hardware evolution, from floating-point coprocessors in the 1980s through graphics processors in the 2000s to today's domain-specific AI accelerators. @Sec-hardware-acceleration traces this historical progression and the architectural principles that drove it. Here, we focus on the consequences of this evolution: the deployment spectrum that results from having qualitatively different hardware available at different points in the infrastructure.
+The hardware spectrum turns that bottleneck diagnosis into a fit test. The platforms in @tbl-representative-systems are products of decades of hardware evolution, from floating-point coprocessors in the 1980s through graphics processors in the 2000s to today's domain-specific AI accelerators. @Sec-hardware-acceleration traces this historical progression and the architectural principles that drove it. Here, the consequence matters most: qualitatively different hardware appears at different points in the infrastructure, so each workload must be matched to the region whose compute, memory, power, and cost envelope it can satisfy.
 
 | **Category**  |  **Example Device** |                              **Processor**                              |                           **Memory**                           |                            **Storage**                             |                                                         **Power**                                                          |                                             **Price Range**                                              |
 |:--------------|:-------------------:|:-----------------------------------------------------------------------:|:--------------------------------------------------------------:|:------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------:|
@@ -1316,12 +1324,12 @@ class DeploymentThresholdsTable:
     check(mobile_bw_hi.to(GB / second).magnitude > mobile_bw_lo.to(GB / second).magnitude, "Mobile bandwidth range collapsed to a single value.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    cloud_thresh_tflops_str = MarkdownStr(">1000 TFLOP/s")
-    cloud_thresh_bw_str = MarkdownStr(">1000 GB/s")
-    cloud_latency_range_str = Platforms.Cloud.latency_range_ms
-    edge_thresh_pflops_str = MarkdownStr("~1 PFLOP/s")
-    edge_thresh_bw_str = MarkdownStr(">270 GB/s")
-    edge_latency_range_str = Platforms.Edge.latency_range_ms
+    cloud_thresh_tflop_per_s_str = MarkdownStr(">1000 TFLOP/s")
+    cloud_thresh_bw_gb_per_s_str = MarkdownStr(">1000 GB/s")
+    cloud_latency_range_str = MarkdownStr(Platforms.Cloud.latency_range_ms)
+    edge_thresh_pflop_per_s_str = MarkdownStr("~1 PFLOP/s")
+    edge_thresh_bw_gb_per_s_str = MarkdownStr(">270 GB/s")
+    edge_latency_range_str = MarkdownStr(Platforms.Edge.latency_range_ms)
     mobile_npu_range_str = fmt_qty_range(
         mobile_npu_lo,
         mobile_npu_hi,
@@ -1337,22 +1345,22 @@ class DeploymentThresholdsTable:
         commas=False,
     )
     mobile_tdp_range_str = MarkdownStr(f"{Platforms.Mobile.tdp_range_w} W")
-    mobile_latency_range_str = Platforms.Mobile.latency_range_ms
+    mobile_latency_range_str = MarkdownStr(Platforms.Mobile.latency_range_ms)
     tiny_thresh_tops_str = MarkdownStr("<1 TOPS")
     tiny_thresh_mw_str = MarkdownStr("<1 mW")
-    tiny_latency_range_str = Platforms.Tiny.latency_range_ms
+    tiny_latency_range_str = MarkdownStr(Platforms.Tiny.latency_range_ms)
 ```
 
-| **Paradigm**  |                         **Compute**                          |                   **Memory bandwidth**                   |                                    **Power**                                     |                          **Latency**                          |
-|:--------------|:------------------------------------------------------------:|:--------------------------------------------------------:|:--------------------------------------------------------------------------------:|:-------------------------------------------------------------:|
-| **Cloud ML**  | `{python} DeploymentThresholdsTable.cloud_thresh_tflops_str` | `{python} DeploymentThresholdsTable.cloud_thresh_bw_str` |                              MW class (PUE 1.1–1.3)                              |  `{python} DeploymentThresholdsTable.cloud_latency_range_str` |
-| **Edge ML**   | `{python} DeploymentThresholdsTable.edge_thresh_pflops_str`  | `{python} DeploymentThresholdsTable.edge_thresh_bw_str`  |                                   100 W class                                    |  `{python} DeploymentThresholdsTable.edge_latency_range_str`  |
-| **Mobile ML** |  `{python} DeploymentThresholdsTable.mobile_npu_range_str`   | `{python} DeploymentThresholdsTable.mobile_bw_range_str` |            `{python} DeploymentThresholdsTable.mobile_tdp_range_str`             | `{python} DeploymentThresholdsTable.mobile_latency_range_str` |
-| **TinyML**    |  `{python} DeploymentThresholdsTable.tiny_thresh_tops_str`   |                            —                             | `{python} DeploymentThresholdsTable.tiny_thresh_mw_str` always-on average target |  `{python} DeploymentThresholdsTable.tiny_latency_range_str`  |
+| **Paradigm**  |                            **Compute**                            |                        **Memory bandwidth**                       |                                    **Power**                                     |                          **Latency**                          |
+|:--------------|:-----------------------------------------------------------------:|:-----------------------------------------------------------------:|:--------------------------------------------------------------------------------:|:-------------------------------------------------------------:|
+| **Cloud ML**  | `{python} DeploymentThresholdsTable.cloud_thresh_tflop_per_s_str` | `{python} DeploymentThresholdsTable.cloud_thresh_bw_gb_per_s_str` |                              MW class (PUE 1.1–1.3)                              |  `{python} DeploymentThresholdsTable.cloud_latency_range_str` |
+| **Edge ML**   |  `{python} DeploymentThresholdsTable.edge_thresh_pflop_per_s_str` |  `{python} DeploymentThresholdsTable.edge_thresh_bw_gb_per_s_str` |                                   100 W class                                    |  `{python} DeploymentThresholdsTable.edge_latency_range_str`  |
+| **Mobile ML** |     `{python} DeploymentThresholdsTable.mobile_npu_range_str`     |      `{python} DeploymentThresholdsTable.mobile_bw_range_str`     |            `{python} DeploymentThresholdsTable.mobile_tdp_range_str`             | `{python} DeploymentThresholdsTable.mobile_latency_range_str` |
+| **TinyML**    |     `{python} DeploymentThresholdsTable.tiny_thresh_tops_str`     |                                 —                                 | `{python} DeploymentThresholdsTable.tiny_thresh_mw_str` always-on average target |  `{python} DeploymentThresholdsTable.tiny_latency_range_str`  |
 
 : **Deployment Decision Thresholds**: Quantitative thresholds that practitioners use to determine deployment feasibility for each paradigm in @tbl-representative-systems. These numbers answer the practical question "can my workload run here?" by specifying the compute, memory bandwidth, and power envelope that each paradigm provides. {#tbl-deployment-thresholds tbl-colwidths="[12,18,18,32,18]"}
 
-Each section follows a consistent structure: definition, key characteristics, benefits and trade-offs, and representative applications. This parallel treatment reveals both what distinguishes each paradigm and what principles they share, setting the stage for the hybrid architectures that combine them. We begin at the resource-rich end of the spectrum and progressively tighten the constraints.
+The threshold table completes the fit test: each paradigm below is an operating envelope with a different binding resource. The following four sections progress from cloud to TinyML, tracing the gradient from maximum computational resources to maximum efficiency constraints while keeping the same questions in view: which term binds, what optimization helps, and which trade-offs follow.
 
 ## Cloud ML: Computational Power {#sec-ml-systems-cloud-ml-maximizing-computational-power-a338}
 
@@ -1428,7 +1436,7 @@ What unifies these diverse cloud workloads is a single defining trade-off:
 
 :::
 
-@Fig-cloud-ml breaks down cloud ML across several dimensions that define its computational paradigm. The Characteristics branch emphasizes centralization and dynamic scalability, which directly enables the Benefits of scalable data processing and global accessibility. This centralization, however, creates the Challenges of latency and internet dependence, shaping the kinds of Examples that thrive in the cloud: virtual assistants, recommendation systems, and fraud detection. The most fundamental of these challenges, network latency, is not an engineering limitation but a physics constraint. A quick calculation of the distance penalty after the figure makes this concrete.
+@Fig-cloud-ml maps the cloud bargain: centralization enables scale and global access, but the same centralization creates latency and internet dependence. The examples that thrive in this regime, including virtual assistants, recommendation systems, and fraud detection, all tolerate that bargain because scale matters more than immediacy. The most fundamental challenge, network latency, is not an engineering limitation but a physics constraint. A quick calculation of the distance penalty after the figure makes this concrete.
 
 ::: {#fig-cloud-ml fig-env="figure" fig-pos="htb" fig-cap="**Cloud ML Decomposition**: Characteristics, benefits, challenges, and representative applications of cloud machine learning, where centralized infrastructure and specialized hardware address scale, complexity, and resource management for large datasets and complex computations." fig-alt="Tree diagram with cloud ML branching to four categories: characteristics, benefits, challenges, and examples. Each lists items like computational power, scalability, vendor lock-in, and virtual assistants."}
 
@@ -1515,7 +1523,7 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Cloud ML};
 # │
 # │ Imports: mlsysim.physics (SPEED_OF_LIGHT_FIBER_KM_S),
 # │          mlsysim.physics (calc_network_latency_ms), mlsysim.book (fmt, check)
-# │ Exports: DistancePenalty.sol_kms_s_str, DistancePenalty.rtt_formatted_ms_str,
+# │ Exports: DistancePenalty.sol_km_per_s_str, DistancePenalty.rtt_formatted_ms_str,
 # │          DistancePenalty.deficit_ms_str, DistancePenalty.distance_km_str,
 # │          DistancePenalty.safety_budget_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1537,7 +1545,7 @@ class DistancePenalty:
     deficit = safety_budget - round_trip
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    sol_kms_s_str = fmt_qty(SPEED_OF_LIGHT_FIBER_KM_S, kilometer / second, precision=0, commas=True)
+    sol_km_per_s_str = fmt_qty(SPEED_OF_LIGHT_FIBER_KM_S, kilometer / second, precision=0, commas=True)
     rtt_formatted_ms_str = fmt_time(round_trip, millisecond, precision=0, commas=False)
     deficit_ms_str = fmt_time(deficit, millisecond, precision=0, commas=False, allow_negative=True)
     distance_km_str = fmt_qty(distance, kilometer, precision=0, commas=True)
@@ -1550,8 +1558,8 @@ class DistancePenalty:
 
 **Physics**:
 
-1.  **Light in Fiber**: ~`{python} DistancePenalty.sol_kms_s_str`.
-2.  **Round-trip propagation**: (`{python} DistancePenalty.distance_km_str` $\times$ 2)/`{python} DistancePenalty.sol_kms_s_str` = `{python} DistancePenalty.rtt_formatted_ms_str`.
+1.  **Light in Fiber**: ~`{python} DistancePenalty.sol_km_per_s_str`.
+2.  **Round-trip propagation**: (`{python} DistancePenalty.distance_km_str` $\times$ 2)/`{python} DistancePenalty.sol_km_per_s_str` = `{python} DistancePenalty.rtt_formatted_ms_str`.
 3.  **Result**: Round-trip propagation alone requires `{python} DistancePenalty.rtt_formatted_ms_str`, exceeding the `{python} DistancePenalty.safety_budget_ms_str` end-to-end budget (`{python} DistancePenalty.deficit_ms_str` headroom) before the model performs any inference.
 
 **Systems insight**: Physics has made cloud ML *impossible* for this application. The model must move to the Edge.
@@ -1574,7 +1582,7 @@ The physical reality of PFLOP/s-scale compute is visible in the infrastructure i
 
 Cloud ML excels at processing massive data volumes through parallelized architectures, enabling training on datasets requiring hundreds of terabytes of storage and PFLOPs of computation—resources that remain impractical on constrained devices. The training techniques covered in @sec-model-training and the hardware analysis in @sec-hardware-acceleration explain how practitioners achieve this scale.
 
-Beyond raw computation, cloud infrastructure creates deployment flexibility through cloud APIs, making trained models accessible worldwide across mobile, web, and IoT platforms. Shared infrastructure enables multiple teams to collaborate simultaneously with integrated version control, while pay-as-you-go pricing models[^fn-cloud-elastic-cost] eliminate upfront capital expenditure and scale elastically with demand.
+The same centralization changes how models are shared and operated. Cloud APIs make trained models accessible worldwide across mobile, web, and IoT platforms. Shared infrastructure enables multiple teams to collaborate simultaneously with integrated version control, while pay-as-you-go pricing models[^fn-cloud-elastic-cost] eliminate upfront capital expenditure and scale elastically with demand.
 
 A common misconception holds that cloud ML's vast computational resources make it universally superior. Exceptional computational power and storage do not automatically translate to optimal solutions for all applications. The Data Gravity Invariant\index{Data Gravity Invariant!cloud limitations} in @sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0 explains why: as data volume scales, the cost of moving it to compute $(C_{\text{move}}(D_{\text{vol}}) \gg C_{\text{move}}(\text{Compute}))$ eventually dominates. The trade-offs listed in the preceding definition become concrete when we consider where edge and embedded deployments excel: real-time response with sub-10 ms decision-making in autonomous control loops, strict data privacy for medical devices processing patient data, predictable costs through one-time hardware investment vs. recurring cloud fees, or operation in disconnected environments such as industrial equipment in remote locations. The optimal deployment paradigm depends on specific application requirements rather than raw computational capability.
 
@@ -1586,13 +1594,13 @@ A common misconception holds that cloud ML's vast computational resources make i
 
 Privacy and security pose serious challenges for cloud deployment. Transmitting sensitive data to remote data centers creates vulnerabilities and complicates regulatory compliance. Organizations handling data subject to regulations like the General Data Protection Regulation (GDPR)[^fn-gdpr-ml-constraint] or the Health Insurance Portability and Accountability Act (HIPAA)[^fn-hipaa-ml-overhead] must implement comprehensive security measures including encryption, strict access controls, and continuous monitoring to meet stringent data handling requirements. Privacy-preserving ML techniques, including federated learning and differential privacy, address these challenges at the systems level.
 
-[^fn-gdpr-ml-constraint]: **GDPR (General Data Protection Regulation)**: The European privacy framework (2018) whose "Right to be Forgotten" provision creates a systems constraint unique to ML: deleting a user's data may require retraining or fine-tuning any model that learned from it, because weight updates are not individually reversible. This transforms a legal requirement into a compute cost that scales with model size and retraining frequency. \index{GDPR!ML retraining constraint}
+[^fn-gdpr-ml-constraint]: [offset=-90mm] **GDPR (General Data Protection Regulation)**: The European privacy framework (2018) whose "Right to be Forgotten" provision creates a systems constraint unique to ML: deleting a user's data may require retraining or fine-tuning any model that learned from it, because weight updates are not individually reversible. This transforms a legal requirement into a compute cost that scales with model size and retraining frequency. \index{GDPR!ML retraining constraint}
 
-[^fn-hipaa-ml-overhead]: **HIPAA (Health Insurance Portability and Accountability Act)**: This US law translates the security measures from the context sentence—encryption, access controls, and monitoring—into direct systems-level costs like isolated compute, immutable logging for every inference, and end-to-end data encryption. These nonnegotiable safeguards are the source of the "stringent data handling requirements" and typically add 15–30 percent to infrastructure and operational overhead for a production ML system. \index{HIPAA!infrastructure overhead}
+[^fn-hipaa-ml-overhead]: [offset=-40mm]**HIPAA (Health Insurance Portability and Accountability Act)**: This US law translates the security measures from the context sentence—encryption, access controls, and monitoring—into direct systems-level costs like isolated compute, immutable logging for every inference, and end-to-end data encryption. These nonnegotiable safeguards are the source of the "stringent data handling requirements" and typically add 15–30 percent to infrastructure and operational overhead for a production ML system. \index{HIPAA!infrastructure overhead}
 
 Cost management introduces operational complexity requiring TCO[^fn-tco-deployment]\index{Total Cost of Ownership!cloud vs. edge}\index{Total Cost of Ownership!deployment decisions} analysis rather than naive unit comparisons. A worked *cloud vs. edge TCO* comparison illustrates the gap between sticker price and true system cost.
 
-[^fn-tco-deployment]: **Total Cost of Ownership (TCO)**: This analysis quantifies the gap between sticker price and true system cost by including all direct and indirect costs (power, cooling, labor) over a system's lifetime. The *cloud vs. edge* decision makes this explicit, trading high upfront capital expense (CapEx) for hardware against recurring operational expenses (OpEx) for cloud services. For an on-premise GPU, the initial purchase price is often only 30–40 percent of the three-year TCO, with the rest dominated by these operational costs. \index{Total Cost of Ownership!deployment economics}
+[^fn-tco-deployment]: [offset=8mm] **Total Cost of Ownership (TCO)**: This analysis quantifies the gap between sticker price and true system cost by including all direct and indirect costs (power, cooling, labor) over a system's lifetime. The *cloud vs. edge* decision makes this explicit, trading high upfront capital expense (CapEx) for hardware against recurring operational expenses (OpEx) for cloud services. For an on-premise GPU, the initial purchase price is often only 30–40 percent of the three-year TCO, with the rest dominated by these operational costs. \index{Total Cost of Ownership!deployment economics}
 
 ```{python}
 #| echo: false
@@ -1695,8 +1703,8 @@ class CloudEdgeTCO:
     gpu_price_str = fmt_usd(gpu_price_per_hr, precision=2, commas=False, per="hr")
     egress_gb_str = fmt_qty(egress_volume_per_day, GB, precision=0, commas=False, per="day")
     egress_price_str = fmt_usd(egress_rate, precision=2, commas=False, per="GB")
-    hours_per_year_str = fmt(HOURS_PER_YEAR, precision=0)
-    days_per_year_str = fmt(DAYS_PER_YEAR, precision=0, commas=False)
+    hours_per_year_str = fmt_time(HOURS_PER_YEAR, "hour", precision=0, per="year")
+    days_per_year_str = fmt_time(DAYS_PER_YEAR, "day", precision=0, commas=False, per="year")
 
     c_gpu_usd_str = fmt_usd(c_gpu, precision=0, approx=True)
     c_egress_usd_str = fmt_usd(c_egress, precision=0, approx=True)
@@ -1721,11 +1729,16 @@ class CloudEdgeTCO:
     server_life_years_str = fmt_time(server_life_years, "year", precision=0, commas=False, style="word")
     power_w_str = fmt_power(server_tdp, unit=watt, precision=0, commas=False)
     electricity_usd_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
-    devops_fte_str = fmt(devops_fte, precision=1, commas=False)
+    devops_fte_str = fmt_count(devops_fte, precision=1, commas=False, label="FTE", plural_label="FTE", allow_fractional=True)
     devops_salary_usd_str = fmt_usd(devops_salary, precision=0)
 ```
 
 For the worked comparison, @tbl-ml-systems-cloud-tco itemizes the annual GPU, network, load-balancer, and observability costs of an illustrative cloud implementation under public list pricing, and @tbl-ml-systems-edge-tco itemizes the corresponding hardware, power, cooling, network, and DevOps labor costs of an on-premise NVIDIA T4 implementation.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
 
 | **Cost Component**       | **Calculation**                                                                                                                                        |                             **Annual Cost** |
 |:-------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------:|
@@ -1737,13 +1750,17 @@ For the worked comparison, @tbl-ml-systems-cloud-tco itemizes the annual GPU, ne
 
 : **Cloud Inference Annual TCO**: Itemized GPU, network, load-balancer, and observability costs for the cloud implementation of the ResNet-50-scale vision workload, with the totals used in the break-even comparison. {#tbl-ml-systems-cloud-tco tbl-colwidths="[33,37,30]"}
 
+```{=latex}
+\endgroup
+```
+
 | **Cost Component**   | **Calculation**                                                                                                                              |                             **Annual Cost** |
 |:---------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------:|
 | **Hardware CAPEX**   | `{python} CloudEdgeTCO.server_cost_str` ÷ `{python} CloudEdgeTCO.server_life_years_str` life                                                 |         `{python} CloudEdgeTCO.e_capex_str` |
 | **Power (24/7)**     | `{python} CloudEdgeTCO.power_w_str` $\times$ `{python} CloudEdgeTCO.hours_per_year_str` $\times$ `{python} CloudEdgeTCO.electricity_usd_str` |     `{python} CloudEdgeTCO.e_power_usd_str` |
 | **Cooling overhead** | ~30 percent of power                                                                                                                         |      `{python} CloudEdgeTCO.e_cool_usd_str` |
 | **Network (fiber)**  | Fixed line for remote management                                                                                                             |       `{python} CloudEdgeTCO.e_net_usd_str` |
-| **DevOps labor**     | `{python} CloudEdgeTCO.devops_fte_str` FTE $\times$ `{python} CloudEdgeTCO.devops_salary_usd_str` salary                                     |     `{python} CloudEdgeTCO.e_labor_usd_str` |
+| **DevOps labor**     | `{python} CloudEdgeTCO.devops_fte_str` $\times$ `{python} CloudEdgeTCO.devops_salary_usd_str` salary                                         |     `{python} CloudEdgeTCO.e_labor_usd_str` |
 | **Total Edge**       |                                                                                                                                              | **`{python} CloudEdgeTCO.e_total_usd_str`** |
 
 : **Edge Inference Annual TCO**: Itemized hardware, power, cooling, network, and DevOps labor costs for the on-premise T4 implementation, exposing labor as the dominant component that determines edge break-even economics. {#tbl-ml-systems-edge-tco tbl-colwidths="[33,37,30]"}
@@ -1798,7 +1815,7 @@ Economics drive this architecture as much as latency. Attempting to process voic
 # │          VoiceAssistantWall.vi_gpu_hours_str,
 # │          VoiceAssistantWall.vi_datacenters_avg_str,
 # │          VoiceAssistantWall.vi_datacenters_peak_str,
-# │          VoiceAssistantWall.vi_audio_kb_str,
+# │          VoiceAssistantWall.vi_audio_kb_per_s_str,
 # │          VoiceAssistantWall.vi_total_audio_tb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, fmt_count, fmt_time, check, MarkdownStr, fmt_qty
@@ -1861,39 +1878,45 @@ class VoiceAssistantWall:
 
     # Infrastructure Strings
     vi_devices_str = fmt(vi_devices_b, precision=0, commas=False)
-    vi_queries_str = fmt(vi_queries_per_day, precision=0, commas=False)
-    vi_total_queries_str = fmt_count(vi_total_queries_day, scale="B", commas=False)
+    vi_queries_str = fmt_rate(vi_queries_per_day, "queries/day", precision=0, commas=False)
+    vi_total_queries_str = fmt_rate(vi_total_queries_day, "queries/day", scale="B", commas=False)
     vi_gpu_ms_str = fmt_time(vi_gpu_ms_per_query, 'millisecond', precision=0, commas=False)
     vi_gpu_hours_str = fmt_int(vi_gpu_hours_day, commas=True)
     vi_gpu_hours_dc_str = fmt_int(vi_gpu_hours_dc_value, commas=True)
     vi_gpus_dc_str = fmt_count(vi_gpus_per_datacenter, commas=True, label="GPU")
     vi_dc_avg_str = fmt(vi_datacenters_avg, precision=1, commas=False)
     vi_dc_peak_str = fmt(vi_datacenters_peak, precision=1, commas=False)
-    vi_peak_ratio_str = fmt(vi_peak_ratio, precision=1, commas=False)
-    vi_audio_kb_str = fmt_qty(vi_audio_rate, KB/second, precision=0, commas=False)
-    vi_audio_tb_s_str = fmt_qty(vi_total_audio_rate, TB/second, precision=0, commas=False)
+    vi_peak_ratio_mult_str = fmt_multiple(vi_peak_ratio, precision=1, commas=False)
+    vi_audio_kb_per_s_str = fmt_qty(vi_audio_rate, KB/second, precision=0, commas=False)
+    vi_audio_tb_per_s_str = fmt_qty(vi_total_audio_rate, TB/second, precision=0, commas=False)
 ```
 
 ::: {#nbk-ml-systems-voice-assistant-wall .callout-notebook title="The voice assistant wall"}
 
-**Problem**\index{Scaling!infrastructure, voice assistants}\index{Cloud ML!scaling limits}: `{python} VoiceAssistantWall.ww_devices_b_str` billion voice assistant devices (smartphones, smart speakers, earbuds) each issue `{python} VoiceAssistantWall.vi_queries_str` wake-word queries per day. What would it cost to serve all queries from the cloud, and how many dedicated data centers would peak load require?
+**Problem**\index{Scaling!infrastructure, voice assistants}\index{Cloud ML!scaling limits}: `{python} VoiceAssistantWall.ww_devices_b_str` billion voice assistant devices (smartphones, smart speakers, earbuds) each issue `{python} VoiceAssistantWall.vi_queries_str` as wake-word traffic. What would it cost to serve all queries from the cloud, and how many dedicated data centers would peak load require?
 
 **Part 1: the economic wall**
 
 - **Cloud cost**: ~`{python} VoiceAssistantWall.ww_cloud_cost_str` → `{python} VoiceAssistantWall.ww_devices_b_str` billion devices = `{python} VoiceAssistantWall.ww_total_cost_str`. Economically prohibitive for a free feature.
 - **TinyML alternative**: `{python} VoiceAssistantWall.ww_edge_power_range_str` local wake-word detection, <`{python} VoiceAssistantWall.ww_edge_cost_str`. Viable at any scale.
 
+```{=latex}
+\vspace*{-1ex}
+```
 **Part 2: the infrastructure wall**
 
 The *economic* argument is compelling, but the *physics* argument is decisive:
 
-1.  **Query volume**: `{python} VoiceAssistantWall.vi_devices_str` billion devices $\times$ `{python} VoiceAssistantWall.vi_queries_str` queries/day = `{python} VoiceAssistantWall.vi_total_queries_str` queries/day.
+1.  **Query volume**: `{python} VoiceAssistantWall.vi_devices_str` billion devices $\times$ `{python} VoiceAssistantWall.vi_queries_str` = `{python} VoiceAssistantWall.vi_total_queries_str`.
 2.  **GPU demand**: Each query requires ~`{python} VoiceAssistantWall.vi_gpu_ms_str` of GPU time. Total: `{python} VoiceAssistantWall.vi_gpu_hours_str`-hours/day.
 3.  **Data center capacity**: A large data center (~`{python} VoiceAssistantWall.vi_gpus_dc_str`) provides `{python} VoiceAssistantWall.vi_gpu_hours_dc_str`-hours/day.
 4.  **Average requirement**: ~`{python} VoiceAssistantWall.vi_dc_avg_str` dedicated data centers just for voice inference.
-5.  **Peak reality**: Queries cluster in waking hours (~`{python} VoiceAssistantWall.vi_peak_ratio_str`$\times$ peak-to-average), requiring ~`{python} VoiceAssistantWall.vi_dc_peak_str` data centers at peak.
+5.  **Peak reality**: Queries cluster in waking hours (~`{python} VoiceAssistantWall.vi_peak_ratio_mult_str` peak-to-average), requiring ~`{python} VoiceAssistantWall.vi_dc_peak_str` data centers at peak.
 
-**The bandwidth wall**: Wake-word detection requires continuous audio monitoring. If devices streamed audio to the cloud (16 kHz, 16-bit), each transmits ~`{python} VoiceAssistantWall.vi_audio_kb_str`. Across `{python} VoiceAssistantWall.vi_devices_str` billion devices: `{python} VoiceAssistantWall.vi_audio_tb_s_str`, a significant fraction of total global internet backbone capacity.
+```{=latex}
+\vspace*{-1ex}
+```
+**The bandwidth wall**: Wake-word detection requires continuous audio monitoring. If devices streamed audio to the cloud (16 kHz, 16-bit), each transmits ~`{python} VoiceAssistantWall.vi_audio_kb_per_s_str`. Across `{python} VoiceAssistantWall.vi_devices_str` billion devices: `{python} VoiceAssistantWall.vi_audio_tb_per_s_str`, a significant fraction of total global internet backbone capacity.
 
 **Systems insight**: Cloud-only voice processing is not merely expensive; it is *physically impossible* at global scale. Local wake-word detection is an infrastructure necessity, not an optimization.
 
@@ -1901,7 +1924,7 @@ The *economic* argument is compelling, but the *physics* argument is decisive:
 
 The voice assistant pipeline illustrates a core systems principle: deployment decisions are constrained by performance requirements, economic realities, and infrastructure physics. The hybrid approach reduces end-to-end latency relative to pure cloud processing while maintaining the computational power needed for complex language understanding, all within sustainable cost boundaries.
 
-Recommendation engines deployed by Netflix and Amazon demonstrate another compelling application of cloud resources. These systems process massive datasets using collaborative filtering\index{Collaborative Filtering!recommendation systems} and deep learning architectures like the Deep Learning Recommendation Model (DLRM)[^fn-dlrm-memory-bound] to uncover patterns in user preferences. DLRM exemplifies a memory-capacity-bound workload: its massive embedding tables, representing millions of users and items, can exceed terabytes in size, requiring distributed memory across many servers just to store the model parameters. Cloud computational resources enable continuous updates and refinements as user data grows, with Netflix processing over 100 billion data points daily to deliver personalized content suggestions that directly enhance user engagement.
+Recommendation engines deployed by Netflix and Amazon demonstrate the same cloud bargain in a memory-capacity-bound form. These systems process massive datasets using collaborative filtering\index{Collaborative Filtering!recommendation systems} and deep learning architectures like the Deep Learning Recommendation Model (DLRM)[^fn-dlrm-memory-bound] to uncover patterns in user preferences. DLRM exemplifies a memory-capacity-bound workload: its massive embedding tables, representing millions of users and items, can exceed terabytes in size, requiring distributed memory across many servers just to store the model parameters. Cloud computational resources enable continuous updates and refinements as user data grows, with Netflix processing over 100 billion data points daily to deliver personalized content suggestions that directly enhance user engagement.
 
 These applications share a common thread: they trade latency for scale, accepting hundreds of milliseconds of round-trip delay in exchange for access to computational resources that no other paradigm can provide. Fraud detection systems analyzing millions of transactions, recommendation engines processing terabytes of embedding tables, and language models generating text one token at a time all depend on this bargain. Yet as the voice assistant wall demonstrated, there exist applications where no amount of cloud compute can compensate for the physics of distance. When latency budgets drop below what the speed of light permits, or when data volumes exceed what networks can carry, the computation must move closer to the data source.
 
@@ -1929,7 +1952,7 @@ This locality-first trade-off defines the edge paradigm.
 
 :::
 
-@Fig-edge-ml organizes these trade-offs into four operational dimensions. The Characteristics branch highlights decentralized processing, which drives the key Benefit of reduced latency. This trade-off, however, introduces Challenges in maintenance and security, as the physical hardware is distributed and harder to secure than a centralized data center.
+@Fig-edge-ml organizes the locality bargain into four operational dimensions. Decentralized processing reduces latency and bandwidth pressure, but it also pushes maintenance and security problems out to distributed hardware that is harder to secure than a centralized data center.
 
 ::: {#fig-edge-ml fig-env="figure" fig-pos="htb" fig-cap="**Edge ML Decomposition**: Characteristics, benefits, challenges, and representative applications of edge machine learning, where decentralized processing on nearby hardware reduces latency and network dependence at the cost of constrained compute and memory." fig-alt="Tree diagram with edge ML branching to four categories: characteristics, benefits, challenges, and examples, listing items like decentralized processing, reduced latency, security concerns, and industrial IoT."}
 
@@ -2024,20 +2047,20 @@ The benefits of lower bandwidth usage and reduced latency become stark when we e
 # │ Imports: mlsysim.core.constants (VIDEO_1080P_WIDTH, VIDEO_1080P_HEIGHT,
 # │          VIDEO_BYTES_PER_PIXEL_RGB, VIDEO_FPS_STANDARD, Infrastructure.Pricing.Cloud.EgressPerGB.rate,
 # │          MB, GB, KB, second, MILLION), mlsysim.physics (calc_monthly_egress_cost)
-# │ Exports: BandwidthBottleneck.cam_rate_mbs_str,
-# │          BandwidthBottleneck.total_rate_gbs_str,
+# │ Exports: BandwidthBottleneck.cam_rate_mb_per_s_str,
+# │          BandwidthBottleneck.total_rate_gb_per_s_str,
 # │          BandwidthBottleneck.monthly_cost_m_str,
-# │          BandwidthBottleneck.net_cap_gbs_str,
-# │          BandwidthBottleneck.bw_short_x_str,
+# │          BandwidthBottleneck.net_cap_gb_per_s_str,
+# │          BandwidthBottleneck.bw_short_mult_str,
 # │          BandwidthBottleneck.num_cameras_str,
 # │          BandwidthBottleneck.bb_fps_str,
 # │          BandwidthBottleneck.egress_cost_str,
 # │          BandwidthBottleneck.video_width_str,
 # │          BandwidthBottleneck.video_height_str,
-# │          BandwidthBottleneck.bytes_per_pixel_str,
+# │          BandwidthBottleneck.bytes_per_pixel_value_str,
 # │          BandwidthBottleneck.metadata_events_per_sec_str,
 # │          BandwidthBottleneck.metadata_kb_per_event_str,
-# │          BandwidthBottleneck.metadata_reduction_x_str
+# │          BandwidthBottleneck.metadata_reduction_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.physics import calc_monthly_egress_cost
@@ -2081,21 +2104,21 @@ class BandwidthBottleneck:
     check(shortfall_ratio > 10, f"Narrative Violation: Bandwidth shortage dropped to {shortfall_ratio:.1f}x (text implies ~15x)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    cam_rate_mbs_str = fmt_qty(bytes_per_sec_single, MB / second, precision=1, commas=False)
-    total_rate_gbs_str = fmt_qty(total_bytes_per_sec, GB / second, precision=1, commas=False)
+    cam_rate_mb_per_s_str = fmt_qty(bytes_per_sec_single, MB / second, precision=1, commas=False)
+    total_rate_gb_per_s_str = fmt_qty(total_bytes_per_sec, GB / second, precision=1, commas=False)
     monthly_cost_m_str = fmt_usd(monthly_cost, precision=1, commas=False, scale="M", per="month")
-    net_cap_gbs_str = fmt_qty(network.bandwidth, GB / second, precision=2, commas=False)
-    bw_short_x_str = fmt(shortfall_ratio, precision=1, commas=False)
-    metadata_events_per_sec_str = fmt(metadata_events_per_sec, precision=0, commas=False)
+    net_cap_gb_per_s_str = fmt_qty(network.bandwidth, GB / second, precision=2, commas=False)
+    bw_short_mult_str = fmt_multiple(shortfall_ratio, precision=1, commas=False)
+    metadata_events_per_sec_str = fmt_rate(metadata_events_per_sec, "events/s", precision=0, commas=False)
     metadata_kb_per_event_str = fmt_qty(metadata_kb_per_event, KB, precision=0, commas=False)
-    metadata_reduction_x_str = fmt(metadata_reduction, precision=0, commas=True)
+    metadata_reduction_mult_str = fmt_multiple(metadata_reduction, precision=0, commas=True)
 
     num_cameras_str = fmt(num_cameras, precision=0, commas=False)
     bb_fps_str = fmt_rate(fps.to("Hz").magnitude, "FPS", precision=0, commas=False)
     egress_cost_str = fmt_usd(Infrastructure.Pricing.Cloud.EgressPerGB.rate.to(USD / GB).magnitude, precision=2, commas=False, per="GB")
     video_width_str = fmt(width, precision=0, commas=False)
     video_height_str = fmt(height, precision=0, commas=False)
-    bytes_per_pixel_str = fmt(bpp, precision=0, commas=False)
+    bytes_per_pixel_value_str = fmt(bpp, precision=0, commas=False)
 ```
 
 ::: {#nbk-ml-systems-bandwidth-bottleneck .callout-notebook title="The bandwidth bottleneck"}
@@ -2104,12 +2127,12 @@ class BandwidthBottleneck:
 
 **Physics**:
 
-1.  **Raw data rate per camera**: `{python} BandwidthBottleneck.video_width_str` $\times$ `{python} BandwidthBottleneck.video_height_str` $\times$ `{python} BandwidthBottleneck.bytes_per_pixel_str` bytes $\times$ `{python} BandwidthBottleneck.bb_fps_str` ≈ `{python} BandwidthBottleneck.cam_rate_mbs_str`.
-2.  **Total data rate**: `{python} BandwidthBottleneck.num_cameras_str` cameras $\times$ `{python} BandwidthBottleneck.cam_rate_mbs_str` = `{python} BandwidthBottleneck.total_rate_gbs_str`.
+1.  **Raw data rate per camera**: `{python} BandwidthBottleneck.video_width_str` $\times$ `{python} BandwidthBottleneck.video_height_str` $\times$ `{python} BandwidthBottleneck.bytes_per_pixel_value_str` bytes $\times$ `{python} BandwidthBottleneck.bb_fps_str` ≈ `{python} BandwidthBottleneck.cam_rate_mb_per_s_str`.
+2.  **Total data rate**: `{python} BandwidthBottleneck.num_cameras_str` cameras $\times$ `{python} BandwidthBottleneck.cam_rate_mb_per_s_str` = `{python} BandwidthBottleneck.total_rate_gb_per_s_str`.
 3.  **Cloud transfer exposure**: Uploading raw camera feeds is primarily a bandwidth, ingest, storage, and processing problem; per-GB cloud egress charges apply when data is transferred back out of the cloud. If the raw stream were later retrieved at `{python} BandwidthBottleneck.egress_cost_str` data-transfer-out pricing, the transfer charge alone would reach `{python} BandwidthBottleneck.monthly_cost_m_str`.
-4.  **Network reality**: Even a dedicated 10 Gbps line (`{python} BandwidthBottleneck.net_cap_gbs_str`) cannot carry the load---the workload demands `{python} BandwidthBottleneck.bw_short_x_str`$\times$ more bandwidth than exists.
+4.  **Network reality**: Even a dedicated 10 Gbps line (`{python} BandwidthBottleneck.net_cap_gb_per_s_str`) cannot carry the load---the workload demands `{python} BandwidthBottleneck.bw_short_mult_str` more bandwidth than exists.
 
-**Systems insight**: Physics has made cloud streaming *impossible* for this application. Edge processing is not optional—it is mandatory. If an edge server transmits only defect metadata (`{python} BandwidthBottleneck.metadata_kb_per_event_str` per detection at roughly `{python} BandwidthBottleneck.metadata_events_per_sec_str` detections/sec across the floor), bandwidth falls by about `{python} BandwidthBottleneck.metadata_reduction_x_str`$\times$.
+**Systems insight**: Physics has made cloud streaming *impossible* for this application. Edge processing is not optional—it is mandatory. If an edge server transmits only defect metadata (`{python} BandwidthBottleneck.metadata_kb_per_event_str` per detection at roughly `{python} BandwidthBottleneck.metadata_events_per_sec_str` across the floor), bandwidth falls by about `{python} BandwidthBottleneck.metadata_reduction_mult_str`.
 
 :::
 
@@ -2126,7 +2149,7 @@ class BandwidthBottleneck:
 # │ How: Recompute the same ratio from centralized energy constants.
 # │
 # │ Imports: mlsysim.core.constants, mlsysim.book (fmt, check)
-# │ Exports: EdgeEnergyTransmissionRecap.ratio_str
+# │ Exports: EdgeEnergyTransmissionRecap.ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
@@ -2149,10 +2172,10 @@ class EdgeEnergyTransmissionRecap:
           f"Transmission should dominate local compute; got {ratio:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ratio_str = fmt(ratio, precision=0, commas=True)
+    ratio_mult_str = fmt_multiple(ratio, precision=0, commas=True)
 ```
 
-The preceding bandwidth calculation reveals why edge processing is mandatory for high-volume sensor deployments. For battery-powered edge devices (wireless cameras, drones, wearables), the constraint is even more severe: as "The Energy of Transmission" (@sec-ml-systems-bottleneck-principle-3514) established, radio transmission costs `{python} EdgeEnergyTransmissionRecap.ratio_str`$\times$ more energy than local inference, making cloud offloading physically impossible for battery-powered devices regardless of available bandwidth. @Fig-energy-per-inference quantifies this asymmetry across deployment tiers.
+The preceding bandwidth calculation reveals why edge processing is mandatory for high-volume sensor deployments. For battery-powered edge devices (wireless cameras, drones, wearables), the constraint is even more severe: as "The Energy of Transmission" (@sec-ml-systems-bottleneck-principle-3514) established, radio transmission costs `{python} EdgeEnergyTransmissionRecap.ratio_mult_str` more energy than local inference, making cloud offloading physically impossible for battery-powered devices regardless of available bandwidth. @Fig-energy-per-inference quantifies this asymmetry across deployment tiers.
 
 ::: {#fig-energy-per-inference fig-env="figure" fig-pos="htb" fig-cap="**Energy Per Inference Across Deployment Paradigms**: Full-system energy consumption per inference spans eight orders of magnitude, from ~10 µJ for TinyML keyword spotting to ~1 kJ for a cloud LLM query. This gap is not an engineering shortcoming—it reflects the physics of data movement, cooling, and network overhead that separates deployment tiers. The 100,000,000$\times$ difference explains why always-on sensing is only feasible at the TinyML tier." fig-alt="Horizontal log-scale bar chart showing energy per inference for five workloads across four deployment paradigms. TinyML keyword spotting at 10 microjoules, Mobile MobileNet at 50 millijoules, Edge ResNet-50 at 500 millijoules, Cloud ResNet-50 at 10 joules, and Cloud GPT-4 query at 1 kilojoule."}
 
@@ -2169,7 +2192,7 @@ The preceding bandwidth calculation reveals why edge processing is mandatory for
 # │ How: Horizontal bar chart on log scale using existing energy data
 # │      from the energy-inference-calc Python block.
 # │
-# │ Imports: sys, os, numpy, mlsysim.core.viz
+# │ Imports: sys, os, numpy, book.tools.figures.style
 # │ Exports: (figure output)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -2180,9 +2203,8 @@ import numpy as np
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 sys.path.insert(0, ".")
-from mlsysim import viz
-
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 3.5))
+from book.tools.figures import style as book_style
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.25))
 
 #—Data (energy per inference, full-system estimates) ---
 workloads = [
@@ -2283,7 +2305,7 @@ The locality crossover is easiest to see by comparing a single high-rate sensor 
 # │ Exports: DataLocalityInvariant.frame_mb_str,
 # │          DataLocalityInvariant.tx_time_ms_str,
 # │          DataLocalityInvariant.remote_ms_str,
-# │          DataLocalityInvariant.net_bw_s_str
+# │          DataLocalityInvariant.net_bw_mbit_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, MarkdownStr, fmt_bandwidth, fmt_qty, fmt_time
 from mlsysim.core.units import MB, byte, bit, megabit, second, millisecond
@@ -2317,7 +2339,7 @@ class DataLocalityInvariant:
     frame_mb_str = fmt_qty(frame_size, MB, precision=1)
     tx_time_ms_str = fmt_time(tx_time, millisecond, precision=1, commas=True)
     remote_ms_str = fmt_time(remote_total_ms, millisecond, precision=0)
-    net_bw_s_str = fmt_bandwidth(net_bw, unit=megabit / second, precision=0, commas=False)
+    net_bw_mbit_per_s_str = fmt_bandwidth(net_bw, unit=megabit / second, precision=0, commas=False)
     frame_label_str = MarkdownStr("4K")
 ```
 
@@ -2328,12 +2350,12 @@ class DataLocalityInvariant:
 **Variables**:
 
 - **Data $(D_{\text{vol}})$**: `{python} DataLocalityInvariant.frame_label_str` frame ≈ `{python} DataLocalityInvariant.frame_mb_str`.
-- **Bandwidth $(\text{BW}_{\text{network}})$**: `{python} DataLocalityInvariant.net_bw_s_str` home broadband (up).
+- **Bandwidth $(\text{BW}_{\text{network}})$**: `{python} DataLocalityInvariant.net_bw_mbit_per_s_str` home broadband (up).
 - **Remote response $(L_{\text{lat,network}} + T_{\text{remote}})$**: `{python} DataLocalityInvariant.remote_ms_str` (round-trip + remote compute).
 
 **Math**:
 
-1.  **Transmission time**: `{python} DataLocalityInvariant.frame_mb_str` $\times$ 8 bits/`{python} DataLocalityInvariant.net_bw_s_str` = `{python} DataLocalityInvariant.tx_time_ms_str`.
+1.  **Transmission time**: `{python} DataLocalityInvariant.frame_mb_str` $\times$ 8 bits/`{python} DataLocalityInvariant.net_bw_mbit_per_s_str` = `{python} DataLocalityInvariant.tx_time_ms_str`.
 2.  **Remote response**: `{python} DataLocalityInvariant.remote_ms_str`.
 
 **Systems insight**: Since `{python} DataLocalityInvariant.tx_time_ms_str` $\gg$ `{python} DataLocalityInvariant.remote_ms_str`, the system is bandwidth blocked. The cloud could have an infinite processor $(R_{\text{peak}} = \infty)$, but the drone would still crash because it cannot move the bits fast enough. This workload is locality mandatory.
@@ -2362,11 +2384,11 @@ These benefits carry corresponding limitations that compound as deployments scal
 # │
 # │ Imports: mlsysim (Models), mlsysim.fmt
 # │ Exports: EdgeSizingThroughput.stores_str, .cameras_per_store_str, .fps_str,
-# │          .inf_per_sec_str, .yolo_gflops_str, .sustained_gf_str,
-# │          .req_tops_equiv_str, .headroom_str
+# │          .inf_per_sec_str, .yolo_gflop_per_inference_str, .sustained_gflop_per_s_str,
+# │          .req_tops_equiv_str, .headroom_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_ops_rate
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_ops_rate, fmt_rate, fmt_ratio
 from mlsysim.core.units import GFLOPs, TOPS, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2388,37 +2410,41 @@ class EdgeSizingThroughput:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     stores_str = fmt(stores, precision=0, commas=False)
-    cameras_per_store_str = fmt(cameras_per_store, precision=0, commas=False)
-    fps_str = fmt(fps, precision=0, commas=False)
-    headroom_str = fmt(headroom, precision=0, commas=False)
-    inf_per_sec_str = fmt(inf_per_sec, precision=0, commas=False)
-    yolo_gflops_per_inference_str = fmt_flops(yolo_flops, unit=GFLOPs, precision=1, per="inference")
-    sustained_gflops_str = fmt_flop_rate(sustained_flop_rate, unit=GFLOPs / second, precision=0)
+    cameras_per_store_str = fmt_rate(cameras_per_store, "cameras/store", precision=0, commas=False)
+    fps_str = fmt_rate(fps, "FPS", precision=0, commas=False)
+    headroom_factor_str = fmt_ratio(headroom, precision=0, commas=False)
+    inf_per_sec_str = fmt_rate(inf_per_sec, "inferences/s", precision=0, commas=False)
+    yolo_gflop_per_inference_str = fmt_flops(yolo_flops, unit=GFLOPs, precision=1, per="inference")
+    sustained_gflop_per_s_str = fmt_flop_rate(sustained_flop_rate, unit=GFLOPs / second, precision=0)
     req_tops_equiv_str = fmt_ops_rate(required_ops_rate, unit=TOPS, precision=2, commas=False)
 ```
 
 ::: {#nbk-ml-systems-edge-inference-sizing .callout-notebook title="Edge inference sizing"}
 
-**Problem**: A smart retail chain deploys person detection across `{python} EdgeSizingThroughput.stores_str` stores, each with `{python} EdgeSizingThroughput.cameras_per_store_str` cameras at `{python} EdgeSizingThroughput.fps_str` FPS. Which edge accelerator (USB-scale TPU, workstation-class embedded GPU, or general-purpose mini-PC) delivers the required throughput at the lowest three-year fleet cost?
+**Problem**: A smart retail chain deploys person detection across `{python} EdgeSizingThroughput.stores_str` stores, each with `{python} EdgeSizingThroughput.cameras_per_store_str` cameras at `{python} EdgeSizingThroughput.fps_str`. Which edge accelerator (USB-scale TPU, workstation-class embedded GPU, or general-purpose mini-PC) delivers the required throughput at the lowest three-year fleet cost?
 
 @Tbl-ml-systems-edge-sizing-requirements cascades the per-store inference rate through YOLOv8-nano's per-frame FLOP count to yield the throughput target:
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.2}
+\renewcommand{\arraystretch}{1.25}
 ```
 
-| **Metric**               |                                                    **Calculation**                                                    |                           **Result**                           |
-|:-------------------------|:---------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------:|
-| **Inferences per store** |   `{python} EdgeSizingThroughput.cameras_per_store_str` cameras $\times$ `{python} EdgeSizingThroughput.fps_str` FPS  | `{python} EdgeSizingThroughput.inf_per_sec_str` inferences/sec |
-| **Model compute**        |                       YOLOv8-nano: `{python} EdgeSizingThroughput.yolo_gflops_per_inference_str`                      |      `{python} EdgeSizingThroughput.sustained_gflops_str`      |
-| **Required throughput**  | `{python} EdgeSizingThroughput.sustained_gflops_str` $\times$ `{python} EdgeSizingThroughput.headroom_str` (headroom) | ~`{python} EdgeSizingThroughput.req_tops_equiv_str` equivalent |
+| **Metric**               |                                                          **Calculation**                                                          |                           **Result**                           |
+|:-------------------------|:---------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------:|
+| **Inferences per store** |           `{python} EdgeSizingThroughput.cameras_per_store_str` cameras $\times$ `{python} EdgeSizingThroughput.fps_str`          |        `{python} EdgeSizingThroughput.inf_per_sec_str`         |
+| **Model compute**        |                             YOLOv8-nano: `{python} EdgeSizingThroughput.yolo_gflop_per_inference_str`                             |   `{python} EdgeSizingThroughput.sustained_gflop_per_s_str`    |
+| **Required throughput**  | `{python} EdgeSizingThroughput.sustained_gflop_per_s_str` $\times$ `{python} EdgeSizingThroughput.headroom_factor_str` (headroom) | ~`{python} EdgeSizingThroughput.req_tops_equiv_str` equivalent |
 
 : **Edge Inference Sizing Requirements**: Per-store throughput target for the smart-retail person-detection scenario. {#tbl-ml-systems-edge-sizing-requirements tbl-colwidths="[33,41,25]"}
 
+```{=latex}
+\endgroup
+```
+
 \index{Edge Accelerator!deployment selection}
 \index{Embedded GPU Accelerators!edge deployment}
-@tbl-ml-systems-edge-hardware-options scores three candidate edge platforms against the throughput target:
+@Tbl-ml-systems-edge-hardware-options scores three candidate edge platforms against the throughput target:
 
 ```{python}
 #| echo: false
@@ -2440,7 +2466,7 @@ class EdgeSizingThroughput:
 from math import ceil
 from mlsysim import Hardware, Models
 from mlsysim.physics import calc_fleet_tco
-from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, MarkdownStr, fmt_qty, fmt_time, fmt_ops_rate
+from mlsysim.fmt import fmt_percent, fmt, fmt_rate, fmt_usd, check, MarkdownStr, fmt_qty, fmt_time, fmt_ops_rate
 from mlsysim.core.units import GFLOPs, TOPS, second, hour, USD, watt, kWh
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2490,11 +2516,11 @@ class EdgeSizingFleetTCO:
     check(coral_cluster_sustained.to(TOPS).magnitude >= required_tops_equiv, "Clustered Coral configuration should clear the requirement.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    req_tops_equiv_str = fmt(required_tops_equiv, precision=2, commas=False)
+    req_tops_equiv_str = fmt_ops_rate(required_tops_equiv * TOPS, unit=TOPS, precision=2, commas=False)
     derate_pct_str = fmt_percent(derate, precision=0, commas=False, style='symbol')
     coral_tops_str = fmt_qty(coral_peak, TOPS, precision=0, commas=False)
     coral_sustained_tops_str = fmt_qty(coral_sustained, TOPS, precision=0, commas=False)
-    coral_units_per_store_str = fmt(coral_units_per_store, precision=0, commas=False)
+    coral_units_per_store_str = fmt_rate(coral_units_per_store, "boards/store", precision=0, commas=False)
     coral_cluster_peak_tops_str = fmt_ops_rate(coral_cluster_peak, unit=TOPS, precision=0, commas=False)
     coral_cluster_sustained_tops_str = fmt_ops_rate(coral_cluster_sustained, unit=TOPS, precision=0, commas=False)
     coral_cluster_unit_cost_str = fmt_usd(coral_cost * coral_units_per_store, precision=0, commas=False)
@@ -2509,22 +2535,27 @@ class EdgeSizingFleetTCO:
     nuc_tops_str = fmt_qty(nuc.compute.peak_flops, TOPS, precision=0, commas=False)
     nuc_fleet_usd_str = fmt_usd(nuc_cost * stores, precision=0, commas=True)
     coral_cluster_fleet_usd_str = fmt_usd(coral_cluster_capex, precision=0, commas=True)
-    jetson_vs_coral_cluster_capex_ratio_str = fmt(jetson_cost / (coral_cost * coral_units_per_store), precision=1, commas=False)
-    years_count_str = fmt(years, precision=0, commas=False)
+    jetson_vs_coral_cluster_capex_ratio_mult_str = fmt_multiple(jetson_cost / (coral_cost * coral_units_per_store), precision=1, commas=False)
+    years_count_str = fmt_time(years, "year", precision=0, commas=False, style="word")
     years_span_str = fmt_time(years, "year", precision=0, commas=False, style="word")
     stores_str = fmt(stores, precision=0, commas=False)
-    hours_per_year_str = fmt_time(HOURS_PER_YEAR, 'hour', precision=0, commas=False)
+    hours_per_year_str = fmt_time(HOURS_PER_YEAR, 'hour', precision=0, commas=False, per="year")
     elec_cost_str = fmt_usd(elec_rate.to(USD / kWh).magnitude, precision=2, commas=False, per="kWh")
     coral_cluster_power_opex_str = fmt_usd(coral_cluster_power_opex, precision=1, commas=True)
     coral_cluster_tco_str = fmt_usd(coral_cluster_capex + coral_cluster_power_opex, precision=1, commas=True)
     cloud_cost_str = fmt_usd(cloud_tco_3yr, precision=0, commas=True)
 ```
 
-| **Edge Device**                                                                          |                                                              **INT8 TOPS**                                                               |                        **Power**                        |                       **Unit Cost**                       |                       **Fleet Cost**                      |
-|:-----------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------:|:---------------------------------------------------------:|:---------------------------------------------------------:|
-| **NVIDIA Jetson Orin NX**                                                                |                                              `{python} EdgeSizingFleetTCO.jetson_tops_str`                                               |   `{python} EdgeSizingFleetTCO.jetson_power_range_str`  |       `{python} EdgeSizingFleetTCO.jetson_cost_str`       |     `{python} EdgeSizingFleetTCO.jetson_fleet_usd_str`    |
-| **Intel NUC + Movidius**                                                                 |                                                `{python} EdgeSizingFleetTCO.nuc_tops_str`                                                |      `{python} EdgeSizingFleetTCO.nuc_power_w_str`      |         `{python} EdgeSizingFleetTCO.nuc_cost_str`        |      `{python} EdgeSizingFleetTCO.nuc_fleet_usd_str`      |
-| **Google Coral Dev (`{python} EdgeSizingFleetTCO.coral_units_per_store_str` per store)** | peak `{python} EdgeSizingFleetTCO.coral_cluster_peak_tops_str`<br>derated `{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` | `{python} EdgeSizingFleetTCO.coral_cluster_power_w_str` | `{python} EdgeSizingFleetTCO.coral_cluster_unit_cost_str` | `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` |
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
+
+| **Edge Device**                                                                |                                                              **INT8 TOPS**                                                               |                        **Power**                        |                       **Unit Cost**                       |                       **Fleet Cost**                      |
+|:-------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------:|:---------------------------------------------------------:|:---------------------------------------------------------:|
+| **NVIDIA Jetson Orin NX**                                                      |                                              `{python} EdgeSizingFleetTCO.jetson_tops_str`                                               |   `{python} EdgeSizingFleetTCO.jetson_power_range_str`  |       `{python} EdgeSizingFleetTCO.jetson_cost_str`       |     `{python} EdgeSizingFleetTCO.jetson_fleet_usd_str`    |
+| **Intel NUC + Movidius**                                                       |                                                `{python} EdgeSizingFleetTCO.nuc_tops_str`                                                |      `{python} EdgeSizingFleetTCO.nuc_power_w_str`      |         `{python} EdgeSizingFleetTCO.nuc_cost_str`        |      `{python} EdgeSizingFleetTCO.nuc_fleet_usd_str`      |
+| **Google Coral Dev (`{python} EdgeSizingFleetTCO.coral_units_per_store_str`)** | peak `{python} EdgeSizingFleetTCO.coral_cluster_peak_tops_str`<br>derated `{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` | `{python} EdgeSizingFleetTCO.coral_cluster_power_w_str` | `{python} EdgeSizingFleetTCO.coral_cluster_unit_cost_str` | `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` |
 
 : **Edge Accelerator Options**: Throughput, power, and cost for three candidate edge accelerators at fleet scale. {#tbl-ml-systems-edge-hardware-options tbl-colwidths="[40,15,15,15,15]"}
 
@@ -2532,9 +2563,9 @@ class EdgeSizingFleetTCO:
 \endgroup
 ```
 
-**Decision**: At `{python} EdgeSizingFleetTCO.req_tops_equiv_str` TOPS-equivalent required, one Coral Dev Board (`{python} EdgeSizingFleetTCO.coral_tops_str` peak, about `{python} EdgeSizingFleetTCO.coral_sustained_tops_str` after `{python} EdgeSizingFleetTCO.derate_pct_str` derating) is undersized. The low-cost edge choice is a sharded configuration with `{python} EdgeSizingFleetTCO.coral_units_per_store_str` Coral boards per store, providing `{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` and about `{python} EdgeSizingFleetTCO.jetson_vs_coral_cluster_capex_ratio_str`$\times$ lower per-store hardware capex than Jetson. Jetson remains the simpler single-device deployment when integration complexity matters more than hardware cost.
+**Decision**: At `{python} EdgeSizingFleetTCO.req_tops_equiv_str` equivalent required, one Coral Dev Board (`{python} EdgeSizingFleetTCO.coral_tops_str` peak, about `{python} EdgeSizingFleetTCO.coral_sustained_tops_str` after `{python} EdgeSizingFleetTCO.derate_pct_str` derating) is undersized. The low-cost edge choice is a sharded configuration with `{python} EdgeSizingFleetTCO.coral_units_per_store_str` Coral boards per store, providing `{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` and about `{python} EdgeSizingFleetTCO.jetson_vs_coral_cluster_capex_ratio_mult_str` lower per-store hardware capex than Jetson. Jetson remains the simpler single-device deployment when integration complexity matters more than hardware cost.
 
-**TCO comparison** over `{python} EdgeSizingFleetTCO.years_span_str` (`{python} EdgeSizingFleetTCO.coral_units_per_store_str` Coral boards/store): Hardware `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` + Power (`{python} EdgeSizingFleetTCO.coral_cluster_power_kw_str` $\times$ `{python} EdgeSizingFleetTCO.stores_str` $\times$ `{python} EdgeSizingFleetTCO.hours_per_year_str` $\times$ `{python} EdgeSizingFleetTCO.years_count_str` $\times$ `{python} EdgeSizingFleetTCO.elec_cost_str` = `{python} EdgeSizingFleetTCO.coral_cluster_power_opex_str`) = `{python} EdgeSizingFleetTCO.coral_cluster_tco_str` total vs. cloud inference at ~`{python} EdgeSizingFleetTCO.cloud_cost_str`.
+**TCO comparison** over `{python} EdgeSizingFleetTCO.years_span_str` (`{python} EdgeSizingFleetTCO.coral_units_per_store_str`): Hardware `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` + Power (`{python} EdgeSizingFleetTCO.coral_cluster_power_kw_str` $\times$ `{python} EdgeSizingFleetTCO.stores_str` $\times$ `{python} EdgeSizingFleetTCO.hours_per_year_str` $\times$ `{python} EdgeSizingFleetTCO.years_count_str` $\times$ `{python} EdgeSizingFleetTCO.elec_cost_str` = `{python} EdgeSizingFleetTCO.coral_cluster_power_opex_str`) = `{python} EdgeSizingFleetTCO.coral_cluster_tco_str` total vs. cloud inference at ~`{python} EdgeSizingFleetTCO.cloud_cost_str`.
 
 :::
 
@@ -2546,7 +2577,7 @@ A realistic retail deployment shows how those constraints turn into throughput, 
 
 \index{Edge ML!autonomous vehicles} \index{Edge ML!industrial IoT} \index{Edge ML!smart retail} \index{Predictive Maintenance!edge deployment}
 \index{Autonomous Vehicles!latency requirements}
-Industries deploy edge ML widely where low latency, data privacy, and operational resilience justify the additional complexity. Autonomous vehicles represent the most demanding application, where safety-critical decisions must occur within milliseconds based on sensor data that cannot be transmitted to remote servers. Systems like Tesla's Full Self-Driving process inputs from multiple cameras at high frame rates through custom edge hardware, making driving decisions with end-to-end latency on the order of milliseconds. This response time is infeasible with cloud processing due to network delays.
+Edge applications differ by domain, but each makes the same locality argument concrete: the system cannot wait for the network, cannot ship the data, cannot expose the raw signal, or cannot stop during an outage. Autonomous vehicles represent the most demanding application, where safety-critical decisions must occur within milliseconds based on sensor data that cannot be transmitted to remote servers. Systems like Tesla's Full Self-Driving process inputs from multiple cameras at high frame rates through custom edge hardware, making driving decisions with end-to-end latency on the order of milliseconds. This response time is infeasible with cloud processing due to network delays.
 
 Smart retail environments demonstrate edge ML's practical advantages for privacy-sensitive, bandwidth-intensive applications. Amazon Go[^fn-amazon-go-edge] stores process video from hundreds of cameras through local edge servers, tracking customer movements and item selections to enable checkout-free shopping. This edge-based approach addresses both technical and privacy concerns. Transmitting high-resolution video from hundreds of cameras would require substantial sustained bandwidth, while local processing keeps raw video on premises, reducing exposure and simplifying compliance.
 
@@ -2581,7 +2612,7 @@ Mobile ML addresses this challenge by integrating machine learning directly into
 # │ How: Recompute MobileNet-vs-ResNet reduction and read the mobile TDP range.
 # │
 # │ Imports: mlsysim.Models, mlsysim.core.constants, mlsysim.book (fmt, check)
-# │ Exports: MobileEfficiencyRecap.mobilenet_flops_reduction_str,
+# │ Exports: MobileEfficiencyRecap.mobilenet_flops_reduction_mult_str,
 # │          MobileEfficiencyRecap.mobile_tdp_range_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
@@ -2604,12 +2635,12 @@ class MobileEfficiencyRecap:
     check(mobilenet_flops_reduction > 10, "MobileNet reduction should be >10x vs ResNet.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    mobilenet_flops_reduction_str = fmt_multiple(mobilenet_flops_reduction, precision=1, commas=False)
+    mobilenet_flops_reduction_mult_str = fmt_multiple(mobilenet_flops_reduction, precision=1, commas=False)
     mobile_tdp_range_str = MarkdownStr(mobile_tdp_range.replace("-", " to ") + " W")
 ```
 
 \index{Depthwise Separable Convolution!power reduction}
-The mobile environment introduces a critical constraint absent from stationary deployments: energy per inference becomes a first-order design parameter. Under the iron law in @eq-iron-law-extended, cloud and edge systems optimize for minimizing $T$, total latency. Mobile systems face an additional constraint: $\text{Energy} = \text{Power} \times T$, and the power wall described by @eq-power-scaling caps sustained power at `{python} MobileEfficiencyRecap.mobile_tdp_range_str`. In archetype terms, a compute beast workload like image classification must be transformed through architectural efficiency (for example, depthwise separable convolutions[^fn-depthwise-mobile-efficiency] in MobileNet) into an efficient variant, reducing FLOPs by `{python} MobileEfficiencyRecap.mobilenet_flops_reduction_str`$\times$, preserving accuracy. This is not merely optimization; it represents a qualitative shift in the arithmetic intensity trade-off, accepting lower peak throughput in exchange for sustainable operation within a `{python} MobileEfficiencyRecap.mobile_tdp_range_str` thermal envelope.
+The mobile environment introduces a critical constraint absent from stationary deployments: energy per inference becomes a first-order design parameter. Under the iron law in @eq-iron-law-extended, cloud and edge systems optimize for minimizing $T$, total latency. Mobile systems face an additional constraint: $\text{Energy} = \text{Power} \times T$, and the power wall described by @eq-power-scaling caps sustained power at `{python} MobileEfficiencyRecap.mobile_tdp_range_str`. In archetype terms, a compute beast workload like image classification must be transformed through architectural efficiency (for example, depthwise separable convolutions[^fn-depthwise-mobile-efficiency] in MobileNet) into an efficient variant, reducing FLOPs by `{python} MobileEfficiencyRecap.mobilenet_flops_reduction_mult_str`, preserving accuracy. This is not merely optimization; it represents a qualitative shift in the arithmetic intensity trade-off, accepting lower peak throughput in exchange for sustainable operation within a `{python} MobileEfficiencyRecap.mobile_tdp_range_str` thermal envelope.
 
 [^fn-computational-photo-ml]: **Computational Photography**: Uses ML algorithms (for example, multi-frame fusion, neural denoising) to overcome the physical limits of small mobile camera sensors. This exemplifies the mobile computing trade-off, as a pipeline of 10–15 models must execute within the user's perceived shutter delay (~200 ms) while adhering to a strict, shared `{python} MobileEfficiencyRecap.mobile_tdp_range_str` thermal budget. \index{Computational Photography!pipeline constraint}
 
@@ -2627,7 +2658,7 @@ This battery-and-thermal boundary gives the mobile paradigm its defining shape.
 
 :::
 
-These constraints play out concretely in @fig-mobile-ml, which organizes the unique characteristics of mobile deployment. The Characteristics branch emphasizes sensor integration and on-device processing, which enables key Benefits like real-time processing and enhanced privacy. However, the Challenges branch reveals battery life constraints and limited computational resources that force engineers to optimize for sustained efficiency over raw performance.
+@Fig-mobile-ml maps the mobile resource budget. Sensor integration and on-device processing enable real-time response and stronger privacy properties, but battery life and limited compute force engineers to optimize for sustained efficiency over raw performance.
 
 ::: {#fig-mobile-ml fig-env="figure" fig-pos="htb" fig-cap="**Mobile ML Decomposition**: Characteristics, benefits, challenges, and representative applications of mobile machine learning, where on-device processing and hardware acceleration balance computational efficiency, battery life, and model performance on smartphones and tablets." fig-alt="Tree diagram with mobile ML branching to four categories: characteristics, benefits, challenges, and examples. Each lists items like on-device processing, real-time response, battery constraints, and voice recognition."}
 
@@ -2772,13 +2803,14 @@ class BatteryTax:
 
 The battery constraint limits total energy consumption over time. However, even if we could ignore battery life (say, for a plugged-in tablet or a short demo), a second physical law intervenes: thermodynamics. Every watt of computation becomes a watt of heat that must be dissipated. In a data center, massive cooling systems remove this heat. In a thin, sealed mobile device with no fan, the only heat path is through the glass and metal casing to the surrounding air. This creates *the thermal wall*, a hard ceiling on sustained power consumption that exists independently of battery capacity.
 
-The distinction matters for engineering decisions: the battery tax is a budget problem, solvable in principle by reducing how often the model runs or by increasing battery capacity. The thermal wall is a physics ceiling. No duty cycle, no larger battery, and no software optimization can raise the maximum sustained wattage a passive chassis can dissipate. A model that exceeds the thermal envelope triggers hardware throttling within seconds, regardless of how much energy remains in the battery. The two constraints therefore attack different points in the iron law: the battery limits total operations per charge ($O$ integrated over time), while the thermal wall caps the instantaneous rate ($R_{\text{peak}} \cdot \eta$) the silicon can sustain.
-
 ::: {.column-margin}
 ![](images/svg/vol1_ml_systems_margin_003.svg){width="100%" fig-alt="Two horizontal throughput levels: a high burst line and, well below it, a lower sustained line after thermal throttling engages."}
 
 *Sustained thermal performance falls well below burst peaks.*
 :::
+
+The distinction matters for engineering decisions: the battery tax is a budget problem, solvable in principle by reducing how often the model runs or by increasing battery capacity. The thermal wall is a physics ceiling. No duty cycle, no larger battery, and no software optimization can raise the maximum sustained wattage a passive chassis can dissipate. A model that exceeds the thermal envelope triggers hardware throttling within seconds, regardless of how much energy remains in the battery. The two constraints therefore attack different points in the iron law: the battery limits total operations per charge ($O$ integrated over time), while the thermal wall caps the instantaneous rate ($R_{\text{peak}} \cdot \eta$) the silicon can sustain.
+
 
 ```{python}
 #| echo: false
@@ -2795,7 +2827,7 @@ The distinction matters for engineering decisions: the battery tax is a budget p
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: ThermalQuantCalc.baseline_w_str, ThermalQuantCalc.quant_power_w_str,
-# │          ThermalQuantCalc.quant_red_str
+# │          ThermalQuantCalc.quant_reduction_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import ReferenceStats
@@ -2827,7 +2859,7 @@ class ThermalQuantCalc:
     baseline_w_str = fmt_qty(baseline_power, watt, precision=0, commas=False)
     mobile_tdp_w_str = fmt_qty(mobile_tdp, watt, precision=0, commas=False)
     quant_power_w_str = fmt_qty(quant_power, watt, precision=0, commas=False)
-    quant_red_str = fmt_multiple(quant_reduction_factor, precision=0, commas=False)
+    quant_reduction_factor_mult_str = fmt_multiple(quant_reduction_factor, precision=0, commas=False)
     temp_rise_s_str = fmt_temperature_rate(temp_rise, precision=0, commas=False)
     trip_time_s_str = fmt_time(trip_time, second, precision=0, commas=False)
     trip_temp_str = fmt_temperature(trip_temp, precision=0, commas=False)
@@ -2846,7 +2878,7 @@ class ThermalQuantCalc:
 3. **Thermal trip**: Within `{python} ThermalQuantCalc.trip_time_s_str`, the hardware reaches the **Thermal Trip Point**\index{Thermal Trip Point!hardware safety} (`{python} ThermalQuantCalc.trip_temp_str`), triggering OS throttling.
 4. **Result**: The `{python} ThermalQuantCalc.fps_before_str` model suddenly drops to `{python} ThermalQuantCalc.fps_after_str` to stay within the thermal envelope.
 
-**Systems insight**: Quantization from FP32 to INT8 reduces power by approximately `{python} ThermalQuantCalc.quant_red_str`$\times$, but with a baseline of `{python} ThermalQuantCalc.baseline_w_str` the result is still `{python} ThermalQuantCalc.quant_power_w_str`---the absolute limit of the hardware. Physics sets a hard ceiling that no optimization can exceed.
+**Systems insight**: Quantization from FP32 to INT8 reduces power by approximately `{python} ThermalQuantCalc.quant_reduction_factor_mult_str`, but with a baseline of `{python} ThermalQuantCalc.baseline_w_str` the result is still `{python} ThermalQuantCalc.quant_power_w_str`---the absolute limit of the hardware. Physics sets a hard ceiling that no optimization can exceed.
 
 :::
 
@@ -2951,7 +2983,7 @@ class MobileResourceRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mobile_ram_range_str = MarkdownStr(f"{mobile_ram_range} GB")
-    mobile_storage_range_str = mobile_storage_range
+    mobile_storage_range_str = MarkdownStr(mobile_storage_range)
     mobile_npu_range_str = fmt_qty_range(
         mobile_npu_min,
         mobile_npu_max,
@@ -2987,7 +3019,7 @@ These benefits require accepting tight resource constraints. Compared to cloud d
 
 ### Personal assistant and media processing {#sec-ml-systems-personal-assistant-media-processing-98d7}
 
-\index{Mobile ML!computational photography} \index{Mobile ML!voice recognition} \index{Mobile ML!health monitoring}Mobile ML has achieved success across diverse applications for billions of users worldwide, and the engineering constraints behind these applications illustrate the battery and thermal trade-offs that define this paradigm. Computational photography exemplifies the challenge of running multiple ML pipelines within a thermal envelope. Modern flagships process every photo through 10–15 distinct ML models in real-time: portrait mode[^fn-portrait-mode-pipeline] uses depth estimation and segmentation, night mode captures and aligns 9-15 frames with ML-based denoising, and HDR merging, super-resolution, and scene optimization run in sequence. The engineering challenge is not any individual model but the pipeline: these models must share a `{python} MobileResourceRecap.mobile_tdp_range_str` power budget and complete within the user's perceived shutter delay, requiring careful scheduling across CPU, GPU, and NPU to avoid thermal throttling.
+\index{Mobile ML!computational photography} \index{Mobile ML!voice recognition} \index{Mobile ML!health monitoring}Across mobile applications, the central systems problem is that several short pipelines must share the same battery and thermal budget. Computational photography exemplifies the challenge of running multiple ML pipelines within a thermal envelope. Modern flagships process every photo through 10–15 distinct ML models in real-time: portrait mode[^fn-portrait-mode-pipeline] uses depth estimation and segmentation, night mode captures and aligns 9-15 frames with ML-based denoising, and HDR merging, super-resolution, and scene optimization run in sequence. The engineering challenge is not any individual model but the pipeline: these models must share a `{python} MobileResourceRecap.mobile_tdp_range_str` power budget and complete within the user's perceived shutter delay, requiring careful scheduling across CPU, GPU, and NPU to avoid thermal throttling.
 
 Voice-driven interactions demonstrate mobile ML's layered architecture. Wake-word detection runs continuously at under 1 mW on a dedicated low-power core, speech recognition operates on the NPU at under 10 ms latency, and keyboard prediction uses context-aware neural models to reduce typing effort by 30–40 percent. Each layer operates at a different power tier, illustrating how mobile ML partitions workloads across heterogeneous processing units within a single SoC.
 
@@ -3009,9 +3041,9 @@ Health monitoring and augmented reality push mobile ML to its sustained-performa
 # │
 # │ Imports: mlsysim.core.constants, mlsysim.book (fmt, check)
 # │ Exports: MobileResnetPitfallRecap.resnet_fp32_mb_str,
-# │          MobileResnetPitfallRecap.resnet_gflops_str
+# │          MobileResnetPitfallRecap.resnet_gflop_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_qty, fmt_count
+from mlsysim.fmt import fmt, check, fmt_qty, fmt_count, fmt_flops
 from mlsysim.core.units import byte, MB, GFLOPs, param
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3033,10 +3065,10 @@ class MobileResnetPitfallRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_fp32_mb_str = fmt_qty(resnet_fp32_bytes, MB, precision=1, commas=False)
-    resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)
+    resnet_gflop_str = fmt_flops(resnet_flops, unit=GFLOPs, precision=1, commas=False)
 ```
 
-These successes can create a misleading sense of ease. A common pitfall involves attempting to deploy desktop-trained models directly to mobile or edge devices without architecture modifications. Models developed on powerful workstations often fail when deployed to resource-constrained devices. A desktop ResNet-50 pipeline may require gigabytes once activations, batches, preprocessing buffers, and runtime overhead are included, even though the FP32 weights alone are about `{python} MobileResnetPitfallRecap.resnet_fp32_mb_str`. Such a pipeline, with `{python} MobileResnetPitfallRecap.resnet_gflops_str` billion FLOPs per inference, cannot run unchanged on a device with 512 MB of RAM and a 1 GFLOP/s processor. Beyond simple resource violations, desktop-optimized models may use operations unsupported by mobile hardware (specialized mathematical operations), assume floating-point precision unavailable on embedded systems, or require batch processing incompatible with single-sample inference. Successful deployment demands architecture-aware design from the beginning, including specialized architectural techniques for mobile devices such as MobileNet's depthwise separable convolutions [@howard2017mobilenets] (detailed in @sec-network-architectures), integer-only operations for microcontrollers, and optimization strategies that maintain accuracy while reducing computation.
+These successes can create a misleading sense of ease. A common pitfall involves attempting to deploy desktop-trained models directly to mobile or edge devices without architecture modifications. Models developed on powerful workstations often fail when deployed to resource-constrained devices. A desktop ResNet-50 pipeline may require gigabytes once activations, batches, preprocessing buffers, and runtime overhead are included, even though the FP32 weights alone are about `{python} MobileResnetPitfallRecap.resnet_fp32_mb_str`. Such a pipeline, requiring `{python} MobileResnetPitfallRecap.resnet_gflop_str` per inference, cannot run unchanged on a device with 512 MB of RAM and a 1 GFLOP/s processor. Beyond simple resource violations, desktop-optimized models may use operations unsupported by mobile hardware (specialized mathematical operations), assume floating-point precision unavailable on embedded systems, or require batch processing incompatible with single-sample inference. Successful deployment demands architecture-aware design from the beginning, including specialized architectural techniques for mobile devices such as MobileNet's depthwise separable convolutions [@howard2017mobilenets] (detailed in @sec-network-architectures), integer-only operations for microcontrollers, and optimization strategies that maintain accuracy while reducing computation.
 
 Mobile ML demonstrates that useful intelligence can operate within a `{python} MobileResourceRecap.mobile_tdp_range_str` thermal envelope on battery power. However, smartphones still cost hundreds of dollars, require gigabytes of memory, and demand user attention to recharge daily. These requirements make them unsuitable for a vast class of applications: monitoring soil moisture across a thousand-acre farm, detecting structural stress in bridge cables, or listening for endangered species in a remote forest. These scenarios demand not just lower power but a qualitatively different engineering regime, one where the device costs dollars instead of hundreds, memory is measured in kilobytes instead of gigabytes, and the system runs unattended for months or years. Mobile optimization techniques such as quantization and depthwise separable convolutions help, but they cannot bridge a 10,000-fold gap in available memory. What is needed is not a scaled-down smartphone but an entirely different class of hardware and algorithms.
 
@@ -3059,7 +3091,7 @@ Where mobile ML requires sophisticated hardware with gigabytes of memory and mul
 
 [^fn-coin-cell-longevity]: **Coin-Cell Deployment**: A CR2032 battery (225 mAh at 3 V, ~675 mWh) powers a TinyML model consuming 10--50 µW for 1--10 years. This "deploy-and-forget" operating model constrains models to <100 KB (fitting in on-chip SRAM) and drives innovation in intermittent computing\index{Intermittent Computing!power management}, where the device sleeps between inferences to stretch the energy budget across years of unattended operation.
 
-The scale of these constraints becomes tangible when we see the hardware. @Fig-TinyML-example shows representative microcontroller development boards, each built around kilobyte-scale SRAM and milliwatt-scale power budgets. The entire ML inference pipeline, from sensor input to classification output, must fit within these physical and energy limits.
+[^fn-ubiquitous-computing]: **Ubiquitous Computing**: Mark Weiser's vision of "invisible" technology is achieved when the cost and power of an intelligent sensor become so low that the economic barrier to mass deployment vanishes. This forces the optimization objective to shift from performance (throughput) to power (energy per inference), the central trade-off of the tiny constraint archetype. A keyword spotter achieving a million-fold energy efficiency gain can thus operate for years on a coin-cell battery, making ubiquitous intelligence practical. \index{Ubiquitous Computing!TinyML realization}
 
 ::: {#fig-TinyML-example fig-env="figure" fig-pos="htb" fig-cap="**TinyML System Scale**: Small microcontroller development boards with visible processor chips and pin connectors that enable sensor integration for always-on ML inference under tight memory and power budgets." fig-alt="Small microcontroller development boards arranged on a surface, with visible chips and connectors."}
 
@@ -3067,7 +3099,7 @@ The scale of these constraints becomes tangible when we see the hardware. @Fig-T
 
 :::
 
-[^fn-ubiquitous-computing]: **Ubiquitous Computing**: Mark Weiser's vision of "invisible" technology is achieved when the cost and power of an intelligent sensor become so low that the economic barrier to mass deployment vanishes. This forces the optimization objective to shift from performance (throughput) to power (energy per inference), the central trade-off of the tiny constraint archetype. A keyword spotter achieving a million-fold energy efficiency gain can thus operate for years on a coin-cell battery, making ubiquitous intelligence practical. \index{Ubiquitous Computing!TinyML realization}
+The scale of these constraints becomes tangible when we see the hardware. @Fig-TinyML-example shows representative microcontroller development boards, each built around kilobyte-scale SRAM and milliwatt-scale power budgets. The entire ML inference pipeline, from sensor input to classification output, must fit within these physical and energy limits.
 
 At this endpoint, the deployment target is defined by always-on sensing under kilobyte and milliwatt budgets.
 
@@ -3160,6 +3192,11 @@ class EnergyInference:
 
 \index{Energy per Inference!paradigm comparison} \index{TinyML!energy efficiency}Energy consumption spans eight orders of magnitude across deployment paradigms. @Tbl-ml-systems-energy-per-inference reports representative full-system energy per inference and the resulting smartphone-battery query counts:
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.15}
+```
+
 | **Paradigm** | **Example Workload** |               **Energy/Inference**               | **Battery Life (`{python} EnergyInference.batt_volt_str`, `{python} EnergyInference.batt_cap_mah_str`)** |
 |:-------------|:---------------------|:------------------------------------------------:|---------------------------------------------------------------------------------------------------------:|
 | **Cloud**    | GPT-4 query          |      `{python} EnergyInference.e_gpt4_str`       |                                                                    `{python} EnergyInference.q_gpt4_str` |
@@ -3170,6 +3207,10 @@ class EnergyInference:
 
 : **Energy per Inference Across Paradigms**: Representative full-system energy per inference and resulting smartphone-battery query counts for cloud, edge, mobile, and TinyML workloads, illustrating the eight-order-of-magnitude span that makes always-on sensing feasible only at the TinyML tier. {#tbl-ml-systems-energy-per-inference tbl-colwidths="[22,25,25,28]"}
 
+```{=latex}
+\endgroup
+```
+
 <!-- lego-ok-block: full-system vs. isolated-compute narrative contrast, not cell operands -->
 Energy values represent *full-system energy* (including server CPUs, memory, networking, and cooling overhead), not *isolated accelerator compute energy*. For example, the A100 GPU alone executes ResNet-50 inference in under 1 ms (~0.3 J), but the full server draws ~1 kW when amortized across queuing, preprocessing, and idle power.
 <!-- end lego-ok-block -->
@@ -3178,7 +3219,7 @@ Energy values represent *full-system energy* (including server CPUs, memory, net
 
 :::
 
-@Fig-tiny-ml positions TinyML relative to the other paradigms. The Characteristics branch reveals the extreme constraints: milliwatt power and kilobyte memory. These limits enable the Benefit of "always-on" sensing that no other paradigm can sustain, but force engineers to solve the Challenge of extreme model compression.
+@Fig-tiny-ml places TinyML at the endpoint of the resource envelope: milliwatt power and kilobyte memory. These limits enable always-on sensing that no other paradigm can sustain, but they force engineers to solve extreme model compression before the application can exist.
 
 ::: {#fig-tiny-ml fig-env="figure" fig-pos="htb" fig-cap="**TinyML Decomposition**: Characteristics, benefits, challenges, and representative applications of TinyML, where milliwatt power budgets and kilobyte memory limits enable always-on sensing and localized intelligence in embedded applications." fig-alt="Tree diagram with TinyML branching to four categories: characteristics, benefits, challenges, and examples, listing items like low-power operation, always-on capability, resource limitations, and predictive maintenance."}
 
@@ -3265,7 +3306,7 @@ Beyond these technical constraints, operational challenges compound the difficul
 
 ### Environmental and health monitoring {#sec-ml-systems-environmental-health-monitoring-14ad}
 
-\index{TinyML!wake-word detection} \index{TinyML!precision agriculture} \index{TinyML!medical wearables}TinyML succeeds across domains where ultra-low power, low per-node cost, and local processing enable applications that no other paradigm can sustain.
+\index{TinyML!wake-word detection} \index{TinyML!precision agriculture} \index{TinyML!medical wearables}TinyML applications belong here when ultra-low power, low per-node cost, and local processing make a deployment feasible that no other paradigm can sustain.
 
 Wake-word detection is the most familiar consumer application of TinyML. These systems listen continuously at sub-milliwatt power consumption, processing audio streams locally and activating higher-power components only when a wake phrase is detected—a design that dramatically reduces average device power draw[^fn-wearable-always-on].
 
@@ -3286,7 +3327,7 @@ Precision agriculture exploits TinyML's economic advantages where traditional so
 # │ Imports: mlsysim.core.constants (GB, KB), mlsysim.book (fmt, check)
 # │ Exports: WildlifeMonitoring.raw_audio_gb_per_day_str,
 # │          WildlifeMonitoring.summary_kb_per_day_str,
-# │          WildlifeMonitoring.reduction_x_str
+# │          WildlifeMonitoring.reduction_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_qty
 from mlsysim.core.units import GB, KB
@@ -3308,11 +3349,11 @@ class WildlifeMonitoring:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     raw_audio_gb_per_day_str = fmt_qty(raw_audio_per_day, GB, precision=1, commas=False, per="day")
     summary_kb_per_day_str = fmt_qty(summary_per_day, KB, precision=0, commas=False, per="day")
-    reduction_x_str = fmt(reduction, precision=0, commas=True)
+    reduction_mult_str = fmt_multiple(reduction, precision=0, commas=True)
 ```
 
 \index{Wildlife Conservation!TinyML monitoring}
-Wildlife conservation uses TinyML for remote environmental monitoring. Researchers deploy solar-powered audio sensors consuming 100–500 mW that process continuous audio streams for species identification. By performing local analysis, these systems reduce satellite transmission requirements from `{python} WildlifeMonitoring.raw_audio_gb_per_day_str` of raw audio to `{python} WildlifeMonitoring.summary_kb_per_day_str` of detection summaries, a `{python} WildlifeMonitoring.reduction_x_str`$\times$ reduction that makes large-scale deployments of 100–1,000 sensors economically feasible.
+Wildlife conservation uses TinyML for remote environmental monitoring. Researchers deploy solar-powered audio sensors consuming 100–500 mW that process continuous audio streams for species identification. By performing local analysis, these systems reduce satellite transmission requirements from `{python} WildlifeMonitoring.raw_audio_gb_per_day_str` of raw audio to `{python} WildlifeMonitoring.summary_kb_per_day_str` of detection summaries, a `{python} WildlifeMonitoring.reduction_mult_str` reduction that makes large-scale deployments of 100–1,000 sensors economically feasible.
 
 Medical wearables push TinyML into healthcare, where the combination of always-on monitoring and on-device privacy proves uniquely valuable. FDA-cleared cardiac monitors achieve 95–98 percent sensitivity while processing 250–500 ECG samples per second at under 5 mW power consumption. This efficiency enables week-long continuous monitoring vs. hours for smartphone-based alternatives, while reducing diagnostic costs from \$2,000–5,000 for traditional in-lab studies to under \$100 for at-home testing.
 
@@ -3528,7 +3569,7 @@ A critical pitfall in deployment selection is choosing paradigms based solely on
 ::: {#fig-mlsys-playbook-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Deployment Decision Logic**: This flowchart guides selection of an appropriate machine learning deployment paradigm by systematically evaluating privacy requirements and processing constraints, ultimately balancing performance, cost, and data security. Navigating the decision tree helps practitioners determine whether cloud, edge, mobile, or tiny machine learning best suits a given application." fig-alt="Decision flowchart with four layers: privacy, performance, compute needs, and cost. Each layer filters toward deployment options: cloud ML, edge ML, mobile ML, or TinyML based on constraints."}
 
 ```{.tikz}
-\resizebox{.9\textwidth}{!}{%
+\resizebox{.87\textwidth}{!}{%
 \begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{%
 Line/.style={black!50,-{Triangle[width = 5pt, length = 8pt]}, line width = 1.25pt,text=black},
@@ -3672,6 +3713,10 @@ class BrakingDistance:
 3. **Compute**: Pedestrian detection requires ~10 GFLOPs at 30 FPS = 300 GFLOP/s sustained.
    - TinyML (<1 GFLOP/s): Fails
    - Mobile NPU (~35 INT8 TOPS, ample once the model is quantized to integer precision): Possible, but thermal constraints limit sustained operation
+
+```{=latex}
+\tcbbreak
+```
    - Edge GPU (~10+ TFLOP/s): Passes with margin
    - Decision: Edge or high-end Mobile.
 4. **Cost**: Safety-critical, high-volume production (millions of vehicles).
@@ -3734,13 +3779,13 @@ The decision framework (@fig-mlsys-playbook-flowchart) helps select the best sin
 
 ### Integration patterns {#sec-ml-systems-integration-patterns-5935}
 
-\index{Hybrid ML!train-serve split} \index{Hybrid ML!hierarchical processing} \index{Hybrid ML!progressive deployment}Three essential patterns address common integration challenges:
+\index{Hybrid ML!train-serve split} \index{Hybrid ML!hierarchical processing} \index{Hybrid ML!progressive deployment}The three essential patterns differ by which boundary creates the constraint: training/serving cost asymmetry, multi-rate data flow, or deployment reach.
 
 The **Train-Serve Split**\index{Train-Serve Split!economics} places training in the cloud while inference happens on edge, mobile, or tiny devices. This pattern exploits cloud scale for training while benefiting from local inference latency and privacy. Training costs may reach millions of dollars for large models, while inference costs mere cents per query when deployed efficiently.[^fn-train-serve-cost-asymmetry]
 
 In **Hierarchical Processing**\index{Hierarchical Processing!data flow}, data and intelligence flow between computational tiers. TinyML sensors perform basic anomaly detection, edge devices aggregate and analyze data from multiple sensors, and cloud systems handle complex analytics and model updates. Each tier handles tasks appropriate to its capabilities.
 
-**Progressive Deployment**\index{Progressive Deployment!model compression} systematically compresses models for deployment across tiers. A large cloud model becomes progressively optimized versions for edge servers, mobile devices, and tiny sensors. Voice assistants exemplify this pattern: wake-word detection uses small, always-on models, often tens of kilobytes for benchmark TinyML neural networks and sub-milliwatt to milliwatt-scale power on dedicated low-power hardware, while complex natural language understanding requires much larger models in cloud infrastructure.
+The third pattern, **Progressive Deployment**\index{Progressive Deployment!model compression}, systematically compresses models for deployment across tiers. A large cloud model becomes progressively optimized versions for edge servers, mobile devices, and tiny sensors. Voice assistants exemplify this pattern: wake-word detection uses small, always-on models, often tens of kilobytes for benchmark TinyML neural networks and sub-milliwatt to milliwatt-scale power on dedicated low-power hardware, while complex natural language understanding requires much larger models in cloud infrastructure.
 
 [^fn-train-serve-cost-asymmetry]: **Train-Serve Cost Asymmetry**: Training is a one-time, compute-intensive search for model parameters, while inference is a single, cheap forward pass using those parameters. This creates the economic rationale for the split, as the massive fixed training cost is amortized over billions of subsequent low-cost inference queries. The resulting cost gap between a multi-million dollar training run and a sub-cent inference can exceed 1,000,000$\times$. \index{Train-Serve Split!cost asymmetry}
 
@@ -3758,7 +3803,7 @@ Voice assistants combine Train-Serve Split, Progressive Deployment, and Hierarch
 
 ### Production system integration {#sec-ml-systems-production-system-integration-3bb3}
 
-\index{Hybrid ML!production systems} \index{Data Pipeline!hybrid architectures}Real-world implementations integrate multiple design patterns into cohesive solutions. @Fig-hybrid makes these interactions concrete through specific connection types. Notice the bidirectional flow: "Deploy" paths show how models flow *downward* from cloud training to various devices, while "Data" and "Results" flow *upward* from sensors through processing stages to cloud analytics. "Sync" connections demonstrate device coordination across tiers. This bidirectional architecture, models flowing down and data flowing up, is the defining characteristic of production hybrid systems.
+\index{Hybrid ML!production systems} \index{Data Pipeline!hybrid architectures}Real-world implementations integrate multiple design patterns into cohesive solutions. @Fig-hybrid makes these interactions concrete through specific connection types. The key feature is bidirectional flow: "Deploy" paths show how models flow *downward* from cloud training to various devices, while "Data" and "Results" flow *upward* from sensors through processing stages to cloud analytics. "Sync" connections demonstrate device coordination across tiers. This bidirectional architecture, models flowing down and data flowing up, is the defining characteristic of production hybrid systems.
 
 ::: {#fig-hybrid fig-env="figure" fig-pos="htb" fig-cap="**Hybrid System Interactions**: Data flows upward from sensors through processing layers to cloud analytics, while trained models deploy downward to edge, mobile, and TinyML inference points. Five connection types (deploy, data, results, assist, and sync) establish a distributed architecture where each paradigm contributes unique capabilities." fig-alt="System diagram with four ML paradigms: TinyML sensors, edge inference, mobile processing, and cloud training. Arrows show deploy, data, results, sync, and assist flows between tiers."}
 
@@ -3834,11 +3879,11 @@ Line/.style={line width=1.0pt,black!50,text=black},
 
 :::
 
-Production systems demonstrate these integration patterns across diverse applications. Industrial defect detection exemplifies Train-Serve Split: cloud infrastructure trains vision models on datasets from multiple facilities, then distributes optimized versions to edge servers managing factory floors, tablets for quality inspectors, and embedded cameras on production lines. Agricultural monitoring illustrates Hierarchical Processing: soil sensors perform local anomaly detection at the TinyML tier, edge processors aggregate data from dozens of sensors and identify field-level patterns, while cloud infrastructure handles farm-wide analytics and seasonal planning. Fitness tracking exemplifies Progressive Deployment with gateway patterns: wearables continuously monitor activity using microcontroller-optimized algorithms consuming <1 mW, sync processed summaries to smartphones that combine metrics from multiple sources, then transmit periodic updates to cloud infrastructure for longitudinal health analysis.
+Production systems demonstrate these integration patterns by placing each tier boundary at a different binding constraint. Industrial defect detection exemplifies Train-Serve Split: cloud infrastructure trains vision models on datasets from multiple facilities, then distributes optimized versions to edge servers managing factory floors, tablets for quality inspectors, and embedded cameras on production lines. Agricultural monitoring illustrates Hierarchical Processing: soil sensors perform local anomaly detection at the TinyML tier, edge processors aggregate data from dozens of sensors and identify field-level patterns, while cloud infrastructure handles farm-wide analytics and seasonal planning. Fitness tracking exemplifies Progressive Deployment with gateway patterns: wearables continuously monitor activity using microcontroller-optimized algorithms consuming <1 mW, sync processed summaries to smartphones that combine metrics from multiple sources, then transmit periodic updates to cloud infrastructure for longitudinal health analysis.
 
 ### Why hybrid approaches work {#sec-ml-systems-hybrid-approaches-work-4bb8}
 
-\index{Hybrid ML!convergence principles} The success of hybrid architectures stems from a deeper truth: despite their diversity, all ML deployment paradigms share core principles. @Fig-ml-systems-convergence illustrates this convergence: implementations spanning cloud to tiny devices meet at the same core system challenges—managing data pipelines, balancing resource constraints, and implementing reliable architectures.
+\index{Hybrid ML!convergence principles} Hybrid architectures work because the paradigms differ in resource budgets, not in the underlying systems jobs. @Fig-ml-systems-convergence illustrates this convergence: implementations spanning cloud to tiny devices meet at the same core system challenges: managing data pipelines, balancing resource constraints, and implementing reliable architectures.
 
 ::: {#fig-ml-systems-convergence fig-env="figure" fig-pos="htb" fig-cap="**Convergence of ML Systems**: Three-layer structure showing how diverse deployments converge. The top layer lists four paradigms (Cloud, Edge, Mobile, TinyML); the middle layer identifies shared foundations (data pipelines, resource management, models, hardware, and deployment); and the bottom layer presents three system considerations (optimization and efficiency, operational aspects, and trustworthy AI) that apply across all paradigms." fig-alt="Three-layer diagram. Top: cloud, edge, mobile, TinyML implementations. Middle: data pipeline, resource management, models, hardware, deployment. Bottom: optimization and efficiency, operational aspects, trustworthy AI. Arrows connect layers."}
 
@@ -4161,13 +4206,13 @@ filllcolor=BrownL!30,  Linewidth=1.0pt}};
 \node[Txt,anchor=south,above= 0 of B4](TT4){Resource-Constrained \\ Devices};
 %%%%%%%%%%%%%%%%%%%%%%
 %Data Pipeline
-\node[Box,below=3.5 of B1](2B1){};
+\node[Box,below=3.2 of B1](2B1){};
 \pic[shift={(-0.56,-0.6)}] at  (2B1){dataP={scalefac=0.56,picname=1,filllcirclecolor=violet!20,filllcolor=BlueLine, Linewidth=0.7pt}};
 \draw[violet,line width=1.5pt](2B1.south west)--coordinate(2S1)(2B1.south east);
 \node[Box3,anchor=north,below= 0.2 of 2B1](2T1){Data Pipeline};
 \node[Txt,anchor=south,above= 0 of 2B1](2TT1){Collection – Processing –\\ Deployment};
 %System Architecture
-\node[Box,below=3.5 of B4](2B3){};
+\node[Box,below=3.2 of B4](2B3){};
 \pic[shift={(0,0)}] at  (2B3){streaming={scalefac=0.43,picname=2,drawcolor=mybrown, Linewidth=1.25pt}};
 \draw[violet,line width=1.5pt](2B3.south west)--coordinate(2S3)(2B3.south east);
 \node[Box3,anchor=north,below= 0.2 of 2B3](2T3){System Architecture};
@@ -4186,20 +4231,20 @@ filllcolor=BrownL!30,  Linewidth=1.0pt}};
 %%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%
 %Optimization
-\node[Box,below=3.5 of 2B1](3B1){};
+\node[Box,below=3.3 of 2B1](3B1){};
 \pic[shift={(-0.20,-0.350)}] at  (3B1){light={scalefac=0.7,drawcolor=yellow!90!black,filllcolor=yellow!50!, Linewidth=1.0pt}};
 \draw[violet,line width=1.5pt](3B1.south west)--coordinate(3S1)(3B1.south east);
 \node[Box4,anchor=north,below= 0.2 of 3B1](3T1){Optimization \& Efficiency};
 \node[Txt,anchor=south,above= 0 of 3B1](3TT1){Model – Hardware –\\ Energy};
 %Operational Aspects
-\node[Box,below=3.5 of 2B2](3B2){};
+\node[Box,below=3.3 of 2B2](3B2){};
 \pic[shift={(-0.8,0)}] at  (3B2){infinityL={scalefac=0.27,picname=1,Linewidth=0.8pt,
  filllcolor=BrownLine,drawcolor=GreenLine}};
 \draw[violet,line width=1.5pt](3B2.south west)--coordinate(3S2)(3B2.south east);
 \node[Box4,anchor=north,below= 0.2 of 3B2](2T2){Operational Aspects};
 \node[Txt,anchor=south,above= 0 of 3B2](3TT2){Deployment – Monitoring –\\  Update};
 %Trustworthy AI
-\node[Box,below=3.5 of 2B3](3B3){};
+\node[Box,below=3.3 of 2B3](3B3){};
 \pic[shift={(0,0.1)}] at  (3B3){stitAI={scalefac=0.66,filllcirclecolor=orange!80,,drawcolor=BlueLine,filllcolor=cyan!10,  Linewidth=1.0pt}};
 \draw[violet,line width=1.5pt](3B3.south west)--coordinate(3S3)(3B3.south east);
 \node[Box4,anchor=north,below= 0.2 of 3B3](3T3){Trustworthy AI };
@@ -4219,79 +4264,11 @@ filllcolor=BrownL!30,  Linewidth=1.0pt}};
 \draw[Arr](F1)--(F2);
 \draw[Arr](F2)--(F3);
 \end{tikzpicture}
-\end{document}
-
-\tikzset{
-Line/.style={line width=1.0pt,black!50,text=black},
-  Box/.style={inner xsep=2pt,
-    node distance=0.6,
-    draw=GreenLine, line width=0.75pt,
-    fill=GreenL,
-    text width=30mm,align=flush center,
-    minimum width=30mm, minimum height=13mm
-  },
-  Box1/.style={inner xsep=2pt,
-    node distance=0.8,
-    draw=BlueLine, line width=0.75pt,
-    fill=BlueL,
-    text width=36mm,align=flush center,
-    minimum width=40mm, minimum height=13mm
-  },
-}
-
-\begin{scope}[anchor=west]
-\node[Box](B1){Cloud ML Data Centers Training at Scale};
-\node[Box,right=of B1](B2){Edge ML Local Processing Inference Focus};
-\node[Box,right=of B2](B3){Mobile ML Personal DevicesUser Applications};
-\node[Box, right=of B3](B4){TinyML Embedded Systems Resource Constrained};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,minimum width=170mm,
-      anchor=west,yshift=2mm,fill=BackColor,
-      fit=(B1)(B2)(B3)(B4),line width=0.75pt](BB){};
-\node[below=11pt of  BB.north east,anchor=east]{ML System Implementations};
-\end{scope}
-%
-\begin{scope}[shift={(0.4,-2.8)}, anchor=west]
-\node[Box1](2B1){Data Pipeline Collection -- Processing -- Deployment};
-\node[Box1,right=of 2B1](2B2){Resource Management Compute -- Memory -- Energy -- Network};
-\node[Box1,right=of 2B2](2B3){System Architecture Models -- Hardware -- Software};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,minimum width=170mm,
-      anchor= west,yshift=-1mm,fill=BackColor,fit=(2B1)(2B2)(2B3),line width=0.75pt](BB2){};
-\node[above=8pt of  BB2.south east,anchor=east]{Core System Principles};
-\end{scope}
-%
-\begin{scope}[shift={(0.4,-6.0)}, anchor=west]
-\node[Box1, fill=VioletL,draw=VioletLine](3B1){Optimization \& Efficiency Model -- Hardware -- Energy};
-\node[Box1,right=of 3B1, fill=VioletL,draw=VioletLine](3B2){Operational Aspects Deployment -- Monitoring -- Updates};
-\node[Box1,right=of 3B2, fill=VioletL,draw=VioletLine](3B3){Trustworthy AI Security -- Privacy -- Reliability};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,minimum width=170mm,
-       anchor= west,yshift=-1mm,fill=BackColor,fit=(3B1)(3B2)(3B3),line width=0.75pt](BB3){};
-\node[above=8pt of  BB3.south east,anchor=east]{System Considerations};
-\end{scope}
-%
-\draw[-latex,Line](B1.south)--++(270:0.75)-|(2B1);
-\draw[-latex,Line](B2.south)--++(270:0.75)-|(2B1);
-\draw[-latex,Line](B3.south)--++(270:0.75)-|(2B1);
-\draw[-latex,Line](B4.south)--++(270:0.75)-|(2B1);
-\draw[-latex,Line](B2.south)--++(270:0.75)-|(2B2);
-\draw[-latex,Line](B3.south)--++(270:0.75)-|(2B3);
-%
-\draw[-latex,Line](2B1.south)--++(270:0.95)-|(3B1);
-\draw[-latex,Line](2B2.south)--++(270:0.95)-|(3B1);
-\draw[-latex,Line](2B3.south)--++(270:0.95)-|(3B1);
-\draw[-latex,Line](2B2.south)--++(270:0.95)-|(3B2);
-\draw[-latex,Line](2B3.south)--++(270:0.95)-|(3B3);
-\end{tikzpicture}
 ```
 
 :::
 
-This convergence explains why techniques transfer effectively between scales. Cloud-trained models deploy to edge because both training and inference minimize the same loss function—only the compute budget differs. Quantization techniques developed for edge deployment reduce cloud serving costs, and distributed training strategies inform edge model parallelism.
+This convergence explains why techniques transfer between scales when they attack a shared bottleneck. Cloud-trained models deploy to edge because both training and inference minimize the same loss function, and only the compute budget differs. Quantization techniques developed for edge deployment reduce cloud serving costs, and distributed training strategies inform edge model parallelism.
 
 Mobile optimization insights inform cloud efficiency because memory bandwidth constraints appear at every scale. Techniques like operator fusion and activation checkpointing, developed for mobile's tight memory budgets, reduce cloud inference costs by 2--3$\times$ when applied to batch serving. TinyML innovations drive cross-paradigm advances because extreme constraints force genuinely novel algorithmic breakthroughs: binary neural networks, developed for microcontrollers, now accelerate cloud recommendation systems, and sparse attention mechanisms, essential for fitting transformers in kilobytes, reduce cloud training costs.
 
@@ -4363,7 +4340,7 @@ A related misconception holds that moving computation closer to the user always 
 # │          MobilePowerFallacyCalc.high_power_w_str,
 # │          MobilePowerFallacyCalc.phone_battery_wh_str,
 # │          MobilePowerFallacyCalc.mobile_tdp_w_str,
-# │          MobilePowerFallacyCalc.quant_red_str,
+# │          MobilePowerFallacyCalc.quant_reduction_factor_mult_str,
 # │          MobilePowerFallacyCalc.low_power_hours_str,
 # │          MobilePowerFallacyCalc.high_power_hours_str,
 # │          MobilePowerFallacyCalc.low_power_frac,
@@ -4404,7 +4381,7 @@ class MobilePowerFallacyCalc:
     low_power_hours_str = fmt_time(low_power_runtime, hour, precision=0, commas=False)
     high_power_hours_str = fmt_time(high_power_runtime, hour, precision=0, commas=False)
     mobile_tdp_w_str = fmt_qty(mobile_tdp, watt, precision=0, commas=False)
-    quant_red_str = fmt_multiple(quant_reduction_factor, precision=0, commas=False)
+    quant_reduction_factor_mult_str = fmt_multiple(quant_reduction_factor, precision=0, commas=False)
 
     # Inline fractions showing the physics.
     low_power_frac = fmt_frac(f"{phone_battery_wh_str}", f"{low_power_w_str}", f"**{low_power_hours_str}**")
@@ -4418,7 +4395,7 @@ Compression techniques do not scale indefinitely against physics. Consider a sma
 - **Light workload** (`{python} MobilePowerFallacyCalc.low_power_w_str` inference): `{python} MobilePowerFallacyCalc.low_power_frac`
 - **Heavy workload** (`{python} MobilePowerFallacyCalc.high_power_w_str`, common for large on-device models): `{python} MobilePowerFallacyCalc.high_power_frac`
 
-The `{python} MobilePowerFallacyCalc.high_power_w_str` workload also triggers thermal throttling\index{Thermal Throttling!performance limits} that substantially reduces performance. As @sec-ml-systems-mobile-ml-benefits-resource-constraints-c568 establishes, sustained mobile inference cannot exceed approximately `{python} MobilePowerFallacyCalc.mobile_tdp_w_str` without active cooling. Reducing numerical precision (using fewer bits to represent each weight; see @sec-model-compression) cuts power by approximately `{python} MobilePowerFallacyCalc.quant_red_str`$\times$, but aggressive precision reduction often causes accuracy loss. Applications requiring continuous inference beyond mobile thermal envelopes remain physically impossible regardless of algorithmic improvements.
+The `{python} MobilePowerFallacyCalc.high_power_w_str` workload also triggers thermal throttling\index{Thermal Throttling!performance limits} that substantially reduces performance. As @sec-ml-systems-mobile-ml-benefits-resource-constraints-c568 establishes, sustained mobile inference cannot exceed approximately `{python} MobilePowerFallacyCalc.mobile_tdp_w_str` without active cooling. Reducing numerical precision (using fewer bits to represent each weight; see @sec-model-compression) cuts power by approximately `{python} MobilePowerFallacyCalc.quant_reduction_factor_mult_str`, but aggressive precision reduction often causes accuracy loss. Applications requiring continuous inference beyond mobile thermal envelopes remain physically impossible regardless of algorithmic improvements.
 
 **Fallacy**: *TinyML represents scaled-down mobile ML.*
 
@@ -4441,7 +4418,7 @@ The difference is qualitative, not just quantitative. As @sec-ml-systems-tinyml-
 # │ Exports: TcoPitfallCalc.cloud_compute_usd_str, TcoPitfallCalc.edge_hw_usd_str,
 # │          TcoPitfallCalc.edge_network_usd_str, TcoPitfallCalc.edge_maint_usd_str,
 # │          TcoPitfallCalc.edge_reliability_usd_str, TcoPitfallCalc.edge_total_usd_str,
-# │          TcoPitfallCalc.tco_ratio_str
+# │          TcoPitfallCalc.tco_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, fmt_multiple
@@ -4473,12 +4450,12 @@ class TcoPitfallCalc:
     edge_maint_usd_str = fmt_usd(edge_maintenance, precision=0, commas=False, per="month")
     edge_reliability_usd_str = fmt_usd(edge_reliability, precision=0, commas=True, per="month")
     edge_total_usd_str = fmt_usd(edge_total, precision=0, commas=True, per="month")
-    tco_ratio_str = fmt_multiple(tco_ratio, precision=0, commas=False)
+    tco_ratio_mult_str = fmt_multiple(tco_ratio, precision=0, commas=False)
 ```
 
 **Pitfall**: *Minimizing computational resources minimizes total cost.*
 
-Teams optimize per-unit resource consumption while ignoring operational overhead and development velocity. As the decision framework in @sec-ml-systems-decision-framework-241f emphasizes, paradigm selection requires evaluating total cost of ownership, not just compute costs. A cloud inference service costing `{python} TcoPitfallCalc.cloud_compute_usd_str` in compute appears expensive vs. `{python} TcoPitfallCalc.edge_hw_usd_str` edge hardware amortization, but edge deployments add network engineering (`{python} TcoPitfallCalc.edge_network_usd_str`), hardware maintenance (`{python} TcoPitfallCalc.edge_maint_usd_str`), and reliability engineering (`{python} TcoPitfallCalc.edge_reliability_usd_str`), totaling `{python} TcoPitfallCalc.edge_total_usd_str`---a `{python} TcoPitfallCalc.tco_ratio_str`$\times$ difference. Development velocity compounds the gap: cloud deployments reaching production in two months vs. six months for custom edge infrastructure represent four months of delayed revenue. The optimal cost solution requires total cost of ownership analysis including development time, operational complexity, and opportunity costs, not merely minimizing compute expenses.
+Teams optimize per-unit resource consumption while ignoring operational overhead and development velocity. As the decision framework in @sec-ml-systems-decision-framework-241f emphasizes, paradigm selection requires evaluating total cost of ownership, not just compute costs. A cloud inference service costing `{python} TcoPitfallCalc.cloud_compute_usd_str` in compute appears expensive vs. `{python} TcoPitfallCalc.edge_hw_usd_str` edge hardware amortization, but edge deployments add network engineering (`{python} TcoPitfallCalc.edge_network_usd_str`), hardware maintenance (`{python} TcoPitfallCalc.edge_maint_usd_str`), and reliability engineering (`{python} TcoPitfallCalc.edge_reliability_usd_str`), totaling `{python} TcoPitfallCalc.edge_total_usd_str`---a `{python} TcoPitfallCalc.tco_ratio_mult_str` difference. Development velocity compounds the gap: cloud deployments reaching production in two months vs. six months for custom edge infrastructure represent four months of delayed revenue. The optimal cost solution requires total cost of ownership analysis including development time, operational complexity, and opportunity costs, not merely minimizing compute expenses.
 
 ```{python}
 #| echo: false
@@ -4497,13 +4474,12 @@ Teams optimize per-unit resource consumption while ignoring operational overhead
 # │ Exports: AmdahlCameraCalc.cam_isp_ms_str, AmdahlCameraCalc.cam_ml_ms_str,
 # │          AmdahlCameraCalc.cam_post_ms_str, AmdahlCameraCalc.cam_total_ms_str,
 # │          AmdahlCameraCalc.cam_ml_pct_str, AmdahlCameraCalc.cam_non_ml_pct_str,
-# │          AmdahlCameraCalc.cam_speedup_10x_str, AmdahlCameraCalc.cam_speedup_inf_str,
+# │          AmdahlCameraCalc.cam_speedup_10x_mult_str, AmdahlCameraCalc.cam_speedup_inf_mult_str,
 # │          AmdahlCameraCalc.cam_ml_opt_ms_str, AmdahlCameraCalc.cam_total_opt_ms_str,
-# │          AmdahlCameraCalc.range_speedup_low_str,
-# │          AmdahlCameraCalc.range_speedup_high_str
+# │          AmdahlCameraCalc.range_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int,  fmt_percent, fmt, check, fmt_time
+from mlsysim.fmt import fmt_int, fmt_multiple, fmt_multiple_range, fmt_percent, check, fmt_time
 from mlsysim.core.units import millisecond
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4538,12 +4514,13 @@ class AmdahlCameraCalc:
     cam_total_ms_str = fmt_time(cam_total, millisecond, precision=0, commas=False)
     cam_ml_pct_str = fmt_percent(cam_ml_fraction, precision=0, commas=False, style="symbol")
     cam_non_ml_pct_str = fmt_percent(cam_non_ml_fraction, precision=0, commas=False, style="symbol")
-    cam_speedup_10x_str = fmt(cam_speedup_10x, precision=2, commas=False)          # "1.37"
-    cam_speedup_inf_str = fmt(cam_speedup_inf, precision=2, commas=False)          # "1.43"
+    cam_speedup_10x_mult_str = fmt_multiple(cam_speedup_10x, precision=2, commas=False)          # "1.37"
+    cam_speedup_inf_mult_str = fmt_multiple(cam_speedup_inf, precision=2, commas=False)          # "1.43"
     cam_ml_opt_ms_str = fmt_time(cam_ml_optimized, millisecond, precision=0, commas=False)
     cam_total_opt_ms_str = fmt_time(cam_total_optimized, millisecond, precision=0, commas=False)
-    range_speedup_low_str = fmt(range_speedup_low, precision=1, commas=False)
-    range_speedup_high_str = fmt_int(round(range_speedup_high), commas=False)
+    range_speedup_mult_str = fmt_multiple_range(
+        range_speedup_low, round(range_speedup_high), precision=(1, 0), commas=False
+    )
 ```
 
 **Fallacy**: *Model optimization translates linearly to system speedup.*
@@ -4554,9 +4531,9 @@ class AmdahlCameraCalc:
 *A faster model stage does not linearly speed up a camera pipeline.*
 :::
 
-Amdahl's Law[^fn-amdahls-law-pipeline]\index{Amdahl's Law!speedup limits}\index{Optimization!Amdahl's Law} establishes hard limits that the Bottleneck Principle (@sec-ml-systems-bottleneck-principle-3514) makes operational, where @sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 derives the strong-scaling form and works a speedup example at eight processors: $\text{Speedup}_{\text{overall}} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. Consider tapping the shutter on a smartphone camera. The image passes through `{python} AmdahlCameraCalc.cam_isp_ms_str` of signal processing (auto-exposure, white balance), `{python} AmdahlCameraCalc.cam_ml_ms_str` of ML scene classification, and `{python} AmdahlCameraCalc.cam_post_ms_str` of postprocessing (tone mapping, HDR merge)---`{python} AmdahlCameraCalc.cam_total_ms_str` total. Optimizing the ML classifier to run 10$\times$ faster (`{python} AmdahlCameraCalc.cam_ml_opt_ms_str` instead of `{python} AmdahlCameraCalc.cam_ml_ms_str`) drops total time from `{python} AmdahlCameraCalc.cam_total_ms_str` to `{python} AmdahlCameraCalc.cam_total_opt_ms_str`---only `{python} AmdahlCameraCalc.cam_speedup_10x_str`$\times$ overall, not 10$\times$. Even eliminating ML entirely $(s = \infty)$ achieves only `{python} AmdahlCameraCalc.cam_speedup_inf_str`$\times$ speedup, because the remaining `{python} AmdahlCameraCalc.cam_non_ml_pct_str` of the pipeline is untouched. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
+Amdahl's Law[^fn-amdahls-law-pipeline]\index{Amdahl's Law!speedup limits}\index{Optimization!Amdahl's Law} establishes hard limits that the Bottleneck Principle (@sec-ml-systems-bottleneck-principle-3514) makes operational, where @sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 derives the strong-scaling form and works a speedup example at eight processors: $\text{Speedup}_{\text{overall}} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. Consider tapping the shutter on a smartphone camera. The image passes through `{python} AmdahlCameraCalc.cam_isp_ms_str` of signal processing (auto-exposure, white balance), `{python} AmdahlCameraCalc.cam_ml_ms_str` of ML scene classification, and `{python} AmdahlCameraCalc.cam_post_ms_str` of postprocessing (tone mapping, HDR merge)---`{python} AmdahlCameraCalc.cam_total_ms_str` total. Optimizing the ML classifier to run 10$\times$ faster (`{python} AmdahlCameraCalc.cam_ml_opt_ms_str` instead of `{python} AmdahlCameraCalc.cam_ml_ms_str`) drops total time from `{python} AmdahlCameraCalc.cam_total_ms_str` to `{python} AmdahlCameraCalc.cam_total_opt_ms_str`---only `{python} AmdahlCameraCalc.cam_speedup_10x_mult_str` overall, not 10$\times$. Even eliminating ML entirely $(s = \infty)$ achieves only `{python} AmdahlCameraCalc.cam_speedup_inf_mult_str` speedup, because the remaining `{python} AmdahlCameraCalc.cam_non_ml_pct_str` of the pipeline is untouched. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
 
-[^fn-amdahls-law-pipeline]: **Amdahl's Law**: Formalized by @amdahl1967 for multiprocessor scaling, this principle applies directly to ML deployment pipelines where the model is only one stage among many. The camera example illustrates the general pattern: ML inference rarely exceeds 30--50 percent of total pipeline time in production systems, meaning even a 100$\times$ model speedup yields only about `{python} AmdahlCameraCalc.range_speedup_low_str`--`{python} AmdahlCameraCalc.range_speedup_high_str`$\times$ end-to-end improvement. Teams that benchmark model latency in isolation systematically overestimate deployment gains. \index{Amdahl's Law!pipeline bottleneck}
+[^fn-amdahls-law-pipeline]: [offset=45mm] **Amdahl's Law**: Formalized by @amdahl1967 for multiprocessor scaling, this principle applies directly to ML deployment pipelines where the model is only one stage among many. The camera example illustrates the general pattern: ML inference rarely exceeds 30--50 percent of total pipeline time in production systems, meaning even a 100$\times$ model speedup yields only about `{python} AmdahlCameraCalc.range_speedup_mult_str` end-to-end improvement. Teams that benchmark model latency in isolation systematically overestimate deployment gains. \index{Amdahl's Law!pipeline bottleneck}
 
 **Pitfall**: *Assuming more training data always improves deployed model performance.*
 

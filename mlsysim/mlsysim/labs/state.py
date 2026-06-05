@@ -151,16 +151,22 @@ class DesignLedger:
         except Exception as e:
             print(f"Failed to save to IndexedDB: {e}")
 
-    def save(self, track: str = None, step: int = None, design: dict = None):
-        """Persists the design decisions to storage."""
+    def save(self, track: str = None, step: int = None, design: dict = None, chapter: int = None):
+        """Persists the design decisions to storage.
+
+        ``chapter`` is kept as a compatibility alias for existing Co-Labs,
+        while ``step`` is the newer generic ledger key.
+        """
         if track:
             self._state.track = track
 
-        step_id = step if step is not None else self._state.current_step
-        if step is not None:
-            self._state.current_step = step
+        step_id = step if step is not None else chapter
+        if step_id is None:
+            step_id = self._state.current_step
+        else:
+            self._state.current_step = step_id
 
-        if design:
+        if design is not None:
             self._state.history[step_id] = design
 
         if self.is_wasm:

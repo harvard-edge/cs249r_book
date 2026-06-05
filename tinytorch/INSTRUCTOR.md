@@ -20,9 +20,12 @@ source .venv/bin/activate
 
 # Install with instructor tools
 pip install -r requirements.txt
-pip install nbgrader
 
-# Setup grading infrastructure
+# NBGrader must be on PATH for instructor workflows.
+# For course deployments, install it system-wide or in the managed grading environment.
+python -m pip install nbgrader
+
+# Setup grading infrastructure (creates assignments/ and nbgrader_config.py)
 tito nbgrader init
 ```
 
@@ -37,18 +40,20 @@ tito nbgrader
 
 ## 📝 Assignment Workflow
 
-### **⚠️ Experimental Feature**
-The NBGrader integration is under active development. Use for testing only.
+### **NBGrader Scope**
+NBGrader is instructor/developer tooling. TinyTorch stages notebooks into nbgrader's expected assignment layout; nbgrader itself handles release notebook generation, collection, autograding, feedback, and grade export.
+
+Tito owns TinyTorch-specific staging. It keeps the existing grading policy from source metadata, and it only treats regions delimited by `### BEGIN SOLUTION` / `### END SOLUTION` as removable solution content. Setup, import, demo, and visible-check cells without those markers are kept in the student release and locked when staged.
 
 ### **Using NBGrader via Tito**
 We provide `tito nbgrader` commands for grading workflows.
 
 ### **1. Prepare Assignments**
 ```bash
-# Generate instructor version (with solutions)
+# Stage instructor source assignment from the generated TinyTorch notebook
 tito nbgrader generate 01_tensor
 
-# Create student version (solutions removed)
+# Create student release notebook with solutions removed
 tito nbgrader release 01_tensor
 
 # Student version will be in: assignments/release/01_tensor/
@@ -58,7 +63,7 @@ tito nbgrader release 01_tensor
 ```bash
 # Option A: GitHub Classroom (recommended)
 # 1. Create assignment repository from TinyTorch
-# 2. Remove solutions from modules
+# 2. Add the files generated under assignments/release/
 # 3. Students clone and work
 
 # Option B: Direct distribution
@@ -104,8 +109,8 @@ tito nbgrader feedback 01_tensor
 # Export grades report
 tito nbgrader report
 
-# Or specific module
-tito nbgrader report --module 01_tensor
+# Or specific assignment/module
+tito nbgrader report --assignment 01_tensor
 ```
 
 ## 📊 Grading Components
@@ -514,7 +519,7 @@ tito module reset XX  # Reset specific module if needed
 **Module Import Errors**
 ```bash
 # Rebuild package
-tito export --all
+tito dev export --all
 ```
 
 **Test Failures**

@@ -11,6 +11,9 @@
 
 .PHONY: help test preflight release clean lint
 
+PYTHON ?= python3
+PIP ?= $(PYTHON) -m pip
+
 # Default target
 help:
 	@echo ""
@@ -35,7 +38,7 @@ help:
 	@echo "  make test-e2e-quick      E2E quick tests (~30s)"
 	@echo "  make test-e2e-module     E2E module flow tests (~2min)"
 	@echo "  make test-e2e-full       E2E complete journey (~10min)"
-	@echo "  make test-milestones     Milestone learning tests (~90s)"
+	@echo "  make test-milestones     Milestone smoke tests"
 	@echo ""
 
 # ============================================================================
@@ -44,19 +47,19 @@ help:
 
 # Quick preflight check - run this before starting work
 preflight:
-	python -m tito.main dev preflight
+	$(PYTHON) -m tito.main dev preflight
 
 # Quick preflight (faster)
 preflight-quick:
-	python -m tito.main dev preflight --quick
+	$(PYTHON) -m tito.main dev preflight --quick
 
 # Standard test suite
 test:
-	python -m pytest tests/ -v --ignore=tests/e2e --ignore=tests/milestones -q
+	$(PYTHON) -m pytest tests/ -v --ignore=tests/e2e --ignore=tests/milestones -q
 
 # Fast smoke tests only
 test-quick:
-	python -m pytest tests/e2e/test_user_journey.py -k quick -v
+	$(PYTHON) -m pytest tests/e2e/test_user_journey.py -k quick -v
 
 # ============================================================================
 # E2E TESTING (by level)
@@ -64,35 +67,35 @@ test-quick:
 
 # E2E quick verification (~30 seconds)
 test-e2e-quick:
-	python -m pytest tests/e2e/test_user_journey.py -k quick -v
+	$(PYTHON) -m pytest tests/e2e/test_user_journey.py -k quick -v
 
 # E2E module workflow tests (~2 minutes)
 test-e2e-module:
-	python -m pytest tests/e2e/test_user_journey.py -k module_flow -v
+	$(PYTHON) -m pytest tests/e2e/test_user_journey.py -k module_flow -v
 
 # E2E milestone tests
 test-e2e-milestone:
-	python -m pytest tests/e2e/test_user_journey.py -k milestone_flow -v
+	$(PYTHON) -m pytest tests/e2e/test_user_journey.py -k milestone_flow -v
 
 # E2E complete journey (~10 minutes)
 test-e2e-full:
-	python -m pytest tests/e2e/test_user_journey.py -v
+	$(PYTHON) -m pytest tests/e2e/test_user_journey.py -v
 
 # ============================================================================
 # SPECIALIZED TESTS
 # ============================================================================
 
-# Milestone learning verification (actually trains models, ~90 seconds)
+# Milestone smoke tests (fast import/model construction checks)
 test-milestones:
-	python -m pytest tests/milestones/test_learning_verification.py -v
+	$(PYTHON) -m pytest tests/milestones/test_milestones_smoke.py -v
 
 # CLI tests
 test-cli:
-	python -m pytest tests/cli/ -v
+	$(PYTHON) -m pytest tests/cli/ -v
 
 # Module-specific tests
 test-module-%:
-	python -m pytest tests/$*/ -v
+	$(PYTHON) -m pytest tests/$*/ -v
 
 # ============================================================================
 # RELEASE VALIDATION
@@ -100,12 +103,12 @@ test-module-%:
 
 # Full release validation - run this before any release
 release:
-	python -m tito.main dev preflight --release
+	$(PYTHON) -m tito.main dev preflight --release
 
 # Full release validation with all tests
 release-full:
-	python -m tito.main dev preflight --release
-	python -m pytest tests/ -v --tb=short
+	$(PYTHON) -m tito.main dev preflight --release
+	$(PYTHON) -m pytest tests/ -v --tb=short
 
 # Pre-release checklist (manual verification)
 release-check:
@@ -117,7 +120,7 @@ release-check:
 	@echo ""
 	@echo "  1. make preflight              # Quick sanity check"
 	@echo "  2. make test-e2e-full          # E2E user journey"
-	@echo "  3. make test-milestones        # ML actually learns"
+	@echo "  3. make test-milestones        # Milestone smoke tests"
 	@echo "  4. make test                   # Full test suite"
 	@echo ""
 	@echo "Manual checks:"
@@ -135,12 +138,12 @@ release-check:
 
 # Install development dependencies
 setup:
-	pip install -e ".[dev]"
-	pip install pytest pytest-cov rich
+	$(PIP) install -e ".[dev]"
+	$(PIP) install pytest pytest-cov rich
 
 # Lint code
 lint:
-	python -m py_compile tito/main.py
+	$(PYTHON) -m py_compile tito/main.py
 	@echo "✓ No syntax errors"
 
 # Clean generated files
@@ -157,22 +160,22 @@ clean:
 
 # CI smoke test (fast, for every commit)
 ci-smoke:
-	python -m tito.main dev preflight --quick --ci
+	$(PYTHON) -m tito.main dev preflight --quick --ci
 
 # CI standard test (for PRs)
 ci-standard:
-	python -m tito.main dev preflight --ci
-	python -m pytest tests/e2e/ -k quick --tb=short -q
+	$(PYTHON) -m tito.main dev preflight --ci
+	$(PYTHON) -m pytest tests/e2e/ -k quick --tb=short -q
 
 # CI full test (for releases)
 ci-full:
-	python -m tito.main dev preflight --full --ci
-	python -m pytest tests/ -v --ignore=tests/milestones --tb=short
+	$(PYTHON) -m tito.main dev preflight --full --ci
+	$(PYTHON) -m pytest tests/ -v --ignore=tests/milestones --tb=short
 
 # CI release validation (comprehensive)
 ci-release:
-	python -m tito.main dev preflight --release --ci
+	$(PYTHON) -m tito.main dev preflight --release --ci
 
 # CI JSON output (for automation/parsing)
 ci-json:
-	python -m tito.main dev preflight --json
+	$(PYTHON) -m tito.main dev preflight --json

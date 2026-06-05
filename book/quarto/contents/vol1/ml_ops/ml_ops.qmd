@@ -27,7 +27,7 @@ engine: jupyter
 \index{MLOps!production deployment challenges}
 _Why can an ML system be perfectly available and perfectly wrong at the same time?_
 
-Traditional software fails loudly: a null pointer exception crashes the server, monitoring dashboards turn red, and engineers are paged within minutes. Machine learning systems fail silently. A model experiencing data drift continues serving predictions with full confidence while accuracy degrades week by week, triggering no alerts because every health check (latency, throughput, uptime) remains green. The serving infrastructure from @sec-model-serving gets models into production; operations keeps them correct once they are there, and correctness is the harder problem. Unlike code, which degrades only when someone modifies it, models degrade simply because the world changes: customer behavior shifts, new product categories appear, seasonal patterns evolve, and the distribution the model learned from slowly diverges from the distribution it now faces. This is not an occasional failure mode but the default trajectory of every deployed model. Entropy is not a risk to be mitigated but a certainty to be managed. Managing it requires a fundamentally different operational discipline: continuous monitoring that tracks *prediction quality* alongside *system health*, automated retraining pipelines that detect drift and respond before accuracy degrades to unacceptable levels, and deployment strategies that validate new model versions against production traffic before full rollout. The gap between development and production is not a hurdle to be cleared once but a condition to be managed indefinitely. Machine learning operations exists because uptime without accuracy is a system that confidently delivers wrong answers at scale.
+Traditional software fails loudly: a null pointer exception crashes the server, monitoring dashboards turn red, and engineers are paged within minutes. Machine learning systems fail silently. A model experiencing data drift continues serving predictions with full confidence while accuracy degrades week by week, triggering no alerts because every health check (latency, throughput, uptime) remains green. The serving infrastructure gets models into production; operations keeps them correct once they are there, and correctness is the harder problem. Unlike code, which degrades only when someone modifies it, models degrade simply because the world changes: customer behavior shifts, new product categories appear, seasonal patterns evolve, and the distribution the model learned from slowly diverges from the distribution it now faces. This is not an occasional failure mode but the default trajectory of every deployed model. Entropy is not a risk to be mitigated but a certainty to be managed. Managing it requires a fundamentally different operational discipline: continuous monitoring that tracks *prediction quality* alongside *system health*, automated retraining pipelines that detect drift and respond before accuracy degrades to unacceptable levels, and deployment strategies that validate new model versions against production traffic before full rollout. The gap between development and production is not a hurdle to be cleared once but a condition to be managed indefinitely. Machine learning operations exists because uptime without accuracy is a system that confidently delivers wrong answers at scale.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -202,7 +202,7 @@ from mlsysim.core.constants import *
 # │ Imports: mlsysim.book (fmt, fmt_usd)
 # │ Exports: queries_daily_str, error_rate_pct_str, error_cost_str, skew_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_rate, fmt_usd, fmt, check, MarkdownStr
 
 class SkewEconomics:
     """
@@ -223,13 +223,13 @@ class SkewEconomics:
     check(annual_cost == 365_000, f"Annual cost should be 365,000, got {annual_cost:.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    queries_daily_str = fmt(queries_daily, precision=0, commas=True)
+    queries_daily_str = fmt_rate(queries_daily, "queries/day", precision=0, commas=True)
     error_rate_pct_str = fmt_percent(round(skew_error_rate * 100)/100, precision=0, commas=False, style='prose')
     error_cost_str = fmt_usd(cost_per_error, precision=2, commas=False)
     skew_cost_str = fmt_usd(annual_cost, precision=0, commas=True)
 ```
 
-For a system serving `{python} SkewEconomics.queries_daily_str` queries daily with `{python} SkewEconomics.error_rate_pct_str` skew-induced errors costing `{python} SkewEconomics.error_cost_str` each, annual skew cost reaches `{python} SkewEconomics.skew_cost_str`. This quantifies why consistency mechanisms represent investments with measurable returns. These mechanisms include feature stores, shared preprocessing code, and validation checks.
+For a system serving `{python} SkewEconomics.queries_daily_str` with `{python} SkewEconomics.error_rate_pct_str` skew-induced errors costing `{python} SkewEconomics.error_cost_str` each, annual skew cost reaches `{python} SkewEconomics.skew_cost_str`. This quantifies why consistency mechanisms represent investments with measurable returns. These mechanisms include feature stores, shared preprocessing code, and validation checks.
 
 #### Observable degradation {#sec-ml-operations-principle-4-observable-degradation-87a9}
 
@@ -894,11 +894,7 @@ Data versioning allows teams to snapshot datasets at specific points in time and
 
 [^fn-model-registry-ops]: **Model Registry**: Prevents "registry bypass," the failure mode where the undocumented production model diverges from the trained artifact through different preprocessing, stale serialization formats, or manual hotfixes applied directly to the serving endpoint. Without a registry enforcing versioned, immutable artifacts with queryable metadata and state, rollbacks require locating the correct weights from an ad-hoc artifact store, which under incident conditions takes 30–90 minutes instead of seconds. \index{Model Registry!version management}
 
-These complementary practices form the lineage layer of an ML system. This layer enables introspection, experimentation, and governance. When a deployed model underperforms, lineage tools help teams answer questions such as:
-
-* Was the input distribution consistent with training data?
-* Did the feature definitions change?
-* Is the model version aligned with the serving infrastructure?
+These complementary practices form the lineage layer of an ML system. The lineage layer enables introspection, experimentation, and governance by preserving the chain of evidence needed to diagnose a degraded model: whether the input distribution matched training data, whether feature definitions changed, and whether the deployed model version matched the serving infrastructure.
 
 By elevating versioning and lineage to first-class citizens in the system design, MLOps enables teams to build and maintain reliable, auditable, and evolvable ML workflows at scale.
 
@@ -1189,7 +1185,7 @@ Several mitigation strategies address these operational concerns. Papermill\inde
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: annual_revenue_str, loss_manual_str, loss_auto_str, annual_savings_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, MarkdownStr, fmt_percent
+from mlsysim.fmt import fmt_int, fmt_rate, fmt_usd, fmt, check, MarkdownStr, fmt_percent, fmt_time
 
 class SilentFailureCost:
     """
@@ -1219,16 +1215,16 @@ class SilentFailureCost:
     annual_revenue_str = fmt_usd((annual_revenue // MILLION) * MILLION, commas=False, scale="M")
     quality_drop_pct_str = fmt_percent(round(quality_drop * 100)/100, precision=0, commas=False, style='prose')
     quality_drop_str = fmt(quality_drop, precision=2, commas=False)
-    manual_detect_days_str = fmt(days_manual, precision=0, commas=False)
+    manual_detect_days_str = fmt_time(days_manual, "day", precision=0, commas=False, style="word")
     manual_detect_weeks_str = fmt_time(days_manual / 7, "week", precision=0, commas=False, style="word")
-    auto_detect_days_str = fmt(days_auto, precision=0, commas=False)
-    incidents_per_year_str = fmt(incidents_per_year, precision=0, commas=False)
+    auto_detect_days_str = fmt_time(days_auto, "day", precision=0, commas=False, style="word")
+    incidents_per_year_str = fmt_rate(incidents_per_year, "incidents/year", precision=0, commas=False)
 
     loss_manual_str = fmt_usd(loss_manual, precision=1, commas=True)
     loss_auto_str = fmt_usd(loss_auto, precision=1, commas=True)
     loss_diff_str = fmt_usd(savings_per_incident, precision=1, commas=True)
     annual_savings_str = fmt_usd(round(annual_savings), commas=True)
-    days_per_year_str = fmt(DAYS_PER_YEAR, precision=0, commas=False)
+    days_per_year_str = fmt_time(DAYS_PER_YEAR, "day", precision=0, commas=False, style="word")
 ```
 
 ::: {#nbk-ml-ops-cost-silent-failures .callout-notebook title="The cost of silent failures"}
@@ -1241,20 +1237,20 @@ class SilentFailureCost:
 **Cost Analysis**:
 
 1.  **Manual ops (monthly review)**:
-    *   Detection Time: ~`{python} SilentFailureCost.manual_detect_weeks_str` (`{python} SilentFailureCost.manual_detect_days_str` days).
+    *   Detection Time: ~`{python} SilentFailureCost.manual_detect_weeks_str` (`{python} SilentFailureCost.manual_detect_days_str`).
     *   Revenue Loss: `{python} SilentFailureCost.annual_revenue_str` $\times$ `{python} SilentFailureCost.quality_drop_str` $\times$ `{python} SilentFailureCost.manual_detect_days_str`/`{python} SilentFailureCost.days_per_year_str` ≈ `{python} SilentFailureCost.loss_manual_str`.
 
 2.  **Automated MLOps (daily checks)**:
-    *   Detection Time: `{python} SilentFailureCost.auto_detect_days_str` day.
+    *   Detection Time: `{python} SilentFailureCost.auto_detect_days_str`.
     *   Revenue Loss: `{python} SilentFailureCost.annual_revenue_str` $\times$ `{python} SilentFailureCost.quality_drop_str` $\times$ `{python} SilentFailureCost.auto_detect_days_str`/`{python} SilentFailureCost.days_per_year_str` ≈ `{python} SilentFailureCost.loss_auto_str`.
 
-**Systems insight**: A single silent failure costs `{python} SilentFailureCost.loss_diff_str` more without MLOps. If the system experiences 3–`{python} SilentFailureCost.incidents_per_year_str` such incidents a year (typical for high-drift domains), MLOps saves nearly `{python} SilentFailureCost.annual_savings_str` (at `{python} SilentFailureCost.incidents_per_year_str` incidents). The "expensive" infrastructure pays for itself by reducing the *time-to-detection* (TTD) for the silent failures defined in the verification invariant.
+**Systems insight**: A single silent failure costs `{python} SilentFailureCost.loss_diff_str` more without MLOps. If the system experiences `{python} SilentFailureCost.incidents_per_year_str` (within the 3-5 incidents/year range typical for high-drift domains), MLOps saves nearly `{python} SilentFailureCost.annual_savings_str`. The "expensive" infrastructure pays for itself by reducing the *time-to-detection* (TTD) for the silent failures defined in the verification invariant.
 
 :::
 
-The recommended practice is to use notebooks for exploration and rapid iteration, then refactor validated logic into tested Python modules for production pipelines. The overhead of refactoring pays off in maintainability and reliability. Failing to robustify these pipelines can lead to silent failures with massive economic consequences. A short cost model quantifies why reducing time-to-detection pays for the extra infrastructure.
+The cost calculation makes the notebook-production boundary concrete. Notebooks remain useful for exploration and rapid iteration, but validated logic should move into tested Python modules before it enters production pipelines. The refactoring overhead pays off when it reduces time-to-detection for silent failures; leaving notebook state and preprocessing assumptions implicit turns exploratory convenience into operational risk.
 
-Beyond reproducibility, automation enhances model training by reducing manual effort and standardizing critical steps. MLOps workflows incorporate techniques such as hyperparameter tuning [@ranjit2019; @li2017hyperband], neural architecture search [@elsken2019], and automatic feature selection [@scikit_learn_feature_selection] to explore the design space efficiently. These tasks are orchestrated using CI/CD pipelines, which automate data preprocessing, model training, evaluation, registration, and deployment. For instance, a Jenkins pipeline triggers a retraining job when new labeled data becomes available. The resulting model is evaluated against baseline metrics, and if performance thresholds are met, it is deployed automatically.
+Once training logic is reproducible, automation can standardize the steps around it. MLOps workflows incorporate techniques such as hyperparameter tuning [@ranjit2019; @li2017hyperband], neural architecture search [@elsken2019], and automatic feature selection [@scikit_learn_feature_selection] to explore the design space efficiently. These tasks are orchestrated using CI/CD pipelines, which automate data preprocessing, model training, evaluation, registration, and deployment. For example, a Jenkins pipeline triggers a retraining job when new labeled data becomes available. The resulting model is evaluated against baseline metrics, and if performance thresholds are met, it is deployed automatically.
 
 The increasing availability of cloud-based infrastructure has expanded the reach of model training [@gartner2024cloud]. This connects to the workflow orchestration patterns explored in @sec-ml-workflow, which provide the foundation for managing complex, multi-stage training processes across distributed systems. Cloud providers offer managed services that provision high-performance computing resources, including GPU and Tensor Processing Unit (TPU) accelerators, on demand[^fn-cloud-training-economics]. Depending on the platform, teams construct their own training workflows or rely on fully managed services such as Vertex AI Fine Tuning [@vertex_ai_fine_tuning], which support automated adaptation of foundation models to new tasks. Hardware availability, regional access restrictions, and cost constraints remain important considerations when designing cloud-based training systems [@oecd_ai_2021].
 
@@ -1302,7 +1298,7 @@ Retrain\index{Retraining!scheduled updates} on a fixed schedule (daily, weekly, 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Infrastructure
 from mlsysim.core.units import USD, hour
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_rate, fmt_usd
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RetrainingAnchor:
@@ -1659,7 +1655,7 @@ Techniques such as shadow deployments\index{Shadow Deployment!production validat
 
 Avoiding the Knight Capital failure mode is exactly why ML deployments stage rollout rather than flip a switch, but staged rollout creates its own problem. When canary deployments reveal problems at partial traffic levels (issues appearing at 30 percent traffic but not at 5 percent), teams need systematic debugging strategies. Effective diagnosis requires correlating multiple signals: performance metrics from @sec-benchmarking, data distribution analysis to detect drift, and feature importance shifts that might explain degradation. Teams maintain debug toolkits including A/B test analysis frameworks, feature attribution tools, and data slice analyzers that identify which subpopulations are experiencing degraded performance.
 
-Integration with CI/CD pipelines further automates the deployment and rollback process, enabling efficient iteration cycles.
+That diagnosis loop must connect directly to the release pipeline. CI/CD integration automates deployment and rollback, but only when rollback is designed as part of the rollout mechanism rather than treated as an emergency script.
 
 ##### Rollback strategies and safety mechanisms {#sec-ml-operations-rollback-strategies-safety-mechanisms-7707}
 
@@ -1728,7 +1724,7 @@ A/B testing\index{A/B Testing!statistical model validation} provides the statist
 from math import ceil, sqrt
 from statistics import NormalDist
 from mlsysim.physics import calc_two_proportion_sample_size
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_percent, fmt_pp, fmt_rate, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ABSampleSize:
@@ -1816,9 +1812,9 @@ A/B testing ML models introduces challenges absent from traditional software exp
 - **Archive all experiments**: Failed experiments provide valuable information for future model development.
 - **Automate analysis pipelines**: Manual analysis introduces errors and delays decisions.
 
-Model registries\index{Model Registry!centralized artifact management}, such as Vertex AI's model registry [@vertex_ai_model_registry], act as centralized repositories for storing and managing trained models. These registries\index{Model Registry!version management} facilitate version comparisons and often include access to base models that may be open source, proprietary, or hybrid, such as Llama [@llama_meta]. Deploying a model from the registry to an inference endpoint is streamlined, handling resource provisioning, model weight downloads, and hosting.
+An A/B decision only matters if the release machinery can promote, hold, or roll back the exact artifact that was tested. Model registries\index{Model Registry!centralized artifact management}, such as Vertex AI's model registry [@vertex_ai_model_registry], act as centralized repositories for storing and managing trained models. These registries\index{Model Registry!version management} facilitate version comparisons and often include access to base models that may be open source, proprietary, or hybrid, such as Llama [@llama_meta]. Deploying a model from the registry to an inference endpoint is streamlined, handling resource provisioning, model weight downloads, and hosting.
 
-Inference endpoints typically expose the deployed model via REST APIs for real-time predictions. Depending on performance requirements, teams can configure resources, such as GPU accelerators, to meet latency and throughput targets. Some providers also offer flexible options like serverless[^fn-serverless-ml-tradeoff] or batch inference, eliminating the need for persistent endpoints and enabling cost-efficient, scalable deployments.
+Inference endpoints carry that tested artifact into live traffic. They typically expose the deployed model via REST APIs for real-time predictions. Depending on performance requirements, teams can configure resources, such as GPU accelerators, to meet latency and throughput targets. Some providers also offer flexible options like serverless[^fn-serverless-ml-tradeoff] or batch inference, eliminating the need for persistent endpoints and enabling cost-efficient, scalable deployments.
 
 [^fn-serverless-ml-tradeoff]: **Serverless ML Inference**: The cost-efficiency of this option stems from provisioning compute only upon request and scaling to zero when idle, eliminating the cost of a persistent endpoint. This creates a direct tension with performance targets, as the first request after an idle period incurs a "cold start" latency penalty while the model is loaded into memory. This delay can easily add 5–10 seconds for a multi-billion parameter model, violating typical real-time latency budgets. \index{Serverless!ML inference trade-off}
 
@@ -1826,7 +1822,7 @@ To maintain lineage and auditability, teams track model artifacts, including scr
 
 [^fn-mlflow-registry]: **MLflow**: Created by Databricks after observing that data scientists were tracking model results in spreadsheets and could never reproduce their best experiments. The "model registry" concept it popularized addresses the combinatorial explosion problem: with $N$ hyperparameters, $M$ data versions, and $K$ code branches, manual tracking becomes intractable, and the inability to reproduce a deployed model becomes a governance and debugging liability. \index{MLflow!experiment tracking}
 
-These tools and practices, along with distributed orchestration frameworks like Ray[^fn-ray-distributed-ml], enable teams to deploy ML models resiliently, ensuring smooth transitions between versions, maintaining production stability, and optimizing performance across diverse use cases.
+Together, registries, endpoints, lineage tracking, and distributed orchestration frameworks like Ray[^fn-ray-distributed-ml] turn A/B outcomes into controlled production changes: the tested model can be promoted, observed, and reversed without losing provenance.
 
 [^fn-ray-distributed-ml]: **Ray**: A distributed computing framework from UC Berkeley [@moritz2018ray] that provides a unified task and actor interface, backed by a distributed scheduler and fault-tolerant store. The broader MLOps lesson is that fragmented infrastructure creates translation points where preprocessing logic, normalization constants, tokenizer versions, or artifact formats can diverge silently. Shared execution abstractions can reduce that fragmentation, but training-serving skew still requires explicit consistency checks across data, features, and serving code. \index{Ray!distributed ML}
 
@@ -1883,7 +1879,7 @@ Regardless of which serving paradigm is used (online, offline, or near-online, a
 # │ How: Sum request-lifecycle components and apply Amdahl-style speedup math.
 # │
 # │ Imports: mlsysim.book (fmt_usd)
-# │ Exports: slo_p99_ms_str, network_ms_str, inference_ms_str, end_to_end_speedup_str, etc.
+# │ Exports: slo_p99_ms_str, network_ms_str, inference_ms_str, end_to_end_speedup_mult_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_usd, check
 
@@ -1927,16 +1923,16 @@ class LatencyBudget:
     serialization_ms_str = fmt_time(serialization, 'millisecond', precision=0, commas=False)
     non_inference_ms_str = fmt_time(non_inference, 'millisecond', precision=0, commas=False)
     inference_pct_str = fmt_percent(inference_fraction, precision=0, commas=False, style='prose')
-    model_speedup_str = fmt(model_speedup, precision=0, commas=False)
+    model_speedup_mult_str = fmt_multiple(model_speedup, precision=0, commas=False)
     new_total_after_model_speedup_ms_str = fmt_time(new_total_after_model_speedup, 'millisecond', precision=1, commas=False)
-    end_to_end_speedup_str = fmt(end_to_end_speedup, precision=1, commas=False)
+    end_to_end_speedup_mult_str = fmt_multiple(end_to_end_speedup, precision=1, commas=False)
 ```
 
 ::: {#psp-ml-ops-latency-budget .callout-perspective title="The latency budget"}
 
 **Problem**: A service has a `{python} LatencyBudget.slo_p99_ms_str` P99 SLO, and the model inference budget is `{python} LatencyBudget.inference_ms_str`. Where must the remaining `{python} LatencyBudget.non_inference_ms_str` go? @Tbl-latency-budget-components allocates the budget across the request lifecycle.
 
-**Systems insight**: Model optimization alone often captures less than 50 percent of the latency opportunity. A model that runs `{python} LatencyBudget.model_speedup_str`$\times$ faster reduces this example from `{python} LatencyBudget.slo_p99_ms_str` to `{python} LatencyBudget.new_total_after_model_speedup_ms_str`, only `{python} LatencyBudget.end_to_end_speedup_str`$\times$ end-to-end improvement, because inference is `{python} LatencyBudget.inference_pct_str` of total latency.
+**Systems insight**: Model optimization alone often captures less than 50 percent of the latency opportunity. A model that runs `{python} LatencyBudget.model_speedup_mult_str` faster reduces this example from `{python} LatencyBudget.slo_p99_ms_str` to `{python} LatencyBudget.new_total_after_model_speedup_ms_str`, only `{python} LatencyBudget.end_to_end_speedup_mult_str` end-to-end improvement, because inference is `{python} LatencyBudget.inference_pct_str` of total latency.
 
 Systems thinking demands end-to-end analysis. Apply the D·A·M taxonomy to diagnose the root cause: is it *Logic* (Algorithm: too many layers, unoptimized graph), *Physics* (Machine: memory bandwidth saturation, thermal throttling), or *Information* (Data: feature extraction overhead, serialization cost)? Dave Patterson's principle applies: "Measure everything, optimize the bottleneck." If feature retrieval exceeds its budget, no amount of model optimization will achieve the SLO.
 
@@ -1953,9 +1949,7 @@ Systems thinking demands end-to-end analysis. Apply the D·A·M taxonomy to diag
 
 : **Latency Budget Components**: Representative allocation of a `{python} LatencyBudget.slo_p99_ms_str` P99 SLO across the request lifecycle. Model inference accounts for `{python} LatencyBudget.inference_pct_str` of total latency, leaving the majority to network, feature retrieval, parsing, postprocessing, and serialization. The optimization-lever column shows where each component can be reduced. {#tbl-latency-budget-components tbl-colwidths="[23,17,20,40]"}
 
-Beyond the latency budget, operationalizing serving requires selecting the right combination of infrastructure techniques. @Tbl-serving-techniques summarizes the key strategies and representative systems that have been developed for ML-as-a-service infrastructure.
-
-Together, these strategies form the foundation of robust model serving systems. While cloud-based serving infrastructure handles many production scenarios, an increasing proportion of ML inference occurs at the edge, where different operational constraints apply.
+Beyond the latency budget, operationalizing serving requires selecting infrastructure techniques for the constraint the budget exposed. @Tbl-serving-techniques summarizes representative strategies for ML-as-a-service infrastructure; the organizing question is whether the bottleneck lies in queueing delay, capacity, routing, orchestration overhead, or latency prediction.
 
 | **Technique**                                                                      | **Description**                                                     | **Example System**              |
 |:-----------------------------------------------------------------------------------|:--------------------------------------------------------------------|:--------------------------------|
@@ -1967,6 +1961,8 @@ Together, these strategies form the foundation of robust model serving systems. 
 | **Execution Time Prediction**                                                      | Forecasts latency to optimize request scheduling                    | Clockwork [@gujarati2020]       |
 
 : **Serving System Techniques**: Scalable ML-as-a-service infrastructure relies on techniques like request scheduling and instance selection to optimize resource utilization and reduce latency under high load. For the underlying queuing theory and batching strategies, see @sec-model-serving. {#tbl-serving-techniques tbl-colwidths="[31,36,33]"}
+
+These strategies form the cloud-serving foundation. Edge deployment keeps the same operational goal but changes the constraints: rollback, telemetry, and update control must work on devices with limited power, memory, and connectivity.
 
 #### Edge AI deployment {#sec-ml-operations-edge-ai-deployment-patterns-dc1d}
 
@@ -2181,7 +2177,7 @@ class CostPerInference:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     hourly_gpu_cost_str = fmt_usd(hourly_gpu_cost, precision=0, commas=False, per="hour")
-    inferences_per_hour_str = fmt(inferences_per_hour, precision=0, commas=True)
+    inferences_per_hour_str = fmt_rate(inferences_per_hour, "inferences/hour", precision=0, commas=True)
     cost_per_1k_inferences_usd_str = fmt_usd(
         cost_per_batch,
         precision=2,
@@ -2190,7 +2186,7 @@ class CostPerInference:
     )
 ```
 
-For a `{python} CostPerInference.hourly_gpu_cost_str` A100 instance processing `{python} CostPerInference.inferences_per_hour_str` inferences/hour, cost is `{python} CostPerInference.cost_per_1k_inferences_usd_str`. Track this metric over time; increases indicate efficiency degradation requiring investigation.
+For a `{python} CostPerInference.hourly_gpu_cost_str` A100 instance processing `{python} CostPerInference.inferences_per_hour_str`, cost is `{python} CostPerInference.cost_per_1k_inferences_usd_str`. Track this metric over time; increases indicate efficiency degradation requiring investigation.
 
 #### Model and infrastructure monitoring {#sec-ml-operations-model-infrastructure-monitoring-3988}
 
@@ -2200,7 +2196,7 @@ Infrastructure management provisions resources; monitoring\index{Model Monitorin
 
 Effective monitoring spans both model behavior and infrastructure performance. On the model side, teams track metrics such as accuracy, precision, recall, and the confusion matrix [@scikit_learn_confusion_matrix] using live or sampled predictions to detect whether performance remains stable or begins to drift. A critical constraint is the *drift detection delay*\index{Drift Detection Delay!statistical monitoring}, which determines how quickly statistical monitoring can confirm that degradation has occurred. The speed of detection depends on traffic volume. A short sample-rate calculation makes that constraint visible.
 
-The detection delay calculated above exposes a fundamental asymmetry: statistical tests require enough labeled samples to achieve power, and low-traffic systems may wait days or weeks before accumulating sufficient evidence. This latency gap is not an engineering shortcut that better tooling can close; it is a consequence of finite sample rates colliding with the statistical power requirements of hypothesis testing. The practical implication is that monitoring systems must distinguish between drift that alters the input distribution (detectable without labels) and drift that changes the decision boundary itself (detectable only after ground truth arrives).
+The sample-rate calculation below exposes a fundamental asymmetry: statistical tests require enough labeled samples to achieve power, and low-traffic systems may wait days or weeks before accumulating sufficient evidence. This latency gap is not an engineering shortcut that better tooling can close; it is a consequence of finite sample rates colliding with the statistical power requirements of hypothesis testing. The practical implication is that monitoring systems must distinguish between drift that alters the input distribution (detectable without labels) and drift that changes the decision boundary itself (detectable only after ground truth arrives).
 
 ```{python}
 #| echo: false
@@ -2253,8 +2249,8 @@ class DriftDetectionDelay:
     samples_needed_str = fmt(samples_needed, precision=0, commas=True)
     seconds_needed_high_str = fmt_time(seconds_needed_high, "second", precision=0, commas=True, style="word")
     minutes_needed_high_str = fmt_time(minutes_needed_high, "minute", precision=1, commas=False, style="word")
-    requests_per_day_low_str = fmt(100, precision=0, commas=False)
-    days_needed_low_str = fmt(days_needed_low, precision=0, commas=False)
+    requests_per_day_low_str = fmt_rate(100, "requests/day", precision=0, commas=False)
+    days_needed_low_str = fmt_time(days_needed_low, "day", precision=0, commas=False, style="word")
 ```
 
 ::: {#nbk-ml-ops-drift-detection-delay .callout-notebook title="The drift detection delay"}
@@ -2265,7 +2261,7 @@ class DriftDetectionDelay:
 
 1.  **Required samples**: To distinguish `{python} DriftDetectionDelay.baseline_acc_pct_str` from `{python} DriftDetectionDelay.target_acc_pct_str` with high confidence, detection requires ≈ `{python} DriftDetectionDelay.samples_needed_str` labeled samples.
 2.  **Detection latency**: `{python} DriftDetectionDelay.samples_needed_str` samples / `{python} DriftDetectionDelay.qps_high_str` = `{python} DriftDetectionDelay.seconds_needed_high_str` ≈ `{python} DriftDetectionDelay.minutes_needed_high_str`.
-3.  **Low-traffic case**: If the model only processes `{python} DriftDetectionDelay.requests_per_day_low_str` requests per day, detecting the same `{python} DriftDetectionDelay.drop_pct_str` drift takes `{python} DriftDetectionDelay.days_needed_low_str` days.
+3.  **Low-traffic case**: If the model only processes `{python} DriftDetectionDelay.requests_per_day_low_str`, detecting the same `{python} DriftDetectionDelay.drop_pct_str` drift takes `{python} DriftDetectionDelay.days_needed_low_str`.
 
 ::: {.column-margin}
 ![](images/svg/ml_ops_drift_threshold_knee.svg){width="100%" fig-alt="Two-rung time ladder contrasting high-traffic drift detection at about 17 minutes with low-traffic drift detection at about 10 days."}
@@ -2315,16 +2311,16 @@ The "Rotting Asset"\index{Rotting Asset Curve!accuracy decay} plot (@fig-rotting
 # │ Show: That trigger-based retraining outperforms fixed schedules by responding to real decay.
 # │ How: Plot model accuracy over time showing decay curves and retraining triggers.
 # │
-# │ Imports: numpy, mlsysim.core.viz
+# │ Imports: numpy, book.tools.figures.style
 # │ Exports: (figure rendered directly, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Visualize the Statistical Drift Invariant.
 import numpy as np
-from mlsysim import viz
+from book.tools.figures import style as book_style
 from mlsysim.fmt import check
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 3.6))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.6))
 
 #—Parameters (illustrative decay scenario) ---
 
@@ -2390,9 +2386,9 @@ plt.close()
 
 ### Quantifying drift: The physics of PSI {#sec-ml-operations-quantifying-drift-physics-psi-8c11}
 
-The statistical drift invariant established earlier tells us that accuracy decays in proportion to distributional divergence; the tools in this section tell us *how fast* and *where*. Gradual long-term degradation is particularly insidious because it evades standard detection thresholds: small day-to-day changes (on the order of basis points of a quality metric) can compound into material degradation over a year without tripping coarse monthly alerts. Seasonal patterns compound this complexity. A model trained in summer may perform well through autumn but fail in winter conditions it never observed. Detecting such gradual degradation requires multi-timescale monitoring: performance baselines across multiple time horizons (daily, weekly, quarterly), sliding window comparisons that detect slow trends, and seasonal performance profiles that account for cyclical patterns.
+The statistical drift invariant established earlier tells us that accuracy decays in proportion to distributional divergence. Quantifying that decay requires two layers of telemetry: infrastructure metrics that reveal whether the serving system itself is the bottleneck, and distribution metrics such as PSI that reveal whether the data has moved. Gradual long-term degradation is particularly insidious because it evades standard detection thresholds: small day-to-day changes (on the order of basis points of a quality metric) can compound into material degradation over a year without tripping coarse monthly alerts. Seasonal patterns compound this complexity. A model trained in summer may perform well through autumn but fail in winter conditions it never observed. Detecting such gradual degradation requires multi-timescale monitoring: performance baselines across multiple time horizons (daily, weekly, quarterly), sliding window comparisons that detect slow trends, and seasonal performance profiles that account for cyclical patterns.
 
-Infrastructure-level monitoring tracks indicators such as CPU and GPU utilization, memory and disk consumption, network latency, and service availability, but the diagnostic value of these metrics depends on understanding what each reveals about system behavior. Hardware-aware monitoring extends raw utilization to capture resource efficiency patterns: GPU memory bandwidth utilization, power consumption relative to computational output, and thermal envelope adherence across sustained workloads. GPU utilization alone is deceptively uninformative because identical 90 percent utilization readings can indicate either efficient tensor computation or a memory-bandwidth bottleneck where the GPU spends most of its cycles waiting for data. Distinguishing between compute-bound and memory-bound operations requires correlating GPU utilization with memory bandwidth utilization: when both are high, the hardware is running efficiently; when GPU utilization is high but bandwidth utilization is low, the bottleneck lies in arithmetic intensity rather than data movement. Memory bandwidth monitoring reveals suboptimal data loading patterns that manifest as high GPU utilization with low computational throughput—a signature that typically indicates the DataLoader, not the model, needs optimization. Power efficiency metrics (for example, inferences per joule or FLOP/s/W, depending on workload) provide a cost-normalized view that enables mixed workload scheduling for both economic and environmental impact.
+The first layer is infrastructure-level monitoring, which tracks indicators such as CPU and GPU utilization, memory and disk consumption, network latency, and service availability. The diagnostic value of these metrics depends on understanding what each reveals about system behavior. Hardware-aware monitoring extends raw utilization to capture resource efficiency patterns: GPU memory bandwidth utilization, power consumption relative to computational output, and thermal envelope adherence across sustained workloads. GPU utilization alone is deceptively uninformative because identical 90 percent utilization readings can indicate either efficient tensor computation or a memory-bandwidth bottleneck where the GPU spends most of its cycles waiting for data. Distinguishing between compute-bound and memory-bound operations requires correlating GPU utilization with memory bandwidth utilization: when both are high, the hardware is running efficiently; when GPU utilization is high but bandwidth utilization is low, the bottleneck lies in arithmetic intensity rather than data movement. Memory bandwidth monitoring reveals suboptimal data loading patterns that manifest as high GPU utilization with low computational throughput—a signature that typically indicates the DataLoader, not the model, needs optimization. Power efficiency metrics (for example, inferences per joule or FLOP/s/W, depending on workload) provide a cost-normalized view that enables mixed workload scheduling for both economic and environmental impact.
 
 ::: {#psp-ml-ops-iron-law-production-monitoring .callout-perspective title="Iron law in production monitoring"}
 
@@ -2429,12 +2425,12 @@ Collecting all of these signals at production scale introduces its own cost cons
 # │
 # │ Imports: mlsysim.core.constants (MILLION, KB, MB, GB),
 # │          mlsysim.fmt (fmt, check)
-# │ Exports: ObservabilitySampling.request_rate_m_req_s_str,
+# │ Exports: ObservabilitySampling.request_rate_m_req_per_s_str,
 # │          ObservabilitySampling.high_seconds_str,
 # │          ObservabilitySampling.low_seconds_str,
-# │          ObservabilitySampling.high_gb_s_str,
-# │          ObservabilitySampling.low_mb_s_str,
-# │          ObservabilitySampling.sampling_ratio_str
+# │          ObservabilitySampling.high_gb_per_s_str,
+# │          ObservabilitySampling.low_mb_per_s_str,
+# │          ObservabilitySampling.sampling_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_memory, fmt_percent, fmt_time, fmt_rate
 
@@ -2464,12 +2460,12 @@ class ObservabilitySampling:
           f"Expected 60x sampling ratio, got {sampling_ratio:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    request_rate_m_req_s_str = fmt_rate(requests_per_second.to(1/second).magnitude, "req/s", scale="M", precision=0, commas=False)
+    request_rate_m_req_per_s_str = fmt_rate(requests_per_second.to(1/second).magnitude, "req/s", scale="M", precision=0, commas=False)
     high_seconds_str = fmt_time(high_frequency_seconds, second, precision=0, commas=False)
     low_seconds_str = fmt_time(low_frequency_seconds, second, precision=0, commas=False)
-    high_gb_s_str = fmt_bandwidth(high_bytes_per_second, unit=GB/second, precision=0, commas=False)
-    low_mb_s_str = fmt_bandwidth(low_bytes_per_second, unit=MB/second, precision=1, commas=False)
-    sampling_ratio_str = fmt(sampling_ratio, precision=0, commas=False)
+    high_gb_per_s_str = fmt_bandwidth(high_bytes_per_second, unit=GB/second, precision=0, commas=False)
+    low_mb_per_s_str = fmt_bandwidth(low_bytes_per_second, unit=MB/second, precision=1, commas=False)
+    sampling_ratio_mult_str = fmt_multiple(sampling_ratio, precision=0, commas=False)
     telemetry_kb_str = fmt_memory(telemetry_per_request, unit=KB, precision=0, commas=False)
     success_sample_pct_str = fmt_percent(success_sample_fraction, precision=0, commas=False, style='prose')
     error_sample_pct_str = fmt_percent(error_sample_fraction, precision=0, commas=False, style='prose')
@@ -2480,14 +2476,14 @@ class ObservabilitySampling:
 **The monitoring trade-off**: "Measure everything" is physically impossible at scale. @Eq-observability-cost shows that observability cost scales linearly with sampling frequency and metric cardinality:
 $$ \text{Cost} \approx \text{Frequency} \times \text{Metrics} \times (\text{Ingest Cost} + \text{Storage Cost}) $$ {#eq-observability-cost}
 
-@Tbl-observability-sampling-cost contrasts the data-volume swing between high- and low-frequency sampling regimes at `{python} ObservabilitySampling.request_rate_m_req_s_str`:
+@Tbl-observability-sampling-cost contrasts the data-volume swing between high- and low-frequency sampling regimes at `{python} ObservabilitySampling.request_rate_m_req_per_s_str`:
 
-|                      **Sampling**                     | **Granularity** | **Data Volume (`{python} ObservabilitySampling.request_rate_m_req_s_str`)** | **Cost Impact**                   |
-|:-----------------------------------------------------:|:----------------|:---------------------------------------------------------------------------:|:----------------------------------|
-| **`{python} ObservabilitySampling.high_seconds_str`** | Micro-bursts    |               ~`{python} ObservabilitySampling.high_gb_s_str`               | High (Requires dedicated cluster) |
-|  **`{python} ObservabilitySampling.low_seconds_str`** | Trends          |                ~`{python} ObservabilitySampling.low_mb_s_str`               | Low (Standard sidecar)            |
+|                      **Sampling**                     | **Granularity** | **Data Volume (`{python} ObservabilitySampling.request_rate_m_req_per_s_str`)** | **Cost Impact**                   |
+|:-----------------------------------------------------:|:----------------|:-------------------------------------------------------------------------------:|:----------------------------------|
+| **`{python} ObservabilitySampling.high_seconds_str`** | Micro-bursts    |               ~`{python} ObservabilitySampling.high_gb_per_s_str`               | High (Requires dedicated cluster) |
+|  **`{python} ObservabilitySampling.low_seconds_str`** | Trends          |                ~`{python} ObservabilitySampling.low_mb_per_s_str`               | Low (Standard sidecar)            |
 
-: **Sampling Frequency vs. Observability Cost**: Roughly `{python} ObservabilitySampling.sampling_ratio_str`$\times$ data-volume swing between `{python} ObservabilitySampling.high_seconds_str` and `{python} ObservabilitySampling.low_seconds_str` sampling at `{python} ObservabilitySampling.request_rate_m_req_s_str`, assuming about `{python} ObservabilitySampling.telemetry_kb_str` of telemetry per request. {#tbl-observability-sampling-cost tbl-colwidths="[14,28,28,30]"}
+: **Sampling Frequency vs. Observability Cost**: Roughly `{python} ObservabilitySampling.sampling_ratio_mult_str` data-volume swing between `{python} ObservabilitySampling.high_seconds_str` and `{python} ObservabilitySampling.low_seconds_str` sampling at `{python} ObservabilitySampling.request_rate_m_req_per_s_str`, assuming about `{python} ObservabilitySampling.telemetry_kb_str` of telemetry per request. {#tbl-observability-sampling-cost tbl-colwidths="[14,28,28,30]"}
 
 **Recommendation**: Use dynamic sampling. Sample `{python} ObservabilitySampling.success_sample_pct_str` of successful requests but `{python} ObservabilitySampling.error_sample_pct_str` of errors. Use high-frequency (`{python} ObservabilitySampling.high_seconds_str`) monitoring only for aggregate counters (like error rate), but low-frequency (`{python} ObservabilitySampling.low_seconds_str`) for high-cardinality data (like user-level distribution sketches). @Sec-ml-operations-monitoring-cost-model-7fe3 provides worked examples for budgeting monitoring infrastructure.
 
@@ -2558,6 +2554,10 @@ Schema validation catches structural corruption (missing columns, wrong types, n
 
 : **Feature Distribution Thresholds**: Starting points for drift detection, calibrated in practice to each feature's sensitivity and business impact. PSI values above 0.2 indicate significant distribution shift, while KS statistics exceeding 0.1 suggest statistically significant divergence from training distributions. Higher thresholds reduce alert fatigue but risk missing gradual drift. {#tbl-feature-distribution-thresholds tbl-colwidths="[38,24,38]"}
 
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
 \index{Population Stability Index!drift quantification}Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (for the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring, see @sec-appdx-data-foundations-measuring-drift-divergence-a6dd). @Eq-psi formalizes this:
 $$ \text{PSI} = \sum_{i=1}^{n} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right) $$ {#eq-psi}
 
@@ -2584,7 +2584,7 @@ To see this in practice, consider a recommendation system monitoring user age. A
 # │ How:     Sum (serving - training) * ln(serving / training) across bins.
 # │
 # │ Imports: math, mlsysim.fmt (fmt, check)
-# │ Exports: PSIAgeExample.training_pct_str, PSIAgeExample.serving_pct_str,
+# │ Exports: PSIAgeExample.training_pct_value_str, PSIAgeExample.serving_pct_value_str,
 # │          PSIAgeExample.difference_str, PSIAgeExample.log_ratio_str,
 # │          PSIAgeExample.contribution_str, PSIAgeExample.total_psi_str,
 # │          PSIAgeExample.warning_threshold_str
@@ -2619,8 +2619,8 @@ class PSIAgeExample:
           f"PSI should be below warning threshold, got {total_psi:.4f}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    training_pct_str = [fmt(value * 100, precision=0, commas=False) for value in training]
-    serving_pct_str = [fmt(value * 100, precision=0, commas=False) for value in serving]
+    training_pct_value_str = [fmt_percent(value, precision=0, commas=False, style='number') for value in training]
+    serving_pct_value_str = [fmt_percent(value, precision=0, commas=False, style='number') for value in serving]
     difference_str = [MarkdownStr(f"{value:+.2f}") for value in differences]
     log_ratio_str = [MarkdownStr(f"{value:+.3f}") for value in log_ratios]
     contribution_str = [fmt(value, precision=4, commas=False) for value in contributions]
@@ -2633,14 +2633,14 @@ class PSIAgeExample:
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Age Bin** |                **Training %**                |                **Serving %**                |               **Difference**               |          **ln(Serving/Training)**         |               **Contribution**               |
-|:-----------:|:--------------------------------------------:|:-------------------------------------------:|:------------------------------------------:|:-----------------------------------------:|:--------------------------------------------:|
-|  **18–25**  | `{python} PSIAgeExample.training_pct_str[0]` | `{python} PSIAgeExample.serving_pct_str[0]` | `{python} PSIAgeExample.difference_str[0]` | `{python} PSIAgeExample.log_ratio_str[0]` | `{python} PSIAgeExample.contribution_str[0]` |
-|  **26–35**  | `{python} PSIAgeExample.training_pct_str[1]` | `{python} PSIAgeExample.serving_pct_str[1]` | `{python} PSIAgeExample.difference_str[1]` | `{python} PSIAgeExample.log_ratio_str[1]` | `{python} PSIAgeExample.contribution_str[1]` |
-|  **36–45**  | `{python} PSIAgeExample.training_pct_str[2]` | `{python} PSIAgeExample.serving_pct_str[2]` | `{python} PSIAgeExample.difference_str[2]` | `{python} PSIAgeExample.log_ratio_str[2]` | `{python} PSIAgeExample.contribution_str[2]` |
-|  **46–55**  | `{python} PSIAgeExample.training_pct_str[3]` | `{python} PSIAgeExample.serving_pct_str[3]` | `{python} PSIAgeExample.difference_str[3]` | `{python} PSIAgeExample.log_ratio_str[3]` | `{python} PSIAgeExample.contribution_str[3]` |
-|  **56–65**  | `{python} PSIAgeExample.training_pct_str[4]` | `{python} PSIAgeExample.serving_pct_str[4]` | `{python} PSIAgeExample.difference_str[4]` | `{python} PSIAgeExample.log_ratio_str[4]` | `{python} PSIAgeExample.contribution_str[4]` |
-|   **66+**   | `{python} PSIAgeExample.training_pct_str[5]` | `{python} PSIAgeExample.serving_pct_str[5]` | `{python} PSIAgeExample.difference_str[5]` | `{python} PSIAgeExample.log_ratio_str[5]` | `{python} PSIAgeExample.contribution_str[5]` |
+| **Age Bin** |                   **Training %**                   |                   **Serving %**                   |               **Difference**               |          **ln(Serving/Training)**         |               **Contribution**               |
+|:-----------:|:--------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------:|:-----------------------------------------:|:--------------------------------------------:|
+|  **18–25**  | `{python} PSIAgeExample.training_pct_value_str[0]` | `{python} PSIAgeExample.serving_pct_value_str[0]` | `{python} PSIAgeExample.difference_str[0]` | `{python} PSIAgeExample.log_ratio_str[0]` | `{python} PSIAgeExample.contribution_str[0]` |
+|  **26–35**  | `{python} PSIAgeExample.training_pct_value_str[1]` | `{python} PSIAgeExample.serving_pct_value_str[1]` | `{python} PSIAgeExample.difference_str[1]` | `{python} PSIAgeExample.log_ratio_str[1]` | `{python} PSIAgeExample.contribution_str[1]` |
+|  **36–45**  | `{python} PSIAgeExample.training_pct_value_str[2]` | `{python} PSIAgeExample.serving_pct_value_str[2]` | `{python} PSIAgeExample.difference_str[2]` | `{python} PSIAgeExample.log_ratio_str[2]` | `{python} PSIAgeExample.contribution_str[2]` |
+|  **46–55**  | `{python} PSIAgeExample.training_pct_value_str[3]` | `{python} PSIAgeExample.serving_pct_value_str[3]` | `{python} PSIAgeExample.difference_str[3]` | `{python} PSIAgeExample.log_ratio_str[3]` | `{python} PSIAgeExample.contribution_str[3]` |
+|  **56–65**  | `{python} PSIAgeExample.training_pct_value_str[4]` | `{python} PSIAgeExample.serving_pct_value_str[4]` | `{python} PSIAgeExample.difference_str[4]` | `{python} PSIAgeExample.log_ratio_str[4]` | `{python} PSIAgeExample.contribution_str[4]` |
+|   **66+**   | `{python} PSIAgeExample.training_pct_value_str[5]` | `{python} PSIAgeExample.serving_pct_value_str[5]` | `{python} PSIAgeExample.difference_str[5]` | `{python} PSIAgeExample.log_ratio_str[5]` | `{python} PSIAgeExample.contribution_str[5]` |
 
 : **PSI Worked Example**: User age distribution drift from training to serving, decomposed across six age bins. The total PSI is `{python} PSIAgeExample.total_psi_str`, well below the `{python} PSIAgeExample.warning_threshold_str` warning threshold, even though several bins shifted by 3 percentage points. The contribution column shows why aggregate PSI is more reliable than per-bin inspection: individual bin movement can look noticeable while the summed evidence remains below the alert threshold. {#tbl-psi-age-example tbl-colwidths="[13,15,15,16,24,17]"}
 
@@ -2734,7 +2734,7 @@ Translating these unit costs into a concrete budget estimate clarifies the real 
 # │ Exports: dp_m_str, ingest_usd_str, storage_gb_str, total_usd_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Infrastructure, GB, USD, ureg
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_memory, fmt_time
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_count, fmt_memory, fmt_rate, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MonitoringBudget:
@@ -2779,23 +2779,23 @@ class MonitoringBudget:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_variants_str = fmt(n_variants, precision=0, commas=False)
     metrics_per_variant_str = fmt(metrics_per_variant, precision=0, commas=False)
-    samples_per_min_str = fmt(samples_per_min, precision=0, commas=False)
+    samples_per_min_str = fmt_rate(samples_per_min, "samples/min", precision=0, commas=False)
     sample_interval_s_str = fmt_time(sample_interval_s, "second", precision=0, commas=False, style="word")
-    days_str = fmt(days, precision=0, commas=False)
+    days_str = fmt_time(days, "day", precision=0, commas=False, style="word")
     ingestion_cost_per_m_str = fmt_usd(ingestion_cost_per_m, precision=2, commas=False, per="million")
-    bytes_per_point_str = fmt(bytes_per_point, precision=0, commas=False)
+    bytes_per_point_value_str = fmt(bytes_per_point, precision=0, commas=False)
     storage_cost_per_gb_str = fmt_usd(storage_cost_per_gb, precision=0, commas=False, per="GB")
     n_dashboards_str = fmt(n_dashboards, precision=0, commas=False)
     n_users_str = fmt(n_users, precision=0, commas=False)
-    queries_per_hr_str = fmt(queries_per_hr, precision=0, commas=False)
-    work_hours_str = fmt(work_hours, precision=0, commas=False)
-    work_days_str = fmt(work_days, precision=0, commas=False)
+    queries_per_hr_str = fmt_rate(queries_per_hr, "queries/hour", precision=0, commas=False)
+    work_hours_str = fmt_time(work_hours, "hour", precision=0, commas=False, style="word", per="day")
+    work_days_str = fmt_time(work_days, "day", precision=0, commas=False, style="word")
     query_cost_per_str = fmt_usd(query_cost_per, precision=2, commas=False, per="query")
     dp_m_str = fmt(datapoints_mo_m, precision=1, commas=False)
     ingest_usd_str = fmt_usd(ingestion_cost, precision=1, commas=False, per="month")
     storage_gb_str = fmt_memory(storage_q, unit=GB, precision=1, commas=False)
     storage_cost_str = fmt_usd(storage_cost, precision=2, commas=False, per="month")
-    queries_str = fmt(queries_mo, precision=0, commas=True)
+    queries_str = fmt_rate(queries_mo, "queries/month", precision=0, commas=True)
     query_cost_str = fmt_usd(query_cost, commas=False, per="month")
     total_usd_str = fmt_usd(total_cost, precision=1, commas=False, per="month")
 ```
@@ -2806,22 +2806,22 @@ Consider monitoring a single ML node (one production model) with:
 
 - one model with `{python} MonitoringBudget.n_variants_str` deployment variants (production, canary, staging), each emitting `{python} MonitoringBudget.metrics_per_variant_str` metrics
 - Metrics sampled every `{python} MonitoringBudget.sample_interval_s_str`
-- `{python} MonitoringBudget.days_str`-day retention requirement
+- Retention requirement: `{python} MonitoringBudget.days_str`
 - `{python} MonitoringBudget.n_dashboards_str` dashboards (model health, infrastructure), `{python} MonitoringBudget.n_users_str` team members, five-minute refresh
 
 **Metric ingestion**:
 
-- Data points per month: `{python} MonitoringBudget.n_variants_str` $\times$ `{python} MonitoringBudget.metrics_per_variant_str` $\times$ (`{python} MonitoringBudget.samples_per_min_str`/min $\times 60 \times 24 \times$ `{python} MonitoringBudget.days_str`) = `{python} MonitoringBudget.dp_m_str` million
+- Data points per month: `{python} MonitoringBudget.n_variants_str` $\times$ `{python} MonitoringBudget.metrics_per_variant_str` $\times$ (`{python} MonitoringBudget.samples_per_min_str` $\times 60 \times 24 \times$ `{python} MonitoringBudget.days_str`) = `{python} MonitoringBudget.dp_m_str` million
 - Cost at `{python} MonitoringBudget.ingestion_cost_per_m_str`: **`{python} MonitoringBudget.ingest_usd_str`**
 
 **Storage**:
 
-- At `{python} MonitoringBudget.bytes_per_point_str` bytes/point compressed: `{python} MonitoringBudget.dp_m_str` million $\times$ `{python} MonitoringBudget.bytes_per_point_str` = `{python} MonitoringBudget.storage_gb_str`
+- At `{python} MonitoringBudget.bytes_per_point_value_str` bytes/point compressed: `{python} MonitoringBudget.dp_m_str` million $\times$ `{python} MonitoringBudget.bytes_per_point_value_str` bytes = `{python} MonitoringBudget.storage_gb_str`
 - Cost at `{python} MonitoringBudget.storage_cost_per_gb_str`: **`{python} MonitoringBudget.storage_cost_str`**
 
 **Query compute**:
 
-- Queries per month: `{python} MonitoringBudget.n_dashboards_str` dashboards $\times$ `{python} MonitoringBudget.n_users_str` users $\times$ (`{python} MonitoringBudget.queries_per_hr_str`/hr $\times$ `{python} MonitoringBudget.work_hours_str` $\times$ `{python} MonitoringBudget.work_days_str` days) = `{python} MonitoringBudget.queries_str`
+- Queries per month: `{python} MonitoringBudget.n_dashboards_str` dashboards $\times$ `{python} MonitoringBudget.n_users_str` users $\times$ (`{python} MonitoringBudget.queries_per_hr_str` $\times$ `{python} MonitoringBudget.work_hours_str` $\times$ `{python} MonitoringBudget.work_days_str`) = `{python} MonitoringBudget.queries_str`
 - Cost at `{python} MonitoringBudget.query_cost_per_str`: **`{python} MonitoringBudget.query_cost_str`**
 
 **Total**: ~`{python} MonitoringBudget.total_usd_str` for a single ML node
@@ -2853,9 +2853,9 @@ $$\text{Monitoring ROI} = \frac{\text{Incidents Prevented} \times \text{Avg Inci
 # │ How: Calculate the return on investment for MLOps infrastructure.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: incidents_prevented_str, avg_incident_cost_str, monitoring_roi_str
+# │ Exports: incidents_prevented_str, avg_incident_cost_str, monitoring_roi_factor_value_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_ratio, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MonitoringROI:
@@ -2877,13 +2877,13 @@ class MonitoringROI:
     incidents_prevented_str = fmt(incidents_prevented, precision=0, commas=False)
     avg_incident_cost_str = fmt_usd(avg_incident_cost, precision=0, commas=True)
     annual_monitoring_cost_str = fmt_usd(annual_monitoring_cost, precision=0, commas=True)
-    monitoring_roi_str = fmt(monitoring_roi, precision=0, commas=False)
+    monitoring_roi_factor_value_str = fmt_ratio(monitoring_roi, precision=0, commas=False)
 ```
 
 If average incident costs `{python} MonitoringROI.avg_incident_cost_str` (downtime + engineering time + reputation) and monitoring prevents `{python} MonitoringROI.incidents_prevented_str` incidents annually at `{python} MonitoringROI.annual_monitoring_cost_str` monitoring cost:
 
 $$
-\text{ROI} = \frac{`{python} MonitoringROI.incidents_prevented_str` \times `{python} MonitoringROI.avg_incident_cost_str`}{`{python} MonitoringROI.annual_monitoring_cost_str`} = `{python} MonitoringROI.monitoring_roi_str`\times
+\text{ROI} = \frac{`{python} MonitoringROI.incidents_prevented_str` \times `{python} MonitoringROI.avg_incident_cost_str`}{`{python} MonitoringROI.annual_monitoring_cost_str`} = `{python} MonitoringROI.monitoring_roi_factor_value_str`\times
 $$
 
 This framework helps justify monitoring investments and prioritize which metrics deserve fine-grained observation vs. coarse sampling.
@@ -2920,6 +2920,10 @@ For P0 and P1 incidents, postmortem documentation\index{Postmortem Documentation
 #### Model debugging: From detection to diagnosis {#sec-ml-operations-model-debugging-detection-diagnosis-4992}
 
 \index{Model Debugging!probabilistic failures}Incident response triages and mitigates; debugging\index{Model Debugging!root cause analysis} identifies root causes. Monitoring detects that something is wrong; debugging determines *why*. ML debugging differs from traditional software debugging because failures are probabilistic rather than deterministic. A model producing incorrect predictions does not throw exceptions or generate stack traces, making systematic debugging approaches essential for resolving ML incidents efficiently.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
 
 ##### The debugging decision tree {#sec-ml-operations-debugging-decision-tree-5080}
 
@@ -2959,11 +2963,11 @@ When model performance degrades\index{Model Debugging!decision tree}, work throu
 # │ Show: Overall traffic = 100%, overall accuracy = 91% in table.
 # │ How: Sum traffic percentages; compute weighted average of accuracy values.
 # │
-# │ Imports: mlsysim.fmt (fmt_int, check)
-# │ Exports: SliceAnalysisCalc.total_traffic_str,
-# │   SliceAnalysisCalc.overall_accuracy_str
+# │ Imports: mlsysim.fmt (fmt_percent, check)
+# │ Exports: SliceAnalysisCalc.total_traffic_pct_str,
+# │   SliceAnalysisCalc.overall_accuracy_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check
+from mlsysim.fmt import fmt_percent, check
 
 
 class SliceAnalysisCalc:
@@ -2991,19 +2995,21 @@ class SliceAnalysisCalc:
     )
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    total_traffic_str = fmt_int(total_traffic)
-    overall_accuracy_str = fmt_int(int(round(overall_accuracy)))
+    total_traffic_pct_str = fmt_percent(total_traffic / 100, precision=0, commas=False, style='prose')
+    overall_accuracy_pct_str = fmt_percent(
+        round(overall_accuracy) / 100, precision=0, commas=False, style='prose'
+    )
 ```
 
-| **User Segment**     |                       **Traffic %**                        |                          **Accuracy**                         | **Impact**               |
-|:---------------------|:----------------------------------------------------------:|:-------------------------------------------------------------:|:-------------------------|
-| **Desktop users**    |                         45 percent                         |                           94 percent                          | Nominal                  |
-| **Mobile (iOS)**     |                         30 percent                         |                           92 percent                          | Nominal                  |
-| **Mobile (Android)** |                         20 percent                         |                           88 percent                          | Minor degradation        |
-| **Tablet users**     |                       **5 percent**                        |                         **62 percent**                        | **Severe—investigate**   |
-| **Overall**          | **`{python} SliceAnalysisCalc.total_traffic_str` percent** | **`{python} SliceAnalysisCalc.overall_accuracy_str` percent** | **Masks tablet problem** |
+| **User Segment**     |                     **Traffic %**                      |                        **Accuracy**                       | **Impact**               |
+|:---------------------|:------------------------------------------------------:|:---------------------------------------------------------:|:-------------------------|
+| **Desktop users**    |                       45 percent                       |                         94 percent                        | Nominal                  |
+| **Mobile (iOS)**     |                       30 percent                       |                         92 percent                        | Nominal                  |
+| **Mobile (Android)** |                       20 percent                       |                         88 percent                        | Minor degradation        |
+| **Tablet users**     |                     **5 percent**                      |                       **62 percent**                      | **Severe—investigate**   |
+| **Overall**          | **`{python} SliceAnalysisCalc.total_traffic_pct_str`** | **`{python} SliceAnalysisCalc.overall_accuracy_pct_str`** | **Masks tablet problem** |
 
-: **Slice Analysis Example**: Overall accuracy of `{python} SliceAnalysisCalc.overall_accuracy_str` percent appears acceptable, but tablet users (5 percent of traffic) experience 62 percent accuracy, a severe degradation masked by aggregation. Effective debugging requires systematic slice analysis across key dimensions. {#tbl-slice-analysis-example tbl-colwidths="[28,22,22,28]"}
+: **Slice Analysis Example**: Overall accuracy of `{python} SliceAnalysisCalc.overall_accuracy_pct_str` appears acceptable, but tablet users (5 percent of traffic) experience 62 percent accuracy, a severe degradation masked by aggregation. Effective debugging requires systematic slice analysis across key dimensions. {#tbl-slice-analysis-example tbl-colwidths="[28,22,22,28]"}
 
 ##### Feature attribution for debugging {#sec-ml-operations-feature-attribution-debugging-f4ab}
 
@@ -3142,15 +3148,14 @@ This connection is not linear. @Fig-business-cost-curve exposes this nonlinearit
 # │ Show: How asymmetric error costs shift the threshold from the 0.5 center.
 # │ How: Plot expected cost curves for False Positives vs. False Negatives.
 # │
-# │ Imports: numpy, mlsysim.core.viz
+# │ Imports: numpy, book.tools.figures.style
 # │ Exports: (figure rendered directly, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Demonstrate that the optimal operating point differs from highest accuracy.
 import numpy as np
-from mlsysim import viz
-
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(10,4))
+from book.tools.figures import style as book_style
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10,4))
 
 #—Parameters (fraud detection cost scenario) ---
 
@@ -3499,10 +3504,10 @@ $$\text{Annual ROI} = \frac{\text{Incidents Avoided} \times \text{Avg Incident C
 # │ How: Contrast incident costs and labor savings against infrastructure spend.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: incidents_avoided_str, incident_savings_k_str, single_model_roi_str,
+# │ Exports: incidents_avoided_str, incident_savings_k_str, single_model_roi_factor_value_str,
 # │          mlops_investment_k_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_ratio, fmt_time, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SingleModelROI:
@@ -3533,7 +3538,7 @@ class SingleModelROI:
     time_savings_k_str = fmt_usd((time_savings // THOUSAND) * THOUSAND, precision=0, commas=False, scale="K")
     mlops_investment_k_str = fmt_usd((mlops_investment // THOUSAND) * THOUSAND, precision=0, commas=False, scale="K")
     mlops_investment_k_year_str = fmt_usd((mlops_investment // THOUSAND) * THOUSAND, precision=0, commas=False, scale="K", per="year")
-    single_model_roi_str = fmt(single_model_roi, precision=1, commas=False)
+    single_model_roi_factor_value_str = fmt_ratio(single_model_roi, precision=1, commas=False)
 ```
 
 For a model generating \$1M annual revenue with:
@@ -3543,7 +3548,7 @@ For a model generating \$1M annual revenue with:
 - MLOps investment of `{python} SingleModelROI.mlops_investment_k_year_str`
 
 $$
-\text{ROI} = \frac{`{python} SingleModelROI.incident_savings_k_str` + `{python} SingleModelROI.time_savings_k_str`}{`{python} SingleModelROI.mlops_investment_k_str`} = `{python} SingleModelROI.single_model_roi_str`\times
+\text{ROI} = \frac{`{python} SingleModelROI.incident_savings_k_str` + `{python} SingleModelROI.time_savings_k_str`}{`{python} SingleModelROI.mlops_investment_k_str`} = `{python} SingleModelROI.single_model_roi_factor_value_str`\times
 $$
 
 #### When to invest more {#sec-ml-operations-invest-14a2}

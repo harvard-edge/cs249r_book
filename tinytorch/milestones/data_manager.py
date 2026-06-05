@@ -161,7 +161,7 @@ class DatasetManager:
         print("\n✅ Download complete!")
 
     def get_mnist(self):
-        """Download and prepare MNIST dataset for MLP milestone."""
+        """Download and prepare MNIST for optional scale-up experiments."""
         mnist_dir = self.data_dir / "mnist"
         mnist_dir.mkdir(exist_ok=True)
 

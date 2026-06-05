@@ -121,7 +121,7 @@ def _(COLORS, mo):
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
                 <div style="margin-bottom: 3px;">1. <strong>Identify why infrastructure accounts for 95% of a production ML system</strong> and why the remaining 5% (the model) cannot be the primary engineering concern.</div>
                 <div style="margin-bottom: 3px;">2. <strong>Predict which deployment paradigm satisfies a given set of physical constraints</strong> (latency floor, power budget, memory capacity) from the four-regime framework.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Recognize each recurring UI component</strong> of the lab interface &mdash; prediction lock, Latency Waterfall, MathPeek accordion, and HUD footer &mdash; before encountering them in live labs.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Recognize each recurring UI component</strong> of the lab interface &mdash; prediction lock, Latency Waterfall, MathPeek accordion, and Design Ledger status strip &mdash; before encountering them in live labs.</div>
             </div>
         </div>
 

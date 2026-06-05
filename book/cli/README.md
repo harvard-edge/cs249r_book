@@ -243,9 +243,10 @@ Math multiplier examples:
 
 | Error code | Bad source | Fix guidance |
 |------------|------------|--------------|
-| `body_multiplier_suffix` | `speedup_str = fmt(speedup, suffix="×")` | Export the number only; prose adds `` `{python} speedup_str`$\times$ ``. |
+| `body_multiplier_suffix` | `speedup_str = fmt(speedup, suffix="×")` | Use `speedup_mult_str = fmt_multiple(speedup, ...)`; prose uses `` `{python} speedup_mult_str` `` by itself. |
+| `mult_double_glyph` | `` `{python} speedup_mult_str`$\times$ `` | Remove the prose glyph; `fmt_multiple` / `fmt_multiple_range` already emit `×`. |
 | `unicode_times_in_prose` | `A100 × H100` | Use `A100 $\times$ H100` in rendered prose; raw `×` only in plain-text contexts. |
-| `times_product_spacing` | `` `{python} a_str`$\times$`{python} b_str` `` | Use spaces around product operators: `` `{python} a_str` $\times$ `{python} b_str` ``. |
+| `times_product_spacing` | `` `{python} a_str`$\times$`{python} b_str` `` | Use spaces around product operators: `` `{python} a_str` $\times$ `{python} b_str` ``. Computed prose multipliers use `*_mult_str`. |
 | `fmt_sci_math_context` | `MarkdownStr(f"${fmt_sci(flops)}$")` | Use `fmt_math(sci_latex(...))` for prose math; keep `fmt_sci()` for plain text. |
 
 ## EPUB Checks — Two Layers, One CLI Surface
