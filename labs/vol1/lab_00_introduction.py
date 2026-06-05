@@ -13,7 +13,7 @@ app = marimo.App(width="full")
 #
 # Four sections:
 #   1. Concept blocks with structured checks (3 total)
-#   2. Interface Orientation — cockpit anatomy, live levers, prediction lock, MathPeek
+#   2. Interface Orientation — case, guess, controls, evidence, decision, report
 # No physics instruments (introduced in Lab 01+).
 # No prediction locks in anger (students haven't read Chapter 1 yet).
 # Progressive disclosure: each check gates the next concept.
@@ -100,12 +100,12 @@ def _(LabMetadata):
     lab_learning_objectives = (
         "Identify why production ML systems are constrained by infrastructure, not only model accuracy.",
         "Choose a canonical track and explain the physical constraint that makes it distinct.",
-        "Recognize the recurring lab rhythm: prediction, interaction, evidence, reflection, and report.",
+        "Recognize the recurring lab rhythm: read the case, make a guess, explore evidence, decide, and report.",
     )
     lab_big_takeaways = (
         "The same model idea becomes a different systems problem on iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.",
         "Track selection changes hardware facts, constraints, metrics, stakeholder pressure, and report framing.",
-        "Future labs should use MLSysIM source references instead of notebook-local hardware constants.",
+        "Later labs build on this track choice, but each lab will introduce only the new concept it needs.",
     )
     return lab_big_takeaways, lab_learning_objectives, lab_metadata
 
@@ -647,7 +647,6 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo):
         _constraints = ", ".join(_profile.dominant_constraints)
         _metrics = ", ".join(_profile.primary_metrics)
         _guardrails = ", ".join(_profile.guardrail_metrics)
-        _system_ref = _profile.system_ref or "single-device profile"
         _cards += f"""
             <div style="background: white; border: 1px solid {_color}44; border-radius: 12px; padding: 20px;">
                 <div style="font-weight: 800; color: #1e293b; font-size: 1.0rem; margin-bottom: 4px;">
@@ -659,13 +658,9 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo):
                 <div style="color: #475569; font-size: 0.87rem; line-height: 1.6; margin-bottom: 12px;">
                     {_profile.narrative}
                 </div>
-                <div style="background: #f8fafc; border-radius: 8px; padding: 8px 12px;
-                            font-size: 0.78rem; color: #334155; line-height: 1.55; margin-bottom: 8px;">
-                    <strong>Hardware:</strong> <code>{_profile.hardware_ref}</code><br/>
-                    <strong>System:</strong> <code>{_system_ref}</code>
-                </div>
                 <div style="background: {_color}12; border-radius: 8px; padding: 8px 12px;
                             font-size: 0.78rem; color: #334155; line-height: 1.55;">
+                    <strong>Your role:</strong> {_profile.stakeholder}<br/>
                     <strong>Primary metrics:</strong> {_metrics}<br/>
                     <strong>Guardrails:</strong> {_guardrails}<br/>
                     <strong>Dominant constraints:</strong> {_constraints}
@@ -679,9 +674,9 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo):
         ## The Four Canonical Tracks
 
         The physical constraints above do not create a generic continuum. In this
-        course they resolve into four canonical tracks. Each track has a canonical
-        profile in `mlsysbook_labs`, a hardware reference in MLSysIM, and a set of
-        metrics and guardrails that later labs reuse.
+        course they resolve into four canonical tracks. You will choose one as
+        your recurring point of view. Later labs will change the story, metrics,
+        and decisions automatically from that choice.
         """),
         mo.Html(f"""
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 16px 0;">
@@ -690,9 +685,9 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo):
         """),
         mo.callout(
             mo.md(
-                "**Track choice is a source-of-truth decision.** Later labs read the selected "
-                "track from the Design Ledger and resolve hardware, system, scenario, and "
-                "report defaults from `mlsysbook_labs` and MLSysIM references."
+                "**Track choice is a learning lens.** You are not choosing a career path. "
+                "You are choosing which deployment constraints you will keep returning to "
+                "as each new ML systems idea is introduced."
             ),
             kind="info",
         ),
@@ -771,7 +766,7 @@ def _(check1, check2empty, check3, mo):
 # ZONE C: INTERFACE ORIENTATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# _act_why: "Before Lab 01, students must recognize every recurring UI component — prediction locks, instruments, MathPeek — so cognitive load goes to content, not navigation."
+# _act_why: "Before Lab 01, students should recognize the recurring case -> guess -> evidence -> decision rhythm without advanced terminology."
 
 # ─── INTERFACE ORIENTATION INTRO ───────────────────────────────────────────────
 
@@ -784,12 +779,13 @@ def _(check1, check2empty, check3, mo):
         mo.md("""
         ## How Every Lab in This Curriculum Is Structured
 
-        Starting from Lab 01, every lab follows the same **four-zone cockpit layout**.
-        This is not aesthetic — it is a deliberate information architecture that
-        separates *what you control* from *what the system tells you*.
+        Starting from Lab 01, every lab follows the same simple rhythm:
+        read a short case, make a prediction, change a few controls, inspect
+        the evidence, and write the decision you would defend.
 
-        Before you begin Lab 01, spend two minutes with the interactive tour below.
-        You will recognize every element the moment you see it.
+        Before you begin Lab 01, spend two minutes with the tour below. The goal
+        is only to recognize the pattern. The technical vocabulary arrives later,
+        one lab at a time.
         """),
     ])
     return
@@ -801,58 +797,55 @@ def _(
 ):
     mo.stop(check1.value is None or check2empty() or check3.value is None)
 
-    # ── ZONE ANATOMY DIAGRAM ─────────────────────────────────────────
+    # ── SIMPLE LAB RHYTHM DIAGRAM ────────────────────────────────────
     _zone_html = """
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:16px 0;">
 
         <div style="background:#f0f4ff; border:1.5px solid #c7d2fe; border-radius:10px;
                     padding:16px; border-top:4px solid #6366f1;">
             <div style="font-weight:800; color:#3730a3; font-size:0.9rem; margin-bottom:6px;">
-                Zone 1 · Command Header
+                1 · Read The Case
             </div>
             <div style="color:#4338ca; font-size:0.83rem; line-height:1.55;">
-                Lab number, scenario title, your active persona, and live
-                <strong>constraint badges</strong> (Latency, Power, Memory).
-                Badges turn red the moment you violate a constraint —
-                the system doesn't wait to tell you. Always visible.
+                Each lab starts with a short situation. Your selected track
+                changes the stakeholder, the device, and the constraint you
+                should care about first.
             </div>
         </div>
 
         <div style="background:#f0fdf4; border:1.5px solid #bbf7d0; border-radius:10px;
                     padding:16px; border-top:4px solid #16a34a;">
             <div style="font-weight:800; color:#14532d; font-size:0.9rem; margin-bottom:6px;">
-                Zone 2 · Engineering Levers
+                2 · Make A Guess
             </div>
             <div style="color:#166534; font-size:0.83rem; line-height:1.55;">
-                Sliders, dropdowns, and toggles that modify your design —
-                hardware target, batch size, precision, model variant.
-                <strong>Every change recalculates everything instantly.</strong>
-                No "Submit" button. The lab reacts in real-time.
+                Before looking at the result, you record what you think will
+                happen. A guess is not graded as a trick question; it gives you
+                something concrete to compare against the evidence.
             </div>
         </div>
 
         <div style="background:#fff7ed; border:1.5px solid #fed7aa; border-radius:10px;
                     padding:16px; border-top:4px solid #ea580c;">
             <div style="font-weight:800; color:#9a3412; font-size:0.9rem; margin-bottom:6px;">
-                Zone 3 · Live Telemetry
+                3 · Explore Evidence
             </div>
             <div style="color:#7c2d12; font-size:0.83rem; line-height:1.55;">
-                Metric cards, Roofline chart (from Lab 11), Latency Waterfall
-                (from Lab 02). All charts <strong>update as you move sliders</strong>.
-                Your job is to read these instruments and trace cause to effect.
+                Sliders, choices, tables, and charts show what changes when you
+                adjust the system. These controls are the pieces that update
+                the evidence.
             </div>
         </div>
 
         <div style="background:#fffbeb; border:1.5px solid #fde68a; border-radius:10px;
                     padding:16px; border-top:4px solid #d97706;">
             <div style="font-weight:800; color:#92400e; font-size:0.9rem; margin-bottom:6px;">
-                Zone 4 · Audit Trail
+                4 · Decide And Report
             </div>
             <div style="color:#78350f; font-size:0.83rem; line-height:1.55;">
-                Consequence log, explanatory text, and a free-form rationale box.
-                <strong>Explain your design decision</strong> in writing before
-                submitting. The act of articulating trade-offs is the learning —
-                not the number the simulator returns.
+                After reading the evidence, you choose a defensible answer and
+                write a short rationale. The downloaded report captures that
+                reasoning for review.
             </div>
         </div>
 
@@ -862,146 +855,123 @@ def _(
     # ── LIVE COMPONENT TOUR via mo.ui.tabs ────────────────────────────
     _tab_overview = mo.vstack([
         mo.md("""
-        **`mo.ui.tabs`** — labs with multiple acts use tab navigation.
-        Each tab is a self-contained section. You are looking at a live example right now.
+        **Lab rhythm** — later labs repeat the same learning loop.
 
-        In later labs, tabs structure the workflow:
-        ```
-        Part A: Baseline     →  establish the initial state
-        Part AI: Intervention →  apply an optimization
-        ```
-        The tab structure ensures you *commit* to a baseline before modifying it.
-        This is not UX convenience — it enforces the scientific method: measure before you change.
+        The technical topic changes from lab to lab, but the student move stays
+        familiar: read the case, make a guess, move the controls, inspect the
+        evidence, decide, and explain.
         """),
+        mo.Html(_zone_html),
         mo.callout(
-            mo.md("Switch between tabs above to navigate. Your work in each tab is preserved independently."),
+            mo.md("The point of Lab 00 is orientation. You should leave knowing what role your track plays and how a later lab page asks you to work."),
             kind="info"
         ),
     ])
 
     _tab_levers = mo.vstack([
-        mo.md("**Zone 2 levers** update the system state reactively. Here is a live example:"),
+        mo.md("""
+        **Controls change evidence.** A radio button that asks for your guess only
+        records your expectation. Sliders and dropdowns are the controls that
+        change plots, tables, and status cards.
+        """),
         mo.hstack([
             mo.vstack([
-                mo.md("**Hardware target**"),
-                mo.ui.dropdown(
-                    options=["H100 (Cloud)", "Jetson Orin NX (Edge)", "Smartphone NPU (Mobile)", "Cortex-M7 (TinyML)"],
-                    value="H100 (Cloud)",
-                    label="Select hardware:"
-                ),
-                mo.md("**Batch size**"),
-                mo.ui.slider(start=1, stop=128, step=1, value=32, label="Batch size:"),
+                mo.md("**Example control**"),
+                mo.ui.slider(start=0, stop=100, step=5, value=55, label="Evidence strength:"),
             ], gap=1),
             mo.Html(f"""
             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;
                         padding:16px; min-width:220px;">
                 <div style="font-size:0.7rem; font-weight:700; color:#94a3b8;
-                            text-transform:uppercase; margin-bottom:8px;">Live Telemetry Preview</div>
+                            text-transform:uppercase; margin-bottom:8px;">Evidence Preview</div>
                 <div style="font-size:0.82rem; color:#475569; line-height:1.8;">
-                    Latency: <strong style="color:{COLORS['BlueLine']}">12.4 ms</strong><br/>
-                    Throughput: <strong style="color:{COLORS['GreenLine']}">2,580 tok/s</strong><br/>
-                    Memory: <strong style="color:{COLORS['OrangeLine']}">34.2 GB</strong><br/>
-                    MFU: <strong style="color:{COLORS['RedLine']}">47%</strong>
+                    Current evidence: <strong style="color:{COLORS['BlueLine']}">medium</strong><br/>
+                    Track constraint: <strong style="color:{COLORS['GreenLine']}">protected</strong><br/>
+                    Decision status: <strong style="color:{COLORS['OrangeLine']}">needs rationale</strong>
                 </div>
                 <div style="margin-top:10px; font-size:0.72rem; color:#94a3b8; font-style:italic;">
-                    In real labs these numbers<br/>update as you move sliders.
+                    In later labs, real plots and<br/>tables update as you move controls.
                 </div>
             </div>
             """),
         ], gap=2, justify="start"),
         mo.callout(
-            mo.md("**Key insight:** Every lever connects to every metric. Changing batch size affects memory, which affects throughput, which affects cost. The cockpit shows all effects simultaneously."),
+            mo.md("Use guesses to learn from surprise. Use controls to create the evidence you will reason from."),
             kind="warn",
         ),
     ])
 
     _tab_prediction = mo.vstack([
         mo.md("""
-        **The Prediction Lock** — the most important component in the curriculum.
+        **Guess first, then test.**
 
-        Before every Act in Labs 01–14, you will see a **Prediction Lock** like the one below.
-        You must commit to a prediction *before* you can run the simulation.
+        Many labs ask for an initial answer before you move a control. That
+        answer is a learning checkpoint. It should not make the chart jump.
         """),
         mo.Html("""
-        <div style="background:#1e293b; border-radius:10px; padding:20px; border-left:4px solid #6366f1;">
+        <div style="background:#f8fafc; border-radius:10px; padding:20px; border-left:4px solid #16a34a; border:1px solid #dbeafe;">
             <div style="font-size:0.72rem; font-weight:700; color:#6366f1;
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">
-                🔒 Prediction Lock — Part A
+                Step 1 - Before Evidence
             </div>
-            <div style="color:#e2e8f0; font-size:0.9rem; line-height:1.6; margin-bottom:14px;">
-                <strong>Scenario:</strong> You double the batch size from 32 to 64 on an H100.
-                The model is memory-bandwidth-bound.<br/><br/>
-                <strong>Predict:</strong> Will throughput (tokens/second) increase,
-                decrease, or stay approximately the same?
+            <div style="color:#1e293b; font-size:0.9rem; line-height:1.6; margin-bottom:14px;">
+                <strong>Scenario:</strong> The system is missing its target.<br/><br/>
+                <strong>Guess:</strong> What do you think is the most likely reason?
             </div>
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                <div style="background:rgba(99,102,241,0.15); border:1px solid #6366f1;
-                            border-radius:8px; padding:8px 16px; color:#a5b4fc; font-size:0.85rem;
+                <div style="background:#ecfdf5; border:1px solid #86efac;
+                            border-radius:8px; padding:8px 16px; color:#166534; font-size:0.85rem;
                             font-weight:600; cursor:pointer;">
-                    A) Increase proportionally (~2×)
+                    A) The data
                 </div>
-                <div style="background:rgba(99,102,241,0.15); border:1px solid #6366f1;
-                            border-radius:8px; padding:8px 16px; color:#a5b4fc; font-size:0.85rem;
+                <div style="background:#ecfdf5; border:1px solid #86efac;
+                            border-radius:8px; padding:8px 16px; color:#166534; font-size:0.85rem;
                             font-weight:600; cursor:pointer;">
-                    B) Increase sub-linearly
+                    B) The model
                 </div>
-                <div style="background:rgba(99,102,241,0.15); border:1px solid #6366f1;
-                            border-radius:8px; padding:8px 16px; color:#a5b4fc; font-size:0.85rem;
+                <div style="background:#ecfdf5; border:1px solid #86efac;
+                            border-radius:8px; padding:8px 16px; color:#166534; font-size:0.85rem;
                             font-weight:600; cursor:pointer;">
-                    C) Stay the same
+                    C) The device
                 </div>
             </div>
-            <div style="margin-top:12px; font-size:0.78rem; color:#64748b; font-style:italic;">
-                ↑ In a real lab, selecting an answer here unlocks the simulation instruments below.
+            <div style="margin-top:12px; font-size:0.78rem; color:#64748b;">
+                This records your starting point. The evidence controls come next.
             </div>
         </div>
         """),
         mo.md("""
-        **Why this matters:** Research on deliberate practice shows that making an
-        explicit prediction before observing a result dramatically increases retention.
-        If your prediction is wrong, you experience *productive failure* — the gap
-        between expectation and observation drives deeper encoding than passive reading.
-
-        The prediction lock is not a gatekeeping mechanism. It is a learning amplifier.
+        Being wrong is useful here. The lab is asking you to notice how evidence
+        changes your mind, not to already know the answer.
         """),
     ])
 
     _tab_mathpeek = mo.vstack([
         mo.md("""
-        **`MathPeek` accordion** — the invariant behind every instrument.
+        **Optional details** keep the main page readable.
 
-        Every chart and metric in the telemetry panel connects to a physical equation.
-        The MathPeek accordion surfaces that equation on demand — you are never just
-        moving sliders, you are probing the underlying physics.
+        Later labs sometimes include a formula, a definition, or a short reference.
+        Those details live behind expandable sections so you can open them when
+        you need them and keep reading when you do not.
         """),
         mo.accordion({
-            "📐 View the Invariant — Iron Law of ML Systems (Preview)": mo.md("""
-            **Formula:** `T = D/BW + O/R + L`
-
-            **Components:**
-            - **T** — Total end-to-end latency (seconds)
-            - **D** — Data size (bytes moved across memory hierarchy)
-            - **BW** — Memory bandwidth (bytes/second)
-            - **O** — FLOPs required (floating-point operations)
-            - **R** — Compute rate (FLOPs/second, hardware peak × MFU)
-            - **L** — Fixed overhead latency (dispatch tax, network RTT)
-
-            _This equation is the central object of the entire curriculum.
-            You will encounter it in every lab. Open this accordion whenever
-            you need to re-anchor a number to first principles._
+            "Open a sample detail": mo.md("""
+            A later lab might explain a metric in one paragraph, show the
+            equation behind it, or name the chapter section that introduced it.
+            The main task still stays visible above the detail.
             """),
         }),
         mo.callout(
-            mo.md("**Lab 01** introduces the Iron Law formally. For now, recognize the accordion — it lives in every lab."),
+            mo.md("You do not need every detail at once. Open details when they help you answer the current question."),
             kind="info",
         ),
     ])
 
     _tour_tabs = mo.ui.tabs({
-        "🏗️ Cockpit Anatomy":  _tab_overview,
-        "🎛️ Live Levers":      _tab_levers,
-        "🔒 Prediction Lock":  _tab_prediction,
-        "📐 MathPeek":         _tab_mathpeek,
+        "Lab Rhythm":       _tab_overview,
+        "Controls":         _tab_levers,
+        "Guess First":      _tab_prediction,
+        "Optional Details": _tab_mathpeek,
     })
 
     mo.vstack([
@@ -1012,10 +982,9 @@ def _(
             <div style="font-size:1.3rem;">✅</div>
             <div style="font-size:0.87rem; color:#94a3b8; line-height:1.6;">
                 <strong style="color:#e2e8f0;">Interface orientation complete.</strong>
-                You now recognize the four-zone cockpit, the live lever pattern, the
-                prediction lock, and the MathPeek accordion. These are the only UI
-                primitives used across all 14 labs — nothing new will be introduced
-                without explanation.
+                You now know the repeated loop: case, guess, controls, evidence,
+                decision, and report. Later labs add technical ideas gradually
+                inside that same structure.
             </div>
         </div>
         """),
@@ -1120,11 +1089,11 @@ def _(
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
-                 "Learn the D·A·M taxonomy, the Iron Law, and why the Memory Wall is your primary constraint"),
+                 "Learn how to diagnose whether the first fix belongs to data, model design, or infrastructure"),
                 ("Labs 05–08", "Build",
-                 "Trace memory allocation through a transformer forward pass; profile your serving stack"),
+                 "Build and measure the pieces of a serving stack instead of treating the model as a black box"),
                 ("Labs 09–11", "Optimize",
-                 "Apply quantization, understand hardware utilization, and cross the efficiency threshold"),
+                 "Reduce cost and latency while keeping quality and reliability visible"),
                 ("Labs 12–14", "Deploy",
                  "Benchmark, monitor, and operate a production serving system at scale"),
             ],
@@ -1139,13 +1108,13 @@ def _(
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
-                 "Understand latency decomposition, the Iron Law, and why P99 is the only metric that matters"),
+                 "Learn how safety-critical systems turn one failure symptom into evidence-backed diagnosis"),
                 ("Labs 05–08", "Build",
-                 "Implement a priority scheduler; measure the tail-latency distribution of your inference stack"),
+                 "Build the parts of an inference path and measure what happens under realistic load"),
                 ("Labs 09–11", "Optimize",
-                 "Apply structured pruning to reduce worst-case latency below the safety threshold"),
+                 "Simplify and accelerate models while protecting worst-case behavior"),
                 ("Labs 12–14", "Deploy",
-                 "Validate deterministic SLAs on physical edge hardware under adversarial load"),
+                 "Validate the system with safety, fallback, and monitoring evidence"),
             ],
         },
         "iphone": {
@@ -1158,13 +1127,13 @@ def _(
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
-                 "Map the D·A·M trade-off for mobile NPUs; quantify the thermal budget"),
+                 "Learn how local-device constraints change the first fix you should try"),
                 ("Labs 05–08", "Build",
-                 "Implement MobileNetV2 with depthwise separable convolutions in TinyTorch"),
+                 "Build efficient model components and connect them to user-visible responsiveness"),
                 ("Labs 09–11", "Optimize",
-                 "Apply INT8 quantization and operator fusion to stay within the thermal envelope"),
+                 "Compress and tune models while protecting quality, battery, and heat"),
                 ("Labs 12–14", "Deploy",
-                 "Benchmark sustained throughput on a power-constrained device under realistic workloads"),
+                 "Benchmark sustained behavior under realistic mobile workloads"),
             ],
         },
         "oura_ring": {
@@ -1177,13 +1146,13 @@ def _(
             ),
             "arc": [
                 ("Labs 01–04", "Foundations",
-                 "Count every byte in a DS-CNN keyword spotting model; understand SRAM allocation"),
+                 "Learn how tiny-device limits force early choices about data windows, model size, and memory"),
                 ("Labs 05–08", "Build",
-                 "Implement depthwise separable convolutions in TinyTorch; profile memory layout"),
+                 "Build compact model pieces and see how memory layout affects whether they fit"),
                 ("Labs 09–11", "Optimize",
-                 "Achieve 4× compression via magnitude pruning and INT8 quantization"),
+                 "Shrink the model while protecting accuracy, update size, and battery use"),
                 ("Labs 12–14", "Deploy",
-                 "Fit the full inference pipeline in 256 KB and validate on a physical MCU"),
+                 "Validate that the full sensing and inference path fits the tiny hardware envelope"),
             ],
         },
     }
@@ -1252,11 +1221,6 @@ def _(
             </div>
             <div style="font-size:1.25rem; font-weight:800; color:#0f172a; margin-bottom:4px;">
                 {_track_profile.label} · {_track_profile.stakeholder}
-            </div>
-            <div style="font-size:0.82rem; color:#64748b; margin-bottom:10px; line-height:1.5;">
-                <strong>MLSysIM source:</strong>
-                <code>{_track_profile.hardware_ref}</code>
-                {f" · <code>{_track_profile.system_ref}</code>" if _track_profile.system_ref else ""}
             </div>
             <div style="font-size:0.88rem; color:#475569; margin-bottom:4px; line-height:1.5;">
                 <strong>North Star:</strong> {_track_profile.narrative}
@@ -1397,10 +1361,10 @@ def _(COLORS, mo):
                     can bridge. Choosing the wrong regime makes the system impossible, not just slow.
                 </div>
                 <div>
-                    <strong>3. The prediction lock, Latency Waterfall, and MathPeek accordion appear in every lab.</strong>
-                    These are not UX choices &mdash; the prediction lock enforces scientific method,
-                    the Waterfall shows Iron Law terms in real time, and the MathPeek surfaces the
-                    governing equation behind every number. Recognize them before Lab 01.
+                    <strong>3. Every later lab repeats the same learning loop.</strong>
+                    You will read a case, make a guess, explore evidence, decide, and
+                    write a short report. That repeated structure lets the technical
+                    ideas get harder without making the interface feel new each time.
                 </div>
             </div>
         </div>
@@ -1419,10 +1383,10 @@ def _(COLORS, mo):
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 01: The Magnitude Awakening.</strong> This lab established
-                    that four deployment regimes exist and that constraints are incommensurable.
-                    Lab 01 asks: by exactly how many orders of magnitude do they differ &mdash;
-                    and does that gap force separate software stacks or merely require tuning?
+                    <strong>Lab 01: The AI Triad.</strong> This lab established your track
+                    and the repeated lab rhythm. Lab 01 asks your first diagnosis
+                    question: when a system is failing, should the first fix focus on
+                    the data, the algorithm, or the machine?
                 </div>
             </div>
 
@@ -1435,10 +1399,10 @@ def _(COLORS, mo):
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> Chapter 1: Introduction for the 95% Problem, the D&middot;A&middot;M
-                    Taxonomy, and the four deployment paradigms with their physical constraints.<br/>
-                    <strong>Build:</strong> TinyTorch starts in Module 01 &mdash; the foundations
-                    module that builds the forward-pass engine you will profile throughout the curriculum.
+                    <strong>Read:</strong> Chapter 1: Introduction for why production ML is a
+                    system, not just a model in a notebook.<br/>
+                    <strong>Build:</strong> TinyTorch starts in Module 01 with the foundations
+                    you will keep using as the labs become more technical.
                 </div>
             </div>
 
@@ -1447,13 +1411,13 @@ def _(COLORS, mo):
 
         mo.accordion({
             "Self-Assessment: Can you answer these?": mo.md("""
-    1. Which track (Cloud Fleet, iPhone, RoboTaxi, or Oura Ring) did you choose, and what was the binding constraint that defined your track — compute, memory, power, or latency?
+    1. Which track (Cloud Fleet, iPhone, RoboTaxi, or Oura Ring) did you choose, and what constraint will that track keep bringing back?
 
-    2. The D·A·M Triad claims that Data, Algorithm, and Machine are inseparable. After selecting your track, which axis most constrained what model architectures were feasible?
+    2. Why is a model that works in a notebook not automatically a deployed ML system?
 
-    3. If a friend claims 'the same trained model can run on any device — you just need to make it smaller,' what specific numbers from Part A would you cite to explain why a 2,000,000x compute gap and a 160,000x memory gap make this impossible in practice?
+    3. What is the recurring order of work in later labs: what do you read, what do you guess, what controls do you move, what evidence do you inspect, and what do you report?
 
-    *If you cannot answer all three from memory, revisit Part A and Part AI.*
+    *If you cannot answer all three from memory, revisit the track cards and interface orientation.*
     """)
         }),
     ])

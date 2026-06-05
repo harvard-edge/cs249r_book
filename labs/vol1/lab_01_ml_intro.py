@@ -167,11 +167,6 @@ def _(
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
                     {v1_01_profile.label}
                 </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_01_triad.hardware_ref}
-                </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <span class="badge badge-info">Binding Axis</span>
@@ -198,7 +193,7 @@ def _(COLORS, mo, v1_01_triad):
             Learning Objectives
         </div>
         <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Diagnose the binding D-A-M axis:</strong>
+            <div style="margin-bottom: 3px;">1. <strong>Diagnose the binding axis:</strong>
                 separate data coverage, algorithm design, and machine envelope.</div>
             <div style="margin-bottom: 3px;">2. <strong>Compare interventions:</strong>
                 allocate a fixed budget and see which axis actually improves feasibility.</div>
@@ -224,8 +219,8 @@ def _(COLORS, mo, v1_01_triad):
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** - Complete the Introduction chapter's Data-Algorithm-Machine
-    discussion and the Iron Law overview before starting this lab.
+    **Recommended Reading** - Complete the Introduction chapter's discussion of
+    production ML as a system before starting this lab.
     """), kind="info")
     return
 
@@ -239,12 +234,12 @@ def _(mo):
 def _(mo, v1_01_triad):
     partA_pred = mo.ui.radio(
         options={
-            "A) Data is usually the binding axis": "Data",
-            "B) Algorithm is usually the binding axis": "Algorithm",
-            "C) Machine is usually the binding axis": "Machine",
-            "D) The binding axis depends on the track evidence": "Depends",
+            "A) Data will bind": "Data",
+            "B) Algorithm will bind": "Algorithm",
+            "C) Machine will bind": "Machine",
+            "D) I need evidence before deciding": "Depends",
         },
-        label=f"{v1_01_triad.label}: which D-A-M axis binds first?",
+        label=f"Step 1 - predict before evidence: for {v1_01_triad.label}, which axis do you expect to bind?",
     )
     return (partA_pred,)
 
@@ -272,6 +267,14 @@ def _(mo, v1_01_triad):
         step=5,
         label="Machine readiness (%)",
     )
+    partA_decision = mo.ui.radio(
+        options={
+            "Data": "Data",
+            "Algorithm": "Algorithm",
+            "Machine": "Machine",
+        },
+        label="Step 3 - final diagnosis after inspecting the evidence",
+    )
 
     partB_pred = mo.ui.radio(
         options={
@@ -282,7 +285,7 @@ def _(mo, v1_01_triad):
         },
         label="How should a fixed engineering budget be allocated?",
     )
-    return (partA_algorithm, partA_data, partA_machine, partB_pred)
+    return (partA_algorithm, partA_data, partA_decision, partA_machine, partB_pred)
 
 
 @app.cell(hide_code=True)
@@ -334,6 +337,7 @@ def _(
     mo,
     partA_algorithm,
     partA_data,
+    partA_decision,
     partA_machine,
     partA_pred,
     partB_algorithm_budget,
@@ -381,13 +385,25 @@ def _(
 - **Data:** {v1_01_triad.data_axis}
 - **Algorithm:** {v1_01_triad.algorithm_axis}
 - **Machine:** {v1_01_triad.machine_axis}
+
+**How this part works.**
+
+1. Make a prediction. This records what you expect; it does not change the plot.
+2. Move the readiness sliders. These are the experiment controls, so they update the plot and evidence.
+3. After reading the evidence, choose a final diagnosis.
             """),
             partA_pred,
         ]
         if partA_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the D-A-M diagnosis."), kind="warn"))
+            items.append(mo.callout(mo.md(
+                "Select a prediction first. Nothing is supposed to change yet; this is your hypothesis before the evidence."
+            ), kind="warn"))
             return mo.vstack(items)
 
+        items.append(mo.callout(mo.md(
+            "**Now explore the evidence.** The sliders below change the simulated readiness scores. "
+            "The prediction above stays fixed so you can compare expectation against evidence."
+        ), kind="info"))
         items.append(mo.hstack([partA_data, partA_algorithm, partA_machine], widths="equal"))
         _diag = diagnose_triad(
             v1_01_triad,
@@ -413,6 +429,10 @@ def _(
         )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
+        items.append(mo.callout(mo.md(
+            f"**Read the plot:** the binding axis is the axis with the weakest margin to its track threshold. "
+            f"Under the current settings, the evidence points to **{_diag.binding_axis}**."
+        ), kind="info"))
 
         _status_color = COLORS["GreenLine"] if _diag.feasible else COLORS["RedLine"]
         items.append(mo.Html(f"""
@@ -432,15 +452,23 @@ def _(
 | Data | {_diag.data_score_pct:.0f}% | {_diag.data_threshold_pct:.0f}% | {v1_01_triad.data_axis} |
 | Algorithm | {_diag.algorithm_score_pct:.0f}% | {_diag.algorithm_threshold_pct:.0f}% | {v1_01_triad.algorithm_axis} |
 | Machine | {_diag.machine_score_pct:.0f}% | {_diag.machine_threshold_pct:.0f}% | {v1_01_triad.machine_axis} |
-
-*Source: `mlsysbook_labs.diagnose_triad`, track `{v1_01_profile.track_id}`.*
         """))
 
-        if partA_pred.value == _diag.binding_axis or (partA_pred.value == "Depends" and _diag.binding_axis):
-            items.append(mo.callout(mo.md("**Good diagnosis.** The binding axis comes from evidence, not habit."), kind="success"))
+        items.append(partA_decision)
+        if partA_decision.value is None:
+            items.append(mo.callout(mo.md(
+                "Choose the final diagnosis after reading the chart and table. This is the answer you would defend."
+            ), kind="warn"))
+            return mo.vstack(items)
+
+        if partA_decision.value == _diag.binding_axis:
+            items.append(mo.callout(mo.md(
+                "**Good diagnosis.** Your final answer matches the evidence. The binding axis comes from the track thresholds, not from a default rule."
+            ), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**The binding axis is {_diag.binding_axis}.** Spending on another axis first leaves the active constraint in place."
+                f"**Re-check the evidence.** Your final answer is {partA_decision.value}, but the current binding axis is {_diag.binding_axis}. "
+                "The first fix should target the weakest margin to threshold."
             ), kind="warn"))
         return mo.vstack(items)
 
@@ -566,7 +594,7 @@ explain why the other two axes are weaker first investments.
         items.append(mo.md(f"""
 **Rejected Alternatives**
 
-{chr(10).join(f"- {axis}: weaker first move under the current D-A-M scores." for axis in _frontier.rejected_alternatives)}
+{chr(10).join(f"- {axis}: weaker first move under the current evidence scores." for axis in _frontier.rejected_alternatives)}
         """))
 
         if partC_pred.value == "defend":
@@ -581,10 +609,10 @@ explain why the other two axes are weaker first investments.
         return mo.vstack([
             mo.md("## Key Takeaways"),
             mo.callout(mo.md(
-                "**1. The D-A-M triad is diagnostic.** Do not spend on an axis until evidence says it binds."
+                "**1. Data, algorithm, and machine form a diagnosis tool.** Do not spend on an axis until evidence says it binds."
             ), kind="info"),
             mo.callout(mo.md(
-                f"**2. Track context changes the answer.** For {v1_01_triad.label}, the axis meanings are specific to {v1_01_triad.hardware_ref} and {v1_01_triad.model_ref}."
+                f"**2. Track context changes the answer.** For {v1_01_triad.label}, the same words mean different engineering constraints and different stakeholder risks."
             ), kind="info"),
             mo.callout(mo.md(
                 "**3. The report artifact is a first-fix memo.** It must include the selected intervention, rejected alternatives, validation evidence, and residual risk."
@@ -592,7 +620,7 @@ explain why the other two axes are weaker first investments.
         ])
 
     _tabs = mo.ui.tabs({
-        "Part A: D-A-M Diagnosis": build_part_a(),
+        "Part A: Diagnosis": build_part_a(),
         "Part B: Intervention Frontier": build_part_b(),
         "Part C: Defensible Fix": build_part_c(),
         "Synthesis": build_synthesis(),
@@ -610,6 +638,7 @@ explain why the other two axes are weaker first investments.
 def _(
     ledger,
     mo,
+    partA_decision,
     partA_pred,
     partB_pred,
     partC_pred,
@@ -617,7 +646,12 @@ def _(
     v1_01_triad,
     v1_01_variant,
 ):
-    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None:
+    if (
+        partA_pred.value is not None
+        and partA_decision.value is not None
+        and partB_pred.value is not None
+        and partC_pred.value is not None
+    ):
         ledger.save(chapter=1, design={
             "chapter": "v1_01",
             "track_id": v1_01_profile.track_id,
@@ -626,6 +660,7 @@ def _(
             "model_ref": v1_01_triad.model_ref,
             "completed": True,
             "triad_prediction": partA_pred.value,
+            "triad_final_diagnosis": partA_decision.value,
             "budget_prediction": partB_pred.value,
             "memo_prediction": partC_pred.value,
         })
@@ -654,6 +689,7 @@ def _(
     mo,
     partA_algorithm,
     partA_data,
+    partA_decision,
     partA_machine,
     partA_pred,
     partB_algorithm_budget,
@@ -684,7 +720,9 @@ def _(
     )
     _incomplete = []
     if partA_pred.value is None:
-        _incomplete.append("Part A D-A-M prediction")
+        _incomplete.append("Part A pre-evidence prediction")
+    if partA_decision.value is None:
+        _incomplete.append("Part A final diagnosis")
     if partB_pred.value is None:
         _incomplete.append("Part B intervention prediction")
     if partC_pred.value is None:
@@ -695,12 +733,13 @@ def _(
         track=v1_01_profile.label,
         scenario=v1_01_variant.workload_summary,
         learning_objectives=(
-            "Diagnose which D-A-M axis binds for the selected track.",
+            "Diagnose which data, algorithm, or machine axis binds for the selected track.",
             "Compare fixed-budget interventions across Data, Algorithm, and Machine.",
             "Write a first-fix diagnosis memo with rejected alternatives and validation evidence.",
         ),
         predictions={
-            "binding_axis": partA_pred.value,
+            "pre_evidence_binding_axis": partA_pred.value,
+            "final_binding_axis_diagnosis": partA_decision.value,
             "budget_strategy": partB_pred.value,
             "memo_structure": partC_pred.value,
         },
@@ -730,7 +769,7 @@ def _(
             f"validate with {partC_validation.value}; reject {', '.join(_frontier.rejected_alternatives)} as weaker first moves."
         ),
         big_takeaways=(
-            "The D-A-M triad is a diagnosis tool, not a vocabulary list.",
+            "Data, algorithm, and machine are a diagnosis tool, not a vocabulary list.",
             "Track context changes the meaning of each axis.",
             "A first-fix memo should explain rejected alternatives and validation evidence.",
         ),
