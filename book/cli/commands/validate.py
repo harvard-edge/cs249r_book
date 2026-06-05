@@ -214,7 +214,7 @@ class ValidateCommand:
         punctuation — em-dash, slash, vs., e.g./i.e., en-dash ranges
         numbers    — units / percent / binary units / currency notation
         math       — \\times spacing, attr-leaks, render-audit (manual)
-        structure  — heading levels, parts, Purpose-unnumbered
+        structure  — heading levels, H2 landings, parts, Purpose-unnumbered
         code       — python-echo, _str/_math LaTeX leak, LEGO dead code
         tables     — grid → pipe, table content
         index      — \\index{} placement, anti-patterns, tag-placement, xrefs
@@ -419,6 +419,8 @@ class ValidateCommand:
         "structure": [
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
+            Scope("h2-landings", "_run_h2_landings",
+                  note="## sections need prose before ### subsections"),
             Scope("parts", "_run_parts",
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
@@ -831,7 +833,7 @@ class ValidateCommand:
             "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
             "numbers": "Units + percent spacing, binary units, percent-in-captions, currency",
             "math": "\\times spacing, attr-leaks, fmt/suffix discipline (LEGO), multiplier prose, optional render audit",
-            "structure": "Heading levels, parts, Purpose-unnumbered",
+            "structure": "Heading levels, H2 landings, parts, Purpose-unnumbered",
             "code": "Python code blocks (echo: false, _str/_math export hygiene)",
             "tables": "Grid tables → pipe, table content hygiene, caption-required",
             "listings": "Code listings carry lst-cap when labeled",
@@ -4280,6 +4282,121 @@ class ValidateCommand:
         return ValidationRunResult(
             name="heading-levels",
             description="Detect skipped heading levels (e.g., ## to ####)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # H2 landing prose  (detect ## followed immediately by ###)
+    # ------------------------------------------------------------------
+
+    def _run_h2_landings(self, root: Path) -> ValidationRunResult:
+        """Require H2 sections to orient readers before H3 subsections.
+
+        This catches the common source-shape problem:
+
+            ## Section
+            ### First subsection
+
+        Index markers and blank lines do not count as prose. A line that starts
+        with one or more ``\\index{...}`` markers and then continues with text
+        does count as prose, matching common chapter style.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        h2_pat = re.compile(r"^##\s+")
+        h3_pat = re.compile(r"^###\s+")
+        code_fence = re.compile(r"^```")
+        yaml_fence = re.compile(r"^---\s*$")
+        div_open_pat = re.compile(r"^(:{3,})\s*\{")
+        div_close_pat = re.compile(r"^(:{3,})\s*$")
+        index_prefix_pat = re.compile(r"^(?:\\index\{[^}]*\}\s*)+")
+
+        def visible_content(stripped: str) -> str:
+            """Return reader-visible content after ignorable leading markers."""
+            if not stripped or stripped.startswith("<!--"):
+                return ""
+            without_index = index_prefix_pat.sub("", stripped).strip()
+            return without_index
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_yaml = False
+            div_depth = 0
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                if idx == 1 and yaml_fence.match(line):
+                    in_yaml = True
+                    continue
+                if in_yaml:
+                    if yaml_fence.match(line):
+                        in_yaml = False
+                    continue
+
+                if code_fence.match(stripped):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                if div_open_pat.match(stripped):
+                    div_depth += 1
+                    continue
+                if div_close_pat.match(stripped) and div_depth > 0:
+                    div_depth -= 1
+                    continue
+                if div_depth > 0:
+                    continue
+
+                if not h2_pat.match(line) or line.startswith("###"):
+                    continue
+
+                first_line = None
+                first_text = ""
+                look = idx
+                while look < len(lines):
+                    candidate = visible_content(lines[look].strip())
+                    look += 1
+                    if not candidate:
+                        continue
+                    first_line = look
+                    first_text = candidate
+                    break
+
+                if first_line is None or not h3_pat.match(first_text):
+                    continue
+
+                heading_text = line.lstrip("#").strip()
+                if "{" in heading_text:
+                    heading_text = heading_text[: heading_text.index("{")].strip()
+                subsection_text = first_text.lstrip("#").strip()
+                if "{" in subsection_text:
+                    subsection_text = subsection_text[: subsection_text.index("{")].strip()
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="h2_missing_landing",
+                        message=(
+                            "H2 section drops directly into an H3 subsection "
+                            "without intervening prose"
+                        ),
+                        severity="error",
+                        context=(
+                            f"{heading_text[:60]} → {subsection_text[:60]}"
+                        ),
+                    )
+                )
+
+        return ValidationRunResult(
+            name="h2-landings",
+            description="Detect H2 sections that drop directly into H3 subsections",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
