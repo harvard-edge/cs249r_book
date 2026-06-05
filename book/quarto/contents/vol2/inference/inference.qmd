@@ -36,7 +36,7 @@ Training a model is a one-time expense; serving it is perpetual. A model trained
 
 ::: {.callout-learning-objectives}
 
-- Quantify why serving cost dominates training cost over a model's lifetime using the total cost of serving equation
+- Quantify why serving cost can dominate training cost over a model's lifetime using the total cost of serving equation
 - Design batching strategies for each model class: static batching for vision, continuous batching for LLMs, feature-parallel batching for recommenders
 - Apply the serving hierarchy framework (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
 - Compare model sharding strategies (tensor parallelism, pipeline parallelism, expert parallelism, embedding sharding) by their communication patterns and latency-memory tradeoffs
@@ -129,7 +129,7 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 
 The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4 class models with hundreds of billions of parameters require 200–400 GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's Deep Learning Recommendation Model (DLRM)[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
 
-[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tb_per_s_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
+[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tb_per_s_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation one major variable in inference cost-per-token. \index{HBM3!bandwidth}
 
 [^fn-dlrm-scale]: **DLRM (Deep Learning Recommendation Model)**: Meta's 2019 reference architecture separates dense features—GPU-bound multilayer perceptrons (MLPs)—from sparse features (CPU-bound embedding lookups), creating a hybrid serving topology. Embedding tables can exceed 100 TB, making DLRM memory-capacity-bound rather than compute-bound and forcing distribution strategies fundamentally different from LLM model parallelism. \index{DLRM!scale}
 
@@ -201,7 +201,7 @@ $$T_{\text{total}} = T_{\text{compute}} + T_{\text{network}} + T_{\text{serializ
 
 Minimizing this tax requires co-locating communicating components, using high-bandwidth interconnects, and designing communication patterns that minimize round trips.
 
-### Serving cost dominates training cost {#sec-inference-scale-serving-cost-dominates-training-cost-576a}
+### Serving cost can dominate training cost {#sec-inference-scale-serving-cost-dominates-training-cost-576a}
 
 ::: {.column-margin}
 ![](images/svg/inference_serving_cost_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing lifetime cost terms. The serving OpEx bar is wide and shaded orange, dominating; the training CapEx bar is a narrow gray sliver."}
@@ -209,7 +209,7 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 *Lifetime serving cost dwarfs one-time training.*
 :::
 
-The serving tax quantified above consumes a fraction of the latency budget per request. The true economic impact of inference emerges when we consider cost over a model's entire operational lifetime. Serving cost typically dominates training cost by orders of magnitude because training is a *one-time capital expenditure* (CapEx) while serving is a *continuous operational expenditure* (OpEx) that scales with user growth. A quick cost calculation makes the multiplier concrete.
+The serving tax quantified above consumes a fraction of the latency budget per request. The true economic impact of inference emerges when we consider cost over a model's entire operational lifetime. Serving cost can dominate training cost by orders of magnitude because training is a *one-time capital expenditure* (CapEx) while serving is a *continuous operational expenditure* (OpEx) that scales with user growth. A quick cost calculation makes the multiplier concrete.
 
 ```{python}
 #| echo: false
@@ -572,11 +572,11 @@ plt.show()
 
 ### The inference landscape: Beyond LLMs {#sec-inference-scale-inference-landscape-beyond-llms-9560}
 
-A common misconception frames inference at scale as synonymous with LLM serving. Large language models present distinctive challenges and attract attention, but they represent a small fraction of production inference volume. Appropriate technique selection requires understanding the full inference landscape. By request count at major technology companies, recommendation and ranking workloads\index{Recommendation Systems!request volume} account for 80–90 percent of production inference, vision and image processing\index{Vision Models!request volume} for 5–10 percent, NLP and LLM workloads\index{LLM!request volume} for 1–5 percent (but growing rapidly), and the remainder is divided among fraud detection, ads, and other classification tasks. @Tbl-inference-landscape breaks down these model types, request volumes, and optimization challenges.
+A common misconception frames inference at scale as synonymous with LLM serving. Large language models present distinctive challenges and attract attention, but they are only one part of production inference volume. Appropriate technique selection requires understanding the full inference landscape. In large consumer platforms, recommendation and ranking workloads\index{Recommendation Systems!request volume} can account for most inference requests; vision and image processing\index{Vision Models!request volume}, NLP and LLM workloads\index{LLM!request volume}, fraud detection, ads, and other classification tasks fill out the remainder. @Tbl-inference-landscape breaks down these model types, request volumes, and optimization challenges.
 
-Recommendation systems dominate because they serve predictions for every user interaction. Every page load, scroll, or click triggers inference. A user browsing an e-commerce site might generate 100 recommendation requests in a single session. In contrast, LLM queries typically require explicit user action and occur less frequently.
+Recommendation systems often dominate high-volume consumer inference because they serve predictions for every user interaction. Every page load, scroll, or click triggers inference. A user browsing an e-commerce site might generate 100 recommendation requests in a single session. In contrast, LLM queries typically require explicit user action and occur less frequently.
 
-The distribution has direct implications for technique selection. Recommendation systems have driven most production inference innovation: dynamic batching, embedding sharding, feature store architectures, and low-latency serving were all developed primarily for recommendation workloads. LLM-specific techniques like continuous batching and KV cache management address a narrower slice of production inference.
+The distribution has direct implications for technique selection. Recommendation systems have driven important production inference innovations: dynamic batching, embedding sharding, feature store architectures, and low-latency serving were all developed primarily for recommendation workloads. LLM-specific techniques like continuous batching and KV cache management address a narrower slice of production inference.
 
 | **Model Type**                   |     **Request Volume**    | **Latency Target** | **Key Challenge** |
 |:---------------------------------|:-------------------------:|:------------------:|:-----------------:|
@@ -731,7 +731,7 @@ Processing multiple requests together amortizes fixed costs (model loading, kern
 
 At scale, batching becomes more complex because different model architectures have distinct batching requirements. A strategy optimal for vision models may be catastrophic for LLMs, and techniques developed for recommendation systems may not apply to either.
 
-In production, recommendation systems constitute 80–90 percent of inference requests at major technology companies, with vision models handling most of the remainder, and LLMs currently representing 1–5 percent of request volume (though growing rapidly). Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners will most frequently encounter recommendation workloads first.
+In large consumer platforms, recommendation systems can constitute the majority of inference requests, with vision, language, ranking, fraud, ads, and other classification workloads sharing the remainder. Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners may frequently encounter recommendation workloads first.
 
 The taxonomy that follows matches batching strategies to model characteristics, providing quantitative analysis of when each approach applies and what performance to expect.
 
@@ -1004,7 +1004,7 @@ In continuous batching, the restaurant operates like a sushi bar. The moment one
 
 Autoregressive language models present a unique batching challenge that static and dynamic approaches handle poorly. The key insight comes from the Orca system[^fn-orca-scheduling] [@yu2022orca]: traditional batching forces all sequences in a batch to complete before any new sequences can join, wasting compute when sequences finish at different times.
 
-[^fn-orca-scheduling]: **Orca (Iteration-Level Scheduling)**: Introduced by @yu2022orca, Orca demonstrated that scheduling at iteration granularity rather than request granularity allows sequences to enter and exit batches at each decode step. This eliminated the head-of-line blocking that wasted 50 percent+ of GPU compute in static batching, establishing the scheduling paradigm that vLLM and all modern LLM serving systems now adopt. \index{Orca!iteration-level scheduling}
+[^fn-orca-scheduling]: **Orca (Iteration-Level Scheduling)**: Introduced by @yu2022orca, Orca demonstrated that scheduling at iteration granularity rather than request granularity allows sequences to enter and exit batches at each decode step. This eliminated the head-of-line blocking that wasted 50 percent+ of GPU compute in static batching and established the scheduling paradigm adopted by LLM serving systems such as vLLM. \index{Orca!iteration-level scheduling}
 
 Consider a batch of 8 sequences. If one sequence completes after 10 tokens while others require 100 tokens, the completed sequence's GPU resources sit idle for 90 iterations. With traditional batching:
 
@@ -1085,7 +1085,7 @@ Continuous batching removes waste caused by variable output length, but it does 
 
 Test-time scaling turns reasoning into a serving resource. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage].
 
-From a serving-systems perspective, the relevant shift is the work issued per request. Extra reasoning consumes latency budget, KV-cache residency, and accelerator time. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or CoT tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second now needs a policy for allocating thinking time.
+From a serving-systems perspective, the relevant shift is the work issued per request. Extra reasoning consumes latency budget, KV-cache residency, and accelerator time. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or CoT tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second also needs a policy for allocating thinking time.
 
 ```{python}
 #| echo: false
@@ -1127,7 +1127,7 @@ class LogicScaling:
 2. **Reasoning response**: `{python} LogicScaling.steps_str` of internal search/CoT before the answer.
 3. **The latency**: `{python} LogicScaling.steps_str` $\times$ 100 ms = `{python} LogicScaling.time_s_str`.
 
-**Systems insight**: Test-time scaling transforms the serving architecture from a throughput factory to a search engine. While standard serving optimizes for tokens per second, reasoning-heavy models are constrained by steps per second. This creates a new "Reasoning SLO": users will wait 12 seconds for a correct proof, but not for a simple greeting. In the Machine Learning Fleet, we are moving toward **Dynamic Compute Allocation**\index{Dynamic Compute Allocation}, where the scheduler grants more "Thinking Time" to harder prompts.
+**Systems insight**: Test-time scaling transforms the serving architecture from a throughput factory to a search engine. While standard serving optimizes for tokens per second, reasoning-heavy models are constrained by steps per second. This creates a "Reasoning SLO": users may tolerate 12 seconds for a correct proof, but not for a simple greeting. In the Machine Learning Fleet, this motivates **Dynamic Compute Allocation**\index{Dynamic Compute Allocation}, where the scheduler grants more "Thinking Time" to harder prompts.
 
 :::
 
@@ -1498,9 +1498,9 @@ Kernel design must also adapt. Batched GPU kernels traditionally assume fixed ba
 
 : **Traditional vs. Continuous Batching Trade-Offs**: Continuous batching provides significant throughput gains for variable-length workloads at the cost of implementation complexity. For uniform-length workloads, the complexity overhead may not justify adoption. {#tbl-batching-tradeoffs}
 
-For new LLM serving deployments, continuous batching frameworks like vLLM, TensorRT-LLM, or TGI provide the implementation complexity as a solved problem. The decision becomes whether to adopt these frameworks vs. building custom serving infrastructure. For organizations with existing traditional batching systems, the migration cost must be weighed against the workload's output length variance using @tbl-continuous-batching-benefit.
+For new LLM serving deployments, continuous batching frameworks like vLLM, TensorRT-LLM, or TGI provide mature implementation paths. The decision becomes whether to adopt these frameworks or build custom serving infrastructure. For organizations with existing traditional batching systems, the migration cost must be weighed against the workload's output length variance using @tbl-continuous-batching-benefit.
 
-Even with modern frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. A real-world P99 latency regression shows how the fleet stack methodology applies across infrastructure, execution, and serving layers.
+Even with mature serving frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. A real-world P99 latency regression shows how the fleet stack methodology applies across infrastructure, execution, and serving layers.
 
 ```{python}
 #| echo: false
@@ -2863,7 +2863,7 @@ else:
     rebuild()
 ```
 
-For Llama-70B GQA with 4K context, KV cache is about 1.3 GB total per sequence, or about 168 MB per device under 8-way tensor parallelism. At 100 Gbps (12.5 GB/s), transferring one shard takes roughly 13 ms, while transferring the full cache would take about 100 ms. Both are often preferable to a ~500 ms prefill rebuild, so transfer remains the better default when bandwidth is available.
+For Llama-70B GQA with 4K context, KV cache is about 1.3 GB total per sequence, or about 168 MB per device under 8-way tensor parallelism. At 100 Gbps (12.5 GB/s), transferring one shard takes roughly 13 ms, while transferring the full cache would take about 100 ms. Both are often preferable to a ~500 ms prefill rebuild, so transfer remains the better choice when bandwidth is available.
 
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
@@ -3974,7 +3974,7 @@ A foundational result in load balancing theory [@mitzenmacher2001] shows that qu
 
 [^fn-balls-bins-routing]: **Balls-into-Bins (Power of Two Choices)**: With random placement, maximum bin load is $\Theta(\log R / \log \log R)$; with two random choices and greedy selection, it drops to $\Theta(\log \log R)$. For a 1,000-server inference fleet, this reduces worst-case queue depth from roughly 5 to roughly 2, cutting P99 tail latency by nearly half while adding only the overhead of a single extra queue-length probe per request. \index{Power of Two Choices!routing}
 
-The procedure is deliberately small, but the load signal must match the serving workload. For a homogeneous vision fleet, current queue length may be enough. For an LLM fleet, active tokens, estimated remaining decode work, and KV-cache pressure better approximate the work a replica has already accepted. @Alg-power-two-choices-routing states the routing loop in the form used by production serving systems: probe two replicas, compare normalized work, and route without polling the whole fleet. @Eq-two-choices-max-queue formalizes why this small change matters, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
+The procedure is deliberately small, but the load signal must match the serving workload. For a homogeneous vision fleet, current queue length may be enough. For an LLM fleet, active tokens, estimated remaining decode work, and KV-cache pressure better approximate the work a replica has already accepted. @Alg-power-two-choices-routing states a representative routing loop: probe two replicas, compare normalized work, and route without polling the whole fleet. @Eq-two-choices-max-queue formalizes why this small change matters, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
 
 ::: {#alg-power-two-choices-routing name="Power-of-two choices request routing"}
 
@@ -4001,7 +4001,7 @@ For 1,000 servers, random assignment produces a maximum queue of roughly 4--5 re
 
 For $R$ servers receiving independent requests, random assignment produces a maximum queue length of $\mathcal{O}(\log R / \log \log R)$ with high probability, while routing each request to the shorter of two randomly sampled queues reduces the maximum queue length to $\mathcal{O}(\log \log R)$.
 
-The practical implication is that near-optimal load balancing does not require polling the whole fleet. Two probes avoid the $R$-probe cost of exact least-loaded routing, the improvement grows with system size, and the method remains simple enough to implement inside ordinary load balancers. Production systems at Google, Meta, and AWS all use variants of power-of-two-choices.
+The practical implication is that near-optimal load balancing does not require polling the whole fleet. Two probes avoid the $R$-probe cost of exact least-loaded routing, the improvement grows with system size, and the method remains simple enough to implement inside ordinary load balancers. Variants of power-of-two-choices appear in large-scale systems because they offer strong tail behavior without global polling.
 
 :::
 
@@ -4365,7 +4365,7 @@ The progression shows clear tradeoffs:
 - Least-connections: State maintenance overhead, 58 percent latency improvement
 - Combined: Best performance, highest complexity
 
-For most production systems, two-choices provides the best trade-off between performance improvement and implementation complexity. Least-connections adds value for workloads with high request size variance (LLM serving, recommendation ranking).
+For many serving systems, two-choices provides a strong trade-off between performance improvement and implementation complexity. Least-connections adds value for workloads with high request size variance (LLM serving, recommendation ranking).
 
 ### Circuit breakers and backpressure {#sec-inference-scale-circuit-breakers-backpressure-e61c}
 
@@ -4691,7 +4691,7 @@ When multiple models run on shared infrastructure, isolation must span memory, c
 
 Compute isolation addresses the latency variance that GPU time-sharing introduces. MIG (Multi-Instance GPU)[^fn-mig-partitioning] provides the strongest guarantee by spatially partitioning the GPU into hardware-isolated instances, each with dedicated SMs, memory bandwidth, and L2 cache. Time-slicing offers a softer alternative with higher overhead, while dedicating entire GPUs per model trades utilization for complete isolation.
 
-[^fn-mig-partitioning]: **MIG (Multi-Instance GPU)**: Introduced with NVIDIA's A100 [@NVIDIA2020], MIG spatially partitions a single GPU into up to 7 isolated instances, each with dedicated compute SMs, memory bandwidth, and L2 cache. Unlike time-slicing, which shares resources and introduces latency variance of 2--5$\times$, MIG provides hardware-enforced isolation with predictable performance, making it the preferred mechanism for serving multiple small models on a single expensive data center GPU. \index{MIG!partitioning}
+[^fn-mig-partitioning]: **MIG (Multi-Instance GPU)**: Introduced with NVIDIA's A100 [@NVIDIA2020], MIG spatially partitions a single GPU into up to 7 isolated instances, each with dedicated compute SMs, memory bandwidth, and L2 cache. Unlike time-slicing, which shares resources and introduces latency variance of 2--5$\times$, MIG provides hardware-enforced isolation with predictable performance, making it a strong mechanism for serving multiple small models on a single expensive data center GPU when partition sizes match model requirements. \index{MIG!partitioning}
 
 Model loading presents a subtler isolation challenge: loading a new model should not evict a running model from GPU memory. @Lst-model-loading-isolation demonstrates priority-aware eviction logic that enforces this constraint.\index{Model Loading!isolation}
 
@@ -4735,7 +4735,7 @@ A viral social media post drives a 10$\times$ spike in traffic to a generative A
 
 Inference systems can scale along three dimensions, each with distinct cost, latency, and speed characteristics. @Tbl-scaling-dimensions contrasts these approaches.
 
-The most common approach is horizontal scaling: adding or removing model replicas to adjust aggregate throughput. Total capacity scales linearly as $\text{Capacity} = \text{Replicas} \times \text{Per-replica throughput}$, but each new replica requires provisioning time measured in minutes.
+A common approach is horizontal scaling: adding or removing model replicas to adjust aggregate throughput. Total capacity scales linearly as $\text{Capacity} = \text{Replicas} \times \text{Per-replica throughput}$, but each new replica requires provisioning time measured in minutes.
 
 When replica count is fixed, vertical scaling replaces existing GPUs with more powerful ones to increase per-replica throughput. Cost efficiency is $\text{Throughput} / \text{GPU cost}$, but vertical scaling requires redeployment and is the slowest scaling response.
 
@@ -5069,15 +5069,15 @@ $$T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provisi
 | **Provisioning**                    |  30s--5min   |        Warm pools       |
 | **Warmup**\index{Cold Start!warmup} |    5--30s    |      Precompilation     |
 
-: **Scaling Response Time Components**: The four phases of a scaling event with typical durations and their primary optimization lever. Provisioning dominates the budget by an order of magnitude, which is why warm pools are the highest-leverage optimization for any latency-sensitive serving fleet. {#tbl-scaling-response-components}
+: **Scaling Response Time Components**: The four phases of a scaling event with typical durations and their primary optimization lever. Provisioning dominates the budget by an order of magnitude, which is why warm pools are a high-leverage optimization for latency-sensitive serving fleets. {#tbl-scaling-response-components}
 
 Each component offers distinct optimization opportunities. Detection speed improves by collecting metrics at 1-second intervals rather than 60-second intervals, at the cost of noisier signals and higher metric volume. Decision speed improves by precomputing scaling plans for predicted scenarios so that when a trigger fires, the system executes a precomputed plan rather than computing one from scratch. Provisioning speed improves most dramatically through warm pools, which eliminate the provisioning phase entirely for anticipated demand. Warmup speed improves through precompiled inference engines that skip JIT compilation, reducing the final phase from 30 seconds to under 5 seconds.
 
 ### Spot and preemptible instances {#sec-inference-scale-spot-preemptible-instances-c969}
 
-Cloud providers offer discounted GPU instances[^fn-spot-inference] that can be reclaimed with short notice:
+Cloud providers may offer discounted GPU instances[^fn-spot-inference] that can be reclaimed with short notice:
 
-[^fn-spot-inference]: **Spot Instance Economics**\index{Spot Instance Economics}: Cloud providers sell unused GPU capacity at 60--90 percent discounts with 30-second to 2-minute termination notice. For inference, termination destroys in-flight requests and KV cache state, requiring graceful drain logic and rapid request re-routing. The 60--90 percent savings justify this complexity for burst and best-effort traffic tiers but are unsuitable for SLO-critical paths where termination would violate latency guarantees. \index{Spot Instances!inference}
+[^fn-spot-inference]: **Spot Instance Economics**\index{Spot Instance Economics}: Cloud providers have sold unused GPU capacity at large discounts, sometimes with 30-second to 2-minute termination notice. For inference, termination destroys in-flight requests and KV cache state, requiring graceful drain logic and rapid request re-routing. The savings can justify this complexity for burst and best-effort traffic tiers but are unsuitable for SLO-critical paths where termination would violate latency guarantees. \index{Spot Instances!inference}
 
 @Tbl-gpu-instance-types lays out the three GPU instance classes and the workloads each suits best:
 
@@ -5087,7 +5087,7 @@ Cloud providers offer discounted GPU instances[^fn-spot-inference] that can be r
 | **Reserved**         | 30-60 percent  |          Never          | Steady baseline |
 | **Spot/Preemptible** | 60--90 percent |        30s--2min        |  Burst capacity |
 
-: **GPU Instance Types by Pricing and Reliability**: Three GPU instance classes trade discount against interruption risk. On-demand is the reference price with no interruption; reserved instances trade upfront commitment for moderate discount; spot instances trade preemption risk for 60--90 percent savings. Production fleets typically run a baseline of reserved + on-demand instances and burst into spot capacity for best-effort traffic. {#tbl-gpu-instance-types}
+: **GPU Instance Types by Pricing and Reliability**: Three GPU instance classes trade discount against interruption risk. On-demand is the reference price with no interruption; reserved instances trade upfront commitment for moderate discount; spot instances trade preemption risk for large savings. Production fleets often run a baseline of reserved + on-demand instances and burst into spot capacity for best-effort traffic. {#tbl-gpu-instance-types}
 
 @Lst-spot-termination illustrates graceful handling of spot termination within the two-minute warning window.\index{Spot Termination Handling}
 
@@ -5116,13 +5116,13 @@ def handle_spot_termination():
 
 A spot-aware architecture splits traffic between on-demand and spot replicas by SLO class, as shown in @fig-spot-aware-routing. SLO-critical requests always route to on-demand capacity, while best-effort requests absorb the cost savings and interruption risk of spot instances.
 
-::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-Aware Traffic Distribution**: The load balancer routes 70 percent of traffic to on-demand replicas (guaranteed availability) and 30 percent to spot replicas (cost savings, preemption risk). SLO-critical requests always use on-demand; best-effort requests tolerate occasional retries on eviction. With typical 60--90 percent spot discounts, the mixed fleet achieves roughly 18--27 percent cost reduction vs. 100 percent on-demand." fig-alt="Load Balancer box with two fan-out arrows: a solid green arrow labeled 70 percent to On-Demand Replicas box containing three active GPU workers, and a dashed orange arrow labeled 30 percent to Spot Replicas box containing two spot workers and one preempted worker."}
+::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-Aware Traffic Distribution**: The load balancer routes 70 percent of traffic to on-demand replicas (guaranteed availability) and 30 percent to spot replicas (cost savings, preemption risk). SLO-critical requests always use on-demand; best-effort requests tolerate occasional retries on eviction. In the representative discount scenario, the mixed fleet achieves roughly 18--27 percent cost reduction vs. 100 percent on-demand." fig-alt="Load Balancer box with two fan-out arrows: a solid green arrow labeled 70 percent to On-Demand Replicas box containing three active GPU workers, and a dashed orange arrow labeled 30 percent to Spot Replicas box containing two spot workers and one preempted worker."}
 
 ![](images/svg/spot-aware-routing.svg)
 
 :::
 
-The split architecture in @fig-spot-aware-routing achieves approximately 18--27 percent cost reduction compared to a fully on-demand fleet when spot instances are 60--90 percent cheaper than on-demand capacity, while absorbing preemption risk only for best-effort traffic and keeping SLO-critical requests on guaranteed capacity.
+The split architecture in @fig-spot-aware-routing achieves approximately 18--27 percent cost reduction compared to a fully on-demand fleet in the representative discount scenario, while absorbing preemption risk only for best-effort traffic and keeping SLO-critical requests on guaranteed capacity.
 
 ### Global inference infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
@@ -5385,7 +5385,7 @@ where $\alpha_{\text{awq}} \in [0.5, 1.0]$ controls scaling aggressiveness. This
 
 : **AWQ vs. GPTQ**: AWQ scales salient channels rather than compensating residual error, achieves higher 4-bit quality at marginally slower calibration speed, and matches GPTQ on hardware compatibility. {#tbl-awq-vs-gptq}
 
-AWQ typically achieves 0.5-1 percent lower perplexity degradation than GPTQ at the same bit-width, making it preferred for production deployments where quality is paramount.
+AWQ can achieve 0.5-1 percent lower perplexity degradation than GPTQ at the same bit-width in the representative setting here, making it a plausible choice when the quality budget is tight.
 
 ### SmoothQuant: Migrating quantization difficulty {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
 
@@ -5497,7 +5497,7 @@ In the ideal memory-bound case, reducing FP16 weights to 4-bit values cuts weigh
 | **FP8**                              | H100/H200 deployments              |          TensorRT-LLM         |
 | **W4A4**                             | Research, extreme compression      |            Limited            |
 
-: **Quantization Deployment Configurations**: Mapping from quantization scheme to deployment target and supporting frameworks. W4A16 dominates consumer and memory-constrained deployments; W8A8 unlocks INT8 Tensor Core throughput; FP8 is the H100/H200 native path; W4A4 remains research territory with limited framework support. {#tbl-quantization-deployment-configurations}
+: **Quantization Deployment Configurations**: Mapping from quantization scheme to deployment target and supporting frameworks. W4A16 is common for consumer and memory-constrained deployments; W8A8 unlocks INT8 Tensor Core throughput; FP8 is the native low-precision path on H100/H200-class deployments; W4A4 is an aggressive compression target with more limited framework support. {#tbl-quantization-deployment-configurations}
 
 ### Runtime contract for quantized serving {#sec-inference-scale-framework-integration-945c}
 
@@ -5591,7 +5591,7 @@ The final selection matches the method to the binding constraint. Deployment con
 
 : **Quantization Impact on Serving Cost**: Estimated cost per million tokens at three configurations. Halving the GPU count via 4-bit quantization halves the cost; halving it again brings the per-million-token cost to one quarter of the FP16 baseline. The cost savings come almost entirely from fewer GPUs rather than from per-GPU throughput gains. {#tbl-quantization-serving-cost tbl-colwidths="[58,42]"}
 
-Quantization can reduce serving costs by 2--4$\times$ while maintaining acceptable quality, making it essential for cost-effective LLM deployment.
+Quantization can reduce serving costs by 2--4$\times$ while maintaining acceptable quality, making it an important lever for cost-effective LLM deployment.
 
 These serving optimizations span continuous batching, PagedAttention, global load balancing, and extreme quantization. The case studies that follow show how production systems at global scale combine these techniques to meet specific cost and latency targets.
 
@@ -5680,7 +5680,7 @@ API Gateway → Rate Limiting → Request Router → Model Cluster → Response 
 
 The main design decision is to prevent long prompts from blocking decode service for everyone else.
 
-OpenAI was an early adopter of continuous batching (Orca-style) to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation. @Tbl-batching-strategies-comparison contrasts the three approaches:
+An Orca-style long-context serving design uses continuous batching to maintain high GPU utilization despite variable output lengths. Chunked prefill bounds decode latency by processing long prompts in chunks that interleave with ongoing generation. @Tbl-batching-strategies-comparison contrasts the three approaches:
 
 | **Batching Strategy**    | **GPU Utilization** | **128K Prompt Behavior**                  |
 |:-------------------------|:-------------------:|:------------------------------------------|
@@ -5849,9 +5849,9 @@ async_q3 = async model3(query, predicted_q1, predicted_q2)
 # Use actual results if they arrive in time, otherwise use speculative
 ```
 
-Google runs ranking models on Tensor Processing Units (TPUs)[^fn-tpu-inference] optimized for transformer inference. TPU pods provide:
+Search ranking deployments can run ranking models on Tensor Processing Units (TPUs)[^fn-tpu-inference] optimized for transformer inference. TPU pods provide:
 
-[^fn-tpu-inference]: **TPU for Inference**\index{TPU!inference}: Google's search infrastructure runs ranking models on TPUs rather than GPUs because the systolic array architecture provides deterministic, low-variance latency. GPUs show 2--5$\times$ latency variance depending on batch composition, while TPUs deliver consistent per-request timing critical for meeting strict search SLOs where P99 latency directly impacts revenue.
+[^fn-tpu-inference]: **TPU for Inference**\index{TPU!inference}: TPU systolic arrays provide deterministic, low-variance matrix execution for ranking-style inference. GPU latency can vary with batch composition, while TPU-style execution can deliver consistent per-request timing for strict search SLOs where P99 latency directly affects revenue.
 
 - 2D mesh topology for efficient AllReduce
 - High memory bandwidth for attention operations
@@ -5871,7 +5871,7 @@ The design produces three serving lessons:
 
 1. Ranking cascades provide dramatic cost reduction for large candidate sets
 2. Deadline propagation and priority scheduling are essential for ensemble serving
-3. Custom hardware (TPU) enables efficiency that commodity GPUs cannot match
+3. Custom hardware (TPU) can improve latency predictability when the workload matches the accelerator
 
 ### TikTok multimodal recommendation {#sec-inference-scale-tiktok-multimodal-recommendation-91e9}
 
@@ -5966,7 +5966,7 @@ A DevOps team applies their standard web-server load balancing rules to a new fl
 
 **Fallacy**: *Inference at scale is synonymous with LLM serving.*
 
-The misconception, reinforced by current discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems constitute 80–90 percent of production inference at major technology companies, with vision and other models comprising most of the remainder. LLMs currently represent 1--5 percent of requests, though this is growing. A practitioner who only understands continuous batching and KV cache management will be unprepared for the feature-parallel batching and embedding sharding that dominate production inference. Technique selection must match the actual workload.
+The misconception, reinforced by LLM-centric discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems can constitute the majority of production inference at large consumer platforms, with vision, language, fraud, ads, and other models comprising the remainder. A practitioner who only understands continuous batching and KV cache management is unprepared for the feature-parallel batching and embedding sharding that dominate high-volume recommendation inference. Technique selection must match the actual workload.
 
 **Pitfall**: *Using training infrastructure for production serving.*
 
@@ -6038,18 +6038,18 @@ Inference at scale is the final realization of the Machine Learning Fleet. Part 
 
 The serving hierarchy organizes the optimization problem from request-level batching and caching to replica-level GPU memory management, service-level load balancing, and platform-level multi-tenancy. The inversion from training to inference changes the dominant metric: aggregate throughput remains important, but P99 latency determines whether the service feels usable and whether downstream systems can depend on it.
 
-Different model architectures require different batching strategies. Vision models benefit from static or dynamic batches because inputs have predictable shapes. Recommendation systems batch and shard sparse features because embedding lookup dominates. LLMs need continuous batching and KV-cache management because every active request carries private sequence state. Model sharding techniques such as tensor and expert parallelism reduce latency for frontier models only when the networking fabric discussed in @sec-collective-communication can sustain the synchronization overhead.
+Different model architectures require different batching strategies. Vision models benefit from static or dynamic batches because inputs have predictable shapes. Recommendation systems batch and shard sparse features because embedding lookup dominates. LLMs need continuous batching and KV-cache management because every active request carries private sequence state. Model sharding techniques such as tensor and expert parallelism reduce latency for very large models only when the networking fabric discussed in @sec-collective-communication can sustain the synchronization overhead.
 
-Understanding inference at scale matters because serving cost, not training cost, dominates the total economics of machine learning in production. A frontier model may require tens of millions of dollars and several months to train, but that investment is amortized once. Serving that same model to millions of users over its operational lifetime can exceed the original training expenditure by 100$\times$ or more. This asymmetry means that every optimization discussed in this chapter, from continuous batching to PagedAttention to power-of-two-choices load balancing, translates directly into sustained cost savings that compound over the model's deployment period.
+Understanding inference at scale matters because serving cost, not training cost, can dominate the total economics of machine learning in production. A very large model may require tens of millions of dollars and several months to train, but that investment is amortized once. Serving that same model to millions of users over its operational lifetime can exceed the original training expenditure by 100$\times$ or more. This asymmetry means that every optimization discussed in this chapter, from continuous batching to PagedAttention to power-of-two-choices load balancing, translates directly into sustained cost savings that compound over the model's deployment period.
 
 The engineer who internalizes the prefill/decode split, who understands why wasted KV-cache memory destroys throughput, and who can reason about the interaction between batching strategy and tail latency can reduce serving costs by orders of magnitude. These are not incremental improvements. Choosing continuous batching over static batching can double GPU utilization; implementing PagedAttention can recover 60--80 percent of wasted memory; and disaggregating prefill from decode across specialized hardware pools can cut per-token cost in half. In aggregate, the techniques presented in this chapter represent the difference between inference infrastructure that scales economically and one that collapses under the weight of its own serving bill.
 
 ::: {.callout-takeaways title="Serving inverts every assumption"}
 
-* **The inference wall**: Serving cost often dominates training cost by 100$\times$ or more over a model's lifetime, making inference efficiency the primary driver of ML economics.
+* **The inference wall**: Serving cost can dominate training cost by 100$\times$ or more over a model's lifetime, making inference efficiency a primary driver of ML economics.
 * **Prefill vs. decode**: LLM serving is split into two regimes: compute-bound prefill (input processing) and memory-bandwidth-bound decode (token generation). Optimizing decode requires high-bandwidth memory, careful KV-cache placement, and scheduling policies that keep bandwidth useful without violating inter-token latency.
 * **Batching is not universal**: There is no "optimal" batch size for all models. Vision models scale with batch size; recommendation models scale with feature-parallel shards; LLMs scale via continuous, iteration-level management.
-* **Power of two choices**: Simple, randomized load balancing achieves exponentially better queue balance ($\mathcal{O}(\log \log R)$) with minimal overhead, a must-have for any large-scale deployment.
+* **Power of two choices**: Simple, randomized load balancing achieves exponentially better queue balance ($\mathcal{O}(\log \log R)$) with minimal overhead, making it a useful primitive for large-scale deployment.
 * **Statefulness is the challenge**: Unlike stateless vision models, LLM serving\index{Inference!stateful serving} is inherently stateful due to the KV cache. This requires sticky routing, prefix caching, and sophisticated memory paging (PagedAttention) to prevent fragmentation.
 * **Distribution is a tax**: Every step of distribution\index{Inference!distribution tax} (network round-trips, serialization, and coordination) adds a "serving tax" that must be explicitly budgeted within the milliseconds allowed for a user response.
 
