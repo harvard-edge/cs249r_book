@@ -308,7 +308,7 @@ $$ \frac{W_q}{1/\mu} = \frac{\rho}{1-\rho} \cdot \frac{1+C_s^2}{2} $$
 
 Here, $\rho = \lambda_{\text{job}}/\mu$ represents cluster utilization, $1/\mu$ is the average job duration, and $C_s = \sigma \mu$ is the **coefficient of variation** of job duration. The right-hand side is therefore the waiting time expressed as a multiple of the average job duration.
 
-In standard web serving, request service times are often approximated by an exponential distribution, yielding $C_s \approx 1$. In ML clusters, job durations follow a heavy-tailed distribution: a vast number of short debugging jobs (minutes) mixed with a few massive training runs (weeks). The representative $C_s=3$ example below captures that variance without claiming a universal fleet constant. The impact on wait times is multiplicative. For this chapter, the single-server multiplier is sufficient; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 generalizes the result to the M/G/c/K queue and validates it against Little's Law for readers sizing a scheduler's admission queue under heavy-tailed arrivals.
+In standard web serving, request service times are often approximated by an exponential distribution, yielding $C_s \approx 1$. In ML clusters, job durations follow a heavy-tailed distribution: a vast number of short debugging jobs (minutes) mixed with a few massive training runs (weeks). The representative $C_s=3$ calculation in this callout captures that variance without claiming a universal fleet constant. The impact on wait times is multiplicative. For this chapter, the single-server multiplier is sufficient; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 generalizes the result to the M/G/c/K queue and validates it against Little's Law for readers sizing a scheduler's admission queue under heavy-tailed arrivals.
 
 At `{python} QueuingTheory.rho_pct_str` utilization $(\rho = 0.8)$: with an exponential workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With a typical ML workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. This explains the "utilization wall" in ML infrastructure. A web server cluster feels responsive at `{python} QueuingTheory.rho_pct_str` load, but an ML cluster at the same utilization feels broken, with jobs languishing in the queue for days. The heavy tail of the service distribution acts as a latency multiplier, forcing operators to run ML clusters at lower utilization (often 60 to 70 percent) to maintain acceptable responsiveness for interactive users.
 
@@ -2307,9 +2307,11 @@ fig = plt.gcf()
 # │      convert recovered GPU-equivalent capacity into annual dollar value.
 # │
 # │ Imports: mlsysim
-# │ Exports: debug_cluster_str, debug_productive_gain_str, debug_recovered_str, debug_annual_usd_str
+# │ Exports: debug_cluster_str, debug_productive_gain_str, debug_recovered_str, debug_annual_usd_str,
+# │          debug inventory, demand, utilization, and result table strings.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.fmt import fmt, fmt_count, fmt_int, fmt_memory, fmt_percent, fmt_qty, fmt_usd
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DebugValueCalc:
@@ -2318,6 +2320,31 @@ class DebugValueCalc:
     debug_cluster      = Systems.Clusters.Training_1K.total_accelerators
     debug_util_before  = 0.60
     debug_util_after   = 0.84
+    debug_target_util = 0.80
+    a100_80_count = 400
+    a100_40_count = 400
+    v100_count = 200
+    a100_80_memory = 80 * GB
+    a100_40_memory = 40 * GB
+    v100_memory = 32 * GB
+    a100_gpus_per_node = Systems.Nodes.DGX_A100.accelerators_per_node
+    v100_gpus_per_node = 4
+    large_job_count = 15
+    large_job_min_gpus = 64
+    large_job_avg_gpus = 80
+    medium_job_count = 8
+    medium_job_gpus = 32
+    v100_job_count = 0
+    idle_a100_40_count = 300
+    large_job_peak_memory = 35 * GB
+    a100_80_alloc_before = 0.95
+    a100_80_eff_before = 0.72
+    a100_80_alloc_after = 0.89
+    a100_80_eff_after = 0.94
+    a100_40_alloc_before = 0.64
+    a100_40_alloc_after = 0.88
+    v100_alloc_before = 0.0
+    v100_alloc_after = 0.71
     _gpu_rate          = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -2325,11 +2352,23 @@ class DebugValueCalc:
     debug_productive_gain = debug_cluster * debug_improvement
     debug_recovered    = debug_productive_gain/debug_util_before
     debug_annual       = debug_recovered * _gpu_rate * HOURS_PER_YEAR
+    a100_80_nodes = a100_80_count // a100_gpus_per_node
+    a100_40_nodes = a100_40_count // a100_gpus_per_node
+    v100_nodes = v100_count // v100_gpus_per_node
+    large_job_total_gpus = large_job_count * large_job_avg_gpus
+    medium_job_total_gpus = medium_job_count * medium_job_gpus
+    a100_80_eff_change_pp = (a100_80_eff_after - a100_80_eff_before) * 100
+    a100_40_alloc_change_pp = (a100_40_alloc_after - a100_40_alloc_before) * 100
+    v100_alloc_change_pp = (v100_alloc_after - v100_alloc_before) * 100
+    cluster_change_pp = debug_improvement * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(debug_improvement > 0, "Utilization should improve in this scenario")
     check(abs(debug_productive_gain - 245.76) < 0.01, f"Expected ~246 productive GPUs, got {debug_productive_gain}")
     check(abs(debug_recovered - 409.6) < 0.01, f"Expected ~410 recovered GPUs, got {debug_recovered}")
+    check(large_job_total_gpus == 1200, "Large-job demand should match scenario")
+    check(medium_job_total_gpus == 256, "Medium-job demand should match scenario")
+    check(a100_80_nodes == 50 and a100_40_nodes == 50 and v100_nodes == 50, "Inventory should map to 50-node pools")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     debug_productive_gain_str = fmt_int(debug_productive_gain, commas=False)
@@ -2338,7 +2377,42 @@ class DebugValueCalc:
     debug_gpu_hour_rate_str = fmt_usd(_gpu_rate, precision=0, commas=False, per="GPU-hour")
     debug_cluster_comma_str = fmt(debug_cluster, precision=0, commas=True)
     debug_util_before_pct_str = fmt_percent(debug_util_before, precision=0, commas=False, style='prose')
-    debug_target_util_pct_str = fmt_percent(80/100, precision=0, commas=False, style='prose')
+    debug_target_util_pct_str = fmt_percent(debug_target_util, precision=0, commas=False, style='prose')
+    a100_80_count_str = fmt_count(a100_80_count, commas=False, label="GPU")
+    a100_40_count_str = fmt_count(a100_40_count, commas=False, label="GPU")
+    v100_count_str = fmt_count(v100_count, commas=False, label="GPU")
+    a100_80_memory_str = fmt_memory(a100_80_memory, unit=GB, precision=0, commas=False)
+    a100_40_memory_str = fmt_memory(a100_40_memory, unit=GB, precision=0, commas=False)
+    v100_memory_str = fmt_memory(v100_memory, unit=GB, precision=0, commas=False)
+    a100_80_nodes_str = fmt_count(a100_80_nodes, commas=False, label="node")
+    a100_40_nodes_str = fmt_count(a100_40_nodes, commas=False, label="node")
+    v100_nodes_str = fmt_count(v100_nodes, commas=False, label="node")
+    a100_gpus_per_node_str = fmt_count(a100_gpus_per_node, commas=False, label="GPU")
+    v100_gpus_per_node_str = fmt_count(v100_gpus_per_node, commas=False, label="GPU")
+    nvlink_a100_gb_per_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0)
+    pcie_v100_gb_per_s_str = fmt_qty(Hardware.Cloud.V100.interconnect.bandwidth, GB/second, precision=1)
+    large_job_count_str = fmt(large_job_count, precision=0, commas=False)
+    large_job_min_gpus_str = fmt_count(large_job_min_gpus, commas=False, label="GPU")
+    large_job_total_gpus_str = fmt_count(large_job_total_gpus, commas=True, label="GPU")
+    medium_job_count_str = fmt(medium_job_count, precision=0, commas=False)
+    medium_job_gpus_str = fmt_count(medium_job_gpus, commas=False, label="GPU")
+    medium_job_total_gpus_str = fmt_count(medium_job_total_gpus, commas=False, label="GPU")
+    v100_job_count_str = fmt(v100_job_count, precision=0, commas=False)
+    idle_a100_40_count_str = fmt_count(idle_a100_40_count, commas=False, label="GPU")
+    large_job_peak_memory_str = fmt_memory(large_job_peak_memory, unit=GB, precision=0, commas=False)
+    a100_80_alloc_before_str = fmt_percent(a100_80_alloc_before, precision=0, commas=False, style='prose')
+    a100_80_eff_before_str = fmt_percent(a100_80_eff_before, precision=0, commas=False, style='prose')
+    a100_80_alloc_after_str = fmt_percent(a100_80_alloc_after, precision=0, commas=False, style='prose')
+    a100_80_eff_after_str = fmt_percent(a100_80_eff_after, precision=0, commas=False, style='prose')
+    a100_80_eff_change_pp_str = fmt(a100_80_eff_change_pp, precision=0, commas=False)
+    a100_40_alloc_before_str = fmt_percent(a100_40_alloc_before, precision=0, commas=False, style='prose')
+    a100_40_alloc_after_str = fmt_percent(a100_40_alloc_after, precision=0, commas=False, style='prose')
+    a100_40_alloc_change_pp_str = fmt(a100_40_alloc_change_pp, precision=0, commas=False)
+    v100_alloc_before_str = fmt_percent(v100_alloc_before, precision=0, commas=False, style='prose')
+    v100_alloc_after_str = fmt_percent(v100_alloc_after, precision=0, commas=False, style='prose')
+    v100_alloc_change_pp_str = fmt(v100_alloc_change_pp, precision=0, commas=False)
+    debug_util_after_pct_str = fmt_percent(debug_util_after, precision=0, commas=False, style='prose')
+    cluster_change_pp_str = fmt(cluster_change_pp, precision=0, commas=False)
 ```
 
 The debugging method is to compare scheduler state with physical capability, inspect job requests against the actual hardware pools, and then test for a policy-infrastructure mismatch. A full queue and idle accelerators can coexist when the scheduler is honoring constraints that the dashboard has aggregated away.
@@ -2349,26 +2423,13 @@ The debugging method is to compare scheduler state with physical capability, ins
 
 The Fleet Stack framework in @fig-fleet-stack provides a structured approach: analyze the Infrastructure Layer first to understand hardware constraints, then the Distribution Layer to understand scheduling logic, and finally the interaction between layers to identify the root cause.
 
-<!-- lego-ok-block: inventory and job-demand figures are illustrative diagnostic narrative -->
 **Infrastructure Layer Analysis**\index{Infrastructure Layer!analysis}: The cluster contains heterogeneous hardware acquired over three procurement cycles:
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Debug inventory table — A100 NVLink bandwidth.
-# │ Exports: FleetDebugNvlinkRecap.nvlink_a100_gb_per_s_str
-from mlsysim.fmt import fmt_qty
-
-class FleetDebugNvlinkRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_a100_gb_per_s_str = fmt_qty(Hardware.Cloud.A100.nvlink.bandwidth, GB/second, precision=0)
-```
-
-| **GPU Type**   | **Count** |  **Memory** |                          **Interconnect**                          |        **Nodes**         |
-|:---------------|:---------:|:-----------:|:------------------------------------------------------------------:|:------------------------:|
-| **A100-80 GB** |    400    | 80 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_per_s_str`) | 50 nodes $\times$ 8 GPUs |
-| **A100-40 GB** |    400    | 40 GB HBM2e | NVLink (`{python} FleetDebugNvlinkRecap.nvlink_a100_gb_per_s_str`) | 50 nodes $\times$ 8 GPUs |
-| **V100-32 GB** |    200    |  32 GB HBM2 |                        PCIe Gen3 (16 GB/s)                         | 50 nodes $\times$ 4 GPUs |
+| **GPU Type**   |                  **Count**                  |                     **Memory**                     |                       **Interconnect**                       |                                               **Nodes**                                               |
+|:---------------|:-------------------------------------------:|:--------------------------------------------------:|:------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------:|
+| **A100-80 GB** | `{python} DebugValueCalc.a100_80_count_str` | `{python} DebugValueCalc.a100_80_memory_str` HBM2e | NVLink (`{python} DebugValueCalc.nvlink_a100_gb_per_s_str`)  | `{python} DebugValueCalc.a100_80_nodes_str` $\times$ `{python} DebugValueCalc.a100_gpus_per_node_str` |
+| **A100-40 GB** | `{python} DebugValueCalc.a100_40_count_str` | `{python} DebugValueCalc.a100_40_memory_str` HBM2e | NVLink (`{python} DebugValueCalc.nvlink_a100_gb_per_s_str`)  | `{python} DebugValueCalc.a100_40_nodes_str` $\times$ `{python} DebugValueCalc.a100_gpus_per_node_str` |
+| **V100-32 GB** |   `{python} DebugValueCalc.v100_count_str`  |   `{python} DebugValueCalc.v100_memory_str` HBM2   | PCIe Gen3 (`{python} DebugValueCalc.pcie_v100_gb_per_s_str`) |   `{python} DebugValueCalc.v100_nodes_str` $\times$ `{python} DebugValueCalc.v100_gpus_per_node_str`  |
 
 : **Cluster hardware inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
@@ -2376,17 +2437,17 @@ As @tbl-fleet-orchestration-debug-inventory shows, the physical topology creates
 
 **Distribution Layer Analysis**\index{Distribution Layer!analysis}: The Slurm scheduler implements gang scheduling with strict resource type matching. Examining the job specifications reveals the demand pattern:
 
-- 15 large training jobs requesting 64+ A100-80 GB GPUs (total demand: 1,200 A100-80 GB GPUs)
-- 8 medium jobs requesting 32 A100-40 GB GPUs (total demand: 256 A100-40 GB)
-- Zero jobs explicitly requesting V100 resources
+- `{python} DebugValueCalc.large_job_count_str` large training jobs requesting at least `{python} DebugValueCalc.large_job_min_gpus_str` of A100-80 GB capacity, with aggregate demand of `{python} DebugValueCalc.large_job_total_gpus_str`.
+- `{python} DebugValueCalc.medium_job_count_str` medium jobs requesting `{python} DebugValueCalc.medium_job_gpus_str` of A100-40 GB capacity, with aggregate demand of `{python} DebugValueCalc.medium_job_total_gpus_str`.
+- `{python} DebugValueCalc.v100_job_count_str` jobs explicitly request V100 resources.
 
-The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few running jobs, while the remaining large jobs stay pending because no full 64-GPU A100-80 GB allocation can be formed. The result is not a standard Slurm partial-allocation deadlock; it is a policy-induced utilization gap where strict resource requests leave A100-40 GB and V100 pools idle while A100-80 GB jobs wait.
+The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few running jobs, while the remaining large jobs stay pending because no full `{python} DebugValueCalc.large_job_min_gpus_str` A100-80 GB allocation can be formed. The result is not a standard Slurm partial-allocation deadlock; it is a policy-induced utilization gap where strict resource requests leave A100-40 GB and V100 pools idle while A100-80 GB jobs wait.
 
 **Diagnosis**: Multiple pathologies compound to create low utilization:
 
-1. **Over-specification**\index{Over-Specification}: Model memory analysis reveals that 12 of the 15 large jobs actually require only 35 GB peak memory per GPU, well within A100-40 GB capacity. Users copied job templates specifying A100-80 GB without recalculating requirements.
-2. **Pool fragmentation**\index{Pool Fragmentation}: The strict homogeneity requirement means a 64-GPU job requesting "A100-80 GB" cannot use any A100-40 GB GPUs, even when 300 A100-40 GB GPUs sit idle.
-3. **Stranded resources**\index{Stranded Resources}: No jobs target V100 hardware because researchers perceive it as "legacy." The 200 V100 GPUs contribute zero productive work despite consuming power and cooling.
+1. **Over-specification**\index{Over-Specification}: Model memory analysis reveals that most large jobs actually require only `{python} DebugValueCalc.large_job_peak_memory_str` peak memory per GPU, well within A100-40 GB capacity. Users copied job templates specifying A100-80 GB without recalculating requirements.
+2. **Pool fragmentation**\index{Pool Fragmentation}: The strict homogeneity requirement means a `{python} DebugValueCalc.large_job_min_gpus_str` job requesting "A100-80 GB" cannot use any A100-40 GB GPUs, even when `{python} DebugValueCalc.idle_a100_40_count_str` sit idle.
+3. **Stranded resources**\index{Stranded Resources}: No jobs target V100 hardware because researchers perceive it as "legacy." The `{python} DebugValueCalc.v100_count_str` contribute zero productive work despite consuming power and cooling.
 4. **Atomic-allocation starvation**\index{Gang Scheduling!starvation}: Large jobs remain pending until a full compatible allocation appears, while other resource pools sit idle because policy prevents compatible substitutions or backfill.
 
 **Root cause (policy-infrastructure mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80 GB cluster. When infrastructure expanded with heterogeneous hardware, the Distribution Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
@@ -2398,16 +2459,14 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 3. **Backfill and queue policy**: Enable or tune backfill scheduling so smaller compatible jobs can use otherwise idle pools without delaying higher-priority reservations. Revise resource constraints and queue priorities so jobs that can run on A100-40 GB or V100 hardware are not blocked behind A100-80 GB-only requests. Do not rely on `bf_window` or `bf_continue` as a gang-completion timeout; those parameters control backfill lookahead and scheduler behavior, not release of partial GPU allocations.
 4. **V100 workload seeding**\index{V100 Workload Seeding}: Create a "legacy-gpu" queue with lower cost accounting (reflecting V100's lower capability) to incentivize researchers to submit appropriate workloads to V100 hardware. Small-scale experiments, single-GPU development, preprocessing-heavy jobs, and data-parallel training whose per-replica footprint fits within 32 GB can run effectively on V100s.
 5. **Workload-hardware matching guidance**\index{Workload-Hardware Matching Guidance}: Provide researchers with a decision matrix mapping model sizes to minimum GPU memory requirements, reducing over-specification by making the correct resource request the easiest choice.
-<!-- end lego-ok-block -->
-
 **Quantified impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:
 
-| **Pool**         |                 **Before**                 |                 **After**                  |         **Change**        |
-|:-----------------|:------------------------------------------:|:------------------------------------------:|:-------------------------:|
-| **A100-80 GB**   | 95 percent allocated, 72 percent effective | 89 percent allocated, 94 percent effective |   +22 percentage points   |
-| **A100-40 GB**   |            64 percent allocated            |            88 percent allocated            |   +24 percentage points   |
-| **V100**         |            0 percent allocated             |            71 percent allocated            |   +71 percentage points   |
-| **Cluster-wide** |               **60 percent**               |               **84 percent**               | **+24 percentage points** |
+| **Pool**         |                                                        **Before**                                                        |                                                       **After**                                                        |                                **Change**                                |
+|:-----------------|:------------------------------------------------------------------------------------------------------------------------:|:----------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------------------------:|
+| **A100-80 GB**   | `{python} DebugValueCalc.a100_80_alloc_before_str` allocated, `{python} DebugValueCalc.a100_80_eff_before_str` effective | `{python} DebugValueCalc.a100_80_alloc_after_str` allocated, `{python} DebugValueCalc.a100_80_eff_after_str` effective |  +`{python} DebugValueCalc.a100_80_eff_change_pp_str` percentage points  |
+| **A100-40 GB**   |                               `{python} DebugValueCalc.a100_40_alloc_before_str` allocated                               |                              `{python} DebugValueCalc.a100_40_alloc_after_str` allocated                               | +`{python} DebugValueCalc.a100_40_alloc_change_pp_str` percentage points |
+| **V100**         |                                `{python} DebugValueCalc.v100_alloc_before_str` allocated                                 |                                `{python} DebugValueCalc.v100_alloc_after_str` allocated                                |  +`{python} DebugValueCalc.v100_alloc_change_pp_str` percentage points   |
+| **Cluster-wide** |                                 **`{python} DebugValueCalc.debug_util_before_pct_str`**                                  |                                 **`{python} DebugValueCalc.debug_util_after_pct_str`**                                 |  **+`{python} DebugValueCalc.cluster_change_pp_str` percentage points**  |
 
 : **Utilization recovery results**: The distinction between "allocated" and "effective" utilization captures the policy-induced utilization gap: before the fix, A100-80 GB GPUs showed high allocation in Slurm but lower actual compute utilization, while strict job templates stranded other capable hardware pools. {#tbl-fleet-orchestration-debug-results}
 
@@ -2433,7 +2492,7 @@ The memory fragmentation trap is an insidious failure mode in long-running infer
 
 The debugging example illustrates a broader principle that applies to every system discussed in this chapter: scheduling systems are only as effective as the policies they implement, and policies must evolve alongside infrastructure. When infrastructure changes (new hardware generations are added, network topologies are upgraded, workload mixes shift from training-dominant to serving-dominant), the policies encoded in scheduler configuration, job templates, and organizational practices must be re-evaluated and updated. The most expensive scheduling bug is often not a software defect but a policy that was correct for the old infrastructure and was never updated for the new one.
 
-This principle connects to the broader governance themes explored later in this book. Technical policies (GPU type matching, gang scheduling timeouts, preemption grace periods) interact with organizational policies (team quotas, priority hierarchies, cost allocation) and human behavior (job template reuse, resource request habits, queue submission patterns). Effective fleet orchestration requires attending to all three layers simultaneously.
+This principle connects scheduling mechanics to fleet governance. Technical policies (GPU type matching, gang scheduling timeouts, preemption grace periods) interact with organizational policies (team quotas, priority hierarchies, cost allocation) and human behavior (job template reuse, resource request habits, queue submission patterns). Effective fleet orchestration requires attending to all three layers simultaneously.
 
 Those policy-infrastructure mismatches recur as a small set of misconceptions that can make an apparently healthy scheduler waste expensive fleet capacity.
 
