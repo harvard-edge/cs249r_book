@@ -89,7 +89,7 @@ Moving data also costs energy that scales with distance, as @fig-data-movement-h
 
 At the exascale (tens of thousands of GPUs), the power budget for communication rivals the power budget for computation itself. A 10,000-GPU cluster exchanging 1 GB of gradients per step at 30 pJ/bit consumes approximately 4.8 kJ per AllReduce (accounting for the factor of 2 in data movement), a nontrivial fraction of the total per-step energy budget.
 
-Beyond these physical limits, protocol overhead adds a per-message software tax. Traditional TCP/IP stacks incur microseconds of OS kernel overhead per packet: the CPU must process socket calls, traverse the kernel networking stack, copy data between user and kernel buffers, and interact with the NIC through device drivers. High-performance ML networks bypass the kernel entirely using **RDMA (Remote Direct Memory Access)**[^fn-zerocopy-rdma], allowing the network card (NIC) to read directly from GPU memory via the PCIe bus. RDMA eliminates the kernel traversal, reducing per-message overhead from 10--20 $\mu\text{s}$ (TCP) to 1--3 $\mu\text{s}$ (RDMA). The most advanced configuration, **GPUDirect RDMA**\index{GPUDirect RDMA}, further eliminates the CPU from the data path: the NIC reads from GPU HBM through a direct PCIe peer-to-peer transfer, without the data ever touching CPU DRAM.
+Beyond these physical limits, protocol overhead adds a per-message software tax. Traditional TCP/IP stacks incur microseconds of OS kernel overhead per packet: the CPU must process socket calls, traverse the kernel networking stack, copy data between user and kernel buffers, and interact with the NIC through device drivers. High-performance ML networks bypass the kernel entirely using RDMA (Remote Direct Memory Access)[^fn-zerocopy-rdma], allowing the network card (NIC) to read directly from GPU memory via the PCIe bus. RDMA eliminates the kernel traversal, reducing per-message overhead from 10--20 $\mu\text{s}$ (TCP) to 1--3 $\mu\text{s}$ (RDMA). The most advanced configuration, **GPUDirect RDMA**\index{GPUDirect RDMA}, further eliminates the CPU from the data path: the NIC reads from GPU HBM through a direct PCIe peer-to-peer transfer, without the data ever touching CPU DRAM.
 
 These three constraints interact multiplicatively. Latency sets the floor for every message regardless of size. Bandwidth caps the throughput for large transfers. Protocol overhead adds a per-message tax that penalizes fine-grained communication. A quick AllReduce estimate makes their combined cost concrete for a realistic training scenario.
 
@@ -495,7 +495,7 @@ class LogPOverlap:
 4.  **Hidden**: All `{python} LogPOverlap.L_us_str` of $L_{\text{lat}}$ can overlap with compute.
 5.  **Exposed**: The `{python} LogPOverlap.two_o_us_str` of $o$ cannot overlap.
 
-**Effective time**\index{Effective Time}: `{python} LogPOverlap.two_o_us_str` + max(`{python} LogPOverlap.compute_us_str`, `{python} LogPOverlap.L_us_str`) = `{python} LogPOverlap.effective_us_str`. The network latency is hidden, but the processor overhead remains exposed. @Fig-comm-compute-overlap shows this overlap visually.
+**Result**: Effective time is `{python} LogPOverlap.two_o_us_str` + max(`{python} LogPOverlap.compute_us_str`, `{python} LogPOverlap.L_us_str`) = `{python} LogPOverlap.effective_us_str`. The network latency is hidden, but the processor overhead remains exposed. @Fig-comm-compute-overlap shows this overlap visually.
 
 **Systems insight**: The α-β model captures the total communication time. The LogP model reveals *how much of it can be hidden*. When designing pipelined training, optimize for low $o$ (kernel bypass, GPUDirect) rather than high $\beta$ alone.
 
@@ -836,7 +836,7 @@ A correct AllReduce must give all 1,000 GPUs the exact sum of all 1,000 one-giga
 
 Consider a naive implementation using a Parameter Server (Star topology). All $N$ workers send their gradients to rank 0; rank 0 sums them and sends the result back.
 
-*   **Bottleneck**: Rank 0's bandwidth. It must receive $N \times M$ bytes and send $N \times M$ bytes.
+*   **Constraint**: Rank 0's bandwidth. It must receive $N \times M$ bytes and send $N \times M$ bytes.
 *   **Time**: $T \propto N \times M / \beta$.
 *   **Result**: Linear slowdown. With 1000 GPUs, rank 0 melts.
 
@@ -847,7 +847,7 @@ The fundamental limitation is that any star-topology approach concentrates traff
 ::: {#ws-collective-communication-horovod-ring-allreduce .callout-war-story title="When the parameter server became the bottleneck"}
 **Context**: In 2017, Alexander Sergeev and Mike Del Balso's team at Uber open-sourced Horovod as part of Uber's Michelangelo ML platform, where TensorFlow training jobs needed to scale across many GPUs without forcing every model author to rewrite large portions of training code [@sergeev2018horovod].
 
-**Failure**: TensorFlow's stock distributed training relied on a parameter-server pattern that concentrated gradient traffic through a central tier and imposed non-negligible communication overhead. Scaling beyond a single node required heavy code modification, and the star-topology aggregation degraded as worker counts grew.
+**Failure mode**: TensorFlow's stock distributed training relied on a parameter-server pattern that concentrated gradient traffic through a central tier and imposed non-negligible communication overhead. Scaling beyond a single node required heavy code modification, and the star-topology aggregation degraded as worker counts grew.
 
 **Consequence**: Horovod adopted Baidu's draft ring-allreduce implementation and wrapped efficient ring reduction behind a small API surface---just a few lines added to existing TensorFlow code. The bandwidth bottleneck moved off the central server and onto bandwidth-optimal collective communication, and distributed training became practical for teams without distributed-systems expertise.
 
@@ -959,7 +959,7 @@ Each GPU sends its fully reduced chunk around the ring so all GPUs receive all r
 | 6        | Final forwarding                                | All GPUs hold $[10, 26, 18, 34]$     |
 : **Ring AllReduce AllGather trace**: Three sequential steps in which each GPU forwards its fully-reduced chunk around the ring. {#tbl-collective-communication-ring-allgather-trace}
 
-**Total data movement per GPU**\index{Ring AllReduce!data movement per GPU}: In each of the $2(N-1)$ = `{python} RingTrace.steps_str` steps, each GPU sends exactly $M/N$ = `{python} RingTrace.elem_str` element. Total per GPU: `{python} RingTrace.steps_str` $\times$ `{python} RingTrace.elem_str` = `{python} RingTrace.total_str` elements sent, `{python} RingTrace.total_str` received.
+The total data movement per GPU\index{Ring AllReduce!data movement per GPU} is fixed by the ring schedule: in each of the $2(N-1)$ = `{python} RingTrace.steps_str` steps, each GPU sends exactly $M/N$ = `{python} RingTrace.elem_str` element. Total per GPU: `{python} RingTrace.steps_str` $\times$ `{python} RingTrace.elem_str` = `{python} RingTrace.total_str` elements sent, `{python} RingTrace.total_str` received.
 
 :::
 
@@ -1309,7 +1309,7 @@ A GPU node delivers an order of magnitude more intra-node bandwidth (NVLink at `
 
 ### Hierarchical AllReduce {#sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338}
 
-The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a **flat**\index{Flat Network} network where every link has the same bandwidth. This assumption holds within a single node (where all GPUs are connected by NVLink at equal bandwidth) but fails by 18$\times$ in multi-node clusters. Real clusters are **hierarchical**\index{Hierarchical Network}, with fundamentally different bandwidths at each tier, as @tbl-bandwidth-hierarchy quantifies:
+The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a flat network\index{Flat Network} where every link has the same bandwidth. This assumption holds within a single node (where all GPUs are connected by NVLink at equal bandwidth) but fails by 18$\times$ in multi-node clusters. Real clusters are hierarchical networks\index{Hierarchical Network}, with fundamentally different bandwidths at each tier, as @tbl-bandwidth-hierarchy quantifies:
 
 | **Tier**       |   **Interconnect**  | **Bandwidth** |  **Relative Speed**  |
 |:---------------|:-------------------:|:-------------:|:--------------------:|
@@ -1664,7 +1664,7 @@ class ErrorFeedbackTrace:
 | 2        |           0.3           |           0           |             0              |         0.7         |
 | 3        |           0.2           |           0           |             0              |         0.9         |
 | 4        |           0.4           |           0           |             0              |         1.3         |
-| 5        |           0.3           |           0           |           **0**            |       **1.6**       |
+| 5        |           0.3           |           0           |             0              |         1.6         |
 
 : **Naive compression trace (no error feedback)**: Five-step worked trace showing how a greedy 1-bit quantizer transmits zero whenever individual gradients fall below the threshold. {#tbl-error-feedback-naive}
 
@@ -1678,7 +1678,7 @@ class ErrorFeedbackTrace:
 | 2        |    0.3    |    0.4    |       0.7       |     1     |                −0.3               |         1          |
 | 3        |    0.2    |    −0.3   |       −0.1      |     0     |                −0.1               |         1          |
 | 4        |    0.4    |    −0.1   |       0.3       |     0     |                0.3                |         1          |
-| 5        |    0.3    |    0.3    |       0.6       |     1     |                −0.4               |       **2**        |
+| 5        |    0.3    |    0.3    |       0.6       |     1     |                −0.4               |         2          |
 
 : **Error-feedback compression trace**: Same five-step sequence under error-feedback compression. {#tbl-error-feedback}
 
