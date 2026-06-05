@@ -32,9 +32,10 @@ Do *not* flag:
 - Tier-3-only regions between ``<!-- lego-ok-block: ... -->`` and ``<!-- end lego-ok-block -->``
 - Lines with no ``{python}`` callout context (Tiers 2–3 require a python callout)
 
-Always flag inline LEGO suppression comments. They should not appear in authored
-chapter source; convert the value to a LEGO export, cite an mlsysIM source, or
-use a queued ``lego-ok-block`` exception for a Tier-3 narrative region.
+Always flag inline LEGO suppression comments, including comments inside fenced
+code cells. They should not appear in authored chapter source; convert the value
+to a LEGO export, cite an mlsysIM source, or use a queued ``lego-ok-block``
+exception for a Tier-3 narrative region.
 """
 
 from __future__ import annotations
@@ -91,7 +92,9 @@ PEDAGOGICAL_RANGE = re.compile(
 GPU_SKU_MEMORY = re.compile(r"\b[A-Za-z]\d+(?:-\d+)?-\d+(?:\.\d+)?\s+GB\b")
 LEGO_OK_BLOCK_START = re.compile(r"<!--\s*lego-ok-block:")
 LEGO_OK_BLOCK_END = re.compile(r"<!--\s*end lego-ok-block\s*-->")
-INLINE_LEGO_OK = re.compile(r"<!--\s*lego-ok\b(?!-block)")
+INLINE_LEGO_OK = re.compile(
+    r"<!--\s*lego-ok\b(?!-block)|(?<![-\w])(?:#|//|/\*|%)\s*lego-ok\b|(?<!<!)--\s*lego-ok\b"
+)
 
 LITERAL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\d{1,3}(?:,\d{3})+"), "comma-formatted number"),

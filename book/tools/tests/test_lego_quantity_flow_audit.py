@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "book" / "tools" / "audit"))
 
 from book_check_lego_quantity_flow import check_file  # noqa: E402
+from book_check_lego_prose_literals import check_file as check_prose_literals  # noqa: E402
 
 
 def _write_qmd(tmp_path: Path, body: str) -> Path:
@@ -75,3 +76,33 @@ class X:
 ```""",
     )
     assert "QF007" in _rules(qmd)
+
+
+def test_prose_literals_flags_inline_code_suppression(tmp_path: Path):
+    qmd = _write_qmd(
+        tmp_path,
+        """```{python}
+class X:
+    latency = 0.5  # lego-ok: illustrative input
+```""",
+    )
+    issues = check_prose_literals(qmd)
+    assert any("inline LEGO suppression" in labels for _, _, labels in issues)
+
+
+def test_prose_literals_allows_block_suppression_marker(tmp_path: Path):
+    qmd = _write_qmd(
+        tmp_path,
+        """::: {#exmp-demo .callout-example}
+```{python}
+class X:
+    value = 1
+```
+<!-- lego-ok-block: narrative exception queued for review -->
+This passage uses 70 percent as a qualitative range.
+<!-- end lego-ok-block -->
+:::
+""",
+    )
+    issues = check_prose_literals(qmd, strict=True)
+    assert not any("inline LEGO suppression" in labels for _, _, labels in issues)
