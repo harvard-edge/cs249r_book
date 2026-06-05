@@ -428,7 +428,62 @@ def click_first_matching_text(page, labels: tuple[str, ...], timeout: int = 5_00
             return label
         except Exception as exc:
             last_error = str(exc).splitlines()[0]
+    shadow_match = click_marimo_shadow_control(page, labels)
+    if shadow_match:
+        return shadow_match
     raise PlaywrightTimeoutError(last_error or "no matching text found")
+
+
+def click_marimo_shadow_control(page, labels: tuple[str, ...]) -> str:
+    """Click a Marimo radio/checkbox whose option text is hidden in shadow DOM."""
+    match = page.evaluate(
+        """
+        (labels) => {
+          const stripHtml = (value) => String(value || "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, "&")
+            .replace(/\\s+/g, " ")
+            .trim();
+          const normalize = (value) => stripHtml(value).toLowerCase();
+          const wanted = labels.map(normalize).filter(Boolean);
+          const matches = (candidate) => {
+            const text = normalize(candidate);
+            return wanted.some((label) => text.includes(label) || label.includes(text));
+          };
+          const clickControl = (control) => {
+            control.scrollIntoView({block: "center", inline: "nearest"});
+            control.click();
+          };
+
+          for (const radio of document.querySelectorAll("marimo-radio")) {
+            const controls = [...(radio.shadowRoot?.querySelectorAll("[role=radio]") || [])];
+            for (const control of controls) {
+              const candidate = control.value || control.getAttribute("value") || control.textContent || "";
+              if (matches(candidate)) {
+                clickControl(control);
+                return stripHtml(candidate);
+              }
+            }
+          }
+
+          for (const checkbox of document.querySelectorAll("marimo-checkbox")) {
+            const candidate = checkbox.getAttribute("data-label") || checkbox.textContent || "";
+            if (!matches(candidate)) {
+              continue;
+            }
+            const control = checkbox.shadowRoot?.querySelector("[role=checkbox], button, input");
+            if (control) {
+              clickControl(control);
+              return stripHtml(candidate);
+            }
+          }
+          return "";
+        }
+        """,
+        list(labels),
+    )
+    return str(match or "")
 
 
 def unlock_lab00_orientation(page) -> tuple[ClickCheck, ...]:
