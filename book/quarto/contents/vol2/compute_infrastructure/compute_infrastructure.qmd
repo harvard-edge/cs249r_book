@@ -176,9 +176,7 @@ The risk of custom silicon is equally clear: if the dominant model architecture 
 
 Custom silicon is therefore a bet on workload stability, and the organizations that make this bet are typically those with enough scale to justify the \$50--200 million development cost and enough workload volume to amortize the per-chip NRE (nonrecurring engineering) cost across millions of chips. Google can justify the TPU's development cost because high-volume services such as Search, YouTube recommendations, and Gmail spam filtering can amortize a shared accelerator platform. A research lab running a few hundred GPUs cannot justify the same investment.
 
-The bet pays off handsomely when workloads are stable: a purpose-built ASIC can deliver 5--10$\times$ the energy efficiency of a general-purpose GPU for its target operation. However, the consequences of a wrong bet are severe, as the chip's fixed dataflow cannot be reprogrammed to accommodate a fundamentally new computational pattern.
-
-Pushing the locality argument further leads to a deeper question of physical scale: whether a single die can be expanded to the size of the entire wafer.
+The bet pays off handsomely when workloads are stable: a purpose-built ASIC can deliver 5--10$\times$ the energy efficiency of a general-purpose GPU for its target operation. However, the consequences of a wrong bet are severe, as the chip's fixed dataflow cannot be reprogrammed to accommodate a fundamentally new computational pattern. Pushing the locality argument further leads to a deeper question of physical scale: whether a single die can be expanded to the size of the entire wafer.
 
 ### Wafer-scale engines {#sec-compute-wafer-scale}
 
@@ -575,7 +573,7 @@ Google's TPU\index{TPU} trajectory follows a different path, focusing on distrib
 
 The generation sequence shows how that pod-first design moved from inference to training. The TPU v1 (2015) was a dedicated inference chip with a $256{\times}256$ systolic array, delivering 92 TOPS (INT8) for the matrix operations that dominated Google's production inference workloads. TPU v2 (2017) and TPU v3 (2018) then shifted the architecture toward training by adding bfloat16 (BF16), avoiding the dynamic range problems of standard FP16, and scaling the pod concept to 1,024 chips and 100+ PFLOP/s of aggregate compute. TPU v4 (2021) extended the same logic into the network itself, adding an optical circuit switch (OCS) so the physical topology could be reconfigured for different workloads while raising per-chip BF16 throughput to 275 TFLOP/s.
 
-The TPU v5p\index{TPU!v5p} (2023) represents Google's high-end training accelerator generation before Trillium. It features 459 TFLOP/s of BF16 compute, 95 GB of HBM2e with 2,765 GB/s memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
+The TPU v5p\index{TPU!v5p} (2023) continued this pod-scale design for high-end training. It features 459 TFLOP/s of BF16 compute, 95 GB of HBM2e with 2,765 GB/s memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
 
 | **Generation** | **Year** |     **Key Innovation**     | **Peak BF16** | **HBM** | **ICI BW** |
 |:---------------|:--------:|:--------------------------:|:-------------:|:-------:|:----------:|
@@ -2404,7 +2402,7 @@ A standard DGX H100 node features two host CPUs, each managing a **PCIe root com
 
 The dual-CPU architecture introduces significant **Non-Uniform Memory Access (NUMA)**\index{NUMA!GPU data loading} effects. The 8 GPUs are physically partitioned, with 4 connected to CPU 0's root complex and 4 to CPU 1's. A GPU connected to CPU 0 can access CPU 0's DRAM at full PCIe bandwidth but must traverse the inter-processor interconnect (UPI or Infinity Fabric) to access CPU 1's DRAM. This traversal incurs additional latency and reduces effective bandwidth by up to 50 percent. Robust data loading pipelines must employ *NUMA-aware scheduling*, pinning data loader worker processes to the CPU cores physically closest to the target GPUs. Empirical benchmarks show that aligning data loaders with the correct NUMA domain can improve data ingestion throughput by 20--30 percent, preventing the CPU from becoming the bottleneck in high-throughput training runs.
 
-@Sec-distributed-training-systems formalizes how these intra-node and inter-node boundaries interact with data, tensor, and pipeline parallelism.
+The practical consequence is that placement is part of the parallelism strategy: a scheduler that ignores PCIe roots, NIC locality, and NUMA domains can turn an otherwise valid tensor- or pipeline-parallel plan into a host-bound bottleneck. @Sec-distributed-training-systems formalizes how these intra-node and inter-node boundaries interact with data, tensor, and pipeline parallelism.
 
 ### Dense node designs {#sec-compute-dense-nodes}
 
@@ -3682,7 +3680,8 @@ The interaction between failure rate and checkpointing frequency creates an opti
 # │ How: allowed write time = cadence × target overhead; BW = checkpoint/time.
 # │
 # │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: CheckpointOverheadBudget.ckpt_total_tb_str,
+# │ Exports: CheckpointOverheadBudget.ckpt_model_weights_gb_str,
+# │          .ckpt_optimizer_states_gb_str, .ckpt_total_tb_str,
 # │          .ckpt_cadence_min_str, .ckpt_target_overhead_pct_str,
 # │          .ckpt_allowed_write_s_str, .ckpt_required_bw_gb_per_s_str,
 # │          .ckpt_reference_write_s_str, .ckpt_reference_bw_gb_per_s_str,
@@ -3703,7 +3702,9 @@ class CheckpointOverheadBudget:
     checkpoints_retained = 10  # scenario assumption: recent checkpoint retention count
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    checkpoint = model.size_in_bytes(BYTES_FP16) + model.parameters * BYTES_FP32 * 2
+    checkpoint_model_weights = model.size_in_bytes(BYTES_FP16)
+    checkpoint_optimizer_states = model.parameters * BYTES_FP32 * 2
+    checkpoint = checkpoint_model_weights + checkpoint_optimizer_states
     target_overhead_fraction_val = target_overhead_pct / 100
     allowed_write = cadence * target_overhead_fraction_val
     required_bw = checkpoint / allowed_write
@@ -3723,14 +3724,16 @@ class CheckpointOverheadBudget:
     check(checkpoints_per_run == 2016, "14 days at 10-min cadence should produce 2,016 checkpoints")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    ckpt_total_tb_str                  = fmt_memory(checkpoint, unit=TB, precision=2, commas=False)
-    ckpt_cadence_min_str               = fmt_time(cadence, minute, precision=0, commas=False, style='word')
-    ckpt_target_overhead_pct_str       = fmt_percent(target_overhead_pct/100, precision=0, commas=False, style='prose')
-    ckpt_allowed_write_s_str           = fmt_time(allowed_write, second, precision=0, commas=False, style='word')
-    ckpt_required_bw_gb_per_s_str           = fmt_bandwidth(required_bw, unit=GB / second, precision=1, commas=False)
-    ckpt_reference_write_s_str         = fmt_time(reference_write, second, precision=0, commas=False, style='word')
-    ckpt_reference_bw_gb_per_s_str          = fmt_bandwidth(reference_bw, unit=GB / second, precision=1, commas=False)
-    ckpt_reference_overhead_pct_str    = fmt_percent(reference_overhead_pct/100, precision=0, commas=False, style='prose')
+    ckpt_model_weights_gb_str = fmt_memory(checkpoint_model_weights, unit=GB, precision=0, commas=False)
+    ckpt_optimizer_states_gb_str = fmt_memory(checkpoint_optimizer_states, unit=GB, precision=0, commas=True)
+    ckpt_total_tb_str = fmt_memory(checkpoint, unit=TB, precision=2, commas=False)
+    ckpt_cadence_min_str = fmt_time(cadence, minute, precision=0, commas=False, style='word')
+    ckpt_target_overhead_pct_str = fmt_percent(target_overhead_pct/100, precision=0, commas=False, style='prose')
+    ckpt_allowed_write_s_str = fmt_time(allowed_write, second, precision=0, commas=False, style='word')
+    ckpt_required_bw_gb_per_s_str = fmt_bandwidth(required_bw, unit=GB / second, precision=1, commas=False)
+    ckpt_reference_write_s_str = fmt_time(reference_write, second, precision=0, commas=False, style='word')
+    ckpt_reference_bw_gb_per_s_str = fmt_bandwidth(reference_bw, unit=GB / second, precision=1, commas=False)
+    ckpt_reference_overhead_pct_str = fmt_percent(reference_overhead_pct/100, precision=0, commas=False, style='prose')
     ckpt_reference_min_cadence_min_str = fmt_time(reference_min_cadence, minute, precision=0, commas=False, style='word')
     ckpt_run_count_str                 = fmt(checkpoints_per_run, precision=0)
     ckpt_run_total_tb_str              = fmt_memory(run_total, unit=TB, precision=0, commas=True)
@@ -3751,7 +3754,9 @@ class InfraFrontierStragglerRecap11:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Checkpointing also creates a significant *storage* requirement that demands its own dedicated infrastructure. A full checkpoint for our `{python} InfraFrontierStragglerRecap11.frontier_params_b_str` model includes the model weights (350 GB), optimizer states (1,400 GB), and the random number generator states needed to resume training deterministically. The total is approximately `{python} CheckpointOverheadBudget.ckpt_total_tb_str` per checkpoint. At a cadence of `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, a write that takes `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` would consume `{python} CheckpointOverheadBudget.ckpt_reference_overhead_pct_str` of training time, not `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`. To keep checkpoint overhead below `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`, the write must complete in about `{python} CheckpointOverheadBudget.ckpt_allowed_write_s_str`, demanding a sustained aggregate write bandwidth of approximately `{python} CheckpointOverheadBudget.ckpt_required_bw_gb_per_s_str`. A write target of `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` corresponds to approximately `{python} CheckpointOverheadBudget.ckpt_reference_bw_gb_per_s_str` and only fits a `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str` budget when checkpoints are spaced at least `{python} CheckpointOverheadBudget.ckpt_reference_min_cadence_min_str` apart. Standard NFS or object storage implementations collapse under this "thundering herd" pattern, where all GPUs transition from compute to I/O simultaneously. The solution requires a high-performance parallel file system like Lustre or IBM Spectrum Scale (GPFS), architected with hundreds of Object Storage Targets (OSTs) striping data across thousands of NVMe drives. A failure to architect for this burst bandwidth results in "I/O jitter," where training hangs unpredictably for minutes as the checkpoint write saturates the storage backend, effectively burning millions of dollars in idle GPU cycles. @Sec-data-storage examines the storage architectures that meet these throughput requirements in detail. If checkpoints are taken every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str` during a 2-week training run, the system must write:
+Checkpointing also creates a significant *storage* requirement that demands its own dedicated infrastructure. A full checkpoint for our `{python} InfraFrontierStragglerRecap11.frontier_params_b_str` model includes `{python} CheckpointOverheadBudget.ckpt_model_weights_gb_str` of model weights, `{python} CheckpointOverheadBudget.ckpt_optimizer_states_gb_str` of optimizer state, and the random number generator state needed to resume training deterministically. The total is approximately `{python} CheckpointOverheadBudget.ckpt_total_tb_str` per checkpoint.
+
+The overhead budget turns that footprint into a bandwidth requirement. At a cadence of `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, a write that takes `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` would consume `{python} CheckpointOverheadBudget.ckpt_reference_overhead_pct_str` of training time, not `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`. To keep checkpoint overhead below `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`, the write must complete in about `{python} CheckpointOverheadBudget.ckpt_allowed_write_s_str`, demanding a sustained aggregate write bandwidth of approximately `{python} CheckpointOverheadBudget.ckpt_required_bw_gb_per_s_str`. A write target of `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` corresponds to approximately `{python} CheckpointOverheadBudget.ckpt_reference_bw_gb_per_s_str` and only fits a `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str` budget when checkpoints are spaced at least `{python} CheckpointOverheadBudget.ckpt_reference_min_cadence_min_str` apart. Standard NFS or object storage implementations collapse under this "thundering herd" pattern, where all GPUs transition from compute to I/O simultaneously. The solution requires a high-performance parallel file system like Lustre or IBM Spectrum Scale (GPFS), architected with hundreds of Object Storage Targets (OSTs) striping data across thousands of NVMe drives. A failure to architect for this burst bandwidth results in "I/O jitter," where training hangs unpredictably for minutes as the checkpoint write saturates the storage backend, effectively burning millions of dollars in idle GPU cycles. If checkpoints are taken every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str` during a `{python} CheckpointOverheadBudget.ckpt_run_days_str` training run, the system must write:
 
 - **Checkpoints per run**\index{Checkpointing!checkpoints per run}: (`{python} CheckpointOverheadBudget.ckpt_run_days_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_run_hours_per_day_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_per_hour_str`) = `{python} CheckpointOverheadBudget.ckpt_run_count_str` checkpoints
 - **Total checkpoint data**\index{Checkpointing!total checkpoint data}: `{python} CheckpointOverheadBudget.ckpt_run_count_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_total_tb_str` = `{python} CheckpointOverheadBudget.ckpt_run_total_tb_str`

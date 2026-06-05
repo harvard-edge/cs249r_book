@@ -588,11 +588,9 @@ Data parallelism offers three principal advantages. First, throughput scales lin
 
 Three hard ceilings limit these advantages. The memory wall\index{Memory Wall!data parallelism} requires every GPU to hold a full copy of the model parameters, gradients, and optimizer states; for a `{python} FrontierTrainingContext.frontier_params_b_str` parameter model, this demands more than 1 TB of memory per GPU, exceeding per-device HBM budgets without ZeRO sharding. The bandwidth wall emerges as $N$ grows: the AllReduce cost $\frac{2(N-1)}{N} \times \frac{M}{\text{BW}_{\text{net}}}$ eventually dominates, and for large language models gradient synchronization can consume more than 50 percent of the step time, collapsing efficiency. The batch size trap compounds the problem: scaling to thousands of GPUs requires increasing the global batch size $(B_{\text{global}} = N \times B_{\text{local}})$, and eventually the critical batch size is reached, where adding more data per step yields diminishing returns in convergence.
 
-A concrete scaling experiment reveals how these ceilings manifest in practice.
-
 ::: {#nbk-distributed-training-gpt-2-data-parallel-scaling .callout-notebook title="GPT-2 data parallel scaling"}
 
-A GPT-2 scaling scenario makes the efficiency loss concrete.
+A GPT-2 scaling scenario makes the efficiency loss concrete by holding the model fixed and changing only the communication domain.
 
 **Single GPU Baseline**
 
@@ -629,6 +627,7 @@ class Scaling8GPU:
     efficiency_8gpu_val = speedup_8gpu_val/gpus_per_node * 100
     training_hours_1gpu = 25
     training_hours_8gpu_val = training_hours_1gpu/speedup_8gpu_val
+    global_batch_val = batch_per_gpu_val * gpus_per_node
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(efficiency_8gpu_val > 90, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
@@ -648,6 +647,7 @@ class Scaling8GPU:
     compute_8gpu_ms_str = fmt_time(compute_8gpu_ms, 'millisecond', precision=0, commas=False)
     # Suffix-bearing prose aliases for raw ints/floats referenced in prose
     batch_per_gpu_str = fmt(batch_per_gpu_val, precision=0, commas=False)
+    global_batch_str = fmt(global_batch_val, precision=0, commas=False)
     training_hours_1gpu_str = fmt_time(training_hours_1gpu, 'hour', precision=0, commas=False, style='word')
     fits_mem_gb_str = fmt_memory(fits_mem, unit=GB, precision=0, commas=False)
 ```
@@ -658,9 +658,7 @@ class Scaling8GPU:
 
 **8 GPUs: Single Node with NVLink**
 
-Configuration:
-
-- Per-GPU batch: 16, global batch: 128
+- Per-GPU batch: `{python} Scaling8GPU.batch_per_gpu_str`, global batch: `{python} Scaling8GPU.global_batch_str`
 - Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str` @ `{python} Scaling8GPU.nvlink_h100_gb_per_s_str` (NVLink) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`
 
 Performance results:
@@ -688,6 +686,8 @@ class Scaling32GPU:
     intra_node_ms_val = 0.35
     training_hours_1gpu = 25
     gpus = 32
+    batch_per_gpu_val = 16
+    global_batch_val = batch_per_gpu_val * gpus
     ring_factor = 2 * (gpus - 1) / gpus
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     sync_size = gradient_tensor * ring_factor
@@ -715,15 +715,15 @@ class Scaling32GPU:
     compute_32gpu_ms_str = fmt_time(compute_32gpu_ms, 'millisecond', precision=0, commas=False)
     comm_32gpu_ms_str = fmt_time(comm_32gpu_ms_val, 'millisecond', precision=1, commas=False)
     intra_node_comm_ms_str = fmt_time(intra_node_ms_val, 'millisecond', precision=1, commas=False)
+    batch_per_gpu_str = fmt(batch_per_gpu_val, precision=0, commas=False)
+    global_batch_str = fmt(global_batch_val, precision=0, commas=False)
     gpus_str = fmt_count(gpus, commas=False, label="GPU")
     n_nodes_str = fmt_count(gpus // 8, commas=False, label="node")
 ```
 
 **Commodity network configuration**: `{python} Scaling32GPU.gpus_str` across `{python} Scaling32GPU.n_nodes_str`
 
-Configuration:
-
-- Per-GPU batch: 16, global batch: 512
+- Per-GPU batch: `{python} Scaling32GPU.batch_per_gpu_str`, global batch: `{python} Scaling32GPU.global_batch_str`
 - Intra-node communication: `{python} Scaling32GPU.intra_node_comm_ms_str` (NVLink)
 - Inter-node communication: `{python} Scaling32GPU.gpt2_sync_size_gb_str` @ `{python} Scaling32GPU.ib_hdr_gb_per_s_str` (10GbE) $\approx$ `{python} Scaling32GPU.inter_node_ms_str`
 
@@ -1098,10 +1098,8 @@ class PodSetupComputeRecap:
 
 - **Scaling efficiency**: $\eta_{\text{scaling}} \approx \frac{T_{\text{compute}}/N}{T_{\text{compute}}/N + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}}} = 2.1/5.6 \approx 0.375$ in this simplified example, where synchronization is included in the AllReduce term and `{python} CommScalingMath.overlap_pct_str` communication overlap has already been applied.
 
-<!-- lego-ok-block: hierarchy-aware scaling efficiency range -->
 The low efficiency (`{python} CommScalingMath.scaling_efficiency_pct_str`) shows why naive data parallelism at this scale is insufficient.
-Hierarchy-aware systems can reach 70--90 percent efficiency by combining data parallelism with tensor parallelism (which communicates over NVLink) and pipeline parallelism (which overlaps computation with communication).
-<!-- end lego-ok-block -->
+Hierarchy-aware systems recover much of that lost efficiency by combining data parallelism with tensor parallelism, which communicates over NVLink, and pipeline parallelism, which overlaps computation with communication.
 
 :::
 
@@ -2183,9 +2181,7 @@ Published systems such as Llama 3 405B use TP=8 within NVLink-connected H100 nod
 
 The same partitioning idea can apply to sequence length as well as matrix dimensions. While standard tensor parallelism tiles computation across the HBM-NVLink boundary within a node, **Ring Attention**\index{Ring Attention} partitions the attention state across GPUs rather than forcing every device to hold the full prefix. This becomes relevant for sequences that exceed a single GPU's memory, such as million-token context windows. Each GPU owns a block of queries $Q$ and circulates the key/value ($K$/$V$) blocks around a ring, computing attention against the block currently resident in memory and then forwarding that block to its neighbor.
 
-The algorithm proceeds in $N - 1$ communication rounds (where $N$ is the number of GPUs). In each round, each GPU computes attention between its local $Q$ block and the currently resident $K$/$V$ block, then sends that $K$/$V$ block to its ring neighbor and receives the next block from its other neighbor.
-
-The algorithm overlaps communication with computation: while GPU $i$ computes attention using $K_j$/$V_j$, it simultaneously receives $K_{j+1}$/$V_{j+1}$ from the ring.
+The algorithm proceeds in $N - 1$ communication rounds (where $N$ is the number of GPUs). In each round, each GPU computes attention between its local $Q$ block and the currently resident $K$/$V$ block, sends that $K$/$V$ block to its ring neighbor, and receives the next block from its other neighbor. The implementation overlaps this exchange with computation: while GPU $i$ computes attention using $K_j$/$V_j$, it simultaneously receives $K_{j+1}$/$V_{j+1}$ from the ring.
 
 ```{python}
 #| echo: false
@@ -2241,7 +2237,7 @@ However, for **Recommendation Systems**\index{Recommendation Systems}—specific
 
 In this sparse regime, the parameter server avoids dense synchronization by moving only the rows that a batch touches:
 
-1.  **Embedding Sharding**: The massive tables are partitioned across the PS fleet (often CPU nodes with massive DRAM).
+1.  **Embedding Sharding**\index{Embedding Sharding}: The massive tables are partitioned across the PS fleet (often CPU nodes with massive DRAM).
 2.  **Sparse Lookups**: Workers send a list of IDs to the PS.
 3.  **Sparse Pull**: The PS returns only the requested embedding vectors, not the full table.
 4.  **Sparse Push**: Workers send gradients only for the touched embedding rows.
@@ -2344,7 +2340,7 @@ class FrontierHybridRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Hybrid parallelism\index{Hybrid Parallelism!definition} resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a `{python} FrontierHybridRecap.frontier_params_b_str` parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously, and it is precisely this combination that defines Archetype A training at large-model scale.
+**Hybrid parallelism**\index{Hybrid Parallelism!definition} resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a `{python} FrontierHybridRecap.frontier_params_b_str` parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously, and it is precisely this combination that defines Archetype A training at large-model scale.
 
 ::: {#lhs-distributed-training-archetype-gpt-4-llama-3-physics-3d-parallelism .callout-lighthouse title="Archetype A (GPT-4/Llama-3): physics of 3D parallelism"}
 

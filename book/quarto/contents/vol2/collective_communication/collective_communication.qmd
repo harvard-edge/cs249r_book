@@ -663,17 +663,17 @@ The six primitives below form a decision ladder: use the narrowest operation tha
     *   Use case: Aggregating validation metrics (loss, accuracy) to a logging process. Common in monitoring and checkpointing across all training strategies.
     *   Complexity: $\mathcal{O}(\log N)$ latency with tree algorithms; bandwidth cost $\mathcal{O}(M)$ total.
 
-3.  **AllReduce**: Data from all workers is aggregated, and the result is distributed to all workers.
+3.  **AllReduce**\index{AllReduce}: Data from all workers is aggregated, and the result is distributed to all workers.
     *   Use case: Data Parallelism. In the data-parallel training strategy from @sec-distributed-training-systems-systems-data-parallelism-6132, AllReduce synchronizes gradients so every GPU computes the same weight update.
     *   Semantics: $y_i = \sum_{j=0}^{N-1} x_j$ for all $i$.
     *   Complexity: Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but $\mathcal{O}(N)$ latency; Tree achieves $\mathcal{O}(\log N)$ latency but suboptimal bandwidth. @Sec-appdx-comm-foundations-allreduce develops the formal definition and a worked example comparing Ring and tree complexity, so a reader who wants that derivation can take the full treatment there before the chapter applies these costs to algorithm selection.
 
-4.  **AllGather**: Every worker sends its data to every other worker. The result is a concatenation of all inputs.
+4.  **AllGather**\index{AllGather}: Every worker sends its data to every other worker. The result is a concatenation of all inputs.
     *   Use case: Sharded Data Parallelism (FSDP[^fn-fsdp-memory]/ZeRO). Collecting sharded parameters before a forward/backward pass.
     *   Semantics: Worker $i$ starts with $x_i$, ends with $[x_0, x_1, \dots, x_{N-1}]$.
     *   Complexity: Ring achieves $\frac{N-1}{N}\frac{M}{\beta}$ bandwidth cost when $M$ is the full gathered tensor; each worker's resident data grows from a local $M/N$ shard to the full $M$.
 
-5.  ReduceScatter\index{ReduceScatter}: Data is reduced (summed), but the result is scattered such that each worker receives only a distinct chunk of the result.
+5.  **ReduceScatter**\index{ReduceScatter}: Data is reduced (summed), but the result is scattered such that each worker receives only a distinct chunk of the result.
     *   Use case: Sharded Data Parallelism. Reducing gradients but keeping them sharded to save memory.
     *   Semantics: Worker $i$ receives the $i$-th block of $\sum x_j$.
     *   Complexity: Ring achieves $\frac{N-1}{N}\frac{M}{\beta}$; functionally the inverse of AllGather.
@@ -682,7 +682,7 @@ A key insight is that AllReduce can be decomposed into ReduceScatter followed by
 
 The same AllGather/ReduceScatter pair also appears in sequence parallelism: an AllGather reconstructs the activation view needed for a local operation, and a later ReduceScatter redistributes the result along the sequence dimension. That example will matter later because it shows that a primitive's semantics stay fixed even when the tensor dimension being sharded changes.
 
-6.  **AllToAll**: The most general pattern. Worker $i$ sends a distinct chunk of data to worker $j$. This is effectively a matrix transpose of distributed data.
+6.  **AllToAll**\index{AllToAll}: The most general pattern. Worker $i$ sends a distinct chunk of data to worker $j$. This is effectively a matrix transpose of distributed data.
     *   Use case: Mixture of Experts (MoE) routing tokens to experts; DLRM[^fn-dlrm-embedding] exchanging embedding lookups across workers.
     *   Semantics: Worker $i$ sends $x_{i \to j}$ to worker $j$ and receives $x_{j \to i}$ from worker $j$, for all $j$.
     *   Complexity: $\mathcal{O}(N^2)$ logical connections create potential for network congestion; bandwidth cost is $\frac{N-1}{N}M$ per worker, but contention makes this the hardest primitive to scale.
@@ -836,11 +836,7 @@ A correct AllReduce must give all 1,000 GPUs the exact sum of all 1,000 one-giga
 
 ### Naive approaches vs. the bandwidth bottleneck {#sec-communication-collective-operations-naive-vs-optimal}
 
-Consider a naive implementation using a Parameter Server (Star topology). All $N$ workers send their gradients to rank 0; rank 0 sums them and sends the result back.
-
-*   **Constraint**: Rank 0's bandwidth. It must receive $N \times M$ bytes and send $N \times M$ bytes.
-*   **Time**: $T \propto N \times M / \beta$.
-*   **Result**: Linear slowdown. With 1000 GPUs, rank 0 melts.
+Consider a naive implementation using a Parameter Server (Star topology). All $N$ workers send their gradients to rank 0; rank 0 sums them and sends the result back. The constraint is rank 0's bandwidth: it must receive $N \times M$ bytes and send $N \times M$ bytes, so the time grows as $T \propto N \times M / \beta$. At 1,000 GPUs, this makes the central rank the scaling bottleneck rather than the arithmetic.
 
 This naive approach was historically common in early distributed ML frameworks, where a dedicated parameter server process received all gradients, performed the aggregation, and broadcast the result. For small clusters (4--8 GPUs), the bottleneck at rank 0 was tolerable. At moderate scale (32--64 GPUs), practitioners mitigated the bottleneck by sharding parameters across multiple parameter servers, so that each server handled only a subset of the gradient tensor. This sharded parameter server approach reduces the per-server traffic from $N \times M$ to $N \times M/K_{\text{srv}}$ (where $K_{\text{srv}}$ is the number of servers), but it still scales linearly with $N$ on each shard and introduces additional complexity in parameter partitioning and consistency management.
 
@@ -1365,7 +1361,7 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import GB, MB, microsecond, ms, second
 from mlsysim import Hardware, Systems
-from mlsysim.fmt import fmt, fmt_count, fmt_qty
+from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_qty, fmt_time
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
@@ -1398,7 +1394,6 @@ class HierarchicalAllreduceCalc:
     intra_ag_rounded = round(intra_ag.to(ms).magnitude)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check, fmt_time
     check(speedup > 1.0, "Hierarchical should be faster than Flat AllReduce")
     check(abs(inter_time.to(ms).magnitude - 4.4) < 0.1, f"Inter-node time = {inter_time.to(ms).magnitude:.1f} ms, expected ~4.4")
 
@@ -1445,9 +1440,7 @@ class HierarchicalAllreduceCalc:
 
 :::
 
-These three phases confine most traffic within each node before crossing the slower inter-node fabric.
-
-The hierarchical approach generalizes beyond two levels. Large clusters with multiple racks connected through spine switches introduce a third bandwidth tier (rack-to-rack at reduced bisection bandwidth). At 128 GPUs arranged as 4 racks of 4 nodes of 8 GPUs with 2:1 cross-rack oversubscription, applying the same decomposition at each tier shrinks the cross-rack payload per GPU by 32$\times$ compared to the original gradient—roughly 15 ms total versus 160 ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
+These three phases confine most traffic within each node before crossing the slower inter-node fabric, and the same idea generalizes beyond two levels. Large clusters with multiple racks connected through spine switches introduce a third bandwidth tier (rack-to-rack at reduced bisection bandwidth). At 128 GPUs arranged as 4 racks of 4 nodes of 8 GPUs with 2:1 cross-rack oversubscription, applying the same decomposition at each tier shrinks the cross-rack payload per GPU by 32$\times$ compared to the original gradient—roughly 15 ms total versus 160 ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
 
 ### In-network reduction: SHARP and beyond {#sec-communication-sharp}
 
@@ -1713,9 +1706,10 @@ The success of 1-bit Adam illustrates a broader principle: compression is most e
 # │ How: T = T_compute + T_comm/Ratio.
 # │
 # │ Imports: mlsysim.book (check)
-# │ Exports: cp_comm_time_ms_str, cp_ratio_str, cp_overhead_ms_str, cp_speedup_mult_str
+# │ Exports: cp_comm_time_ms_str, cp_ratio_str, cp_overhead_ms_str,
+# │          cp_compressed_comm_ms_str, cp_total_new_ms_str, cp_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_ratio, fmt_time
+from mlsysim.fmt import check, fmt_multiple, fmt_ratio, fmt_time
 
 class CompressionPayback:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1733,6 +1727,8 @@ class CompressionPayback:
     cp_throughput_factor_mult_str = fmt_multiple(ratio, precision=0, commas=False)
     cp_ratio_str = fmt_ratio(ratio, precision=0, commas=False)
     cp_overhead_ms_str = fmt_time(t_overhead_ms, 'millisecond', precision=0, commas=False)
+    cp_compressed_comm_ms_str = fmt_time(t_compressed_comm, 'millisecond', precision=0, commas=False)
+    cp_total_new_ms_str = fmt_time(t_total_new, 'millisecond', precision=0, commas=False)
     cp_speedup_mult_str = fmt_multiple(speedup, precision=1, commas=False)
 ```
 
@@ -1742,9 +1738,9 @@ class CompressionPayback:
 
 **Math**:
 
-1. **Compressed communication time**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by `{python} CompressionPayback.cp_ratio_str` = 5 ms.
-2. **Total new time**: 5 ms (comm) + `{python} CompressionPayback.cp_overhead_ms_str` (overhead) = 7 ms.
-3. **Effective speedup**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by 7 $\approx$ `{python} CompressionPayback.cp_speedup_mult_str`.
+1. **Compressed communication time**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by `{python} CompressionPayback.cp_ratio_str` = `{python} CompressionPayback.cp_compressed_comm_ms_str`.
+2. **Total new time**: `{python} CompressionPayback.cp_compressed_comm_ms_str` (comm) + `{python} CompressionPayback.cp_overhead_ms_str` (overhead) = `{python} CompressionPayback.cp_total_new_ms_str`.
+3. **Effective speedup**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by `{python} CompressionPayback.cp_total_new_ms_str` $\approx$ `{python} CompressionPayback.cp_speedup_mult_str`.
 
 **Systems insight**: Compression is a trade of *compute for bandwidth*. It pays off only when $T_{\text{overhead}} < T_{\text{comm}}(N) \times (1 - 1/\text{Ratio})$. In this case, spending 2 ms to save 35 ms of network time is an exceptional trade. However, on a high-speed NVLink network where $T_{\text{comm}}(N)$ is only 1 ms, this same compression logic would slow down training. Always profile the network before adding compression.
 
