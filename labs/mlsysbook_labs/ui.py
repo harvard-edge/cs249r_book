@@ -199,6 +199,41 @@ ACADEMIC_LAB_CSS = mo.Html(
   border-color: #F4C27A;
   border-left: 4px solid var(--mlsysbook-warn);
 }
+.mlsysbook-action-box {
+  width: min(var(--mlsysbook-panel-width), 100%);
+  max-width: min(var(--mlsysbook-panel-width), 100%);
+  margin: 14px auto;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, #F8FFFB 0%, #FFFFFF 84%);
+  border: 1px solid #B8D8C6;
+  border-left: 4px solid var(--mlsysbook-ok);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(31, 64, 122, 0.06);
+}
+.mlsysbook-action-box.is-warn {
+  background: linear-gradient(135deg, #FFFBF2 0%, #FFFFFF 84%);
+  border-color: #F4C27A;
+  border-left-color: var(--mlsysbook-warn);
+}
+.mlsysbook-action-box h3 {
+  margin: 0 0 4px 0;
+  font-size: 0.98rem;
+  letter-spacing: 0;
+}
+.mlsysbook-action-box p {
+  color: #475467;
+  line-height: 1.45;
+  margin: 0 0 12px 0;
+}
+.mlsysbook-action-control {
+  margin-top: 8px;
+}
+.mlsysbook-action-note {
+  color: #475467;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin: 4px 0 0 0;
+}
 .mlsysbook-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -414,6 +449,21 @@ ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
 .output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) li {
   max-width: min(var(--mlsysbook-readable-width), 100%) !important;
 }
+.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly)) {
+  width: min(var(--mlsysbook-panel-width), 100%) !important;
+  max-width: min(var(--mlsysbook-panel-width), 100%) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  background: linear-gradient(135deg, #F8FFFB 0%, #FFFFFF 82%) !important;
+  border: 1px solid #B8D8C6 !important;
+  border-left: 4px solid var(--mlsysbook-ok) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(31, 64, 122, 0.06) !important;
+  padding: 14px 18px !important;
+}
+.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly)) > div {
+  max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+}
 marimo-tabs,
 div[style*="border-left:4px solid"][style*="border-radius:0 10px"],
 div[style*="border-left: 4px solid"][style*="border-radius: 0 10px"],
@@ -455,6 +505,10 @@ marimo-callout-output {
   }
   .mlsysbook-compact-fields {
     grid-template-columns: 1fr;
+  }
+  .output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly)) {
+    width: 100% !important;
+    max-width: 100% !important;
   }
   .mlsysbook-compact-field:last-child:nth-child(n) {
     grid-column: auto;
@@ -813,6 +867,37 @@ def track_selector(default: str = DEFAULT_TRACK_ID):
     options = track_options()
     selected_label = next((label for label, track_id in options.items() if track_id == selected), "iPhone")
     return mo.ui.radio(options=options, value=selected_label, label="Choose Your Track", inline=True)
+
+
+def action_box(
+    element,
+    *,
+    title: str,
+    body: str = "",
+    name: str = "answer",
+    tone: str = "track",
+):
+    """Render a real UI control inside a reusable student action panel."""
+    border = "#F4C27A" if tone == "warn" else "#B8D8C6"
+    accent = "var(--mlsysbook-warn)" if tone == "warn" else "var(--mlsysbook-ok)"
+    background = "#FFFBF2" if tone == "warn" else "#F8FFFB"
+    body_html = f"<p>{html.escape(body)}</p>" if body else ""
+    return mo.ui.batch(
+        mo.Html(
+            f"""
+<div class="mlsysbook-action-box" style="width:min(var(--mlsysbook-panel-width),100%);
+     max-width:min(var(--mlsysbook-panel-width),100%); margin:14px auto; padding:16px 18px;
+     background:linear-gradient(135deg,{background} 0%,#FFFFFF 84%);
+     border:1px solid {border}; border-left:4px solid {accent}; border-radius:8px;
+     box-shadow:0 4px 12px rgba(31,64,122,0.06);">
+  <h3 style="margin:0 0 4px 0; font-size:0.98rem; letter-spacing:0;">{html.escape(title)}</h3>
+  <div style="color:#475467; line-height:1.45; margin:0 0 12px 0;">{body_html}</div>
+  <div class="mlsysbook-action-control" style="margin-top:8px;">{{{name}}}</div>
+</div>
+"""
+        ),
+        {name: element},
+    )
 
 
 def track_context(track: str | TrackProfile) -> mo.Html:

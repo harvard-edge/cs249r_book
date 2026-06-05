@@ -1021,7 +1021,7 @@ def _(check1, check2empty, check3, mo):
         ## Your Track
 
         Choose one canonical track. Later labs will read this choice from the
-        local Design Ledger and adapt narrative, hardware references, metrics,
+        local Design Ledger and adapt narrative, device assumptions, metrics,
         guardrails, and report framing automatically.
         """),
     ])
@@ -1073,7 +1073,7 @@ def _(
         mo.vstack([
             context_selector,
             mo.md("_Select your deployment context above._"),
-        ])
+        ], align="center")
     )
 
     _track_id = context_selector.value
@@ -1191,7 +1191,7 @@ def _(
     ])
 
     mo.vstack([
-        context_selector,
+        mo.vstack([context_selector], align="center"),
         mo.md("---"),
         decision_ui,
         track_context(_track_profile),

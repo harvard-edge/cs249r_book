@@ -265,14 +265,17 @@ def report_export_panel(report: LabReport, *, include_json: bool = True, include
 
     controls = report_export(report, include_json=include_json)
     if not include_fallback:
-        return controls
+        return mo.vstack([controls], align="center")
 
     fallback = mo.Html(
         f"""
-<div class="mlsysbook-panel">
+<div class="mlsysbook-panel mlsysbook-report-panel">
   <h2>Report Text Fallback</h2>
+  <p class="mlsysbook-action-note">
+    This contains the same Markdown artifact as the download button.
+  </p>
   <textarea readonly style="width:100%; min-height:260px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:0.85rem; line-height:1.45; border:1px solid #D9DEE8; border-radius:8px; padding:12px;">{html.escape(report.markdown)}</textarea>
 </div>
 """
     )
-    return mo.vstack([controls, mo.accordion({"Report text fallback": fallback}, multiple=False)])
+    return mo.vstack([controls, mo.accordion({"Report text fallback": fallback}, multiple=False)], align="center")

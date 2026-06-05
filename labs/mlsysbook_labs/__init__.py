@@ -278,6 +278,7 @@ from .workflow import (
 )
 from .ui import (
     COMPLETION_STATES,
+    action_box,
     advanced_knob_drawer,
     big_takeaways,
     chapter_recap,
@@ -552,6 +553,7 @@ __all__ = [
     "list_lab_variants",
     "variant_coverage",
     "COMPLETION_STATES",
+    "action_box",
     "lab_header",
     "learning_objectives",
     "chapter_recap",

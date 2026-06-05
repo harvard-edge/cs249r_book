@@ -32,6 +32,7 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        action_box,
         build_lab_report,
         diagnose_triad,
         get_lab_metadata,
@@ -52,6 +53,7 @@ async def _():
         _ = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS,
+        action_box,
         COLORS,
         LAB_CSS,
         apply_plotly_theme,
@@ -231,7 +233,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, v1_01_triad):
+def _(action_box, mo, v1_01_triad):
     partA_pred = mo.ui.radio(
         options={
             "A) Data will bind": "Data",
@@ -267,13 +269,18 @@ def _(mo, v1_01_triad):
         step=5,
         label="Machine readiness (%)",
     )
-    partA_decision = mo.ui.radio(
-        options={
-            "Data": "Data",
-            "Algorithm": "Algorithm",
-            "Machine": "Machine",
-        },
-        label="Step 3 - final diagnosis after inspecting the evidence",
+    partA_decision = action_box(
+        mo.ui.radio(
+            options={
+                "Data": "Data",
+                "Algorithm": "Algorithm",
+                "Machine": "Machine",
+            },
+            label="",
+        ),
+        title="Step 3 - Final Diagnosis",
+        body="Choose the answer you would defend after reading the chart and table.",
+        name="diagnosis",
     )
 
     partB_pred = mo.ui.radio(
@@ -455,19 +462,17 @@ def _(
         """))
 
         items.append(partA_decision)
-        if partA_decision.value is None:
-            items.append(mo.callout(mo.md(
-                "Choose the final diagnosis after reading the chart and table. This is the answer you would defend."
-            ), kind="warn"))
+        _decision_value = (partA_decision.value or {}).get("diagnosis")
+        if _decision_value is None:
             return mo.vstack(items)
 
-        if partA_decision.value == _diag.binding_axis:
+        if _decision_value == _diag.binding_axis:
             items.append(mo.callout(mo.md(
                 "**Good diagnosis.** Your final answer matches the evidence. The binding axis comes from the track thresholds, not from a default rule."
             ), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                f"**Re-check the evidence.** Your final answer is {partA_decision.value}, but the current binding axis is {_diag.binding_axis}. "
+                f"**Re-check the evidence.** Your final answer is {_decision_value}, but the current binding axis is {_diag.binding_axis}. "
                 "The first fix should target the weakest margin to threshold."
             ), kind="warn"))
         return mo.vstack(items)
@@ -646,9 +651,10 @@ def _(
     v1_01_triad,
     v1_01_variant,
 ):
+    _decision_value = (partA_decision.value or {}).get("diagnosis")
     if (
         partA_pred.value is not None
-        and partA_decision.value is not None
+        and _decision_value is not None
         and partB_pred.value is not None
         and partC_pred.value is not None
     ):
@@ -660,7 +666,7 @@ def _(
             "model_ref": v1_01_triad.model_ref,
             "completed": True,
             "triad_prediction": partA_pred.value,
-            "triad_final_diagnosis": partA_decision.value,
+            "triad_final_diagnosis": _decision_value,
             "budget_prediction": partB_pred.value,
             "memo_prediction": partC_pred.value,
         })
@@ -721,7 +727,8 @@ def _(
     _incomplete = []
     if partA_pred.value is None:
         _incomplete.append("Part A pre-evidence prediction")
-    if partA_decision.value is None:
+    _decision_value = (partA_decision.value or {}).get("diagnosis")
+    if _decision_value is None:
         _incomplete.append("Part A final diagnosis")
     if partB_pred.value is None:
         _incomplete.append("Part B intervention prediction")
@@ -739,7 +746,7 @@ def _(
         ),
         predictions={
             "pre_evidence_binding_axis": partA_pred.value,
-            "final_binding_axis_diagnosis": partA_decision.value,
+            "final_binding_axis_diagnosis": _decision_value,
             "budget_strategy": partB_pred.value,
             "memo_structure": partC_pred.value,
         },
