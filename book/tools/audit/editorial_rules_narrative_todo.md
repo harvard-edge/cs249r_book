@@ -35,6 +35,21 @@ listed here.
 - Edited LEGO cells were smoke-tested directly for output formatting; the
   checkpoint example now derives the `350 GB` and `1,400 GB` components from
   MLSysIM constants instead of prose-only literals.
+- 2026-06-05 section-flow triage: committed `45ed408262` for ops-scale
+  CI/CD/rollout/resource-management bridges and `5bea6b53e9` for Volume 2
+  edge/fault/inference transitions. The layout-proxy heuristic was rerun on
+  both volumes; remaining high-count warnings were inspected by context rather
+  than fixed mechanically. Intentional short structures include worked-example
+  calculation steps, MLPerf scenario headings, static/dynamic serving
+  distinctions, ClinAIOps loop headings, rollback subcases, and figure-backed
+  design-pattern headings. These should be reconsidered only in the later
+  whole-section macro flow pass if the surrounding prose fails the narrative
+  test.
+- Standalone-book wording check found no authored-prose `Volume 1`/`Volume 2`
+  hits in `book/quarto/contents/vol1` or `book/quarto/contents/vol2`. Raw
+  `above`/`below`/`later` greps are noisy because they hit TikZ coordinates and
+  comments, so use the prose checker and targeted authored-prose searches
+  rather than treating the raw grep as actionable.
 
 ## Needs Author Attention
 
