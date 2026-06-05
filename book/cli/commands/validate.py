@@ -6070,8 +6070,15 @@ class ValidateCommand:
             must be capitalized (@Sec-, @Fig-, ...) so the rendered prefix
             ("Section", "Figure") leads the sentence with a capital.
           * Mid-sentence -- a capitalized @Sec-/@Fig-/... after a comma,
-            semicolon, open paren, or a lowercase word renders a stray capital
-            ("...as Table 2 shows") and must be lowercased (@sec-, @fig-, ...).
+            semicolon, open paren, a lowercase word, or a plain-prose colon
+            renders a stray capital ("...as Table 2 shows") and must be
+            lowercased (@sec-, @fig-, ...). A colon is mid-sentence ONLY in
+            running prose ("...as follows: section 3 derives ..."), per MIT
+            Press house style (mit-press-editorial.md S10.4, which lowercases
+            generic section/figure/table refs in running text). A colon after
+            a bold structural label ("**Setup**: @Fig- shows ...") instead
+            begins a complete sentence (emphasis.md bold lead-in rule) and is
+            classified as a sentence start.
           * Algorithm theorem refs -- direct @Alg-/@alg- refs follow the same
             casing rule as other cross-refs. Bracketed [Algorithm @alg-id]
             refs are unnecessary because the shared Quarto language file
@@ -6087,7 +6094,11 @@ class ValidateCommand:
 
         Reverse (mid-sentence) direction + @alg- added 2026-06-04 to mirror the
         documented Prefix Casing policy; algorithm bracket/bare-prefix checks
-        were added the same day.
+        were added the same day. Colon handling corrected 2026-06-04: a plain-
+        prose colon is mid-sentence (lowercase) per MIT Press, not a sentence
+        start; only a bold-label lead-in colon capitalizes. Previously every
+        colon forced a capital, which matched the engineering-textbook habit the
+        book's MIT Press copyedit rejected.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -6151,9 +6162,26 @@ class ValidateCommand:
                     # left unflagged on purpose -- it may end a clause.)
                     is_mid_sentence = True
                 elif re.search(r':\s*$', before):
+                    # A colon splits two ways (MIT Press house style):
+                    #   * after a bold structural label ("**Setup**: @Fig- shows
+                    #     ...") the colon introduces a complete sentence, so the
+                    #     ref is a sentence start and takes a capital prefix
+                    #     (emphasis.md bold lead-in rule).
+                    #   * in plain running prose ("...as follows: @sec-3 derives
+                    #     ...") the colon introduces a single clause, which
+                    #     mit-press-editorial.md §10.4 lowercases ("section 3"),
+                    #     so the ref is mid-sentence and takes a lowercase prefix.
+                    # Drop any \index{} tag before testing the label shape.
+                    head = re.sub(r'\\index\{[^}]*\}', '', before[:-1]).strip()
+                    is_label_leadin = bool(
+                        re.fullmatch(r'(?:[-*+]\s+|\d+[.)]\s+)?\*\*[^*]+\*\*', head)
+                    )
                     after_ref = line[ref_end:].strip()
                     if after_ref and after_ref[0] not in ".,;:)]":
-                        is_sentence_start = True
+                        if is_label_leadin:
+                            is_sentence_start = True
+                        else:
+                            is_mid_sentence = True
                 # otherwise (em-dash, other punctuation): neutral, no flag
 
             return is_sentence_start, is_mid_sentence
