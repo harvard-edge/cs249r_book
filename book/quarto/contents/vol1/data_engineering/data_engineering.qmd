@@ -102,6 +102,12 @@ The engineering implication is direct: datasets must be versioned (like git), un
 
 This compilation metaphor establishes the engineering mindset that runs through the chapter. A compiler has distinct phases (lexing, parsing, optimization, code generation), and our dataset compiler has phases too: acquisition, ingestion, processing, labeling, storage, and ongoing maintenance. A **four pillars framework**\index{Four pillars framework!data engineering} of Quality, Reliability, Scalability, and Governance organizes design decisions across all phases. Each stage is illustrated through a Keyword Spotting (KWS) case study that demonstrates data engineering under extreme resource constraints, where every byte and operation matters.
 
+::: {.column-margin}
+![](images/svg/data_engineering_data_gravity_entropy.svg){width="100%" fig-alt="A 2-by-2 quadrant. The horizontal axis is data gravity (movement cost), the vertical axis is information entropy (signal density). The top-left cell, low gravity and high entropy, is highlighted and labeled high gain; the other three cells are neutral gray."}
+
+*Selection gain is highest where entropy is high and data gravity low.*
+:::
+
 Before any of these pipeline stages can be designed well, however, we need to understand the physical properties that constrain them. Just as a civil engineer must understand soil mechanics before designing foundations, a data engineer must understand the physics of data movement and information density before making pipeline decisions. These physics impose hard constraints that no amount of clever software can circumvent.
 
 ## Physics of Data {#sec-data-engineering-physics-data-cdcb}
@@ -193,14 +199,7 @@ class DataGravity:
 
 ### Information entropy {#sec-data-engineering-information-entropy-5622}
 
-::: {.column-margin}
-![](images/svg/data_engineering_data_gravity_entropy.svg){width="100%" fig-alt="A 2-by-2 quadrant. The horizontal axis is data gravity (movement cost), the vertical axis is information entropy (signal density). The top-left cell, low gravity and high entropy, is highlighted and labeled high gain; the other three cells are neutral gray."}
-
-*Selection gain is highest where entropy is high and data gravity low.*
-:::
-
 **Information entropy**\index{Information Entropy!data density} is the density of signal. A dataset of 1 million identical images has high gravity (TB of storage) but zero entropy (one image worth of information). A dataset of 10,000 diverse edge cases has low gravity but high entropy. Let Information Entropy measure signal density (bits of information per byte) and data gravity capture movement cost (data volume/bandwidth, that is, transfer time). The ratio of the two quantities captures a dataset's return on movement cost, which @eq-data-selection-gain formalizes as the data selection gain:
-
 $$ \text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Data Gravity}} $$ {#eq-data-selection-gain}
 \index{Data Selection!gain formula}
 
@@ -344,6 +343,9 @@ The iron law in @sec-introduction-iron-law-ml-systems-c32a and the memory-wall a
 
 : **Energy Cost of Moving vs. Computing on a Bit**: Approximate energy per operation at each stage of the data-movement hierarchy, with multipliers normalized to a single 32-bit MAC on a per-bit basis. All rows list energy per 32-bit access (SSD and network values scale per-bit transfer costs by 32). Moving a bit costs hundreds of times more energy than computing on it for DRAM-resident data, rising to hundreds of thousands of times more when the data must traverse a data-center network. {#tbl-energy-movement-cost tbl-colwidths="[34,33,33]"}
 
+```{=latex}
+\vspace*{-1.5ex}
+```
 The cost gradient quantified in @tbl-energy-movement-cost explains why locality is the dominant lever in systems engineering: every step the data does not take is the largest energy savings available.
 
 Data has physical mass. Pruning `{python} EnergyAccessCosts.prune_pct_str` of training data through deduplication does more than save disk space; it eliminates the most energy-intensive stages of the training lifecycle. This is *why* data selection is the highest-leverage tool in the systems engineer's toolkit: it addresses the problem at the most expensive source.
@@ -1099,10 +1101,6 @@ This yields roughly 0.75M labeled examples, just below the 1M anchor in our desi
 Current accuracy budget:
 
 - Base model: ~`{python} KWSDesignConstraints.kws_base_model_acc_str` (minimal data)
-
-```{=latex}
-\tcbbreak
-```
 - Partial data-volume gain from 750K real examples
 - Need: higher sampling rate plus synthetic/noisy augmentation to reach the `{python} KWSDesignConstraints.kws_accuracy_target_str` target
 
@@ -2156,7 +2154,6 @@ Quality monitoring extends beyond simple schema validation to statistical proper
 
 The K-S test is one tool for detecting drift in continuous features; @sec-data-engineering-detecting-responding-data-drift-509a provides the complete taxonomy of distribution shifts (covariate, label, concept, and label-quality drift) along with Population Stability Index (PSI) and KL divergence metrics for operationalizing the degradation equation.
 
-Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating the data source has changed in ways that will affect model performance.
 
 ```{python}
 #| echo: false
@@ -2224,6 +2221,8 @@ class KSTest:
 
 :::
 
+Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating the data source has changed in ways that will affect model performance.
+
 Validation at the pipeline level encompasses multiple strategies working together. Schema validation executes synchronously as data enters the pipeline, rejecting malformed records immediately before they can propagate downstream. Modern tools like TensorFlow Data Validation\index{TensorFlow Data Validation} (TFDV) [@breck2019data] automatically infer schemas from training data, capturing expected data types, value ranges, and presence requirements.
 
 This synchronous validation remains simple and fast, checking properties that can be evaluated on individual records in microseconds. More sophisticated validation that requires comparing serving data against training data distributions or aggregating statistics across many records must run asynchronously to avoid blocking the ingestion pipeline. Statistical validation\index{Statistical Validation!sampling strategies} systems typically sample 1-10 percent of serving traffic, enough to detect meaningful shifts while avoiding the computational cost of analyzing every record. These samples accumulate in rolling windows, commonly one hour, 24 hours, and seven days, with different windows revealing different patterns. Hourly windows detect sudden shifts like a data source failing over to a backup with different characteristics, while weekly windows reveal gradual drift in user populations or behavior.
@@ -2252,16 +2251,6 @@ A dataset can be mechanically perfect (no nulls, correct types) but semantically
 :::
 
 These mechanical expectations become executable assertions that can run automatically.
-
-CI/CD integration runs expectations in the deployment pipeline. Expectation violations fail deployments before bad data reaches training. A pipeline structured as data ingestion followed by data validation followed by training blocks deployment when validation detects anomalies like age values of 150, triggering alerts for investigation.
-
-Expectation suites as artifacts version alongside training code. When training code changes, expectation updates help keep data contracts evolving together. This coupling reduces the risk of silent divergence where code assumes data properties that the upstream pipeline no longer provides.
-
-This pattern catches approximately 60 percent of production data issues before they reach training, based on industry experience with tools like Great Expectations, Pandera, and Pydantic. The remaining issues require runtime monitoring, as some quality problems only emerge in the full production data stream.
-
-### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
-
-\index{Data Drift!detection}\index{Distribution Shift!monitoring}ML models rest on the assumption that production data resembles training data. When this assumption breaks, not through *immediate schema violations* but through *gradual statistical shifts*, model performance degrades silently without obvious errors or system failures. Unlike the validation and monitoring techniques we have examined that catch immediate data quality issues, drift detection identifies gradual statistical changes in data distributions that compound over time to undermine model effectiveness. Production experience reveals that drift detection and response consume 30–40 percent of ongoing ML operations effort, making this a core data engineering responsibility rather than an optional advanced topic. @Sec-ml-operations builds on this foundation to address operational response orchestration and automated retraining pipelines at scale.
 
 ::: {#lst-data-expectations lst-cap="**Data Quality Assertions**: Executable data contracts catch schema violations, missing values, and invalid entries before training begins. Production systems using this pattern detect approximately 60 percent of data issues at pipeline execution time, preventing cascading failures that would otherwise propagate to model training."}
 
@@ -2292,8 +2281,7 @@ suite.add_expectation(
     gx.expectations.ExpectColumnValuesToBeUnique(column="user_id")
 )
 
-# Categorical validation: detects unexpected values from upstream
-# changes
+# Categorical validation: detects unexpected values from upstream changes
 suite.add_expectation(
     gx.expectations.ExpectColumnDistinctValuesToBeInSet(
         column="country_code",
@@ -2301,8 +2289,7 @@ suite.add_expectation(
     )
 )
 
-# Link the suite to a preconfigured Batch Definition and run
-# validation
+# Link the suite to a preconfigured Batch Definition and run validation
 # (the Batch Definition connects GX to the training_users data asset)
 validation_definition = gx.ValidationDefinition(
     name="training_users_validation",
@@ -2318,6 +2305,16 @@ if not results.success:
 ```
 
 :::
+
+CI/CD integration runs expectations in the deployment pipeline. Expectation violations fail deployments before bad data reaches training. A pipeline structured as data ingestion followed by data validation followed by training blocks deployment when validation detects anomalies like age values of 150, triggering alerts for investigation.
+
+Expectation suites as artifacts version alongside training code. When training code changes, expectation updates help keep data contracts evolving together. This coupling reduces the risk of silent divergence where code assumes data properties that the upstream pipeline no longer provides.
+
+This pattern catches approximately 60 percent of production data issues before they reach training, based on industry experience with tools like Great Expectations, Pandera, and Pydantic. The remaining issues require runtime monitoring, as some quality problems only emerge in the full production data stream.
+
+### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
+
+\index{Data Drift!detection}\index{Distribution Shift!monitoring}ML models rest on the assumption that production data resembles training data. When this assumption breaks, not through *immediate schema violations* but through *gradual statistical shifts*, model performance degrades silently without obvious errors or system failures. Unlike the validation and monitoring techniques we have examined that catch immediate data quality issues, drift detection identifies gradual statistical changes in data distributions that compound over time to undermine model effectiveness. Production experience reveals that drift detection and response consume 30–40 percent of ongoing ML operations effort, making this a core data engineering responsibility rather than an optional advanced topic. @Sec-ml-operations builds on this foundation to address operational response orchestration and automated retraining pipelines at scale.
 
 The degradation equation in @eq-degradation, introduced in @sec-introduction-ml-vs-traditional-software-e19a, now becomes actionable through the divergence metrics formalized in @sec-appdx-data-foundations-measuring-drift-divergence-a6dd: the divergence term $\mathcal{D}(P_t \lVert P_0)$ is exactly what PSI and KL divergence measure. Two key metrics operationalize this measurement: the **Population Stability Index (PSI)**\index{Population Stability Index!definition}, which quantifies how much a categorical or binned feature distribution has shifted (values above 0.2 indicate significant drift), and **Kullback-Leibler (KL) Divergence**\index{KL Divergence!definition}, which measures the information-theoretic distance between continuous distributions. When PSI exceeds 0.2 or KL divergence crosses a threshold, the system signals that $\mathcal{D}(P_t \lVert P_0)$ has grown large enough to materially impact $\text{Accuracy}(t)$.
 
@@ -2846,40 +2843,6 @@ scale=1,every node/.append style={scale=1}]
 
 The ETL pattern\index{ETL!transformation first} transforms data before loading it into the target system. For ML pipelines, this means only validated, schema-conformant data enters the warehouse, enforcing quality and privacy compliance at ingestion time. For instance, an ML system predicting customer churn might use ETL to standardize customer interaction data from multiple sources, converting timestamp formats to UTC, normalizing text encodings, and computing aggregate features like "total purchases last 30 days" before loading [@inmon2005building]. The disadvantage is inflexibility: when feature definitions change, all source data must be reprocessed through the pipeline, a process that can take hours or days for large datasets and slows iteration velocity during development.
 
-The ELT pattern\index{ELT!load first} reverses this order, loading raw data first and applying transformations within the target system. For ML development, this enables flexible feature experimentation on the same raw data. Multiple teams can compute different aggregation windows, and when transformation logic bugs are discovered, teams reprocess by rerunning queries rather than re-ingesting from sources. This flexibility accelerates ML experimentation where feature engineering requirements evolve rapidly. The cost is higher storage requirements (raw data is larger than transformed data), repeated computation when multiple models transform the same source data, and greater complexity in enforcing privacy compliance when raw sensitive data persists in storage.
-
-Production ML systems rarely use one pattern exclusively. Structured data with stable schemas often flows through ETL for efficiency and compliance, while unstructured data or rapidly evolving feature pipelines benefit from ELT's flexibility. Choosing between these patterns requires understanding the cost of transformation placement.
-
-Deciding where to run these transformations involves a small cost model for the cost of transformation placement, as shown in @lst-etl-elt-cost-comparison.
-
-::: {#lst-etl-elt-cost-comparison lst-cap="**ETL vs. ELT Cost Comparison**: Calculating storage and compute costs for different transformation placement strategies. ETL processes data before loading (reducing storage but requiring reprocessing on schema changes), while ELT loads raw data first (higher storage costs but flexible reprocessing via SQL)."}
-
-```{.python}
-# ETL vs ELT cost comparison
-daily_raw_tb = 10
-s3_per_tb_mo = 23
-spark_per_tb = 5
-n_models = 3
-retention_days = 30
-query_cost_per = 5
-
-# ETL
-etl_spark_daily = daily_raw_tb * spark_per_tb
-etl_datasets = 3
-etl_tb_each = 2
-etl_storage_tb = etl_datasets * etl_tb_each
-etl_storage_mo = etl_storage_tb * s3_per_tb_mo
-
-# ELT
-elt_storage_tb = daily_raw_tb * retention_days
-elt_storage_mo = elt_storage_tb * s3_per_tb_mo
-elt_query_mo = n_models * query_cost_per * retention_days
-
-# Savings
-storage_savings_mo = elt_storage_mo - etl_storage_mo
-```
-
-:::
 
 ```{python}
 #| echo: false
@@ -2990,6 +2953,41 @@ class EtlEltCost:
     *   Schema change cost: Rewrite SQL query (~`{python} EtlEltCost.schema_change_elt_minutes_str`) per change
 
 **Systems insight**: ETL saves `{python} EtlEltCost.savings_str` in storage. After normalizing Spark compute to a monthly cost, ETL totals `{python} EtlEltCost.etl_total_usd_str` (`{python} EtlEltCost.etl_spark_monthly_usd_str` compute + `{python} EtlEltCost.etl_storage_usd_str` storage), while ELT totals `{python} EtlEltCost.elt_total_usd_str` (`{python} EtlEltCost.elt_storage_usd_str` storage + `{python} EtlEltCost.elt_query_usd_str` query compute), for a cloud-cost advantage of `{python} EtlEltCost.total_savings_str` before engineering labor. ETL still costs `{python} EtlEltCost.schema_change_ratio_mult_str` more engineering time per schema change. The exact break-even point depends on engineering labor cost and schema-change frequency: stable schemas favor ETL's lower cloud cost, while frequent feature-definition changes favor ELT's faster iteration.
+
+:::
+
+The ELT pattern\index{ELT!load first} reverses this order, loading raw data first and applying transformations within the target system. For ML development, this enables flexible feature experimentation on the same raw data. Multiple teams can compute different aggregation windows, and when transformation logic bugs are discovered, teams reprocess by rerunning queries rather than re-ingesting from sources. This flexibility accelerates ML experimentation where feature engineering requirements evolve rapidly. The cost is higher storage requirements (raw data is larger than transformed data), repeated computation when multiple models transform the same source data, and greater complexity in enforcing privacy compliance when raw sensitive data persists in storage.
+
+Production ML systems rarely use one pattern exclusively. Structured data with stable schemas often flows through ETL for efficiency and compliance, while unstructured data or rapidly evolving feature pipelines benefit from ELT's flexibility. Choosing between these patterns requires understanding the cost of transformation placement.
+
+Deciding where to run these transformations involves a small cost model for the cost of transformation placement, as shown in @lst-etl-elt-cost-comparison.
+
+::: {#lst-etl-elt-cost-comparison lst-cap="**ETL vs. ELT Cost Comparison**: Calculating storage and compute costs for different transformation placement strategies. ETL processes data before loading (reducing storage but requiring reprocessing on schema changes), while ELT loads raw data first (higher storage costs but flexible reprocessing via SQL)."}
+
+```{.python}
+# ETL vs ELT cost comparison
+daily_raw_tb = 10
+s3_per_tb_mo = 23
+spark_per_tb = 5
+n_models = 3
+retention_days = 30
+query_cost_per = 5
+
+# ETL
+etl_spark_daily = daily_raw_tb * spark_per_tb
+etl_datasets = 3
+etl_tb_each = 2
+etl_storage_tb = etl_datasets * etl_tb_each
+etl_storage_mo = etl_storage_tb * s3_per_tb_mo
+
+# ELT
+elt_storage_tb = daily_raw_tb * retention_days
+elt_storage_mo = elt_storage_tb * s3_per_tb_mo
+elt_query_mo = n_models * query_cost_per * retention_days
+
+# Savings
+storage_savings_mo = elt_storage_mo - etl_storage_mo
+```
 
 :::
 
@@ -3167,6 +3165,12 @@ Data locality becomes critical at this scale. At 10 GB/s peak throughput, transf
 
 [^fn-mapreduce-origin]: **MapReduce**: Designed by @dean2004mapreduce at Google to process the company's multi-petabyte web index across thousands of commodity machines. The key design decision was making data locality the scheduling primitive: the scheduler assigns map tasks to nodes that already hold the input data, eliminating network transfers that would otherwise dominate wall-clock time. This compute-follows-data architecture became the template for Hadoop, Spark, and every subsequent distributed data processing framework. \index{MapReduce!data locality}
 
+::: {.column-margin}
+![](images/svg/vol1_data_engineering_margin_003.svg){width="100%" fig-alt="Vertical time ladder comparing gather-all normalization around 120 seconds against local aggregation around 0.2 seconds."}
+
+*Local aggregation beats gather-all when network latency dominates.*
+:::
+
 ::: {#nbk-data-engineering-coordination-tax .callout-notebook title="The coordination tax"}
 
 **Problem**: Mean normalization must be computed across 1 TB of features distributed across 100 nodes. Is it faster to (A) gather all data to one node and compute centrally, or (B) compute local means and aggregate them?
@@ -3186,12 +3190,6 @@ Data locality becomes critical at this scale. At 10 GB/s peak throughput, transf
 
 **Systems insight**: Operations that *reduce* data (sum, mean, count) should always run locally first. Operations that *expand* data (joins, cross-products) face unavoidable network costs. Pipeline design should minimize data movement by pushing computation to where data resides, the compute-follows-data principle central to systems like MapReduce [@dean2004mapreduce], Spark [@zaharia2010spark], and modern ML frameworks.
 
-:::
-
-::: {.column-margin}
-![](images/svg/vol1_data_engineering_margin_003.svg){width="100%" fig-alt="Vertical time ladder comparing gather-all normalization around 120 seconds against local aggregation around 0.2 seconds."}
-
-*Local aggregation beats gather-all when network latency dominates.*
 :::
 
 Single-machine processing\index{Single-Machine Processing!scalability} suffices for surprisingly large workloads when engineered carefully. Modern servers with 256 gigabytes RAM can process datasets of several terabytes using out-of-core processing that streams data from disk. Libraries like Dask or Vaex\index{Lazy Evaluation!data processing} enable pandas-like APIs that automatically stream and parallelize computations across multiple cores. Before investing in distributed processing infrastructure, teams should exhaust single-machine optimization: using efficient data formats (Parquet[^fn-parquet-columnar-io] instead of CSV), minimizing memory allocations, using vectorized operations, and exploiting multi-core parallelism. The operational simplicity of single-machine processing (no network coordination, no partial failures, simple debugging) makes it preferable when performance is adequate.
@@ -3558,6 +3556,9 @@ class ActiveLearningBudget:
 Methods such as active learning\index{Active Learning!label prioritization}[^fn-active-learning-budget] complement these approaches by intelligently prioritizing which examples need human attention [@coleman2022]. These systems continuously analyze model uncertainty to identify valuable labeling candidates. Rather than labeling a random sample of unlabeled data, active learning selects examples where the current model is most uncertain or where labels would most improve model performance. The infrastructure must efficiently compute uncertainty metrics (often prediction entropy or disagreement between ensemble models), maintain task queues ordered by informativeness, and adapt prioritization strategies based on incoming labels. Consider a medical imaging system: active learning might identify unusual pathologies for expert review while handling routine cases through preannotation that experts merely verify. This approach can reduce required annotations by 50–90 percent compared to random sampling, though it requires careful engineering to prevent feedback loops where the model's uncertainty biases which data gets labeled. A budget calculation makes that leverage concrete.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{50mm}
+```
 ![](images/svg/data_engineering_active_learning_budget.svg){width="100%" fig-alt="Budget-envelope chart with a 50K-dollar limit marker; the labeling budget fits at the limit, while full-pool scoring extends into the red over-budget region at 100K dollars."}
 
 *Full-pool scoring can exceed the label budget before labeling begins.*
@@ -3857,10 +3858,6 @@ The performance difference directly impacts iteration velocity. Training that lo
 
 To build engineering judgment, practitioners must internalize the orders of magnitude separating these tiers. @Tbl-ml-latencies translates these disparities into human-scale analogies that build intuition for system design: if a CPU cycle were one second, fetching from local SSD would take two days, while a cross-country network request would span six years. Internalizing these ratios (three orders of magnitude between L1 cache and DRAM, another three between DRAM and SSD) explains why seemingly small architectural choices cascade into large performance differences.
 
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
 
 | **Operation**            | **Latency (ns)** | **Human Scale** | **ML System Impact**         |
 |:-------------------------|:----------------:|:---------------:|:-----------------------------|
@@ -3875,9 +3872,6 @@ To build engineering judgment, practitioners must internalize the orders of magn
 
 : **Latency Numbers Every ML Systems Engineer Should Know**: Understanding the quantitative disparities in the storage hierarchy is essential for diagnosing bottlenecks. If a CPU cycle were one second, fetching data from local SSD would be like waiting two days, while a cross-country network request would take six years. Source: Adapted from Jeff Dean's *Numbers Every Programmer Should Know* (full hardware reference with bandwidth and energy ratios in @sec-appdx-machine-foundations-numbers-know-b531). {#tbl-ml-latencies tbl-colwidths="[30,20,20,30]"}
 
-```{=latex}
-\endgroup
-```
 
 These latency numbers originated from Jeff Dean's influential 2009 talk at Stanford,[^fn-jeff-dean-latency-numbers] which established the quantitative culture that distinguishes systems engineering from programming. Understanding them is foundational to ML systems engineering: they explain why a poorly designed storage architecture can idle a \$15,000 GPU, and why distributed training requires careful attention to data locality.
 
@@ -4276,10 +4270,6 @@ Deployment and serving requirements prioritize low-latency random access.\index{
 
 A recommendation model's click-through rate dropped 3 percent after a routine weekly retraining, even though the code had not changed. The team had to distinguish among a data change, a labeling shift, and a corrupted upstream table. Without a record linking the model to the exact dataset that produced it, the team spent two weeks bisecting possibilities. With data versioning, they would have diffed the training snapshots in minutes and identified the root cause: an upstream provider had silently backfilled six months of historical records, shifting the label distribution.
 
-Data versioning\index{Data Versioning!model reproducibility} is the storage analogue of source-control provenance. It connects model versions to exact training data, enabling debugging and reproducibility. Without it, teams cannot identify the exact data that trained model v47.
-
-@Lst-dvc-workflow shows how DVC\index{DVC!git semantics} provides Git-like semantics for data versioning, while @lst-delta-time-travel\index{Delta Lake!time travel} demonstrates querying historical data states directly in SQL.
-
 ::: {#lst-dvc-workflow lst-cap="**DVC Workflow**: Git-like semantics for data versioning. DVC tracks large data files alongside code commits, enabling exact reproduction of any historical training dataset through paired `git checkout` and `dvc checkout` commands."}
 
 ```{.bash}
@@ -4295,6 +4285,10 @@ dvc checkout  # Restores exact data from that commit
 ```
 
 :::
+
+Data versioning\index{Data Versioning!model reproducibility} is the storage analogue of source-control provenance. It connects model versions to exact training data, enabling debugging and reproducibility. Without it, teams cannot identify the exact data that trained model v47.
+
+@Lst-dvc-workflow shows how DVC\index{DVC!git semantics} provides Git-like semantics for data versioning, while @lst-delta-time-travel\index{Delta Lake!time travel} demonstrates querying historical data states directly in SQL.
 
 ::: {#lst-delta-time-travel lst-cap="**Delta Lake Time Travel**: Querying historical data states directly in SQL. Delta Lake maintains a transaction log enabling point-in-time queries by date or version number, eliminating the need for separate snapshot management."}
 
@@ -4320,6 +4314,8 @@ The storage architectures we have examined address where data resides and how it
 
 \index{Feature Store!training-serving bridge}\index{Point-in-Time Correctness}The storage problem returns finally to consistency: the system must serve historical feature values for training and current feature values for inference without changing feature semantics. Feature stores have emerged as critical infrastructure components addressing this challenge while enabling feature reuse across models and teams. Traditional ML architectures often compute features differently offline during training vs. online during serving, creating training-serving skew that silently degrades model performance.
 
+The core problem feature stores address becomes clear when examining typical ML development workflows. During model development, data scientists write feature engineering logic in notebooks or scripts, often using different libraries and languages than production serving systems. Training might compute a user's "total purchases last 30 days" using SQL aggregating historical data, while serving computes the same feature using a microservice that incrementally updates cached values. These implementations should produce identical results, but subtle differences in handling timezone conversions, dealing with missing data, or rounding numerical values cause training and serving features to diverge. A study of production ML systems found that 30 percent to 40 percent of initial deployments at Uber suffered from training-serving skew, motivating development of their Michelangelo platform with integrated feature stores.
+
 ::: {#dfn-data-engineering-feature-store .callout-definition title="Feature store"}
 
 ***Feature Store***\index{Feature Store!definition} is the architectural layer that centralizes the management of machine learning features, decoupling feature computation from consumption.
@@ -4329,8 +4325,6 @@ The storage architectures we have examined address where data resides and how it
 3.  **Common pitfall**: A frequent misconception is that a feature store is just "a place to store *data*." In reality, it is a transformation engine: it stores the *logic* to compute features consistently across the entire ML lifecycle.
 
 :::
-
-The core problem feature stores address becomes clear when examining typical ML development workflows. During model development, data scientists write feature engineering logic in notebooks or scripts, often using different libraries and languages than production serving systems. Training might compute a user's "total purchases last 30 days" using SQL aggregating historical data, while serving computes the same feature using a microservice that incrementally updates cached values. These implementations should produce identical results, but subtle differences in handling timezone conversions, dealing with missing data, or rounding numerical values cause training and serving features to diverge. A study of production ML systems found that 30 percent to 40 percent of initial deployments at Uber suffered from training-serving skew, motivating development of their Michelangelo platform with integrated feature stores.
 
 Feature stores (discussed architecturally in @sec-ml-operations-feature-stores-c01c) provide a single source of truth for feature definitions, ensuring consistency across all stages of the ML lifecycle. When data scientists define a feature like "user_purchase_count_30d", the feature store maintains both the definition (SQL query, transformation logic, or computation graph) and executes it consistently whether providing historical feature values for training or real-time values for serving. This architectural pattern eliminates an entire class of subtle bugs that prove notoriously difficult to debug because models train successfully but perform poorly in production without obvious errors. The same centralized approach enables feature reuse across models and teams: when multiple teams build models requiring similar features, the feature store prevents each team from reimplementing identical computations with subtle variations. A recommendation system might compute user embedding vectors across hundreds of dimensions, aggregating months of interaction history. Rather than each model team recomputing these expensive embeddings, the feature store computes them once and serves them to all consumers.
 
@@ -4704,7 +4698,6 @@ Teams treat data versioning as optional infrastructure to add "when needed," the
 
 Data engineering provides the foundational infrastructure that transforms raw information into the basis of machine learning systems, determining model performance, system reliability, ethical compliance, and long-term maintainability. The four pillars framework of Quality, Reliability, Scalability, and Governance organizes design choices across acquisition, ingestion, validation, and storage, while the cascading nature of data quality failures reveals why every pipeline stage requires careful engineering decisions. The task of "getting data ready" encompasses complex trade-offs quantified throughout this chapter: data engineering cost constants for budgeting, storage performance hierarchies, and drift detection thresholds that operationalize the degradation equation into production monitoring infrastructure.
 
-The technical architecture of data systems demonstrates how engineering decisions compound across the pipeline, creating either reliable, scalable foundations or brittle, maintenance-heavy technical debt. Data acquisition strategies must navigate the reality that perfect datasets rarely exist in nature, requiring approaches from crowdsourcing and synthetic generation to careful curation and active learning. Storage architectures from traditional databases to modern data lakes and feature stores represent consequential choices about how data flows through the system, affecting everything from training speed to serving latency.
 
 ```{python}
 #| echo: false
@@ -4828,6 +4821,9 @@ class StorageLoadingRecap:
 * **The degradation equation becomes actionable through drift detection**: The divergence term $\mathcal{D}(P_t \lVert P_0)$ from the Introduction is exactly what PSI and KL divergence measure. Data engineering operationalizes this theoretical equation into monitoring infrastructure that catches silent model degradation before users are affected.
 
 :::
+
+
+The technical architecture of data systems demonstrates how engineering decisions compound across the pipeline, creating either reliable, scalable foundations or brittle, maintenance-heavy technical debt. Data acquisition strategies must navigate the reality that perfect datasets rarely exist in nature, requiring approaches from crowdsourcing and synthetic generation to careful curation and active learning. Storage architectures from traditional databases to modern data lakes and feature stores represent consequential choices about how data flows through the system, affecting everything from training speed to serving latency.
 
 Our KWS case study demonstrates these principles in action: multi-source acquisition combining curated datasets with crowdsourcing and synthetic generation; pipeline architecture with consistency validation; tiered storage handling `{python} DataEngineeringSummaryRecap.kws_dataset_size_m_round_str` million audio samples across `{python} DataEngineeringSummaryRecap.kws_dataset_size_gb_str` of raw data; and lineage tracking essential for always-listening devices in users' homes. Data engineering is not a preprocessing step to be completed before "real" ML work begins; it is the foundation upon which model performance, user trust, and regulatory compliance rest. While this chapter focuses on *building* reliable data infrastructure, @sec-data-selection examines *optimizing* data usage through active learning, data pruning, and intelligent sampling strategies.
 
