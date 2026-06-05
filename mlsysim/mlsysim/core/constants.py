@@ -44,7 +44,7 @@ from .units import *  # noqa: F401,F403 — re-export full unit registry
 # Architecture-class efficiency + per-byte movement hierarchy -> Hardware.Tech.{EffectiveCompute,Movement}.*
 # MobileNet inference energy -> Models.Vision.MobileNetV2.inference_energy
 
-# Network transfer energy -> Systems.NetworkEnergy.{Per5gMb, Per1Kb}
+# Network transfer energy -> Systems.NetworkEnergy.{Per5gMb, Per1Kb, NvlinkEnergyPerBit, InfiniBandEnergyPerBit}
 
 # --- Physics --- (universal physical constants -> physics/constants.py)
 # SPEED_OF_LIGHT_FIBER_KM_S -> physics/constants.py

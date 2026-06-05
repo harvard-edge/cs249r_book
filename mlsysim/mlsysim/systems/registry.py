@@ -10,7 +10,7 @@ from .types import (
 )
 from .reliability import Reliability
 from .orchestration import Orchestration as OrchestrationProfile
-from ..core.units import ureg, Q_, Gbps, GB, TB, watt, MB, kilowatt
+from ..core.units import ureg, Q_, Gbps, GB, TB, watt, MB, kilowatt, pJ, bit
 from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
 from ..core.registry import Registry
@@ -286,6 +286,10 @@ class NetworkEnergy(Registry):
         name="5G transfer energy per MB", description="Approximate radio-access energy to move 1 MB over 5G.")
     Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.NETWORK_ENERGY_ANCHORS,
         name="Network energy per KB", description="Approximate energy to move 1 KB across a datacenter network (~1 µJ).")
+    NvlinkEnergyPerBit = sourced_qty(7.5 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
+        name="NVLink energy per bit", description="Representative midpoint of a 5--10 pJ/bit NVLink transfer envelope.")
+    InfiniBandEnergyPerBit = sourced_qty(35 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
+        name="InfiniBand energy per bit", description="Representative midpoint of a 20--50 pJ/bit switched-network transfer envelope.")
 
 
 class Storage(Registry):

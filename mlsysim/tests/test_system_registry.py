@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mlsysim import Systems
-from mlsysim.core.units import GB, MW, TB, kilowatt, second
+from mlsysim.core.units import GB, MW, TB, bit, kilowatt, pJ, second
 
 
 def test_reference_25k_h100_cluster_totals():
@@ -72,6 +72,11 @@ def test_switch_fabric_port_anchors():
     assert int(Systems.SwitchFabric.NdrSwitchPorts) == 64
     assert int(Systems.SwitchFabric.NdrLeafDownlinkPorts) == 32
     assert int(Systems.SwitchFabric.NdrLeafUplinkPorts) == 32
+
+
+def test_network_energy_link_anchors():
+    assert Systems.NetworkEnergy.NvlinkEnergyPerBit.to(pJ / bit).magnitude == pytest.approx(7.5)
+    assert Systems.NetworkEnergy.InfiniBandEnergyPerBit.to(pJ / bit).magnitude == pytest.approx(35.0)
 
 
 def test_rack_profiles():
