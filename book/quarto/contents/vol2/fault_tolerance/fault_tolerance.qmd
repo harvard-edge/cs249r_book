@@ -675,7 +675,7 @@ where $k$ typically ranges from three to five to achieve low false positive rate
 
 #### Byzantine failures {#sec-fault-tolerance-reliability-reliability-byzantine-failures-8a24}
 
-Where a fail-stop component simply goes silent and is detected and replaced, a far more insidious class keeps running but produces incorrect results. A GPU that returns wrong gradients without throwing errors, a network that delivers corrupted packets that pass CRC checks, or a worker that computes different results for identical inputs all exemplify **Byzantine failures**\index{Byzantine Failures}, the most challenging class in distributed systems.
+Where a fail-stop component simply goes silent and is detected and replaced, a far more insidious class keeps running but produces incorrect results. A GPU that returns wrong gradients without throwing errors, a network that delivers corrupted packets that pass CRC checks, or a worker that computes different results for identical inputs all exemplify **Byzantine failures**\index{Byzantine Failures}, the most challenging class in distributed systems. In ML systems, this category includes silent data corruption\index{Silent Data Corruption!mechanism}, numerical instability\index{Numerical Instability}, determinism violations\index{Determinism Violations}, and adversarial corruption; the common property is that the worker still participates while the value it contributes can poison shared state.
 
 ##### The physics of silent corruption {#sec-fault-tolerance-reliability-physics-silent-corruption-5d5d}
 
@@ -729,14 +729,7 @@ Verify your understanding of nonstop failures and SDC:
 
 :::
 
-Byzantine failures include:
-
-- **Silent data corruption**\index{Silent Data Corruption!mechanism}: Memory or computation errors produce wrong values without triggering errors
-- **Numerical instability**\index{Numerical Instability}: Floating-point edge cases cause gradients to become not a number (NaN) or infinity
-- **Determinism violations**\index{Determinism Violations}: Race conditions cause different workers to compute different results for identical inputs
-- **Adversarial corruption**: Malicious actors intentionally inject incorrect gradients
-
-Byzantine failures are particularly dangerous in distributed training because the standard assumption that workers compute identical gradients for identical data no longer holds. A single Byzantine worker can corrupt the averaged gradient, potentially causing training to diverge or converge to a poor solution. @Fig-failure-types contrasts the straightforward detection of fail-stop failures\index{Fail-Stop Failure} with the insidious nature of Byzantine corruption.
+Silent-corruption detection is the first defense, but the same logic extends to any Byzantine worker whose output remains syntactically valid. These failures are particularly dangerous in distributed training because the standard assumption that workers compute identical gradients for identical data no longer holds. A single Byzantine worker can corrupt the averaged gradient, potentially causing training to diverge or converge to a poor solution. @Fig-failure-types contrasts the straightforward detection of fail-stop failures\index{Fail-Stop Failure} with the insidious nature of Byzantine corruption.
 
 ::: {#fig-failure-types fig-env="figure" fig-pos="htb" fig-cap="**Fail-Stop vs. Byzantine Failures**: In the fail-stop model (left), a failed worker simply ceases to send messages, which is easily detected by timeouts. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (for example, corrupted gradients reported as valid), which can poison the global model state if not detected by redundant validation." fig-alt="Side-by-side diagrams. Left: fail-stop failure with worker 2 silent, dashed timeout arrow to coordinator. Right: Byzantine failure with worker 2 sending incorrect gradient 9.9 while worker 1 sends valid 0.5, resulting in poisoned update warning."}
 
@@ -1935,6 +1928,8 @@ class SDCCollective:
 **Systems insight**: In a 100k-GPU fleet, a silent error occurs every 18,000 steps (roughly every 10 hours). Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, model parameters silently accumulate corrupted contributions and drift within half a day. Robustness moves from being a *restart* problem to a *verification* problem: the fleet must perform redundant reductions or use parity-protected gradients to catch silent parameter corruption.
 
 :::
+
+The calculation makes check-and-verify mandatory, but verification only earns trust when tested against realistic failures. The next step is therefore to inject faults deliberately and confirm that the same checks catch the corruption before it reaches model state.
 
 ## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
 
@@ -3231,7 +3226,7 @@ $$ A_{\text{system}} = 1 - (1 - A_{\text{single}})^k $$ {#eq-availability-redund
 
 where $k$ is the number of replicas. For a service whose single replica is available 99 percent of the time, redundancy compounds as follows.
 
-Single replica availability: $A_{\text{single}} = 99\%$ (3.65 days of downtime per year)
+For a single replica, $A_{\text{single}} = 99\%$ corresponds to 3.65 days of downtime per year. Adding independent replicas changes the tail of the failure distribution quickly: two replicas give $A = 1 - (0.01)^2 = 99.99\%$, or 52.6 minutes of downtime per year, and three replicas give $A = 1 - (0.01)^3 = 99.9999\%$, or 31.5 seconds. The math is powerful, but it rests on the independence assumption; shared power, shared networking, and shared software bugs reduce actual availability below these theoretical values.
 
 ::: {.column-margin}
 ![](images/svg/vol2_fault_tolerance_margin_004.svg){width="100%" fig-alt="Time ladder showing annual downtime dropping from 3.65 days with one replica to 52.6 minutes with two and 31.5 seconds with three."}
@@ -3239,15 +3234,9 @@ Single replica availability: $A_{\text{single}} = 99\%$ (3.65 days of downtime p
 *Redundancy turns days of downtime into seconds.*
 :::
 
-With two replicas: $A = 1 - (0.01)^2 = 99.99\%$ (52.6 minutes downtime per year)
-
-With three replicas: $A = 1 - (0.01)^3 = 99.9999\%$ (31.5 seconds downtime per year)
-
-This calculation assumes independent failures. Correlated failures reduce actual availability below these theoretical values. Shared power, shared network, and software bugs create correlation.
-
 #### Replication strategies {#sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2}
 
-In **active-active replication**\index{Replication!active-active replication} (@fig-serving-redundancy, left), all replicas actively serve requests.
+The availability equation says how much redundancy can help; the replication strategy determines what that redundancy costs during normal operation and failover. In **active-active replication**\index{Replication!active-active replication} (@fig-serving-redundancy, left), all replicas actively serve requests, so capacity is used efficiently but a failed replica immediately increases load on the survivors. In **active-passive replication**\index{Replication!active-passive replication} (@fig-serving-redundancy, right), a primary serves traffic while standby replicas remain idle but ready, simplifying failover at the cost of unused resources during normal operation.
 
 ::: {#fig-serving-redundancy fig-env="figure" fig-pos="htb" fig-cap="**Serving Redundancy Strategies**: Comparison of Active-Active vs. Active-Passive replication. Active-Active (left) distributes load across three active replicas, each receiving roughly one-third of traffic, maximizing utilization but requiring capacity headroom to absorb failures. Active-Passive (right) keeps standby replicas idle and synchronized via heartbeat, simplifying failover logic at the cost of idle resource utilization." fig-alt="Two diagrams comparing replication strategies. Left: active-active with load balancer sending roughly 33 percent to each of three green replicas. Right: active-passive with load balancer sending 100 percent to primary while dashed standby replicas receive heartbeat sync."}
 
@@ -3255,19 +3244,11 @@ In **active-active replication**\index{Replication!active-active replication} (@
 
 :::
 
-Load is distributed across replicas. Failure of one replica increases load on remaining replicas. This approach maximizes resource utilization but requires sufficient capacity in remaining replicas to handle increased load.
-
-In **active-passive replication**\index{Replication!active-passive replication} (@fig-serving-redundancy, right), primary replicas serve requests while standby replicas remain idle but ready. Failure of a primary triggers failover to the standby. This approach provides simpler failover but wastes standby resources during normal operation.
-
-Geographic replication distributes replicas across geographic regions. This protects against regional failures (data center outage, regional network issues) but introduces latency for requests routed to distant regions.
-
-Multi-tier replication applies different strategies at different levels. Edge caches are replicated for latency optimization. Regional serving clusters provide geographic coverage. Global primary ensures consistency and freshness.
+Geographic replication extends the same choice across regions. It protects against data-center or regional network failures, but requests routed to distant regions pay additional latency. Multi-tier designs combine several replication policies at once: edge caches replicate for latency, regional serving clusters replicate for availability, and a global primary or coordination layer preserves consistency and freshness.
 
 #### Replica placement and failure domains {#sec-fault-tolerance-reliability-reliability-replica-placement-failure-domains-73a7}
 
-Effective redundancy requires placing replicas in independent failure domains. Different machines tolerate individual machine failures. Different racks tolerate rack-level failures from power and ToR switch issues. Different availability zones tolerate data center section failures. Different regions tolerate entire data center failures.
-
-The level of independence should match the availability requirements and cost constraints. Regional replication is expensive but necessary for the highest availability requirements. It requires duplicate compute and network costs.
+Effective redundancy requires placing replicas in independent failure domains. Different machines tolerate individual machine failures; different racks tolerate rack-level failures from power or top-of-rack switch issues; different availability zones tolerate data-center-section failures; and different regions tolerate entire data-center failures. The independence level should match the availability requirement and cost constraint: regional replication is expensive because it duplicates compute and network capacity, but it is necessary when regional failure must not become user-visible downtime.
 
 ### Failover mechanisms {#sec-fault-tolerance-reliability-reliability-failover-mechanisms-5ddd}
 
@@ -3277,11 +3258,7 @@ When a replica fails, traffic must be redirected to healthy replicas. The speed 
 
 Health checks decide when traffic should move, so they must test not only liveness but readiness and inference correctness:
 
-Liveness checks verify that the process is running and responsive. A simple HTTP endpoint that returns 200 indicates liveness. Failure to respond triggers process restart.
-
-Readiness checks go further, verifying that the replica is ready to serve requests. For ML serving, readiness requires model weights loaded, GPU initialized and responsive, warmup complete, and dependencies available. The first inference is often slower, so warmup must complete. Feature stores and caches must be available as dependencies.
-
-Inference health checks verify that inference produces correct results. Running a known input through the model and verifying the output matches expected results catches silent failures where the model produces incorrect results without errors.
+Liveness checks verify that the process is running and responsive, often through a simple HTTP endpoint that returns 200 and triggers restart when it fails. Readiness checks go further: for ML serving, a replica is not ready until model weights are loaded, the GPU is initialized and responsive, warmup has completed, and dependencies such as feature stores and caches are available. Inference health checks add a correctness probe by running a known input through the model and verifying the expected output, catching silent failures where the process is healthy but the model response is wrong.
 
 Health check parameters set the false-positive/latency trade-off. A check interval such as 5 s controls sampling frequency, a 2 s timeout controls patience, a failure threshold of 3 missed probes marks a replica unhealthy, and a success threshold of 2 clean probes returns it to service.
 
@@ -3289,15 +3266,13 @@ Health check parameters set the false-positive/latency trade-off. A check interv
 
 Load-balancer design sets how much request context the routing tier can use during failover. L4 load balancing routes based on IP and port, offering simple and fast operation. L7 load balancing routes based on HTTP and gRPC content, enabling more specific routing. Service mesh adds traffic management, observability, and security around those routing decisions.
 
-Load balancer failover latency depends on health check frequency and failure detection logic. Aggressive settings enable fast failover but increase false positives. This marks healthy replicas as unhealthy during transient issues.
+Load-balancer failover latency depends on health check frequency and failure detection logic. Aggressive settings enable fast failover but increase false positives, marking healthy replicas as unhealthy during transient issues.
 
 #### Session affinity and stateful failover {#sec-fault-tolerance-reliability-reliability-session-affinity-stateful-failover-27b2}
 
 For stateful serving, session affinity\index{Session Affinity} routes all requests within a session to the same replica:
 
-Load balancers maintain session-to-replica mapping through sticky sessions. Implementation uses cookies, headers, or IP hashing.
-
-State failover choices trade recovery speed against consistency and operational complexity. State loss accepts degraded quality on failover by regenerating state from scratch. State checkpointing periodically saves session state for recovery. State replication copies state to a standby replica. Distributed state stores session state in external stores like Redis or Memcached.
+Load balancers maintain session-to-replica mapping through sticky sessions implemented with cookies, headers, or IP hashing. State failover choices then trade recovery speed against consistency and operational complexity: state loss accepts degraded quality by regenerating state from scratch, checkpointing periodically saves session state for recovery, replication copies state to a standby replica, and distributed state stores move session state into external systems such as Redis or Memcached.
 
 The choice depends on state size, update frequency, and the quality impact of state loss; @tbl-stateful-failover summarizes the trade-offs across the four common approaches:
 

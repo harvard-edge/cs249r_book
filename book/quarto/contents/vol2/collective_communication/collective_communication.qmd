@@ -1326,7 +1326,7 @@ A naive flat Ring AllReduce ignores this structure, potentially routing data acr
 *Hierarchical collectives shrink payload before it crosses slow tiers.*
 :::
 
-::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), reducing inter-node traffic by a factor of $G$ (GPUs per node). Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The figure labels these phases by their NVLink/IB mechanics; the corresponding collective-primitive names appear in the subsection headings below." fig-alt="Two-node diagram with multiple GPUs per node. Intra-node NVLink arrows show Phase 1 (ring/ReduceScatter) and Phase 3 (ring/AllGather). Inter-node InfiniBand arrows show Phase 2 (cross-node AllReduce on the node shards)."}
+::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), reducing inter-node traffic by a factor of $G$ (GPUs per node). Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The figure labels these phases by their NVLink/IB mechanics; the prose below names the corresponding collective primitives." fig-alt="Two-node diagram with multiple GPUs per node. Intra-node NVLink arrows show Phase 1 (ring/ReduceScatter) and Phase 3 (ring/AllGather). Inter-node InfiniBand arrows show Phase 2 (cross-node AllReduce on the node shards)."}
 
 ![](images/svg/hierarchical-allreduce.svg)
 
@@ -1334,17 +1334,7 @@ A naive flat Ring AllReduce ignores this structure, potentially routing data acr
 
 The three-phase decomposition in @fig-hierarchical-allreduce confines the expensive inter-node traffic to Phase 2, where each GPU transmits only $M/G$ bytes instead of $M$. With $G = 8$ GPUs per node (a typical DGX configuration), this reduces inter-node traffic by 8$\times$, effectively multiplying the scarce InfiniBand bandwidth by the number of GPUs per node.
 
-#### Step 1: Intra-node ReduceScatter (NVLink) {.unnumbered}
-
-Each node performs a local ReduceScatter among its $G$ GPUs using the fast NVLink mesh. After this step, each GPU holds $1/G$ of the partially reduced data. The key insight: this step uses only the abundant intra-node bandwidth.
-
-#### Step 2: Inter-node AllReduce (InfiniBand) {.unnumbered}
-
-GPUs at the same position across nodes (for example, all GPU-0s) perform an AllReduce using InfiniBand. Because Step 1 already reduced the data by $G\times$, each GPU only sends $M/G$ bytes instead of $M$ bytes, reducing inter-node traffic by a factor of $G$.
-
-#### Step 3: Intra-node AllGather (NVLink) {.unnumbered}
-
-Each node performs a local AllGather to distribute the final result to all $G$ GPUs. Again, this uses only NVLink, leaving inter-node bandwidth untouched.
+The phases form one causal chain. **Step 1: intra-node ReduceScatter over NVLink** performs a local reduction among the $G$ GPUs in each node, leaving each GPU with $1/G$ of the partially reduced data while using only abundant intra-node bandwidth. **Step 2: inter-node AllReduce over InfiniBand** sends those node shards across corresponding GPU positions, so each GPU transmits $M/G$ bytes instead of $M$. **Step 3: intra-node AllGather over NVLink** redistributes the final shards inside each node, completing the result without consuming additional inter-node bandwidth.
 
 The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node), effectively multiplying the apparent inter-node bandwidth by $G$. A simple 8-node budget makes this bandwidth multiplication concrete:
 
@@ -1798,7 +1788,7 @@ Now consider the same model on a faster network where communication takes only 3
 
 ## The Communication Library Landscape {#sec-communication-collective-operations-collective-operations-communication-libraries-nccl-5307}
 
-Writing a highly optimized, topology-aware, hierarchical Ring AllReduce from scratch in C++ would take a dedicated team of engineers months of effort. The engineering decision is which library preserves the chapter's model, topology, and overlap assumptions on the target hardware. The preceding sections developed three complementary strategies for taming communication cost, all of which are encapsulated in high-performance communication libraries.
+Writing a highly optimized, topology-aware, hierarchical Ring AllReduce from scratch in C++ would take a dedicated team of engineers months of effort. The engineering decision is which library preserves the chapter's model, topology, and overlap assumptions on the target hardware. The preceding sections developed three complementary strategies for taming communication cost; production libraries realize those strategies through four decision axes: the device memory path, topology awareness, portability, and observability.
 
 ### NCCL: Why it is central to NVIDIA GPU workloads {#sec-communication-nccl}
 
@@ -1848,7 +1838,7 @@ The primary limitation is performance on GPU clusters. Gloo\index{Gloo} lacks ke
 
 ### Library selection guide {#sec-communication-library-selection}
 
-@Tbl-library-selection provides a decision matrix for choosing the right library based on hardware and workload requirements.
+The selection matrix in @tbl-library-selection summarizes those axes. The point is not to memorize library names; it is to choose the backend whose memory path, topology model, portability constraints, and debugging visibility match the job.
 
 | **Scenario**                      | **Recommended Library** | **Rationale**                                |
 |:----------------------------------|:-----------------------:|:---------------------------------------------|
@@ -1881,6 +1871,8 @@ When a distributed training job runs slower than expected, the communication lib
 5. **Isolate network vs. host overhead**: If `nccl-tests` shows low bandwidth, the issue is network-level (bad cables, congestion, misconfigured routing). If `nccl-tests` shows full bandwidth but training is slow, the issue is host-level (insufficient overlap, small bucket sizes, CPU bottlenecks in data loading).
 
 :::
+
+Once the backend is correctly matched to the hardware and measured against a bare collective baseline, the remaining exposed communication time must be hidden behind computation.
 
 ## Communication-Computation Overlap {#sec-communication-overlap}
 

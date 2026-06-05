@@ -224,6 +224,8 @@ class InfraFrontierAccelRecap:
 
 As @tbl-accelerator-comparison summarizes, for our `{python} InfraFrontierAccelRecap.frontier_params_b_str` model, the choice is not purely about peak FLOP/s. If we are a research lab experimenting with novel architectures weekly, the GPU's flexibility justifies its generality tax. If we are deploying a fixed Transformer at scale for years, the TPU's dataflow efficiency or a custom ASIC's power advantage may dominate total cost. The accelerator spectrum is ultimately an economic question of *how much flexibility can be surrendered, given the stability of the workload*.
 
+### Chiplet-based accelerators {#sec-compute-chiplet-accelerators}
+
 A major accelerator design pattern is the **chiplet**\index{Chiplet} architecture, exemplified by NVIDIA's Blackwell and AMD's Instinct MI300 series. Rather than fabricating a single monolithic die, chiplet-based designs partition the processor into multiple smaller dies connected by a high-bandwidth die-to-die interconnect on a common package substrate. This approach addresses two physical limitations that constrain monolithic designs.
 
 First, the maximum die size is limited by the reticle size of lithographic equipment, roughly 800 mm$^2$ for EUV scanners. A monolithic GPU cannot exceed this area, which caps the number of Tensor Cores, SMs, and HBM stacks that can be integrated. Chiplet designs bypass this limit by placing multiple dies on a single package, with the B200's dual-die design effectively creating a 1,600 mm$^2$ equivalent processor.
@@ -232,7 +234,7 @@ Second, manufacturing yield decreases exponentially with die area because a sing
 
 The trade-off is the die-to-die interconnect. Communication between chiplets within a package is faster than communication between packages (NVLink) but slower than communication within a single monolithic die (the on-die mesh network). Workloads that generate frequent, fine-grained communication between processing elements (such as operations that share data between nonadjacent SMs) may experience a latency penalty when those SMs reside on different chiplets. GPU vendors mitigate this by making the die-to-die link transparent to the programmer, so the software sees a single logical GPU regardless of the underlying chiplet topology.
 
-#### Evolution of GPU architectures {#sec-compute-infrastructure-evolution-gpu-architectures-566b}
+### Evolution of GPU architectures {#sec-compute-infrastructure-evolution-gpu-architectures-566b}
 
 The rapid evolution of NVIDIA's GPU architectures over the past decade illustrates how accelerator design has adapted to the changing demands of ML workloads. Each generation has introduced architectural innovations targeted at the specific bottlenecks revealed by production ML workloads, rather than simply increasing transistor counts.
 
@@ -567,7 +569,7 @@ plt.close()
 
 @Fig-accelerator-efficiency-wall quantifies a critical asymmetry: while each GPU generation delivers dramatically more raw throughput, the power required to sustain that throughput grows nearly as fast. The advertised low-precision Tensor Core peak from P100 to B200 has grown by more than 200$\times$, while TFLOP/s per watt has grown far less. The precision modes differ across generations, but that is itself part of the hardware trend: each generation gains compute density partly by introducing lower-precision formats. This divergence is the physical root of the power wall discussed in the next sections and explains *why* liquid cooling, megawatt-scale power delivery, and thermal management dominate dense accelerator facility design.
 
-#### Evolution of TPU architectures {#sec-compute-tpu-evolution}
+### Evolution of TPU architectures {#sec-compute-tpu-evolution}
 
 Google's TPU\index{TPU} trajectory follows a different path, focusing on distributed efficiency and XLA compiler integration. While GPUs emphasize peak per-chip throughput and software flexibility (CUDA), the TPU is designed from the beginning as a "Pod-scale" resource. Every TPU chip is born as part of a larger cluster, with dedicated inter-chip interconnect (ICI) links that bypass the host CPU entirely.
 
@@ -628,13 +630,6 @@ class InfraFrontierMemoryIntroRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-An H100 can execute nearly 2,000 TFLOP/s of low-precision matrix arithmetic, yet during autoregressive decoding of our `{python} InfraFrontierMemoryIntroRecap.frontier_params_b_str` model, its Tensor Cores would sit idle for over 99 percent of each cycle in a bandwidth-floor model. The bottleneck is not the speed of *multiplication* but the speed of *delivery*: once the model has been sharded or compressed so the weights fit, the serving path must still stream the active weight shards through the arithmetic units for every output token. No amount of additional Tensor Cores can help when the existing ones are already starved for data. The accelerator response to this fundamental limitation is High Bandwidth Memory\index{HBM}[^fn-hbm-origin].
-
-The memory hierarchy within a single accelerator spans orders of magnitude in both capacity and bandwidth. At the top sits the **register file**[^fn-register-file-bandwidth] -- approximately 20--30 MB distributed across all SMs -- with effectively infinite bandwidth (hundreds of TB/s) but minuscule capacity. Below this lies the L1 cache and **shared memory**\index{Shared Memory!accelerator SRAM} (SRAM)[^fn-sram-energy-efficiency], offering roughly 256 KB per SM (approximately 33 MB total) with an aggregate bandwidth of ~19 TB/s.
-
-[^fn-register-file-bandwidth]: **Register File Bandwidth**\index{Bandwidth!register file}\index{Register File!bandwidth}: In an H100 GPU, the register file provides over 300 TB/s of aggregate bandwidth to the CUDA cores. This is ~100$\times$ higher than HBM3 bandwidth, explaining why tiling is mandatory: any operand not in a register during execution forces the arithmetic units to wait 100+ clock cycles for data, collapsing utilization.
-
-[^fn-sram-energy-efficiency]: **SRAM Energy (pJ/bit)**\index{SRAM!energy efficiency}: Accessing a bit in SRAM (shared memory) consumes approximately 0.1--0.5 pJ, while fetching from HBM consumes 2--5 pJ. This 10$\times$ energy difference is the physical driver behind kernel fusion: every intermediate result kept in SRAM instead of written to HBM saves both time and significant power and thermal headroom.
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_qty
@@ -649,7 +644,13 @@ class MemoryBandwidthCacheRecap:
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
 
-Further down is the `{python} MemoryBandwidthCacheRecap.h100_l2_bytes_str` L2 cache (~12 TB/s), and finally the `{python} MemoryBandwidthCacheRecap.h100_mem_gb_str` of HBM3 at `{python} MemoryBandwidthCacheRecap.h100_bw_tb_per_s_str`.
+An H100 can execute nearly 2,000 TFLOP/s of low-precision matrix arithmetic, yet during autoregressive decoding of our `{python} InfraFrontierMemoryIntroRecap.frontier_params_b_str` model, its Tensor Cores would sit idle for over 99 percent of each cycle in a bandwidth-floor model. The bottleneck is not the speed of *multiplication* but the speed of *delivery*: once the model has been sharded or compressed so the weights fit, the serving path must still stream the active weight shards through the arithmetic units for every output token. No amount of additional Tensor Cores can help when the existing ones are already starved for data. The accelerator response to this fundamental limitation is High Bandwidth Memory\index{HBM}[^fn-hbm-origin].
+
+The memory hierarchy within a single accelerator spans orders of magnitude in both capacity and bandwidth. At the top sits the **register file**[^fn-register-file-bandwidth] -- approximately 20--30 MB distributed across all SMs -- with effectively infinite bandwidth (hundreds of TB/s) but minuscule capacity. Below this lies the L1 cache and **shared memory**\index{Shared Memory!accelerator SRAM} (SRAM)[^fn-sram-energy-efficiency], offering roughly 256 KB per SM (approximately 33 MB total) with an aggregate bandwidth of ~19 TB/s. Further down sits the `{python} MemoryBandwidthCacheRecap.h100_l2_bytes_str` L2 cache (~12 TB/s), and finally the `{python} MemoryBandwidthCacheRecap.h100_mem_gb_str` of HBM3 at `{python} MemoryBandwidthCacheRecap.h100_bw_tb_per_s_str`.
+
+[^fn-register-file-bandwidth]: **Register File Bandwidth**\index{Bandwidth!register file}\index{Register File!bandwidth}: In an H100 GPU, the register file provides over 300 TB/s of aggregate bandwidth to the CUDA cores. This is ~100$\times$ higher than HBM3 bandwidth, explaining why tiling is mandatory: any operand not in a register during execution forces the arithmetic units to wait 100+ clock cycles for data, collapsing utilization.
+
+[^fn-sram-energy-efficiency]: **SRAM Energy (pJ/bit)**\index{SRAM!energy efficiency}: Accessing a bit in SRAM (shared memory) consumes approximately 0.1--0.5 pJ, while fetching from HBM consumes 2--5 pJ. This 10$\times$ energy difference is the physical driver behind kernel fusion: every intermediate result kept in SRAM instead of written to HBM saves both time and significant power and thermal headroom.
 
 ::: {#lhs-compute-infrastructure-archetype-b-dlrm-at-scale-capacity-wall .callout-lighthouse title="Archetype B (DLRM at Scale): The capacity wall"}
 
@@ -673,7 +674,7 @@ class InfraFrontierMemoryTilingRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Despite the `{python} InfraFrontierMemoryTilingRecap.frontier_params_b_str` model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
+Despite the `{python} InfraFrontierMemoryTilingRecap.frontier_params_b_str` model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage. HBM supplies the bulk capacity, but tiling decides whether that capacity feeds the arithmetic units fast enough to matter.
 
 [^fn-hbm-origin]: **HBM (High Bandwidth Memory)**\index{HBM!origin}: Standardized by JEDEC in 2013 as a joint development between AMD and SK Hynix, originally for graphics cards. ML accelerators adopted HBM because neural networks exhibit the same bandwidth-hungry, capacity-moderate access pattern as high-end rendering. Each HBM generation has roughly doubled bandwidth (128 GB/s in HBM1 to 1.2 TB/s per stack in HBM3e), yet the gap between memory bandwidth and arithmetic throughput continues to widen -- making HBM a necessary but never sufficient response to the memory wall.
 

@@ -344,6 +344,12 @@ To achieve `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str`, we *cannot* simply t
 
 However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of three compared to NRZ, making the link highly susceptible to noise. Consequently, high-speed links operate near the physical limits of reliable detection and require **Forward Error Correction (FEC)**\index{Forward Error Correction}\index{FEC} at the physical layer, typically Reed-Solomon RS(544,514) codes. FEC processing adds `{python} FECLatency.ns_low_str` to `{python} FECLatency.ns_high_str` of latency per hop to every packet. For our 175B model training, which generates 350 GB of gradient traffic per step across `{python} NetworkWireClusterRecap.n_gpus_str`, this latency floor is nonnegotiable. A packet crossing three switch hops in a fat-tree incurs `{python} FECLatency.three_hop_low_ns_str`--`{python} FECLatency.three_hop_high_ns_str` of one-way irreducible latency from FEC decoding and encoding, or `{python} FECLatency.round_trip_low_ns_str`--`{python} FECLatency.round_trip_high_ns_str` over a three-hop path in each direction. This "physics tax" sets a hard floor on the $\alpha$ term of our performance models, limiting the speed of latency-sensitive collectives like AllReduce regardless of software optimizations.
 
+@Fig-pam4-vs-nrz shows the signaling trade-off directly: PAM4 doubles the bits per symbol relative to NRZ, but the smaller voltage gaps reduce noise margin and make FEC part of the link's latency floor.
+
+::: {#fig-pam4-vs-nrz fig-env="figure" fig-pos="htb" fig-cap="**Signaling Evolution: NRZ vs. PAM4**: To increase bandwidth without doubling clock frequency, high-speed interconnects moved from NRZ (2 voltage levels, 1 bit per symbol) to PAM4 (4 voltage levels, 2 bits per symbol). The trade-off is reduced noise margin: the 'eye' of the signal is smaller, necessitating Forward Error Correction (FEC) and increasing the irreducible $\alpha$ latency of the fabric." fig-alt="Signal waveform comparison. NRZ shows two levels (0, 1). PAM4 shows four levels (00, 01, 10, 11). Shaded regions indicate the reduced noise margin in PAM4."}
+![](images/svg/pam4-vs-nrz.svg)
+:::
+
 ### Reach and medium: Copper vs. optics {#sec-network-fabrics-copper-optics}
 
 The choice of physical medium\index{Optical Interconnect} determines the reach and economics of each link. Three categories recur in ML cluster design:
@@ -358,12 +364,6 @@ The choice of physical medium\index{Optical Interconnect} determines the reach a
 
 In an ML fleet, distance is money. A 10,000-GPU cluster requires ~20,000 optical links at the spine layer alone. At \$500 each with 10 W per link, that represents \$10 million in cabling and 200 kW of continuous power for transceivers alone. The cost dictates **cluster geometry**\index{Cluster!geometry}: architects pack accelerators as densely as possible (70–100 kW per rack) to maximize cheap copper and minimize expensive optics.
 
-:::
-
-As bandwidth demands grew, high-speed links moved from binary NRZ signaling to four-level PAM4, doubling throughput per wire at the cost of reduced noise margins (@fig-pam4-vs-nrz).
-
-::: {#fig-pam4-vs-nrz fig-env="figure" fig-pos="htb" fig-cap="**Signaling Evolution: NRZ vs. PAM4**: To increase bandwidth without doubling clock frequency, high-speed interconnects moved from NRZ (2 voltage levels, 1 bit per symbol) to PAM4 (4 voltage levels, 2 bits per symbol). The trade-off is reduced noise margin: the 'eye' of the signal is smaller, necessitating Forward Error Correction (FEC) and increasing the irreducible $\alpha$ latency of the fabric." fig-alt="Signal waveform comparison. NRZ shows two levels (0, 1). PAM4 shows four levels (00, 01, 10, 11). Shaded regions indicate the reduced noise margin in PAM4."}
-![](images/svg/pam4-vs-nrz.svg)
 :::
 
 ### SerDes, link budget, and power {#sec-network-fabrics-serdes}
@@ -664,7 +664,7 @@ plt.close()
 
 :::
 
-The same model also identifies when communication overtakes computation. The $\alpha$-$\beta$ analysis above focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
+Beyond classifying individual transfers, the same model identifies when communication overtakes computation. The $\alpha$-$\beta$ analysis above focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
 
 ::: {#nbk-allreduce-bottleneck .callout-notebook title="When does AllReduce become the bottleneck?"}
 
