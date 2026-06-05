@@ -2212,6 +2212,8 @@ The **on-demand staging**\index{On-Demand Staging} pattern copies shards to loca
 
 The **streaming**\index{Streaming!data staging} pattern never stages data locally, instead reading from the parallel file system or object storage for every epoch. This approach has zero startup delay and zero local storage requirement, but every epoch pays the full cost of network reads. It is appropriate for single-epoch training (common in large language model pretraining, where the dataset is so large that one epoch suffices) or for workloads where local NVMe capacity is insufficient to hold the dataset.
 
+Tiering is a placement policy, so the next question is where the tier boundaries can move. Emerging devices shift the boundary between DRAM, NVMe, and archival storage, while inference workloads reuse the same hierarchy for a different objective: reducing cold-start latency and managing serving-time working sets rather than maximizing epoch throughput.
+
 ### Storage technologies that move tiers {#sec-storage-emerging}
 
 While the six-tier hierarchy represents a common production baseline, memory and storage technologies can fill the bandwidth gaps between existing tiers, reshaping effective storage architecture for large-scale ML.
@@ -2526,11 +2528,13 @@ The storage hierarchy so far has optimized the training fuel line: large shards,
 
 ::: {#psp-data-storage-iops-bottleneck-high-dimensional-search .callout-perspective title="The IOPS bottleneck in high-dimensional search"}
 
-This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth**\index{Sequential Read Bandwidth} to **random-access IOPS**\index{Random-Access IOPS}. Vector databases must traverse high-dimensional graph indexes to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. Disk-backed graph indexes such as DiskANN show how billion-scale search can trade DRAM footprint against SSD-backed graph traversal while targeting high recall and low query latency [@subramanya2019diskann].
+This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth**\index{Sequential Read Bandwidth} to **random-access IOPS**\index{Random-Access IOPS}. Vector databases must traverse high-dimensional graph indexes to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. In-memory HNSW-style graph indexes\index{HNSW} make the same graph-navigation idea fast when the index fits in DRAM, while hybrid search\index{Hybrid Search} combines vector similarity with lexical or metadata filters and therefore stresses both random vector traversal and document fetches. Disk-backed graph indexes such as DiskANN show how billion-scale search can trade DRAM footprint against SSD-backed graph traversal while targeting high recall and low query latency [@subramanya2019diskann].
 
 :::
 
 This makes retrieval infrastructure a useful counterexample to the training fuel line. The same hierarchy still applies, but the objective changes: training storage hides sequential bandwidth behind prefetching, whereas vector search spends storage budget on the index levels that keep random graph traversal inside the serving latency SLO. A disk-backed index is economical only if the extra SSD traversals do not erase the quality gain from searching a larger corpus.
+
+That serving-time counterexample completes the access-pattern contrast. Before the chapter moves to synthetic data, the running example needs one consolidated accounting table so the training dataset, checkpoints, and archive lineage are visible against the same storage hierarchy.
 
 ```{python}
 #| echo: false

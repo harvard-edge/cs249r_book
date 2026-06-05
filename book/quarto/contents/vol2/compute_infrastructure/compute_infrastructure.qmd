@@ -616,7 +616,7 @@ class MemoryBandwidthIntroRecap:
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB/second, precision=2, commas=False)
 ```
 
-The implications are concrete and perceptible in our running example. Our `{python} InfraFrontierMemoryWallRecap.frontier_params_b_str` model's weights occupy 350 GB in FP16. During autoregressive decoding, this entire 350 GB tensor must be streamed from off-chip memory into the processor's registers for every single token generated. A single H100 cannot hold that tensor, so this is a bandwidth-floor calculation after sharding or quantization has solved the capacity problem. At H100-class HBM bandwidths (~`{python} MemoryBandwidthIntroRecap.h100_bw_tb_per_s_str` per accelerator), the data movement alone dictates a latency floor of over 100 ms per token if one accelerator-equivalent bandwidth path must stream the weights. The memory wall is not an abstract architectural concept: it is the physical reason a chatbot takes a perceptible pause between words. Three engineering responses address this constraint: high bandwidth memory (HBM) widens the data pipe, the roofline model rigorously diagnoses whether a workload is starving for data or for compute, and Tensor Cores maximize the arithmetic value of every byte fetched.
+The implications are concrete and perceptible in our running example. Our `{python} InfraFrontierMemoryWallRecap.frontier_params_b_str` model's weights occupy 350 GB in FP16. During autoregressive decoding, this entire 350 GB tensor must be streamed from off-chip memory into the processor's registers for every single token generated. A single H100 cannot hold that tensor, so this is a bandwidth-floor calculation after sharding or quantization has solved the capacity problem. At H100-class HBM bandwidths (~`{python} MemoryBandwidthIntroRecap.h100_bw_tb_per_s_str` per accelerator), the data movement alone dictates a latency floor of over 100 ms per token if one accelerator-equivalent bandwidth path must stream the weights. The memory wall is not an abstract architectural concept: it is the physical reason a chatbot takes a perceptible pause between words. Three engineering responses address this constraint: high bandwidth memory (HBM) widens the data pipe, the roofline model rigorously diagnoses whether a workload is starving for data or for compute, and Tensor Cores maximize the arithmetic value of every byte fetched. The same resource-accounting lens then carries into power delivery, thermal design, and workload-specific accelerator selection, because memory bandwidth is only the first physical ceiling the package exposes.
 
 ### HBM: Breaking the memory wall {#sec-compute-hbm}
 
@@ -2561,6 +2561,8 @@ class AlternativeNodeArchitectureRecap:
     frontier_weights_gb_str = fmt_memory(frontier_weights, unit=GB, precision=0, commas=False)
 ```
 
+These alternatives are accelerator-system designs, not interchangeable product names. An AMD MI300X is a GPU-class accelerator whose package emphasizes very large HBM capacity, while Intel/Habana Gaudi designs emphasize Ethernet/RDMA attachment as a first-class communication path. Comparing them against a DGX H100 node reveals where each architecture spends its scarce budget.
+
 The DGX H100 answers a general node-design problem by making local accelerator exchange cheap. A switch-rich design spends power, board area, and cost on universal any-to-any exchange. That choice is easy to justify when tensor parallelism is the critical path, because each Transformer layer turns local accelerator communication into part of the model's inner loop. The `{python} AlternativeNodeArchitectureRecap.h100_nvlink_gb_per_s_str` H100 NVLink fabric therefore buys a software abstraction: the training framework can treat eight accelerators as one tightly coupled device for the layers that must be split across chips.
 
 Other systems move that boundary. TPU pods use the Inter-Chip Interconnect (ICI) and a mesh-oriented topology instead of making a central switch the defining component of the node; the TPU v5p profile in MLSysIM models ICI at `{python} AlternativeNodeArchitectureRecap.tpu_v5p_ici_gb_per_s_str`. The mesh can reduce switch cost and expose a regular structure to the compiler, but it also makes placement more visible: the runtime must respect neighbor relationships rather than assuming that every chip pair has the same communication path. That is a reasonable trade when the workload is regular enough for the compiler and collective libraries to map communication onto the topology.
@@ -3209,7 +3211,7 @@ The placement and configuration of ToR switches directly affects the network top
 
 The rail-optimized design requires 8 ToR switches per rack group instead of 1, which increases switch cost and cabling complexity. However, it eliminates cross-switch congestion for the most common communication pattern (data-parallel AllReduce across nodes), improving scaling efficiency by 5--15 percent compared to a conventional single-ToR design. @Sec-network-fabrics examines rail-optimized topologies in detail, including the formal analysis of their bandwidth properties and the conditions under which they outperform fat-tree alternatives.
 
-#### Physical security and environmental controls {#sec-compute-infrastructure-physical-security-environmental-controls-7132}
+#### Facility reliability and environmental controls {#sec-compute-infrastructure-physical-security-environmental-controls-7132}
 
 Rack design also defines physical failure domains. Data centers housing ML infrastructure implement multiple layers of physical security and environmental monitoring, not only for regulatory compliance but also because a single rack of DGX H100 nodes (\$1.4 million in hardware alone) concentrates enough value, heat, and liquid-cooling risk to justify controls that would be excessive for traditional server equipment.
 
@@ -3233,6 +3235,8 @@ These environmental controls are not afterthoughts but integral parts of the inf
 **Systems lesson**: Compute infrastructure is not only GPUs and network topology. Fire compartments, power isolation, backup geography, and disaster-recovery assumptions determine whether a rack-scale incident becomes a site-scale outage.
 
 :::
+
+Once rack-level controls are in place, the reliability question moves up to facility redundancy. The same failure-domain logic that isolates a leaking rack also decides how much duplicate power, cooling, and recovery capacity the site should buy.
 
 Data center reliability is classified by the Uptime Institute into tiers, with **Tier III**\index{Tier III data center} and **Tier IV**\index{Tier IV data center} representing the standard options for mission-critical compute. A Tier III facility offers $N+1$ redundancy (concurrently maintainable) with an expected uptime of 99.982 percent, translating to roughly 1.6 hours of unplanned downtime per year. Tier IV provides $2N$ fully fault-tolerant redundancy for every power and cooling path, boosting uptime to 99.995 percent (approximately 26 minutes of unplanned downtime per year). Achieving Tier IV requires doubling the electrical and mechanical infrastructure, driving CapEx 30--50 percent higher than a comparable Tier III build.
 
@@ -3340,7 +3344,7 @@ class InfraFrontierStragglerRecap10:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The rack concentrates power and heat into a physical volume where thermodynamics, not software, sets the limits. A single rack of 32 GPUs, however, is far from sufficient for our `{python} InfraFrontierStragglerRecap10.frontier_params_b_str` model, which may require thousands of accelerators to train in a reasonable timeframe. The next level of infrastructure aggregates hundreds of racks into a unified computing system: the pod, whose network topology (@fig-pod-network-topology) ensures that any GPU can communicate with any other at full line rate.
+The rack concentrates power and heat into a physical volume where thermodynamics, not software, sets the limits. A single rack of 32 GPUs, however, is far from sufficient for our `{python} InfraFrontierStragglerRecap10.frontier_params_b_str` model, which may require thousands of accelerators to train in a reasonable timeframe. The next level of infrastructure aggregates hundreds of racks into a unified computing system: the pod, whose network topology (@fig-pod-network-topology) is designed around the communication pattern the workload must sustain. Full any-to-any bisection is one design point; torus and rail-optimized designs trade that universality for lower cost or better locality.
 
 ## The Pod {#sec-compute-pod}
 
@@ -3940,6 +3944,8 @@ A TPU v5p pod can scale to 8,960 chips in a single torus, providing an aggregate
 
 : **WSC Architecture Comparison**: The choice of pod architecture is not a matter of preference but of workload economics. NVIDIA prioritizes generality because its customers run diverse workloads. Google TPU pods prioritize dataflow throughput for regular dense models. Meta's Grand Teton design prioritizes embedding capacity for recommendation and ranking workloads. {#tbl-pod-comparison}
 
+#### Meta Grand Teton {#sec-compute-infrastructure-meta-grand-teton-4d4d}
+
 As @tbl-pod-comparison illustrates, Meta's production ML workload differs structurally from language model training. Their recommendation and ranking models use embedding tables that can reach terabytes in size, far exceeding the HBM capacity of any GPU. The dense neural network layers that operate on the embeddings are relatively small and compute-intensive.
 
 Meta addresses this with a hybrid CPU-GPU architecture called **Grand Teton**\index{Grand Teton}. Terabyte-scale embedding tables reside in host CPU DRAM, which costs \$3--5/GB, while the dense layers execute on GPUs where the compute density justifies the \$10--15/GB cost of HBM.
@@ -3973,6 +3979,10 @@ class InfraFrontierStragglerRecap18:
 ```
 
 Dojo's efficiency for its target workload is exceptional, but the system cannot run Transformer-based language models efficiently because the 2D mesh topology and small local memory per processing node are poorly matched to the all-to-all communication and large weight matrices characteristic of Transformer training. Training our `{python} InfraFrontierStragglerRecap18.frontier_params_b_str` model on Dojo would be impractical: the 350 GB weight tensor would need to be distributed across many tiles, and the all-to-all communication required for tensor parallelism would traverse many hops in the 2D mesh, creating latencies that would dominate the training step. This makes Dojo a high-stakes bet on the continued centrality of vision models to Tesla's autonomous driving stack, and it illustrates the extreme end of the generality-efficiency trade-off at the system level. If Tesla's workload mix shifted toward large language models, the Dojo architecture would need fundamental redesign -- a risk that custom silicon always carries.
+
+### Site, schedule, and ownership economics {#sec-compute-infrastructure-site-schedule-ownership-economics-9ad3}
+
+The case studies show that topology follows workload, but the infrastructure decision does not end at topology. A deployable fleet also has to price the fabric, choose a site, synchronize construction with hardware delivery, and decide whether ownership beats rental over the hardware lifecycle.
 
 The choice between fat-tree, torus, and rail-optimized topologies has quantitative implications for training throughput that can alter AllReduce time by 2--3$\times$ for the same cluster size. The key insight for infrastructure planning is that topology choice is not separable from workload selection: Transformer training with its regular AllReduce patterns favors different topologies than Mixture-of-Experts models with their AllToAll communication. The network fabric cost (10--15 percent of total system cost) is easily justified if it improves scaling efficiency by even a few percentage points, because poor scaling wastes the other 85--90 percent of the investment.
 

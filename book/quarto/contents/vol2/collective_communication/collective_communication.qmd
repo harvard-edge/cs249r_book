@@ -516,6 +516,8 @@ In practice, most engineering calculations start with the $\alpha$-$\beta$ model
 
 The alpha-beta model becomes most valuable when applied to real training configurations. Consider a concrete scenario: training a Llama-class 70B parameter model using data parallelism across 128 GPUs spanning 16 nodes of 8 GPUs each. The gradient tensor is 140 GB in BF16 (70 billion parameters at 2 bytes each, common for Llama-class training). During each training step, this entire gradient must be synchronized across all workers.
 
+The calculation uses the bandwidth hierarchy before the chapter formalizes it: reduce as much data as possible over the fast NVLink tier inside each node, send only the reduced shard over the slower InfiniBand tier, then reconstruct the result locally. The primitive names become precise in the hierarchy section; the engineering idea is already visible in the bandwidth budget.
+
 ```{python}
 #| echo: false
 #| label: llama-budget-calc
@@ -1268,6 +1270,8 @@ Verify your understanding of Ring vs. Tree AllReduce trade-offs:
 ## Hierarchical Communication {#sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214}
 
 The algorithms above assume a flat network where every link has the same bandwidth. Real data centers violate this assumption by an order of magnitude or more. Not all wires are created equal.
+
+Hierarchical communication is the response to that inequality. Intra-node links are abundant and fast, inter-node links are scarce and expensive, and the algorithm must shrink payloads before they cross the scarce tier whenever possible. This is why the same AllReduce can be implemented as a local ReduceScatter, a cross-node reduction, and a local AllGather rather than as one flat exchange across every rank.
 
 ```{python}
 #| echo: false
@@ -2076,7 +2080,7 @@ The Ring and Tree AllReduce algorithms occupy opposite ends of the latency-bandw
 
 When even the fastest wires are not enough, gradient compression provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like 1-bit Adam reduce communication volume by 4--1000$\times$. Error Feedback ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, communication-computation overlap through layer-by-layer pipelining and bucket fusion hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15 percent of total step time in well-configured systems.
 
-The communication traffic patterns differ fundamentally across the Lighthouse Archetypes.
+The communication traffic patterns differ fundamentally across the Lighthouse Archetypes. The compression and error-feedback mechanisms developed in this section also matter outside data centers: when devices are intermittent or bandwidth-poor, the dominant cost may be the ability to send any useful update at all rather than saturating a high-speed fabric.
 
 ::: {#lhs-collective-communication-communication-archetype-patterns .callout-lighthouse title="Communication archetype patterns"}
 
