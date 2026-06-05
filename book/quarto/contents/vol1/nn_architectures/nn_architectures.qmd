@@ -419,7 +419,7 @@ MobileNet challenged the trend of ever-larger models by prioritizing efficiency.
 Keyword Spotting (KWS) [@warden2018speech]\index{Keyword Spotting}
 Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represent the extreme end of efficiency. Designed to run on "always-on" microcontrollers with kilobyte-scale memory and milliwatt power budgets, these models (often Depthwise Separable CNNs) exemplify the constraints of TinyML. They force engineers to count every byte and cycle, driving later techniques for extreme quantization (INT8 and INT4) and specialized hardware.
 
-### Arithmetic intensity spectrum {#sec-network-architectures-understanding-arithmetic-intensity-ade5}
+### Workload signatures: The arithmetic intensity spectrum {#sec-network-architectures-understanding-arithmetic-intensity-ade5}
 
 The quantitative characteristics of these Lighthouse models expose a critical engineering constraint established in @sec-neural-computation: **arithmetic intensity**\index{Arithmetic Intensity!FLOP/byte ratio}. As we saw, this FLOP/byte ratio determines whether a workload is compute bound or memory bound.
 
@@ -479,8 +479,6 @@ class WorkloadSignatures:
     mobilenet_intensity_str = fmt(mobilenet_i, precision=1, commas=False)
     resnet_to_gpt2_ratio_mult_str = fmt_multiple(resnet_to_gpt2_ratio, precision=1, commas=False)
 ```
-
-### Workload signatures: The arithmetic intensity table {#sec-network-architectures-workload-signatures}
 
 ::: {.column-margin}
 ![](images/svg/nn_architectures_arithmetic_intensity.svg){width="100%" fig-alt="Three stacked horizontal bars on a log scale labeled ResNet 40, MobileNet 21, and GPT-2 0.5 FLOP per byte, the topmost bar far longer than the bottom one."}
@@ -2965,11 +2963,9 @@ class AttentionMemory:
 
 :::
 
-#### Computation needs {#sec-network-architectures-computation-needs-7a5d}
+#### Computation and data movement {#sec-network-architectures-computation-needs-7a5d}
 
 Attention computation divides into two main phases: generating attention weights and applying them to values. For each attention layer, the system performs many multiply-accumulate operations across multiple computational stages. The query-key interactions alone require $S \times S \times d$ multiply-accumulates, with an equal number needed for applying attention weights to values. Additional computations are required for the projection matrices and softmax operations. This computational pattern differs from previous architectures due to its quadratic scaling with sequence length and the need to perform fresh computations for each input.
-
-#### Data movement {#sec-network-architectures-data-movement-d007}
 
 Data movement in attention mechanisms presents challenges distinct from all previous architectures. Each attention operation requires projecting and moving query, key, and value vectors for every position in the sequence, then storing and accessing the full $S{\times}S$ attention weight matrix, and finally coordinating value vector movement during the weighted combination phase. These intermediate attention weights become a major factor in system bandwidth requirements. Unlike the predictable spatial access patterns of CNNs or the sequential access of RNNs, attention operations require frequent movement of dynamically computed weights across the memory hierarchy, a pattern that defeats simple caching strategies.
 
@@ -3703,11 +3699,9 @@ class DLRMLighthouseProfile:
 
 :::
 
-### Computational mapping {#sec-network-architectures-computational-mapping-b346}
+### Computational mapping and system implications {#sec-network-architectures-computational-mapping-b346}
 
 DLRM's computational mapping splits into two regimes that stress different hardware subsystems. The dense MLPs are standard GEMM operations, identical to the MLP computational mapping discussed in @sec-network-architectures-computational-mapping-cf30 and handled efficiently by Tensor Cores. The sparse embedding lookups, however, are qualitatively different: they are index-based memory copies (gather operations) with no arithmetic, making them entirely memory-bandwidth bound at the operation level. This is distinct from the capacity constraint described earlier: the total size of the embedding tables is what makes the model memory-capacity-bound, whereas the speed of each individual gather is what makes the lookup operations memory-bandwidth bound. Because each training sample accesses a different set of embedding rows, the access pattern is effectively random, defeating caching and prefetching strategies that benefit CNNs and MLPs.
-
-### System implications {#sec-network-architectures-system-implications-d8ee}
 
 DLRM creates a unique systems challenge: *the model is too big to fit on a single GPU*. While a ResNet-50 (`{python} DLRMLighthouseProfile.resnet_fp32_mb_str`) or even GPT-3 (`{python} DLRMLighthouseProfile.gpt3_fp16_gb_str`) might fit on a single node, industrial recommendation models can reach terabytes or petabytes due to massive embedding tables. In iron law terms (@sec-introduction-iron-law-ml-systems-c32a), neither $O$ nor $D_{\text{vol}}$ is the binding constraint—it is raw memory capacity that limits the system, a regime the iron law was not designed to capture.
 

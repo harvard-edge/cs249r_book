@@ -1354,8 +1354,6 @@ This architecture serves three functions. First, concurrency management: servers
 
 Third, model management: inference servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and completing warmup inferences before exposing the model to live traffic. Among these components, the scheduler deserves special attention because it embodies the core serving trade-off between throughput and latency.
 
-### The scheduler: Where throughput meets latency {#sec-model-serving-scheduler-throughput-meets-latency-d022}
-
 The **Scheduler**\index{Scheduler!inference server} is the "brain" of the inference server. It implements the dynamic batching logic discussed in @sec-model-serving-throughput-optimization-18d1. The scheduler must decide whether to run a single request immediately to minimize its latency or wait five milliseconds for a second request and process them together to maximize throughput.
 
 Systems designers use the **Batching Window**\index{Batching!window, latency-throughput trade-off} parameter to tune this trade-off. A window of 0 ms optimizes for pure latency (no batching), while a window of 10–50 ms is common for high-throughput cloud services. This decision determines the "duty cycle" of the GPU, the percentage of time the hardware is actually computing vs. waiting for work.
@@ -3404,15 +3402,21 @@ class PracticalConfigCalc:
     pc_predicted_throughput_img_per_s_str = fmt_rate(pc_predicted_throughput_value, 'img/s', precision=1)
 ```
 
-- Latency budget for batching: `{python} PracticalConfigCalc.pc_batch_budget_ms_str`
-- Maximum window: `{python} PracticalConfigCalc.pc_max_window_ms_str`
-- Expected batch size: `{python} PracticalConfigCalc.pc_expected_batch_str`
-- p99 batch size under Poisson arrivals: `{python} PracticalConfigCalc.pc_p99_batch_str`
-- Maximum batch size: `{python} PracticalConfigCalc.pc_mem_limit_batch_str` (memory limit)
-- Configuration: $T_{\text{window}}$ = `{python} PracticalConfigCalc.pc_config_window_ms_str`, $B_{\text{max}}$ = `{python} PracticalConfigCalc.pc_config_batch_str`
-- Predicted p99 latency: `{python} PracticalConfigCalc.pc_predicted_p99_ms_str` (within SLO)
-- Predicted peak capacity: `{python} PracticalConfigCalc.pc_predicted_throughput_img_per_s_str`
-- Served throughput at stated traffic: `{python} PracticalConfigCalc.pc_qps_img_per_s_str` (arrival-limited; batch-32 cap handles bursts)
+The calculation turns the SLO and arrival-rate assumptions into two deployable knobs: the batching window and maximum batch size. @Tbl-practical-batching-config summarizes the resulting configuration and the predicted operating point.
+
+| **Quantity**                 | **Value**                                                                                                                                           | **Engineering role**                                  |
+|:-----------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------|
+| Latency budget for batching  | `{python} PracticalConfigCalc.pc_batch_budget_ms_str`                                                                                               | Portion of the SLO available for queueing delay.      |
+| Maximum window               | `{python} PracticalConfigCalc.pc_max_window_ms_str`                                                                                                 | Upper bound implied by the latency budget.            |
+| Expected batch size          | `{python} PracticalConfigCalc.pc_expected_batch_str`                                                                                                | Average batch under the stated traffic.               |
+| p99 batch size               | `{python} PracticalConfigCalc.pc_p99_batch_str`                                                                                                     | Burst size under Poisson arrivals.                    |
+| Memory-limited maximum batch | `{python} PracticalConfigCalc.pc_mem_limit_batch_str`                                                                                               | Hard cap imposed by accelerator memory.               |
+| Selected configuration       | $T_{\text{window}}$ = `{python} PracticalConfigCalc.pc_config_window_ms_str`, $B_{\text{max}}$ = `{python} PracticalConfigCalc.pc_config_batch_str` | Practical knob setting for deployment.                |
+| Predicted p99 latency        | `{python} PracticalConfigCalc.pc_predicted_p99_ms_str`                                                                                              | Confirms that the configuration stays within the SLO. |
+| Predicted peak capacity      | `{python} PracticalConfigCalc.pc_predicted_throughput_img_per_s_str`                                                                                | Capacity if the selected batch cap is saturated.      |
+| Served throughput            | `{python} PracticalConfigCalc.pc_qps_img_per_s_str`                                                                                                 | Arrival-limited load handled by the configuration.    |
+
+: **Practical Batching Configuration**: Working backward from a 50 ms SLO and 500 QPS traffic estimate yields a 12 ms batching window and batch-32 cap. The predicted p99 latency remains within the SLO, while the batch cap leaves headroom for bursts. {#tbl-practical-batching-config tbl-colwidths="[30,30,40]"}
 
 ### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
 
@@ -3455,8 +3459,6 @@ These LLM-specific optimizations build directly on the foundations this chapter 
 :::
 
 Continuous batching is the dominant technique for LLM serving, yet not all deployment scenarios benefit from batching. The sophisticated techniques examined so far (from dynamic batching windows to PagedAttention) optimize for high-throughput server workloads. These techniques introduce complexity and latency overhead that may not be justified for all deployment contexts. The practical question is *when* batching hurts rather than helps.
-
-#### When not to batch {#sec-model-serving-batch-12a4}
 
 Some scenarios require single-request processing. Ultra-low latency requirements\index{Latency!ultra-low, no batching}, where p99 latency must stay under 10 ms, make any batching delay unacceptable. Highly variable request sizes create padding overhead that wastes compute, since the smallest input in a batch must be padded to match the largest. Memory constraints also become binding when models already consume most GPU memory, since batch activations scale linearly with batch size and can trigger out-of-memory errors.
 
