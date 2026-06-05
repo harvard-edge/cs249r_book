@@ -37,6 +37,7 @@ async def _():
         get_lab_track_variant,
         get_track_profile,
         iteration_frontier,
+        part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -64,6 +65,7 @@ async def _():
         iteration_frontier,
         ledger,
         mo,
+        part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -188,7 +190,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_03_workflow):
+def _(COLORS, mo, part_workflow, v1_03_workflow):
+    mo.vstack([
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -219,7 +222,42 @@ def _(COLORS, mo, v1_03_workflow):
             </div>
         </div>
     </div>
-    """)
+    """),
+    part_workflow(
+        "Constraint Tax Workflow",
+        (
+            {
+                "part": "Part A",
+                "concept": "Constraint Propagation",
+                "prediction": "Predict when the deployment constraint should be tested.",
+                "controls": "Move the discovery stage and compare when the wrong assumption is found.",
+                "evidence": "Read the rework days, avoidable rework, and artifacts that must be rebuilt.",
+                "decision": "Decide which early gate should block the track before rework compounds.",
+            },
+            {
+                "part": "Part B",
+                "concept": "Iteration Frontier",
+                "prediction": "Predict how much validation realism the track can afford.",
+                "controls": "Tune validation depth, automation, hardware realism, and data scale.",
+                "evidence": "Compare iteration days, confidence, residual risk, and bottleneck.",
+                "decision": "Choose the validation mix that lowers risk without freezing iteration.",
+            },
+            {
+                "part": "Part C",
+                "concept": "Workflow Policy",
+                "prediction": "Predict which release gate should become non-negotiable.",
+                "controls": "Select the gate, release policy, and rollback rule.",
+                "evidence": "Compare policy summary, residual risk, and the remaining blind spot.",
+                "decision": "Write the workflow memo and name the risk you still carry.",
+            },
+        ),
+        scenario=(
+            f"{v1_03_workflow.label} needs a workflow that discovers "
+            f"{v1_03_workflow.constraint_name} before the team builds on a bad assumption."
+        ),
+        reflection="Carry one gate, one evidence requirement, and one residual blind spot into the report.",
+    ),
+    ])
     return
 
 

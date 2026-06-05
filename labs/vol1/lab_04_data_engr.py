@@ -38,6 +38,7 @@ async def _():
         get_lab_track_variant,
         get_track_profile,
         movement_frontier,
+        part_workflow,
         pipeline_architecture,
         report_export_panel,
         resolve_mlsysim_ref,
@@ -66,6 +67,7 @@ async def _():
         mo,
         movement_frontier,
         pipeline_architecture,
+        part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -187,7 +189,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_04_pipeline_profile):
+def _(COLORS, mo, part_workflow, v1_04_pipeline_profile):
+    mo.vstack([
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -218,7 +221,42 @@ def _(COLORS, mo, v1_04_pipeline_profile):
             </div>
         </div>
     </div>
-    """)
+    """),
+    part_workflow(
+        "Data Gravity Workflow",
+        (
+            {
+                "part": "Part A",
+                "concept": "Feed The Model",
+                "prediction": "Predict which pipeline stage will bottleneck the selected track.",
+                "controls": "Change the sampling or traffic multiplier.",
+                "evidence": "Inspect stage utilization, effective rate, raw data per day, and storage window.",
+                "decision": "Decide which stage must be redesigned first.",
+            },
+            {
+                "part": "Part B",
+                "concept": "Data Movement Frontier",
+                "prediction": "Predict whether moving raw data, summaries, or compute is best.",
+                "controls": "Select a movement strategy, network budget, and dataset size.",
+                "evidence": "Compare data moved, transfer time, egress cost, quality, and privacy risk.",
+                "decision": "Choose the movement strategy you can defend for the track.",
+            },
+            {
+                "part": "Part C",
+                "concept": "Pipeline Architecture",
+                "prediction": "Predict what data must be retained for later debugging or governance.",
+                "controls": "Select retention policy and architecture stance.",
+                "evidence": "Compare retained data, quality retained, bottleneck, and accepted risk.",
+                "decision": "Write the data policy and name the evidence you are willing to lose.",
+            },
+        ),
+        scenario=(
+            f"{v1_04_pipeline_profile.label} has data from "
+            f"{v1_04_pipeline_profile.data_source}; the lab asks where to process, move, and retain it."
+        ),
+        reflection="Carry one pipeline bottleneck, one movement choice, and one accepted data risk into the report.",
+    ),
+    ])
     return
 
 

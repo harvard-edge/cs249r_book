@@ -715,6 +715,63 @@ def decision_flow(title: str, steps: tuple[str, ...] | list[str]) -> mo.Html:
     )
 
 
+def part_workflow(
+    title: str,
+    parts: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
+    *,
+    scenario: str = "",
+    reflection: str = "",
+) -> mo.Html:
+    """Render a reusable learner workflow for part-level lab activity."""
+    scenario_html = (
+        f'<p><strong>Scenario:</strong> {html.escape(scenario)}</p>'
+        if scenario
+        else ""
+    )
+    reflection_html = (
+        f'<div class="mlsysbook-callout"><strong>Reflection:</strong> {html.escape(reflection)}</div>'
+        if reflection
+        else ""
+    )
+    rows = []
+    for index, part in enumerate(parts, start=1):
+        part_label = _part_value(part, "part", "label", default=f"Part {index}")
+        concept = _part_value(part, "concept", "title", default="")
+        heading = _part_heading(part_label, concept)
+        fields = _render_compact_fields(
+            {
+                "Prediction": _part_value(part, "prediction", default="State what you expect before changing controls."),
+                "Controls": _part_value(part, "controls", default="Move the provided knobs or choices."),
+                "Evidence": _part_value(part, "evidence", default="Inspect the computed result and plot."),
+                "Decision": _part_value(part, "decision", default="Write what you would defend and why."),
+            }
+        )
+        rows.append(
+            f"""
+    <div class="mlsysbook-map-row">
+      <div>
+        <div class="mlsysbook-map-title">{html.escape(heading)}</div>
+        <div class="mlsysbook-compact-fields is-brief">{fields}</div>
+      </div>
+    </div>
+"""
+        )
+    return mo.Html(
+        f"""
+<div class="mlsysbook-panel mlsysbook-launch-panel">
+  <div class="mlsysbook-section-label">How To Work This Lab</div>
+  <h2>{html.escape(title)}</h2>
+  <div class="mlsysbook-scenario-narrative">
+    {scenario_html}
+    <p>Use each part as a prediction, controls, evidence, and decision loop. The goal is not just the computed answer; it is the argument you can defend for the selected track.</p>
+  </div>
+  <div class="mlsysbook-map-list">{"".join(rows)}</div>
+  {reflection_html}
+</div>
+"""
+    )
+
+
 def lab_map(parts: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]], completion: Mapping[str, str] | None = None) -> mo.Html:
     """Render the lab part navigator with contract completion states."""
     completion = completion or {}

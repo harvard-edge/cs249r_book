@@ -43,6 +43,7 @@ async def _():
         get_lab_track_variant,
         get_track_profile,
         hardware_roofline_profile,
+        part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
         roofline_point,
@@ -59,7 +60,7 @@ async def _():
         ACADEMIC_LAB_CSS, COLORS, LAB_CSS, apply_plotly_theme,
         build_lab_report, fusion_traffic, gemm_workload,
         get_lab_metadata, get_lab_track_variant, get_track_profile, go,
-        hardware_roofline_profile, ledger, math, mo, np, report_export_panel,
+        hardware_roofline_profile, ledger, math, mo, np, part_workflow, report_export_panel,
         resolve_mlsysim_ref, roofline_point, source_trace, track_context,
         track_arc_context, track_selector,
     )
@@ -365,7 +366,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    fusion_traffic, gemm_workload, mo, pA_dim, pA_prec, pA_pred,
+    fusion_traffic, gemm_workload, mo, part_workflow, pA_dim, pA_prec, pA_pred,
     pB_batch, pB_mode, pB_pred, pC_hw,
     pC_pred, pD_pred, pE_pred, pE_seq,
     pE_tile, roofline_point, v1_11_comparison_profiles,
@@ -386,6 +387,26 @@ def _(
         fig.add_vline(x=ridge, line_dash="dot", line_color=color,
                       annotation_text=f"Ridge: {ridge:.0f}")
 
+    def _part_loop(part, concept, prediction, controls, evidence, decision):
+        return part_workflow(
+            f"{part} Workflow",
+            (
+                {
+                    "part": part,
+                    "concept": concept,
+                    "prediction": prediction,
+                    "controls": controls,
+                    "evidence": evidence,
+                    "decision": decision,
+                },
+            ),
+            scenario=(
+                f"For {v1_11_profile.label}, keep the hardware ceiling, "
+                "memory movement, and selected accelerator path in view."
+            ),
+            reflection="Before moving on, connect the computed evidence to the hardware decision you would defend.",
+        )
+
     # ─────────────────────────────────────────────────────────────────────
     # PART A: The Memory Wall (Roofline Diagnosis)
     # ─────────────────────────────────────────────────────────────────────
@@ -405,6 +426,14 @@ def _(
             </div>
         </div>
         """))
+        items.append(_part_loop(
+            "Part A",
+            "Roofline Diagnosis",
+            "Predict whether low MFU means a bug or a memory-bandwidth ceiling.",
+            "Adjust matrix dimension and precision.",
+            "Inspect arithmetic intensity, ridge point, attainable GFLOP/s, and MFU.",
+            "Decide whether the kernel is memory-bound, compute-bound, or on the wrong path.",
+        ))
         items.append(mo.md(f"""
         ## The Roofline Model: Two Ceilings
 
@@ -556,6 +585,14 @@ When $\\text{AI} < \\text{Ridge}$, the kernel is memory-bound and performance sc
             </div>
         </div>
         """))
+        items.append(_part_loop(
+            "Part B",
+            "Kernel Fusion",
+            "Predict the speedup from fusing memory-bound elementwise kernels.",
+            "Switch eager versus fused mode and vary batch size.",
+            "Compare HBM traffic, latency, and eliminated intermediate writes.",
+            "Decide whether fusion is worth implementing for the selected hardware.",
+        ))
         items.append(mo.md("""
         ## Kernel Fusion: The Elementwise Trap
 
@@ -706,6 +743,14 @@ Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for 
             </div>
         </div>
         """))
+        items.append(_part_loop(
+            "Part C",
+            "Balance Shift",
+            "Predict whether the same kernel keeps the same regime across hardware.",
+            "Select the comparison hardware profile.",
+            "Inspect each ridge point, arithmetic intensity, attainable performance, and MFU.",
+            "Decide which target is easier to saturate and why.",
+        ))
         _ridge_list = "\n".join(
             f"- {profile.label}: {profile.ridge_flop_per_byte:.1f} FLOP/byte"
             for profile in v1_11_comparison_profiles
@@ -837,6 +882,14 @@ AI grows linearly with $N$. Small matrices are memory-bound; large matrices are 
             </div>
         </div>
         """))
+        items.append(_part_loop(
+            "Part D",
+            "Energy Roofline",
+            "Predict whether memory-bound or compute-bound execution uses more energy.",
+            "Compare low and high arithmetic-intensity operating points.",
+            "Inspect energy per FLOP and the memory-traffic energy ratio.",
+            "Decide which optimization reduces Joules for the selected track.",
+        ))
         items.append(mo.md(f"""
         ## The Energy Roofline
 
@@ -961,6 +1014,14 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
             </div>
         </div>
         """))
+        items.append(_part_loop(
+            "Part E",
+            "Tiling Dividend",
+            "Predict how much tiling improves attention-style memory movement.",
+            "Adjust tile size and sequence length.",
+            "Inspect speedup and memory traffic saved.",
+            "Decide whether tiled attention is a required implementation tactic.",
+        ))
         _memory_name = "HBM" if v1_11_roofline.bandwidth_gbs >= 1000 else "device memory"
         _scratchpad_name = "SRAM/cache" if v1_11_profile.track_id != "cloud_fleet" else "SRAM/L2"
         items.append(mo.md(f"""

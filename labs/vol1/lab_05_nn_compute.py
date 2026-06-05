@@ -39,6 +39,7 @@ async def _():
         neural_compute_profile,
         operation_ledger,
         operator_design,
+        part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -66,6 +67,7 @@ async def _():
         neural_compute_profile,
         operation_ledger,
         operator_design,
+        part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -187,7 +189,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_05_compute):
+def _(COLORS, mo, part_workflow, v1_05_compute):
+    mo.vstack([
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -218,7 +221,42 @@ def _(COLORS, mo, v1_05_compute):
             </div>
         </div>
     </div>
-    """)
+    """),
+    part_workflow(
+        "Neural Compute Workflow",
+        (
+            {
+                "part": "Part A",
+                "concept": "Operation Ledger",
+                "prediction": "Predict whether weights, activations, operations, or bytes moved dominate.",
+                "controls": "Adjust the shape multiplier for the active operator.",
+                "evidence": "Compare activation memory, bytes moved, arithmetic intensity, latency, and feasibility.",
+                "decision": "Decide which resource must be reduced first for the selected track.",
+            },
+            {
+                "part": "Part B",
+                "concept": "Memory Cliff",
+                "prediction": "Predict where the activation budget will fail.",
+                "controls": "Sweep the shape variable and watch the feasible/infeasible boundary.",
+                "evidence": "Inspect the activation curve and threshold multiplier.",
+                "decision": "Choose the largest shape you can justify before the cliff.",
+            },
+            {
+                "part": "Part C",
+                "concept": "Layer Design",
+                "prediction": "Predict which precision, tiling, fusion, or streaming design fits.",
+                "controls": "Select the operator design option.",
+                "evidence": "Compare activation memory, latency, bandwidth, feasibility, and quality risk.",
+                "decision": "Write the design memo with the residual validation risk.",
+            },
+        ),
+        scenario=(
+            f"{v1_05_compute.label} is constrained by {v1_05_compute.tensor_label}; "
+            "the lab asks which tensor budget actually controls deployment."
+        ),
+        reflection="Carry one dominant resource, one feasible design, and one quality risk into the report.",
+    ),
+    ])
     return
 
 

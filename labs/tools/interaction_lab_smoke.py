@@ -304,34 +304,115 @@ def layout_metrics(page) -> tuple[int, int, int]:
 
 
 def scroll_through(page, max_steps: int = 12) -> tuple[int, ...]:
-    max_scroll = int(
-        page.evaluate(
-            "() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) - window.innerHeight"
-        )
-    )
-    if max_scroll <= 0:
-        return (0,)
-    step = max(320, max_scroll // max_steps)
-    positions = list(range(0, max_scroll + step, step))
-    positions[-1] = max_scroll
-    seen: list[int] = []
-    for position in positions[: max_steps + 1]:
-        page.evaluate("(y) => window.scrollTo(0, y)", position)
-        page.wait_for_timeout(120)
-        seen.append(int(page.evaluate("() => Math.round(window.scrollY)")))
-    page.evaluate(
+    targets = page.evaluate(
         """
         () => {
-          for (const el of document.querySelectorAll('*')) {
-            if (el.scrollHeight > el.clientHeight + 80) {
-              el.scrollTop = el.scrollHeight;
-            }
+          const candidates = [document.scrollingElement, document.documentElement, document.body, ...document.querySelectorAll('*')];
+          const seen = new Set();
+          const targets = [];
+          for (const el of candidates) {
+            if (!el || seen.has(el)) continue;
+            seen.add(el);
+            const maxScroll = el.scrollHeight - el.clientHeight;
+            if (maxScroll <= 80) continue;
+            const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : {width: window.innerWidth, height: window.innerHeight};
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            const id = `smoke-scroll-${targets.length}`;
+            el.setAttribute('data-smoke-scroll-target', id);
+            targets.push({id, maxScroll});
           }
+          return targets
+            .sort((a, b) => b.maxScroll - a.maxScroll)
+            .slice(0, 4);
         }
         """
     )
+    if not targets:
+        return (0,)
+    seen: list[int] = []
+    for target in targets:
+        max_scroll = int(target["maxScroll"])
+        step = max(320, max_scroll // max_steps)
+        positions = list(range(0, max_scroll + step, step))
+        positions[-1] = max_scroll
+        selector = f'[data-smoke-scroll-target="{target["id"]}"]'
+        for position in positions[: max_steps + 1]:
+            page.locator(selector).evaluate("(el, y) => { el.scrollTop = y; }", position)
+            if target["id"] == "smoke-scroll-0":
+                page.evaluate("(y) => window.scrollTo(0, y)", position)
+            page.wait_for_timeout(120)
+            seen.append(position)
+        page.locator(selector).evaluate("(el) => { el.scrollTop = 0; }")
+    page.evaluate("() => window.scrollTo(0, 0)")
     page.wait_for_timeout(120)
     return tuple(dict.fromkeys(seen))
+
+
+def collect_visible_text_across_scroll(page, max_steps: int = 8) -> str:
+    """Collect viewport text while scrolling Marimo/window scroll containers."""
+    script = """
+        (maxSteps) => {
+          const visible = (el) => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return rect.width > 0
+              && rect.height > 0
+              && rect.bottom >= 0
+              && rect.top <= window.innerHeight
+              && style.display !== 'none'
+              && style.visibility !== 'hidden';
+          };
+          const capture = () => {
+            const textNodes = [];
+            const seenText = new Set();
+            for (const el of document.querySelectorAll('body *')) {
+              if (!visible(el)) continue;
+              const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
+              if (text && text.length < 3500 && !seenText.has(text)) {
+                seenText.add(text);
+                textNodes.push(text);
+              }
+            }
+            return textNodes.join('\\n');
+          };
+          const candidates = [document.scrollingElement, document.documentElement, document.body, ...document.querySelectorAll('*')];
+          const seen = new Set();
+          const targets = [];
+          for (const el of candidates) {
+            if (!el || seen.has(el)) continue;
+            seen.add(el);
+            const maxScroll = el.scrollHeight - el.clientHeight;
+            if (maxScroll <= 80) continue;
+            const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : {width: window.innerWidth, height: window.innerHeight};
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            targets.push({el, maxScroll});
+          }
+          targets.sort((a, b) => b.maxScroll - a.maxScroll);
+          const chunks = [capture()];
+          for (const target of targets.slice(0, 4)) {
+            const step = Math.max(320, Math.floor(target.maxScroll / maxSteps));
+            const positions = [];
+            for (let y = 0; y <= target.maxScroll; y += step) {
+              positions.push(Math.min(y, target.maxScroll));
+            }
+            positions.push(target.maxScroll);
+            for (const y of [...new Set(positions)].slice(0, maxSteps + 1)) {
+              target.el.scrollTop = y;
+              if (target.el === document.scrollingElement || target.el === document.documentElement || target.el === document.body) {
+                window.scrollTo(0, y);
+              }
+              chunks.push(capture());
+            }
+            target.el.scrollTop = 0;
+          }
+          window.scrollTo(0, 0);
+          return chunks.join('\\n');
+        }
+    """
+    try:
+        return str(page.evaluate(script, max_steps))
+    except Exception:
+        return ""
 
 
 def click_first_matching_text(page, labels: tuple[str, ...], timeout: int = 5_000) -> str:
@@ -527,10 +608,10 @@ def inspect_visible_part(page, label: str, clicked: bool = True, note: str = "")
     category_patterns = {
         "narrative": ("scenario", "stakeholder", "incoming message", "objective", "systems question"),
         "prediction": ("prediction", "predict", "select your prediction", "what do you expect", "how much", "which"),
-        "controls": ("slider", "select", "precision", "model", "budget", "threshold", "knob", "try it", "explore"),
-        "evidence": ("evidence", "result", "frontier", "chart", "plot", "summary", "feasible", "candidate"),
+        "controls": ("control", "controls", "slider", "select", "adjust", "switch", "tune", "move", "precision", "model", "budget", "threshold", "knob", "try it", "explore"),
+        "evidence": ("evidence", "inspect", "compare", "computed", "result", "frontier", "chart", "plot", "summary", "feasible", "candidate"),
         "source_math": ("source", "math", "formula", "calculation", "solver", "mlsysim"),
-        "reflection": ("reflection", "checkpoint", "decision", "takeaway", "report", "residual risk", "synthesis"),
+        "reflection": ("reflection", "checkpoint", "decision", "decide", "defend", "write", "takeaway", "report", "residual risk", "synthesis"),
     }
 
     def detected_categories(value: str) -> list[str]:
@@ -545,6 +626,15 @@ def inspect_visible_part(page, label: str, clicked: bool = True, note: str = "")
     words = len(re.findall(r"\b\w+\b", text))
     if words < 45 or len(categories) < 3:
         combined_text = f"{text}\n{visible_text}"
+        combined_categories = detected_categories(combined_text)
+        combined_words = len(re.findall(r"\b\w+\b", combined_text))
+        if len(combined_categories) > len(categories) or combined_words > words:
+            text = combined_text
+            categories = combined_categories
+            words = combined_words
+    if words < 45 or len(categories) < 3:
+        scrolled_text = collect_visible_text_across_scroll(page)
+        combined_text = f"{text}\n{scrolled_text}"
         combined_categories = detected_categories(combined_text)
         combined_words = len(re.findall(r"\b\w+\b", combined_text))
         if len(combined_categories) > len(categories) or combined_words > words:
