@@ -9,6 +9,8 @@ from mlsysbook_labs import (
     get_track_profile,
     normalize_track_id,
     report_text_fallback,
+    track_display_label,
+    track_emoji,
     track_options,
     track_profile_map,
 )
@@ -39,11 +41,13 @@ def test_track_aliases_preserve_legacy_category_inputs():
     assert normalize_track_id("edge") == "robotaxi"
     assert normalize_track_id("cloud/fleet") == "cloud_fleet"
     assert get_track_profile("robo taxi").track_id == "robotaxi"
+    assert track_emoji("cloud_fleet") == "☁️"
+    assert track_display_label("robotaxi") == "🚕 RoboTaxi"
     assert track_options() == {
-        "iPhone": "iphone",
-        "Oura Ring": "oura_ring",
-        "RoboTaxi": "robotaxi",
-        "Cloud Fleet": "cloud_fleet",
+        "📱 iPhone": "iphone",
+        "💍 Oura Ring": "oura_ring",
+        "🚕 RoboTaxi": "robotaxi",
+        "☁️ Cloud Fleet": "cloud_fleet",
     }
 
 

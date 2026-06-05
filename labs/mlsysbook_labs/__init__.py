@@ -240,6 +240,8 @@ from .tracks import (
     TRACK_ALIASES,
     get_track_profile,
     normalize_track_id,
+    track_display_label,
+    track_emoji,
     track_options,
     track_profile_map,
 )
@@ -533,6 +535,8 @@ __all__ = [
     "STABLE_RELEASE_CHANNEL",
     "normalize_track_id",
     "get_track_profile",
+    "track_display_label",
+    "track_emoji",
     "track_options",
     "track_profile_map",
     "TrackArc",

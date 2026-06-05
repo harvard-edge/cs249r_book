@@ -63,6 +63,7 @@ async def _():
         report_export_panel,
         track_context,
         track_arc_context,
+        track_display_label,
     )
 
     ledger = DesignLedger()
@@ -82,6 +83,7 @@ async def _():
         report_export_panel,
         track_context,
         track_arc_context,
+        track_display_label,
     )
 
 @app.cell
@@ -103,7 +105,7 @@ def _(LabMetadata):
         "Recognize the recurring lab rhythm: read the case, make a guess, explore evidence, decide, and report.",
     )
     lab_big_takeaways = (
-        "The same model idea becomes a different systems problem on iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.",
+        "The same model idea becomes a different systems problem on 📱 iPhone, 💍 Oura Ring, 🚕 RoboTaxi, and ☁️ Cloud Fleet.",
         "Track selection changes hardware facts, constraints, metrics, stakeholder pressure, and report framing.",
         "Later labs build on this track choice, but each lab will introduce only the new concept it needs.",
     )
@@ -333,53 +335,52 @@ def _(mo):
 
 @app.cell
 def _(check1, mo):
-    mo.stop(
-        check1.value is None,
-        mo.vstack([
+    if check1.value is None:
+        _check1_view = mo.vstack([
             check1,
             mo.callout(
                 mo.md("_Select an answer to continue._"),
                 kind="warn",
             ),
         ])
-    )
+    else:
+        _correct = check1.value == "C"
+        _feedback = {
+            "A": (
+                "**Not quite.** The architecture hasn't changed — the model itself is unchanged. "
+                "The issue is that the *world* changed while the model stayed fixed. "
+                "Model architecture is an ML concern; detecting and responding to drift "
+                "is a *systems* concern — monitoring, pipelines, retraining triggers."
+            ),
+            "B": (
+                "**Not quite.** The training algorithm only runs during training. "
+                "Once the model is deployed, SGD vs Adam no longer matters. "
+                "The degradation happened in production — that's the systems layer: "
+                "monitoring, data pipelines, serving infrastructure."
+            ),
+            "C": (
+                "**Correct.** The model hasn't changed — but the world it's operating in has. "
+                "This is *silent degradation*, one of the defining challenges of ML systems. "
+                "Your job is not to debug code; it's to build monitoring that detects when "
+                "production data drifts away from training data, and pipelines that respond. "
+                "That's the 95%."
+            ),
+            "D": (
+                "**Not quite.** More training data would help if you were retraining — "
+                "but the immediate problem is that you don't even *know* the model is degrading "
+                "until someone complains. The systems problem is the absence of monitoring. "
+                "Data collection is part of the solution, but detecting the problem comes first."
+            ),
+        }
 
-    _correct = check1.value == "C"
-    _feedback = {
-        "A": (
-            "**Not quite.** The architecture hasn't changed — the model itself is unchanged. "
-            "The issue is that the *world* changed while the model stayed fixed. "
-            "Model architecture is an ML concern; detecting and responding to drift "
-            "is a *systems* concern — monitoring, pipelines, retraining triggers."
-        ),
-        "B": (
-            "**Not quite.** The training algorithm only runs during training. "
-            "Once the model is deployed, SGD vs Adam no longer matters. "
-            "The degradation happened in production — that's the systems layer: "
-            "monitoring, data pipelines, serving infrastructure."
-        ),
-        "C": (
-            "**Correct.** The model hasn't changed — but the world it's operating in has. "
-            "This is *silent degradation*, one of the defining challenges of ML systems. "
-            "Your job is not to debug code; it's to build monitoring that detects when "
-            "production data drifts away from training data, and pipelines that respond. "
-            "That's the 95%."
-        ),
-        "D": (
-            "**Not quite.** More training data would help if you were retraining — "
-            "but the immediate problem is that you don't even *know* the model is degrading "
-            "until someone complains. The systems problem is the absence of monitoring. "
-            "Data collection is part of the solution, but detecting the problem comes first."
-        ),
-    }
-
-    mo.vstack([
-        check1,
-        mo.callout(
-            mo.md(_feedback[check1.value]),
-            kind="success" if _correct else "warn",
-        ),
-    ])
+        _check1_view = mo.vstack([
+            check1,
+            mo.callout(
+                mo.md(_feedback[check1.value]),
+                kind="success" if _correct else "warn",
+            ),
+        ])
+    _check1_view
     return
 
 # ─── CONCEPT 2: PHYSICAL CONSTRAINTS PARTITION DEPLOYMENT ─────────────────────
@@ -492,6 +493,7 @@ def _(mo):
 @app.cell
 def _(
     check1,
+    check2empty,
     edge_deploy,
     faster_gpu,
     mo,
@@ -501,18 +503,22 @@ def _(
 ):
     mo.stop(check1.value is None)
 
-    mo.vstack([
-        mo.md("""**Check your understanding.** An autonomous vehicle perception system
-    is routed to a cloud datacenter 2,000 km away. Round-trip latency is 40 ms.
-    The safety requirement is a 10 ms end-to-end decision loop."""),
+    if check2empty():
+        _check2_prompt = mo.vstack([
+            mo.md("""**Check your understanding.** An autonomous vehicle perception system
+        is routed to a cloud datacenter 2,000 km away. Round-trip latency is 40 ms.
+        The safety requirement is a 10 ms end-to-end decision loop."""),
 
-        mo.md("""Select **all approaches** that could actually solve the latency problem:"""),
-        model_size,
-        quantization,
-        move_server,
-        faster_gpu,
-        edge_deploy
-    ])
+            mo.md("""Select **all approaches** that could actually solve the latency problem:"""),
+            model_size,
+            quantization,
+            move_server,
+            faster_gpu,
+            edge_deploy
+        ])
+    else:
+        _check2_prompt = mo.md("")
+    _check2_prompt
     return
 
 @app.cell
@@ -591,6 +597,15 @@ def _(
     # correct answers, so we suppress it on an exactly-right submission and
     # let the prose explanation + math peek carry the point (#1305).
     _items = [
+        mo.md("""**Check your understanding.** An autonomous vehicle perception system
+    is routed to a cloud datacenter 2,000 km away. Round-trip latency is 40 ms.
+    The safety requirement is a 10 ms end-to-end decision loop."""),
+        mo.md("""Select **all approaches** that could actually solve the latency problem:"""),
+        model_size,
+        quantization,
+        move_server,
+        faster_gpu,
+        edge_deploy,
         mo.Html(f"""
         <div style="background:{_bg_outer}; border:1.5px solid {_border};
                     border-radius:10px; padding:18px 20px; margin-top:8px;">
@@ -632,7 +647,7 @@ def _(
 # ─── CONCEPT 3: THE DEPLOYMENT REGIMES ────────────────────────────────────────
 
 @app.cell
-def _(CANONICAL_TRACKS, check1, check2empty, mo):
+def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label):
     mo.stop(check1.value is None or check2empty())
 
     _color_by_track = {
@@ -650,7 +665,7 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo):
         _cards += f"""
             <div style="background: white; border: 1px solid {_color}44; border-radius: 12px; padding: 20px;">
                 <div style="font-weight: 800; color: #1e293b; font-size: 1.0rem; margin-bottom: 4px;">
-                    {_profile.label}
+                    {track_display_label(_profile)}
                 </div>
                 <div style="font-size: 0.78rem; color: {_color}; font-weight: 700; margin-bottom: 10px;">
                     {_profile.category}
@@ -714,11 +729,16 @@ def _(check1, check2empty, mo):
 
     Which deployment paradigm is the *only* one that satisfies all three requirements simultaneously?""",
     )
+    return (check3,)
+
+@app.cell
+def _(check1, check2empty, check3, mo):
+    mo.stop(check1.value is None or check2empty() or check3.value is not None)
 
     mo.vstack([
         check3,
     ])
-    return (check3,)
+    return
 
 @app.cell
 def _(check1, check2empty, check3, mo):
@@ -755,6 +775,7 @@ def _(check1, check2empty, check3, mo):
     }
 
     mo.vstack([
+        check3,
         mo.callout(
             mo.md(_feedback[check3.value]),
             kind="success" if _correct else "warn",
@@ -1042,6 +1063,22 @@ def _(check1, check2empty, check3, mo):
     )
     return (context_selector,)
 
+@app.cell
+def _(check1, check2empty, check3, context_selector, mo):
+    mo.stop(
+        check1.value is None
+        or check2empty()
+        or check3.value is None
+        or context_selector.value is not None
+    )
+
+    _context_prompt = mo.vstack([
+        context_selector,
+        mo.md("_Select your deployment context above._"),
+    ], align="center")
+    _context_prompt
+    return
+
 # ─── CONTEXT REVEAL + STAKEHOLDER MESSAGE + LEDGER INIT ───────────────────────
 
 @app.cell(hide_code=True)
@@ -1062,18 +1099,15 @@ def _(
     lab_metadata,
     ledger,
     mo,
+    track_display_label,
     track_context,
-        track_arc_context,
+    track_arc_context,
 ):
     mo.stop(
         check1.value is None
         or check2empty()
         or check3.value is None
-        or context_selector.value is None,
-        mo.vstack([
-            context_selector,
-            mo.md("_Select your deployment context above._"),
-        ], align="center")
+        or context_selector.value is None
     )
 
     _track_id = context_selector.value
@@ -1220,7 +1254,7 @@ def _(
                 🎖️ Deployment Context Confirmed
             </div>
             <div style="font-size:1.25rem; font-weight:800; color:#0f172a; margin-bottom:4px;">
-                {_track_profile.label} · {_track_profile.stakeholder}
+                {track_display_label(_track_profile)} · {_track_profile.stakeholder}
             </div>
             <div style="font-size:0.88rem; color:#475569; margin-bottom:4px; line-height:1.5;">
                 <strong>North Star:</strong> {_track_profile.narrative}
@@ -1241,7 +1275,7 @@ def _(
 
         mo.callout(
             mo.md(
-                f"**Design Ledger initialized** — track: `{_track_id}`. "
+                f"**Design Ledger initialized** — track: {track_display_label(_track_profile)}. "
                 "Your track pre-loads hardware defaults and scenario constraints "
                 "in every lab from Lab 01 onward. Proceed to **Lab 01: ML Introduction**."
             ),
@@ -1335,7 +1369,14 @@ def _(
 
 # ─── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, check1, check2empty, check3, context_selector, mo):
+    mo.stop(
+        check1.value is None
+        or check2empty()
+        or check3.value is None
+        or context_selector.value is None
+    )
+
     mo.vstack([
         mo.md("---"),
 
@@ -1411,7 +1452,7 @@ def _(COLORS, mo):
 
         mo.accordion({
             "Self-Assessment: Can you answer these?": mo.md("""
-    1. Which track (Cloud Fleet, iPhone, RoboTaxi, or Oura Ring) did you choose, and what constraint will that track keep bringing back?
+    1. Which track (☁️ Cloud Fleet, 📱 iPhone, 🚕 RoboTaxi, or 💍 Oura Ring) did you choose, and what constraint will that track keep bringing back?
 
     2. Why is a model that works in a notebook not automatically a deployed ML system?
 
@@ -1425,8 +1466,10 @@ def _(COLORS, mo):
 
 # ─── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
 @app.cell
-def _(COLORS, get_track_profile, ledger, mo):
-    _track   = ledger.get_track() or "NONE"
+def _(COLORS, context_selector, get_track_profile, mo, track_display_label):
+    mo.stop(context_selector.value is None)
+
+    _track = context_selector.value
     _color_map = {
         "cloud":  COLORS["BlueLine"],
         "edge":   COLORS["RedLine"],
@@ -1439,11 +1482,8 @@ def _(COLORS, get_track_profile, ledger, mo):
         "NONE":   "#475569",
     }
     _hud_color  = _color_map.get(_track, "#475569")
-    _hud_status = "Uninitialized" if _track == "NONE" else "Active — Chapter 0"
-    try:
-        _hud_track = get_track_profile(_track).label
-    except KeyError:
-        _hud_track = _track.upper()
+    _hud_status = "Active — Chapter 0"
+    _hud_track = track_display_label(get_track_profile(_track))
 
     mo.Html(f"""
     <div style="display:flex; gap:28px; align-items:center; padding:12px 24px;

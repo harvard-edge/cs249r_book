@@ -9,7 +9,7 @@ from typing import Any, Mapping
 import marimo as mo
 
 from .schemas import ChapterRecap, InstructorMetadata, LabMetadata, NuggetSpec, TrackProfile
-from .tracks import DEFAULT_TRACK_ID, get_track_profile, normalize_track_id, track_options
+from .tracks import DEFAULT_TRACK_ID, get_track_profile, normalize_track_id, track_display_label, track_options
 
 
 ACADEMIC_LAB_CSS = mo.Html(
@@ -865,7 +865,7 @@ def track_selector(default: str = DEFAULT_TRACK_ID):
     """Return a Marimo radio selector for the canonical student tracks."""
     selected = normalize_track_id(default)
     options = track_options()
-    selected_label = next((label for label, track_id in options.items() if track_id == selected), "iPhone")
+    selected_label = next((label for label, track_id in options.items() if track_id == selected), track_display_label(DEFAULT_TRACK_ID))
     return mo.ui.radio(options=options, value=selected_label, label="Choose Your Track", inline=True)
 
 
@@ -924,9 +924,9 @@ def track_context(track: str | TrackProfile) -> mo.Html:
         f"""
 <div class="mlsysbook-panel mlsysbook-track-panel">
   <div class="mlsysbook-section-label">Track Mission</div>
-  <h2>Your Track</h2>
+  <h2>{html.escape(track_display_label(profile))} Track</h2>
   <div class="mlsysbook-scenario-narrative">
-    <p><strong>You are deploying for {html.escape(profile.label)}.</strong> {html.escape(profile.narrative)}</p>
+    <p><strong>You are deploying for {html.escape(track_display_label(profile))}.</strong> {html.escape(profile.narrative)}</p>
     <p><strong>Your job in this lab:</strong> {html.escape(track_delta)}</p>
   </div>
   <div class="mlsysbook-compact-fields is-brief">{fields}</div>
@@ -953,7 +953,7 @@ def track_arc_context(track: str | TrackProfile, lab_id: str) -> mo.Html:
         f"""
 <div class="mlsysbook-panel mlsysbook-launch-panel">
   <div class="mlsysbook-section-label">Where This Fits</div>
-  <h2>{html.escape(profile.label)} Journey</h2>
+  <h2>{html.escape(track_display_label(profile))} Journey</h2>
   <div class="mlsysbook-scenario-narrative">
     <p>{html.escape(summary["Volume arc"])}</p>
   </div>

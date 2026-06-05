@@ -8,6 +8,14 @@ from .schemas import TrackProfile
 DEFAULT_TRACK_ID = "iphone"
 
 
+TRACK_EMOJIS: dict[str, str] = {
+    "iphone": "📱",
+    "oura_ring": "💍",
+    "robotaxi": "🚕",
+    "cloud_fleet": "☁️",
+}
+
+
 CANONICAL_TRACKS: tuple[TrackProfile, ...] = (
     TrackProfile(
         track_id="iphone",
@@ -109,9 +117,22 @@ def get_track_profile(track_id: str | None) -> TrackProfile:
     raise KeyError(f"Unknown track_id {track_id!r}. Expected one of: {valid}")
 
 
+def track_emoji(track_id: str | TrackProfile | None) -> str:
+    """Return the canonical emoji for a track."""
+    profile = track_id if isinstance(track_id, TrackProfile) else get_track_profile(track_id)
+    return TRACK_EMOJIS.get(profile.track_id, "")
+
+
+def track_display_label(track_id: str | TrackProfile | None, *, include_category: bool = False) -> str:
+    """Return a consistent student-facing track label with its canonical emoji."""
+    profile = track_id if isinstance(track_id, TrackProfile) else get_track_profile(track_id)
+    suffix = f" ({profile.category})" if include_category else ""
+    return f"{track_emoji(profile)} {profile.label}{suffix}".strip()
+
+
 def track_options() -> dict[str, str]:
     """Return Marimo-friendly radio options keyed by student-facing label."""
-    return {profile.label: profile.track_id for profile in CANONICAL_TRACKS}
+    return {track_display_label(profile): profile.track_id for profile in CANONICAL_TRACKS}
 
 
 def track_profile_map() -> dict[str, TrackProfile]:
@@ -122,9 +143,12 @@ def track_profile_map() -> dict[str, TrackProfile]:
 __all__ = [
     "CANONICAL_TRACKS",
     "DEFAULT_TRACK_ID",
+    "TRACK_EMOJIS",
     "TRACK_ALIASES",
     "get_track_profile",
     "normalize_track_id",
+    "track_display_label",
+    "track_emoji",
     "track_options",
     "track_profile_map",
 ]
