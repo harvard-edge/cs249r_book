@@ -6187,8 +6187,10 @@ class ValidateCommand:
             must be capitalized (@Sec-, @Fig-, ...) so the rendered prefix
             ("Section", "Figure") leads the sentence with a capital.
           * Mid-sentence -- a capitalized @Sec-/@Fig-/... after a comma,
-            semicolon, open paren, or a lowercase word renders a stray capital
-            ("...as Table 2 shows") and must be lowercased (@sec-, @fig-, ...).
+            semicolon, open paren, plain prose colon, or a lowercase word
+            renders a stray capital ("...as Table 2 shows") and must be
+            lowercased (@sec-, @fig-, ...). Bold lead-ins such as
+            ``**Scenario**: @Tbl-...`` are sentence-start contexts.
           * Algorithm theorem refs -- direct @Alg-/@alg- refs follow the same
             casing rule as other cross-refs. Bracketed [Algorithm @alg-id]
             refs are unnecessary because the shared Quarto language file
@@ -6268,9 +6270,19 @@ class ValidateCommand:
                     # left unflagged on purpose -- it may end a clause.)
                     is_mid_sentence = True
                 elif re.search(r':\s*$', before):
-                    after_ref = line[ref_end:].strip()
-                    if after_ref and after_ref[0] not in ".,;:)]":
+                    # Plain prose colons keep the reference mid-sentence:
+                    # "The reason is: @sec-x shows..." renders as
+                    # "...: section x shows...". A bold lead-in is different:
+                    # "**Scenario**: @Tbl-x shows..." starts the labeled
+                    # sentence after the colon.
+                    if re.match(
+                        r"^\s*(?:[-*]|\d+\.)?\s*\*\*[^*]+\*\*"
+                        r"(?:\\index\{[^}]*\})*:\s*$",
+                        before,
+                    ):
                         is_sentence_start = True
+                    else:
+                        is_mid_sentence = True
                 # otherwise (em-dash, other punctuation): neutral, no flag
 
             return is_sentence_start, is_mid_sentence
