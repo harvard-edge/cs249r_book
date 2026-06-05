@@ -2011,7 +2011,7 @@ Each stage should be independently executable and idempotent. If the pipeline fa
 
 Training pipelines require orchestration systems that make dependency order, resource allocation, and failure recovery explicit. The orchestrator represents the workflow as a directed acyclic graph (DAG), tracks dependencies between stages, retries transient failures without rerunning unaffected work, schedules scarce resources such as GPUs and memory, caches intermediate results when inputs are unchanged, and records logs and artifacts for later debugging.
 
-Common orchestration choices include Kubeflow Pipelines[^fn-kubeflow-orchestration] [@bisong2019], Airflow with ML extensions, and cloud-native solutions like Vertex AI Pipelines or SageMaker Pipelines. The choice depends on which dependency and resource contracts the platform must enforce, as well as existing infrastructure, team expertise, and scale requirements.
+Common orchestration choices include Kubeflow Pipelines[^fn-kubeflow-orchestration] [@bisong2019], Airflow with ML extensions, and cloud-native solutions like Vertex AI Pipelines or SageMaker Pipelines. The choice depends on which dependency and resource contracts the platform must enforce, as well as existing infrastructure, team expertise, and scale requirements. Orchestration fixes the execution contract; parameterization fixes the variation contract, so the same graph can run against different data, models, and hardware envelopes without becoming a new program each time.
 
 [^fn-kubeflow-orchestration]: **Kubeflow**\index{Kubeflow!orchestration}: An open-source ML platform released by Google in 2018 that couples pipeline orchestration to Kubernetes resource management. The key systems consequence: because Kubeflow DAGs express both computational dependencies and resource requests, the orchestrator can schedule GPU-intensive training steps only when accelerators are available, preventing the resource contention that makes manual scheduling of multi-model training fleets untenable.
 
@@ -2045,6 +2045,8 @@ training_pipeline:
 :::
 
 The separation enables configuration-driven training because the platform can vary data versions, hyperparameter sweeps, reproducibility records, and environment-specific resource overrides without rewriting the pipeline code.
+
+A parameter file is also an audit artifact. When a candidate model later reaches a release gate, the platform can reconstruct exactly which data slice, feature set, hardware envelope, and threshold configuration produced it. That lineage turns validation from a one-time judgment into a reproducible contract.
 
 ### Validation gates {#sec-ml-operations-scale-validation-gates-89a2}
 
@@ -2139,7 +2141,7 @@ where $A$ represents the protected attribute, $\hat{Y}$ is the model prediction,
 
 Before training or deployment, data quality validation ensures that data meets expected properties [@caveness2020]. Schema conformance verifies all required fields are present with correct types. Statistical properties ensure feature distributions remain within expected bounds. Freshness checks confirm data is not stale beyond acceptable thresholds. Completeness verification ensures missing data rates stay within tolerance.
 
-Data quality gates catch issues that would otherwise manifest as mysterious model degradation.
+These gates catch issues that would otherwise manifest as mysterious model degradation, completing the pre-release evidence bundle before deployment risk shifts from artifact validity to live-traffic exposure. The next control is no longer another offline score; it is the amount of production traffic allowed to test the artifact under real conditions.
 
 ### Staged rollout strategies {#sec-ml-operations-scale-staged-rollout-strategies-2d1f}
 
@@ -2212,7 +2214,7 @@ Canary deployment[^fn-canary-deploy] routes a small percentage of traffic to the
 
 [^fn-canary-deploy]: **Canary Deployment**\index{Canary Deployment!gradual rollout}: Named after the coal-mining practice of using canaries to detect toxic gases -- a small sacrifice that protects the whole. For ML systems, the analogy is precise: model regressions typically manifest as gradual accuracy degradation rather than crashes, making them invisible to health checks but detectable through statistical comparison of canary vs. control traffic. Without canary stages, a subtly degraded model can reach 100 percent traffic before anyone notices the loss.
 
-Typical progression: 1 percent → 5 percent → 25 percent → 50 percent → 100 percent
+A typical progression moves from 1 percent to 5 percent to 25 percent to 50 percent to 100 percent as evidence accumulates.
 
 Determining the duration of each stage is critical. @Eq-canary-duration relates stage duration to sample requirements, request rate, and traffic percentage, enabling precise calculation of minimum canary durations for statistical validity:
 
@@ -2799,6 +2801,8 @@ The rollout risk framework suggests three mitigation strategies:
 
 #### Risk categories {#sec-ml-operations-scale-risk-categories-6247}
 
+The risk equation becomes actionable only when the platform maps measured risk to a rollout policy. @Tbl-ops-scale-risk-categories turns probability, impact, and exposure into deployment posture: low-risk changes can move through a fast canary, while safety-critical changes need shadow validation, human review, and slower traffic expansion.
+
 | **Category** | **$p_{\text{regression}}$** | **$I_{\text{regression}}$** |      **Rollout Strategy**      |
 |:-------------|:---------------------------:|:---------------------------:|:------------------------------:|
 | **Low**      |        Minor code fix       |     Limited user impact     |          Fast canary           |
@@ -2810,7 +2814,7 @@ The rollout risk framework suggests three mitigation strategies:
 
 #### Automated rollback triggers {#sec-ml-operations-scale-automated-rollback-triggers-ffa3}
 
-Rollback should be automated based on metric degradation, as configured in @lst-rollback-triggers.\index{Rollback!automated configuration}
+Risk categories decide how cautiously traffic should expand, but rollback triggers decide when expansion must stop. The trigger configuration in @lst-rollback-triggers makes that stop condition executable by binding each monitored metric to a threshold, observation window, and minimum sample count.\index{Rollback!automated configuration}
 
 ::: {#lst-rollback-triggers lst-cap="**Automated Rollback Configuration**: Metric-specific thresholds, observation windows, and minimum sample sizes that balance sensitivity against false triggers."}
 
@@ -3417,7 +3421,7 @@ Autoscaling adds horizontal capacity from request-rate, latency, or model-specif
 
 #### Platform utilization metrics {#sec-ml-operations-scale-platform-utilization-metrics-ed31}
 
-@Eq-platform-utilization defines platform efficiency as the capacity-weighted average utilization across all resources:
+Once training and serving controls are separated, the shared platform still needs an aggregate measure of whether capacity is being converted into useful work. @Eq-platform-utilization defines platform efficiency as the capacity-weighted average utilization across all resources:
 
 $$U_{\text{platform}} = \frac{\sum_{i} U_i \times R_i}{\sum_{i} R_i}$$ {#eq-platform-utilization}
 
