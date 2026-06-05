@@ -866,7 +866,7 @@ Although "serving" often implies a networked server processing API requests, the
 
 #### Networked serving (cloud/data center) {#sec-model-serving-networked-serving-clouddatacenter-0328}
 
-In networked serving\index{Serving!cloud/data center}\index{Microservice!model serving}, the model runs as a standalone service (microservice), the deployment paradigm @sec-ml-systems-cloud-ml-maximizing-computational-power-a338 characterized as trading latency for larger pooled compute. The primary interface is the network (HTTP/gRPC), so the binding constraints are network bandwidth and serialization cost before the request even reaches the accelerator. Data-center hardware such as NVIDIA GPUs (V100, A100, H100), Google Tensor Processing Units (TPUs), and AWS Inferentia supports high-throughput batching and concurrency, but cold start\index{Cold Start!cloud serving} can still stretch from seconds to minutes because container startup, model loading, and warmup sit outside the steady-state inference path.
+In networked serving\index{Serving!cloud/data center}\index{Microservice!model serving}, the model runs as a standalone service (microservice), the deployment paradigm @sec-ml-systems-cloud-ml-maximizing-computational-power-a338 characterized as trading latency for larger pooled compute. The primary interface is the network through request protocols such as HTTP or gRPC, so the binding constraints are network bandwidth and serialization cost before the request even reaches the accelerator. Data-center hardware such as NVIDIA GPUs (V100, A100, H100), Google Tensor Processing Units (TPUs), and AWS Inferentia supports high-throughput batching and concurrency, but cold start\index{Cold Start!cloud serving} can still stretch from seconds to minutes because container startup, model loading, and warmup sit outside the steady-state inference path.
 
 #### Application-embedded serving (mobile/edge) {#sec-model-serving-applicationembedded-serving-mobileedge-8bd1}
 
@@ -3071,7 +3071,7 @@ The throughput gains in @tbl-batching-throughput trace directly back to the fixe
 ::: {#nbk-model-serving-iron-law-batching-efficiency .callout-notebook title="The iron law of batching efficiency"}
 
 *Iron law connection*:
-In serving, we maximize throughput by amortizing the latency term $(L_{\text{lat}})$, as shown in @eq-compute-time:
+In serving, batching improves throughput by amortizing fixed per-batch work such as scheduling, kernel launch, and weight reads; queue wait remains a separate latency cost. The same iron-law decomposition from @eq-compute-time shows why:
 $$ T = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} $$ {#eq-compute-time}
 
 *Deriving the sweet spot*:
@@ -3079,7 +3079,7 @@ $$ T = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} $$ {#eq
 *   **Case 1 (batch 1)**: Overhead (`{python} BatchingAnalysisCalc.il_overhead_ms_str`) ≫ Compute (`{python} BatchingAnalysisCalc.il_compute_b1_ms_str`). Efficiency ≈ `{python} BatchingAnalysisCalc.il_eff_b1_str`. The GPU is mostly waiting.
 *   **Case 2 (batch 32)**: Overhead (`{python} BatchingAnalysisCalc.il_overhead_ms_str`) ≪ Compute (`{python} BatchingAnalysisCalc.il_compute_b32_ms_str`). Efficiency ≈ `{python} BatchingAnalysisCalc.il_eff_b32_str`. The GPU is crunching numbers.
 
-*Golden rule*: Increase batch size until the latency term becomes negligible (< `{python} BatchingAnalysisCalc.il_threshold_str` of total time). Beyond this point, additional batching yields minimal throughput but imposes a linear latency penalty.
+*Golden rule*: Increase batch size until fixed overhead becomes negligible (< `{python} BatchingAnalysisCalc.il_threshold_str` of total time) or the latency SLO blocks further waiting. Beyond this point, additional batching yields minimal throughput but imposes a linear queueing penalty.
 
 :::
 
@@ -3830,7 +3830,7 @@ Production LLM systems return tokens as they are produced rather than waiting fo
 
 Generative inference requires managing the KV Cache[^fn-kv-cache-serving]\index{KV Cache!LLM memory}\index{KV Cache!sequence length scaling}, a stateful memory structure that grows with sequence length. Unlike traditional models where memory usage is constant per batch, LLM memory usage is dynamic. Each generated token adds to the context window, consuming additional GPU memory through state accumulation, and variable-length sequences can lead to memory fragmentation if not managed explicitly.
 
-[^fn-kv-cache-serving]: **KV Cache (Key-Value Cache)**\index{KV Cache!memory scaling}: To avoid redundant work, the system caches the Key and Value vectors from previous tokens, which remain valid throughout generation. This design choice is the direct cause of the dynamic memory growth described; the cache's size grows linearly with every generated token, making memory management, not computation, the primary constraint. For the 70-billion-parameter-class grouped-query-attention example used below, the FP16 KV cache is about 0.31 MB per token per sequence, so a batch of 32 requests at an 8,000-token context requires roughly 80 GB just for KV cache. Without grouped-query or multi-query attention, the KV cache can be several times larger.
+[^fn-kv-cache-serving]: **KV Cache (Key-Value Cache)**\index{KV Cache!memory scaling}: To avoid redundant work, the system caches the Key and Value vectors from previous tokens, which remain valid throughout generation. This design choice is the direct cause of the dynamic memory growth described; the cache's size grows linearly with every generated token, making memory management, not computation, the primary constraint. For the 70-billion-parameter-class grouped-query-attention sizing example in this section, the FP16 KV cache is about 0.31 MB per token per sequence; grouped-query attention (GQA) shares key/value heads across multiple query heads, reducing the cache relative to full multi-head attention. A batch of 32 requests at an 8,000-token context therefore requires roughly 80 GB just for KV cache. Without grouped-query or multi-query attention, the KV cache can be several times larger.
 
 The continuous batching and PagedAttention techniques covered in @sec-model-serving-continuous-batching-8bb6 address these challenges.
 
@@ -3980,7 +3980,7 @@ LLM serving introduces constraints absent from traditional model serving.
 
 ## Inference Runtime Selection {#sec-model-serving-inference-runtime-selection-5eef}
 
-The batching strategies and LLM-specific techniques examined in preceding sections determine *how* requests are grouped and processed. These strategies assume an underlying execution engine that actually runs the model computations—an assumption that matters enormously. The token generation time in @eq-token-generation-time and the latency budgets established earlier are achievable only if the runtime efficiently maps operations to hardware. The inference runtime, the software layer that orchestrates tensor operations and manages hardware resources, can vary by an order of magnitude in performance for identical models. Runtime work therefore has two phases: selection chooses the execution engine, and configuration tunes that engine for the target model, hardware, and latency distribution.
+The batching strategies and LLM-specific techniques determine *how* requests are grouped and processed. These strategies assume an underlying execution engine that actually runs the model computations—an assumption that matters enormously. The token generation time in @eq-token-generation-time and the latency budgets established earlier are achievable only if the runtime efficiently maps operations to hardware. The inference runtime, the software layer that orchestrates tensor operations and manages hardware resources, can vary by an order of magnitude in performance for identical models. Runtime work therefore has two phases: selection chooses the execution engine, and configuration tunes that engine for the target model, hardware, and latency distribution.
 
 ### Runtime ecosystem and configuration {#sec-model-serving-frameworknative-serving-da62}
 
