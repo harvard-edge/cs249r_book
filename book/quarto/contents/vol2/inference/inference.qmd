@@ -2865,9 +2865,7 @@ For Llama-70B GQA with 4K context, KV cache is about 1.3 GB total per sequence, 
 
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
-Effective KV cache management combines multiple techniques:
-
-Sizing the KV cache pool starts from the available GPU memory budget:
+Effective KV-cache management begins with capacity accounting rather than an eviction policy. The serving process first reserves memory for weights, activations, runtime overhead, and safety headroom, then treats the remaining HBM as a managed pool for active sequences:
 
 ```
 Available GPU memory = Total - Weights - Activations - Overhead
@@ -2876,11 +2874,7 @@ KV pool size = 0.9 * Available  # Leave 10% headroom
 Max concurrent sequences = KV pool size / (avg_seq_length * per_token_cache)
 ```
 
-When cache is full, systems use several eviction policies. LRU (Least Recently Used) evicts sequences with oldest last access. Size-based eviction removes longest sequences first to free most memory. Priority-based eviction protects high-priority or paid-tier requests.
-
-Preemption for continuous batching:
-
-When a new high-priority request cannot fit, the system follows a sequence of steps. It selects victim sequences using the eviction policy. It swaps the victim's KV cache to CPU memory. It allocates GPU memory to the new request. When the victim is resumed, it swaps back from CPU.
+That budget determines how many sequences can coexist before the scheduler must choose between rejection, preemption, or paging. When the cache is full, LRU eviction removes the sequence with the oldest access, size-based eviction frees the longest sequence first, and priority-based eviction protects paid-tier or latency-critical requests. Continuous batching then turns eviction into a scheduling decision: a high-priority request that cannot fit triggers victim selection, swaps the victim's KV cache to CPU memory, allocates GPU memory to the new request, and restores the victim later if its service-level objective still permits the delay.
 
 ::: {#nbk-inference-kv-cache-memory-hierarchy .callout-notebook title="KV cache memory hierarchy"}
 
@@ -3011,9 +3005,11 @@ This multi-tenant serving pattern shifts the fundamental performance constraint 
 
 :::
 
-When the model itself exceeds single-GPU capacity, as a 175-billion parameter foundation model does, fitting even the weights requires splitting the workload across multiple devices through model sharding for inference.
+When the model itself exceeds single-GPU capacity, as a 175-billion-parameter foundation model does, fitting even the weights requires splitting the workload across multiple devices through model sharding for inference.
 
 ## Model Sharding for Inference {#sec-inference-scale-model-sharding-inference-82b3}
+
+A 70-billion-parameter model requires over 140 GB of VRAM just to hold its weights in 16-bit precision, making it physically impossible to load onto a single 80 GB GPU. To serve this model, we must slice its architecture across multiple GPUs that act together as a single logical replica. Adapting distributed training parallelism techniques, specifically tensor and pipeline parallelism, for low-latency inference introduces a distinct set of constraints.
 
 ```{python}
 #| echo: false
@@ -3042,8 +3038,6 @@ class HardwareSetupSharding:
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
 ```
 
-A 70-billion parameter model requires over 140 GB of VRAM just to hold its weights in 16-bit precision, making it physically impossible to load onto a standard 80 GB A100 GPU. To serve this model, we must slice its architecture across multiple GPUs that act together as a single logical replica. Adapting distributed training parallelism techniques, specifically tensor and pipeline parallelism, for low-latency inference introduces a distinct set of constraints.
-
 ### When sharding becomes necessary {#sec-inference-scale-sharding-becomes-necessary-81d4}
 
 Model sharding for inference is driven by two distinct requirements. @Tbl-sharding-triggers identifies the memory and latency constraints that necessitate sharding:
@@ -3052,7 +3046,7 @@ The first driver is memory capacity. A model that cannot fit in single-GPU memor
 
 $$\text{Memory}_{\text{weights}} = P \times \frac{b}{8} \text{ bytes}$$ {#eq-weight-memory}
 
-A 70-billion parameter model in FP16 (16 bits) requires:
+A 70-billion-parameter model in FP16 (16 bits) requires:
 
 $$\text{Memory} = 70 \times 10^9 \times \frac{16}{8} = 140 \text{ GB}$$
 
