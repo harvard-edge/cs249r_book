@@ -682,12 +682,12 @@ from mlsysim.fmt import fmt, fmt_count, fmt_int, fmt_math, fmt_params, fmt_perce
 # │ Context: Network Performance Modeling - Alpha-Beta Model.
 # │
 # │ Goal: Identify when communication intensity overwhelms computation.
-# │ Show: Growth of comm overhead from 1B to 70B parameter models.
+# │ Show: Growth of comm overhead from GPT-2-scale to 70B parameter models.
 # │ How: Calculate T_compute vs T_ring_allreduce using Alpha-Beta parameters.
 # │
 # │ Imports: mlsysim.core.constants
 # │ Exports: AllReduceBottleneck.alpha_math, AllReduceBottleneck.beta_math,
-# │          AllReduceBottleneck.t_comp_display_math, AllReduceBottleneck.t_ring_1b_math,
+# │          AllReduceBottleneck.t_comp_display_math, AllReduceBottleneck.t_ring_small_math,
 # │          AllReduceBottleneck.comm_frac_display_math, AllReduceBottleneck.t_ring_70b_display_math
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -712,7 +712,7 @@ class AllReduceBottleneck:
     flops_per_sample_base = 5e13 * flop # scenario assumption: realistic per-GPU compute for ~100ms iteration
     grad_bytes_per_param = 4 * byte / param # scenario assumption: FP32 gradients
 
-    m_1b = Models.Language.BERT_Base # 1B scale for this example
+    m_small = Models.Language.GPT2 # GPT-2-scale model from the registry
     m_70b = Models.Language.Llama2_70B
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -720,43 +720,43 @@ class AllReduceBottleneck:
     t_comp = flops_per_sample_base / (peak_flops * gpu_util)
 
     # Use library formula for Ring AllReduce
-    # Model A: 1B params (FP32 = 4 bytes/param)
-    grad_1b = m_1b.parameters * grad_bytes_per_param
-    t_comm_1b = calc_ring_allreduce_time(grad_1b, num_gpus, ib_ndr.bandwidth, FABRIC_ALPHA_NDR)
+    # Model A: GPT-2-scale params (FP32 = 4 bytes/param)
+    grad_small = m_small.parameters * grad_bytes_per_param
+    t_comm_small = calc_ring_allreduce_time(grad_small, num_gpus, ib_ndr.bandwidth, FABRIC_ALPHA_NDR)
 
     # Model B: 70B params (FP32 = 4 bytes/param)
     grad_70b = m_70b.parameters * grad_bytes_per_param
     t_comm_70b = calc_ring_allreduce_time(grad_70b, num_gpus, ib_ndr.bandwidth, FABRIC_ALPHA_NDR)
 
-    comm_frac_small = (t_comm_1b / (t_comp + t_comm_1b)).to_base_units().magnitude
+    comm_frac_small = (t_comm_small / (t_comp + t_comm_small)).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_comp > 0.1 * second, f"Compute time should be significant, got {t_comp.to(second).magnitude:.2f}s")
-    check(t_comm_70b > t_comm_1b * 50, "70B comm should be >50x 1B comm")
+    check(t_comm_70b > t_comm_small * 40, "70B comm should be >40x GPT-2-scale comm")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     t_comp_display = f"{t_comp.to(ms).magnitude:.0f}"
-    t_comm_1b_display = f"{t_comm_1b.to(ms).magnitude:.0f}"
+    t_comm_small_display = f"{t_comm_small.to(ms).magnitude:.0f}"
     t_comm_70b_display = f"{t_comm_70b.to(ms).magnitude:.0f}"
-    comm_frac_1b_pct = f"{comm_frac_small * 100:.1f}"
+    comm_frac_small_pct = f"{comm_frac_small * 100:.1f}"
 
     # Math strings
     alpha_math           = fmt_math(f"\\alpha = {FABRIC_ALPHA_NDR.to(microsecond).magnitude:.1f} \\;\\mu\\text{{s}}")
     beta_math            = fmt_math(f"\\beta = {ib_ndr.bandwidth.to(GB/second).magnitude:.0f} \\;\\text{{GB/s}}")
     t_comp_display_math  = MarkdownStr(f"$$ T_{{\\text{{compute}}}} = {t_comp_display} \\text{{ ms}} $$")
-    t_ring_1b_math       = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_1b_display} \\text{{ ms}}")
-    comm_frac_display_math = MarkdownStr(f"$$ \\text{{Comm. fraction}} = {comm_frac_1b_pct} \\% $$")
+    t_ring_small_math    = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_small_display} \\text{{ ms}}")
+    comm_frac_display_math = MarkdownStr(f"$$ \\text{{Comm. fraction}} = {comm_frac_small_pct} \\% $$")
     t_ring_70b_display_math = MarkdownStr(f"$$ T_{{\\text{{ring}}}} \\approx {t_comm_70b_display} \\text{{ ms}} $$")
 
     num_gpus_str = fmt_int(num_gpus, commas=False)
-    params_1b_billion_str = fmt_params(
-        m_1b.parameters,
+    params_small_billion_str = fmt_params(
+        m_small.parameters,
         scale="B",
         precision=1,
         commas=False,
         scale_style="word",
     )
-    grad_1b_gb_str = fmt_qty(grad_1b, GB, precision=1, commas=False)
+    grad_small_gb_str = fmt_qty(grad_small, GB, precision=1, commas=False)
     gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
     h100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOPs/second, precision=0, commas=False)
     params_70b_billion_str = fmt_params(
@@ -768,7 +768,7 @@ class AllReduceBottleneck:
     grad_70b_gb_str = fmt_qty(grad_70b, GB, precision=0, commas=False)
 ```
 
-**Setup**\index{Setup}: A cluster of `{python} AllReduceBottleneck.num_gpus_str` H100 GPUs training a model with `{python} AllReduceBottleneck.params_1b_billion_str` parameters (`{python} AllReduceBottleneck.grad_1b_gb_str` of FP32 gradients). Each GPU computes at `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` FP16/BF16 peak. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
+**Setup**\index{Setup}: A cluster of `{python} AllReduceBottleneck.num_gpus_str` H100 GPUs training a GPT-2-scale model with `{python} AllReduceBottleneck.params_small_billion_str` parameters (`{python} AllReduceBottleneck.grad_small_gb_str` of FP32 gradients). Each GPU computes at `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` FP16/BF16 peak. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
 
 **Step 1**: Compute time per iteration.
 Assume each GPU processes a synthetic microbatch requiring $5 \times 10^{13}$ FLOPs, chosen to produce an approximately 100 ms compute phase for this bottleneck example. At `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` with `{python} AllReduceBottleneck.gpu_util_pct_str` utilization:
@@ -776,9 +776,9 @@ Assume each GPU processes a synthetic microbatch requiring $5 \times 10^{13}$ FL
 `{python} AllReduceBottleneck.t_comp_display_math`
 
 **Step 2**: Communication time (Ring AllReduce\index{Ring AllReduce}).
-With $N = 1{,}024$ and $M = 4 \times 10^9$ bytes:
+With $N = 1{,}024$ and a gradient payload $M$ of about `{python} AllReduceBottleneck.grad_small_gb_str`:
 
-- Total Communication: `{python} AllReduceBottleneck.t_ring_1b_math`
+- Total Communication: `{python} AllReduceBottleneck.t_ring_small_math`
 
 **Step 3**: Communication fraction.
 `{python} AllReduceBottleneck.comm_frac_display_math`

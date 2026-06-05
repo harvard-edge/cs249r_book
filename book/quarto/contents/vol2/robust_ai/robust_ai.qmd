@@ -2097,26 +2097,24 @@ Hyperparameter tuning grows significantly more complex when balancing robustness
 ```{.python}
 def adversarial_training_step(model, data, labels, epsilon=0.1):
     # Generate adversarial examples using FGSM
-    data.requires_grad_(True)
-    outputs = model(data)
-    loss = F.cross_entropy(outputs, labels)
-
-    model.zero_grad()
-    loss.backward()
+    attack_data = data.detach().clone().requires_grad_(True)
+    attack_logits = model(attack_data)
+    attack_loss = F.cross_entropy(attack_logits, labels)
+    input_grad = torch.autograd.grad(attack_loss, attack_data)[0]
 
     # Create adversarial perturbation and mix with clean data
-    adv_data = data + epsilon * data.grad.sign()
-    adv_data = torch.clamp(adv_data, 0, 1)
+    adv_data = attack_data + epsilon * input_grad.sign()
+    adv_data = torch.clamp(adv_data, 0, 1).detach()
 
-    mixed_data = torch.cat([data, adv_data])
-    mixed_labels = torch.cat([labels, labels])
+    mixed_data = torch.cat([data, adv_data], dim=0)
+    mixed_labels = torch.cat([labels, labels], dim=0)
 
     return F.cross_entropy(model(mixed_data), mixed_labels)
 ```
 
 :::
 
-The implementation in @lst-adversarial-training generates adversarial examples on-the-fly during training by computing gradients with respect to input data via `requires_grad_` and the standard backward pass, applying the sign function to extract perturbation direction (`data.grad.sign()`), and mixing the resulting adversarial examples with clean training data through `torch.cat`. The `torch.clamp()` operation ensures pixel values remain valid, while the final concatenation doubles the effective batch size by combining clean and adversarial examples. This approach requires careful tuning of the perturbation budget $\epsilon$; optimized variants can reduce adversarial-training overhead by reusing gradient computations [@shafahi2019adversarial].
+The implementation in @lst-adversarial-training generates adversarial examples on-the-fly during training by computing gradients with respect to a detached input clone, applying the sign function to extract the perturbation direction, and mixing the resulting adversarial examples with clean training data through `torch.cat`. Using `torch.autograd.grad` for the attack step avoids accumulating parameter gradients before the final training loss is computed. The `torch.clamp()` operation ensures pixel values remain valid, while the final concatenation doubles the effective batch size by combining clean and adversarial examples. This approach requires careful tuning of the perturbation budget $\epsilon$; optimized variants can reduce adversarial-training overhead by reusing gradient computations [@shafahi2019adversarial].
 
 Once adversarial examples are part of the training loop, deployment must coordinate robustness techniques with MLOps pipelines, monitoring strategies, and distributed training infrastructure that synchronizes updates across multiple nodes. The remaining strategies move the spending point rather than eliminating the cost. Defensive distillation\index{Defensive Distillation} [@papernot2016] spends it during training by teaching a student model from the teacher's soft labels, which can smooth decision behavior but must still be evaluated against stronger attacks. Input preprocessing spends it at serving time: image denoising, JPEG compression, random resizing, padding, and random transformations try to erase perturbations before the model sees them. Ensembles spend it through redundancy, combining models with different architectures, training data, or preprocessing paths so that a perturbation that fools one member is less likely to fool all of them.
 
