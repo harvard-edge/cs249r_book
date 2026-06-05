@@ -224,7 +224,7 @@ $$T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$$ {#eq-tr
 
 The simplification is valid when the pipeline is correctly staged: at training scale with large batches, data movement $(D_{\text{vol}}/\text{BW})$ is overlapped with compute via prefetching pipelines, and communication overhead $(L_{\text{lat}})$ is absorbed by gradient overlap strategies, leaving hardware utilization as the dominant remaining lever. When pipelines are poorly staged, $D_{\text{vol}}/\text{BW}$ resurfaces as the bottleneck and the simplified form no longer applies.
 
-1.  **Significance (quantitative)**: The three factors identify three distinct optimization levers: $O$ (reducible by algorithmic or model changes such as pruning, distillation, sparsity, or fewer training tokens), $R_{\text{peak}}$ (improved by hardware and lower-precision tensor cores), and $\eta_{\text{hw}}$ (the utilization fraction and primary engineering target; GPT-3 training achieved $\eta_{\text{hw}} \approx 0.45$ [@narayanan2021] while current systems target $\eta_{\text{hw}} > 0.55$).
+1.  **Significance (quantitative)**: The three factors identify three distinct optimization levers: $O$ (reducible by algorithmic changes, fewer training tokens, or model-compression methods such as pruning and distillation introduced in @sec-model-compression), $R_{\text{peak}}$ (improved by hardware and lower-precision tensor cores), and $\eta_{\text{hw}}$ (the utilization fraction and primary engineering target; GPT-3 training achieved $\eta_{\text{hw}} \approx 0.45$ [@narayanan2021] while current systems target $\eta_{\text{hw}} > 0.55$).
 2.  **Distinction (durable)**: Unlike the general iron law, which models all three cost terms $(D_{\text{vol}}/\text{BW}, O/(R_{\text{peak}} \cdot \eta_{\text{hw}}), L_{\text{lat}})$, this simplified form assumes data movement and communication are not the binding constraint, an assumption that breaks for small-batch workloads or bandwidth-limited deployments.
 3.  **Common pitfall**: A frequent misconception is that $\eta_{\text{hw}}$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\eta_{\text{hw}}$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
 
@@ -2564,7 +2564,7 @@ class NetworkWall:
 4. **Compute time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
 
 \index{AllReduce!network wall}
-**Systems insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression (reduce data volume), overlapping computation with communication (as implemented in Horovod [@sergeev2018horovod]), and using faster interconnects (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. InfiniBand at `{python} NetworkWall.network_bw_gb_per_s_str`).
+**Systems insight**: The network becomes a wall when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression, which sends fewer or lower-precision gradient bytes while checking convergence impact; overlapping computation with communication, as implemented in Horovod [@sergeev2018horovod]; and using faster interconnects (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. InfiniBand at `{python} NetworkWall.network_bw_gb_per_s_str`).
 
 :::
 
@@ -4863,7 +4863,7 @@ Flash Attention exemplifies a fundamental systems engineering principle: **IO-aw
 
 This principle extends beyond attention. In IO-aware matrix multiplication, tiling algorithms like those in CUTLASS minimize DRAM traffic by maximizing data reuse in fast caches. A naive $m{\times}m$ matrix multiply performs $\mathcal{O}(m^3)$ FLOPs with $\mathcal{O}(m^2)$ memory traffic, while blocked algorithms maintain $\mathcal{O}(m^3)$ FLOPs but reduce cache misses through locality optimization.
 
-The same logic applies to communication-efficient distributed training: gradient compression techniques trade extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms, where a 10 percent increase in FLOPs that halves memory traffic yields 3--5$\times$ energy savings.
+The same byte-movement principle reappears in communication-efficient distributed training, where gradient compression trades extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms, where a 10 percent increase in FLOPs that halves memory traffic yields 3--5$\times$ energy savings. This section establishes the IO-aware heuristic; distributed and edge deployment settings reuse the same byte-movement logic.
 
 Flash Attention transforms practical model training capabilities. By eliminating the $\mathcal{O}(S^2)$ memory bottleneck, it enables:
 
@@ -6436,7 +6436,7 @@ Within a single node, NVLink provides enough bandwidth to overlap gradient synch
 
 Recall the energy-movement invariant\index{Energy-Movement Invariant!distributed training} from @sec-data-engineering: moving data is 100--1,000$\times$ more expensive than computing on it. In distributed training, this physical law manifests as the communication tax\index{Distributed Training!communication tax}.
 
-Synchronizing gradients across a fleet of GPUs means moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{\text{move}}$ across the network) exceeds the energy for computation ($E_{\text{compute}}$), system efficiency $(\eta_{\text{hw}})$ collapses. Techniques like mixed precision (@sec-model-training-mixedprecision-training-9218) and **Gradient Compression**\index{Gradient Compression!definition} address this directly: they reduce the bytes moved per synchronization step, managing the physical limits of distributed scaling.
+Synchronizing gradients across a fleet of GPUs means moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{\text{move}}$ across the network) exceeds the energy for computation ($E_{\text{compute}}$), system efficiency $(\eta_{\text{hw}})$ collapses. Techniques like mixed precision (@sec-model-training-mixedprecision-training-9218) and gradient compression\index{Gradient Compression!definition}, which reduces communicated gradient bytes through sparsity, quantization, or encoding, address this directly by managing the physical limits of distributed scaling.
 
 :::
 

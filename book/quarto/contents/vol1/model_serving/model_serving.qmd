@@ -114,7 +114,7 @@ class BlackFridayCalc:
 **Fix**:
 
 1.  **Load shedding**\index{Load Shedding!coordinated}: Reject excess requests immediately to keep the queue short.
-2.  **Autoscaling**: Spin up more replicas before utilization hits the "knee" of the curve.
+2.  **Autoscaling**: Use an operational control loop to spin up more serving replicas before utilization hits the "knee" of the curve.
 3.  **Degradation**: Serve cached/dumber recommendations to reduce compute cost per query.
 
 **Systems lesson**: High average throughput does not protect a serving system from collapse. Tail latency control requires keeping utilization below the queueing knee, even if that means shedding load or serving a cheaper fallback.
@@ -882,15 +882,15 @@ The model\index{Serving!TinyML}\index{TinyML!bare-metal serving} is compiled int
 
 @Tbl-serving-spectrum summarizes *how* these deployment contexts shape serving system design:
 
-| **Characteristic**   | **Cloud/Data center** | **Mobile/Edge**      | **TinyML**       |
-|:---------------------|:----------------------|:---------------------|:-----------------|
-| **Latency Target**   | 10–100 ms             | 20–50 ms             | 1–100 ms         |
-| **Batch Size**       | 1–128 (dynamic)       | 1 (fixed)            | 1 (fixed)        |
-| **Memory**           | 16–80 GB VRAM         | 2–8 GB shared        | 256 KB–2 MB SRAM |
-| **Power**            | 300–700 W             | 1–10 W               | 1–100 mW         |
-| **Update Mechanism** | Container deploy      | App store update     | Firmware OTA     |
-| **Failure Mode**     | Retry/failover        | Graceful degradation | Silent or reset  |
-| **Monitoring**       | Full telemetry        | Limited analytics    | Heartbeat only   |
+| **Characteristic**   | **Cloud/Data center** | **Mobile/Edge**      | **TinyML**                  |
+|:---------------------|:----------------------|:---------------------|:----------------------------|
+| **Latency Target**   | 10–100 ms             | 20–50 ms             | 1–100 ms                    |
+| **Batch Size**       | 1–128 (dynamic)       | 1 (fixed)            | 1 (fixed)                   |
+| **Memory**           | 16–80 GB VRAM         | 2–8 GB shared        | 256 KB–2 MB SRAM            |
+| **Power**            | 300–700 W             | 1–10 W               | 1–100 mW                    |
+| **Update Mechanism** | Container deploy      | App store update     | Firmware over-the-air (OTA) |
+| **Failure Mode**     | Retry/failover        | Graceful degradation | Silent or reset             |
+| **Monitoring**       | Full telemetry        | Limited analytics    | Heartbeat only              |
 
 : **Serving Architecture Spectrum**: The deployment paradigm selected in @sec-ml-systems-comparative-analysis-paradigm-selection-bf66 shapes every aspect of serving system design. Cloud systems optimize for throughput with dynamic batching; mobile systems optimize for energy with fixed batch-1; TinyML systems operate under extreme memory and power constraints with no dynamic allocation. The physical walls (light, power, memory) that created these paradigms now dictate the serving constraints each must satisfy. {#tbl-serving-spectrum}
 
@@ -1352,7 +1352,7 @@ This architecture serves three functions. First, concurrency management: servers
 
 [^fn-nchw-nhwc-serving]: **NCHW and NHWC (Tensor Memory Layouts)**: These acronyms encode the memory layout order of 4D image tensors: N (batch), C (channels), H (height), W (width). NCHW places all values for one channel contiguously, enabling vectorized convolution on GPUs; NHWC interleaves channels at each spatial position, aligning better with CPU single instruction, multiple data (SIMD) instructions. A format mismatch between client and server can produce incorrect tensors even when the shape appears valid, so serving code should make layout conversions explicit. \index{NCHW!tensor layout}
 
-Third, model management: inference servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and completing warmup inferences before exposing the model to live traffic. Among these components, the scheduler deserves special attention because it embodies the core serving trade-off between throughput and latency.
+Third, model management: inference servers manage the lifecycle of loaded model artifacts, including loading weights into VRAM, tracking which artifact version is active, and completing warmup inferences before exposing the model to live traffic. Full registries, release gates, and rollback governance belong to @sec-ml-operations; the local serving concern is whether the right artifact is loaded and ready. Among these components, the scheduler deserves special attention because it embodies the core serving trade-off between throughput and latency.
 
 The **Scheduler**\index{Scheduler!inference server} is the "brain" of the inference server. It implements the dynamic batching logic discussed in @sec-model-serving-throughput-optimization-18d1. The scheduler must decide whether to run a single request immediately to minimize its latency or wait five milliseconds for a second request and process them together to maximize throughput.
 
@@ -3454,7 +3454,7 @@ The batching and memory techniques covered here establish the foundation for LLM
 
 Language model serving introduces challenges beyond the batching and memory principles established here. The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques like speculative decoding\index{Speculative Decoding!latency reduction}\index{Speculative Decoding!draft model verification} use small draft models to propose multiple tokens that the target model verifies in parallel, achieving 2--3$\times$ latency reduction for interactive applications. Weight-only quantization (INT4 weights with FP16 activations) proves more effective than activation quantization for memory-bandwidth-bound LLM inference.
 
-These LLM-specific optimizations build directly on the foundations this chapter establishes: queuing theory governs request scheduling, batching trade-offs determine throughput-latency curves, and precision selection follows the same accuracy-efficiency principles. The serving fundamentals apply universally; LLM serving adds domain-specific techniques atop this foundation. Advanced treatments provide detailed coverage of KV cache optimization, including advanced techniques for multi-tenant serving and distributed inference.
+These LLM-specific optimizations build directly on the foundations this chapter establishes: queuing theory governs request scheduling, batching trade-offs determine throughput-latency curves, and precision selection follows the same accuracy-efficiency principles. The serving fundamentals apply universally; LLM serving adds domain-specific techniques atop this foundation. Advanced treatments provide detailed coverage of KV cache optimization, including techniques for multi-tenant serving, where one fleet shares capacity across users, and distributed inference, where one request may be split across machines.
 
 :::
 
@@ -3808,9 +3808,9 @@ Interactive LLM services usually need separate SLOs for responsiveness, generati
 
 - **TTFT**: < 500 ms (for a 1000-token prompt)
 - **TPOT**: < 50 ms (equivalent to ~20 tokens/s, faster than human reading speed)
-- **Throughput**: > 1000 tokens/s aggregate across all users
+- **Throughput**: > 1000 tokens/s aggregate across active serving replicas
 
-The systems point is that a single "latency" number hides the prefill/decode split: TTFT is the blank-screen budget, TPOT is the reading-flow budget, and throughput determines whether those targets hold under shared fleet load.
+The systems point is that a single "latency" number hides the prefill/decode split: TTFT is the blank-screen budget, TPOT is the reading-flow budget, and aggregate service throughput, measured as tokens/s summed across active serving replicas, determines whether those targets hold under shared load.
 
 :::
 
@@ -3840,7 +3840,7 @@ The memory pressure from KV caches can be further mitigated through architectura
 
 When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV Cache Offloading**\index{KV Cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. While retrieving offloaded context introduces a latency "tax" due to PCIe bandwidth limits (@sec-model-serving-model-swapping-host-memory-c54f), it prevents Out-of-Memory (OOM) failures and enables handling much larger context windows than the hardware could otherwise support.
 
-Advanced techniques including speculative decoding[^fn-speculative-decoding] and distributed parallelism are covered in specialized treatments of large-scale systems.
+Advanced techniques including speculative decoding[^fn-speculative-decoding] and distributed parallelism, where one request is split across multiple devices or machines, are covered in specialized treatments of large-scale systems.
 
 [^fn-speculative-decoding]: **Speculative Decoding**: A small "draft" model generates $k$ candidate tokens autoregressively; the large target model then verifies all $k$ in a single parallel forward pass. When the draft model's proposals are accepted at rate $\alpha$, effective throughput scales as $k \cdot \alpha$—but verification is parallel, so wall-clock cost is approximately one large-model step regardless of $k$. At $\alpha = 0.8$ with $k = 4$, speculative decoding delivers roughly 3.2$\times$ throughput improvement over sequential decoding without modifying the target model. This breaks the serial autoregressive bottleneck at the runtime layer, not the architecture layer. \index{Speculative Decoding!throughput}
 
@@ -4291,7 +4291,7 @@ This is why CPUs often outperform GPUs at batch size one for small models\index{
 
 ### Model serialization and fast loading {#sec-model-serving-fast-model-loading-1109}
 
-In autoscaling systems, the time to spin up a new node is critical. A major component of "Cold Start" (@sec-model-serving-model-loading-initialization-cc5a) is simply reading the model weights from disk into memory. The choice of serialization format determines how quickly this loading can occur.
+Autoscaling systems are operational control loops that add or remove serving replicas based on load. In those systems, the time to spin up a new node is critical. A major component of "Cold Start" (@sec-model-serving-model-loading-initialization-cc5a) is simply reading the model weights from disk into memory. The choice of serialization format determines how quickly this loading can occur.
 
 The standard PyTorch `torch.load()` uses Python's `pickle` format\index{Pickle!loading overhead}. This approach is inefficient because it requires the CPU to unpickle objects one by one, copy them into memory, and then often copy them again to the GPU. A faster alternative is memory mapping\index{mmap!zero-copy loading}, which allows the OS to map a file directly into the process's virtual address space. The data is effectively "loaded" only when accessed, and the OS handles the transfer from disk to RAM efficiently.
 
@@ -4548,7 +4548,7 @@ class CapacityPlanningRecap:
     cp_final_ceil_str = fmt_count(cp_final_ceil_value, commas=False, label="V100")
 ```
 
-The worked example in @sec-model-serving-queuing-theory-tail-latency-29a6 demonstrates the complete workflow: starting from a 50 ms p99 SLO and 5,000 QPS target, deriving the conservative M/M/1 safe utilization threshold of `{python} CapacityPlanningRecap.cp_rho_safe_pct_str` from @eq-p99-latency, and determining GPU count with headroom of `{python} CapacityPlanningRecap.cp_final_ceil_str`. Production systems typically provision for peak load plus 30 percent headroom, using auto-scaling to reduce costs during low-traffic periods while meeting latency objectives during peaks. The key insight from capacity planning is that throughput numbers are meaningful only when coupled with latency guarantees: a system achieving 10,000 QPS but violating the p99 SLO on 5 percent of requests is actually serving 9,500 valid QPS and failing on the rest.
+The worked example in @sec-model-serving-queuing-theory-tail-latency-29a6 demonstrates the complete workflow: starting from a 50 ms p99 SLO and 5,000 QPS target, deriving the conservative M/M/1 safe utilization threshold of `{python} CapacityPlanningRecap.cp_rho_safe_pct_str` from @eq-p99-latency, and determining GPU count with headroom of `{python} CapacityPlanningRecap.cp_final_ceil_str`. Production systems typically provision for peak load plus 30 percent headroom, using autoscaling to reduce costs during low-traffic periods while meeting latency objectives during peaks; @sec-ml-operations develops the operational policy layer around these serving calculations. The key insight from capacity planning is that throughput numbers are meaningful only when coupled with latency guarantees: a system achieving 10,000 QPS but violating the p99 SLO on 5 percent of requests is actually serving 9,500 valid QPS and failing on the rest.
 
 ### Production case study: Serving 8-billion-parameter Llama 3 {#sec-model-serving-production-case-study-serving-llama38b-0499}
 
