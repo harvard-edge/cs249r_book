@@ -5590,7 +5590,106 @@ Heterogeneous SoCs address this complexity through machine learning-based runtim
 
 No single processor architecture can optimally handle the diverse computational patterns in AI applications, so heterogeneous acceleration becomes a coordination problem rather than a hardware inventory. Efficient mobile AI systems deliver high performance only when processor assignment, memory coherence, thermal limits, and latency constraints are managed together.
 
-The complexity of hardware acceleration, spanning data center architectures to heterogeneous mobile SoCs, leaves room for misconceptions and suboptimal design decisions.
+The same coordination problem also has an energy consequence. If hardware selection determines how much data moves, how often accelerators stall, and how efficiently arithmetic maps to silicon, then it also determines how much energy the deployment consumes for each useful prediction.
+
+## Hardware Sustainability {#sec-hardware-acceleration-hardware-sustainability-e902}
+
+Beyond raw performance, we must evaluate hardware sustainability\index{Hardware Sustainability!carbon footprint} through the lens of silicon sustainability\index{Sustainability!silicon design}. In the era of planetary-scale AI, performance per watt\index{Performance per Watt!efficiency metric}\index{Energy Efficiency!TFLOPS per watt} is not merely a mobile constraint but a global environmental mandate. A quick fleet calculation makes the environmental stakes concrete.
+
+```{python}
+#| echo: false
+#| label: carbon-roi-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CARBON ROI OF SPECIALIZED SILICON
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Carbon ROI of Specialized Silicon" callout
+# │
+# │ Goal: Quantify carbon savings of NPUs vs CPUs for inference fleets.
+# │ Show: The 200× efficiency gap and ~350 metric tons CO2e saved per year.
+# │ How: Compare power consumption and compute efficiency, then project
+# │      daily energy use and annual carbon savings.
+# │
+# │ Imports: mlsysim.core.constants (DAYS_PER_YEAR), mlsysim.book (fmt)
+# │ Exports: CarbonRoiCalc.cpu_power_w_str, CarbonRoiCalc.npu_power_w_str,
+# │          CarbonRoiCalc.cpu_tflop_per_s_str, CarbonRoiCalc.npu_tflop_per_s_str,
+# │          CarbonRoiCalc.cpu_eff_str, CarbonRoiCalc.npu_eff_str,
+# │          CarbonRoiCalc.eff_gap_mult_str, CarbonRoiCalc.workload_str,
+# │          CarbonRoiCalc.cpu_energy_day_kwh_str, CarbonRoiCalc.npu_energy_day_kwh_str,
+# │          CarbonRoiCalc.carbon_intensity_str, CarbonRoiCalc.co2_saved_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
+
+class CarbonRoiCalc:
+    """Carbon ROI of specialized NPU silicon vs generic CPU inference fleets."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cpu_power          = 100 * watt    # scenario baseline per CPU server doing inference
+    cpu_flops          = 1 * (TFLOP / second)      # scenario baseline peak CPU inference throughput
+    cpu_servers        = 1000   # Fleet size for 1B inferences/day example
+    npu_power          = 5 * watt      # scenario baseline per NPU chip
+    npu_flops          = 10 * (TFLOP / second)     # scenario baseline peak NPU inference throughput
+    npu_chips          = 100    # Same throughput class as 1000 CPUs
+    inferences_per_day = 1 * BILLION    # 1 billion inferences/day
+    carbon_intensity   = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh * kg / kWh
+    cpu_power_total    = cpu_servers * cpu_power
+    npu_power_total    = npu_chips * npu_power
+    cpu_energy_day     = (cpu_power_total * HOURS_PER_DAY * hour).to(kWh)
+    npu_energy_day     = (npu_power_total * HOURS_PER_DAY * hour).to(kWh)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cpu_eff = (cpu_flops / cpu_power).to(TFLOP / second / watt)
+    npu_eff = (npu_flops / npu_power).to(TFLOP / second / watt)
+    eff_gap = (npu_eff / cpu_eff).to_base_units().magnitude
+
+    energy_savings_day = cpu_energy_day - npu_energy_day
+    cpu_co2_year = (cpu_energy_day * DAYS_PER_YEAR * carbon_intensity).to(metric_ton)
+    co2_saved_year = (energy_savings_day * DAYS_PER_YEAR * carbon_intensity).to(metric_ton)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(eff_gap == 200, f"Efficiency gap should be 200×, got {eff_gap}×")
+    check(co2_saved_year > 300 * metric_ton, f"CO2e savings should exceed 300 tons, got {co2_saved_year.to(metric_ton).magnitude}")
+    check(co2_saved_year < cpu_co2_year,
+          "Annual savings cannot exceed total CPU fleet emissions.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    cpu_power_w_str      = fmt_power(cpu_power, unit=watt, precision=0, commas=True)
+    npu_power_w_str      = fmt_power(npu_power, unit=watt, precision=0, commas=True)
+    cpu_servers_str    = fmt(cpu_servers, precision=0)
+    npu_chips_str      = fmt(npu_chips, precision=0)
+    cpu_tflop_per_s_str     = fmt_flop_rate(cpu_flops, unit=TFLOP / second, precision=0, commas=True)
+    npu_tflop_per_s_str     = fmt_flop_rate(npu_flops, unit=TFLOP / second, precision=0, commas=True)
+    cpu_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(cpu_eff, unit=TFLOP / second / watt, precision=2)
+    npu_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(npu_eff, unit=TFLOP / second / watt, precision=0)
+    eff_gap_mult_str        = fmt_multiple(eff_gap, precision=0, commas=True)
+    workload_str       = fmt_count(inferences_per_day, scale="billion", commas=False, scale_style="word")
+    cpu_energy_day_kwh_str = fmt_energy(cpu_energy_day, unit=kWh, precision=0, commas=True)
+    npu_energy_day_kwh_str = fmt_energy(npu_energy_day, unit=kWh, precision=0, commas=True)
+    carbon_intensity_str = fmt_carbon_intensity(carbon_intensity, unit=kg / kWh, precision=3)
+    co2_saved_str      = fmt_emissions(co2_saved_year, unit=metric_ton, precision=1)
+```
+
+::: {#nbk-hw-acceleration-carbon-roi-specialized-silicon .callout-notebook title="The carbon ROI of specialized silicon"}
+
+**Problem**: Should an inference fleet run on generic CPUs or invest in specialized NPUs (Neural Processing Units)?
+
+**Physics**: Specialized hardware allocates a larger fraction of its transistors to arithmetic units and fewer to control logic.
+
+*   **CPU inference**: `{python} CarbonRoiCalc.cpu_power_w_str` for `{python} CarbonRoiCalc.cpu_tflop_per_s_str` (efficiency = `{python} CarbonRoiCalc.cpu_efficiency_tflop_per_s_per_w_str`).
+*   **NPU inference**: `{python} CarbonRoiCalc.npu_power_w_str` for `{python} CarbonRoiCalc.npu_tflop_per_s_str` (efficiency = `{python} CarbonRoiCalc.npu_efficiency_tflop_per_s_per_w_str`).
+*   **The gap**: The NPU is `{python} CarbonRoiCalc.eff_gap_mult_str` more energy-efficient per operation.
+
+**Math**:
+
+1.  **Workload**: `{python} CarbonRoiCalc.workload_str` inferences per day.
+2.  **CPU fleet energy**: `{python} CarbonRoiCalc.cpu_servers_str` CPU servers $\times$ `{python} CarbonRoiCalc.cpu_power_w_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.cpu_energy_day_kwh_str`/day.
+3.  **NPU fleet energy**: `{python} CarbonRoiCalc.npu_chips_str` NPU chips $\times$ `{python} CarbonRoiCalc.npu_power_w_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.npu_energy_day_kwh_str`/day.
+4.  **Carbon savings**: At `{python} CarbonRoiCalc.carbon_intensity_str`, switching to NPUs saves ~`{python} CarbonRoiCalc.co2_saved_str` of CO~2~ per year.
+
+**Systems insight**: Specialized accelerators can materially reduce the energy use of matched inference workloads. For workloads with stable arithmetic patterns and high deployment volume, the per-operation energy gains compound into substantial reductions in operational carbon footprint relative to general-purpose hardware.
+
+:::
+
+The sustainability perspective reinforces a theme that has recurred throughout this chapter: hardware selection is never a purely technical decision. Performance per watt, carbon cost, and total cost of ownership must all enter the decision framework alongside peak FLOP/s and memory bandwidth. With scaling, heterogeneity, and sustainability now in view, the remaining step is to identify the misconceptions that cause teams to choose the wrong hardware path.
 
 ## Fallacies and Pitfalls {#sec-hardware-acceleration-fallacies-pitfalls-dc1f}
 
@@ -5960,108 +6059,7 @@ Before procuring hardware, can you validate all three hard constraints?
 
 :::
 
-This checklist synthesizes the principles developed throughout this chapter, translating theoretical understanding into practical engineering decisions.
-
-These fallacies and pitfalls reveal a recurring theme: optimizing for the wrong metric wastes resources. "Resources," however, extends beyond compute time and engineer-hours. As AI systems scale to planetary deployment, with millions of GPUs consuming megawatts of power, the environmental cost of suboptimal hardware choices accumulates at societal scale. The same architectural principles that maximize performance per watt also minimize carbon per inference, making efficiency optimization both an engineering imperative and an environmental one.
-
-## Hardware Sustainability {#sec-hardware-acceleration-hardware-sustainability-e902}
-
-Beyond raw performance, we must evaluate hardware sustainability\index{Hardware Sustainability!carbon footprint} through the lens of silicon sustainability\index{Sustainability!silicon design}. In the era of planetary-scale AI, performance per watt\index{Performance per Watt!efficiency metric}\index{Energy Efficiency!TFLOPS per watt} is not merely a mobile constraint but a global environmental mandate. A quick fleet calculation makes the environmental stakes concrete.
-
-```{python}
-#| echo: false
-#| label: carbon-roi-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CARBON ROI OF SPECIALIZED SILICON
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Carbon ROI of Specialized Silicon" callout
-# │
-# │ Goal: Quantify carbon savings of NPUs vs CPUs for inference fleets.
-# │ Show: The 200× efficiency gap and ~350 metric tons CO2e saved per year.
-# │ How: Compare power consumption and compute efficiency, then project
-# │      daily energy use and annual carbon savings.
-# │
-# │ Imports: mlsysim.core.constants (DAYS_PER_YEAR), mlsysim.book (fmt)
-# │ Exports: CarbonRoiCalc.cpu_power_w_str, CarbonRoiCalc.npu_power_w_str,
-# │          CarbonRoiCalc.cpu_tflop_per_s_str, CarbonRoiCalc.npu_tflop_per_s_str,
-# │          CarbonRoiCalc.cpu_eff_str, CarbonRoiCalc.npu_eff_str,
-# │          CarbonRoiCalc.eff_gap_mult_str, CarbonRoiCalc.workload_str,
-# │          CarbonRoiCalc.cpu_energy_day_kwh_str, CarbonRoiCalc.npu_energy_day_kwh_str,
-# │          CarbonRoiCalc.carbon_intensity_str, CarbonRoiCalc.co2_saved_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
-
-class CarbonRoiCalc:
-    """Carbon ROI of specialized NPU silicon vs generic CPU inference fleets."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cpu_power          = 100 * watt    # scenario baseline per CPU server doing inference
-    cpu_flops          = 1 * (TFLOP / second)      # scenario baseline peak CPU inference throughput
-    cpu_servers        = 1000   # Fleet size for 1B inferences/day example
-    npu_power          = 5 * watt      # scenario baseline per NPU chip
-    npu_flops          = 10 * (TFLOP / second)     # scenario baseline peak NPU inference throughput
-    npu_chips          = 100    # Same throughput class as 1000 CPUs
-    inferences_per_day = 1 * BILLION    # 1 billion inferences/day
-    carbon_intensity   = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh * kg / kWh
-    cpu_power_total    = cpu_servers * cpu_power
-    npu_power_total    = npu_chips * npu_power
-    cpu_energy_day     = (cpu_power_total * HOURS_PER_DAY * hour).to(kWh)
-    npu_energy_day     = (npu_power_total * HOURS_PER_DAY * hour).to(kWh)
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cpu_eff = (cpu_flops / cpu_power).to(TFLOP / second / watt)
-    npu_eff = (npu_flops / npu_power).to(TFLOP / second / watt)
-    eff_gap = (npu_eff / cpu_eff).to_base_units().magnitude
-
-    energy_savings_day = cpu_energy_day - npu_energy_day
-    cpu_co2_year = (cpu_energy_day * DAYS_PER_YEAR * carbon_intensity).to(metric_ton)
-    co2_saved_year = (energy_savings_day * DAYS_PER_YEAR * carbon_intensity).to(metric_ton)
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(eff_gap == 200, f"Efficiency gap should be 200×, got {eff_gap}×")
-    check(co2_saved_year > 300 * metric_ton, f"CO2e savings should exceed 300 tons, got {co2_saved_year.to(metric_ton).magnitude}")
-    check(co2_saved_year < cpu_co2_year,
-          "Annual savings cannot exceed total CPU fleet emissions.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cpu_power_w_str      = fmt_power(cpu_power, unit=watt, precision=0, commas=True)
-    npu_power_w_str      = fmt_power(npu_power, unit=watt, precision=0, commas=True)
-    cpu_servers_str    = fmt(cpu_servers, precision=0)
-    npu_chips_str      = fmt(npu_chips, precision=0)
-    cpu_tflop_per_s_str     = fmt_flop_rate(cpu_flops, unit=TFLOP / second, precision=0, commas=True)
-    npu_tflop_per_s_str     = fmt_flop_rate(npu_flops, unit=TFLOP / second, precision=0, commas=True)
-    cpu_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(cpu_eff, unit=TFLOP / second / watt, precision=2)
-    npu_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(npu_eff, unit=TFLOP / second / watt, precision=0)
-    eff_gap_mult_str        = fmt_multiple(eff_gap, precision=0, commas=True)
-    workload_str       = fmt_count(inferences_per_day, scale="billion", commas=False, scale_style="word")
-    cpu_energy_day_kwh_str = fmt_energy(cpu_energy_day, unit=kWh, precision=0, commas=True)
-    npu_energy_day_kwh_str = fmt_energy(npu_energy_day, unit=kWh, precision=0, commas=True)
-    carbon_intensity_str = fmt_carbon_intensity(carbon_intensity, unit=kg / kWh, precision=3)
-    co2_saved_str      = fmt_emissions(co2_saved_year, unit=metric_ton, precision=1)
-```
-
-::: {#nbk-hw-acceleration-carbon-roi-specialized-silicon .callout-notebook title="The carbon ROI of specialized silicon"}
-
-**Problem**: Should an inference fleet run on generic CPUs or invest in specialized NPUs (Neural Processing Units)?
-
-**Physics**: Specialized hardware allocates a larger fraction of its transistors to arithmetic units and fewer to control logic.
-
-*   **CPU inference**: `{python} CarbonRoiCalc.cpu_power_w_str` for `{python} CarbonRoiCalc.cpu_tflop_per_s_str` (efficiency = `{python} CarbonRoiCalc.cpu_efficiency_tflop_per_s_per_w_str`).
-*   **NPU inference**: `{python} CarbonRoiCalc.npu_power_w_str` for `{python} CarbonRoiCalc.npu_tflop_per_s_str` (efficiency = `{python} CarbonRoiCalc.npu_efficiency_tflop_per_s_per_w_str`).
-*   **The gap**: The NPU is `{python} CarbonRoiCalc.eff_gap_mult_str` more energy-efficient per operation.
-
-**Math**:
-
-1.  **Workload**: `{python} CarbonRoiCalc.workload_str` inferences per day.
-2.  **CPU fleet energy**: `{python} CarbonRoiCalc.cpu_servers_str` CPU servers $\times$ `{python} CarbonRoiCalc.cpu_power_w_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.cpu_energy_day_kwh_str`/day.
-3.  **NPU fleet energy**: `{python} CarbonRoiCalc.npu_chips_str` NPU chips $\times$ `{python} CarbonRoiCalc.npu_power_w_str` $\times$ 24 h $\approx$ `{python} CarbonRoiCalc.npu_energy_day_kwh_str`/day.
-4.  **Carbon savings**: At `{python} CarbonRoiCalc.carbon_intensity_str`, switching to NPUs saves ~`{python} CarbonRoiCalc.co2_saved_str` of CO~2~ per year.
-
-**Systems insight**: Specialized accelerators can materially reduce the energy use of matched inference workloads. For workloads with stable arithmetic patterns and high deployment volume, the per-operation energy gains compound into substantial reductions in operational carbon footprint relative to general-purpose hardware.
-
-:::
-
-The sustainability perspective reinforces a theme that has recurred throughout this chapter: hardware selection is never a purely technical decision. Performance per watt, carbon cost, and total cost of ownership must all enter the decision framework alongside peak FLOP/s and memory bandwidth. With these considerations in place, we can now synthesize the principles that span from silicon physics to system-level optimization.
+This checklist synthesizes the principles developed throughout this chapter, translating theoretical understanding into practical engineering decisions. Together, these fallacies reduce the chapter's machinery to a diagnostic habit: start from the workload, choose the bottleneck metric, match the hardware path to that metric, and budget for the portability, scaling, and energy consequences of that choice.
 
 ## Summary {#sec-hardware-acceleration-summary-a5f8}
 
