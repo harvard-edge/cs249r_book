@@ -44,6 +44,7 @@ One model is a project. A hundred models is a system of systems, where interacti
 - Compare centralized, embedded, and hybrid organizational patterns for ML platform teams
 - Evaluate feature store architectures that maintain freshness SLOs and point-in-time correctness at scale
 - Apply the total cost of ownership framework to guide scale-stage investment
+- Diagnose production ML incidents by linking symptoms to data, platform, serving, or model-control failures
 
 :::
 
@@ -570,7 +571,7 @@ plt.show()
 
 :::
 
-Platform ROI is one lever; the cost of individual training runs and the capacity decisions that follow are another.
+Platform ROI is one lever; the cost of individual training runs and the capacity decisions that follow are another. The next example makes that capacity question concrete by costing a single 2,048-GPU H100 run. It also sets up the fleet-economics section below, because utilization, checkpointing, and carbon accounting become platform-level decisions rather than isolated experiment costs.
 
 ### Capacity planning and cost of training {#sec-ml-operations-scale-capacity-planning-cost-training}
 
@@ -2174,7 +2175,7 @@ Latency gates catch overt performance violations, but some regressions pass ever
 
 #### Fairness gates {#sec-ml-operations-scale-fairness-gates-145c}
 
-For models affecting users, fairness validation[^fn-fairness-validation-tradeoff] turns a policy commitment into a release gate [@hardt2016equality]. The platform cannot simply ask whether "the model is fair" because different contexts encode fairness differently. @Sec-responsible-ai later studies these definitions as social and statistical criteria; in operations, they first appear as executable thresholds. @Eq-demographic-parity expresses one operational choice: the probability of a positive prediction must differ by less than threshold $\epsilon$ between protected groups $a$ and $b$. @Eq-equalized-odds encodes a stricter choice: prediction behavior must be similar across groups after conditioning on the true outcome.
+Fairness concepts become operational at release time when policy choices are encoded as thresholds. For models affecting users, fairness validation[^fn-fairness-validation-tradeoff] turns a policy commitment into a release gate [@hardt2016equality]. The platform cannot simply ask whether "the model is fair" because different contexts encode fairness differently. @Sec-responsible-ai later studies these definitions as social and statistical criteria; in operations, they first appear as executable thresholds. @Eq-demographic-parity expresses one operational choice: the probability of a positive prediction must differ by less than threshold $\epsilon$ between protected groups $a$ and $b$. @Eq-equalized-odds encodes a stricter choice: prediction behavior must be similar across groups after conditioning on the true outcome.
 
 [^fn-fairness-validation-tradeoff]: **Fairness Validation in ML**\index{Fairness!validation in ml}: Multiple fairness definitions exist -- demographic parity, equalized odds, calibration -- and satisfying all simultaneously is mathematically impossible (the Chouldechova-Kleinberg impossibility result). This forces a systems design choice: automated validation gates must encode which fairness definition the organization prioritizes, making the gate configuration itself a policy decision that cannot be delegated to a generic threshold. \index{Fairness!validation, impossibility trade-off}
 
@@ -2910,7 +2911,7 @@ A mature CI/CD pipeline ensures that only healthy, verified models reach product
 
 ## Monitoring at Scale {#sec-ml-operations-scale-monitoring-scale-73c5}
 
-Application-layer drift detection depends on a healthy physical substrate. At fleet scale, a degraded NVLink connection or a thermally throttling GPU can masquerade as a software timeout.
+Application-layer drift detection depends on a healthy physical substrate. At fleet scale, a degraded NVLink connection or a thermally throttling GPU can masquerade as a software timeout. Monitoring therefore starts bottom-up with fleet telemetry, then climbs through alert aggregation, model-quality signals, dashboards, and cost observability so that operators can route a symptom to the layer that can actually repair it.
 
 ### Fleet telemetry and hardware observability {#sec-ops-scale-fleet-telemetry}
 
@@ -3235,7 +3236,7 @@ Fraud monitoring binds on adversarial urgency. Missed fraud creates immediate fi
 
 LLM monitoring binds on semantic quality, which is difficult to measure from service metrics alone. Latency, token generation rate, error rate, and safety-classifier scores establish operational health; user satisfaction signals such as thumbs-up/thumbs-down rates, regeneration rate, and task-completion proxies add delayed quality evidence. Safety metrics such as toxicity detections, refusal rate, and hallucination indicators remain partial, so they should trigger review rather than claim complete coverage.
 
-Standard monitoring cannot detect semantic safety failures such as persuasive misinformation or skilled manipulation. Red teaming\index{Red Teaming} adds an adversarial testing channel: human evaluators or automated probes attempt jailbreaks\index{Jailbreak} before deployment, and a smaller continuous probe set verifies that production safety filters remain active. Sampling outputs for delayed human review closes the loop for failures that automated metrics do not observe.
+Standard monitoring cannot detect semantic safety failures such as persuasive misinformation or skilled manipulation. Here, red teaming\index{Red Teaming} is a production monitoring channel rather than the full adversarial-evaluation program developed later: human evaluators or automated probes attempt jailbreaks\index{Jailbreak} before deployment, and a smaller continuous probe set verifies that production safety filters remain active. Sampling outputs for delayed human review closes the loop for failures that automated metrics do not observe.
 
 ### Observability architecture {#sec-ml-operations-scale-observability-architecture-ba87}
 
@@ -3676,7 +3677,7 @@ Regular review of these metrics identifies systemic inefficiencies and guides pl
 
 ### RAG vs. fine-tuning: The knowledge operations trade-off {#sec-ml-operations-scale-rag-vs-finetuning-knowledge-operations-tradeoff-77f3}
 
-A critical operational decision for LLM platforms is how to inject domain knowledge. Retrieval-augmented generation\index{Retrieval-Augmented Generation} (RAG) retrieves documents at inference time and places them in the prompt [@lewis2020retrieval]. Fine-tuning, including supervised fine-tuning (SFT) and low-rank adaptation (LoRA), stores the adaptation in model weights or adapter weights. Both approaches can improve task behavior, but they move cost and failure risk to different places in the fleet.
+This subsection is not teaching LLM adaptation mechanics from scratch; it compares two operational ways to place domain knowledge in the fleet. Retrieval-augmented generation\index{Retrieval-Augmented Generation} (RAG) retrieves documents at inference time and places them in the prompt [@lewis2020retrieval]. Fine-tuning stores adaptation in model weights or adapter weights: supervised fine-tuning (SFT) trains on curated input-output examples, while Low-Rank Adaptation (LoRA) stores small adapter-weight deltas [@hu2021lora]. Both approaches can improve task behavior, but they move cost and failure risk to different places in the fleet.
 
 RAG chooses freshness and attribution over lower-cost inference. Updating a document index can change the system's answers without retraining the model, and retrieved passages provide a concrete source trail for generated claims. The cost moves into the serving path: each query may carry a large payload of retrieved context, such as 10,000 extra tokens, increasing prefill attention work roughly quadratically with sequence length while growing the KV cache linearly with context length. FlashAttention reduces memory traffic and intermediate storage, but it does not remove the attention-compute or KV-cache footprint created by long context. Long contexts also introduce a quality risk because the model may underuse relevant evidence when the prompt contains too much retrieved material.
 
@@ -4094,11 +4095,11 @@ The TCO framework transforms these architectural debates from opinion-based disc
 
 Consider a fraud detection system that needs to know a user's transaction volume over the last ten minutes. In production, this requires a sub-millisecond database lookup. During training, however, evaluating a year's worth of historical data requires a massive distributed join across billions of rows. When the logic to compute "transaction volume" differs even slightly between the batch processing and the real-time lookup, the resulting training-serving skew will silently destroy the model's performance.
 
-@Sec-ml-operations-scale-feature-store-architecture-51da introduces feature store architectures with online stores for low-latency serving and offline stores for training data generation. Operating these systems at scale presents unique challenges in freshness, consistency, and performance. The core problem feature stores solve is the **training-serving gap**\index{Training-Serving Gap}: features computed during training must be reproducible during serving, but the computational contexts differ fundamentally: *batch* vs. *real-time*, *hours* vs. *milliseconds*. That gap often manifests as training-serving skew\index{Training-Serving Skew}, a critical failure mode where subtle differences in feature processing logic between batch training and real-time inference pipelines cause silent accuracy degradation.
+The first design decision is the dual-store architecture: online stores serve low-latency feature lookups, while offline stores generate reproducible training data. Operating these systems at scale presents unique challenges in freshness, consistency, and performance. The core problem feature stores solve is the **training-serving gap**\index{Training-Serving Gap}: features computed during training must be reproducible during serving, but the computational contexts differ fundamentally: *batch* vs. *real-time*, *hours* vs. *milliseconds*. That gap often manifests as training-serving skew\index{Training-Serving Skew}, a critical failure mode where subtle differences in feature processing logic between batch training and real-time inference pipelines cause silent accuracy degradation.
 
 ::: {#psp-ops-scale-training-serving-skew .callout-perspective title="Training-serving skew"}
 
-At fleet scale, the concern shifts from detecting training-serving skew in a single model to preventing it as a platform-level property: a feature store (see @sec-ml-operations-scale-feature-store-architecture-51da) provides the consistency guarantee that eliminates skew by construction—training and serving pipelines read from the same materialized feature store, making $f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$ an architectural invariant rather than a manual verification responsibility.
+At fleet scale, the concern shifts from detecting training-serving skew in a single model to controlling it as a platform-level property. A feature store reduces skew by making training and serving pipelines read from shared feature definitions and materialized feature values where possible, turning $f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$ into an architectural invariant that can be tested and monitored rather than a manual convention repeated by every team.
 
 :::
 
@@ -4391,7 +4392,7 @@ For `{python} FeatureStoreScale.storage_users_str`, `{python} FeatureStoreScale.
 
 Feature definitions are production interfaces, so changing one without versioning can break every dependent model. Versioning and lineage make this evolution governable rather than implicit.
 
-The later `user_engagement_score` incident makes the mechanics concrete. A platform team changes the feature from a 30-day z-score to a 7-day min-max scale. The output may still be a floating-point number, so schema validation alone can pass while the feature's meaning changes completely. Versioning names the semantic change before it reaches production; lineage identifies every model trained or served with the old meaning; backfill recomputes historical values for the new meaning; and freshness and quality checks decide whether the rewritten history is safe to use. Without that chain, a feature migration becomes a silent multi-model regression.
+A representative `user_engagement_score` incident makes the mechanics concrete. A platform team changes the feature from a 30-day z-score to a 7-day min-max scale. The output may still be a floating-point number, so schema validation alone can pass while the feature's meaning changes completely. Versioning names the semantic change before it reaches production; lineage identifies every model trained or served with the old meaning; backfill recomputes historical values for the new meaning; and freshness and quality checks decide whether the rewritten history is safe to use. Without that chain, a feature migration becomes a silent multi-model regression.
 
 A safe feature interface records both version dimensions and lineage fields. @Tbl-ops-scale-feature-version-lineage-components keeps those fields tied to their operational use.
 
@@ -4582,7 +4583,7 @@ By establishing shared contribution models and domain-specific platform leads, o
 
 ## Case Studies {#sec-ml-operations-scale-case-studies-8bfd}
 
-The case studies matter because each mature platform embodies a durable operations trade-off: standardization vs. velocity, freshness vs. cost, abstraction vs. control, or latency vs. model richness.
+The case studies matter because each mature platform embodies a durable operations trade-off: standardization vs. velocity, freshness vs. cost, abstraction vs. control, or latency vs. model richness. They also expose the control-plane failure modes that the following incident-response section formalizes.
 
 ### Uber Michelangelo {#sec-ml-operations-scale-uber-michelangelo-37ff}
 
@@ -4618,7 +4619,7 @@ Vertex also tackles the feature store problem with a focus on consistency and co
 
 ### Spotify ML platform {#sec-ml-operations-scale-spotify-ml-platform}
 
-Spotify's ML platform shows how personalization infrastructure balances exploration against exploitation at the scale of 500 million users. The core operational challenge is that optimizing strictly for immediate clicks (exploitation) creates "filter bubbles\index{Filter Bubble}" that degrade long-term user retention. To counter this, the platform supports counterfactual evaluation and contextual bandit algorithms directly in the serving path. The architecture separates the "candidate generation" phase (retrieving 1,000 potential songs) from the "ranking" phase (ordering the top 10). The candidate generators are diverse---some are collaborative filtering models [@koren2009] updated daily, while others are "algotorial" heuristics updated in real-time. This decoupling allows the platform to mix-and-match retrieval strategies without rewriting the heavy ranking logic, facilitating rapid experimentation with new content types like podcasts and audiobooks.
+Spotify's ML platform shows how personalization infrastructure balances exploration against exploitation at the scale of 500 million users. The core operational challenge is that optimizing strictly for immediate clicks (exploitation) creates "filter bubbles\index{Filter Bubble}" that degrade long-term user retention. To counter this, the platform supports counterfactual evaluation and contextual bandit algorithms, methods for estimating outcomes and allocating exploration traffic under partial feedback, directly in the serving path. The architecture separates the "candidate generation" phase (retrieving 1,000 potential songs) from the "ranking" phase (ordering the top 10). The candidate generators are diverse---some are collaborative filtering models [@koren2009] updated daily, while others are "algotorial" heuristics updated in real-time. This decoupling allows the platform to mix-and-match retrieval strategies without rewriting the heavy ranking logic, facilitating rapid experimentation with new content types like podcasts and audiobooks.
 
 A central component of their architecture is the **"Paved Road"**\index{Paved Road} for model orchestration [@spotify2019mlinfra]. Spotify uses a centralized Model Registry that enforces strict lineage tracking. Every model artifact in production is cryptographically linked to the specific dataset snapshot, code commit, and hyperparameter set used to create it. This rigorous tracking is essential for debugging "silent regressions." If a user complains about repetitive recommendations, an engineer can trace the exact lineage of the responsible model to find that a specific data pipeline upstream was delayed. This lineage system also enables automated "canary deployments." When a new model version is registered, the platform automatically deploys it to a small subset of users (for example, 1 percent) and compares business metrics (streams per session) against the control group. If the metrics drop, the rollback is automatic, preventing bad models from ever reaching the full user base.
 
@@ -4756,7 +4757,7 @@ Effective PIRs require psychological safety and a systems frame rather than indi
 
 ### Debugging distributed ML systems {#sec-ml-operations-scale-debugging-distributed-ml-systems-a2ea}
 
-Distributed training and inference shift debugging from a single failing process to a coordinated set of ranks, devices, and network paths.
+Distributed training and inference shift debugging from a single failing process to a coordinated set of ranks, devices, and network paths. Operator triage localizes the failing rank, collective, or resource so the right specialist can act; deep performance debugging then uses NCCL logs, per-rank memory traces, and profilers to explain the mechanism.
 
 #### Distributed failure diagnostics {#sec-ml-operations-scale-communication-failures-19b4}
 

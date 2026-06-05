@@ -1906,7 +1906,7 @@ These software practices catch implementation faults that surface through tests 
 
 As clusters scale to 100,000+ GPUs, the probability of a "Silent Data Corruption" (SDC) event (in which an ALU or HBM bit flip occurs without triggering ECC or hardware alerts) approaches certainty during large collective operations. Standard AllReduce algorithms assume that if a node is *alive*, its data is *correct*. In the machine learning fleet, we must transition to a Byzantine fault tolerance mindset: "Trust, but verify."
 
-A quick estimate makes the exposure concrete.
+Check-and-verify methods turn that mindset into a data-path invariant. The system computes a checksum, hash, or redundant reduction over each gradient shard or reduced buffer, compares the result across ranks or against an independently computed digest, and blocks the optimizer step when the verification disagrees. A quick estimate makes the exposure concrete.
 
 ```{python}
 #| echo: false
@@ -1938,7 +1938,7 @@ class SDCCollective:
 3. **The exposure**: In a 2-second window, the fleet has $100,000 \times (2/3600) \approx 55$ "GPU-hours" of exposure.
 4. **The probability**: $\Pr(\text{at least one SDC}) \approx$ `{python} SDCCollective.prob_str`.
 
-**Systems insight**: In a 100k-GPU fleet, a silent error occurs every 18,000 steps (roughly every 10 hours). If the AllReduce path does not implement checksummed collectives or hash-and-verify gradients, model parameters silently accumulate corrupted contributions and drift within half a day. Robustness moves from being a *restart* problem to a *verification* problem: the fleet must perform redundant reductions or use parity-protected gradients to catch silent parameter corruption.
+**Systems insight**: In a 100k-GPU fleet, a silent error occurs every 18,000 steps (roughly every 10 hours). Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, model parameters silently accumulate corrupted contributions and drift within half a day. Robustness moves from being a *restart* problem to a *verification* problem: the fleet must perform redundant reductions or use parity-protected gradients to catch silent parameter corruption.
 
 :::
 
@@ -2887,7 +2887,7 @@ Once a failure is classified, the recovery procedure executes a rigid sequence t
 
 6. **Training resumption**\index{Training!resumption}: The data loader fast-forwards to the correct batch index, and the training loop resumes from the checkpoint step.
 
-Automatic recovery systems perform these steps without human intervention. Modern training frameworks integrate with cluster managers to automate the entire sequence. DeepSpeed's `deepspeed.launch` can be configured for automatic restart on failure. PyTorch's `torchrun` (elastic launch) provides similar capabilities through its rendezvous mechanism.
+Automatic recovery systems perform these steps without human intervention. Modern training frameworks integrate with cluster managers to automate the entire sequence. DeepSpeed's `deepspeed.launch` can be configured for automatic restart on failure. PyTorch's `torchrun` (elastic launch) provides similar capabilities through its rendezvous mechanism, the coordinator-backed protocol by which surviving workers agree on membership and ranks after a restart.[^fn-rendezvous-elastic]
 
 Recovery validation is the final and often overlooked step. After loading a checkpoint, validation confirms successful recovery by verifying model parameters match expected shapes and dtypes, running a few training steps and checking that the loss is consistent with prefailure values, and confirming gradient computations produce expected statistics. If the loss diverges immediately after recovery, the checkpoint itself may be corrupted, requiring fallback to an earlier snapshot.
 
@@ -3205,7 +3205,7 @@ Elasticity and checkpointing provide the necessary resilience for long-running b
 
 When a user asks a voice assistant to turn off the lights, they will not tolerate a five-minute pause while the inference server reloads from a checkpoint. Serving models presents a fundamentally different challenge: users expect millisecond-level responsiveness even when backend GPUs crash.
 
-Serving fault tolerance operates under constraints that training never faces. While @sec-inference-scale-health-checking-failover-070e examines serving health checks and failover in the broader inference architecture, the focus here is specifically on fault tolerance and reliability mechanisms for real-time inference.
+Volume 1 established serving replicas, routing, readiness checks, load balancing, KV cache, and graceful degradation as serving-system building blocks. Serving fault tolerance asks how those mechanisms behave when replicas, GPUs, or state stores fail under live latency budgets. @Sec-inference-scale-health-checking-failover-070e later broadens the same mechanisms into a full distributed inference architecture; the focus here is specifically on fault tolerance and reliability for real-time inference.
 
 ### Stateless vs. stateful serving {#sec-fault-tolerance-reliability-reliability-stateless-vs-stateful-serving-0a60}
 

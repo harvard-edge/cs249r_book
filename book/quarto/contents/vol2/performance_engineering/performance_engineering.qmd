@@ -663,7 +663,7 @@ The **decode phase**\index{Decode Phase} generates output tokens one at a time, 
 
 The prefill-decode decomposition has direct implications for system design. A system optimized for prefill (maximizing FLOP/s utilization) would use large matrix sizes and high compute throughput. A system optimized for decode (maximizing bandwidth utilization) would use aggressive quantization and memory optimization. A real serving system must handle both phases, often simultaneously across different active requests.
 
-Disaggregated serving addresses this mismatch by running prefill and decode on separate hardware pools. Prefill servers are optimized for compute (fewer, higher-FLOP/s GPUs), while decode servers are optimized for memory bandwidth and capacity (more memory per GPU, aggressive quantization). The KV cache computed during prefill is transferred to a decode server, which handles the subsequent autoregressive generation. This disaggregation allows each phase to use hardware and software configurations tuned for its specific bottleneck.
+Disaggregated serving addresses this mismatch by running prefill and decode on separate hardware pools. Here, disaggregation is evidence that prefill and decode have different bottlenecks; @sec-inference-scale develops the routing, admission-control, and serving-policy machinery. Prefill servers are optimized for compute (fewer, higher-FLOP/s GPUs), while decode servers are optimized for memory bandwidth and capacity (more memory per GPU, aggressive quantization). The KV cache computed during prefill is transferred to a decode server, which handles the subsequent autoregressive generation. This disaggregation allows each phase to use hardware and software configurations tuned for its specific bottleneck.
 
 The performance characteristics of each phase determine which optimization techniques apply. FlashAttention provides the largest speedup during prefill, where the quadratic attention computation dominates. KV cache quantization and speculative decoding apply exclusively to the decode phase. Precision engineering (FP8/INT4 weights) benefits both phases, but through different mechanisms: prefill benefits from doubled compute throughput (FP8 Tensor Cores), while decode benefits from doubled effective bandwidth (half the bytes per weight read).
 
@@ -867,7 +867,7 @@ The combination of operator fusion (reducing the number of kernels) and CUDA Gra
 
 ### FlashAttention: Tiled attention as a system primitive {#sec-performance-engineering-flashattention}
 
-Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $S{\times}S$ attention matrix $A = QK^T$ in HBM, where $S$ is the sequence length. For $S = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head. At 32 heads, the materialized attention matrices require approximately 4.3 GB per layer, dominating memory traffic for the entire forward pass.
+Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $S{\times}S$ attention matrix $A = QK^T$ in HBM, where $S$ is the sequence length. For $S = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head. At 32 heads, the score matrices alone require approximately 4.3 GB per layer. The worked accounting below uses a 64-head Llama-style layer and includes the score/probability traffic as well as persistent $Q$, $K$, $V$, and output tensors, so the larger number reflects a wider accounting boundary rather than a different scaling law.
 
 ```{python}
 #| echo: false
@@ -877,7 +877,7 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-performance-engineering-flashattention FlashAttention prose
 # │
-# │ Goal: Quantify materialized attention-state reduction from tiling attention for a 32-head,
+# │ Goal: Quantify materialized attention-state reduction from tiling attention for a 64-head,
 # │       8192-token sequence and 128-wide attention head, FP16 configuration.
 # │ Show: ~65x reduction in materialized quadratic state by avoiding sequence-by-sequence tensors.
 # │ How: Naive materializes score/probability matrices plus Q/K/V/output; Flash keeps only linear Q/K/V/output
@@ -945,7 +945,7 @@ FlashAttention\index{FlashAttention} [@dao2022] reformulates attention as a **ti
 *FlashAttention shrinks attention memory about 65 times.*
 :::
 
-The reduction in materialized attention state is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the naive implementation materializes and revisits approximately `{python} FlashAttentionSavings.naive_mb_str` of HBM-resident tensors for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. FlashAttention avoids the quadratic score and probability tensors; its persistent HBM-visible tensors are dominated by $Q$, $K$, $V$, and output $Y$, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. This simplified accounting excludes schedule-dependent tile reloads inside a particular kernel, but it captures the important scaling result: a `{python} FlashAttentionSavings.savings_mult_str` reduction in materialized attention state for this configuration.
+The reduction in materialized attention state is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the naive implementation materializes and revisits approximately `{python} FlashAttentionSavings.naive_mb_str` of HBM-resident tensors for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. FlashAttention avoids the quadratic score and probability tensors; its persistent HBM-visible tensors are dominated by $Q$, $K$, $V$, and output $Y$, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. This simplified accounting excludes schedule-dependent tile reloads inside a particular kernel, but it captures the important scaling result: a `{python} FlashAttentionSavings.savings_mult_str` reduction in HBM-visible attention state for this configuration.
 
 The key insight behind FlashAttention is the **online softmax**[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $S{\times}S$ matrix.
 
@@ -970,7 +970,7 @@ FlashAttention processes the computation in tiles of size $T_r{\times}T_c$ (typi
 
 FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for modern GPU architectures by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy on GPUs with many streaming multiprocessors. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
-FlashAttention-3 targets the H100's new hardware features: FP8 Tensor Cores and the Tensor Memory Accelerator (TMA). By computing attention in FP8 with selective FP16 accumulation, FlashAttention-3 achieves near-peak FP8 utilization for the attention operation, further closing the gap between achieved and theoretical performance.
+Newer FlashAttention-family kernels target Hopper-era hardware features such as FP8 Tensor Cores and the Tensor Memory Accelerator (TMA), a hardware path for asynchronous bulk tensor movement between HBM and shared memory. The systems principle is the same as the original algorithm: as the hardware exposes faster movement and lower-precision execution paths, the attention schedule must be rewritten to use those paths without materializing the quadratic workspace.
 
 The original breakthrough was a change in how engineers understood the bottleneck: the constraint on attention was the memory hierarchy, not the matrix multiplication.
 
@@ -997,7 +997,7 @@ Verify your understanding of memory-aware attention:
 
 :::
 
-@Fig-flashattention-memory-savings quantifies how that workspace advantage grows with sequence length. Standard-attention workspace grows quadratically while FlashAttention's running state grows linearly, so the savings ratio grows linearly: at a typical 8K context, the quadratic score workspace alone is 4,096$\times$ larger than FlashAttention's running statistics; at 64K long-context, the ratio reaches 32,768$\times$.
+@Fig-flashattention-memory-savings quantifies how that workspace advantage grows with sequence length. This plot uses a narrower boundary than the full-layer HBM-visible accounting above: it compares only the quadratic score workspace against FlashAttention's linear running statistics. Standard-attention workspace grows quadratically while FlashAttention's running state grows linearly, so the savings ratio grows linearly: at a typical 8K context, the quadratic score workspace alone is 4,096$\times$ larger than FlashAttention's running statistics; at 64K long-context, the ratio reaches 32,768$\times$.
 
 ::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention Memory Savings**: $\mathcal{O}(S^2) \rightarrow \mathcal{O}(S)$. Standard attention allocates the full $S{\times}S$ score matrix in HBM, while FlashAttention maintains only $\mathcal{O}(S)$ running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. At long-context lengths (64K+), the savings exceed four orders of magnitude." fig-alt="Log-log plot of attention memory vs. sequence length. Standard quadratic curve rises steeply; FlashAttention linear curve grows more slowly. Shaded region shows savings, with annotations at 8K and 65K."}
 
@@ -1154,9 +1154,9 @@ When PTQ fails to meet quality thresholds, QAT provides the remedy by integratin
 
 [^fn-ste-quantization]: **Straight-Through Estimator (STE)**: Discussed by @bengio2013estimating for hard stochastic neurons, the STE handles a fundamental calculus problem that also appears in quantization: the gradient of a rounding function is zero almost everywhere, making backpropagation through quantized layers impossible by standard rules. The STE simply passes the upstream gradient through the rounding step unchanged, pretending the rounding did not happen. This mathematically unjustified approximation works in practice because it preserves the gradient's direction even though it ignores the rounding noise, enabling QAT to converge. \index{Straight-Through Estimator!quantization}
 
-The cost is substantial: QAT is effectively a full fine-tuning run, often requiring hundreds of GPU-hours and a distributed training cluster. For a 70B model, this can mean a multi-day multi-GPU job instead of an hours-scale PTQ calibration run. Emerging techniques like **QLoRA**\index{QLoRA} (Quantized Low-Rank Adaptation) bridge this gap by freezing the base model in 4-bit precision and fine-tuning only a small set of high-precision adapter weights. This hybrid approach offers some of the quality recovery of QAT with a memory footprint small enough to run on much smaller hardware.
+The cost is substantial: QAT is effectively a full fine-tuning run, often requiring hundreds of GPU-hours and a distributed training cluster. For a 70B model, this can mean a multi-day multi-GPU job instead of an hours-scale PTQ calibration run. Adapter-based quantized fine-tuning narrows the gap by freezing the low-precision base model and updating only small low-rank adapter matrices rather than all model weights. This hybrid approach offers some of the quality recovery of QAT with a memory footprint small enough to run on much smaller hardware, but it is a task-adaptation remedy rather than a universal replacement for full quantization-aware retraining.
 
-The practical workflow in most production environments follows a two-stage approach: deploy with PTQ first (because it is fast and requires no training infrastructure), then apply QAT or QLoRA only if the PTQ model fails to meet quality requirements at the target precision. This sequence minimizes engineering effort while preserving the option of higher quality when needed.
+The practical workflow in most production environments follows a two-stage approach: deploy with PTQ first (because it is fast and requires no training infrastructure), then apply QAT or adapter-based quantized fine-tuning only if the PTQ model fails to meet quality requirements at the target precision. This sequence minimizes engineering effort while preserving the option of higher quality when needed.
 
 ### Weight-only vs. weight-activation quantization {#sec-performance-engineering-quant-strategies}
 
@@ -1330,7 +1330,7 @@ The kernel selection pass maps each fused operation to a specific machine code i
 
 ### torch.compile {#sec-performance-engineering-torch-compile}
 
-For workloads already written in PyTorch, `torch.compile` is the least disruptive compiler intervention: it tries to capture enough static graph to fuse memory-bound regions while preserving PyTorch's dynamic Python execution model. It operates through three components: **TorchDynamo** for graph capture, **TorchInductor**\index{TorchInductor} for code generation, and **AOTAutograd** for ahead-of-time backward graph construction.
+For workloads already written in PyTorch, `torch.compile` is the least disruptive compiler intervention: it tries to capture enough static graph to fuse memory-bound regions while preserving PyTorch's dynamic Python execution model. It operates through three components: **TorchDynamo** for graph capture, **TorchInductor**\index{TorchInductor} for code generation, and **AOTAutograd** for ahead-of-time backward graph construction when training workloads need compiled backward passes.
 
 TorchDynamo operates at the Python bytecode level[^fn-torchdynamo-bytecode], a design choice that distinguishes it from earlier tracing approaches.
 
@@ -1563,6 +1563,8 @@ For performance engineering, the local question is whether active-parameter savi
 A standard MoE transformer layer replaces the feed-forward network (FFN) with multiple parallel "expert" FFNs and a lightweight **router**\index{Router!Mixture of Experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, and load balance. When experts are distributed across GPUs, expert parallelism places different experts on different devices, and an AllToAll exchange moves each token's hidden state to its assigned expert before returning the result. The active-parameter savings are valuable only if that routing traffic and any expert imbalance remain smaller than the dense compute they replace.
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
+
+After changing the local work through fusion, precision, compilation, speculation, or sparse expert routing, the next exposed iron-law term is often communication. Overlap is the technique that removes communication from the critical path when enough useful compute remains to hide it.
 
 ```{python}
 #| echo: false
@@ -2254,7 +2256,7 @@ The fourth step is to apply and verify. Implement the highest-impact optimizatio
 
 Production systems combine techniques because no single intervention covers every term in the iron law. A highly optimized LLM serving system might employ all of the following:
 
-- FlashAttention-2 or FlashAttention-3 for memory-efficient attention computation
+- FlashAttention-2 or later FlashAttention-family kernels for memory-efficient attention computation
 - INT4 weight quantization (GPTQ or AWQ) with FP16 dequantization during GEMM
 - INT8 KV cache compression with per-channel scaling
 - torch.compile\index{torch.compile!kernel fusion} or TensorRT\index{TensorRT!kernel selection} for element-wise fusion and kernel selection
@@ -2266,11 +2268,11 @@ The speedups from these techniques are not additive; they interact in ways that 
 
 The interaction between optimizations creates a dependency graph that the performance engineer must navigate. Some combinations are synergistic: FlashAttention removes attention intermediates, and INT8 KV cache compression reduces KV cache memory, together freeing enough memory for larger batch sizes that transform the economics of serving. Other combinations are redundant: applying both CUDA Graphs and the `reduce-overhead` mode of `torch.compile` achieves the same result, since `reduce-overhead` internally uses CUDA Graphs. Still other combinations conflict: speculative decoding benefits most at small batch sizes (where decode is memory-bound), while many throughput optimizations work by increasing batch size. At large batch sizes, speculation adds overhead without proportional benefit.
 
-A practical heuristic for sequencing optimizations is to apply the cheapest bottleneck-moving intervention before adding new algorithmic machinery:
+A practical heuristic for sequencing optimizations is to apply the cheapest bottleneck-moving intervention before adding new algorithmic machinery. The first step depends on the measured bottleneck. Compiler-first is the default for stable-shape workloads when memory is not obviously the binding constraint. For batch-1 70B decode, precision comes first because weight bandwidth and KV capacity dominate before graph overhead does.
 
-1. torch.compile (1 line of code, 10--40 percent speedup): Apply first when input shapes are stable and graph breaks are limited. Verify with profiling, since compilation latency, recompilation on dynamic shapes, and reduced optimization for symbolic shapes can erode the gain.
-2. Weight quantization (INT4/FP8, hours of calibration, 2--4$\times$ throughput): Apply second. Frees memory for batching.
-3. FlashAttention (library swap, 2--32$\times$ for attention): Apply third. Usually a configuration flag.
+1. Primary bottleneck fix: apply `torch.compile` when the trace shows launch overhead and stable shapes, or apply weight/KV precision first when the profile is memory-capacity or bandwidth bound.
+2. FlashAttention (library swap, 2--32$\times$ for attention): Apply when attention materialization or attention HBM traffic remains visible in the profile.
+3. Weight quantization (INT4/FP8, hours of calibration, 2--4$\times$ throughput): Apply early for memory-bound serving, but validate quality before treating the speedup as usable.
 4. KV cache compression (INT8, library support, 2$\times$ cache reduction): Apply fourth. Enables larger batches.
 5. Speculative decoding (requires draft model, engineering effort): Apply last, only if latency target not met. Most complex to deploy.
 

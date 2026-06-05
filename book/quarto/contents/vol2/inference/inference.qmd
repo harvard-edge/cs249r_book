@@ -620,7 +620,7 @@ Verify your understanding of where specific optimizations sit within the serving
 
 :::
 
-The remainder of this chapter progresses through these levels: batching and caching (request level), model sharding (replica level), load balancing and autoscaling (service level), and multi-tenancy (platform level).
+The remainder of this chapter follows the hierarchy while allowing a few techniques to cross levels. Batching, KV-cache layout, and decode-time optimizations start at the request level. Quantization, adapter state, and model sharding change the replica's memory and compute budget. Disaggregated serving, load balancing, and autoscaling coordinate replicas into a service, while multi-tenancy and resource isolation govern the platform. Quantization appears across the hierarchy because it is a representation-level lever that changes memory, bandwidth, and cost budgets wherever model state or KV state resides.
 
 ## Serving Architecture Dimensions {#sec-inference-scale-serving-framework-selection-45d3}
 
@@ -1083,7 +1083,9 @@ Continuous batching removes waste caused by variable output length, but it does 
 
 ### The logic wall: Test-time compute scaling {#sec-inference-logic-wall}
 
-Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage]. From a serving-systems perspective, the serving-relevant shift is the work issued per request. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or chain-of-thought (CoT) tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second now needs a policy for allocating thinking time.
+Test-time scaling turns reasoning into a serving resource. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage].
+
+From a serving-systems perspective, the relevant shift is the work issued per request. Extra reasoning consumes latency budget, KV-cache residency, and accelerator time. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or CoT tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second now needs a policy for allocating thinking time.
 
 ```{python}
 #| echo: false
@@ -1798,6 +1800,8 @@ Consider a streaming speech-to-text system with 20 ms audio frames:
 
 : **Streaming speech recognition pipeline latency**: Per-stage latency for a streaming speech-to-text pipeline operating on 20 ms audio frames against a 100 ms end-to-end budget. {#tbl-inference-streaming-speech-pipeline}
 
+Here, a Streaming Conformer is the low-latency speech encoder, while CTC and transducer decoding are incremental decoders that emit text from frame-level acoustic states without waiting for the full utterance.
+
 **Key constraints**:
 
 - No batching: Each frame processes individually
@@ -1931,7 +1935,7 @@ Even a well-tuned continuous batching strategy cannot eliminate a deeper, archit
 
 As an LLM generates a 2,000-word essay, it must constantly recall every word it has previously written. It does this by storing intermediate attention states in a rapidly expanding memory buffer known as the KV Cache. Unmanaged, this cache will aggressively fragment GPU memory, causing out-of-memory crashes even when 40 percent of the VRAM is technically free.
 
-The memory management techniques that enable efficient LLM serving at scale include PagedAttention for fragmentation-free allocation, prefix caching for common prompt sharing, and speculative decoding for latency reduction.
+Two classes of techniques meet at this boundary. KV-state capacity techniques, such as PagedAttention and prefix caching, decide where attention state lives and how much fragmentation the memory manager tolerates. Decode-time latency techniques, such as speculative decoding, change how much target-model work is needed per emitted token. Speculative decoding is not KV-cache compression; it trades extra draft-model state, target-model verification, and scheduler complexity for lower time per output token under the same memory budget.
 
 ### The KV cache wall: Memory-bound capacity {#sec-inference-scale-kv-cache-wall}
 
@@ -2999,11 +3003,9 @@ The schedule ensures decode latency remains bounded regardless of incoming promp
 
 :::
 
-KV Cache management enables a single GPU to handle many concurrent requests without crashing.
-
 ### Dynamic memory swapping and multi-tenancy {#sec-inference-scale-lora-multi-tenancy}
 
-As serving platforms scale to support thousands of concurrent users on a single foundation model, personalization introduces a new memory bottleneck. Low-Rank Adaptation (LoRA) stores a small set of user- or task-specific adapter weights that modify a shared base model without copying the full model. When 10,000 users each have a unique LoRA adapter applied to the same 140 GB base model, replicating the base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific adapters are brought into the fast on-chip working set as needed.
+KV-cache management makes one GPU safe for many concurrent requests; multi-tenant adapter serving asks the same serving process to manage another kind of resident state. The KV cache is per-token attention state. A LoRA adapter is per-tenant weight delta. Both must be available at the moment a decode step runs, and both can erase batching gains if the scheduler ignores locality. As serving platforms scale to support thousands of concurrent users on a single foundation model, personalization introduces a new memory bottleneck. Low-Rank Adaptation (LoRA) stores a small set of user- or task-specific adapter weights that modify a shared base model without copying the full model. When 10,000 users each have a unique LoRA adapter applied to the same 140 GB base model, replicating the base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific adapters are brought into the fast on-chip working set as needed.
 
 ::: {#psp-inference-context-switch-machine-learning .callout-perspective title="The context switch of machine learning"}
 
@@ -3512,12 +3514,12 @@ This AllToAll pattern creates a critical system challenge: load balancing. If th
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
-Router behavior directly impacts both system performance and model quality. Performance engineers must monitor for several failure modes:
+Router behavior directly impacts both system performance and model quality. Some failures are training-shaped problems that become visible during serving, while others are runtime overload conditions the serving system must mitigate directly:
 
--   **Expert collapse**\index{Expert Collapse}: The router converges to a small subset of experts, leaving others undertrained. The model effectively degrades to a small dense model with a massive memory footprint.
--   **Routing instability**\index{Routing Instability}: Assignments oscillate during training, preventing experts from specialized learning.
--   **Distribution shift**\index{Distribution Shift}: A router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
--   **Token dropping**\index{Token Dropping}: At high load, capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
+-   **Expert collapse**\index{Expert Collapse}: A training-time router failure in which the router converges to a small subset of experts, leaving others undertrained. The served model then behaves like a small dense model with a massive memory footprint.
+-   **Routing instability**\index{Routing Instability}: A training-time failure in which assignments oscillate, preventing experts from specialized learning.
+-   **Distribution shift**\index{Distribution Shift}: A serving-time workload mismatch in which a router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
+-   **Token dropping**\index{Token Dropping}: A serving-time overload behavior in which capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
 
 These failure modes follow from the basic MoE serving trade-off[^fn-moe-serving]: computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
 
@@ -5595,7 +5597,7 @@ These serving optimizations span continuous batching, PagedAttention, global loa
 
 ## Case Studies {#sec-inference-scale-case-studies-9689}
 
-Production-scale serving systems force the chapter's techniques to meet real workload variance, latency budgets, and operational constraints. The cases bind on different constraints: embedding scale, variable-length generation, cascade cost, or multimodal freshness. The examples show how systems combine batching, sharding, caching, routing, and quantization to meet specific cost and latency targets. The sequence begins with iteration-level scheduling popularized by vLLM in 2022, which transformed LLM serving from a coarse-grained batch process into a fluid, high-utilization stream, and extends through global request routing and embedding-server topologies.
+Production-scale serving systems force the chapter's techniques to meet real workload variance, latency budgets, and operational constraints. The cases bind on different constraints: embedding scale, variable-length generation, cascade cost, or multimodal freshness. The examples show how systems combine batching, sharding, caching, routing, and quantization to meet specific cost and latency targets. The Orca and vLLM mechanisms developed earlier provide the LLM-serving primitives; the cases below broaden the view to recommendation serving, global request routing, ranking cascades, and multimodal freshness.
 
 ### Meta recommendation serving {#sec-inference-scale-meta-recommendation-serving-bede}
 
@@ -5831,7 +5833,7 @@ class RankingCascadeCost:
 
 The cascade reduces final L3 evaluations by `{python} RankingCascadeCost.final_eval_reduction_mult_str` compared to running L3 on all candidates. Under this simplified request-budget model, the L3 stage costs `{python} RankingCascadeCost.l3_per_candidate_ms_str` per candidate. Applying L3 to the full million-candidate set would therefore consume about `{python} RankingCascadeCost.l3_all_s_str` of model work, while the cascade budget sums to `{python} RankingCascadeCost.cascade_budget_ms_str`. The resulting model-work reduction is roughly `{python} RankingCascadeCost.cost_reduction_rounded_mult_str`.
 
-Given tight latency budgets, Google uses speculative execution for model ensembles:
+Given tight latency budgets, Google uses speculative execution for model ensembles. Here, speculation means launching candidate ranking work in parallel under a deadline, not draft-token verification for LLM decoding:
 
 ```
 # Instead of sequential:
@@ -5927,7 +5929,7 @@ New video content is processed with different priorities, as @tbl-tiktok-video-p
 
 The priority scheme ensures popular creators' content reaches recommendations quickly while managing compute costs.
 
-TikTok combines multiple understanding modalities through late fusion:
+TikTok combines multiple understanding modalities through late fusion, which combines independently computed modality embeddings or scores near the end of ranking rather than running one joint model over all raw modalities:
 
 ```
 Video embedding (512d) ─┐

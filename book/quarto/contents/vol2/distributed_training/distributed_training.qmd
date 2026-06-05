@@ -1120,7 +1120,7 @@ class InfraFrontierPodParallelRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-To illustrate this interaction concretely, consider three parallelism configurations for training our `{python} InfraFrontierPodParallelRecap.frontier_params_b_str` model on a 1,024-GPU cluster organized as 128 nodes of 8 GPUs each.
+To illustrate this interaction concretely, consider three parallelism configurations for training our `{python} InfraFrontierPodParallelRecap.frontier_params_b_str` model on a 1,024-GPU cluster organized as 128 nodes of 8 GPUs each. This comparison previews the mechanics developed below: DP replicates the model across data shards, TP splits individual tensor operations across devices, PP splits layers into pipeline stages, and the pipeline bubble is the idle time introduced while microbatches fill and drain those stages.
 
 Configuration A: Pure Data Parallelism (DP-1024). All 1,024 GPUs replicate the full model (using ZeRO to shard optimizer states), and each GPU processes a different data shard. The gradient AllReduce exchanges 350 GB across the full InfiniBand fabric. As the napkin math above showed, this achieves approximately 37.5 percent efficiency because the inter-node communication dominates.
 
@@ -1510,7 +1510,7 @@ The critical batch size has important implications for distributed training syst
 
 ::: {#chk-distributed-training-scaling-decisions .callout-checkpoint title="Scaling decisions"}
 
-Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM2e each), determine the maximum useful batch size.
+Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM2e each), determine the maximum useful batch size. Use a pilot trace with $\text{tr}(\Sigma)=1.6\times10^6$, $\|\mu\|^2=100$, per-GPU batch $b=4$, and a proposed gradient-accumulation depth of 32 steps, giving $B_{\text{global}} = 64 \times 4 \times 32 = 8192$ samples.
 
 1.  Calculate the critical batch size $(B_{\text{crit}})$, where the gradient noise scale equals the batch size.
 2.  Use the Gradient Noise Scale metric $\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$ to evaluate the proposed batch size.
@@ -2471,7 +2471,7 @@ Consider a training fleet configured with Tensor Parallelism (TP) of `{python} T
 
 The training step begins at the Data Parallel level. Each of the `{python} TensorParallel3DTraffic.dp_value_str` model replicas receives a distinct slice of the global batch. Within each replica, the model is split across `{python} TensorParallel3DTraffic.pp_value_str` pipeline stages (nodes), with micro-batches flowing sequentially from the embedding layer on Node 0 to the loss calculation on Node 15. At the finest granularity, within each node, the `{python} TensorParallel3DTraffic.tp_str` fuse into a single "super-accelerator" via TP. Every matrix multiplication in the forward pass is fractured across these devices, which must exchange partial results via high-bandwidth NVLink after every operation. For a 175B-scale hidden dimension, the activation payload is roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str`; the resulting tensor-parallel traffic is about `{python} TensorParallel3DTraffic.per_stage_forward_gb_str` per pipeline stage per microbatch in the forward pass, or `{python} TensorParallel3DTraffic.per_stage_forward_backward_gb_str` including the backward pass. Across the full 96-layer replica, the forward tensor-parallel traffic is about `{python} TensorParallel3DTraffic.full_forward_gb_str`. This traffic is the highest-intensity in the system, but latency remains negligible due to the `{python} DistTrainNvlinkHybridRecap.nvlink_a100_gb_per_s_str`--`{python} FlashAttentionHybridRecap.nvlink_h100_gb_per_s_str` bandwidth between co-located chips.
 
-The backward pass inverts this flow and exposes the critical dependencies between parallelism dimensions. As gradients flow backward through the pipeline, nodes exchange activation gradients point-to-point. This traffic is relatively light—roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str` per stage boundary—allowing it to traverse slower inter-node InfiniBand links without stalling the pipeline. The true bottleneck emerges at the end of the step: the global AllReduce. All `{python} TensorParallel3DTraffic.dp_value_str` replicas must synchronize their gradients to update the weights, requiring the summation of 350 GB of gradient data across the entire cluster. By overlapping this communication with the computation of subsequent micro-batches through gradient bucketing, the system hides the latency of moving terabytes of data across the data center fabric.
+The backward pass inverts this flow and exposes the critical dependencies between parallelism dimensions. As gradients flow backward through the pipeline, nodes exchange activation gradients point-to-point. This traffic is relatively light—roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str` per stage boundary—allowing it to traverse slower inter-node InfiniBand links without stalling the pipeline. The true bottleneck emerges at the end of the step: the global AllReduce. All `{python} TensorParallel3DTraffic.dp_value_str` replicas must synchronize their gradients to update the weights, requiring the summation of 350 GB of gradient data across the entire cluster. Gradient bucketing groups ready layer-gradient tensors into larger messages as backward computation proceeds; when the bucket schedule and cross-sectional bandwidth line up, the AllReduce runs under useful computation instead of extending the critical path.
 
 The architectural imperative is *bandwidth matching*: the communication volume of each algorithm must map inversely to the latency of the hardware interconnects. Chatty, blocking TP communication stays within the NVLink domain (`{python} DistTrainNvlinkHybridRecap.nvlink_a100_gb_per_s_str` or higher). Serialized, point-to-point PP transfers traverse the cluster spine at InfiniBand speeds. The massive but infrequent DP synchronization amortizes across the full training step. Attempting to run TP across racks, or DP without gradient accumulation, would violate this hierarchy—causing the 16,000-GPU fleet to wait idly for data to traverse the wire. This bandwidth-matching principle is precisely the "Jeff Dean Test" introduced in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344.
 
@@ -2645,7 +2645,7 @@ class AutoParallelism:
 
 **Problem**: An engineering team needs to schedule Archetype A (a `{python} AutoParallelism.params_b_str` parameter model) on a cluster of `{python} AutoParallelism.gpu_count_str` H100 GPUs. Manually searching the 3D-parallelism space (TP $\times$ PP $\times$ DP) is error-prone: a split that maximizes DP might exceed the `{python} AutoParallelism.hbm_gb_str` HBM capacity, while a split that maximizes TP might saturate the NVLink interconnect.
 
-**Solution**: Instead of trial and error, we invoke a Tier 3 Optimizer (like the `ParallelismOptimizer` in our physics engine) to find the mathematically optimal split. We configure the optimizer with the workload and cluster constraints, setting the objective to maximize Model FLOPs Utilization (MFU).
+**Solution**: Instead of trial and error, we invoke a constrained design-space search over TP, PP, and DP factorizations, implemented here as the Tier 3 Optimizer (`ParallelismOptimizer`) in our physics engine. We configure the optimizer with the workload and cluster constraints, setting the objective to maximize Model FLOPs Utilization (MFU).
 
 **Result**: The optimizer performs a constrained grid search over all valid algebraic factorizations. In under a second, it deduces the optimal strategy:
 
@@ -2826,7 +2826,7 @@ class DistTrainH100Capacity:
     min_gpus_practical_str = MarkdownStr("64--128 GPUs")
 ```
 
-The parallelism strategies examined so far assume a single model being trained on a single objective. Reinforcement Learning from Human Feedback\index{Reinforcement Learning from Human Feedback!multi-model coordination} (RLHF) and its variants break this assumption by requiring multiple models to coordinate within a single training loop, each with different memory footprints, compute profiles, and gradient requirements. This creates a heterogeneous fleet management problem that cannot be solved by any single parallelism strategy and represents a qualitatively different distributed systems challenge from standard pretraining.
+The parallelism strategies examined so far assume a single model being trained on a single objective. Reinforcement Learning from Human Feedback\index{Reinforcement Learning from Human Feedback!multi-model coordination} (RLHF) and its variants break this assumption by requiring multiple models to coordinate within a single training loop, each with different memory footprints, compute profiles, and gradient requirements. At a high level, RLHF generates model outputs, scores them with preference-derived reward signals, regularizes updates against a reference model, and then updates the policy; PPO implements this online loop with separate policy, reference, reward, and value models, while DPO-style methods remove much of that rollout and value-model machinery. This creates a heterogeneous fleet management problem that cannot be solved by any single parallelism strategy and represents a qualitatively different distributed systems challenge from standard pretraining.
 
 ### The multi-model coordination problem {#sec-distributed-training-rlhf-coordination}
 
@@ -3328,17 +3328,17 @@ class DistTrainSummaryRecap:
     dlrm_mem_tb_str = MarkdownStr("10 TB")
 ```
 
-Throughout this chapter, we applied these partitioning strategies to our Lighthouse Archetypes, revealing that there is no "one size fits all" configuration (@tbl-partitioning-archetypes).
+Throughout this chapter, the partitioning strategies were developed directly for dense frontier training and recommendation-style workloads. @Tbl-partitioning-archetypes also shows how the same constraint logic reaches the federated edge case, where the bottleneck shifts from accelerator memory and fabric bandwidth to unreliable devices, privacy, and intermittent connectivity.
 
 ::: {#lhs-distributed-training-distributed-archetype-spectrum .callout-lighthouse title="Distributed archetype spectrum"}
 
 The "optimal point" in the 3D Parallelism Cube shifts depending on the system's primary bottleneck:
 
-| **Archetype**                                                    | **Primary Partitioning Strategy** | **The Logic**                                                                                                                            |
-|:-----------------------------------------------------------------|:---------------------------------:|:-----------------------------------------------------------------------------------------------------------------------------------------|
-| **Archetype A (GPT-4/Llama-3)**                                  |       Hybrid 3D Parallelism       | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit `{python} DistTrainSummaryRecap.gpt4_mem_tb_str` of weights.      |
-| **Archetype B (DLRM at Scale)**                                  |         Embedding Sharding        | Partition massive `{python} DistTrainSummaryRecap.dlrm_mem_tb_str`+ tables across a Parameter Server fleet; use sparse AllToAll updates. |
-| **Archetype C (MELLODDY Pharma QSAR) [@heyndrickx2023melloddy]** |         Federated Learning        | Keep confidential assay data at participating pharmaceutical organizations while training shared QSAR models across partners.            |
+| **Archetype**                         | **Primary Partitioning Strategy** | **The Logic**                                                                                                                            |
+|:--------------------------------------|:---------------------------------:|:-----------------------------------------------------------------------------------------------------------------------------------------|
+| **Archetype A (GPT-4/Llama-3)**       |       Hybrid 3D Parallelism       | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit `{python} DistTrainSummaryRecap.gpt4_mem_tb_str` of weights.      |
+| **Archetype B (DLRM at Scale)**       |         Embedding Sharding        | Partition massive `{python} DistTrainSummaryRecap.dlrm_mem_tb_str`+ tables across a Parameter Server fleet; use sparse AllToAll updates. |
+| **Archetype C (Federated MobileNet)** |         Federated Learning        | Coordinate on-device MobileNet updates across unreliable, privacy-constrained edge devices without centralizing raw data.                |
 
 : **Partitioning strategy by archetype**: The optimal point in the 3D-parallelism cube shifts with the dominant bottleneck. {#tbl-partitioning-archetypes}
 
