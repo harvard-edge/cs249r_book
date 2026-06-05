@@ -14,6 +14,8 @@ Reach for it from the inference and operations chapters: when those chapters cit
 
 ## Serving performance analysis {#sec-appdx-appendix-inference-serving}
 
+Serving performance analysis has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. The subsections that follow derive the queueing model first, then connect that model to memory-capacity limits in the worked serving examples.
+
 ### Queuing theory for batched inference {#sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0}
 
 The batching efficiency curve provides intuition about throughput-latency tradeoffs, but production systems require rigorous analysis to determine optimal batch sizes under stochastic arrival patterns. Queuing theory provides the mathematical framework to derive these optimal operating points and to understand why certain batch sizes outperform others under specific conditions.
@@ -226,10 +228,10 @@ class GPT3ServingResults:
     b32_total_ms = 234.6
 
     # Prose-facing canonical strings (preserve raw floats for arithmetic above)
-    b8_service_ms_str = fmt_int(b8_service_ms, commas=False)
+    b8_service_ms_str = fmt_time(b8_service_ms, 'millisecond', precision=0, commas=False)
     b8_util_pct_str = fmt_percent(b8_util_pct/100, precision=1, commas=False, style='prose')
     b8_wait_ms_str = fmt_time(b8_wait_ms, 'millisecond', precision=1, commas=False)
-    b16_service_ms_str = fmt_int(b16_service_ms, commas=False)
+    b16_service_ms_str = fmt_time(b16_service_ms, 'millisecond', precision=0, commas=False)
     b16_util_pct_str = fmt_percent(b16_util_pct/100, precision=1, commas=False, style='prose')
     b16_wait_ms_str = fmt_time(b16_wait_ms, 'millisecond', precision=1, commas=False)
 ```
@@ -312,11 +314,11 @@ This matches the response-time decomposition: roughly 6 requests are in service 
 
 Production systems must select batch size to meet Service Level Objectives (SLOs), typically specified as latency percentiles (for example, P99 latency < 200 ms). The following framework systematizes this decision:
 
-#### Step 1: Characterize service time {.unnumbered}
+##### Step 1: Characterize service time {.unnumbered}
 
 Measure $T_{\text{fixed}}$ and $t_{\text{req}}$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $T_{\text{svc}}(B) = T_{\text{fixed}} + t_{\text{req}} B$.
 
-#### Step 2: Compute stability threshold {.unnumbered}
+##### Step 2: Compute stability threshold {.unnumbered}
 
 Find minimum batch size $B_{\text{min}}$ such that $\mu_{\text{eff}}(B_{\text{min}}) > \lambda_{\text{arr}}$:
 
@@ -324,13 +326,13 @@ $$B_{\text{min}} = \frac{T_{\text{fixed}} \lambda_{\text{arr}}}{1 - t_{\text{req
 
 Any batch size below $B_{\text{min}}$ results in an unstable system.
 
-#### Step 3: Compute latency at candidate batch sizes {.unnumbered}
+##### Step 3: Compute latency at candidate batch sizes {.unnumbered}
 
 For each candidate $B \in \{B_{\text{min}}, 2B_{\text{min}}, ..., B_{\text{max}}\}$, compute:
 
 $$E[T(B)] = \frac{\lambda_{\text{arr}} \cdot T_{\text{svc}}(B)^2}{2B(1 - \lambda_{\text{arr}} T_{\text{svc}}(B)/B)} + \frac{B}{2\lambda_{\text{arr}}} + T_{\text{svc}}(B)$$
 
-#### Step 4: Account for tail latency {.unnumbered}
+##### Step 4: Account for tail latency {.unnumbered}
 
 For P99 SLO compliance, use the heavy-traffic approximation for tail latency:
 
@@ -338,7 +340,7 @@ $$T_{\text{P99}} \approx E[T] + 2.33 \cdot \sigma_T$$
 
 where $\sigma_T$ is the standard deviation of response time. For exponential-like response times, P99 is closer to $-\ln(0.01)E[T] \approx 4.6 \cdot E[T]$; use measured percentiles for production sizing.
 
-#### Step 5: Select optimal batch size {.unnumbered}
+##### Step 5: Select optimal batch size {.unnumbered}
 
 Choose the largest $B$ such that $T_{\text{P99}}(B) \leq \text{SLO}$:
 

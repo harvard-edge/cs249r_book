@@ -20,7 +20,8 @@ def test_algorithm_refs_follow_sentence_position(tmp_path):
             [
                 "@Alg-start states the loop.",
                 "The implementation follows @alg-mid.",
-                "The transition is mechanical: @Alg-after-colon shows it.",
+                "The transition is mechanical: @alg-after-colon shows it.",
+                "**Scenario**: @Alg-bold-leadin shows it.",
             ]
         ),
     )
@@ -35,12 +36,14 @@ def test_algorithm_ref_case_violations_are_flagged(tmp_path):
             [
                 "@alg-start states the loop.",
                 "The implementation follows @Alg-mid.",
+                "The transition is mechanical: @Alg-after-colon shows it.",
             ]
         ),
     )
 
     assert [issue.code for issue in result.issues] == [
         "xref_sentence_start_case",
+        "xref_midsentence_case",
         "xref_midsentence_case",
     ]
 

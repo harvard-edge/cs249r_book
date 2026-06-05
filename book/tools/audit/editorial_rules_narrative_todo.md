@@ -1,6 +1,6 @@
 # Editorial Rules and Narrative Audit TODO
 
-Status: active review ledger for the `codex/editorial-rules-narrative-audit` worktree.
+Status: active review ledger for the `codex/section-flow-pass` worktree.
 
 Use this file for items that need author/editor attention or a later dedicated
 pass. Routine fixes that can be made safely in the current pass should not be
@@ -8,6 +8,17 @@ listed here.
 
 ## Current Pass Notes
 
+- One-agent-per-chapter narrative audits have completed for all primary
+  Volume 1 chapters and for the active Volume 2 chapters. Fresh Volume 2
+  returns now cover introduction, compute infrastructure, network fabrics,
+  data storage, distributed training, collective communication, fault
+  tolerance, fleet orchestration, performance engineering, inference, edge
+  intelligence, ops scale, and robust AI; earlier audits remain available for
+  security/privacy, sustainable AI, responsible AI, and conclusion.
+- Safe local fixes from those audits have been committed separately: forward
+  dependency localization, concrete-before-definition landings, terminology
+  corrections, and index capitalization fixes. Larger LEGO, citation,
+  algorithm, feature-store, and chapter-scope repairs remain queued below.
 - The current diff has been checked against the high-risk rule files:
   `book-prose.md`, `prose-craft.md`, `emphasis.md`,
   `chapter-architecture.md`, `cross-references.md`, `mlsysim.md`, `fmt.md`,
@@ -24,6 +35,21 @@ listed here.
 - Edited LEGO cells were smoke-tested directly for output formatting; the
   checkpoint example now derives the `350 GB` and `1,400 GB` components from
   MLSysIM constants instead of prose-only literals.
+- 2026-06-05 section-flow triage: committed `45ed408262` for ops-scale
+  CI/CD/rollout/resource-management bridges and `5bea6b53e9` for Volume 2
+  edge/fault/inference transitions. The layout-proxy heuristic was rerun on
+  both volumes; remaining high-count warnings were inspected by context rather
+  than fixed mechanically. Intentional short structures include worked-example
+  calculation steps, MLPerf scenario headings, static/dynamic serving
+  distinctions, ClinAIOps loop headings, rollback subcases, and figure-backed
+  design-pattern headings. These should be reconsidered only in the later
+  whole-section macro flow pass if the surrounding prose fails the narrative
+  test.
+- Standalone-book wording check found no authored-prose `Volume 1`/`Volume 2`
+  hits in `book/quarto/contents/vol1` or `book/quarto/contents/vol2`. Raw
+  `above`/`below`/`later` greps are noisy because they hit TikZ coordinates and
+  comments, so use the prose checker and targeted authored-prose searches
+  rather than treating the raw grep as actionable.
 
 ## Needs Author Attention
 
@@ -74,6 +100,47 @@ listed here.
 - Resolve MLSysIM/source backing for the
   `vol2/fault_tolerance/fault_tolerance.qmd` cost example using 25,000 GPUs,
   $2/GPU-hour, and a $1.2M/day calculation.
+- Resolve LEGO/source backing for the fault-tolerance cluster MTBF table and
+  graceful-degradation loss example. The audit flagged hardcoded derived MTBF,
+  failures-per-day, CTR-loss, and outage-cost values that should either be
+  computed from a nearby cell or recast as qualitative scenario prose.
+- Resolve source or scenario backing for fleet-orchestration cost and failure
+  claims: the 1--4 failures/day per 1,000 GPUs band, 10,000-GPU capital/waste
+  figures, scheduler speedup ranges, and build-vs.-buy ROI numbers should be
+  cited, computed, or clearly framed as illustrative assumptions.
+- Resolve inference serving support for hardcoded cost ratios, adaptive
+  batching measurements, hardware/framework support tables, and large public
+  case-study scale claims. Where public architecture details are inferred, the
+  case studies should say so explicitly rather than reading as internal facts.
+- Resolve performance-engineering source-of-truth issues for the SRAM/HBM
+  energy example, widening-gap hardware table, tensor-parallel transfer-time
+  example, overlap-budget plot, MBU/MFU thresholds, hero-run tax, and the 70B
+  optimization case study.
+- Resolve edge-intelligence source backing for on-device training memory
+  ranges, adapter-switching values, heterogeneity penalty ranges, minimum
+  participation thresholds, and fallacy/pitfall quantitative anchors. The
+  PyTorch-specific frozen-parameter listing should be considered for algorithm
+  or framework-neutral pseudocode treatment in the algorithm pass.
+- Resolve ops-scale feature-store structure and indexing. The body section
+  should carry the primary `Feature Store!definition` anchor, split the
+  dual-store mechanism from the training-serving skew failure, and lead with
+  offline analytical vs. online key-value access constraints rather than
+  vendor examples.
+- Resolve ops-scale support for the Jeff Dean attribution, the 50-model
+  platform threshold, proactive-maintenance utilization ranges, and case-study
+  quantitative claims such as the 95 percent infrastructure-code figure.
+- Resolve robust-AI citation or scenario support for definition-callout
+  accuracy ranges, reliability overhead ranges, fraud-pipeline defense
+  effectiveness, adversarial-training cost multipliers, medical-imaging
+  adversarial example confidence, and poisoning/backdoor fallacy numbers.
+- Review thin subsection scaffolds flagged by fresh audits: fault-tolerance
+  degradation dimensions and replica placement; fleet heterogeneous gang
+  scheduling and research scheduler mini-profiles; performance scaling
+  regressions and playbook sections; edge peak memory and repeated
+  design-constraint prose; ops-scale model registries, ensemble management,
+  validation gates, rollout risk, dashboards, cost components, and
+  organizational patterns; robust-AI retraining levels and data-poisoning
+  defense landing.
 
 ## Active Pass Queue
 

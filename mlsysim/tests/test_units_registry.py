@@ -290,7 +290,9 @@ def test_mobilenetv2_variant_model_profiles():
     from mlsysim.core.units import param
 
     assert Models.Vision.MobileNetV2.parameters.to(param).magnitude == pytest.approx(3_504_872)
+    assert Models.Vision.EfficientNetB0.parameters.to(param).magnitude == pytest.approx(5_300_000)
     assert Models.Vision.MobileNetV2_Alpha0_5.parameters.to(param).magnitude == pytest.approx(1_968_680)
     assert Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters.to(param).magnitude == pytest.approx(687_680)
     assert Models.Vision.MobileNetV2.metadata.provenance.ref
+    assert Models.Vision.EfficientNetB0.metadata.provenance.ref
     assert Models.Vision.MobileNetV2_Alpha0_5.metadata.provenance.ref

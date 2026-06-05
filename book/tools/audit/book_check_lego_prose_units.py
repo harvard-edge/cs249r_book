@@ -10,7 +10,9 @@ must not repeat that unit after the ref.
 **Open** exports (``fmt()``, ``fmt_int()`` on bare scalars) intentionally leave
 the unit to prose — ``32 GPUs``, ``95 percent``, ``10 ms`` are valid.
 
-Lines with ``<!-- lego-ok: ... -->`` are skipped.
+Legacy inline LEGO suppressions are skipped by this checker,
+but authored chapters should not introduce them; use source-of-truth values or a
+queued ``lego-ok-block`` exception instead.
 """
 
 from __future__ import annotations
