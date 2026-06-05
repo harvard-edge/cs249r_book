@@ -445,14 +445,14 @@ Verify your understanding of network performance regimes:
 
 ### The LogP model {#sec-communication-collective-operations-collective-operations-logp-model-e45d}
 
-The α-β model assumes the processor is idle during communication. For **pipelined systems** where we overlap communication with computation, this assumption fails. The **LogP**\index{LogP Model} model [@culler1993] extends α-β with two additional parameters:
+The α-β model assumes the processor is idle during communication. For pipelined systems where we overlap communication with computation, this assumption fails. The **LogP**\index{LogP Model} model [@culler1993] extends α-β with two additional parameters:
 
 *   **$L_{\text{lat}}$ (Latency)**: The time for a message to traverse the network (similar to $\alpha$).
 *   **$o$ (Overhead)**\index{LogP Model!processor overhead}: The CPU/GPU time spent initiating or receiving a transfer. During this time, the processor cannot compute, making this the nonoverlappable cost.
 *   **$g$ (Gap)**: The minimum time interval between consecutive message injections (inverse of message rate). This models link contention\index{Link Contention}.
 *   **$N$ (Processors)**: The number of processors in the system.
 
-LogP distinguishes **network latency** ($L_{\text{lat}}$, which can be hidden) from **processor overhead** ($o$, which *cannot*). A system can overlap communication with computation only if the compute kernel runs longer than the overhead. A small overlap calculation makes this distinction concrete:
+LogP distinguishes network latency ($L_{\text{lat}}$, which can be hidden) from processor overhead ($o$, which *cannot*). A system can overlap communication with computation only if the compute kernel runs longer than the overhead. A small overlap calculation makes this distinction concrete:
 
 ```{python}
 #| echo: false
@@ -689,7 +689,7 @@ The same AllGather/ReduceScatter pair also appears in sequence parallelism: an A
 
 This ladder matters because the primitive determines the synchronization shape before any algorithmic optimization begins. AllReduce creates global agreement, AllGather and ReduceScatter trade memory for repeated shard movement, and AllToAll replaces a bandwidth problem with fan-out and contention.
 
-[^fn-fsdp-memory]: **FSDP (Fully Sharded Data Parallel)**\index{FSDP!memory trade-off}: PyTorch's implementation of ZeRO-3 (Zero Redundancy Optimizer), which shards parameters, gradients, and optimizer states across $N$ accelerators, reducing per-GPU memory from $16P$ bytes under FP32 Adaptive Moment Estimation (Adam) to $16P/N$ bytes. The trade-off is communication frequency: FSDP issues $2N_L$ collective operations per step (AllGather + ReduceScatter per layer) instead of data parallelism's single AllReduce, making it more sensitive to the $\alpha$ overhead.
+[^fn-fsdp-memory]: **FSDP (Fully Sharded Data Parallel)**\index{FSDP!memory trade-off}: PyTorch's implementation of ZeRO-3 (Zero Redundancy Optimizer), which shards parameters, gradients, and optimizer states across $N$ accelerators, reducing per-GPU memory from $16P$ bytes under FP32 Adaptive Moment Estimation (Adam) to $16P/N$ bytes. The trade-off is communication frequency: FSDP issues $2N_{\text{layers}}$ collective operations per step (AllGather + ReduceScatter per layer) instead of data parallelism's single AllReduce, making it more sensitive to the $\alpha$ overhead.
 
 [^fn-dlrm-embedding]: **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction, where embedding tables can exceed 100 GB and must be sharded across workers. Each forward pass triggers AllToAll to exchange sparse embedding lookups, creating a communication pattern where message sizes are small (hundreds of KB) but fan-out is $\mathcal{O}(N)$, making DLRM one of the most latency-sensitive distributed workloads in production.
 
@@ -822,9 +822,9 @@ The FSDP/ZeRO strategy deserves special attention because its communication patt
 
 Because each GPU now holds only $1/N$ of the parameters, it must reconstruct the full tensor before it can use a layer, and that reconstruction is what transforms the communication pattern. Before each layer's forward pass, the GPU calls AllGather to collect the shards from all other GPUs. After the backward pass, the gradients are reduced and redistributed via ReduceScatter, so each GPU holds gradients only for its own parameter shard. The sharded parameters can then be discarded (freed from memory) until the next forward pass needs them.
 
-The consequence is a trade-off between memory and communication frequency. Standard data parallelism communicates once per training step (a single AllReduce of the full gradient). FSDP communicates twice per layer per step (AllGather in forward, ReduceScatter in backward), but each communication is smaller (only that layer's parameters, sharded across ranks). For a model with $N_L$ layers, FSDP issues $2N_L$ collective operations per step instead of 1; across all those operations, the total communication volume can be comparable to the single full-gradient AllReduce, but it is spread across many smaller operations.
+The consequence is a trade-off between memory and communication frequency. Standard data parallelism communicates once per training step (a single AllReduce of the full gradient). FSDP communicates twice per layer per step (AllGather in forward, ReduceScatter in backward), but each communication is smaller (only that layer's parameters, sharded across ranks). For a model with $N_{\text{layers}}$ layers, FSDP issues $2N_{\text{layers}}$ collective operations per step instead of 1; across all those operations, the total communication volume can be comparable to the single full-gradient AllReduce, but it is spread across many smaller operations.
 
-The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2N_L$ collectives pays the full NCCL startup overhead (25--50 $\mu\text{s}$ per operation from @tbl-nccl-vs-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through prefetching\index{Prefetching} (launching the next layer's AllGather while the current layer is computing) and **communication stream pipelining** (using dedicated CUDA streams for communication that overlap with compute streams).
+The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2N_{\text{layers}}$ collectives pays the full NCCL startup overhead (25--50 $\mu\text{s}$ per operation from @tbl-nccl-vs-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through prefetching\index{Prefetching} (launching the next layer's AllGather while the current layer is computing) and communication stream pipelining (using dedicated CUDA streams for communication that overlap with compute streams).
 
 Selecting the right collective algorithm at each invocation requires understanding these asymmetric patterns. The AllGather operations in FSDP are medium-sized (one layer's parameters, typically 10--100 MB for transformer models) and latency-sensitive (because computation blocks until the full parameters are available). The ReduceScatter operations are of similar size but can overlap with the next layer's backward computation. This asymmetry means the AllGather operations benefit more from low-latency algorithms (Tree or hybrid) while the ReduceScatter operations can use bandwidth-optimal algorithms (Ring) because their latency is hidden behind computation.
 
@@ -1547,9 +1547,7 @@ For a gradient vector of dimension $d_{\text{grad}}$ quantized to INT8 with bloc
 *   **Effective compression**: $4d_{\text{grad}} / (d_{\text{grad}} + 4d_{\text{grad}}/b_{\text{block}}) = 4b_{\text{block}} / (b_{\text{block}} + 4)$. For $b_{\text{block}} = 128$: 3.88$\times$, close to the theoretical 4$\times$.
 *   **Quality improvement**: Block quantization reduces the maximum quantization error from $s \cdot 0.5$ (where $s$ is the global scaling factor) to $s_b \cdot 0.5$ (where $s_b$ is the block-local scaling factor). For gradient tensors with heavy-tailed distributions (common in attention layers), this can reduce quantization error by 2--5$\times$ compared to per-tensor quantization.
 
-Block quantization is a common approach in communication compression and is supported by interfaces that allow fused quantize-reduce operations.
-
-Each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by error feedback (discussed later). Quantization should therefore move only as far down the precision ladder as the convergence budget permits.
+Interfaces that fuse quantize-reduce operations make block quantization practical in communication compression, but each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by error feedback (discussed later). Quantization should therefore move only as far down the precision ladder as the convergence budget permits.
 
 ### Sparsification: Transmitting only important gradients {#sec-communication-collective-operations-collective-operations-sparsification-transmitting-important-gradients-2cd2}
 
@@ -1852,6 +1850,8 @@ The selection matrix in @tbl-library-selection summarizes those axes. The point 
 
 : **Communication Library Selection**: Choose based on hardware and workload requirements. Many NVIDIA GPU training deployments use NCCL; Gloo serves as a portable fallback. {#tbl-library-selection}
 
+The table follows directly from the chapter's cost model. A backend is not faster in the abstract; it is faster when its memory path avoids host copies, its topology model matches the fabric, and its failure signals expose the part of $\alpha$, $\beta$, or processor overhead that limits the job.
+
 ### Vendor-specific libraries {#sec-communication-vendor-libs}
 
 The three libraries above do not exhaust the communication landscape because the same collective algorithm has different effective $\alpha$, $\beta$, and topology constraints on different accelerator platforms. The pattern is consistent: use the backend that understands the device memory path and interconnect on the hardware actually running the job. AMD's **RCCL (ROCm Communication Collectives Library)**\index{RCCL} mirrors NCCL's API for AMD GPUs and optimizes collectives for the ROCm stack and Infinity Fabric, but benchmarked RCCL deployments may achieve only 70--85 percent of comparable NCCL bandwidth when intra-node fabric maturity or software tuning lags the NVIDIA stack. Intel's **oneCCL (oneAPI Collective Communications Library)**\index{oneCCL} targets Intel accelerator and CPU deployments with its own topology-aware collectives.
@@ -1992,7 +1992,7 @@ $T_{\text{sequential}} = T_{\text{backward}} + T_{\text{comm}}(N)$ = `{python} O
 
 Each layer's AllReduce (`{python} OverlapBudgetCalc.allreduce_per_layer_ms_str`) runs in parallel with the next layer's backward pass (15 ms). Since `{python} OverlapBudgetCalc.allreduce_per_layer_ms_str` > 15 ms, there is `{python} OverlapBudgetCalc.exposed_per_layer_ms_str` of exposed communication per layer that cannot be hidden.
 
-$T_{\text{pipelined}} = T_{\text{backward}} + T_{\text{first layer comm}} + (N_L - 1) \times T_{\text{exposed}}$ = `{python} OverlapBudgetCalc.with_overlap_ms_str`.
+$T_{\text{pipelined}} = T_{\text{backward}} + T_{\text{first layer comm}} + (N_{\text{layers}} - 1) \times T_{\text{exposed}}$ = `{python} OverlapBudgetCalc.with_overlap_ms_str`.
 
 **Systems insight**: Overlap reduces total step time by `{python} OverlapBudgetCalc.overlap_savings_pct_str`. The remaining exposed communication comes from the AllReduce being slower than the per-layer backward pass. To eliminate this residual, either increase the backward pass computation (larger batch size) or reduce AllReduce time (more aggressive compression, better topology). The overlap is most effective when $T_{\text{backward per layer}} > T_{\text{AllReduce per layer}}$.
 

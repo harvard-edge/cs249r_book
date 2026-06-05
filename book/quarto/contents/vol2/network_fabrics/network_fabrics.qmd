@@ -158,7 +158,7 @@ The concrete bandwidth cliff that separates intra-node from inter-node communica
 
 :::
 
-@Fig-bandwidth-hierarchy reveals that this cliff is not an artifact of one accelerator generation: the NVLink-to-InfiniBand ratio has remained between 12$\times$ and 25$\times$ across four GPU generations (the H100 cliff quoted above sits mid-range), despite absolute bandwidth improvements at every tier. The persistent cliff reflects fundamental physics: on-package interconnects (NVLink) operate over millimeters of copper, while inter-node links (InfiniBand) span meters of cable and must traverse switches. The ratio determines which parallelism strategies are efficient. Tensor parallelism, which requires continuous high-bandwidth exchange of activations, is viable within a node but impractical across nodes. Pipeline and data parallelism, which tolerate lower inter-node bandwidth, must carry the burden of cross-node communication. Every topology and protocol decision in the remainder of this chapter attempts to minimize the impact of this hierarchy on collective communication performance.
+@Fig-bandwidth-hierarchy reveals that this cliff is not an artifact of one accelerator generation: the NVLink-to-InfiniBand ratio has remained between 12$\times$ and 25$\times$ across four GPU generations, despite absolute bandwidth improvements at every tier. The persistent cliff reflects fundamental physics: on-package interconnects (NVLink) operate over millimeters of copper, while inter-node links (InfiniBand) span meters of cable and must traverse switches. The ratio determines which parallelism strategies are efficient. Tensor parallelism, which requires continuous high-bandwidth exchange of activations, is viable within a node but impractical across nodes. Pipeline and data parallelism, which tolerate lower inter-node bandwidth, must carry the burden of cross-node communication. Every topology and protocol decision in this chapter attempts to minimize the impact of this hierarchy on collective communication performance.
 
 To see *why* this ratio matters so viscerally, consider *what* happens during a single training step. @Fig-bandwidth-cliff-gantt uses a normalized timeline: the compute phases are held fixed at 100 ms, and the AllReduce block represents a small gradient shard chosen to make the intra-node and inter-node contrast visible. It is not the full 175B-parameter gradient exchange; it isolates how crossing the node boundary changes utilization.
 
@@ -352,7 +352,7 @@ However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of 
 
 ### Reach and medium: Copper vs. optics {#sec-network-fabrics-copper-optics}
 
-The choice of physical medium\index{Optical Interconnect} determines the reach and economics of each link. Three categories recur in ML cluster design:
+The choice of physical medium determines the reach and economics of each link. Three categories recur in ML cluster design:
 
 - **DAC (Direct Attach Copper)**\index{DAC}: Passive copper cables offering the lowest latency and cost (~\$50), but limited to ~3 meters. Used exclusively within a rack.
 - **AOC (Active Optical Cable)**\index{AOC}: Fiber with permanently attached transceivers, suitable for 3 to 30 meter runs (~\$500). The conversion between electrical and optical signals, combined with Forward Error Correction (FEC)[^fn-fec-latency], adds hundreds of nanoseconds to every link.
@@ -360,7 +360,7 @@ The choice of physical medium\index{Optical Interconnect} determines the reach a
 [^fn-fec-latency]: **FEC (Forward Error Correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is so fragile that the hardware must use FEC to reconstruct corrupted bits. This adds 100--200 ns per hop---a "latency tax" that is physically unavoidable. In a three-tier fat-tree, FEC alone can contribute over 1 $\mu$s to the round-trip time, making it a significant component of the $\alpha$ latency term.
 - **Pluggable Optics**\index{Pluggable Optics}: Separate transceivers and fiber cords, used for runs exceeding 30 meters to the network core.
 
-The sequence is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, active optics extends a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
+The sequence is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical Interconnect} extend a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
 
 ::: {#psp-network-fabrics-cost-distance .callout-perspective title="The cost of distance"}
 
@@ -783,7 +783,7 @@ With $N = 1{,}024$ and a gradient payload $M$ of about `{python} AllReduceBottle
 
 With overlap between communication and computation (possible because the backward pass produces gradients layer by layer), the effective overhead can be reduced, but the network is already a major contributor to iteration time for this configuration.
 
-When does it become the bottleneck? If we scale to `{python} AllReduceBottleneck.params_70b_billion_str` parameters (`{python} AllReduceBottleneck.grad_70b_gb_str` of gradients) and the per-GPU computation stays similar (through batch size scaling), the bandwidth term alone becomes:
+At `{python} AllReduceBottleneck.params_70b_billion_str` parameters (`{python} AllReduceBottleneck.grad_70b_gb_str` of gradients), the bandwidth term becomes the bottleneck if per-GPU computation stays similar through batch-size scaling:
 
 `{python} AllReduceBottleneck.t_ring_70b_display_math`
 
@@ -877,7 +877,7 @@ Bisection bandwidth is a metric; the topology property that delivers full $\text
 
 :::
 
-@Fig-network-topologies (below) turns these topology definitions into a bandwidth and cost comparison. Fat-trees build on Clos-style non-blocking network ideas to provide full $\text{BW}_{\text{bisect}}$ [@clos1953], rail-optimized networks trade some global flexibility for lower cost, and dragonflies reduce cabling while accepting workload-placement constraints [@kim2008].
+@Fig-network-topologies turns these topology definitions into a bandwidth and cost comparison. Fat-trees build on Clos-style non-blocking network ideas to provide full $\text{BW}_{\text{bisect}}$ [@clos1953], rail-optimized networks trade some global flexibility for lower cost, and dragonflies reduce cabling while accepting workload-placement constraints [@kim2008].
 
 This trade-off between guaranteed bandwidth and economic scalability drives every topology decision in large-scale ML clusters.
 
@@ -1436,7 +1436,7 @@ These case studies close the five-level stack by showing how the physical wire, 
 
 ## Network Virtualization {#sec-network-fabrics-virtualization}
 
-Production ML clusters are rarely dedicated to a single training job, creating a massive economic imperative for efficient multi-tenancy. A \$300 million supercomputer that sits 30 percent idle because it cannot securely isolate concurrent workloads represents a \$90 million waste of capital. To recover this utility, the network must support virtualization\index{Network Virtualization}\index{SR-IOV} along three orthogonal dimensions: **bandwidth partitioning** (guaranteeing minimum throughput), **latency determinism** (preventing head-of-line blocking), and **security isolation** (preventing memory snooping between tenants). Technologies like SR-IOV (Single Root I/O Virtualization) and virtual lanes decouple the training job from the physical wire, much as hypervisors decoupled the operating system from the CPU. For our 175B model, this means the training job can reliably consume 80 percent of the cluster's $\text{BW}_{\text{bisect}}$ while a high-priority inference service and a background data preprocessing job share the remaining 20 percent, with the fabric enforcing hard boundaries that prevent the preprocessor's bursty traffic from stalling gradient updates.
+Production ML clusters are rarely dedicated to a single training job, creating a massive economic imperative for efficient multi-tenancy. A \$300 million supercomputer that sits 30 percent idle because it cannot securely isolate concurrent workloads represents a \$90 million waste of capital. To recover this utility, the network must support virtualization\index{Network Virtualization} along three orthogonal dimensions: **bandwidth partitioning** (guaranteeing minimum throughput), **latency determinism** (preventing head-of-line blocking), and **security isolation** (preventing memory snooping between tenants). Technologies like SR-IOV (Single Root I/O Virtualization) and virtual lanes decouple the training job from the physical wire, much as hypervisors decoupled the operating system from the CPU. For our 175B model, this means the training job can reliably consume 80 percent of the cluster's $\text{BW}_{\text{bisect}}$ while a high-priority inference service and a background data preprocessing job share the remaining 20 percent, with the fabric enforcing hard boundaries that prevent the preprocessor's bursty traffic from stalling gradient updates.
 
 ### SR-IOV: Hardware NIC virtualization {#sec-network-fabrics-sriov}
 
@@ -1554,7 +1554,7 @@ The diagnostic sequence preserves the chapter's layer model: application symptom
 
 :::
 
-The monitoring tools above keep deployed fabrics honest, but observability cannot push past a physical ceiling that copper approaches at high signaling rates.
+Monitoring keeps deployed fabrics honest, but observability cannot push past a physical ceiling that copper approaches at high signaling rates.
 
 ## Network Technologies That Move the Ceiling {#sec-network-fabrics-emerging}
 
