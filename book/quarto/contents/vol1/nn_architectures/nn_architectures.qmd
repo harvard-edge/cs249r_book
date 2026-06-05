@@ -4008,7 +4008,7 @@ Skip connections ensure gradients *reach* early layers; normalization ensures th
 #### Batch normalization: Definition and formulation {#sec-network-architectures-batch-normalization-definition-formulation-8579}
 
 \index{Batch Normalization}\index{Normalization!batch}
-Batch normalization normalizes activations across the batch dimension during training. For a mini-batch $\mathcal{B} = \{x_1, \ldots, x_B\}$ of activations at a particular layer, the transformation proceeds in two stages.
+Batch normalization normalizes activations using statistics computed over the mini-batch for each feature or channel during training. For fully connected activations, the averaging axis is the batch. For convolutional activations, implementations typically compute per-channel statistics over both the batch and spatial positions. For a mini-batch $\mathcal{B} = \{x_1, \ldots, x_B\}$ of activations at a particular layer, the transformation proceeds in two stages.
 
 First, compute the batch statistics:
 $$
@@ -4062,13 +4062,13 @@ Layer normalization normalizes each sample independently, making the operation i
 
 The choice between normalization variants depends on computational context. @Tbl-normalization-comparison summarizes the key trade-offs. BatchNorm typically stores learned scale/shift parameters plus nonlearned running mean/variance buffers; LayerNorm computes per-sample statistics at runtime and typically stores learned scale/shift parameters but no running-statistic buffers.
 
-| **Characteristic**        | **BatchNorm**                  | **LayerNorm**            | **RMSNorm**                   |
-|:--------------------------|:-------------------------------|:-------------------------|:------------------------------|
-| **Normalization Axis**    | Batch dimension                | Feature dimension        | Feature dimension             |
-| **Batch Size Dependency** | High (noisy for small batches) | None                     | None                          |
-| **Typical Use Case**      | CNNs, vision models            | Transformers, RNNs       | LLaMA, efficient Transformers |
-| **Computation Cost**      | Higher (mean + variance)       | Higher (mean + variance) | Lower (RMS only)              |
-| **Training/Inference**    | Different (running stats)      | Identical                | Identical                     |
+| **Characteristic**        | **BatchNorm**                          | **LayerNorm**            | **RMSNorm**                   |
+|:--------------------------|:---------------------------------------|:-------------------------|:------------------------------|
+| **Normalization Axis**    | Batch and, for CNNs, spatial positions | Feature dimension        | Feature dimension             |
+| **Batch Size Dependency** | High (noisy for small batches)         | None                     | None                          |
+| **Typical Use Case**      | CNNs, vision models                    | Transformers, RNNs       | LLaMA, efficient Transformers |
+| **Computation Cost**      | Higher (mean + variance)               | Higher (mean + variance) | Lower (RMS only)              |
+| **Training/Inference**    | Different (running stats)              | Identical                | Identical                     |
 
 : **Normalization Variant Comparison**\index{RMSNorm}\index{Normalization!RMSNorm}: Different normalization techniques trade off between computational efficiency, batch size sensitivity, and architectural compatibility. RMSNorm [@zhang2019root], used in LLaMA and other efficient architectures, omits mean centering: $\text{RMSNorm}(\mathbf{x}) = \mathbf{x} / \sqrt{\frac{1}{d_{\text{model}}}\sum_i x_i^2 + \epsilon} \cdot \boldsymbol{\gamma}$. {#tbl-normalization-comparison}
 
@@ -4164,16 +4164,16 @@ This portability is the central lesson. Recent innovations continue the same pat
 
 [^fn-vision-transformers]: **Vision Transformers (ViTs)**\index{Vision Transformer}: Google's 2020 ViT paper split $224{\times}224$ images into $16{\times}16$ patches (196 "tokens") and applied standard Transformer attention. The systems trade-off: ViTs replace CNN's efficient local convolutions with $\mathcal{O}(S^2)$ global attention over patch tokens, requiring 3--5$\times$ more training data and compute to match CNN accuracy on ImageNet. ViTs dominate only when massive pretraining budgets are available, illustrating how inductive bias and compute budget are substitutes: weaker bias demands more data and hardware. \index{Vision Transformer!compute trade-off}
 
-@Tbl-primitive-comparison makes this synthesis concrete. Transformers retain the core GEMM operations common to all architectures but introduce more complex memory access patterns with their attention mechanism, blending the broadcast operations of MLPs with the gather operations of more dynamic architectures.
+@Tbl-primitive-comparison makes this synthesis concrete. Transformers retain the core GEMM operations common to all architectures but introduce content-dependent all-to-all reductions through attention, blending the broadcast operations of MLPs with the gather and reduce operations of more dynamic architectures.
 
-| **Primitive Type** | **MLP**    | **CNN**        | **RNN**            | **Transformer**  |
-|:-------------------|:-----------|:---------------|:-------------------|:-----------------|
-| **Computation**    | Dense GEMM | Convolution    | Sequential GEMM    | GEMM + Attention |
-| **Memory Access**  | Sequential | Strided        | Sequential + State | Random (QKV)     |
-| **Data Movement**  | Broadcast  | Sliding window | Temporal broadcast | Gather + Reduce  |
-| **Parallelism**    | High       | High           | Low (time deps)    | High (positions) |
+| **Primitive Type** | **MLP**    | **CNN**        | **RNN**            | **Transformer**   |
+|:-------------------|:-----------|:---------------|:-------------------|:------------------|
+| **Computation**    | Dense GEMM | Convolution    | Sequential GEMM    | GEMM + Attention  |
+| **Memory Access**  | Sequential | Strided        | Sequential + State | Tiled QKV streams |
+| **Data Movement**  | Broadcast  | Sliding window | Temporal broadcast | Gather + Reduce   |
+| **Parallelism**    | High       | High           | Low (time deps)    | High (positions)  |
 
-: **Primitive Utilization Across Architectures**: Every architecture uses GEMM, but they differ in memory access patterns (sequential to random), data movement (broadcast to gather+reduce), and parallelism. Transformers combine elements from all previous families while introducing attention-specific patterns. {#tbl-primitive-comparison}
+: **Primitive Utilization Across Architectures**: Every architecture uses GEMM, but they differ in memory access patterns, data movement (broadcast to gather+reduce), and parallelism. Transformers combine dense tiled QKV access with attention-specific reductions; sparse recommendation embeddings remain the canonical random-access workload. {#tbl-primitive-comparison}
 
 For systems engineers, this building-block perspective separates portable optimizations from architecture-specific ones. GEMM tiling and mixed-precision compute benefit every architecture. Skip connection memory management applies to any residual network. Normalization kernel fusion helps CNNs and transformers alike. Attention-specific optimizations remain tied to attention's memory pattern, but even those build on the same underlying GEMM and memory-access primitives. @Sec-ml-frameworks shows how software frameworks encapsulate these building blocks as composable layer abstractions, while @sec-hardware-acceleration details how hardware exploits their shared computational patterns.
 
@@ -4341,7 +4341,7 @@ Sequential access is the simplest, most efficient pattern, and the most energy-f
 
 Strided access appears prominently in CNNs, where each output position needs to access a window of input values at regular intervals. Each output position requires accessing nine input values (for a $3{\times}3$ filter) with a stride matching the input width. While less efficient than sequential access, hardware supports this through pattern-aware caching strategies and specialized memory controllers. Software frameworks often transform these strided patterns into sequential access through data layout reorganization, where the im2col transformation in deep learning frameworks converts convolution's strided access into efficient matrix multiplications.
 
-Random access poses the greatest challenge for system efficiency. In a transformer processing a sequence of 512 tokens, each attention operation potentially needs to access any position in the sequence, creating unpredictable memory access patterns. Random access can severely impact performance through cache misses (potentially causing 100+ cycle stalls per access) and unpredictable memory latencies. Systems address this through large cache hierarchies (modern GPUs have several MB of L2 cache) and multi-level prefetching strategies, while software frameworks employ techniques like attention pattern pruning to reduce random access requirements.
+Random access poses the greatest challenge for system efficiency. Sparse embedding lookups in recommendation models are the canonical example: each request may touch a different set of table rows, defeating predictable streaming and causing cache misses or irregular memory latency. Dense transformer attention is different. Its weights are content-dependent, but Q, K, and V are stored in contiguous tensors and optimized kernels tile those tensors through SRAM/registers while reducing over the sequence. The systems challenge for attention is therefore quadratic data movement and reduction structure, not arbitrary address-random fetches.
 
 @Tbl-arch-complexity quantifies how these different memory access patterns contribute to the overall memory requirements of each architecture, comparing MLPs, CNNs, RNNs, and transformers across parameter storage, activation storage, and scaling behavior.
 

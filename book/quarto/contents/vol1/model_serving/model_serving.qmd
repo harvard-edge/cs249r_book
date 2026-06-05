@@ -1439,7 +1439,7 @@ For a system processing `{python} SerializationEfficiency.requests_per_sec_str` 
 
 :::
 
-The system choice is clear: use REST for public APIs to maximize developer accessibility, and use gRPC for high-performance internal communication to minimize the serialization tax.
+The system choice is constraint-dependent. REST/HTTP is common when public compatibility, debugging, and ecosystem reach dominate. gRPC/Protobuf, or another binary protocol, is favored when internal high-QPS tensor traffic, connection reuse, or streaming makes serialization a meaningful share of the latency and CPU budget.
 
 The architectural components and protocols examined so far describe *how* serving systems are built. Understanding *why* certain configurations perform better requires analyzing what happens to individual requests as they traverse these components.
 
@@ -2957,16 +2957,16 @@ $$\Pr(\text{batch size} = k) = \frac{(\lambda T_{\text{window}})^k e^{-\lambda T
 |    **50 QPS**    |      0.5       |     0.7     |         61 percent        |                    39 percent                    |
 |   **200 QPS**    |      2.0       |     1.4     |         14 percent        |                    14 percent                    |
 |   **500 QPS**    |      5.0       |     2.2     |        0.7 percent        |                    3 percent                     |
-| **THOUSAND QPS** |      10.0      |     3.2     |       0.005 percent       |                   0.3 percent                    |
+|   **1000 QPS**   |      10.0      |     3.2     |       0.005 percent       |                   0.3 percent                    |
 
 : **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching, and the probability of batches exceeding twice the mean size decreases as traffic grows (from 39 percent at 50 QPS to 0.3 percent at 1000 QPS), reflecting the law of large numbers. {#tbl-batch-variability tbl-colwidths="[24,18,18,20,20]"}
 
 #### Throughput maximization strategy {#sec-model-serving-throughput-maximization-strategy-27f5}
 
-Throughput optimization requires maximizing the number of requests processed per unit time. For a system with service time $T_{\text{service}}(B)$ for batch size $B$, throughput follows @eq-batch-throughput:
-$$\text{Throughput}(B) = \frac{B}{T_{\text{window}} + T_{\text{service}}(B)}$$ {#eq-batch-throughput}
+Throughput optimization requires separating per-request latency from saturated service capacity. A request waits for batch formation, then pays the service time of the formed batch. Under sustained load, however, batch formation can overlap with the previous batch's execution, so capacity is governed by the ready-batch service time:
+$$\mu(B) \approx \frac{B}{T_{\text{service}}(B)}, \qquad \text{throughput} = \min(\lambda, \mu(B))$$ {#eq-batch-throughput}
 
-The numerator increases linearly with batch size while the denominator increases sub-linearly (due to GPU parallelism). This creates an optimal batch size that balances these competing effects.
+In @eq-batch-throughput, $\lambda$ is the offered arrival rate and $\mu(B)$ is the saturated service capacity for batch size $B$. The numerator increases linearly with batch size while service time often increases sub-linearly over a useful range because GPU parallelism is better utilized. The batching window still appears in request latency and in low-traffic regimes, where the expected batch size is limited by arrivals during the window, roughly $\lambda T_{\text{window}}$.
 
 For ResNet-50 on a V100 GPU, service time approximately scales as $T_{\text{service}}(B) = 5 \text{ ms} + 0.6 B$ (5 ms fixed overhead plus 0.6 ms per image in the batch). This linear approximation captures the dominant trend; actual service times may deviate slightly due to memory hierarchy effects. With $T_{\text{window}} = 10 \text{ ms}$ batching window:
 
@@ -3277,7 +3277,9 @@ The interplay between window size and batch limits creates a space of possible c
 ::: {#lst-adaptive-batching lst-cap="**Adaptive Batching Window**: Dynamically adjusts batch timeout based on queue depth and arrival rate, reducing average latency by 27 percent compared to fixed windows while maintaining throughput."}
 
 ```{.python}
-def adaptive_batching_window(queue_depth, arrival_rate, slo_ms):
+def adaptive_batching_window(
+    queue_depth, arrival_rate, slo_ms, service_ms, fixed_overhead_ms
+):
     """Compute optimal batching window.
 
     Based on current system state.
@@ -3288,11 +3290,8 @@ def adaptive_batching_window(queue_depth, arrival_rate, slo_ms):
     if queue_depth >= target_batch_size:
         return 0
 
-    # Compute maximum allowable wait from SLO constraint, in
-    # milliseconds
-    # Reserve 30% of latency budget for batching,
-    # remainder for inference
-    max_wait_ms = slo_ms * 0.3
+    # Compute maximum allowable wait from the remaining p99 budget.
+    max_wait_ms = max(0, slo_ms - service_ms - fixed_overhead_ms)
 
     # Estimate time to accumulate target batch at current arrival
     # rate.
@@ -3300,11 +3299,11 @@ def adaptive_batching_window(queue_depth, arrival_rate, slo_ms):
     # milliseconds.
     if arrival_rate > 0:
         requests_needed = target_batch_size - queue_depth
-        estimated_wait_ms = requests_needed / arrival_rate * THOUSAND
+        estimated_wait_ms = requests_needed / arrival_rate * 1000.0
         # Return minimum of estimated wait and SLO-constrained maximum
         return min(estimated_wait_ms, max_wait_ms)
 
-    return max_wait_ms  # Low traffic: use full budget to accumulate batch
+    return max_wait_ms  # Low traffic: use remaining budget to accumulate batch
 ```
 
 :::
@@ -3836,9 +3835,9 @@ The continuous batching and PagedAttention techniques covered in @sec-model-serv
 
 #### Prefix caching and memory offloading {#sec-model-serving-prefix-caching-offloading}
 
-The memory pressure from KV caches can be further mitigated through architectural strategies that exploit request patterns. **Prefix Caching**\index{Prefix Caching!KV cache reuse} stores the KV cache of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing many independent requests to reuse the same precomputed hidden states. This eliminates redundant prefill operations $(O)$ and reduces memory transfer cost $(D_{\text{vol}}/\text{BW})$. For multi-turn conversations, this "caching of the past" allows the system to process only the *new* tokens in each turn.
+The memory pressure from KV caches can be further mitigated through architectural strategies that exploit request patterns. **Prefix Caching**\index{Prefix Caching!KV cache reuse} stores the KV cache of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing many independent requests to reuse the same precomputed hidden states. For $N$ requests sharing a prefix of $P$ tokens, the saved prefill work is roughly $(N-1)P$ token steps, plus the avoided reads and writes of the prefix KV state. For multi-turn conversations, this "caching of the past" allows the system to process only the *new* tokens in each turn.
 
-When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV Cache Offloading**\index{KV Cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. While retrieving offloaded context introduces a latency "tax" due to PCIe bandwidth limits (@sec-model-serving-model-swapping-host-memory-c54f), it prevents Out-of-Memory (OOM) failures and enables handling much larger context windows than the hardware could otherwise support.
+When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV Cache Offloading**\index{KV Cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents Out-of-Memory (OOM) failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly.
 
 Advanced techniques including speculative decoding[^fn-speculative-decoding] and distributed parallelism, where one request is split across multiple devices or machines, are covered in specialized treatments of large-scale systems.
 
