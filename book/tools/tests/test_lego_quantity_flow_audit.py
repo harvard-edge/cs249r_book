@@ -79,11 +79,12 @@ class X:
 
 
 def test_prose_literals_flags_inline_code_suppression(tmp_path: Path):
+    inline_marker = "lego" + "-ok: illustrative input"
     qmd = _write_qmd(
         tmp_path,
-        """```{python}
+        f"""```{{python}}
 class X:
-    latency = 0.5  # lego-ok: illustrative input
+    latency = 0.5  # {inline_marker}
 ```""",
     )
     issues = check_prose_literals(qmd)
