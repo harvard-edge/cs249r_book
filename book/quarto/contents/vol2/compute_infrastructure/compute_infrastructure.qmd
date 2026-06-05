@@ -2412,7 +2412,7 @@ The result is a natural mapping between parallelism types and interconnect domai
 
 The mapping also determines how the job scheduler assigns nodes to training jobs. Nodes within the same tensor-parallel group should be physically adjacent (ideally in the same chassis, connected via NVLink). Nodes within the same pipeline-parallel group should be in the same rack or adjacent racks (minimizing InfiniBand switch hops). Data-parallel groups can span the entire cluster because their communication (gradient AllReduce) is the least bandwidth-intensive and most latency-tolerant of the three parallelism types.
 
-@Sec-distributed-training-systems formalizes this mapping and examines the interactions between these parallelism strategies.
+One intra-node boundary remains before that mapping reaches the scheduler: the PCIe hierarchy that connects accelerators to host CPUs, NICs, storage, and DRAM.
 
 #### The PCIe hierarchy within a node {#sec-compute-infrastructure-pcie-hierarchy-within-node-c56f}
 
@@ -2432,6 +2432,8 @@ While NVLink provides a high-bandwidth freeway for GPU-to-GPU communication, **P
 A standard DGX H100 node features two host CPUs, each managing a **PCIe root complex**\index{PCIe Root Complex} with 128 lanes. These lanes are distributed to maximize simultaneous throughput: 8 GPUs each receive a dedicated x16 link, and 8 InfiniBand HCAs each receive their own x16 link. This configuration provides an aggregate theoretical bandwidth of nearly 2 TB/s within the chassis. However, this bandwidth is shared among competing traffic streams. During a single training step, the PCIe bus simultaneously carries host-to-GPU data batches, GPU-to-HCA gradient shards for inter-node AllReduce (via GPUDirect RDMA), and periodic CPU-to-NVMe checkpoint writes. Contention between these streams can cause unexpected pipeline stalls, particularly when gradient synchronization saturates the links typically used for data loading.
 
 The dual-CPU architecture introduces significant **Non-Uniform Memory Access (NUMA)**\index{NUMA!GPU data loading} effects. The 8 GPUs are physically partitioned, with 4 connected to CPU 0's root complex and 4 to CPU 1's. A GPU connected to CPU 0 can access CPU 0's DRAM at full PCIe bandwidth but must traverse the inter-processor interconnect (UPI or Infinity Fabric) to access CPU 1's DRAM. This traversal incurs additional latency and reduces effective bandwidth by up to 50 percent. Robust data loading pipelines must employ *NUMA-aware scheduling*, pinning data loader worker processes to the CPU cores physically closest to the target GPUs. Empirical benchmarks show that aligning data loaders with the correct NUMA domain can improve data ingestion throughput by 20--30 percent, preventing the CPU from becoming the bottleneck in high-throughput training runs.
+
+@Sec-distributed-training-systems formalizes how these intra-node and inter-node boundaries interact with data, tensor, and pipeline parallelism.
 
 ### Dense node designs {#sec-compute-dense-nodes}
 
@@ -3248,7 +3250,7 @@ The rail-optimized design requires 8 ToR switches per rack group instead of 1, w
 
 #### Physical security and environmental controls {#sec-compute-infrastructure-physical-security-environmental-controls-7132}
 
-Data centers housing ML infrastructure typically implement multiple layers of physical security and environmental monitoring, not only for regulatory compliance but also for practical risk management. The value of a single rack of DGX H100 nodes (\$1.4 million in hardware alone) justifies security measures that would be excessive for traditional server equipment.
+Rack design also defines physical failure domains. Data centers housing ML infrastructure implement multiple layers of physical security and environmental monitoring, not only for regulatory compliance but also because a single rack of DGX H100 nodes (\$1.4 million in hardware alone) concentrates enough value, heat, and liquid-cooling risk to justify controls that would be excessive for traditional server equipment.
 
 Environmental monitoring includes:
 
@@ -4254,6 +4256,8 @@ Wafer-scale integration also faces manufacturing challenges. Because the chip sp
 
 The lesson for infrastructure planners is not that wafer-scale systems replace GPU fleets. It is that memory proximity and memory capacity trade against each other. WSE-style designs buy extraordinary local bandwidth by putting the working set near the arithmetic, while CXL buys flexible capacity by moving memory farther away. HBM sits between those extremes: off-chip but on-package, smaller than host memory but fast enough for the active computation. The right architecture is the one whose memory tier matches the workload's reuse pattern.
 
+### Advanced packaging {#sec-compute-advanced-packaging}
+
 Underpinning both directions is the evolution of **advanced packaging**\index{Advanced Packaging}. Packaging moves the boundary inside the accelerator package rather than all the way out to the rack or all the way in to a single wafer, and it matters because the reticle limit is only about 858 mm$^2$ for a single exposure. **2.5D interposers**\index{2.5D interposers}, such as TSMC's CoWoS, mount compute dies and HBM stacks on a shared silicon substrate, allowing chiplet-based accelerators to behave like a single device for most software. **3D stacking**\index{3D stacking}, with approaches such as SoIC, places SRAM caches or logic directly above one another and shortens data paths further. The H100-to-B200 transition shows the fleet consequence: the package can deliver far more local arithmetic and die-to-die bandwidth, but the rack must absorb higher power density, tighter cooling requirements, and less tolerance for power transients before the silicon advantage becomes useful infrastructure.
 
 The common theme is relocation rather than elimination. CXL moves capacity outward into a fabric and leaves bandwidth as the limiting discipline. Wafer-scale integration moves communication inward and leaves capacity and yield as the limiting disciplines. Advanced packaging compresses die-to-die distance and leaves power density as the limiting discipline. Infrastructure planning therefore still begins by identifying where the next byte moves, how quickly it must arrive, and what physical system must be built so that movement does not dominate the workload.
@@ -4261,6 +4265,8 @@ The common theme is relocation rather than elimination. CXL moves capacity outwa
 Because the bottlenecks move rather than disappear, the same planning mistakes recur: teams optimize the visible specification and miss the binding constraint.
 
 ## Fallacies and Pitfalls {#sec-compute-fallacies-pitfalls}
+
+Compute infrastructure mistakes usually come from optimizing the visible specification while ignoring the binding physical constraint. The fallacies below translate the chapter's node, rack, pod, and facility lessons into operational warnings.
 
 **Fallacy**: *More GPUs always means faster training.*
 

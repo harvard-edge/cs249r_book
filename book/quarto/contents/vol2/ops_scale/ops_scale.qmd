@@ -355,6 +355,8 @@ class PlatformRoi:
 
 #### From artisanal to industrial operations {#sec-ml-operations-scale-artisanal-to-industrial-operations-092d}
 
+The platform-dividend calculation above gives the general rule; the worked example below turns it into an operating decision. The question is not whether shared tooling is aesthetically cleaner, but whether the fixed platform cost is smaller than the manual toil it removes across the model fleet.
+
 ```{python}
 #| echo: false
 #| label: platform-economics-lego
@@ -873,8 +875,6 @@ class DeploymentRoi:
 
 The decision rule is asymmetric. Pay debt when this ratio exceeds the expected value from feature development; the configuration debt above qualifies because it has high impact (blocks deployments), high frequency (every deployment), high benefit (eliminates 35 percent of delays), and moderate cost (6 weeks). Defer debt when it is localized to a single team, frequency is low (monthly or less), system sunset is planned within 12 months, or resolution cost exceeds 6 months of engineering effort.
 
-#### Organizational practices {#sec-ml-operations-scale-organizational-practices-9f81}
-
 The same prioritization logic must become organizational habit, or the measured debt will reaccumulate between audits. Quantified debt first becomes a backlog item with affected systems, estimated impact, resolution cost, and priority score. Quarterly review then updates that backlog as platform needs change, keeping the ranking tied to current deployment velocity, incident rates, and toil rather than stale complaints.
 
 A debt budget turns that ranking into capacity. Allocating 20 to 30 percent of sprint capacity to paydown makes remediation compete explicitly with feature work, while teams spending less than 10 percent on debt usually see debt grow faster than they can address it. Prevention moves the same reasoning upstream into code and design review: every proposed change should ask whether it introduces configuration complexity, hard-to-maintain data dependencies, or manual operational procedures, because preventing debt creation costs less than paying it down later.
@@ -894,13 +894,9 @@ The operational requirements for multi-model platforms differ qualitatively from
 
 : **Single-Model vs. Platform Operations**\index{Single-Model vs. Platform Operations}: Six qualitative differences that emerge when scaling from one model to 100+. Deployment shifts from team-controlled rollouts to dependency-aware platform coordination, monitoring evolves from model-centric dashboards to system-level aggregation, and governance expands from team-specific policies to organization-wide automated enforcement. {#tbl-ops-scale-differences}
 
-#### Deployment complexity {#sec-ml-operations-scale-deployment-complexity-c976}
-
 The qualitative gap is most visible in deployment operations. Single-model deployment is straightforward: validate the new version, deploy to a canary, monitor for regressions, and proceed to full rollout. Platform-scale deployment must consider dependency ordering, where models that consume features from other models cannot be updated independently. Rollback coordination becomes essential, as reverting one model may require reverting dependent models. Resource contention arises when multiple deployments compete for GPU memory or network bandwidth. Blast radius management limits the impact of any single deployment failure.
 
 For recommendation systems, this complexity is particularly acute. A typical recommendation request might involve 10--50 models executing in sequence or parallel: candidate retrieval models, ranking models, diversity filters, and business rule layers. Updating any component requires understanding its interactions with all others.
-
-#### Monitoring evolution {#sec-ml-operations-scale-monitoring-evolution-549b}
 
 Monitoring requirements evolve similarly. At single-model scale, monitoring focuses on model-specific metrics: prediction accuracy, inference latency, and data drift indicators. At platform scale, this approach becomes untenable. With 100 models, 100 independent dashboards create information overload that prevents effective incident response.
 
@@ -1844,8 +1840,6 @@ The dependency graph must be explicit in the registry because the update approva
 
 Without explicit dependency tracking, organizations discover dependencies through production failures when an upstream model change breaks downstream consumers.
 
-#### Registry schema example {#sec-ml-operations-scale-registry-schema-example-b135}
-
 @Lst-registry-schema illustrates how a single YAML entry captures artifact location, training provenance, and evaluation thresholds, giving the dependency tracker enough metadata to identify which downstream models must be re-evaluated when the upstream embedding changes.\index{Model Registry!schema}
 
 ::: {#lst-registry-schema lst-cap="**Model Registry Schema**: A YAML entry capturing model metadata, artifact location, training provenance, and evaluation results for dependency tracking and reproducibility."}
@@ -2450,6 +2444,10 @@ However, the coordination service becomes a critical dependency. If the coordina
 - With bounded staleness: Regions continue but coordinator failure triggers alerts if staleness exceeds bounds
 
 Organizations deploying safety-critical models typically implement coordinator redundancy through consensus protocols (Raft, Paxos) that survive single-node failures while maintaining consistency guarantees.
+
+### Production experiment validation {#sec-ml-operations-scale-production-experiment-validation}
+
+Once rollout coordination preserves version boundaries, the next question is whether the candidate model is actually safe to expose. Shadow traffic, interleaving, A/B tests, and network-effect checks form an experiment ladder: each step buys stronger production evidence at higher operational cost.
 
 #### Shadow deployment and traffic replay {#sec-ml-operations-scale-shadow-deployment-traffic-replay-ee4f}
 
@@ -3608,15 +3606,11 @@ Training Cost Comparison (100 GPU-hours):
 └── Actual spot with interruptions: ~$110 (accounting for 20% rerun overhead)
 ```
 
-#### Autoscaling for serving {#sec-ml-operations-scale-autoscaling-serving-2ae1}
-
-Serving costs scale with traffic, but ML serving cannot autoscale like a stateless web application. Large models may take seconds or minutes to load, so purely reactive scaling arrives after the latency spike; the platform needs predictive scale-up before anticipated demand.
+The serving side allocates risk differently. Serving costs scale with traffic, but ML serving cannot autoscale like a stateless web application. Large models may take seconds or minutes to load, so purely reactive scaling arrives after the latency spike; the platform needs predictive scale-up before anticipated demand.
 
 The capacity steps are also lumpy. GPU memory makes serving scale in jumps of 0, 1, 2, or 4 GPUs rather than smooth CPU fractions, and batching adds another coupling because waiting for a larger batch improves utilization but consumes latency budget. An autoscaling policy must therefore choose the least expensive capacity step that still protects the p99 latency SLO.
 
-#### Right-sizing and instance selection {#sec-ml-operations-scale-rightsizing-instance-selection-fe66}
-
-ML workloads have distinct compute profiles, so right-sizing starts from the binding constraint rather than the newest instance type. Memory-bound training with large embedding tables prioritizes GPU memory capacity and bandwidth. Compute-bound dense training maximizes sustained FLOP/s per dollar.
+Instance selection then starts from the binding constraint rather than the newest instance type. Memory-bound training with large embedding tables prioritizes GPU memory capacity and bandwidth. Compute-bound dense training maximizes sustained FLOP/s per dollar.
 
 Serving splits the decision again. Latency-sensitive serving minimizes cold start and single-request latency, while throughput-oriented serving maximizes requests per dollar through batching. Instance selection should therefore be benchmark-driven: compare cost per training step or cost per inference across instance types instead of assuming larger hardware is automatically more economical.
 
@@ -3638,13 +3632,7 @@ Effective chargeback closes the loop by making those costs actionable. It requir
 
 FinOps extends beyond infrastructure optimization because cost feedback changes which experiments teams run and which models they ship.
 
-#### Experiment budgets {#sec-ml-operations-scale-experiment-budgets-ea9d}
-
-Unconstrained experimentation leads to runaway costs, but budget controls should make trade-offs visible before they block useful work.
-
-- Per-experiment limits: Cap individual training runs at a cost threshold
-- Team budgets: Allocate monthly compute budgets to teams with visibility into consumption
-- Approval workflows: Require approval for experiments exceeding cost thresholds
+Unconstrained experimentation leads to runaway costs, but budget controls should make trade-offs visible before they block useful work. Per-experiment limits cap individual training runs at a cost threshold; team budgets allocate monthly compute budgets with visibility into consumption; and approval workflows require review for experiments that exceed cost thresholds.
 
 These controls should inform rather than block. The goal is cost awareness, not prevention of valuable experiments.
 
@@ -3674,6 +3662,8 @@ Efficiency metrics should be reviewed alongside model quality so the platform ca
 : **Efficiency Metric Action Map**: Efficiency metrics are useful only when they identify a decision. The platform reviews these signals alongside quality metrics to find waste that accuracy alone hides. {#tbl-ops-scale-efficiency-metric-actions}
 
 Regular review of these metrics identifies systemic inefficiencies and guides platform improvements.
+
+The same visibility must extend to the knowledge layer of modern ML applications. Retrieval, fine-tuning, and total lifecycle ownership all look like model-quality choices from a notebook, but at fleet scale they become cost-placement decisions.
 
 ### RAG vs. fine-tuning: The knowledge operations trade-off {#sec-ml-operations-scale-rag-vs-finetuning-knowledge-operations-tradeoff-77f3}
 
@@ -4064,9 +4054,7 @@ $$T_{\text{breakeven}} = \frac{\$80,000}{\$45,000/month} = 1.8 \text{ months}$$
 
 Still attractive, but lower priority than inference optimization due to longer payback and smaller absolute savings.
 
-#### Optimization priority matrix {#sec-ml-operations-scale-optimization-priority-matrix-a87c}
-
-@Tbl-optimization-priority provides a decision framework mapping cost structure to optimization priorities:
+That same payback logic generalizes into an optimization priority matrix. @Tbl-optimization-priority maps the dominant cost structure to the optimization work that should come first:
 
 | **Dominant Cost**              |  **First Priority** |   **Second Priority**    |          **Avoid**          |
 |:-------------------------------|:-------------------:|:------------------------:|:---------------------------:|
@@ -4190,8 +4178,6 @@ Training data must use features as they existed at the time of each training exa
 The contrast in @fig-time-travel is stark: the correct point-in-time value at noon is 4 clicks, but a naive batch join would supply the midnight value of 10, inflating the training signal by 2.5 times and producing a model that cannot generalize to production.
 
 This "time travel"\index{Time Travel} failure is common because the feature value is valid in the database but invalid for the historical prediction moment. Consider `total_clicks_today`: at midnight, the pipeline calculates the value for User A as 10, but a noon prediction should only see the 4 clicks that existed by noon. Training on the midnight value leaks future information into the example, so the model learns to "cheat" with signals unavailable in production. The result can be spectacular offline metrics and catastrophic production failure when future data disappears.\index{Leakage}
-
-#### Point-in-time joins {#sec-ml-operations-scale-pointintime-joins-146f}
 
 Feature stores implement point-in-time joins that retrieve feature values as of specific timestamps, as shown in @lst-pit-joins.\index{Point-in-Time Join}
 
@@ -4430,15 +4416,11 @@ Production feature stores also carry two time horizons at once. The online path 
 
 Data quality\index{Data Quality} issues are a major source of production ML problems [@polyzotis2017]. While model monitoring detects symptoms, data quality monitoring prevents problems at their source. At scale, data quality operations become as critical as model quality operations, requiring systematic monitoring, validation, and incident response procedures.
 
-#### Data quality metrics {#sec-ml-operations-scale-data-quality-metrics-b0bd}
-
-Data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce `{python} FeatureStoreScale.expected_events_str` but delivering only `{python} FeatureStoreScale.delivered_events_str` is `{python} FeatureStoreScale.completeness_pct_str` complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than `{python} FeatureStoreScale.validation_failure_threshold_pct_str` of validation rules because allowing corrupt data through is more expensive than delaying a batch.
+The first step is measurement: data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce `{python} FeatureStoreScale.expected_events_str` but delivering only `{python} FeatureStoreScale.delivered_events_str` is `{python} FeatureStoreScale.completeness_pct_str` complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than `{python} FeatureStoreScale.validation_failure_threshold_pct_str` of validation rules because allowing corrupt data through is more expensive than delaying a batch.
 
 Timeliness measures freshness against the SLO of the consuming model. Fraud detection may need features less than 100 milliseconds old, while demographic features can tolerate staleness measured in days; the alert threshold should therefore be tied to the feature's use, not a global constant. Accuracy asks whether values remain correct within expected distributions. Sensor drift after calibration lapses, for example, can leave values well-typed but wrong. Statistical tests such as Kolmogorov-Smirnov for continuous features, chi-square for categorical features, and Maximum Mean Discrepancy for high-dimensional data turn those accuracy checks into recurring gates.
 
-#### Data validation patterns {#sec-ml-operations-scale-data-validation-patterns-9377}
-
-Production data quality operations employ three validation patterns, ordered from structural failures to semantic failures. Schema validation enforces expected column names, types, and constraints at ingestion; tools such as Great Expectations, TensorFlow Data Validation, and Pandera provide declarative schemas with automated checks. Distribution monitoring then tracks feature distributions over time, catching drift that may not violate a type constraint but still indicates an upstream change likely to degrade model performance. Cross-field validation adds the business logic that neither schema nor marginal distributions can express: if `country="USA"`, the `zip_code` should match US postal formats; if `order_status="shipped"`, a `shipping_date` should exist; and age derived from birthdate should match any explicit age field.
+Validation then turns those measurements into a layered defense. Schema validation enforces expected column names, types, and constraints at ingestion; tools such as Great Expectations, TensorFlow Data Validation, and Pandera provide declarative schemas with automated checks. Distribution monitoring tracks feature distributions over time, catching drift that may not violate a type constraint but still indicates an upstream change likely to degrade model performance. Cross-field validation adds the business logic that neither schema nor marginal distributions can express: if `country="USA"`, the `zip_code` should match US postal formats; if `order_status="shipped"`, a `shipping_date` should exist; and age derived from birthdate should match any explicit age field.
 
 #### Worked example: Debugging data quality incident {#sec-ml-operations-scale-worked-example-debugging-data-quality-incident-72cd}
 
