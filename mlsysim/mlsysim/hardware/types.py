@@ -21,13 +21,13 @@ class ComputeCore(BaseModel):
     @field_validator("peak_flops", mode="after")
     @classmethod
     def _validate_peak_flops(cls, v):
-        return require_unit_family(v, ureg.count / ureg.second, "peak_flops", "operation")
+        return require_unit_family(v, ureg.flop / ureg.second, "peak_flops", "operation")
 
     @field_validator("precision_flops", mode="after")
     @classmethod
     def _validate_precision_flops(cls, v):
         return {
-            key: require_unit_family(val, ureg.count / ureg.second, f"precision_flops[{key!r}]", "operation")
+            key: require_unit_family(val, ureg.flop / ureg.second, f"precision_flops[{key!r}]", "operation")
             for key, val in v.items()
         }
 
