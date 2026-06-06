@@ -2524,7 +2524,9 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         fn_pat = re.compile(r"\[\^fn-[\w-]+\]")
+        fn_def_pat = re.compile(r"^\[\^(fn-[\w-]+)\]:")
         inline_fn_pat = re.compile(r"\^\[[^\]]+\]")
+        list_item_pat = re.compile(r"^(?P<indent>\s*)(?P<marker>(?:[-+*]|\d+[.)]))\s+")
         table_sep_pat = re.compile(r"^\|[\s\-:+]+\|")
         # Citation-then-footnote: visually anchors the footnote to the
         # bibliographic reference instead of the concept term. \s*
@@ -2539,6 +2541,46 @@ class ValidateCommand:
             div_depth = 0
             div_start_line = 0
 
+            def previous_list_item(line_index: int) -> Optional[Tuple[int, int]]:
+                """Return (line, indent) for the list item immediately before a block."""
+                for prev_index in range(line_index - 1, -1, -1):
+                    prev_line = lines[prev_index]
+                    prev_stripped = prev_line.strip()
+                    if not prev_stripped:
+                        continue
+                    if fn_def_pat.match(prev_stripped):
+                        return None
+                    if (
+                        prev_stripped.startswith("#")
+                        or prev_stripped.startswith(":::")
+                        or prev_stripped.startswith("```")
+                        or prev_stripped.startswith("|")
+                    ):
+                        return None
+                    marker = list_item_pat.match(prev_line)
+                    if marker:
+                        return prev_index + 1, len(marker.group("indent"))
+                    if not prev_line.startswith((" ", "\t")):
+                        return None
+                return None
+
+            def next_list_item_after_footnote(line_index: int) -> Optional[Tuple[int, int]]:
+                """Return (line, indent) when a later list item follows before prose."""
+                for next_index in range(line_index + 1, len(lines)):
+                    next_line = lines[next_index]
+                    next_stripped = next_line.strip()
+                    if not next_stripped:
+                        continue
+                    if fn_def_pat.match(next_stripped):
+                        continue
+                    marker = list_item_pat.match(next_line)
+                    if marker:
+                        return next_index + 1, len(marker.group("indent"))
+                    if next_line.startswith((" ", "\t")):
+                        continue
+                    return None
+                return None
+
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
 
@@ -2552,6 +2594,27 @@ class ValidateCommand:
                         div_depth -= 1
                         if div_depth == 0:
                             div_start_line = 0
+
+                fn_def = fn_def_pat.match(stripped)
+                if fn_def:
+                    prev_list = previous_list_item(idx - 1)
+                    next_list = next_list_item_after_footnote(idx - 1)
+                    if prev_list and next_list:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_def_interrupts_list",
+                                message=(
+                                    f"Footnote definition [^{fn_def.group(1)}]: appears between "
+                                    f"list items (previous item line {prev_list[0]}, next item "
+                                    f"line {next_list[0]}). Move the definition after the complete "
+                                    f"Markdown list so Pandoc preserves the list structure."
+                                ),
+                                severity="error",
+                                context=stripped[:80],
+                            )
+                        )
 
                 # Check inline footnotes (always forbidden)
                 for m in inline_fn_pat.finditer(line):
