@@ -73,19 +73,24 @@ def _(lab_path, system_design_context, track_picker):
 @app.cell
 def _(context, mo, system_design_controls):
     controls = system_design_controls(mo, context.profile)
-    return (controls,)
+    boundary_check = controls.boundary_check
+    choice = controls.choice
+    knob = controls.knob
+    prediction = controls.prediction
+    reflection = controls.reflection
+    return boundary_check, choice, controls, knob, prediction, reflection
 
 
 @app.cell
 def _():
-    # Static contract: render_system_design_lab creates mo.ui.tabs, mo.ui.radio,
+    # Static contract: render_system_design_lab creates staged mo.ui.radio,
     # mo.ui.slider, mo.ui.dropdown, and visible failure / violation states.
     return
 
 
 @app.cell(hide_code=True)
-def _(COLORS, LAB_CSS, apply_plotly_theme, chapter, context, controls, go, ledger, mo, render_system_design_lab, track_picker):
-    _ = LAB_CSS
+def _(COLORS, LAB_CSS, apply_plotly_theme, boundary_check, chapter, choice, context, controls, go, knob, ledger, mo, prediction, reflection, render_system_design_lab, track_picker):
+    _ = (LAB_CSS, prediction.value, knob.value, boundary_check.value, choice.value, reflection.value)
     render_system_design_lab(
         mo=mo,
         go=go,

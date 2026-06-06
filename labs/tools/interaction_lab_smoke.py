@@ -340,9 +340,29 @@ def wait_for_lab_ready(page, timeout_ms: int = 30_000) -> bool:
 
 def page_text(page) -> str:
     try:
-        return page.locator("body").inner_text(timeout=10_000)
+        return str(page.evaluate(
+            """
+            () => {
+              const roots = [];
+              const visit = (root) => {
+                roots.push(root);
+                for (const el of root.querySelectorAll?.("*") || []) {
+                  if (el.shadowRoot) {
+                    visit(el.shadowRoot);
+                  }
+                }
+              };
+              visit(document);
+              const texts = roots.map((root) => root.body?.innerText || root.textContent || "");
+              return texts.join("\\n").replace(/\\s+/g, " ").trim();
+            }
+            """
+        ))
     except Exception:
-        return ""
+        try:
+            return page.locator("body").inner_text(timeout=10_000)
+        except Exception:
+            return ""
 
 
 def visible_error_markers(page) -> tuple[str, ...]:
@@ -527,6 +547,19 @@ def click_marimo_shadow_control(page, labels: tuple[str, ...]) -> str:
     match = page.evaluate(
         """
         (labels) => {
+          const allElements = () => {
+            const elements = [];
+            const visit = (root) => {
+              for (const el of root.querySelectorAll?.("*") || []) {
+                elements.push(el);
+                if (el.shadowRoot) {
+                  visit(el.shadowRoot);
+                }
+              }
+            };
+            visit(document);
+            return elements;
+          };
           const stripHtml = (value) => String(value || "")
             .replace(/<[^>]+>/g, " ")
             .replace(/&quot;/g, '"')
@@ -544,7 +577,7 @@ def click_marimo_shadow_control(page, labels: tuple[str, ...]) -> str:
             control.click();
           };
 
-          for (const radio of document.querySelectorAll("marimo-radio")) {
+          for (const radio of allElements().filter((el) => el.tagName?.toLowerCase() === "marimo-radio")) {
             const controls = [...(radio.shadowRoot?.querySelectorAll("[role=radio]") || [])];
             for (const control of controls) {
               const candidate = control.value || control.getAttribute("value") || control.textContent || "";
@@ -555,7 +588,7 @@ def click_marimo_shadow_control(page, labels: tuple[str, ...]) -> str:
             }
           }
 
-          for (const checkbox of document.querySelectorAll("marimo-checkbox")) {
+          for (const checkbox of allElements().filter((el) => el.tagName?.toLowerCase() === "marimo-checkbox")) {
             const candidate = checkbox.getAttribute("data-label") || checkbox.textContent || "";
             if (!matches(candidate)) {
               continue;
@@ -639,21 +672,33 @@ def visible_tab_labels(page, max_tabs: int) -> tuple[str, ...]:
     labels = page.evaluate(
         """
         (patterns) => {
+          const roots = [];
+          const visit = (root) => {
+            roots.push(root);
+            for (const el of root.querySelectorAll?.("*") || []) {
+              if (el.shadowRoot) {
+                visit(el.shadowRoot);
+              }
+            }
+          };
+          visit(document);
           const seen = new Set();
           const labels = [];
-          for (const el of document.querySelectorAll('button, [role="tab"]')) {
-            const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
-            const rect = el.getBoundingClientRect();
-            const style = window.getComputedStyle(el);
-            if (!text || rect.width <= 0 || rect.height <= 0 || style.display === 'none' || style.visibility === 'hidden') {
-              continue;
-            }
-            if (!patterns.some((pattern) => text.includes(pattern))) {
-              continue;
-            }
-            if (!seen.has(text)) {
-              seen.add(text);
-              labels.push(text);
+          for (const root of roots) {
+            for (const el of root.querySelectorAll?.('button, [role="tab"]') || []) {
+              const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              if (!text || rect.width <= 0 || rect.height <= 0 || style.display === 'none' || style.visibility === 'hidden') {
+                continue;
+              }
+              if (!patterns.some((pattern) => text.includes(pattern))) {
+                continue;
+              }
+              if (!seen.has(text)) {
+                seen.add(text);
+                labels.push(text);
+              }
             }
           }
           return labels;
@@ -677,7 +722,38 @@ def click_tabs(page, max_tabs: int) -> tuple[ClickCheck, ...]:
     visible_labels = set(visible_tab_labels(page, max_tabs=max_tabs))
     for label in candidate_tab_labels(page, max_tabs):
         try:
-            page.get_by_text(label, exact=False).last.click(timeout=5_000)
+            clicked = page.evaluate(
+                """
+                (label) => {
+                  const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+                  const roots = [];
+                  const visit = (root) => {
+                    roots.push(root);
+                    for (const el of root.querySelectorAll?.("*") || []) {
+                      if (el.shadowRoot) {
+                        visit(el.shadowRoot);
+                      }
+                    }
+                  };
+                  visit(document);
+                  for (const root of roots) {
+                    for (const el of root.querySelectorAll?.('button, [role="tab"]') || []) {
+                      const text = normalize(el.innerText || el.textContent);
+                      if (!text.includes(label)) {
+                        continue;
+                      }
+                      el.scrollIntoView({block: "center", inline: "nearest"});
+                      el.click();
+                      return true;
+                    }
+                  }
+                  return false;
+                }
+                """,
+                label,
+            )
+            if not clicked:
+                page.get_by_text(label, exact=False).last.click(timeout=5_000)
             page.wait_for_timeout(1_000)
             wait_for_settled(page)
             checks.append(

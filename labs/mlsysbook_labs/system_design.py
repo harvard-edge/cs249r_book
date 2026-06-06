@@ -128,6 +128,7 @@ class SystemDesignContext:
 class SystemDesignControls:
     prediction: Any
     knob: Any
+    boundary_check: Any
     choice: Any
     reflection: Any
 
@@ -285,8 +286,16 @@ def system_design_controls(mo: Any, profile: SystemDesignProfile) -> SystemDesig
         step=profile.knob_step,
         label=f"{profile.knob_label} ({profile.knob_unit})",
     )
+    boundary_check = mo.ui.checkbox(
+        label="I compared the scaling curve with the track failure boundary.",
+    )
     options = {option.label: option.option_id for option in profile.decision_options}
-    choice = mo.ui.dropdown(options=options, value=profile.decision_options[0].label, label="Decision option")
+    choice = mo.ui.dropdown(
+        options=options,
+        value=None,
+        allow_select_none=True,
+        label="Decision option",
+    )
     reflection = mo.ui.text_area(
         label="Reflection",
         placeholder="Defend the selected option, rejected alternatives, and residual risk.",
@@ -295,6 +304,7 @@ def system_design_controls(mo: Any, profile: SystemDesignProfile) -> SystemDesig
     return SystemDesignControls(
         prediction=prediction,
         knob=knob,
+        boundary_check=boundary_check,
         choice=choice,
         reflection=reflection,
     )
@@ -492,13 +502,19 @@ def render_system_design_lab(
     profile = context.profile
     prediction = controls.prediction
     knob = controls.knob
+    boundary_check = controls.boundary_check
     choice = controls.choice
     reflection = controls.reflection
 
     frontier = system_frontier(profile, knob_value=knob.value)
-    curve = system_curve(profile, option_id=choice.value)
+    curve_option_id = choice.value or "balanced_policy"
+    curve = system_curve(profile, option_id=curve_option_id)
     selected = system_option_result(profile, option_id=choice.value, knob_value=knob.value)
     decision = system_decision(profile, option_id=choice.value, knob_value=knob.value)
+    prediction_complete = prediction.value is not None
+    boundary_complete = bool(boundary_check.value)
+    decision_complete = choice.value is not None
+    reflection_complete = bool(str(reflection.value or "").strip())
 
     frontier_fig = go.Figure()
     frontier_fig.add_trace(go.Scatter(
@@ -562,7 +578,7 @@ def render_system_design_lab(
     rejected_items = "".join(f"<li>{item}</li>" for item in decision.rejected_alternatives)
     validation_items = "".join(f"<li>{item}</li>" for item in profile.validation_tests)
 
-    if prediction.value is not None:
+    if prediction_complete and boundary_complete and decision_complete:
         ledger.save(chapter=chapter, design={
             "chapter": f"v2_{chapter:02d}",
             "track_id": track.track_id,
@@ -578,9 +594,13 @@ def render_system_design_lab(
 
     prior_v2_decisions = system_design_ledger_summary(ledger, prefix="v2_", upto=chapter)
     incomplete = []
-    if prediction.value is None:
+    if not prediction_complete:
         incomplete.append("Part A dominant-pressure prediction")
-    if not str(reflection.value or "").strip():
+    if not boundary_complete:
+        incomplete.append("Part B scaling-boundary confirmation")
+    if not decision_complete:
+        incomplete.append("Part C decision option")
+    if not reflection_complete:
         incomplete.append("Part C reflection")
 
     report = build_lab_report(
@@ -593,7 +613,7 @@ def render_system_design_lab(
             "Choose a mitigation, state rejected alternatives, and name residual risk.",
         ),
         predictions={"dominant_pressure": prediction.value},
-        knob_settings={"knob_value": knob.value, "selected_option": decision.selected_id},
+        knob_settings={"knob_value": knob.value, "selected_option": choice.value},
         evidence_summary={
             "hardware_ref": profile.hardware_ref,
             "model_ref": profile.model_ref,
@@ -604,7 +624,7 @@ def render_system_design_lab(
             "mitigation": decision.mitigation,
             "prior_v2_decisions": tuple(item.__dict__ for item in prior_v2_decisions),
         },
-        final_decision=decision.memo_summary,
+        final_decision=decision.memo_summary if decision_complete else "",
         big_takeaways=(
             "The same Volume II concept produces different system limits by track.",
             "A local optimum can violate the selected track's guardrail.",
@@ -612,10 +632,10 @@ def render_system_design_lab(
         ),
         reflections={
             "student_reflection": reflection.value,
-            "validation_requirement": decision.validation_requirement,
+            "validation_requirement": decision.validation_requirement if decision_complete else "",
             "report_artifact": profile.report_artifact,
         },
-        residual_risk=decision.residual_risk,
+        residual_risk=decision.residual_risk if decision_complete else "",
         source_trace={
             "track_id": track.track_id,
             "scenario_id": variant.scenario_id,
@@ -666,6 +686,213 @@ def render_system_design_lab(
     else:
         capstone_panel = mo.md("")
 
+    def step_panel(step: str, title: str, body: str) -> Any:
+        return mo.Html(f"""
+        <div class="mlsysbook-action-box" style="width:min(var(--mlsysbook-panel-width),100%);
+             max-width:min(var(--mlsysbook-panel-width),100%); margin:14px auto; padding:16px 18px;
+             background:linear-gradient(135deg,#F8FFFB 0%,#FFFFFF 84%);
+             border:1px solid #B8D8C6; border-left:4px solid var(--mlsysbook-ok); border-radius:8px;
+             box-shadow:0 4px 12px rgba(31,64,122,0.06);">
+          <div class="mlsysbook-section-label">{step}</div>
+          <h3 style="margin:0 0 6px 0; font-size:1.0rem; letter-spacing:0;">{title}</h3>
+          <p style="margin:0; color:#475467; line-height:1.45;">{body}</p>
+        </div>
+        """)
+
+    part_a_items = [
+        mo.Html('<div class="mlsysbook-panel mlsysbook-nugget"><div class="mlsysbook-part-title"><h2>Part A: Decision Frontier</h2></div><div class="mlsysbook-callout"><strong>Purpose:</strong> Make a prediction first, then test it against the track frontier.</div></div>'),
+        step_panel(
+            "A1",
+            "Predict the binding pressure",
+            "Choose the pressure you expect to dominate before you see the chart. Later evidence should confirm, revise, or complicate this first guess.",
+        ),
+        prediction,
+    ]
+    if prediction_complete:
+        part_a_items.extend([
+            mo.callout(
+                mo.md(f"Prediction saved. Step A2 is now open: adjust **{profile.knob_label}** and watch how the track pressure changes."),
+                kind="success",
+            ),
+            step_panel(
+                "A2",
+                "Tune the track pressure",
+                f"Move the {profile.knob_label} control. The same design option can become feasible or infeasible as this track-specific pressure changes.",
+            ),
+            knob,
+            mo.Html("""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>A3: Inspect the frontier evidence</h2></div>
+              <div class="mlsysbook-callout"><strong>Read the chart:</strong> green options stay inside all budgets; red options violate at least one track constraint.</div>
+            </div>
+            """),
+            mo.as_html(frontier_fig),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Table Fallback</h2>
+              <table class="mlsysbook-table">
+                <thead>
+                  <tr><th>Option</th><th>Stress</th><th>Latency</th><th>Cost</th><th>Quality</th><th>Guardrail</th><th>Feasible</th><th>Dominant risk</th></tr>
+                </thead>
+                <tbody>{frontier_rows}</tbody>
+              </table>
+            </div>
+            """),
+        ])
+    else:
+        part_a_items.append(
+            mo.callout(
+                mo.md("Select your prediction to unlock A2 and A3: the track control, frontier chart, and fallback table."),
+                kind="warn",
+            )
+        )
+
+    if prediction_complete:
+        part_b_items = [
+            mo.Html(f"""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>Part B: Scaling Boundary</h2></div>
+              <div class="mlsysbook-callout"><strong>Purpose:</strong> Find where the selected track stops scaling cleanly.</div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>B1: Read the scaling curve</h2></div>
+              <div class="mlsysbook-callout"><strong>Failure boundary:</strong>
+                {curve.first_failure if curve.first_failure is not None else 'not reached'} {profile.knob_unit}</div>
+            </div>
+            """),
+            mo.as_html(curve_fig),
+            step_panel(
+                "B2",
+                "Confirm the boundary",
+                "Before moving to the memo, confirm that you compared the curve against the first failure point and the track guardrails.",
+            ),
+            boundary_check,
+        ]
+        if boundary_complete:
+            part_b_items.append(
+                mo.callout(
+                    mo.md("Boundary confirmed. Part C is now open: choose a design option and defend it with this evidence."),
+                    kind="success",
+                )
+            )
+        else:
+            part_b_items.append(
+                mo.callout(
+                    mo.md("Confirm the boundary reading to unlock the Part C decision memo."),
+                    kind="warn",
+                )
+            )
+    else:
+        part_b_items = [
+            mo.Html('<div class="mlsysbook-panel mlsysbook-nugget"><div class="mlsysbook-part-title"><h2>Part B: Scaling Boundary</h2></div><div class="mlsysbook-callout"><strong>Locked:</strong> Complete Part A so this scaling curve has a prediction to compare against.</div></div>'),
+            mo.callout(
+                mo.md("Complete the Part A prediction to unlock the scaling boundary evidence."),
+                kind="warn",
+            ),
+        ]
+
+    part_c_items = [
+        mo.Html('<div class="mlsysbook-panel mlsysbook-nugget"><div class="mlsysbook-part-title"><h2>Part C: Decision Memo</h2></div><div class="mlsysbook-callout"><strong>Decision step:</strong> Choose the deployment option only after you have seen how the track changes the frontier and scaling boundary.</div></div>'),
+    ]
+    if prediction_complete and boundary_complete:
+        part_c_items.extend([
+            step_panel(
+                "C1",
+                "Choose a design option",
+                "Pick the option you would defend to the stakeholder. The computed evidence appears only after this choice.",
+            ),
+            choice,
+        ])
+        if decision_complete:
+            part_c_items.extend([
+                mo.Html(f"""
+                <div class="mlsysbook-panel">
+                  <h2>C2: Computed Evidence</h2>
+                  <div class="mlsysbook-grid">
+                    <div class="mlsysbook-field"><strong>Selected option</strong>{decision.selected_label}</div>
+                    <div class="mlsysbook-field"><strong>Feasible</strong>{'yes' if decision.feasible else 'no - violation'}</div>
+                    <div class="mlsysbook-field"><strong>Stress ratio</strong>{decision.stress_ratio:.2f}</div>
+                    <div class="mlsysbook-field"><strong>Dominant risk</strong>{decision.dominant_risk}</div>
+                    <div class="mlsysbook-field"><strong>Mitigation</strong>{decision.mitigation}</div>
+                    <div class="mlsysbook-field"><strong>Validation</strong>{decision.validation_requirement}</div>
+                  </div>
+                  <div class="mlsysbook-callout"><strong>Memo decision:</strong> {decision.memo_summary}</div>
+                </div>
+                """),
+                mo.Html(f"""
+                <div class="mlsysbook-panel">
+                  <h2>C3: Alternatives and Validation</h2>
+                  <ul class="mlsysbook-list">{rejected_items}</ul>
+                  <h2>Validation Tests</h2>
+                  <ul class="mlsysbook-list">{validation_items}</ul>
+                </div>
+                """),
+                step_panel(
+                    "C4",
+                    "Write the memo reflection",
+                    "Explain why the selected option survives the track constraints, which alternatives you rejected, and what residual risk remains.",
+                ),
+                reflection,
+            ])
+        else:
+            part_c_items.append(
+                mo.callout(
+                    mo.md("Choose a decision option to unlock C2, C3, and C4: computed evidence, rejected alternatives, validation, and reflection."),
+                    kind="warn",
+                )
+            )
+    elif prediction_complete:
+        part_c_items.append(
+            mo.callout(
+                mo.md("Complete the Part B boundary confirmation before writing the decision memo."),
+                kind="warn",
+            )
+        )
+    else:
+        part_c_items.append(
+            mo.callout(
+                mo.md("Complete Part A before writing the final decision memo. The decision should use evidence, not just the initial guess."),
+                kind="warn",
+            )
+        )
+
+    if incomplete:
+        missing_items = "".join(f"<li>{item}</li>" for item in incomplete)
+        synthesis_panel = mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Synthesis Locked</h2>
+          <div class="mlsysbook-callout"><strong>Finish the sequence:</strong> synthesis, takeaways, and report download unlock after all required steps are complete.</div>
+          <ul class="mlsysbook-list">{missing_items}</ul>
+        </div>
+        """)
+        takeaways_panel = mo.md("")
+    else:
+        synthesis_panel = mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Synthesis</h2>
+          <div class="mlsysbook-grid">
+            <div class="mlsysbook-field"><strong>Track</strong>{track.label}</div>
+            <div class="mlsysbook-field"><strong>Selected option</strong>{decision.selected_label}</div>
+            <div class="mlsysbook-field"><strong>Dominant risk</strong>{decision.dominant_risk}</div>
+            <div class="mlsysbook-field"><strong>Residual risk</strong>{decision.residual_risk}</div>
+          </div>
+        </div>
+        """)
+        takeaways_panel = mo.Html("""
+        <div class="mlsysbook-panel">
+          <h2>Big Takeaways</h2>
+          <ul class="mlsysbook-list">
+            <li><strong>Track context changes the right answer.</strong> Mobile, tiny, edge, and cloud systems fail at different boundaries.</li>
+            <li><strong>Feasibility is multi-dimensional.</strong> Capacity, latency, cost, quality, and guardrails must be checked together.</li>
+            <li><strong>Reports need residual risk.</strong> A decision without validation and remaining risk is not complete.</li>
+          </ul>
+        </div>
+        """)
+
+    report_heading = "## Report Status" if incomplete else "## Download Report"
+
     return mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
@@ -710,85 +937,15 @@ def render_system_design_lab(
           <div class="mlsysbook-callout"><strong>Track story:</strong> {profile.decision_story}</div>
         </div>
         """),
-        mo.ui.tabs({
-            "Part A · Frontier": mo.vstack([
-                mo.Html('<div class="mlsysbook-panel mlsysbook-nugget"><div class="mlsysbook-part-title"><h2>Part A: Decision Frontier</h2></div></div>'),
-                prediction,
-                knob,
-                mo.as_html(frontier_fig),
-                mo.Html(f"""
-                <div class="mlsysbook-panel">
-                  <h2>Table Fallback</h2>
-                  <table class="mlsysbook-table">
-                    <thead>
-                      <tr><th>Option</th><th>Stress</th><th>Latency</th><th>Cost</th><th>Quality</th><th>Guardrail</th><th>Feasible</th><th>Dominant risk</th></tr>
-                    </thead>
-                    <tbody>{frontier_rows}</tbody>
-                  </table>
-                </div>
-                """),
-            ]),
-            "Part B · Scaling": mo.vstack([
-                mo.Html(f"""
-                <div class="mlsysbook-panel mlsysbook-nugget">
-                  <div class="mlsysbook-part-title"><h2>Part B: Scaling Boundary</h2></div>
-                  <div class="mlsysbook-callout"><strong>Failure boundary:</strong>
-                    {curve.first_failure if curve.first_failure is not None else 'not reached'} {profile.knob_unit}</div>
-                </div>
-                """),
-                mo.as_html(curve_fig),
-            ]),
-            "Part C · Decision": mo.vstack([
-                mo.Html('<div class="mlsysbook-panel mlsysbook-nugget"><div class="mlsysbook-part-title"><h2>Part C: Decision Memo</h2></div></div>'),
-                choice,
-                mo.Html(f"""
-                <div class="mlsysbook-panel">
-                  <h2>Computed Evidence</h2>
-                  <div class="mlsysbook-grid">
-                    <div class="mlsysbook-field"><strong>Selected option</strong>{decision.selected_label}</div>
-                    <div class="mlsysbook-field"><strong>Feasible</strong>{'yes' if decision.feasible else 'no - violation'}</div>
-                    <div class="mlsysbook-field"><strong>Stress ratio</strong>{decision.stress_ratio:.2f}</div>
-                    <div class="mlsysbook-field"><strong>Dominant risk</strong>{decision.dominant_risk}</div>
-                    <div class="mlsysbook-field"><strong>Mitigation</strong>{decision.mitigation}</div>
-                    <div class="mlsysbook-field"><strong>Validation</strong>{decision.validation_requirement}</div>
-                  </div>
-                  <div class="mlsysbook-callout"><strong>Memo decision:</strong> {decision.memo_summary}</div>
-                </div>
-                """),
-                mo.Html(f"""
-                <div class="mlsysbook-panel">
-                  <h2>Rejected Alternatives</h2>
-                  <ul class="mlsysbook-list">{rejected_items}</ul>
-                  <h2>Validation Tests</h2>
-                  <ul class="mlsysbook-list">{validation_items}</ul>
-                </div>
-                """),
-                reflection,
-            ]),
-        }),
+        mo.vstack([
+            mo.vstack(part_a_items),
+            mo.vstack(part_b_items),
+            mo.vstack(part_c_items),
+        ]),
         capstone_panel,
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Synthesis</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Track</strong>{track.label}</div>
-            <div class="mlsysbook-field"><strong>Selected option</strong>{decision.selected_label}</div>
-            <div class="mlsysbook-field"><strong>Dominant risk</strong>{decision.dominant_risk}</div>
-            <div class="mlsysbook-field"><strong>Residual risk</strong>{decision.residual_risk}</div>
-          </div>
-        </div>
-        """),
-        mo.Html("""
-        <div class="mlsysbook-panel">
-          <h2>Big Takeaways</h2>
-          <ul class="mlsysbook-list">
-            <li><strong>Track context changes the right answer.</strong> Mobile, tiny, edge, and cloud systems fail at different boundaries.</li>
-            <li><strong>Feasibility is multi-dimensional.</strong> Capacity, latency, cost, quality, and guardrails must be checked together.</li>
-            <li><strong>Reports need residual risk.</strong> A decision without validation and remaining risk is not complete.</li>
-          </ul>
-        </div>
-        """),
-        mo.md("## Download Report"),
+        synthesis_panel,
+        takeaways_panel,
+        mo.md(report_heading),
         report_export_panel(report),
     ])
 

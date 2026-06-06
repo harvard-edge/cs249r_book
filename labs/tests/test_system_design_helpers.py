@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from mlsysbook_labs import (
     get_lab_track_variant,
     get_track_profile,
@@ -11,6 +13,8 @@ from mlsysbook_labs import (
     system_frontier,
 )
 
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SYSTEM_DESIGN_LAB_IDS = (
     "v2_01_scale_illusion",
@@ -112,3 +116,14 @@ def test_system_design_ledger_summary_filters_prior_volume_decisions():
     assert len(summary) == 1
     assert summary[0].chapter == "v2_01"
     assert summary[0].selected_option == "balanced_policy"
+
+
+def test_shared_system_design_renderer_uses_progressive_disclosure():
+    source = (REPO_ROOT / "labs" / "mlsysbook_labs" / "system_design.py").read_text(encoding="utf-8")
+
+    assert "prediction_complete = prediction.value is not None" in source
+    assert "Select your prediction to unlock A2 and A3" in source
+    assert "Complete the Part A prediction to unlock the scaling boundary evidence" in source
+    assert "Complete the Part B boundary confirmation before writing the decision memo" in source
+    assert "Choose a decision option to unlock C2, C3, and C4" in source
+    assert 'report_heading = "## Report Status" if incomplete else "## Download Report"' in source
