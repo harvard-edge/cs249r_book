@@ -56,8 +56,25 @@ class Workload(BaseModel):
     Layer A (Workload Demand): Base representation of an ML model or task.
     
     A Workload defines the computational requirements of a task without any
-    knowledge of the hardware it will run on. It must implement `lower()` 
+    knowledge of the hardware it will run on. It must implement `lower()`
     to project its architectural definition down into a `ComputationGraph`.
+
+    ``inference_flops`` semantics — the unit of work DIFFERS BY MODEL FAMILY
+    (documented 2026-06-06; the field is dimensioned only as ``flop``, so the
+    family convention is the contract):
+
+    - Autoregressive LMs (``TransformerWorkload`` decoder-only,
+      ``SparseTransformerWorkload``): FLOPs **per generated token**, following
+      the 2 x params convention — 2 x TOTAL params for dense models, 2 x
+      ACTIVE params for MoE.
+    - Encoder models (BERT-family): FLOPs **per sequence** at the reference
+      sequence length recorded in the entry's provenance (BERT-Base: 22 GFLOP
+      at seq=128).
+    - Vision / CNN / recommendation models: FLOPs **per input** (one image /
+      one query forward pass).
+
+    NEVER compare ``inference_flops`` across families without normalizing —
+    the magnitudes differ by orders of magnitude purely from the work unit.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
@@ -66,6 +83,8 @@ class Workload(BaseModel):
     parameters: Optional[Quantity] = None
     model_size: Optional[Quantity] = None
     embedding_entries: Optional[Quantity] = None
+    # Per-token (LMs) / per-sequence (encoders) / per-input (vision) — see
+    # class docstring before comparing across model families.
     inference_flops: Optional[Quantity] = None
     inference_energy: Optional[Quantity] = None  # per-inference energy (e.g. mobile on-device)
     data_rate: Optional[Quantity] = None # e.g., TB/hour for autonomous driving
