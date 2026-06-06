@@ -6,7 +6,7 @@ list spacing, div spacing, and table formatting.
 
 Usage:
     binder format blanks   — Collapse extra blank lines
-    binder format python   — Format Python code blocks (Black, 70 chars)
+    binder format python   — Format Python code blocks (Black; display 70, LEGO 150)
     binder format lists    — Fix bullet list spacing
     binder format divs     — Fix div/callout spacing
     binder format tables   — Prettify grid tables
@@ -118,7 +118,7 @@ class FormatCommand:
         table.add_column("Description", style="white", width=45)
 
         table.add_row("blanks", "Collapse extra blank lines (native)")
-        table.add_row("python", "Format Python code blocks via Black (70 chars)")
+        table.add_row("python", "Format Python via Black (display 70, LEGO cells 150)")
         table.add_row("lists", "Fix bullet list spacing (blank line before lists)")
         table.add_row("divs", "Fix div/callout spacing (paragraph ↔ list gaps)")
         table.add_row("tables", "Prettify grid tables (align columns, bold headers)")
@@ -197,14 +197,35 @@ class FormatCommand:
     def _collapse_blank_lines(content: str) -> str:
         """Replace multiple consecutive blank lines with a single blank line.
 
-        Preserves content inside code blocks.
+        Preserves content inside code blocks and HTML comments. Fence
+        tracking must ignore HTML comments: commented-out figures often
+        contain partial code blocks whose unbalanced ``` lines would
+        otherwise desync the toggle, making the formatter treat real
+        code cells as prose for the rest of the file.
         """
         lines = content.split("\n")
         result = []
         in_code_block = False
+        in_html_comment = False
         blank_count = 0
 
         for line in lines:
+            if in_html_comment:
+                # Leave commented-out regions verbatim; their fences
+                # (often unbalanced) must not toggle code-block state.
+                result.append(line)
+                if "-->" in line:
+                    in_html_comment = False
+                continue
+
+            if not in_code_block and "<!--" in line and "-->" not in line:
+                if blank_count > 0:
+                    result.append("")
+                    blank_count = 0
+                result.append(line)
+                in_html_comment = True
+                continue
+
             if line.strip().startswith("```"):
                 in_code_block = not in_code_block
                 if blank_count > 0:

@@ -49,13 +49,14 @@ A single GPU can perform trillions of operations per second, but distributed tra
 #| echo: false
 from mlsysim import *
 from mlsysim.core.units import *
-#| label: network-fabrics-setup
+
 from mlsysim.fmt import fmt_int, MarkdownStr, fmt, check, fmt_math
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: NetworkRunningExampleCluster.n_gpus_str, .peer_gpus_str
 class NetworkRunningExampleCluster:
     """Mid-scale training cluster (`Systems.Clusters.Training_1K`) for the 175B running example."""
+
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     _cluster = Systems.Clusters.Training_1K
     n_gpus = _cluster.total_accelerators
@@ -137,11 +138,11 @@ class NetworkFabricsContextScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(ib_ndr_raw, unit=Gbps, precision=0, commas=False)
-    ib_ndr_gb_per_s_str = fmt_qty(ib_ndr_raw, GB/second, precision=0, commas=False)
-    nvlink_h100_gb_per_s_str = fmt_qty(nvlink_h100_raw, GB/second, precision=0, commas=False)
+    ib_ndr_gb_per_s_str = fmt_qty(ib_ndr_raw, GB / second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_qty(nvlink_h100_raw, GB / second, precision=0, commas=False)
     nvlink_to_ib_ratio_mult_str = fmt_multiple(nvlink_to_ib_ratio_val, precision=0, commas=False)
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_flops_raw, unit=TFLOP/second, precision=0, commas=False)
-    h100_mem_bw_tb_per_s_str = fmt_qty(h100_mem_bw_raw, TB/second, precision=2, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_flops_raw, unit=TFLOP / second, precision=0, commas=False)
+    h100_mem_bw_tb_per_s_str = fmt_qty(h100_mem_bw_raw, TB / second, precision=2, commas=False)
 ```
 
 The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise. @Sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str`. The moment computation crosses a node boundary, however, the available bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` (NVLink) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor the figures used throughout this chapter. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
@@ -315,6 +316,7 @@ Before analyzing protocols and topologies, we must understand the physical mediu
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_time
+
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: PAM4 / FEC latency paragraph.
 # │ Exports: FECLatency.ns_low_str, ns_high_str, three_hop_*_str, round_trip_*_str
@@ -485,24 +487,25 @@ from mlsysim.fmt import fmt, check, fmt_math, fmt_percent, fmt_time, fmt_qty
 
 class NetworkAlphaBeta:
     """Namespace for the alpha-beta communication model."""
+
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Level 1: Hardware Specs
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
-    alpha_ib = FABRIC_ALPHA_NDR # 1.5 us (typical for IB NDR)
-    beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth # ~50 GB/s
+    alpha_ib = FABRIC_ALPHA_NDR  # 1.5 us (typical for IB NDR)
+    beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth  # ~50 GB/s
 
     # Level 2: Messages
-    n_small = 4000 * byte # scenario assumption: 4 KB control message
-    n_large = 350 * MB # scenario assumption: 350 MB gradient shard
-    n_demo_large = 100 * MB # scenario assumption: 100 MB alpha-beta walkthrough
+    n_small = 4000 * byte  # scenario assumption: 4 KB control message
+    n_large = 350 * MB  # scenario assumption: 350 MB gradient shard
+    n_demo_large = 100 * MB  # scenario assumption: 100 MB alpha-beta walkthrough
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     n_cross_ib = alpha_ib * beta_ib
 
-    t_small_ib = alpha_ib + (n_small/beta_ib)
-    small_bw_term_pct = ((n_small/beta_ib) / t_small_ib).to_base_units().magnitude * 100
+    t_small_ib = alpha_ib + (n_small / beta_ib)
+    small_bw_term_pct = ((n_small / beta_ib) / t_small_ib).to_base_units().magnitude * 100
 
-    t_large_ib = alpha_ib + (n_large/beta_ib)
+    t_large_ib = alpha_ib + (n_large / beta_ib)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_cross_ib < 100 * KB, f"Crossover ({n_cross_ib.to(KB).magnitude:.0f} KB) should be < 100 KB for IB")
@@ -511,7 +514,7 @@ class NetworkAlphaBeta:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_cross_ib_kb_str = fmt_qty(n_cross_ib, KB, precision=0, commas=False)
     t_small_ib_us_str = fmt_time(t_small_ib, microsecond, precision=2, commas=False)
-    small_bw_pct_str = fmt_percent(small_bw_term_pct/100, precision=1, commas=False, style='prose')
+    small_bw_pct_str = fmt_percent(small_bw_term_pct / 100, precision=1, commas=False, style='prose')
     t_large_ib_ms_str = fmt_time(t_large_ib, millisecond, precision=1, commas=False)
     ib_alpha_us_str = fmt_time(alpha_ib, microsecond, precision=1, commas=False)
     ib_beta_gb_per_s_str = fmt_qty(beta_ib, GB / second, precision=0, commas=False)
@@ -592,13 +595,13 @@ alpha_eth_q = Systems.SwitchFabric.AlphaRoce
 beta_eth_q = Systems.Fabrics.Ethernet_100G.bandwidth
 
 alpha_ib = alpha_ib_q.to(second).magnitude
-beta_ib = beta_ib_q.to(byte/second).magnitude
+beta_ib = beta_ib_q.to(byte / second).magnitude
 alpha_eth = alpha_eth_q.to(second).magnitude
-beta_eth = beta_eth_q.to(byte/second).magnitude
+beta_eth = beta_eth_q.to(byte / second).magnitude
 
 n = np.logspace(0, 10, 1000)
-t_ib = alpha_ib + n/beta_ib
-t_eth = alpha_eth + n/beta_eth
+t_ib = alpha_ib + n / beta_ib
+t_eth = alpha_eth + n / beta_eth
 
 n_cross_ib_q = alpha_ib_q * beta_ib_q
 n_cross_ib = n_cross_ib_q.to(byte).magnitude
@@ -619,28 +622,28 @@ ax.scatter([n_cross_ib], [t_cross_ib], color='#006395', s=80, zorder=5, edgecolo
 ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgecolors='white')
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-#blue
+# blue
 ax.annotate(
     f'Crossover\n~{fmt_qty(n_cross_ib_q, KB, precision=0, commas=False)}',
-    xy=(n_cross_ib*1.2, t_cross_ib*0.9),
-    xytext=(n_cross_ib*40, t_cross_ib/1.5),
+    xy=(n_cross_ib * 1.2, t_cross_ib * 0.9),
+    xytext=(n_cross_ib * 40, t_cross_ib / 1.5),
     arrowprops=dict(arrowstyle='->', color='#006395'),
     color='#006395',
     fontsize=9,
     ha='center',
-    va='top'
+    va='top',
 )
 
-#red
+# red
 ax.annotate(
     f'Crossover\n~{fmt_qty(n_cross_eth_q, KB, precision=1, commas=False)}',
-    xy=(n_cross_eth*0.9, t_cross_eth*1.03),
-    xytext=(n_cross_eth/40, t_cross_eth*5),
+    xy=(n_cross_eth * 0.9, t_cross_eth * 1.03),
+    xytext=(n_cross_eth / 40, t_cross_eth * 5),
     arrowprops=dict(arrowstyle='->', color='#CB202D'),
     color='#CB202D',
     fontsize=9,
     ha='center',
-    va='top'
+    va='top',
 )
 
 split_point = n_cross_ib
@@ -674,6 +677,7 @@ Beyond classifying individual transfers, the same model identifies when communic
 #| echo: false
 #| label: allreduce-bottleneck
 from mlsysim.fmt import fmt, fmt_count, fmt_int, fmt_math, fmt_params, fmt_percent, fmt_qty
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ALLREDUCE BOTTLENECK ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -707,10 +711,10 @@ class AllReduceBottleneck:
 
     peak_flops = h_h100.compute.peak_flops
     gpu_util = 0.50
-    flops_per_sample_base = 5e13 * flop # scenario assumption: realistic per-GPU compute for ~100ms iteration
-    grad_bytes_per_param = 4 * byte / param # scenario assumption: FP32 gradients
+    flops_per_sample_base = 5e13 * flop  # scenario assumption: realistic per-GPU compute for ~100ms iteration
+    grad_bytes_per_param = 4 * byte / param  # scenario assumption: FP32 gradients
 
-    m_small = Models.Language.GPT2 # GPT-2-scale model from the registry
+    m_small = Models.Language.GPT2  # GPT-2-scale model from the registry
     m_70b = Models.Language.Llama2_70B
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -739,10 +743,10 @@ class AllReduceBottleneck:
     comm_frac_small_pct = f"{comm_frac_small * 100:.1f}"
 
     # Math strings
-    alpha_math           = fmt_math(f"\\alpha = {FABRIC_ALPHA_NDR.to(microsecond).magnitude:.1f} \\;\\mu\\text{{s}}")
-    beta_math            = fmt_math(f"\\beta = {ib_ndr.bandwidth.to(GB/second).magnitude:.0f} \\;\\text{{GB/s}}")
-    t_comp_display_math  = MarkdownStr(f"$$ T_{{\\text{{compute}}}} = {t_comp_display} \\text{{ ms}} $$")
-    t_ring_small_math    = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_small_display} \\text{{ ms}}")
+    alpha_math = fmt_math(f"\\alpha = {FABRIC_ALPHA_NDR.to(microsecond).magnitude:.1f} \\;\\mu\\text{{s}}")
+    beta_math = fmt_math(f"\\beta = {ib_ndr.bandwidth.to(GB/second).magnitude:.0f} \\;\\text{{GB/s}}")
+    t_comp_display_math = MarkdownStr(f"$$ T_{{\\text{{compute}}}} = {t_comp_display} \\text{{ ms}} $$")
+    t_ring_small_math = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_small_display} \\text{{ ms}}")
     comm_frac_display_math = MarkdownStr(f"$$ \\text{{Comm. fraction}} = {comm_frac_small_pct} \\% $$")
     t_ring_70b_display_math = MarkdownStr(f"$$ T_{{\\text{{ring}}}} \\approx {t_comm_70b_display} \\text{{ ms}} $$")
 
@@ -756,7 +760,7 @@ class AllReduceBottleneck:
     )
     grad_small_gb_str = fmt_qty(grad_small, GB, precision=0, commas=False)
     gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOPs/second, precision=0, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOPs / second, precision=0, commas=False)
     params_70b_billion_str = fmt_params(
         m_70b.parameters,
         scale="B",
@@ -848,7 +852,7 @@ class NonBlockingOversubscription:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     comm_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
-    throughput_loss_pct_str = fmt_percent(throughput_loss_pct/100, precision=1, commas=False, style='prose')
+    throughput_loss_pct_str = fmt_percent(throughput_loss_pct / 100, precision=1, commas=False, style='prose')
 ```
 
 The first property, bisection bandwidth, quantifies the worst-case throughput ceiling that the topology imposes on global collectives. A cluster can have thousands of fast links at the edge and still starve its AllReduce operations if the cross-sectional capacity at the narrowest point in the switching hierarchy is insufficient.
@@ -936,9 +940,9 @@ class FatTreeScaling:
     fat_tree_k = 64
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    fat_tree_hosts_val = (fat_tree_k ** 3) // 4
+    fat_tree_hosts_val = (fat_tree_k**3) // 4
     fat_tree_two_tier_hosts_val = (fat_tree_k // 2) ** 2
-    fat_tree_switches_val = (5 * fat_tree_k ** 2) // 4
+    fat_tree_switches_val = (5 * fat_tree_k**2) // 4
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(fat_tree_hosts_val == 65536, f"k=64 fat-tree should support 65,536 hosts, got {fat_tree_hosts_val}")
@@ -992,7 +996,7 @@ class BisectionScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    gradient = 100 * GB # scenario assumption: per-GPU gradient shard
+    gradient = 100 * GB  # scenario assumption: per-GPU gradient shard
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gpus_per_side = n_gpus // 2
     bw_1_1_q = gpus_per_side * beta
@@ -1009,8 +1013,8 @@ class BisectionScaling:
     bbs_gpus_per_side_value_str = fmt(gpus_per_side, precision=0, commas=False)
     bbs_gradient_gb_str = fmt_qty(gradient, GB, precision=0, commas=False)
     bbs_total_data_gb_str = fmt_qty(total_data, GB, precision=0, commas=True)
-    bbs_bw_1_1_gb_per_s_str = fmt_qty(bw_1_1_q, GB/second, precision=0, commas=True)
-    bbs_bw_4_1_gb_per_s_str = fmt_qty(bw_4_1_q, GB/second, precision=0, commas=True)
+    bbs_bw_1_1_gb_per_s_str = fmt_qty(bw_1_1_q, GB / second, precision=0, commas=True)
+    bbs_bw_4_1_gb_per_s_str = fmt_qty(bw_4_1_q, GB / second, precision=0, commas=True)
     bbs_slowdown_mult_str = fmt_multiple(slowdown, commas=False, precision=0)
     bbs_time_1_1_ms_str = fmt_time(time_1_1, millisecond, precision=0, commas=True)
     bbs_time_4_1_ms_str = fmt_time(time_4_1, millisecond, precision=0, commas=True)
@@ -1083,14 +1087,14 @@ from mlsysim.fmt import fmt, check, fmt_time
 class RailLatency:
     # ┌── 1. LOAD ──────────────────────────────────────────
     FABRIC_HOP_LATENCY = Systems.SwitchFabric.HopLatency
-    t_hop = FABRIC_HOP_LATENCY # switch + wire latency
+    t_hop = FABRIC_HOP_LATENCY  # switch + wire latency
     n_nodes = 128
     # Standard fat-tree: Leaf -> Spine -> Leaf (2 hops)
     # Rail-optimized: Leaf (direct) (1 hop)
     # ┌── 2. EXECUTE ───────────────────────────────────────
     lat_std = 2 * t_hop
     lat_rail = 1 * t_hop
-    speedup = (lat_std/lat_rail).to_base_units().magnitude
+    speedup = (lat_std / lat_rail).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(speedup == 2.0, f"Speedup {speedup:.1f}x unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1267,9 +1271,9 @@ from mlsysim.fmt import fmt, fmt_count, check, MarkdownStr
 class PfcStormRisk:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = 4096
-    links_per_gpu = 3 # leaf + spine + core
+    links_per_gpu = 3  # leaf + spine + core
     transceivers_per_link = 2
-    p_transceiver_degrade = 1e-5 # 0.001% per day
+    p_transceiver_degrade = 1e-5  # 0.001% per day
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_total_links = n_gpus * links_per_gpu
     n_total_transceivers = n_total_links * transceivers_per_link
@@ -1288,14 +1292,8 @@ class PfcStormRisk:
     pfc_storm_prob_decimal_str = fmt(p_storm, precision=2, commas=False)
     pfc_storm_prob_str = fmt_percent(p_storm, precision=1, commas=False, style='prose')
     pfc_storm_prob_rounded_str = fmt_percent(p_storm, precision=1, commas=False, style='prose')
-    pfc_safe_prob_math = fmt_math(
-        f"\\Pr(\\text{{safe}}) = (1 - 0.00001)^{{{pfc_total_transceivers_str}}} "
-        f"\\approx {pfc_safe_prob_str}"
-    )
-    pfc_storm_prob_math = fmt_math(
-        f"\\Pr(\\text{{storm}}) = 1 - {pfc_safe_prob_str} "
-        f"= \\mathbf{{{pfc_storm_prob_decimal_str}}}"
-    )
+    pfc_safe_prob_math = fmt_math(f"\\Pr(\\text{{safe}}) = (1 - 0.00001)^{{{pfc_total_transceivers_str}}} " f"\\approx {pfc_safe_prob_str}")
+    pfc_storm_prob_math = fmt_math(f"\\Pr(\\text{{storm}}) = 1 - {pfc_safe_prob_str} " f"= \\mathbf{{{pfc_storm_prob_decimal_str}}}")
     pfc_links_per_gpu_str = fmt_count(links_per_gpu, commas=False, label="link tier")
 ```
 
@@ -1403,7 +1401,7 @@ class NetworkFabricsClusterRecap:
     nvlink = Hardware.Cloud.H100.nvlink.bandwidth
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_to_ib_ratio_mult_str = fmt_multiple((nvlink / ib_ndr).to_base_units().magnitude, precision=0, commas=False)
-    nvlink_h100_gb_per_s_str = fmt_qty(nvlink, GB/second, precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_qty(nvlink, GB / second, precision=0, commas=False)
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
@@ -1505,6 +1503,7 @@ class IbHdrReference:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import fmt, check, fmt_bandwidth
+
     check(round(hdr_bw.to(Gbps).magnitude) == 200, "HDR bandwidth should be 200 Gb/s")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -1514,13 +1513,14 @@ class IbHdrReference:
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_bandwidth, fmt_qty
+
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Monitoring — NDR negotiated speed checks.
 # │ Exports: IbNdrMonitoringRecap.ib_ndr_gbit_per_s_str, ib_ndr_gb_per_s_str
 class IbNdrMonitoringRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
-    ib_ndr_gb_per_s_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB/second, precision=0, commas=False)
+    ib_ndr_gb_per_s_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB / second, precision=0, commas=False)
 ```
 
 These metrics are typically polled by a centralized monitoring system (for example, Prometheus with Grafana dashboards) at 10–30 second intervals to catch **silent degradation**\index{Silent Degradation}. A common failure mode involves a QSFP56 cable negotiating at HDR speed (`{python} IbHdrReference.ib_hdr_gbit_per_s_str`) instead of NDR (`{python} IbNdrMonitoringRecap.ib_ndr_gbit_per_s_str`), or silently dropping from 4 lanes to 2 lanes due to a single bad connector pin. The link remains "up" and functional, but its bandwidth is halved. In a cluster of `{python} NetworkMonitoringClusterRecap.n_gpus_str` with over 3,000 links, a 0.1 percent point-in-time component degradation rate implies about 3 degraded links in expectation, with a high probability that at least one link is degraded. Because distributed training algorithms like Ring AllReduce are synchronous, a single degraded link throttles the entire job to the speed of that straggler, transforming a minor hardware fault into a massive waste of idle compute cycles.
@@ -1637,12 +1637,13 @@ from mlsysim.fmt import fmt_int, fmt_power, fmt_qty, fmt, check
 
 class OpticalDividend:
     """Power savings from Co-Packaged Optics (CPO)."""
+
     # ┌── 1. LOAD ──────────────────────────────────────────
     SWITCH_ASIC_51T2_BW = Systems.SwitchFabric.SwitchAsic51T2
     ETHERNET_400G_BW = Systems.Fabrics.Ethernet_400G.bandwidth
     OPTICS_POWER_PLUGGABLE_400G_W = Systems.SwitchFabric.OpticsPluggable400G
     OPTICS_POWER_CPO_400G_W = Systems.SwitchFabric.OpticsCpo400G
-    n_ports = int((SWITCH_ASIC_51T2_BW / ETHERNET_400G_BW).to_base_units().magnitude) # 51.2 Tb/s switch
+    n_ports = int((SWITCH_ASIC_51T2_BW / ETHERNET_400G_BW).to_base_units().magnitude)  # 51.2 Tb/s switch
     n_switches = 1000  # scenario assumption: large-cluster switch count
     # ┌── 2. EXECUTE ───────────────────────────────────────
     total_pluggable = n_ports * OPTICS_POWER_PLUGGABLE_400G_W
@@ -1658,11 +1659,12 @@ class OpticalDividend:
     def plot(cls):
         """Visualizes the Optical Dividend."""
         from book.tools.figures import style as book_style
+
         return book_style.bar_compare(
             labels=["Pluggable", "CPO"],
             values=[cls.total_pluggable.to(kilowatt).magnitude, cls.total_cpo.to(kilowatt).magnitude],
             title="Optical Power Dividend",
-            ylabel="Total Optics Power (kW)"
+            ylabel="Total Optics Power (kW)",
         )
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1770,30 +1772,33 @@ class BandwidthFallacy:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     from mlsysim import Hardware
+
     ib_hdr = Systems.Fabrics.InfiniBand_HDR
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
     alpha = FABRIC_ALPHA_NDR
-    msg = 10 * KB # scenario assumption: small control packet
+    msg = 10 * KB  # scenario assumption: small control packet
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # T(n) = alpha + n/beta, computed via pint to keep units explicit.
     t_hdr = alpha + (msg / ib_hdr.bandwidth)
     t_ndr = alpha + (msg / ib_ndr.bandwidth)
 
-    speedup_pct = (1 - (t_ndr/t_hdr).to_base_units().magnitude) * 100
+    speedup_pct = (1 - (t_ndr / t_hdr).to_base_units().magnitude) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     from mlsysim.fmt import check
+
     check(speedup_pct < 25, f"Speedup ({speedup_pct:.1f}%) too high; fallacy argument weakened.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     from mlsysim.fmt import fmt, fmt_bandwidth, fmt_time
+
     hdr_bw_gbit_per_s_str = fmt_bandwidth(ib_hdr.bandwidth, unit=Gbps, precision=0, commas=False)
     ndr_bw_gbit_per_s_str = fmt_bandwidth(ib_ndr.bandwidth, unit=Gbps, precision=0, commas=False)
     t_hdr_us_str = fmt_time(t_hdr, microsecond, precision=2, commas=False)
     t_ndr_us_str = fmt_time(t_ndr, microsecond, precision=2, commas=False)
-    speed_pct_str = fmt_percent(speedup_pct/100, precision=1, commas=False, style='prose')
+    speed_pct_str = fmt_percent(speedup_pct / 100, precision=1, commas=False, style='prose')
 ```
 
 Consider a 10 KB message (typical for control synchronization). On `{python} BandwidthFallacy.hdr_bw_gbit_per_s_str` InfiniBand, it takes `{python} BandwidthFallacy.t_hdr_us_str`. Upgrading to `{python} BandwidthFallacy.ndr_bw_gbit_per_s_str` reduces this to `{python} BandwidthFallacy.t_ndr_us_str`, a `{python} BandwidthFallacy.speed_pct_str` improvement despite doubling the link rate.
