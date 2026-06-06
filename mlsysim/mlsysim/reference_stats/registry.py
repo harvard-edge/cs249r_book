@@ -257,10 +257,10 @@ class ModelLoading(Registry):
         description="Reference cold-start load time for the object-reconstruction path.",
     )
     StableDiffusionV15SafetensorsLoadTime = sourced_qty(
-        0.5 * ureg.second,
+        1.5 * ureg.second,
         pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
         name="Stable Diffusion v1.5 Safetensors load time",
-        description="Reference cold-start load time for the memory-mapped tensor path.",
+        description="Reference cold-start load time for the memory-mapped tensor path at Gen3 NVMe bandwidth.",
     )
     PcieSwapReferenceModelSize = sourced_qty(
         10 * GB,
