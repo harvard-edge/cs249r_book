@@ -149,6 +149,12 @@ def _context_needles(value: str) -> list[str]:
     stripped = value.strip().lstrip("$").rstrip("$")
     if stripped and stripped not in needles:
         needles.append(stripped)
+    # Roofline-style equation operands (e.g. ``22 $\\times$ $10^{9}$``) render as
+    # ``22 \(\times\) \(10^{9}\)`` in HTML — match on distinctive multi-digit literals.
+    if r"\times" in value or "×" in value or "÷" in value or "/" in value:
+        for num in re.findall(r"(?<![.\d])(\d{2,}(?:\.\d+)?)(?![.\d])", value.replace(",", "")):
+            if num not in needles:
+                needles.append(num)
     return needles
 
 

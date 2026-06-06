@@ -19,11 +19,16 @@ VOL="${1:?vol1|vol2}"
 CH="${2:?chapter short name, e.g. introduction}"
 LOG="/tmp/lego_verify_${VOL}_${CH}.log"
 PROGRESS="$REPO/book/tools/audit/artifacts/lego_chapter_progress.md"
+REPORTS="$REPO/book/tools/audit/artifacts/lego_chapter_reports"
+CELLS_SNAP="$REPORTS/${VOL}_${CH}_cells.json"
+PROSE_SNAP="$REPORTS/${VOL}_${CH}_prose.json"
 
 export PYTHONPATH=mlsysim
 export LEGO_VERIFY_VOL="$VOL"
 export LEGO_VERIFY_CH="$CH"
 export LEGO_VERIFY_REPO="$REPO"
+export LEGO_VERIFY_CELLS_SNAP="$CELLS_SNAP"
+export LEGO_VERIFY_PROSE_SNAP="$PROSE_SNAP"
 
 echo "=== LEGO verify $VOL/$CH $(date -Iseconds) ===" | tee "$LOG"
 
@@ -32,7 +37,9 @@ python3 book/tools/audit/chapter_html_verify.py "--$VOL" "$CH" 2>&1 | tee -a "$L
 ./book/binder reset html 2>&1 | tee -a "$LOG"
 
 python3 book/tools/audit/fmt/audit_lego_cells.py --chapter "$VOL/$CH" 2>&1 | tee -a "$LOG"
+cp "$REPO/book/tools/audit/artifacts/lego_cells_verify_report.json" "$CELLS_SNAP"
 python3 book/tools/audit/fmt/audit_lego_rendered_prose.py --chapter "$VOL/$CH" 2>&1 | tee -a "$LOG"
+cp "$REPO/book/tools/audit/artifacts/lego_rendered_prose_audit.json" "$PROSE_SNAP"
 
 COHERENCE_RC=0
 if command -v gemini >/dev/null 2>&1; then
@@ -59,8 +66,12 @@ vol = os.environ["LEGO_VERIFY_VOL"]
 ch = os.environ["LEGO_VERIFY_CH"]
 coh_rc = int(os.environ.get("LEGO_VERIFY_COHERENCE_RC", "0"))
 
-cells_path = repo / "book/tools/audit/artifacts/lego_cells_verify_report.json"
-prose_path = repo / "book/tools/audit/artifacts/lego_rendered_prose_audit.json"
+cells_path = Path(os.environ.get("LEGO_VERIFY_CELLS_SNAP", "")) or (
+    repo / f"book/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_cells.json"
+)
+prose_path = Path(os.environ.get("LEGO_VERIFY_PROSE_SNAP", "")) or (
+    repo / f"book/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_prose.json"
+)
 ledger_path = repo / "book/tools/audit/artifacts/chapter_html_audit.json"
 coh_path = repo / f"book/tools/audit/artifacts/lego_prose_coherence_{vol}_{ch}.json"
 report_md = repo / f"book/tools/audit/artifacts/lego_chapter_reports/{vol}_{ch}_rendered_prose.md"
