@@ -9,8 +9,13 @@ from mlsysim.core.constants import ureg
 
 def _ensure_unit(val, expected_unit, param_name="Value"):
     """
-    Attach a unit if val is a raw number; verify dimensional correctness
-    if it is already a Pint Quantity.
+    Attach a unit if val is a raw number; verify dimensional correctness AND
+    convert to ``expected_unit`` if it is already a Pint Quantity.
+
+    Returning the *converted* quantity (audit fix 2026-06-06; previously the
+    quantity was returned unconverted) makes a downstream ``.magnitude`` read
+    safe: a caller that passes ``Q_("120 1/minute")`` where Hz is expected now
+    yields magnitude 2.0, not a silent 60x misread.
     """
     if isinstance(val, (int, float)):
         return val * expected_unit
@@ -24,7 +29,7 @@ def _ensure_unit(val, expected_unit, param_name="Value"):
                     f"{expected_unit.dimensionality}. You provided '{val.units}'."
                 ),
             )
-        return val
+        return val.to(expected_unit)
     raise TypeError(
         f"Expected a number or Pint Quantity for {param_name}, got {type(val).__name__}"
     )
