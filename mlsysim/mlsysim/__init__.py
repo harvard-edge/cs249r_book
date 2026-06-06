@@ -26,7 +26,7 @@ from .systems.registry import Systems
 from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
 # Non-executable sourced anchors used by examples and external analyses.
-from .scenarios.registry import ReferenceStats
+from .reference_stats.registry import ReferenceStats
 from .ops import Ops
 from .engine import calibration
 
@@ -45,7 +45,7 @@ from .fmt import (
     fmt_percent_range, fmt_sci_qty,
     fmt_power, fmt_energy, fmt_bandwidth, fmt_flop_rate, fmt_flops,
     fmt_arithmetic_intensity, fmt_ops_rate, fmt_compute_efficiency,
-    fmt_memory, fmt_emissions, fmt_carbon_intensity, fmt_water,
+    fmt_memory, fmt_length, fmt_emissions, fmt_carbon_intensity, fmt_water,
     fmt_water_rate, fmt_water_intensity, fmt_latency,
     assert_qty_close, check, MarkdownStr,
 )

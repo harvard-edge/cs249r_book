@@ -36,7 +36,7 @@ class PlatformEnvelope(BaseModel):
     def _validate_compute_threshold(cls, v):
         return require_unit_family(
             v,
-            ureg.count / ureg.second,
+            ureg.flop / ureg.second,
             "compute_threshold",
             "operation",
         )
