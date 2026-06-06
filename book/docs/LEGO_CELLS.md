@@ -5,7 +5,8 @@ class computes scenario values once, exports formatted `*_str` fields, and prose
 references them with `` `{python} Class.field_str` ``.
 
 This document defines how to author and review LEGO cells. It complements the
-fmt/notation audit lane (`book/tools/audit/fmt/README.md`) and pre-commit checks
+fmt/notation audit lane (`book/tools/audit/fmt/README.md`), the agent verify
+playbook (`.claude/rules/lego-verify.md`), and pre-commit checks
 (`lego-dead-code`, `./book/binder check math --scope canonical`).
 
 ## Core rule
@@ -168,6 +169,31 @@ Every `*_str` export must match its formatter (see `.claude/rules/lego-units.md`
 ```bash
 PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose.py "$CH" --flagged-only
 ```
+
+**Precision guard triage** (when exec fails with `Formatting Precision Error`):
+
+| Error | Fix |
+|-------|-----|
+| `formatted as '0'` | Raise `precision` or change display unit |
+| `not integer-like but precision=0` | Use `precision>=1` |
+| `integer-like but precision=1 … '10.0'` | Use `precision=0` or omit `precision=` |
+
+For **`fmt_arithmetic_intensity`**, prefer **no explicit `precision=`** (auto:
+integer-like → 0, fractional → 1). Pass explicit precision only for pinned
+scenario literals (e.g. 300 FLOP/byte). **`7.0 FLOP/byte`** is a smell on exact
+integers; **`153.0 FLOP/byte`** is normal for fractional ridge points at
+precision 1. Agent copy: `.claude/rules/lego-verify.md`.
+
+**Corpus exec sweep** (all chapter QMDs, shared namespace):
+
+```bash
+python3 book/tools/audit/chapter_html_verify.py --vol1 training   # build + full lane
+python3 book/tools/audit/chapter_html_verify.py --report
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_html.py
+```
+
+Do not commit truncated `book/quarto/config/_quarto-html-vol*.yml` after binder
+builds — restore from git if the render list shrinks.
 
 ### Phase 4 — HTML ground truth
 
