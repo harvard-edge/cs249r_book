@@ -74,8 +74,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "RLHF training keeps an actor, critic, reference model, and reward model running simultaneously, each with different compute and memory profiles. Explain why classical homogeneous gang scheduling fails for this workload and what the scheduler must provide instead.",
-            "answer": "Classical gang scheduling assumes a single pool of identical workers that all wait on each other at the same AllReduce, which works when every rank runs the same forward and backward pass. RLHF breaks this assumption because the four roles have different bottlenecks: the actor and reference models are inference-dominated and memory-bound, while the critic and reward-model update paths are backprop-dominated and compute-bound. The scheduler must therefore do heterogeneous gang scheduling: allocate a balanced constellation of node types atomically, keep the roles connected with enough bandwidth to stream tokens and rewards between them, and treat the whole constellation as a single gang whose under-provisioned role stalls the entire pipeline.",
+            "question": "Preference-training pipelines often keep policy trainers, evaluators, and inference-style workers supplying reference behavior running simultaneously within one job. Explain why classical homogeneous gang scheduling fails for this workload and what the scheduler must provide instead.",
+            "answer": "Classical gang scheduling assumes a single pool of identical workers executing the exact same compute graph, which works when every rank runs the same forward and backward pass. Preference training breaks this assumption because the roles have different bottlenecks: inference-style workers generating rollouts are memory-bound and need high-HBM nodes, while policy trainers are compute-bound and need high-compute nodes for backpropagation. The scheduler must therefore do heterogeneous gang scheduling: allocate a balanced constellation of diverse node types atomically, keep the roles connected with enough bandwidth to stream data continuously between them, and treat the whole constellation as a single gang whose under-provisioned role stalls the entire pipeline.",
             "learning_objective": "Analyze why heterogeneous gang scheduling is required for composite ML workloads whose roles have different resource profiles"
           }
         ]
@@ -267,8 +267,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain the scheduler-framework contract required for safe elastic scale-up and scale-down, naming the two concrete responsibilities on each side.",
-            "answer": "The scheduler must (a) signal capacity changes through a defined protocol with enough notice for graceful adaptation, and (b) fence the outgoing workers so they stop issuing collectives before their slots are reassigned. The framework must (a) rebuild its world-size, communication groups, and data-shard assignments after the membership change, and (b) resynchronize parameter state so every remaining worker enters the next step from the same checkpoint. If either side skips its half of the contract, samples get duplicated or dropped, or the first AllReduce after rescale completes with inconsistent gradients.",
+            "question": "Explain the scheduler-framework contract required for safe elastic scale-up and scale-down, naming the responsibilities on each side.",
+            "answer": "The scheduler guarantees that resource changes are communicated through defined signals with sufficient advance notice for graceful adaptation, rather than abruptly terminating processes. The framework guarantees it can handle these changes without corrupting model state by reconstructing communication groups, adjusting the effective batch size, and recalibrating the learning rate. If either side violates this contract, the job either crashes from unexpected preemption or resumes with an invalid distributed state.",
             "learning_objective": "Explain the coordination contract between orchestration and training frameworks in elastic training"
           },
           {
@@ -285,15 +285,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A top-of-rack switch fails, dropping dozens of workers from an elastic job simultaneously. Which failure mode does the chapter flag as a major risk in the subsequent rendezvous?",
+            "question": "An elastic training job is scaled down from 256 to 64 GPUs. Which trade-off must the framework navigate regarding batch size and memory limits?",
             "choices": [
-              "A thundering herd of surviving workers plus fresh replacements simultaneously re-registering, overwhelming the rendezvous service and triggering retry storms that further delay group formation",
-              "Stale membership views that let two rendezvous rounds both believe they are the authoritative world, producing duplicate data-shard assignments",
-              "Partial collective completion where the failed workers' contributions were already AllReduced and must be subtracted from the surviving gradients",
-              "Automatic deletion of prior checkpoints because the rescaling protocol rewrites checkpoint metadata on membership change"
+              "Holding the global batch size constant preserves convergence mathematics but risks out-of-memory errors because each remaining GPU must process more samples per step.",
+              "Scaling the global batch size down proportionally guarantees both memory safety and identical convergence behavior without learning rate adjustments.",
+              "Using an adaptive learning rate allows the global batch size to remain constant, automatically bypassing per-GPU memory limits.",
+              "Holding the per-GPU batch size constant preserves memory limits and automatically maintains the original convergence trajectory."
             ],
-            "answer": "The correct answer is A. When a correlated fault evicts many workers, the survivors and their replacements all hit the rendezvous backend within a short window; that surge can exceed the service's throughput, causing timeouts and retries that cascade. The stale-view framing describes a classic consensus bug but not the chapter's named risk; partial-collective subtraction is not how AllReduce works (a failed rank aborts the collective, it is not algebraically removed); and checkpoint deletion is not part of the rescale protocol.",
-            "learning_objective": "Identify the thundering-herd rendezvous failure mode that arises during elastic recovery from correlated faults"
+            "answer": "The correct answer is A. To keep the global batch size constant across fewer workers, each remaining GPU must hold a larger per-worker batch of activations, which can easily violate per-GPU memory limits. Keeping the per-GPU batch size constant avoids memory limits but shrinks the global batch size, which introduces convergence risk unless the learning rate is adaptively recalibrated. The adaptive-learning-rate option conflates learning-rate scaling with memory footprint reduction.",
+            "learning_objective": "Analyze the trade-off between constant global batch size and adaptive learning rate when scaling an elastic job down."
           },
           {
             "question_type": "ORDER",
