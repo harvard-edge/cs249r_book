@@ -4168,7 +4168,8 @@ from mlsysim.fmt import fmt, check, fmt_memory, fmt_params
 from mlsysim.physics import calc_activation_memory
 
 class MixedPrecisionMemory:
-    batch_size = 32
+    batch_size = 4           # matches the walkthrough configuration (fits a V100)
+    contrast_batch_size = 32  # the scale-out motivator: no single GPU suffices
     seq_len = 1024
     bytes_per_val = BYTES_FP16.to(byte).magnitude
     checkpoint_factor = 4
@@ -4183,6 +4184,15 @@ class MixedPrecisionMemory:
         strategy="none",
     )
     act_fp32 = act_fp16 * 2
+    act_fp16_b32 = calc_activation_memory(
+        n_layers=Models.Language.GPT2.layers,
+        seq_len=seq_len,
+        batch_size=contrast_batch_size,
+        hidden_dim=Models.Language.GPT2.hidden_dim,
+        n_heads=Models.Language.GPT2.heads,
+        precision_bytes=bytes_per_val,
+        strategy="none",
+    )
 
     p_fp32 = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
     g_fp32 = p_fp32
@@ -4196,6 +4206,8 @@ class MixedPrecisionMemory:
 
     act_ckpt = act_fp16 / checkpoint_factor
     total_ckpt = p_fp16 + g_fp16 + act_ckpt + master_fp32 + opt_fp32
+    total_ckpt_b32 = p_fp16 + g_fp16 + (act_fp16_b32 / checkpoint_factor) + master_fp32 + opt_fp32
+    v100_capacity = Hardware.Cloud.V100.memory.capacity
 
     total_mp_value = total_mp.to(GB).magnitude
     total_fp32_value = total_fp32.to(GB).magnitude
@@ -4203,6 +4215,11 @@ class MixedPrecisionMemory:
     check(total_ckpt < total_mp, "Checkpointing should further reduce memory.")
     check(abs((p_fp32 + act_fp32 + g_fp32 + opt_fp32 - total_fp32).to(GB).magnitude) < 0.1,
           "FP32 total must equal sum of parameters, activations, gradients, and optimizer states.")
+    # The callout's two pedagogical claims, pinned as invariants:
+    check(total_ckpt < v100_capacity,
+          "Batch-4 AMP+checkpointing total must fit a 32 GiB V100 (the callout's 'fits' claim).")
+    check(total_ckpt_b32 > v100_capacity,
+          "Batch-32 total must exceed a single V100 (the callout's scale-out contrast).")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     gpt2_b_str = fmt_params(Models.Language.GPT2.parameters)
@@ -4221,7 +4238,9 @@ class MixedPrecisionMemory:
     fp16_t_gb_str = fmt_memory(total_mp, unit=GB, precision=1, commas=False)
     ckpt_act_gb_str = fmt_memory(act_ckpt, unit=GB, precision=1, commas=False)
     ckpt_total_gb_str = fmt_memory(total_ckpt, unit=GB, precision=1, commas=False)
-    v100_capacity_gib_str = fmt_memory(Hardware.Cloud.V100.memory.capacity, unit=GiB, precision=0, commas=False)
+    ckpt_total_b32_gb_str = fmt_memory(total_ckpt_b32, unit=GB, precision=1, commas=False)
+    contrast_batch_size_str = fmt(contrast_batch_size, precision=0, commas=False)
+    v100_capacity_gib_str = fmt_memory(v100_capacity, unit=GiB, precision=0, commas=False)
 ```
 
 ::: {#nbk-training-gpt-2-mixed-precision-memory .callout-notebook title="GPT-2 mixed precision memory savings"}
@@ -4249,7 +4268,7 @@ class MixedPrecisionMemory:
 - Activations reduced to ~`{python} MixedPrecisionMemory.ckpt_act_gb_str` (recompute during backward)
 - Total: ~`{python} MixedPrecisionMemory.ckpt_total_gb_str` → fits in `{python} MixedPrecisionMemory.v100_capacity_gib_str` V100
 
-**Systems insight**: Mixed precision halves the parameter and gradient footprint; gradient checkpointing then trades a backward-pass recompute for an additional activation-memory cut. Together they bring GPT-2 XL within V100 capacity, turning an out-of-memory configuration into a trainable one.
+**Systems insight**: Mixed precision halves the parameter and gradient footprint; gradient checkpointing then trades a backward-pass recompute for an additional activation-memory cut. Together they bring GPT-2 XL at batch size `{python} MixedPrecisionMemory.mp_batch_size_str` within V100 capacity, turning an out-of-memory configuration into a trainable one. The relief is bounded, because activations grow linearly with batch size: at batch `{python} MixedPrecisionMemory.contrast_batch_size_str`, the same recipe still requires ~`{python} MixedPrecisionMemory.ckpt_total_b32_gb_str`, beyond any single accelerator, which is where the scaling techniques later in this chapter take over.
 
 :::
 
@@ -5368,7 +5387,7 @@ class GPT2WalkthroughCalc:
 
 **Step 1**: Establish the baseline memory footprint.
 
-The trace starts with GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: small enough to discuss on one V100, but large enough that the first failure is immediate and unambiguous. This walkthrough uses batch size 4; the mixed-precision callout earlier uses batch 32, and @tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized). At batch size 4, the FP32 baseline requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the Machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_gib_str` V100 before throughput matters.
+The trace starts with GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: small enough to discuss on one V100, but large enough that the first failure is immediate and unambiguous. This walkthrough uses batch size 4, the same configuration as the mixed-precision callout earlier; @tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized), which exceed a single GPU even after optimization. At batch size 4, the FP32 baseline requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the Machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_gib_str` V100 before throughput matters.
 
 **Step 2**: Apply mixed precision.
 
@@ -5617,17 +5636,27 @@ from mlsysim import Hardware, Models
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Recap optimized GPT-2 memory and V100 capacity for scaling intro.
 # │ Exports: GPT2SummaryScalingRecap.{b_total_mem,o_total_mem,v100_mem}_str
-from mlsysim.fmt import fmt_memory
+from mlsysim.fmt import fmt_memory, check
 from mlsysim.physics import calc_activation_memory
 
 class GPT2SummaryScalingRecap:
-    batch_size = 32
+    batch_size = 32           # the scale-out contrast configuration
+    fit_batch_size = 4        # the walkthrough configuration that fits a V100
     seq_len = 1024
     checkpoint_factor = 4
     act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
         batch_size=batch_size,
+        hidden_dim=Models.Language.GPT2.hidden_dim,
+        n_heads=Models.Language.GPT2.heads,
+        precision_bytes=BYTES_FP16.to(byte).magnitude,
+        strategy="none",
+    )
+    act_fp16_b4 = calc_activation_memory(
+        n_layers=Models.Language.GPT2.layers,
+        seq_len=seq_len,
+        batch_size=fit_batch_size,
         hidden_dim=Models.Language.GPT2.hidden_dim,
         n_heads=Models.Language.GPT2.heads,
         precision_bytes=BYTES_FP16.to(byte).magnitude,
@@ -5646,15 +5675,19 @@ class GPT2SummaryScalingRecap:
     o_opt = b_opt
     o_act = act_fp16 / checkpoint_factor
     o_total_mem = o_param + o_grad + o_master + o_opt + o_act
+    o_total_mem_b4 = o_param + o_grad + o_master + o_opt + (act_fp16_b4 / checkpoint_factor)
     v100_mem = Hardware.Cloud.V100.memory.capacity
+    check(o_total_mem_b4 < v100_mem, "Batch-4 optimized total must fit a single V100 (the recap's claim).")
+    check(o_total_mem > v100_mem, "Batch-32 optimized total must exceed a single V100 (the scale-out motivation).")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     b_total_mem_gb_str = fmt_memory(b_total_mem, unit=GB, precision=1, commas=False)
     o_total_mem_gb_str = fmt_memory(o_total_mem, unit=GB, precision=1, commas=False)
+    o_total_mem_b4_gb_str = fmt_memory(o_total_mem_b4, unit=GB, precision=1, commas=False)
     v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
 ```
 
-The optimization toolkit developed in the previous section (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated reducing memory from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str`, bringing a 1.5-billion-parameter model within reach of a single V100 GPU (`{python} GPT2SummaryScalingRecap.v100_mem_gib_str`). However, some models simply will not fit\index{Scaling!single-device limitations}, no matter how aggressively these techniques are applied. A 70-billion-parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on higher-capacity variants like the H100 NVL (94 GB) and H200 (141 GB) once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
+The optimization toolkit developed in the previous section (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated this at batch size 4, bringing a 1.5-billion-parameter model to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str` and within reach of a single V100 GPU (`{python} GPT2SummaryScalingRecap.v100_mem_gib_str`). The same toolkit has limits that batch size makes visible: at batch 32, memory falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str`, a substantial reduction that still exceeds what any single accelerator provides. And some models simply will not fit\index{Scaling!single-device limitations}, no matter how aggressively these techniques are applied. A 70-billion-parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on higher-capacity variants like the H100 NVL (94 GB) and H200 (141 GB) once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
 
 ::: {.column-margin}
 ![](images/svg/vol1_training_margin_004.svg){width="100%" fig-alt="80 GB GPU capacity threshold with 70B FP16 weights above it."}
@@ -6824,7 +6857,7 @@ from mlsysim.fmt import fmt
 from mlsysim.physics import calc_activation_memory, model_memory
 
 class GPT2SummaryChapterRecap:
-    batch_size = 32
+    batch_size = 4  # the walkthrough configuration whose optimized total fits a V100
     seq_len = 1024
     checkpoint_factor = 4
     act_fp16_gb = calc_activation_memory(
