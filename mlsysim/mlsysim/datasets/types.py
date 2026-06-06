@@ -6,7 +6,7 @@ from ..core.types import Metadata, Quantity, require_dimensionality, require_uni
 
 
 class DatasetProfile(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     training_examples: Optional[Quantity] = None
     test_examples: Optional[Quantity] = None

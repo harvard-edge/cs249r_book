@@ -7,7 +7,7 @@ from ..core.types import Metadata, Quantity, require_dimensionality, require_uni
 class PlatformEnvelope(BaseModel):
     """Abstract deployment envelope (RAM, storage, latency budget)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     ram: Quantity
     storage: Quantity

@@ -17,7 +17,7 @@ class ComputationGraph(BaseModel):
     It strips away high-level architectural details (like "Transformer" or 
     "CNN") and reduces the workload to pure math: Operations and Bytes.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     
     name: str
     total_ops: Quantity
@@ -76,7 +76,7 @@ class Workload(BaseModel):
     NEVER compare ``inference_flops`` across families without normalizing —
     the magnitudes differ by orders of magnitude purely from the work unit.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     architecture: str
     metadata: Metadata = Field(default_factory=Metadata)

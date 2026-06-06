@@ -375,31 +375,33 @@ class SensitivitySolver(BaseSolver):
             Per-parameter sensitivities, the binding constraint name, and the
             baseline latency.
         """
-        from copy import deepcopy
-        from ...hardware.types import ComputeCore
-
         baseline = Engine.solve(model, hardware, precision=precision, efficiency=efficiency)
         t_base = baseline.latency.to("ms").magnitude
         factor = 1.0 + perturbation_pct / 100.0
         sensitivities = {}
 
-        hw_flops = deepcopy(hardware)
-        hw_flops.compute = ComputeCore(
-            peak_flops=hardware.compute.peak_flops * factor,
-            precision_flops={k: v * factor for k, v in hardware.compute.precision_flops.items()}
-        )
+        # Registry hardware entries are frozen shared singletons, so each
+        # perturbation builds a modified COPY via model_copy(update=...) rather
+        # than assigning to the node (2026-06-06; the old deepcopy-then-assign
+        # pattern relied on mutability that frozen=True now forbids).
+        hw_flops = hardware.model_copy(update={
+            "compute": hardware.compute.model_copy(update={
+                "peak_flops": hardware.compute.peak_flops * factor,
+                "precision_flops": {k: v * factor for k, v in hardware.compute.precision_flops.items()},
+            })
+        })
         t_flops = Engine.solve(model, hw_flops, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["peak_flops"] = (t_flops - t_base) / t_base if t_base > 0 else 0.0
 
-        hw_bw = deepcopy(hardware)
-        hw_bw.memory = deepcopy(hardware.memory)
-        hw_bw.memory.bandwidth = hardware.memory.bandwidth * factor
+        hw_bw = hardware.model_copy(update={
+            "memory": hardware.memory.model_copy(update={"bandwidth": hardware.memory.bandwidth * factor})
+        })
         t_bw = Engine.solve(model, hw_bw, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_bandwidth"] = (t_bw - t_base) / t_base if t_base > 0 else 0.0
 
-        hw_mem = deepcopy(hardware)
-        hw_mem.memory = deepcopy(hardware.memory)
-        hw_mem.memory.capacity = hardware.memory.capacity * factor
+        hw_mem = hardware.model_copy(update={
+            "memory": hardware.memory.model_copy(update={"capacity": hardware.memory.capacity * factor})
+        })
         t_mem = Engine.solve(model, hw_mem, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_capacity"] = (t_mem - t_base) / t_base if t_base > 0 else 0.0
 

@@ -11,7 +11,7 @@ from ..core.types import (
 )
 
 class DeploymentTier(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     ram: Quantity
     storage: Quantity
@@ -31,7 +31,7 @@ class DeploymentTier(BaseModel):
 class StorageSubsystem(BaseModel):
     """Reusable storage tier or service in a system design."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     storage_tech: Any | None = None
     capacity: Optional[Quantity] = None
@@ -62,7 +62,7 @@ class StorageSubsystem(BaseModel):
 class NodeStorageConfig(BaseModel):
     """Per-node storage composition, such as four local NVMe drives."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     device: StorageSubsystem
     devices_per_node: int = 1
@@ -76,7 +76,7 @@ class NodeStorageConfig(BaseModel):
 class CheckpointStoragePath(BaseModel):
     """Local staging plus durable checkpoint destination for training fleets."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     local_stage: Optional[NodeStorageConfig] = None
     durable_store: Optional[StorageSubsystem] = None
@@ -96,7 +96,7 @@ class NetworkFabric(BaseModel):
     Captures the topology, raw bandwidth, latency, and oversubscription ratio 
     of the cluster's switching fabric (e.g., InfiniBand NDR or Ethernet).
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     topology: str = "fat-tree"
     bandwidth: Quantity
@@ -133,7 +133,7 @@ class Node(BaseModel):
     Essential for modeling the bandwidth gap between fast intra-node 
     communication (e.g., NVLink) and slower inter-node communication.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     accelerator: HardwareNode
     accelerators_per_node: int
@@ -157,7 +157,7 @@ class Node(BaseModel):
 class RackProfile(BaseModel):
     """Physical rack composition for node-level system profiles."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     node: Node
     nodes_per_rack: int
@@ -187,7 +187,7 @@ class RackProfile(BaseModel):
 class PodEnvelope(BaseModel):
     """Reference TPU/accelerator pod envelope (not a K8s Pod)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     chips: int
     memory: Quantity
@@ -212,7 +212,7 @@ class Fleet(BaseModel):
     count of nodes. It can optionally be situated in a specific `Datacenter` 
     to enable unified calculations of distributed performance and sustainability.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     node: Node
     count: int
