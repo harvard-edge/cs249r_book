@@ -57,6 +57,9 @@ from .quantities import (
 )
 
 __all__ = [
+    # Physical constants (book LEGO cells use `from mlsysim import *`, which
+    # only sees names listed here — audit fix 2026-06-06).
+    "SPEED_OF_LIGHT_FIBER_KM_S",
     "calc_network_latency_ms",
     "dTime",
     "calc_training_time",

@@ -239,7 +239,10 @@ class DistributedModel(ForwardModel):
                 # Hierarchical: Ring within node, then Ring across nodes
                 t_comm_dp = calc_hierarchical_allreduce_time(
                     message_bytes=gradient_size,
-                    n_nodes=dp_size // fleet.node.accelerators_per_node,
+                    # ceil, not floor: 12 ranks on 8-GPU nodes span 2 nodes;
+                    # flooring to 1 modeled ZERO inter-node traffic (audit
+                    # fix 2026-06-06).
+                    n_nodes=math.ceil(dp_size / fleet.node.accelerators_per_node),
                     gpus_per_node=fleet.node.accelerators_per_node,
                     intra_node_bw=fleet.node.intra_node_bw,
                     inter_node_bw=fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio,
