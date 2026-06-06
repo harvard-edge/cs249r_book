@@ -152,7 +152,7 @@ $$ R_{\text{single}}(t) = e^{-\lambda t} $$ {#eq-single-component-reliability}
 
 The mean time between failures (MTBF) for this component equals $1/\lambda$. Data center GPUs often have specified MTBF values in the tens of thousands of hours, with field behavior depending on operating conditions, cooling effectiveness, manufacturing variation, and workload stress.[^fn-gpu-mtbf-field] @sec-appdx-reliability-foundations-component-rates catalogs the canonical per-component MTTF values (H100, A100, TPU, PCIe, power, network) that anchor these $\lambda$ and FIT figures, so a reader can substitute the constant for any device and reproduce the rates used throughout this chapter.
 
-[^fn-gpu-mtbf-field]: **GPU MTBF Variation**\index{GPU!mtbf variation}\index{MTBF!GPU field variation}: NVIDIA specifies A100 MTBF at approximately 50,000 hours under controlled conditions, while published fleet studies from Google (Tensor Processing Unit (TPU) pods) and Meta (GPUs) report field failure rates above manufacturer specifications in their environments. The gap arises from thermal stress, power fluctuations, and memory-intensive ML workloads that push components beyond the steady-state assumptions in reliability models.
+[^fn-gpu-mtbf-field]: **GPU MTBF Variation**\index{GPU!MTBF variation}\index{MTBF!GPU field variation}: NVIDIA specifies A100 MTBF at approximately 50,000 hours under controlled conditions, while published fleet studies from Google (Tensor Processing Unit (TPU) pods) and Meta (GPUs) report field failure rates above manufacturer specifications in their environments. The gap arises from thermal stress, power fluctuations, and memory-intensive ML workloads that push components beyond the steady-state assumptions in reliability models.
 
 When multiple independent components operate in a system where any single failure causes system failure, @eq-system-reliability-product formalizes how system reliability becomes the product of individual component reliabilities:
 
@@ -448,7 +448,7 @@ Each GPU operates within a failure domain that includes the GPU itself, its PCIe
 
 This result means the cluster experiences a failure approximately every `{python} FailureCascadeExample.mtbf_hours_str` on average. The expected failure cadence is `{python} FailureCascadeExample.failures_per_day_str`; a training run lasting one week will experience approximately `{python} FailureCascadeExample.weekly_failures_str`. Any training system operating at this scale must treat failure as a continuous condition, not an exceptional event. @Sec-appdx-reliability-foundations-mtbf-cascade works this same cascade through step by step, composing per-component rates into a fleet-wide system MTBF, so a reader can rerun the calculation for a different node design or cluster size.
 
-The cluster MTBF scaling\index{Cluster!mtbf scaling} in @tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation above is lower once PCIe, power, and network failure domains are included.
+The cluster MTBF scaling\index{Cluster!MTBF scaling} in @tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation is lower once PCIe, power, and network failure domains are included.
 
 | **Cluster Size (GPUs)** | **Individual GPU MTBF** |   **Cluster MTBF**   | **Expected Failures per Day** |
 |:------------------------|:-----------------------:|:--------------------:|:-----------------------------:|
@@ -639,14 +639,9 @@ The MTBF calculations in the reliability analysis quantify *how often* failures 
 
 #### Transient failures {#sec-fault-tolerance-reliability-reliability-transient-failures-57b4}
 
-Transient failures occur temporarily and resolve without intervention. Examples include:
-
-- **Network packet loss**\index{Network Packet Loss}: Momentary congestion causes dropped packets, but retransmission succeeds
-- **Memory bit flips**\index{Memory!bit flips}: Cosmic ray induced single-event upsets[^fn-seu-rate] corrupt individual bits
+Transient failures occur temporarily and resolve without intervention, so the recovery question is whether the system can retry or validate the affected work before corrupted state propagates. Momentary **network packet loss**\index{Network Packet Loss} may drop packets while retransmission succeeds; **memory bit flips**\index{Memory!bit flips} from cosmic ray induced single-event upsets[^fn-seu-rate] can corrupt individual bits; **thermal throttling**\index{Thermal Throttling} can temporarily reduce performance during temperature spikes; and **software timeouts**\index{Software Timeouts} can arise from temporary resource contention.
 
 [^fn-seu-rate]: **Single-Event Upset (SEU)**\index{SEU!error rate}: From particle physics, where "upset" denotes a nondestructive state change. Cosmic rays and alpha particles from chip packaging flip approximately one bit per gigabyte of RAM per month at sea level. ECC memory corrects single-bit errors but cannot handle multi-bit upsets in the same word, leaving a residual silent corruption rate that compounds across the terabytes of state in large-scale ML training.
-- **Thermal throttling**\index{Thermal Throttling}: Temporary performance reduction due to temperature spikes
-- **Software timeouts**\index{Software Timeouts}: Temporary resource contention causes operation delays
 
 Transient failures are particularly insidious in ML training because they may not trigger explicit errors. A transient memory bit flip during gradient computation produces incorrect gradients that propagate through subsequent training steps. The model continues training but produces subtly degraded results. Large-scale SDC and DRAM field studies show that hardware errors can escape ordinary error reporting in production fleets [@dixit2021silent; @schroeder2009]. In ML training, that same undetected-corruption pattern can surface as degraded gradients, anomalous loss curves, or rollback-worthy checkpoints rather than an explicit crash[^fn-silent-corruption-training].
 
@@ -656,12 +651,7 @@ The appropriate response to transient failures depends on detection capability. 
 
 #### Fail-stop failures {#sec-fault-tolerance-reliability-reliability-failstop-failures-5cdd}
 
-Fail-stop failures cause components to cease operation entirely and detectably. The failed component stops responding to requests and can be identified through timeout mechanisms. Examples include:
-
-- **GPU hardware failure**\index{GPU!hardware failure}: Memory errors cause device to become unresponsive
-- **Node crash**\index{Node!crash}: Operating system failure terminates all processes
-- **Network partition**: Physical or logical disconnection isolates node from cluster
-- **Storage failure**\index{Storage!failure}: Disk failure prevents checkpoint read/write operations
+Fail-stop failures cause components to cease operation entirely and detectably. The failed component stops responding to requests and can be identified through timeout mechanisms: a **GPU hardware failure**\index{GPU!hardware failure} can make a device unresponsive, a **node crash**\index{Node!crash} can terminate all processes on a machine, a **network partition** can isolate the node from the cluster, and a **storage failure**\index{Storage!failure} can prevent checkpoint reads or writes.
 
 Fail-stop failures are the easiest class to handle because detection is straightforward: the component stops responding. Recovery involves replacing the failed component and restoring state from the most recent checkpoint. The primary challenge is minimizing detection time and recovery latency.
 
@@ -745,13 +735,7 @@ Byzantine-resilient distributed training algorithms exist but impose significant
 
 #### Correlated failures {#sec-fault-tolerance-reliability-reliability-correlated-failures-95e8}
 
-The reliability calculations in @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef assume independent failures. Real systems exhibit correlated failures where multiple components fail simultaneously due to shared dependencies:
-
-- **Power supply failure**\index{Power Supply Failure}: All GPUs in a node lose power simultaneously
-- **Network switch failure**\index{Network Switch Failure}: All nodes connected to the switch become unreachable
-- **Cooling system failure**\index{Cooling!system failure}: Thermal shutdown affects multiple racks
-- **Software bugs**\index{Software Bugs}: A bug in the CUDA driver crashes all processes using that driver version
-- **Operator error**\index{Operator Error}: Misconfiguration affects entire cluster
+The reliability calculations in @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef assume independent failures. Real systems exhibit correlated failures when shared dependencies fail many components at once: a **power supply failure**\index{Power Supply Failure} can take down every GPU in a node, a **network switch failure**\index{Network Switch Failure} can isolate all attached nodes, a **cooling system failure**\index{Cooling!system failure} can force thermal shutdown across racks, a **software bug**\index{Software Bugs} in a CUDA driver can crash every process using that version, and **operator error**\index{Operator Error} can misconfigure an entire cluster.
 
 Correlated failures violate the independence assumption underlying @eq-system-reliability-n-components. When failures are correlated, the actual system reliability is lower than the formula predicts. Correlated failures can also defeat redundancy strategies. Three replicas of a model provide no availability benefit if all three run on the same power domain and a power failure takes out all three simultaneously.
 
@@ -799,7 +783,7 @@ The key insight from @fig-failure-domains is that redundancy is effective only w
 
 **Context**: Google's TPUv4 machine-learning supercomputer used 4,096 TPU chips connected by a custom 3D torus Inter-Chip Interconnect (ICI) fabric, and Google engineers published their operating experience with automatic fault resiliency and hardware recovery [@zu2024tpuv4].
 
-**Failure**: At that scale, a failed machine, chip, ICI cable, or optical circuit switch was not merely a lost component. It could disrupt the topology that synchronous training jobs relied on for collective communication.
+**Failure mode**: At that scale, a failed machine, chip, ICI cable, or optical circuit switch was not merely a lost component. It could disrupt the topology that synchronous training jobs relied on for collective communication.
 
 **Consequence**: Google built a control plane that detected faults, reconfigured the ICI fabric, and routed jobs around failures or onto spare healthy cubes. The paper reports 99.98 percent system availability while gracefully handling hardware outages experienced by about 1 percent of training jobs.
 
@@ -809,7 +793,7 @@ The key insight from @fig-failure-domains is that redundancy is effective only w
 
 ### The bathtub curve and hardware lifecycle {#sec-fault-tolerance-reliability-reliability-bathtub-curve-hardware-lifecycle-7d8a}
 
-The failure taxonomy above classifies failure types and domains, answering what kind of failures occur. Equally important for designing fault tolerance is understanding when in a component's lifetime failures are most likely to occur. Hardware failure rates are not constant over component lifetime. @Fig-bathtub-curve illustrates the bathtub curve\index{Bathtub Curve}, a well-established model in reliability engineering that describes how failure rates vary across three distinct phases:
+The failure taxonomy classifies failure types and domains, answering what kind of failures occur. Equally important for designing fault tolerance is understanding when in a component's lifetime failures are most likely to occur. Hardware failure rates are not constant over component lifetime. @Fig-bathtub-curve illustrates the bathtub curve\index{Bathtub Curve}, a well-established model in reliability engineering that describes how failure rates vary across three distinct phases:
 
 The first phase, infant mortality\index{Infant Mortality}, exhibits elevated failure rates from manufacturing defects, improper installation, and early-life wear-out of marginal components. This phase typically lasts days to weeks for electronic components. Burn-in testing[^fn-burn-in-screening] operates components under stress conditions before deployment to precipitate infant mortality failures before production use.
 
@@ -867,7 +851,7 @@ Large Language Models experience the highest absolute failure costs due to their
 
 Recommendation Systems present unique challenges because their training is often continuous rather than episodic. The value of a RecSys model derives partly from its freshness. Embeddings that capture recent user behavior outperform stale embeddings. A failure that loses hours of embedding updates may degrade recommendation quality in ways that directly impact revenue. Meta has documented that recommendation model freshness directly correlates with engagement metrics, making recovery time a business-critical metric.[^fn-recsys-freshness-cost]
 
-[^fn-recsys-freshness-cost]: **RecSys Freshness**\index{RecSys Freshness}\index{Recommendation Systems!freshness fault tolerance}: Meta's Deep Learning Recommendation Model (DLRM) infrastructure documents that embedding staleness measured in hours produces measurable degradation in recommendation relevance and engagement metrics. This inverts the typical fault tolerance priority: for recommendation systems, minimizing recovery time matters more than minimizing checkpoint overhead, because stale embeddings directly reduce revenue.
+[^fn-recsys-freshness-cost]: **RecSys Freshness**\index{RecSys Freshness}\index{Recommendation System!freshness fault tolerance}: Meta's Deep Learning Recommendation Model (DLRM) infrastructure documents that embedding staleness measured in hours produces measurable degradation in recommendation relevance and engagement metrics. This inverts the typical fault tolerance priority: for recommendation systems, minimizing recovery time matters more than minimizing checkpoint overhead, because stale embeddings directly reduce revenue.
 
 Vision Models occupy a middle ground with moderate training durations and manageable checkpoint sizes. The relatively small checkpoints enable frequent checkpointing with minimal overhead. A ViT-Large checkpoint in the 1–2 GB range imposes little overhead compared with large language or embedding-heavy recommendation workloads. Data augmentation state represents the primary state beyond model weights that must be preserved for reproducible recovery. The augmentation parameters and data shuffling seed must be captured.
 
@@ -1075,7 +1059,7 @@ class MemBandwidthProtection:
     gddr6x_eff_gb_per_s_str = fmt_bandwidth(gddr6x_eff_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-The memory bandwidth protection analysis\index{Memory Bandwidth!protection analysis} below shows the throughput tax that error protection can impose on different memory technologies.
+The memory bandwidth protection analysis\index{Memory Bandwidth!protection analysis} shows the throughput tax that error protection can impose on different memory technologies.
 
 | **Memory Technology** |                     **Base Bandwidth**                     |                    **ECC Overhead**                    |                  **Effective Bandwidth**                  |
 |:----------------------|:----------------------------------------------------------:|:------------------------------------------------------:|:---------------------------------------------------------:|
@@ -2056,7 +2040,7 @@ Tools like **Fidelity**\index{Fidelity} [@he2020] address this gap by mapping lo
 
 **Scenario**: A team validates a training system with software fault injection and concludes that a particular tensor bit flip always corrupts model output.
 
-**System**: Physical beam testing can produce a different result because hardware includes **masking effects**\index{Masking Effect} below the software abstraction. A bit flip in a hardware register might be corrected by ECC memory or masked by logical gates before it ever reaches the variable that software tools mutate directly.
+**Mechanism**: Physical beam testing can produce a different result because hardware includes **masking effects**\index{Masking Effect} below the software abstraction. A bit flip in a hardware register might be corrected by ECC memory or masked by logical gates before it ever reaches the variable that software tools mutate directly.
 
 **Systems lesson**: Software fault injection is useful for fast coverage of model-visible states, but it can overstate vulnerability when it bypasses circuit-level defenses. Production resilience claims therefore need a hardware-calibrated fault model, not software injection alone.
 
@@ -2093,8 +2077,8 @@ Training fault tolerance has three obligations: preserve state, detect and class
 ***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of the complete training state (parameters, optimizer state, and data loader position) to persistent storage.
 
 1.  **Significance (quantitative)**: It minimizes the Lost Work after a system failure by trading checkpoint I/O against rework. Writing too often wastes accelerator time on storage traffic; writing too rarely risks replaying many completed steps after a failure. The Young-Daly Formula $(\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}})$ captures that local trade-off by choosing the interval that balances write cost against expected lost work.
-2.  **Distinction (durable)**: Unlike Incremental Backups\index{Incremental Backups}, Checkpointing must capture the Exact Execution Context (including random seeds and learning rate schedules) to ensure deterministic resumption of the optimization loop.
-3.  **Common pitfall**: A frequent misconception is that Checkpointing is "just writing to disk." In reality, for large models, it is a Storage System Stress Test\index{Storage!system stress test}: the simultaneous write from thousands of GPUs can trigger a checkpoint storm\index{Checkpoint Storm} that saturates the entire network fabric $(\text{BW})$.
+2.  **Observation**: Unlike Incremental Backups\index{Incremental Backups}, Checkpointing must capture the Exact Execution Context (including random seeds and learning rate schedules) to ensure deterministic resumption of the optimization loop.
+3.  **Pitfall**: A frequent misconception is that Checkpointing is "just writing to disk." In reality, for large models, it is a Storage System Stress Test\index{Storage!system stress test}: the simultaneous write from thousands of GPUs can trigger a checkpoint storm\index{Checkpoint Storm} that saturates the entire network fabric $(\text{BW})$.
 
 :::
 
@@ -2555,7 +2539,7 @@ While the theoretical overhead of checkpointing appears manageable for individua
 
 **Scenario**: A training job saves a distributed checkpoint from thousands of accelerators at the same instant.
 
-**System**: For the 2.1 TB Archetype A checkpoint above, 1,000 workers would each write roughly 2.1 GB of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: 10,000 GPUs, each holding a 10 GB shard of model or embedding state, can flood the network fabric with 100 TB of simultaneous writes.
+**Mechanism**: For the 2.1 TB Archetype A checkpoint above, 1,000 workers would each write roughly 2.1 GB of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: 10,000 GPUs, each holding a 10 GB shard of model or embedding state, can flood the network fabric with 100 TB of simultaneous writes.
 
 **Systems lesson**: A checkpoint storm occurs when massive parallel writes overwhelm the cluster's I/O infrastructure, causing switch buffers to overflow and storage controllers to lock up.
 
@@ -2660,7 +2644,7 @@ class CheckpointDebug:
 
 ::: {#exmp-fault-tolerance-debugging-checkpoint-overhead .callout-example title="Debugging checkpoint overhead"}
 
-A team training a `{python} CheckpointDebug.params_b_str` parameter model observes that checkpointing takes `{python} CheckpointDebug.observed_write_min_str` per checkpoint, far exceeding their expected `{python} CheckpointDebug.target_write_min_str`-minute target. Training throughput has dropped `{python} CheckpointDebug.overhead_pct_str` because the cluster sits idle during checkpoints. How can this be diagnosed and resolved?
+**Problem**: A team training a `{python} CheckpointDebug.params_b_str` parameter model observes that checkpointing takes `{python} CheckpointDebug.observed_write_min_str` per checkpoint, far exceeding their expected `{python} CheckpointDebug.target_write_min_str`-minute target. Training throughput has dropped `{python} CheckpointDebug.overhead_pct_str` because the cluster sits idle during checkpoints. Diagnose the bottleneck and identify the recovery path.
 
 **Diagnosis**: The fleet stack exposes where the checkpoint overhead comes from.
 
@@ -2751,7 +2735,7 @@ This protocol ensures that either all workers complete their writes or the check
 
 ::: {#psp-fault-tolerance-checkpoint-consistency-models .callout-perspective title="Checkpoint consistency models"}
 
-The idealized protocol above assumes step 2 completes quickly. At scale, this barrier synchronization becomes the dominant checkpoint cost because there is almost always at least one slow worker in a 10,000+ GPU cluster.
+The idealized protocol assumes step 2 completes quickly. At scale, this barrier synchronization becomes the dominant checkpoint cost because there is almost always at least one slow worker in a 10,000+ GPU cluster.
 
 **Strict Synchronous**\index{Strict Synchronous}: All workers checkpoint at exactly the same training step. Provides strongest consistency but highest overhead from barrier synchronization.
 
@@ -2959,7 +2943,7 @@ class FaultToleranceRecoveryRecap:
     n_workers_str = fmt_count(n_workers, commas=True, label="GPU")
 ```
 
-Consider our `{python} FaultToleranceRecoveryRecap.params_b_str` parameter model training on `{python} FaultToleranceRecoveryRecap.n_workers_str`. The checkpoint size is approximately `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` (weights + Adam optimizer state). How much does a single failure event cost?
+**Problem**: Consider our `{python} FaultToleranceRecoveryRecap.params_b_str` parameter model training on `{python} FaultToleranceRecoveryRecap.n_workers_str`. The checkpoint size is approximately `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` (weights + Adam optimizer state). Estimate the cost of a single failure event.
 
 **Setup**: The recovery budget $T_{\text{recovery}}$ has four terms.
 
@@ -3009,8 +2993,8 @@ This automation reduces Mean Time To Recovery (MTTR) from the 30–60 minutes ty
 ***Straggler***\index{Straggler!definition} is a worker in a distributed training job that processes tasks significantly slower than its peers, creating a synchronization bottleneck.
 
 1.  **Significance (quantitative)**: In a synchronous system (BSP), cluster throughput is bounded by the speed of the Slowest Rank. A single 10 percent performance drop on one node can reduce the effective compute capacity of thousands of nodes by 10 percent.
-2.  **Distinction (durable)**: Unlike a Hardware Failure (where the node stops), a Straggler continues to produce correct results but violates the Temporal Consistency required for efficient parallel execution.
-3.  **Common pitfall**: A frequent misconception is that stragglers are caused only by "bad hardware." In reality, they are often caused by System Jitter\index{System Jitter}: background OS processes, network congestion, or thermal throttling that varies across the data center floor.
+2.  **Observation**: Unlike a Hardware Failure (where the node stops), a Straggler continues to produce correct results but violates the Temporal Consistency required for efficient parallel execution.
+3.  **Pitfall**: A frequent misconception is that stragglers are caused only by "bad hardware." In reality, they are often caused by System Jitter\index{System Jitter}: background OS processes, network congestion, or thermal throttling that varies across the data center floor.
 
 :::
 
@@ -3090,7 +3074,7 @@ A single failing device (`{python} StragglerTax.straggler_frac_str` of the hardw
 
 ::::
 
-However, killing a slow node and restarting the job implies waiting for a replacement to maintain the original GPU count. The previous sections assumed that recovery means restoring the *same* resource allocation: checkpoint, wait for a replacement, restart. Elastic recovery breaks that assumption by allowing the job to continue with *fewer* workers rather than idling the entire cluster until the original count is restored.
+However, killing a slow node and restarting the job implies waiting for a replacement to maintain the original GPU count. The checkpoint-restart recovery model assumes restoring the *same* resource allocation: checkpoint, wait for a replacement, restart. Elastic recovery breaks that assumption by allowing the job to continue with *fewer* workers rather than idling the entire cluster until the original count is restored.
 
 ## Elastic Recovery {#sec-fault-tolerance-reliability-reliability-elastic-training-4f87}
 
@@ -3098,11 +3082,11 @@ Suppose a 1,024-GPU training job loses an 8-GPU node to a hardware fault, but th
 
 ::: {#dfn-fault-tolerance-elastic-training .callout-definition title="Elastic training"}
 
-***Elastic Training***\index{Elastic training!definition}\index{Training!elastic} is the capability of a distributed training job to dynamically adjust its worker count during execution without requiring a full restart.
+***Elastic Training***\index{Elastic Training!definition}\index{Training!elastic} is the capability of a distributed training job to dynamically adjust its worker count during execution without requiring a full restart.
 
 1.  **Significance (quantitative)**: It converts hard failures into throughput degradations rather than full stops. A 1,024-GPU job that loses 8 GPUs continues at 99.2 percent capacity instead of dropping to zero. It requires learning rate recalibration and gradient accumulation adjustment to maintain mathematical consistency as the global batch size changes.
-2.  **Distinction (durable)**: Unlike checkpoint-restart recovery (which halts the job, waits for replacement hardware, and reloads state), elastic recovery is always-live: the optimization loop never stops, it only changes its parallel width.
-3.  **Common pitfall**: A frequent misconception is that elasticity is "automatic." In reality, recovery requires coordinated adaptation: the training framework, the data loader, and the orchestrator must all synchronize their state to ensure that no data samples are lost or double-counted during the resize.
+2.  **Observation**: Unlike checkpoint-restart recovery (which halts the job, waits for replacement hardware, and reloads state), elastic recovery is always-live: the optimization loop never stops, it only changes its parallel width.
+3.  **Pitfall**: A frequent misconception is that elasticity is "automatic." In reality, recovery requires coordinated adaptation: the training framework, the data loader, and the orchestrator must all synchronize their state to ensure that no data samples are lost or double-counted during the resize.
 
 :::
 
@@ -3334,8 +3318,8 @@ During a major regional network outage, an e-commerce site suddenly loses access
 ***Graceful Degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality (falling back to a smaller model, serving cached results, or returning partial outputs) rather than failing completely, maintaining measurable availability at reduced capability.
 
 1.  **Significance (quantitative)**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system that falls back from a 7B-parameter ranker to a collaborative-filtering model on GPU failure may reduce click-through rate by 8–15 percent but maintains request availability instead of turning every affected request into an error. The engineering calculation changes from total outage duration to measured quality loss during fallback.
-2.  **Distinction (durable)**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy—each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
-3.  **Common pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
+2.  **Observation**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy—each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
+3.  **Pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
 
 :::
 
@@ -3570,15 +3554,15 @@ The diagnosis must then separate the root causes that produce the same slow-work
 
 ### Common failure patterns {#sec-fault-tolerance-reliability-reliability-common-failure-patterns-3306}
 
-The observability pillars above enable detection of recurring failure patterns that experience with large-scale ML systems has identified. @Fig-training-failure-signatures catalogs the most common training loss signatures, each requiring a different diagnostic and recovery response.
+The observability pillars enable detection of recurring failure patterns that experience with large-scale ML systems has identified. @Fig-training-failure-signatures catalogs the most common training loss signatures, each requiring a different diagnostic and recovery response.
 
 #### Training failures {#sec-fault-tolerance-reliability-reliability-training-failures-bc3a}
+
+A training-loss signature is useful because it maps a curve to a recovery decision. @Fig-training-failure-signatures shows the curves first; @tbl-training-failure-response-map then makes the operational mapping explicit, treating the curve as evidence for a specific recovery action.
 
 ::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training Failure Signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal Training. (B) Gradient Explosion. (C) Loss Plateau. (D) NaN Divergence. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Plot showing four loss curves: (A) Normal Training with smooth descent, (B) Gradient Explosion with a sudden spike, (C) Loss Plateau where learning stalls, and (D) NaN Divergence with erratic oscillation collapsing to NaN."}
 ![](images/svg/training-failure-signatures.svg)
 :::
-
-A training-loss signature is useful because it maps a curve to a recovery decision. @Tbl-training-failure-response-map makes that mapping explicit: the curve is evidence, and the recovery action depends on what kind of system failure could have produced it.
 
 | **Signature**              | **Likely Interpretation**                                                         | **Recovery Response**                                                                          |
 |:---------------------------|:----------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------|
@@ -3608,13 +3592,13 @@ Cascade failures are particularly insidious because the root cause is obscured b
 
 **Scenario**: A recommendation system experiences sudden latency spikes.
 
-**System**: The three observability pillars work together to diagnose the root cause. **Metrics**\index{Metric!observability} reveal the symptom: p99 latency jumped from 45 ms to 800 ms at 14:32, with error rate increasing from 0.1 percent to 15 percent. **Traces**\index{Trace!observability} isolate the bottleneck: the feature-service span consumes 700 ms instead of the normal 12 ms, while the model-inference span remains normal at 40 ms. **Logs**\index{Logs!observability} identify the root cause: feature-service logs show repeated connection timeouts to the user embedding cache at 14:31, followed by cache miss storms as requests bypass the failed cache and hit the embedding database directly.
+**Diagnosis**: The three observability pillars work together to diagnose the root cause. **Metrics**\index{Metric!observability} reveal the symptom: p99 latency jumped from 45 ms to 800 ms at 14:32, with error rate increasing from 0.1 percent to 15 percent. **Traces**\index{Trace!observability} isolate the bottleneck: the feature-service span consumes 700 ms instead of the normal 12 ms, while the model-inference span remains normal at 40 ms. **Logs**\index{Logs!observability} identify the root cause: feature-service logs show repeated connection timeouts to the user embedding cache at 14:31, followed by cache miss storms as requests bypass the failed cache and hit the embedding database directly.
 
 **Systems lesson**: The cache node failure caused a cache-miss avalanche, overwhelming the embedding database and propagating latency to all requests. The fix is a circuit breaker on cache access, falling back to default embeddings when cache is unavailable.
 
 :::
 
-The case studies below show how failure detection, state preservation, and observability are orchestrated together at scale.
+The production examples that follow show how failure detection, state preservation, and observability are orchestrated together at scale.
 
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 
@@ -3658,7 +3642,7 @@ These case studies reveal three universal principles. First, detection speed det
 
 An infrastructure team might spend weeks hardening their storage layer against disk failures, only to have their entire training run destroyed by a subtle software bug in their PyTorch distributed backend. Fault tolerance for distributed ML systems involves counterintuitive mathematics and subtle trade-offs where conventional data center wisdom often fails.
 
-**Fallacy**: *Hardware failures are the main concern.*
+A common fallacy is this: *Hardware failures are the main concern.*
 
 This intuition comes from traditional systems where disk failures, power outages, and network partitions dominate. In ML systems, hardware failures are only one part of a broader incident mix.
 
@@ -3666,7 +3650,7 @@ Industry experience from large-scale ML systems points to a broader failure mix 
 
 Investing heavily in hardware redundancy while neglecting software robustness (input validation, gradual rollouts, configuration management) leaves many important failure modes unaddressed. The most reliable ML systems treat software bugs as inevitable and design defensively.
 
-**Pitfall**: *Setting checkpoint interval by intuition.*
+A recurring pitfall is this: *Setting checkpoint interval by intuition.*
 
 Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." The Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
 
@@ -3674,11 +3658,11 @@ $$\tau_{\text{opt}} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49 \tex
 
 The intuitive "every hour" is close but suboptimal. More critically, if checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes 85 minutes, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2--3$\times$ from optimal in either direction.
 
-**Fallacy**: *If each GPU is 99.99 percent reliable, a 10,000-GPU cluster is also 99.99 percent reliable.*
+A common fallacy is this: *If each GPU is 99.99 percent reliable, a 10,000-GPU cluster is also 99.99 percent reliable.*
 
 Reliability does not compose by averaging---it compounds by multiplication. For $N$ serial components each with availability $A$, and assuming their failures are independent, the aggregate availability is $A^N$. With $A = 0.9999$ and $N = 10{,}000$, the cluster availability is $0.9999^{10{,}000} \approx 0.37$: the cluster is *down* 63 percent of the time. Individual component reliability is necessary but nowhere near sufficient at fleet scale. System-level fault tolerance (checkpointing, elastic recovery, redundancy across failure domains) must be designed explicitly, not assumed to emerge from per-component MTTF.
 
-**Pitfall**: *Using MTBF calculations as if failures were independent.*
+A recurring pitfall is this: *Using MTBF calculations as if failures were independent.*
 
 The reliability equation $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}}/N$ assumes component failures are statistically independent. In production, failures correlate:
 
@@ -3691,7 +3675,7 @@ Correlated failures change two quantities that the simple MTBF equation hides: i
 
 Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
 
-**Fallacy**: *Component MTTF values predict individual failure timing.*
+A common fallacy is this: *Component MTTF values predict individual failure timing.*
 
 ```{python}
 #| echo: false
@@ -3724,7 +3708,7 @@ class FleetReliabilityFallacyRates:
 
 Engineers read a GPU MTTF of `{python} FleetReliabilityFallacyRates.gpu_mttf_str` and plan around a five-year replacement cadence per device. MTTF is a statistical property of a population, not a prediction for any single component. A GPU with MTTF `{python} FleetReliabilityFallacyRates.gpu_mttf_str` might fail at 200 hours or last 100,000 hours; the distribution is broad. What MTTF reliably predicts is the aggregate failure rate: in a fleet of `{python} FleetReliabilityFallacyRates.fleet_gpus_str`, the steady-state failure rate is approximately `{python} FleetReliabilityFallacyRates.fleet_rate_eq_math` failures per hour, or roughly one failure every `{python} FleetReliabilityFallacyRates.hours_between_str`. Fleet-scale reliability engineering relies on this statistical regularity to size automated recovery, spare-pool depth, and on-call rotations. Trying to predict which individual GPU will fail next is a category error and a waste of monitoring effort.
 
-**Pitfall**: *Ignoring restart overhead in checkpoint planning.*
+A recurring pitfall is this: *Ignoring restart overhead in checkpoint planning.*
 
 The Young-Daly formula accounts for checkpoint save time, but practitioners often forget restart overhead:
 
@@ -3738,11 +3722,11 @@ The Young-Daly formula accounts for checkpoint save time, but practitioners ofte
 
 Total restart time can be 3--5$\times$ checkpoint save time. A 5-minute checkpoint save followed by a 20-minute restart means each failure costs 25 minutes before accounting for lost work since the last checkpoint. That recovery term should be included in the expected waste and recovery-SLO budget; it should not be added to $T_{\text{write}}$ as though it were paid at every checkpoint unless a specific recovery-aware checkpoint model derives that dependency.
 
-**Fallacy**: *Every failure should be handled as a full restart.*
+A common fallacy is this: *Every failure should be handled as a full restart.*
 
 Engineers often treat all failures as "node crashed, restart from checkpoint," but different failure modes require different responses. Transient failures (network congestion, thermal throttling) should trigger retry/pause, not restart, since state remains in memory. Permanent failures (GPU death, node crash) require checkpoint-restart with migration to new hardware. Silent corruption (bit flips, ECC errors) demands rollback to a previous checkpoint, not just the latest one, requiring checkpoint history retention. Resource exhaustion (OOM, memory fragmentation) needs reconfiguration before restart; otherwise the job crashes again immediately. As @sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c details, misdiagnosing failure type wastes compute: treating transient network blips as permanent failures wastes hours re-initializing, while ignoring silent corruption poisons model weights undetected.
 
-**Pitfall**: *Assuming checkpoints are consistent without validating state.*
+A recurring pitfall is this: *Assuming checkpoints are consistent without validating state.*
 
 Modern frameworks checkpoint transparently, creating the illusion of automatic consistency. In practice, distributed checkpoints require coordination that can fail subtly:
 
@@ -3756,7 +3740,7 @@ Modern frameworks checkpoint transparently, creating the illusion of automatic c
 
 Production systems must implement checkpoint validation: verify all shards exist, verify iteration numbers match, verify optimizer state matches model state. Organizations that discover corrupted checkpoints during recovery from a failure have no recourse except restarting from an earlier (potentially much earlier) checkpoint.
 
-**Fallacy**: *Fault tolerance can be tested only when failures happen.*
+A common fallacy is this: *Fault tolerance can be tested only when failures happen.*
 
 Fault tolerance mechanisms are code paths that execute rarely in normal operation. Like backup systems never tested until disaster strikes, fault tolerance code paths accumulate bugs:
 
@@ -3768,23 +3752,23 @@ Chaos engineering (intentionally injecting failures) transforms fault tolerance 
 
 The cost of regular fault injection (some failed experiments, some minor outages) is far less than the cost of discovering broken fault tolerance during an actual failure.
 
-**Pitfall**: *Using elastic training as a substitute for checkpointing.*
+A recurring pitfall is this: *Using elastic training as a substitute for checkpointing.*
 
 Elastic training adjusts parallelism degree when workers fail, continuing with reduced capacity, which appears to eliminate checkpoint-restart overhead. However, state consistency challenges remain: reducing the active worker count requires redistributing model shards, optimizer states, and data assignments consistently. Below some minimum viable size, training becomes infeasible (model does not fit, batch size too small), requiring checkpoint-restart regardless. Each removed worker reduces throughput; accumulated failures progressively degrade training speed until checkpoint-restart becomes preferable to continued degradation. If a failure was caused by a software bug triggered by specific data, the bug persists in remaining workers. Elastic training is complementary to checkpointing, not a replacement; the reduced checkpoint frequency still requires occasional checkpoints for catastrophic failures and training completion.
 
-**Fallacy**: *Overhead budgets are fixed fractions of training time.*
+A common fallacy is this: *Overhead budgets are fixed fractions of training time.*
 
 Reference tables that show "pipeline bubble: 10 percent, checkpoint overhead: 5 percent, failure recovery: 3 percent" are easy to read as physical laws and pass through as line items in capacity plans. They are engineering targets, not constants. Pipeline bubble overhead depends on the number of microbatches and the interleaved schedule; failure-recovery overhead drops dramatically with elastic training that avoids full restarts; checkpoint overhead is a function of model size, storage bandwidth, and whether checkpointing is synchronous or asynchronous. Treating these numbers as fixed percentages leads to passive acceptance of avoidable inefficiency. The Young-Daly formula already shows that checkpoint cadence is a decision; the same is true of every other overhead listed in the reference tables.
 
-**Pitfall**: *Adding GPUs without accounting for communication and recovery overhead.*
+A recurring pitfall is this: *Adding GPUs without accounting for communication and recovery overhead.*
 
 Capacity plans typically account for Amdahl's Law and AllReduce overhead but treat reliability as a fixed background condition. At extreme scale, each additional GPU increases the aggregate failure rate, which inflates the expected recovery and replay time per job. There exists a cluster size beyond which the time lost to failures and recovery exceeds the time saved by additional parallelism, and wall-clock training time increases rather than decreasing with $N$. This is the reliability version of diminishing returns and it applies on top of the Amdahl ceiling. The two effects must be modeled together: useful goodput equals MFU $\times$ scaling efficiency $\times$ (1 - failure overhead), and the failure-overhead term grows with $N$.
 
-**Fallacy**: *Silent data corruption is negligible because hardware has ECC.*
+A common fallacy is this: *Silent data corruption is negligible because hardware has ECC.*
 
 GPUs and memory systems include extensive error correction (ECC, CRC, parity), creating the intuition that silent data corruption is negligible. Large-scale CPU SDC and memory-error studies reveal otherwise: silent corruptions and memory faults still occur at fleet scale and can escape ordinary error reporting [@dixit2021silent; @sridharan2015]. For a 10,000-GPU cluster, even rare per-device corruption events become operationally relevant because the system continuously executes enormous volumes of memory and arithmetic operations. Silent corruption causes mysterious training anomalies: loss spikes attributed to "bad batches" may be hardware errors, gradient NaNs blamed on learning rates may be bit flips, and models failing to converge despite correct hyperparameters may have corrupted weights. Detection strategies include redundant computation (computing batches on multiple workers and comparing), gradient checksums (verifying AllReduce consistency), and statistical monitoring of gradient/activation distributions. Unlike detectable failures, silent corruption does not trigger errors; training "succeeds" but produces subtly broken models, requiring detection mechanisms as discussed in @sec-fault-tolerance-reliability-reliability-mlspecific-debugging-27d5.
 
-**Pitfall**: *Relying only on hardware ECC instead of end-to-end validation.*
+A recurring pitfall is this: *Relying only on hardware ECC instead of end-to-end validation.*
 
 ECC is a necessary layer, but it is not an end-to-end correctness proof for a training run. The pipeline also needs checksums on data shards, validation of checkpoint shards, gradient and activation anomaly detection, and replayable tests that can distinguish a bad batch from corrupted state. End-to-end validation makes the silent-corruption problem observable at the ML-system boundary, where the damage would otherwise appear only as unexplained training behavior.
 

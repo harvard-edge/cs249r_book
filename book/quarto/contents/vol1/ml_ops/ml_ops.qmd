@@ -36,14 +36,13 @@ Traditional software fails loudly: a null pointer exception crashes the server, 
 
 ::: {.callout-learning-objectives}
 
-- Explain why silent failures distinguish ML systems from traditional software and why the degradation equation makes operational monitoring necessary
-- Analyze technical debt patterns in ML systems, including boundary erosion, correction cascades, and data dependencies, and identify their infrastructure solutions
-- Design feature stores and CI/CD pipelines that ensure consistency between training and serving environments
-- Apply cost-aware automation principles, including the retraining staleness model, to make quantitative decisions about model retraining intervals and resource allocation
-- Implement monitoring that quantifies data drift (PSI, KL divergence), detects degradation, and surfaces training-serving skew before production impact
-- Compare deployment patterns including canary testing, blue-green strategies, and shadow deployments, and implement tiered rollback strategies for different risk profiles
-- Implement incident response, debugging workflows, and on-call practices for ML-specific failure modes (probabilistic degradation, delayed impact)
-- Evaluate organizational MLOps maturity levels and their architectural implications for infrastructure and automation
+- Explain why silent ML failures make operational monitoring necessary
+- Analyze technical debt patterns and their infrastructure solutions
+- Design feature stores and CI/CD pipelines that keep training and serving consistent
+- Apply the retraining staleness model to choose retraining intervals and resource allocation
+- Implement monitoring for drift, degradation, and training-serving skew
+- Compare canary, blue-green, shadow, and rollback deployment patterns
+- Evaluate incident response, on-call practice, and organizational maturity for ML operations
 
 :::
 
@@ -143,8 +142,8 @@ $\bullet$ Monitoring \& Triggering};
 ***Machine Learning Operations (MLOps)***\index{MLOps!definition} is the engineering discipline that closes the feedback loop between model behavior and data reality by automating retraining, validation, and deployment in response to measurable production drift [@kreuzberger2023].
 
 1.  **Significance (quantitative)**: The cost of not closing this loop shows up in reported production deployments: recommendation models without drift monitoring can lose on the order of 10–20 percent absolute accuracy within six months as distribution shift accumulates, and a moderate KL-style divergence ($\mathcal{D}(P_t \lVert P_0) > 0.1$) is widely used in industry runbooks as a threshold beyond which accuracy drops of several percent become routine. Automated retraining pipelines compress the mean time to recovery (MTTR) from days to hours by triggering retraining when monitored feature statistics cross a threshold, rather than waiting for user complaints; highly automated systems can approach sub-hour recovery for well-instrumented, low-risk updates. These ranges are illustrative rather than exact; the magnitudes are well documented across vendor case studies and operational survey reports of production ML systems.
-2.  **Distinction (durable)**: Unlike DevOps (which monitors *system availability*: uptime, error rates, latency, and succeeds as long as the service responds), MLOps must monitor *predictive correctness*, which can silently degrade to zero while every infrastructure health check stays green.
-3.  **Common pitfall**: A frequent misconception is that retraining on new data solves distribution shift. In reality, retraining on shifted data without first diagnosing which distribution changed (input features ($p(x)$), label relationships ($p(y \mid x)$), or both) can entrench the shift rather than correct it. Data drift and concept drift require different interventions: fresh sampling fixes the former; relabeling under current ground-truth criteria is required for the latter.
+2.  **Observation**: Unlike DevOps (which monitors *system availability*: uptime, error rates, latency, and succeeds as long as the service responds), MLOps must monitor *predictive correctness*, which can silently degrade to zero while every infrastructure health check stays green.
+3.  **Pitfall**: A frequent misconception is that retraining on new data solves distribution shift. In reality, retraining on shifted data without first diagnosing which distribution changed (input features ($p(x)$), label relationships ($p(y \mid x)$), or both) can entrench the shift rather than correct it. Data drift and concept drift require different interventions: fresh sampling fixes the former; relabeling under current ground-truth criteria is required for the latter.
 
 :::
 
@@ -297,7 +296,7 @@ These principles respond to recurring challenges: data drift[^fn-data-drift-adve
 
 : **MLOps vs. DevOps**: MLOps extends DevOps principles to address the unique requirements of machine learning systems, including data and model versioning, and continuous monitoring for model performance and data drift. MLOps coordinates a broader range of stakeholders and emphasizes reproducibility and scalability beyond traditional software development workflows. {#tbl-mlops}
 
-This expanded scope reshapes the development cycle.
+This expanded scope turns model operation into a feedback loop rather than a release pipeline.
 
 ::: {#chk-ml-ops-mlops-loop .callout-checkpoint title="The MLOps loop"}
 
@@ -331,8 +330,8 @@ In the ML context, this concept takes on a specific meaning:
 ***Technical Debt in Machine Learning***\index{Technical Debt!definition} is the accumulating maintenance cost created by implicit data dependencies, entangled features, and undeclared consumers in ML systems, where the "interest" compounds as silent accuracy degradation rather than slower development velocity.
 
 1.  **Significance (quantitative)**: Google's analysis of production ML systems found that model code constitutes roughly 5 percent of the total codebase; the remaining 95 percent is data pipelines, configuration, serving infrastructure, and monitoring [@sculley2015hidden]. ML-specific debt drivers compound this: changing one input feature can silently shift the learned representation of every other feature (entanglement), a model trained to correct another model's errors creates a fragile dependency chain (correction cascades), and downstream systems consuming model outputs without explicit contracts become undeclared consumers that break silently when the model is updated.
-2.  **Distinction (durable)**: Unlike software technical debt (which manifests as slower development velocity and is visible in code review), ML technical debt manifests as silent accuracy degradation that is invisible to unit tests, integration tests, and system health monitors. The system continues to run and respond correctly by every infrastructure metric while predictions quietly worsen.
-3.  **Common pitfall**: A frequent misconception is that "better code" solves technical debt in ML. In reality, it is a systems architecture problem: the debt accumulates when the assumptions of the training distribution (feature ranges, label meanings, data freshness) are not enforced as runtime contracts at the system boundary.
+2.  **Observation**: Unlike software technical debt (which manifests as slower development velocity and is visible in code review), ML technical debt manifests as silent accuracy degradation that is invisible to unit tests, integration tests, and system health monitors. The system continues to run and respond correctly by every infrastructure metric while predictions quietly worsen.
+3.  **Pitfall**: A frequent misconception is that "better code" solves technical debt in ML. In reality, it is a systems architecture problem: the debt accumulates when the assumptions of the training distribution (feature ranges, label meanings, data freshness) are not enforced as runtime contracts at the system boundary.
 
 :::
 
@@ -1864,7 +1863,7 @@ class LatencyBudget:
 
 **Systems insight**: Model optimization alone often captures less than 50 percent of the latency opportunity. A model that runs `{python} LatencyBudget.model_speedup_mult_str` faster reduces this example from `{python} LatencyBudget.slo_p99_ms_str` to `{python} LatencyBudget.new_total_after_model_speedup_ms_str`, only `{python} LatencyBudget.end_to_end_speedup_mult_str` end-to-end improvement, because inference is `{python} LatencyBudget.inference_pct_str` of total latency.
 
-Systems thinking demands end-to-end analysis. Apply the D·A·M taxonomy to diagnose the root cause: is it *Logic* (Algorithm: too many layers, unoptimized graph), *Physics* (Machine: memory bandwidth saturation, thermal throttling), or *Information* (Data: feature extraction overhead, serialization cost)? Dave Patterson's principle applies: "Measure everything, optimize the bottleneck." If feature retrieval exceeds its budget, no amount of model optimization will achieve the SLO.
+Systems thinking demands end-to-end analysis. Apply the D·A·M taxonomy to diagnose the root cause across Data (feature extraction overhead, serialization cost), Algorithm (too many layers, unoptimized graph), and Machine (memory bandwidth saturation, thermal throttling). Dave Patterson's principle applies: "Measure everything, optimize the bottleneck." If feature retrieval exceeds its budget, no amount of model optimization will achieve the SLO.
 
 :::
 
@@ -2199,7 +2198,7 @@ class DriftDetectionDelay:
 *Drift detection speed is bounded by the sample rate.*
 :::
 
-**Systems insight**: The "Sample Rate" of monitoring is physically limited by traffic volume. For low-traffic, high-stakes models (like medical diagnosis), drift detection can take days or weeks, leaving the system in a long-term "Silent Failure" state. This is why high-stakes systems must supplement statistical monitoring with proactive **Model Audits**\index{Model Audit!high-stakes systems}.
+**Systems insight**: The sample rate of monitoring is physically limited by traffic volume. For low-traffic, high-stakes models (like medical diagnosis), drift detection can take days or weeks, leaving the system in a long-term silent-failure state. This is why high-stakes systems must supplement statistical monitoring with proactive model audits\index{Model Audit!high-stakes systems}.
 
 ::::
 
@@ -2218,8 +2217,8 @@ Both forms of drift motivate a formal definition:
 ***Data drift***\index{Data Drift!definition} is the specific subtype of distribution shift in which the input distribution $p(x)$ changes while the decision boundary $p(y \mid x)$ remains stable. The broader drift taxonomy from @sec-data-engineering-detecting-responding-data-drift-509a also includes concept drift, in which $p(y \mid x)$ itself shifts.
 
 1.  **Significance (quantitative)**: It represents a violation of the i.i.d. assumption (independent and identically distributed), causing accuracy to erode monotonically with the distributional divergence $(\mathcal{D}(P_t \lVert P_0))$, empirically modeled as $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$ with $\lambda$ fit per deployment. Because $p(y \mid x)$ is unchanged, retraining on fresh $p(x)$ data can recover performance (when the new input distribution overlaps the original support), unlike concept drift, where the label relationship must also be re-learned.
-2.  **Distinction (durable)**: Unlike model decay\index{Model Decay!definition} (which implies internal failure, where the algorithm or code degraded), data drift is an external force (market shifts, sensor aging, user behavior change) that invalidates the model's learned mapping without any engineering error.
-3.  **Common pitfall**: A frequent misconception is that drift is detectable by monitoring model outputs. By the time output drift is visible, the system has often already been serving degraded predictions for weeks. Monitoring Input Feature Statistics ($\mathcal{D}(P_t \lVert P_0)$ via PSI or KL divergence) provides earlier warning because input shift precedes output shift by the length of the ground-truth feedback loop.
+2.  **Observation**: Unlike model decay\index{Model Decay!definition} (which implies internal failure, where the algorithm or code degraded), data drift is an external force (market shifts, sensor aging, user behavior change) that invalidates the model's learned mapping without any engineering error.
+3.  **Pitfall**: A frequent misconception is that drift is detectable by monitoring model outputs. By the time output drift is visible, the system has often already been serving degraded predictions for weeks. Monitoring Input Feature Statistics ($\mathcal{D}(P_t \lVert P_0)$ via PSI or KL divergence) provides earlier warning because input shift precedes output shift by the length of the ground-truth feedback loop.
 
 :::
 
@@ -2765,9 +2764,9 @@ $$\text{Monitoring ROI} = \frac{\text{Incidents Prevented} \times \text{Avg Inci
 # │ How: Calculate the return on investment for MLOps infrastructure.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: incidents_prevented_str, avg_incident_cost_str, monitoring_roi_factor_value_str
+# │ Exports: incidents_prevented_str, avg_incident_cost_str, monitoring_roi_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_ratio, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_multiple, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MonitoringROI:
@@ -2789,13 +2788,13 @@ class MonitoringROI:
     incidents_prevented_str = fmt(incidents_prevented, precision=0, commas=False)
     avg_incident_cost_str = fmt_usd(avg_incident_cost, precision=0, commas=True)
     annual_monitoring_cost_str = fmt_usd(annual_monitoring_cost, precision=0, commas=True)
-    monitoring_roi_factor_value_str = fmt_ratio(monitoring_roi, precision=0, commas=False)
+    monitoring_roi_mult_str = fmt_multiple(monitoring_roi, precision=0, commas=False)
 ```
 
 If average incident costs `{python} MonitoringROI.avg_incident_cost_str` (downtime + engineering time + reputation) and monitoring prevents `{python} MonitoringROI.incidents_prevented_str` incidents annually at `{python} MonitoringROI.annual_monitoring_cost_str` monitoring cost:
 
 $$
-\text{ROI} = \frac{`{python} MonitoringROI.incidents_prevented_str` \times `{python} MonitoringROI.avg_incident_cost_str`}{`{python} MonitoringROI.annual_monitoring_cost_str`} = `{python} MonitoringROI.monitoring_roi_factor_value_str`\times
+\text{ROI} = \frac{`{python} MonitoringROI.incidents_prevented_str` \times `{python} MonitoringROI.avg_incident_cost_str`}{`{python} MonitoringROI.annual_monitoring_cost_str`} = `{python} MonitoringROI.monitoring_roi_mult_str`
 $$
 
 This framework helps justify monitoring investments and prioritize which metrics deserve fine-grained observation vs. coarse sampling.
@@ -3038,7 +3037,7 @@ While titles vary across organizations, five core ML team roles\index{ML Team Ro
 
 : **ML Team Roles Matrix**: Clear role boundaries prevent gaps and overlaps. Data Scientists focus on model quality while ML Engineers handle productionization. Data Engineers own data pipelines while Platform Engineers own MLOps tooling. SREs ensure overall system reliability. {#tbl-ml-roles-matrix}
 
-Clear role definitions matter most at handoff points\index{Notebook to Production!handoff challenges}, where work transitions between specialists. The most failure-prone handoff occurs between Data Scientists and ML Engineers: a model that performs well in a Jupyter notebook may fail in production due to undocumented preprocessing steps, hardcoded file paths, or environment dependencies. Similarly, the handoff from ML Engineers to SREs [@beyer2016sre]\index{Production Readiness Review!handoff criteria} requires verified monitoring dashboards, configured alerting rules, documented runbooks, and tested rollback procedures. Data Engineers hand off to the broader ML team through feature contracts\index{Feature Contracts!schema specification}, formal specifications of schema, freshness SLOs, and quality guarantees that prevent silent pipeline changes from surfacing as mysterious model degradation weeks later. Organizations mitigate these handoff risks through standardized model interfaces, required documentation, and reproducibility requirements that must be verified before each transition.
+Clear role definitions matter most at handoff points\index{Notebook to Production!handoff challenges}, where work transitions between specialists. The most failure-prone handoff occurs between Data Scientists and ML Engineers: a model that performs well in a Jupyter notebook may fail in production due to undocumented preprocessing steps, hardcoded file paths, or environment dependencies. Similarly, the handoff from ML Engineers to SREs [@beyer2016sre]\index{Production Readiness Review!handoff criteria} requires verified monitoring dashboards, configured alerting rules, documented runbooks, and tested rollback procedures. Data Engineers hand off to the broader ML team through feature contracts\index{Feature Contract!schema specification}, formal specifications of schema, freshness SLOs, and quality guarantees that prevent silent pipeline changes from surfacing as mysterious model degradation weeks later. Organizations mitigate these handoff risks through standardized model interfaces, required documentation, and reproducibility requirements that must be verified before each transition.
 
 Effective MLOps extends beyond internal team coordination, however, to encompass the broader communication challenges that arise when technical teams interface with business stakeholders.
 
@@ -3383,11 +3382,11 @@ At the highest levels of operational maturity, the single-model practices establ
 
 ### MLOps investment economics {#sec-ml-operations-investment-return-investment-8571}
 
-The operational benefits of MLOps are substantial, but implementing mature practices requires organizational investment. Understanding costs and returns helps teams make informed decisions about MLOps adoption for their ML node.
+The operational benefits of MLOps become persuasive only when the investment matches the model's production value. For a single ML node, the decision is whether deployment speed, incident reduction, and monitoring coverage justify the operational spend; for a portfolio, the same economics compound into platform investment.
 
 #### Single-model MLOps investment {#sec-ml-operations-singlemodel-mlops-investment-9026}
 
-For a single production ML system, establishing solid MLOps practices typically incurs the costs summarized in @tbl-mlops-single-model-investment:
+For a single production ML system, the first threshold is the annual cost of making the node observable, deployable, and recoverable. @Tbl-mlops-single-model-investment summarizes the main cost categories:
 
 | **Component**               |   **Typical Cost**   | **Justification**                          |
 |:----------------------------|:--------------------:|:-------------------------------------------|
@@ -3401,7 +3400,7 @@ For a single production ML system, establishing solid MLOps practices typically 
 
 #### Single-model ROI calculation {#sec-ml-operations-singlemodel-roi-calculation-e70f}
 
-The ROI for a single ML node depends on model criticality, as @eq-mlops-roi formalizes:
+The return threshold then depends on model criticality: a revenue-facing model can justify more operational spend because avoided incidents and deployment-time savings have measurable value. @Eq-mlops-roi formalizes that single-node calculation:
 $$\text{Annual ROI} = \frac{\text{Incidents Avoided} \times \text{Avg Incident Cost} + \text{Time Savings} \times \text{Hourly Cost}}{\text{Annual MLOps Investment}}$$ {#eq-mlops-roi}
 
 ```{python}
@@ -3418,10 +3417,10 @@ $$\text{Annual ROI} = \frac{\text{Incidents Avoided} \times \text{Avg Incident C
 # │ How: Contrast incident costs and labor savings against infrastructure spend.
 # │
 # │ Imports: mlsysim.book (fmt)
-# │ Exports: incidents_avoided_str, incident_savings_k_str, single_model_roi_factor_value_str,
+# │ Exports: incidents_avoided_str, incident_savings_k_str, single_model_roi_mult_str,
 # │          mlops_investment_k_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_ratio, fmt_time, fmt_usd, check
+from mlsysim.fmt import fmt, fmt_multiple, fmt_time, fmt_usd, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SingleModelROI:
@@ -3452,7 +3451,7 @@ class SingleModelROI:
     time_savings_k_str = fmt_usd((time_savings // THOUSAND) * THOUSAND, precision=0, commas=False, scale="K")
     mlops_investment_k_str = fmt_usd((mlops_investment // THOUSAND) * THOUSAND, precision=0, commas=False, scale="K")
     mlops_investment_k_year_str = fmt_usd((mlops_investment // THOUSAND) * THOUSAND, precision=0, commas=False, scale="K", per="year")
-    single_model_roi_factor_value_str = fmt_ratio(single_model_roi, precision=1, commas=False)
+    single_model_roi_mult_str = fmt_multiple(single_model_roi, precision=1, commas=False)
 ```
 
 For a model generating \$1M annual revenue with:
@@ -3462,8 +3461,10 @@ For a model generating \$1M annual revenue with:
 - MLOps investment of `{python} SingleModelROI.mlops_investment_k_year_str`
 
 $$
-\text{ROI} = \frac{`{python} SingleModelROI.incident_savings_k_str` + `{python} SingleModelROI.time_savings_k_str`}{`{python} SingleModelROI.mlops_investment_k_str`} = `{python} SingleModelROI.single_model_roi_factor_value_str`\times
+\text{ROI} = \frac{`{python} SingleModelROI.incident_savings_k_str` + `{python} SingleModelROI.time_savings_k_str`}{`{python} SingleModelROI.mlops_investment_k_str`} = `{python} SingleModelROI.single_model_roi_mult_str`
 $$
+
+The `{python} SingleModelROI.single_model_roi_mult_str` return means the investment is not justified by tooling elegance; it is justified because the model is expensive enough that preventing incidents and shortening deployments outweigh the annual platform spend.
 
 #### When to invest more {#sec-ml-operations-invest-14a2}
 
@@ -4109,35 +4110,35 @@ The shared engineering lesson is that MLOps maturity is not tool accumulation. I
 
 These fallacies and pitfalls capture common errors that waste engineering resources, trigger production incidents, and cause silent accuracy degradation. Each connects to specific sections detailing the underlying mechanisms and solutions.
 
-**Fallacy**: *MLOps is just applying traditional DevOps practices to machine learning models.*
+A common fallacy is this: *MLOps is just applying traditional DevOps practices to machine learning models.*
 
 Engineers assume standard CI/CD pipelines transfer directly to ML\index{MLOps Fallacies!DevOps equivalence}, but production ML requires specialized infrastructure. As @sec-ml-operations-cicd-pipelines-a9de showed, ML pipelines add data validation, model training, performance evaluation, artifact registration, and deployment gates that make them slower and more stateful than conventional software pipelines. Traditional DevOps can release deterministic services frequently; ML systems without specialized tooling often slow down because retraining and validation are stateful. Standard CI/CD tools do not by themselves handle feature stores, model registries, or drift detection. A recommendation system deployed using conventional DevOps can lose accuracy because the pipeline lacks training-serving consistency checks. Organizations that adopt DevOps without ML adaptations encounter silent model degradation, training-serving skew, and data quality failures that evade conventional testing.
 
-**Pitfall**: *Treating model deployment as a one-time event rather than an ongoing process.*
+A recurring pitfall is this: *Treating model deployment as a one-time event rather than an ongoing process.*
 
 Teams view deployment as a terminal milestone\index{MLOps Pitfalls!one-time deployment} analogous to shipping software releases, but models degrade continuously due to data drift and distribution shift. @Sec-ml-operations-data-quality-monitoring-c6b6 establishes that PSI values exceeding 0.2 indicate significant distribution shift requiring investigation. A fraud detection model can move from below the warning threshold to above the review threshold within months, turning initially acceptable accuracy into material degradation. The optimal retraining interval follows $T^* \approx \sqrt{\frac{2C}{QVA_0\gamma}}$ from @sec-ml-operations-quantitative-retraining-economics-1579, where high-volume systems require daily retraining while low-drift domains sustain monthly intervals. Without automated retraining pipelines, Mean Time To Recovery (MTTR) for accuracy degradation is often measured in days; with automation, MTTR can drop to hours for well-instrumented, low-risk updates. Production ML requires continuous monitoring of feature distributions, performance metrics, and automated retraining triggers throughout the operational lifecycle.
 
-**Fallacy**: *Automated retraining ensures optimal model performance without human oversight.*
+A common fallacy is this: *Automated retraining ensures optimal model performance without human oversight.*
 
 Engineers assume automated pipelines handle all maintenance scenarios\index{MLOps Fallacies!automated retraining sufficiency}, yet automation cannot detect all failure modes. Automated retraining perpetuates biases in corrupted training data, triggers updates during peak traffic, or deploys models that pass validation but degrade edge cases. Industry postmortems suggest that a substantial fraction of P1 incidents (accuracy drops exceeding 10 percent) originate from automated retraining propagating upstream data quality issues. A news recommendation system retrained on weekend data exhibited lower engagement because user behavior differs sharply across weekday vs. weekend contexts. Organizations implementing human checkpoints at validation boundaries consistently report fewer production incidents than fully automated pipelines. Effective MLOps requires escalation protocols for anomalous validation results, manual approval for unusual metric patterns, and override capabilities when automation produces questionable outcomes.
 
-**Pitfall**: *Focusing on technical infrastructure while neglecting organizational and process alignment.*
+A recurring pitfall is this: *Focusing on technical infrastructure while neglecting organizational and process alignment.*
 
 Organizations invest in MLOps platforms\index{MLOps Pitfalls!organizational neglect} expecting tooling to solve deployment problems, but sophisticated infrastructure fails without cultural transformation. MLOps demands coordination between data scientists optimizing for accuracy, engineers prioritizing latency, and business stakeholders focused on impact. A retail company deployed feature stores and model registries but maintained quarterly deployment frequency because data scientists and engineers operated in isolation. Practitioners commonly observe that unified ML teams deploy significantly more frequently (weekly or daily vs. quarterly) compared to siloed organizations. Time-to-production for new models can stretch to months in fragmented organizations but drops considerably with integrated teams. Successful MLOps requires cross-functional teams with unified objectives, shared on-call rotations building empathy across roles, and incentive structures rewarding production reliability alongside model performance.
 
-**Fallacy**: *Training and serving environments automatically remain consistent once pipelines are established.*
+A common fallacy is this: *Training and serving environments automatically remain consistent once pipelines are established.*
 
 Teams assume that feature computation produces identical values across training and serving\index{MLOps Fallacies!automatic consistency} after initial pipeline setup, but training-serving skew emerges from subtle inconsistencies in preprocessing logic, timezone handling, or dependency versions. @Sec-ml-operations-feature-stores-c01c demonstrates that skew causes 5 to 15 percent accuracy degradation even when models perform well in offline validation. An e-commerce ranking model that computes `session_length` using wall-clock time in training but processing time in serving can suffer double-digit accuracy loss that persists until someone compares feature distributions directly. Documented production systems report meaningful gains from eliminating skew, often worth substantial revenue when the model drives high-volume decisions. Without centralized feature stores and automated consistency validation, skew detection can take weeks as degradation gradually becomes visible in aggregate metrics; feature stores with built-in consistency checks shorten that loop by comparing feature distributions across environments automatically.
 
-**Pitfall**: *Assuming comprehensive monitoring prevents all production incidents.*
+A recurring pitfall is this: *Assuming comprehensive monitoring prevents all production incidents.*
 
 Engineers believe sufficient metrics and dashboards\index{MLOps Pitfalls!monitoring overconfidence} eliminate surprise failures, but monitoring creates blind spots when teams track outputs without validating inputs. @Sec-ml-operations-data-quality-monitoring-c6b6 establishes that input validation detects issues before they degrade predictions, yet many ML systems in practice monitor only accuracy and latency. A recommendation system can track click-through rate while ignoring feature staleness, missing embeddings that are hours out of date due to database replication lag. This can create engagement degradation for days before accuracy monitoring triggers alerts. Systems monitoring only outputs can exhibit multi-day Mean Time To Detection (MTTD); adding data quality monitoring can reduce MTTD to hours or less. Production ML requires layered monitoring with explicit SLAs for data freshness, schema validation, feature distributions, model outputs, and business metrics. Monitoring infrastructure itself needs redundancy to prevent blind operation during platform failures.
 
-**Fallacy**: *Accuracy is the first production signal to monitor.*
+A common fallacy is this: *Accuracy is the first production signal to monitor.*
 
 Teams instrument production with accuracy dashboards and assume degradation will appear there first. Accuracy is a lagging indicator. A model's accuracy can remain stable even as the input distribution drifts, because the model continues to memorize enough of the old distribution to maintain aggregate metrics on the slice it has seen before. By the time accuracy visibly degrades, the drift has often been accumulating for weeks. Monitoring input distributions with PSI or KL divergence (@sec-ml-operations-data-quality-monitoring-c6b6) catches drift earlier and allows proactive retraining before accuracy crosses the SLO. The PSI threshold of 0.2 cited earlier in the chapter exists precisely to surface drift weeks before accuracy would have made it visible.
 
-**Pitfall**: *Alerting only after accuracy degradation becomes visible.*
+A recurring pitfall is this: *Alerting only after accuracy degradation becomes visible.*
 
 An accuracy-only alert closes the loop too late because it waits for the user-facing metric to absorb the upstream problem. A stronger monitoring plan treats schema changes, feature freshness, distribution drift, and calibration movement as leading indicators, then routes those alerts to the same response machinery that handles accuracy regressions. The operational goal is not to replace accuracy monitoring, but to make accuracy the confirmation signal rather than the first sign of trouble.
 
