@@ -88,7 +88,45 @@ class SystemEvaluator:
         duration_days: Optional[float] = None
     ) -> SystemEvaluation:
         """
-        Evaluates an ML system scenario across three analytical lenses: Feasibility, Performance, and Macro/Economics.
+        Evaluate an ML system scenario across three analytical lenses.
+
+        Composes a pipeline from the inputs and maps its results onto the
+        three-level scorecard:
+
+        - **Feasibility** ("will it run?"): memory footprint vs HBM capacity
+          from ``SingleNodeModel`` (single node only; the distributed path
+          currently reports a pass-through check);
+        - **Performance** ("is it fast enough?"): latency/throughput/MFU from
+          ``SingleNodeModel``, or step latency / scaling efficiency from
+          ``DistributedModel`` when ``nodes > 1`` and a fleet is given;
+        - **Macro** ("is it worth it?"): TCO/carbon/energy from
+          ``EconomicsModel``, included only when both ``fleet_obj`` and
+          ``duration_days`` are provided (otherwise SKIPPED).
+
+        Parameters
+        ----------
+        scenario_name : str
+            Label echoed into the scorecard.
+        model_obj, hardware_obj : Any
+            Workload and accelerator registry objects.
+        batch_size : int
+            Samples per step.
+        precision : str
+            Numerical precision ('fp16', 'fp32', ...).
+        efficiency : float
+            Software efficiency factor in (0, 1].
+        fleet_obj : Any, optional
+            Fleet object; enables the distributed and economics paths.
+        nodes : int
+            Node count; > 1 with a fleet selects ``DistributedModel``.
+        duration_days : float, optional
+            Operation duration for the economics lens.
+
+        Returns
+        -------
+        SystemEvaluation
+            The three-level scorecard (metric units: memory in GB, latency in
+            ms, throughput in 1/s, TCO in USD, carbon in metric tons).
         """
         
         from .solver import SingleNodeModel, DistributedModel, EconomicsModel

@@ -92,7 +92,37 @@ class SustainabilityModel(ForwardModel):
     def solve(self, fleet: Fleet, duration_days: float, datacenter: Optional[Datacenter] = None,
               mfu: float = 1.0, embodied_carbon_per_device: float = 0.0) -> SustainabilityResult:
         """
-        Calculates energy, carbon, and water footprint for a fleet operation.
+        Calculate energy, carbon, and water footprint for a fleet operation.
+
+        Implements the formula contract in the class docstring: per-device
+        power is an energy-proportionality model
+        (``idle_fraction * TDP + dynamic_fraction * TDP * MFU``), scaled to
+        the fleet, integrated over the duration, then taxed by PUE for
+        facility energy. Carbon and water apply the regional grid's carbon
+        intensity and WUE to facility (post-PUE) energy.
+
+        Parameters
+        ----------
+        fleet : Fleet
+            The cluster; supplies accelerator count, per-device TDP, and the
+            default datacenter/region when ``datacenter`` is not given.
+        duration_days : float
+            Operation duration in days.
+        datacenter : Datacenter, optional
+            Override for the fleet's datacenter (or a bare GridProfile);
+            supplies PUE, carbon intensity, and WUE. Falls back to the fleet
+            region and finally to the US average grid.
+        mfu : float
+            Model FLOPs Utilization in [0, 1]; drives the dynamic-power term.
+        embodied_carbon_per_device : float
+            Manufacturing/shipping carbon per accelerator in kg CO2e
+            (default 0 = operational carbon only).
+
+        Returns
+        -------
+        SustainabilityResult
+            IT and facility energy (kWh), total carbon (kg CO2e, operational
+            plus embodied), water usage (liters), and the PUE applied.
         """
         # 1. Resolve Environment
         dc = datacenter or fleet.datacenter
@@ -213,7 +243,7 @@ class EconomicsModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        EconomicsResult
             Financial metrics including CapEx, OpEx, and total TCO.
         """
         sust_model = SustainabilityModel()
@@ -277,7 +307,40 @@ class ResponsibleEngineeringModel(ForwardModel):
               epsilon: float = 1.0, delta: float = 1e-5,
               min_subgroup_prevalence: float = 0.01) -> ResponsibleEngineeringResult:
         """
-        Calculates the overhead of responsible engineering practices.
+        Calculate the compute and data overhead of responsible-AI guarantees.
+
+        Two first-order cost models:
+
+        - **Privacy (DP-SGD slowdown)**:
+          ``slowdown = 1 + coefficient / epsilon`` — tighter privacy budgets
+          (smaller epsilon) require more noise and per-sample clipping work,
+          so training time grows hyperbolically as epsilon -> 0. The
+          coefficient is a pedagogical calibration constant
+          (``DP_SGD_SLOWDOWN_COEFFICIENT`` in ``engine/calibration.py``).
+        - **Fairness (data requirement)**:
+          ``additional_data = 1 / min_subgroup_prevalence`` — to collect N
+          samples of a subgroup seen at prevalence p, you must collect ~N/p
+          samples overall.
+
+        Parameters
+        ----------
+        base_training_time : Quantity
+            Training time without privacy guarantees (any time unit; the
+            result keeps the same unit).
+        epsilon : float
+            Differential-privacy budget (> 0); smaller is stricter. Clamped
+            below at 0.01 to avoid a singular slowdown.
+        delta : float
+            DP failure probability (reported, not used in the slowdown model).
+        min_subgroup_prevalence : float
+            Prevalence in (0, 1] of the rarest subgroup that must be
+            adequately represented.
+
+        Returns
+        -------
+        ResponsibleEngineeringResult
+            DP slowdown factor (dimensionless), effective training time, and
+            the data-collection multiplier.
         """
         dp_slowdown = 1.0 + (cal.DP_SGD_SLOWDOWN_COEFFICIENT / max(epsilon, 0.01))
         additional_data_factor = 1.0 / max(min_subgroup_prevalence, 1e-6)
@@ -296,7 +359,13 @@ class ResponsibleEngineeringModel(ForwardModel):
 
 class PlacementOptimizer(BaseOptimizer):
     """
-    Finds the optimal datacenter location to minimize TCO and Carbon.
+    Finds the datacenter region that minimizes TCO plus a carbon tax.
+
+    Sweeps a list of grid regions, runs ``EconomicsModel`` for each, and
+    ranks them by the combined objective
+    ``TCO_usd + carbon_tons * carbon_tax_per_ton``. This makes the
+    carbon/cost trade-off explicit: a cheap-but-dirty grid can lose to a
+    pricier low-carbon one once carbon is priced in.
     """
     requires = ("fleet", "duration_days")
     produces = PlacementOptimizerResult
@@ -305,7 +374,29 @@ class PlacementOptimizer(BaseOptimizer):
               regions: List[str] = ["US_Avg", "Quebec", "Iowa"],
               carbon_tax_per_ton: float = 100.0, mfu: float = 1.0) -> PlacementOptimizerResult:
         """
-        Determines the optimal data center location to minimize TCO and carbon taxes.
+        Determine the datacenter region minimizing TCO plus carbon tax.
+
+        Parameters
+        ----------
+        fleet : Fleet
+            The cluster to place.
+        duration_days : float
+            Operation duration in days.
+        regions : List[str]
+            Candidate grid names looked up on ``Infrastructure.Grids``;
+            unknown names are skipped silently.
+        carbon_tax_per_ton : float
+            Carbon price in USD per metric ton CO2e (default 100, a common
+            mid-range social-cost-of-carbon teaching value).
+        mfu : float
+            Model FLOPs Utilization in [0, 1]; passed through to the
+            energy model.
+
+        Returns
+        -------
+        PlacementOptimizerResult
+            Best region with its TCO (USD), carbon footprint (metric tons),
+            PUE, and the full ranked candidate list.
         """
         from ...infrastructure.registry import Infrastructure
         econ_model = EconomicsModel()

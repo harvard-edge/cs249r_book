@@ -22,9 +22,15 @@ def calc_monthly_egress_cost(bytes_per_sec, cost_per_gb):
     -------
     float
         The total monthly cost in USD.
+
+    Notes
+    -----
+    Uses a 30-day month convention (a common cloud-billing simplification),
+    so a "month" here is exactly 2,592,000 seconds — not a calendar month
+    and ~1.4% short of the 365/12 average.
     """
     b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second, "bytes_per_sec")
-    monthly_bytes = b_s * (30 * ureg.day)
+    monthly_bytes = b_s * (30 * ureg.day)  # 30-day month convention (see Notes)
     cost_rate = _ensure_unit(cost_per_gb, ureg.dollar / ureg.gigabyte, "cost_per_gb")
     cost = monthly_bytes * cost_rate.to(ureg.dollar / ureg.byte)
     return cost.m_as(ureg.dollar)

@@ -3,74 +3,13 @@
 The implementations live in ``mlsysim.engine.solvers`` by domain. This module
 keeps solver imports stable while the implementation remains split into small,
 domain-oriented files.
+
+The export list is derived mechanically from ``mlsysim.engine.solvers.__all__``
+(the canonical list) so the three public surfaces — ``mlsysim.engine.solvers``,
+``mlsysim.engine.solver``, and ``mlsysim.solvers`` — can never drift apart.
 """
 
-from .solvers import (
-    BaseResolver,
-    ForwardModel,
-    BaseSolver,
-    BaseOptimizer,
-    SingleNodeModel,
-    NetworkRooflineModel,
-    EfficiencyModel,
-    SensitivitySolver,
-    SynthesisSolver,
-    DistributedModel,
-    MoERoutingModel,
-    TopologyModel,
-    ParallelismOptimizer,
-    ReliabilityModel,
-    CheckpointModel,
-    TrainingMemoryModel,
-    ScalingModel,
-    ServingModel,
-    ServingCapacityModel,
-    ContinuousBatchingModel,
-    WeightStreamingModel,
-    TailLatencyModel,
-    InferenceScalingModel,
-    BatchingOptimizer,
-    SustainabilityModel,
-    EconomicsModel,
-    ResponsibleEngineeringModel,
-    PlacementOptimizer,
-    DataModel,
-    TransformationModel,
-    OrchestrationModel,
-    CompressionModel,
-)
+from .solvers import *  # noqa: F401,F403 — re-export the canonical solver set
+from .solvers import __all__ as _solver_all
 
-__all__ = [
-    "BaseResolver",
-    "ForwardModel",
-    "BaseSolver",
-    "BaseOptimizer",
-    "SingleNodeModel",
-    "NetworkRooflineModel",
-    "EfficiencyModel",
-    "SensitivitySolver",
-    "SynthesisSolver",
-    "DistributedModel",
-    "MoERoutingModel",
-    "TopologyModel",
-    "ParallelismOptimizer",
-    "ReliabilityModel",
-    "CheckpointModel",
-    "TrainingMemoryModel",
-    "ScalingModel",
-    "ServingModel",
-    "ServingCapacityModel",
-    "ContinuousBatchingModel",
-    "WeightStreamingModel",
-    "TailLatencyModel",
-    "InferenceScalingModel",
-    "BatchingOptimizer",
-    "SustainabilityModel",
-    "EconomicsModel",
-    "ResponsibleEngineeringModel",
-    "PlacementOptimizer",
-    "DataModel",
-    "TransformationModel",
-    "OrchestrationModel",
-    "CompressionModel",
-]
+__all__ = list(_solver_all)

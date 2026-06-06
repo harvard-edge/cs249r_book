@@ -341,7 +341,7 @@ class ScalingModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        ScalingResult
             Optimal parameters, token count, and training duration estimates.
         """
         # C = 6 * P * D

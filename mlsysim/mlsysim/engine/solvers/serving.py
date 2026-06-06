@@ -299,7 +299,53 @@ class ServingCapacityModel(ForwardModel):
         max_replicas: int = 1024,
         service_time_cv: float = 1.0,
     ) -> ServingCapacityResult:
-        """Return the minimum replica count that satisfies the target P99."""
+        """Return the minimum replica count that satisfies the target P99.
+
+        Composes three first-order models and then scans replica counts
+        upward (1, 2, ...) until the estimated request P99 meets the target:
+
+        1. ``ContinuousBatchingModel`` sizes the per-replica active batch and
+           token throughput under the memory wall;
+        2. ``ServingModel`` (at that batch) gives TTFT/ITL, so the base
+           request latency is ``TTFT + ITL * output_tokens``;
+        3. ``TailLatencyModel`` (M/M/c) adds the P99 queue wait at each
+           candidate replica count.
+
+        Estimated P99 = base request latency + P99 queue wait. Per-replica
+        QPS capacity = token throughput / output_tokens.
+
+        Parameters
+        ----------
+        model : TransformerWorkload
+            The model being served.
+        hardware : HardwareNode
+            The per-replica accelerator.
+        qps : float
+            Target aggregate arrival rate in queries per second (> 0).
+        target_p99_latency_ms : float
+            End-to-end P99 latency target in milliseconds.
+        seq_len : int
+            Input context length in tokens.
+        output_tokens : int
+            Generated tokens per request; converts token throughput to QPS.
+        max_batch_size : int
+            Cap on concurrent requests per replica.
+        precision : str
+            Numerical precision for weights and KV cache.
+        efficiency : float
+            Software efficiency factor in (0, 1].
+        max_replicas : int
+            Search cap; reported as the requirement when infeasible.
+        service_time_cv : float
+            Coefficient of variation of service time (1.0 = M/M/c).
+
+        Returns
+        -------
+        ServingCapacityResult
+            Replica count, capacity/utilization, latency decomposition, and
+            the limiting ``bottleneck`` ('Memory', 'Capacity', 'Tail Latency',
+            'Base Latency', or 'Feasible').
+        """
         from ...core._validation import validate_at_least, validate_nonnegative, validate_positive, validate_range
 
         validate_positive(qps, "qps")
@@ -431,7 +477,45 @@ class ContinuousBatchingModel(ForwardModel):
     produces = ContinuousBatchingResult
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, max_batch_size: int = 1, page_size: int = 16, precision: str = "fp16", efficiency: float = 0.5) -> ContinuousBatchingResult:
-        """Calculates continuous batching throughput and PagedAttention memory."""
+        """Calculate continuous-batching throughput and PagedAttention memory.
+
+        Models a decode-dominated serving replica:
+
+        - **Capacity**: KV memory per sequence comes from
+          ``calc_paged_kv_cache_size`` (page-granular allocation, so internal
+          fragmentation is bounded by one page per sequence); the number of
+          concurrent requests is what fits in HBM after the weights.
+        - **Latency**: TTFT is the prefill compute time (linear ``2*P*S`` plus
+          attention ``4*L*H*d*S^2`` FLOPs) plus the dispatch tax; ITL is
+          memory-bound — (weights + total KV) streamed once per token over
+          HBM bandwidth.
+        - **Speedup vs static batching**: static allocation is modeled as
+          reaching only ~60% of the continuous batch size, reflecting the
+          20-40% external fragmentation measured by Kwon et al. (2023).
+
+        Parameters
+        ----------
+        model : TransformerWorkload
+            The model being served (layers, heads, hidden_dim, kv_heads).
+        hardware : HardwareNode
+            The accelerator (HBM capacity/bandwidth, dispatch tax).
+        seq_len : int
+            Sequence length in tokens (context for KV sizing and prefill).
+        max_batch_size : int
+            Scheduler cap on concurrent requests.
+        page_size : int
+            PagedAttention page size in tokens (vLLM default 16).
+        precision : str
+            Numerical precision for weights and KV cache.
+        efficiency : float
+            Software efficiency factor in (0, 1] applied to prefill FLOPS.
+
+        Returns
+        -------
+        ContinuousBatchingResult
+            Token throughput (tokens/s), max active requests, fragmentation
+            percentage, KV cache size, TTFT/ITL, and speedup vs static.
+        """
         precision, bpp = resolve_precision(precision)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
 
@@ -735,7 +819,7 @@ class InferenceScalingModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        InferenceScalingResult
             Total reasoning time, cost per query, and token counts.
         """
         # Use ServingModel internally to get per-step latency
@@ -790,13 +874,52 @@ class BatchingOptimizer(BaseOptimizer):
               num_replicas: int = 1, precision: str = "fp16",
               efficiency: float = 0.5, max_search_batch: int = 256) -> BatchingOptimizerResult:
         """
-        Determines the maximum batch size that satisfies a P99 tail latency SLA.
+        Determine the maximum batch size that satisfies a P99 latency SLA.
+
+        Exhaustively scans batch sizes 1..``max_search_batch``. For each
+        candidate ``b``, the per-batch service latency is
+        ``TTFT + ITL * seq_len`` from ``ServingModel``, and the batch arrival
+        rate is ``arrival_rate_qps / b`` (requests are grouped into batches).
+        A candidate is feasible when the model fits in memory, the M/M/c
+        queue is stable, and the queueing P99 meets the SLA. Among feasible
+        candidates the largest batch wins, since throughput grows with batch
+        size.
+
+        Parameters
+        ----------
+        model : TransformerWorkload
+            The model being served.
+        hardware : HardwareNode
+            The serving accelerator.
+        seq_len : int
+            Tokens generated per request (used as the decode count).
+        sla_latency_ms : float
+            P99 latency SLA in milliseconds.
+        arrival_rate_qps : float
+            Aggregate request arrival rate in queries per second.
+        num_replicas : int
+            Number of serving replicas (the 'c' in M/M/c).
+        precision : str
+            Numerical precision.
+        efficiency : float
+            Software efficiency factor in (0, 1].
+        max_search_batch : int
+            Upper bound of the batch-size search range.
+
+        Returns
+        -------
+        BatchingOptimizerResult
+            Best batch size, resulting throughput (tokens/s), P99 latency,
+            and SLO headroom; ``is_feasible=False`` if no batch size works.
         """
         from ...core.optimization.registry import OptimizationRegistry
         serving_model = ServingModel()
         tail_model = TailLatencyModel()
 
         def objective(b_array):
+            """Search objective: returns -b for feasible batch sizes (so the
+            exhaustive minimizer picks the largest feasible batch) and a 1e12
+            penalty for memory-infeasible, unstable, or SLA-violating ones."""
             b = int(b_array[0])
             res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=b, precision=precision, efficiency=efficiency)
             if not res.feasible:
