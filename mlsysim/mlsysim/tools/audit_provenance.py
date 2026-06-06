@@ -86,7 +86,7 @@ def _validate_provenance_record(path: str, prov: Provenance | None) -> list[str]
 
 
 def _check_node(path: str, node: Any) -> list[str]:
-    """Inspects an AST node to verify its provenance lineage."""
+    """Inspects a runtime registry object to verify its provenance lineage."""
     meta = getattr(node, "metadata", None)
     if meta is not None:
         return _validate_provenance_record(path, getattr(meta, "provenance", None))
@@ -97,8 +97,13 @@ def _check_node(path: str, node: Any) -> list[str]:
     if hasattr(node, "mttf_hours"):
         return _validate_provenance_record(path, getattr(node.mttf_hours, "provenance", None))
     if hasattr(node, "rate"):
-        return _check_node(path, node)
-    return []
+        # Recurse into the rate VALUE (was `node`, an infinite loop — audit fix 2026-06-06).
+        return _check_node(path, node.rate)
+    # A value that reaches here carries no provenance hook at all. Report it
+    # instead of silently passing (audit fix 2026-06-06: bare floats/Quantities
+    # previously returned [] and made the "every value is sourced" claim
+    # unenforced).
+    return [f"{path}: no provenance attached ({type(node).__name__})"]
 
 
 def audit_registries(*, scope_cloud: bool = False) -> list[str]:
