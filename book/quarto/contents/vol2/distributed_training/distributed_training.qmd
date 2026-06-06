@@ -810,6 +810,16 @@ The memory constraints of data parallelism motivate a family of techniques that 
 
 [^fn-zero]: **ZeRO (Zero Redundancy Optimizer)**\index{ZeRO!memory optimization}: Published by Microsoft Research in 2019, ZeRO partitions optimizer states, gradients, and optionally parameters across workers instead of replicating them. At ZeRO Stage 3 with 64 GPUs, per-device memory drops from 16 bytes/parameter (full replication) to 0.25 bytes/parameter, converting a 112 GB memory footprint into 1.75 GB. The trade-off: FSDP (PyTorch's ZeRO-3 implementation) adds AllGather and ReduceScatter on every forward and backward layer, introducing 10--25 percent communication overhead that only pays off when memory pressure justifies it.
 
+::: {#dfn-distributed-training-sharded-data-parallelism .callout-definition title="Sharded data parallelism"}
+
+***Sharded Data Parallelism***\index{Sharded Data Parallelism!definition}\index{ZeRO!definition} is the data-parallelism variant (implemented as the ZeRO stages and FSDP) that partitions optimizer state, gradients, and at the deepest stage the parameters themselves across the data-parallel workers, reconstructing each shard on demand through collectives so that per-worker memory falls toward $1/N$ of the full training state while every worker still processes its own minibatch shard.
+
+1.  **Significance (quantitative)**: Mixed-precision Adam training carries 16 bytes of state per parameter, so a 7B-parameter model requires 112 GB of training state, out of memory on any 80 GB accelerator even though the model fits comfortably for inference. ZeRO Stage 3 across 64 workers cuts the per-device state to 1.75 GB (0.25 bytes per parameter), converting the memory wall into a communication cost: the AllGather and ReduceScatter traffic that reassembles shards on demand adds 10--25 percent overhead per step.
+2.  **Observation**: Unlike vanilla data parallelism (which replicates the complete training state on every worker) and unlike model parallelism (which partitions the computation itself), sharded data parallelism partitions only the storage: every worker still executes the full forward and backward pass, gathering each layer's parameters just in time and discarding them immediately after use.
+3.  **Pitfall**: A frequent misconception is that sharding is free memory. The on-demand AllGathers place parameter traffic on the critical path of every layer in every step; on slower interconnects or at small per-worker batch sizes, the exposed communication erodes throughput faster than the memory savings help. Capacity is purchased with bandwidth.
+
+:::
+
 To understand the scale of memory savings ZeRO provides, consider the concrete memory budget for a large language model.
 
 ```{python}
@@ -2259,7 +2269,7 @@ The **Sparse Pull/Sparse Push**\index{Sparse Pull}\index{Sparse Push} pattern av
 
 ### Expert parallelism (mixture of experts) {#sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45}
 
-While tensor parallelism splits dense layers across devices, **Expert Parallelism**\index{Expert Parallelism!definition} enables scaling model capacity (parameters) without increasing compute cost (FLOPs) by using conditional computation. In a Mixture-of-Experts (MoE\index{MoE!routing}) architecture [@shazeer2017outrageously], the feed-forward network (FFN) of each transformer block is replaced by a set of $E$ "experts" (independent FFNs). For each token, a gating network selects a small subset (typically top-1 or top-2) of experts to process it.
+While tensor parallelism splits dense layers across devices, **Expert Parallelism**\index{Expert Parallelism!conditional computation} enables scaling model capacity (parameters) without increasing compute cost (FLOPs) by using conditional computation. In a Mixture-of-Experts (MoE\index{MoE!routing}) architecture [@shazeer2017outrageously], the feed-forward network (FFN) of each transformer block is replaced by a set of $E$ "experts" (independent FFNs). For each token, a gating network selects a small subset (typically top-1 or top-2) of experts to process it.
 
 In a distributed setting, experts are partitioned across workers. If we have 8 GPUs and 8 experts, each GPU hosts one expert. The training process introduces a distinct communication pattern, as @fig-moe-all-to-all-routing illustrates:
 
@@ -2273,6 +2283,16 @@ In a distributed setting, experts are partitioned across workers. If we have 8 G
 :::
 
 The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the **All-to-All**\index{All-to-All!expert parallelism} communication, which is bandwidth-intensive and sensitive to load imbalance.
+
+::: {#dfn-distributed-training-expert-parallelism .callout-definition title="Expert parallelism"}
+
+***Expert Parallelism***\index{Expert Parallelism!definition} is the distribution strategy for mixture-of-experts models that places different experts on different devices and routes each token's activations to the devices hosting its selected experts through All-to-All collectives, scaling total parameter count across the cluster without scaling the compute each token consumes.
+
+1.  **Significance (quantitative)**: It decouples model capacity from compute budget: a trillion-parameter MoE model may activate on the order of 10B parameters per token, so per-token FLOPs remain near those of a 10B dense model while capacity grows roughly 100$\times$. The price is communication structure: every MoE layer requires two All-to-All shuffles per pass (dispatch and combine) whose volume scales with tokens moved times hidden dimension, stressing the cluster's bisection bandwidth rather than any single link.
+2.  **Observation**: Unlike tensor parallelism, which splits dense operations so that every device computes a fraction of every token, expert parallelism is conditional computation: each device computes only the tokens routed to its experts, making both the communication pattern and the load distribution data-dependent rather than fixed by the architecture.
+3.  **Pitfall**: A frequent misconception is that experts share work evenly. Natural token distributions are skewed: a hot expert can receive 3--5$\times$ its fair share of traffic, overflowing its device's activation buffer while sibling devices idle, which is why production MoE systems cap per-expert token budgets and penalize routing skew during training rather than trusting the router alone.
+
+:::
 
 At the heart of expert parallelism lies the All-to-All communication primitive, which shuffles tokens across the cluster based on dynamic routing decisions. Consider a configuration with $E=64$ experts distributed across 64 GPUs, processing a batch of $B=4$ sequences at length $S=2048$ with hidden dimension $d_{\text{model}}=4096$. For every MoE layer, the system must dispatch $B \times S$ tokens to their assigned experts. In FP16, this moves $B \cdot S \cdot d_{\text{model}} \cdot 2$ bytes—approximately 67 MB—in a single direction. Since the processed embeddings must return to their original device for the residual connection, the total network overhead is roughly 134 MB per transformer block. While manageable in isolation, this latency accumulates rapidly in deep, sparse architectures like the Switch Transformer [@fedus2022switch] (up to 2,048 experts) or GShard [@lepikhin2021gshard].
 
