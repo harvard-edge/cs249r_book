@@ -17,6 +17,9 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(v) for v in value]
     if isinstance(value, tuple):
         return [_json_safe(v) for v in value]
+    # Duck-typed Pint Quantity check (avoids importing the registry here);
+    # serialize as the compact pretty string ("3.35 TB/s") so the unit travels
+    # with the number in JSON output.
     if hasattr(value, "magnitude") and hasattr(value, "units"):
         return f"{value:~P}"
     return value

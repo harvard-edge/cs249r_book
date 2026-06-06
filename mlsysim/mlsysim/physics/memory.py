@@ -207,6 +207,7 @@ def calc_kv_cache_size(
         ureg.byte,
         "kv_precision_bytes" if kv_precision_bytes is not None else "bytes_per_elem",
     )
+    # Leading 2 = the separate K and V tensors cached per layer per head.
     return (2 * n_layers * n_heads * head_dim * seq_len * batch_size * bpe).to(ureg.byte)
 
 
@@ -251,6 +252,9 @@ def calc_paged_kv_cache_size(
         - frag_pct (float): Internal memory fragmentation (0.0 to 1.0).
     """
     bpe = _ensure_unit(bytes_per_elem, ureg.byte, "bytes_per_elem")
+    # Allocation is page-granular: round the sequence up to whole pages. The
+    # slack in the final partially-filled page is the only waste PagedAttention
+    # leaves (internal fragmentation), bounded by one page per sequence.
     padded_seq_len = math.ceil(seq_len / page_size_tokens) * page_size_tokens
     internal_frag = max(0, padded_seq_len - seq_len)
     frag_pct = internal_frag / padded_seq_len if padded_seq_len > 0 else 0.0

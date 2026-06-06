@@ -112,10 +112,12 @@ class OrchestrationModel(ForwardModel):
         utilization = lambda_rate / mu_rate
 
         # M/D/1 Queue approximation for wait time (Fixed duration jobs)
-        # T_wait = ρ / (2μ(1-ρ))
+        # T_wait = ρ / (2μ(1-ρ))  — half the M/M/1 wait, because deterministic
+        # service removes the service-time variance term.
         if utilization < 1.0:
             wait_time_days = utilization / (2 * mu_rate * (1 - utilization))
         else:
+            # ρ >= 1: arrivals outpace service; the queue grows without bound.
             wait_time_days = float('inf')
 
         return OrchestrationResult(

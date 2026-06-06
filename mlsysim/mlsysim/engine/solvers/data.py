@@ -115,6 +115,8 @@ class DataModel(ForwardModel):
             bottleneck, supply_bw = "Unknown", Q_("0 GB/s")
         demand_bw = workload_data_rate.to("GB/s")
 
+        # Utilization > 1.0 means demand exceeds the slowest link's supply: the
+        # accelerator stalls waiting for data (the data wall binds).
         utilization = (demand_bw / supply_bw).magnitude if supply_bw.magnitude > 0 else float('inf')
         is_stalled = utilization > 1.0
 
@@ -174,7 +176,10 @@ class TransformationModel(ForwardModel):
         accel_time = accelerator_step_time.to("ms")
         is_bottleneck = transform_time.magnitude > accel_time.magnitude
 
-        # Accelerator utilization: fraction of time the accelerator is active
+        # Accelerator utilization: fraction of time the accelerator is active.
+        # Assumes perfect pipelining (prefetch overlaps CPU work with the
+        # accelerator step), so the steady-state step time is the max of the two
+        # stages, not their sum.
         total_step_time = max(transform_time.magnitude, accel_time.magnitude)
         accelerator_utilization = accel_time.magnitude / total_step_time if total_step_time > 0 else 0.0
 

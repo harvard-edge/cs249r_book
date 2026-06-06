@@ -106,21 +106,26 @@ class CheckpointModel(ForwardModel):
         ckpt_size = calc_checkpoint_size(model.parameters, bytes_per_param=bytes_per_param)
 
         storage_bw = getattr(hardware.storage, 'bandwidth', Q_(cal.FALLBACK_STORAGE_BANDWIDTH_GB_S, "GB/s")) if hardware.storage else Q_(cal.FALLBACK_STORAGE_BANDWIDTH_GB_S, "GB/s")
-        # Fallback to network or standard disk speed if undefined
+        # Fallback to network or standard disk speed if undefined — a zero
+        # bandwidth would make the write time below divide by zero.
         if storage_bw.magnitude == 0:
             storage_bw = Q_(cal.FALLBACK_STORAGE_BANDWIDTH_GB_S, "GB/s")
 
-        # Distributed writing: scale bandwidth by n_writers, capped by filesystem limit
+        # Distributed writing: per-writer bandwidth scales linearly until the
+        # shared filesystem's aggregate ceiling binds (FSDP-style sharded writes
+        # do not get to ignore the backend's total ingest limit).
         fs_limit = Q_(filesystem_limit_gbs, "GB/s")
         effective_write_bw = min(storage_bw * n_writers, fs_limit)
 
         t_write = (ckpt_size / effective_write_bw).to("second")
 
-        # Calculate penalty to MFU
+        # MFU penalty: the fraction of each checkpoint interval the cluster spends
+        # blocked on the synchronous write (training stalls while state drains).
         interval_s = Q_(checkpoint_interval_hours, "hour").to("second")
         if interval_s.magnitude > 0:
             penalty_pct = (t_write / interval_s).magnitude
         else:
+            # Degenerate zero interval: checkpointing continuously, no useful work.
             penalty_pct = 1.0
 
         return CheckpointResult(
@@ -245,6 +250,10 @@ class TrainingMemoryModel(ForwardModel):
         gradients = trainable_params_per_rank * bpp * ureg.byte
         optimizer_state = trainable_params_per_rank * opt_bytes * ureg.byte
 
+        # ZeRO stages are cumulative: each stage shards one more state class
+        # across the DP group. Stage 1 = optimizer state only (the biggest win at
+        # 8-12 bytes/param for Adam), stage 2 adds gradients, stage 3 adds the
+        # weights themselves (at the cost of gather traffic every layer).
         if zero_stage >= 1:
             optimizer_state = optimizer_state / dp_size
         if zero_stage >= 2:
@@ -255,6 +264,9 @@ class TrainingMemoryModel(ForwardModel):
         # Step 2: activations scale with the local microbatch and layers owned by
         # this pipeline stage. bpp is bytes/element; the Korthikanti constants
         # inside calc_activation_memory are FP16-based and scale by bpp/2.
+        # Global batch -> what one rank holds at once: divide by DP replicas, then
+        # by accumulation steps (each micro-step's activations are freed before
+        # the next), and never below one sample.
         local_microbatch = max(1, math.ceil(batch_size / (dp_size * gradient_accumulation_steps)))
         layers_per_stage = max(1, math.ceil(model.layers / pp_size))
         hidden_dim = model.hidden_dim or 4096
@@ -268,9 +280,13 @@ class TrainingMemoryModel(ForwardModel):
             strategy=activation_checkpointing,
         )
 
+        # Gradient bucket: the staging buffer the DP allreduce drains from,
+        # modeled as a small fraction of the gradient footprint.
         grad_bucket = gradients * communication_buffer_fraction
         pipeline_buffer = Q_("0 byte")
         if pp_size > 1:
+            # Pipeline boundary activations: one send + one receive buffer, each
+            # holding a microbatch's worth of hidden states at the stage boundary.
             pipeline_buffer = 2 * local_microbatch * seq_len * hidden_dim * bpp * ureg.byte
         communication_buffers = grad_bucket + pipeline_buffer
 
@@ -351,14 +367,20 @@ class ScalingModel(ForwardModel):
         # Convert H100-days to FLOPs if necessary (simplified approximation)
         c_flops = compute_budget
         if compute_budget.dimensionality == ureg.day.dimensionality:
-            # Convert GPU-days to FLOPs using H100 SXM reference
+            # Convert GPU-days to FLOPs using H100 SXM reference, derated by a
+            # sustained-MFU factor — clusters never run at datasheet peak.
             # Source: NVIDIA H100 datasheet (989 TFLOPs FP16 dense)
             c_flops = (compute_budget * (cal.REFERENCE_HARDWARE_TFLOPS * ureg.TFLOPs / ureg.second) * cal.REFERENCE_MFU_SUSTAINED).to(ureg.flop)
 
         if target_model_size:
+            # Pinned model size: spend the whole budget on tokens via C = 6PD,
+            # i.e. D = C / (6P). The result may be over- or under-trained
+            # relative to the Chinchilla-optimal D = 20P.
             p_opt = target_model_size.to(ureg.count).magnitude
             d_opt = (c_flops.magnitude / (Literature.Chinchilla.ComputeConstant * p_opt))
         else:
+            # Compute-optimal point: substituting D = 20P into C = 6PD gives
+            # C = 120 P^2, so P = sqrt(C / 120).
             p_opt = math.sqrt(c_flops.magnitude / (Literature.Chinchilla.ComputeConstant * Literature.Chinchilla.TokensPerParam))
             d_opt = Literature.Chinchilla.TokensPerParam * p_opt
 

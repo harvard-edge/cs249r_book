@@ -119,10 +119,14 @@ def _check_fmt_precision(val, precision, result):
     3. precision>=1: integer-like value displayed with spurious decimals
        (e.g. 512.0 → "512.0" instead of "512").
     """
+    # Non-numeric render (e.g. exotic format output) — nothing to check.
     numeric_result = _parse_formatted_number(result)
     if numeric_result is None:
         return
 
+    # Mode 1 — vanishing value: the rounded display is exactly zero while the
+    # input is not. This is the original MarkdownStr-era bug class (0.001
+    # rendered as "0"), and it fires at ANY precision.
     if numeric_result == 0.0 and abs(val) > 1e-12:
         raise ValueError(
             f"Formatting Precision Error: Value {val} was formatted as '{result}' "
@@ -131,6 +135,9 @@ def _check_fmt_precision(val, precision, result):
             f"non-zero value as zero."
         )
 
+    # Mode 2 — silent integer rounding: precision=0 on a genuinely fractional
+    # value (10.7 -> "11") corrupts arithmetic quoted in prose without any
+    # visible symptom. The 1e-9 tolerance forgives float noise on true ints.
     if precision == 0 and abs(val) > 1e-12:
         nearest_int = round(val)
         if abs(val - nearest_int) > 1e-9:
@@ -141,6 +148,9 @@ def _check_fmt_precision(val, precision, result):
                 f"fmt_int({val!r}) if integer display is intentional."
             )
 
+    # Mode 3 — the cosmetic inverse: an integer-like value dressed with dead
+    # decimals ("512.0"). Not a correctness bug, but a house-style defect the
+    # guard surfaces at the call site rather than in copyedit.
     if precision >= 1 and _is_integer_like(val) and _has_spurious_zero_decimals(result):
         raise ValueError(
             f"Formatting Precision Error: Value {val} is integer-like "
@@ -250,6 +260,10 @@ def _resolve_scaled_count_precision(val, precision):
         return precision
     if _is_integer_like(val):
         return 0
+    # Sub-unit mantissas arise when an explicit scale exceeds the value (e.g.
+    # 150M rendered at scale="B" → 0.15). Step precision up one decimal per
+    # decade below 1 so at least two significant digits survive — otherwise
+    # the precision guard would (correctly) reject the display as "0.0".
     abs_val = abs(val)
     if abs_val >= 1:
         return _resolve_display_precision(val, None)

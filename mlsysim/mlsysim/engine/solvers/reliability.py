@@ -99,7 +99,10 @@ class ReliabilityModel(ForwardModel):
             Average time to recover from a failure in seconds (default 300s).
             Includes checkpoint reload, process restart, and re-warmup.
         """
-        # Use compound node MTBF accounting for GPUs, NICs, and PSUs
+        # Series-system reliability: any single component failure stalls the
+        # whole synchronous job, so failure rates ADD — first across a node's
+        # GPUs/NICs/PSUs, then across all nodes. Fleet MTBF therefore shrinks
+        # roughly as 1/N with cluster size.
         node_mtbf = calc_mtbf_node(
             gpu_mtbf_h=Reliability.Gpu.mttf_hours, n_gpus=fleet.node.accelerators_per_node,
             nic_mtbf_h=Reliability.Nic.mttf_hours, n_nics=fleet.node.nics_per_node,

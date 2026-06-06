@@ -209,6 +209,9 @@ class NetworkRooflineModel(ForwardModel):
         is_network_bound = network_time > compute_time
         latency = max(compute_time.to("ms").magnitude, network_time.to("ms").magnitude) * ureg.ms
 
+        # MFU follows from the binding ceiling: useful FLOPs delivered per step
+        # over fleet peak. HFU adds the recompute/kernel work the hardware does
+        # beyond model FLOPs, via the calibrated HFU:MFU ratio.
         achieved_rate = (training_ops / latency.to("s")).to(total_flops.units)
         mfu = min((achieved_rate / total_flops).to_base_units().magnitude, 1.0)
         hfu = min(mfu * cal.HFU_MFU_RATIO, 1.0)
@@ -405,6 +408,8 @@ class SensitivitySolver(BaseSolver):
         t_mem = Engine.solve(model, hw_mem, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_capacity"] = (t_mem - t_base) / t_base if t_base > 0 else 0.0
 
+        # The binding constraint is the parameter whose upgrade moves latency
+        # most (abs() because improvements show up as negative sensitivities).
         binding = max(sensitivities, key=lambda k: abs(sensitivities[k]))
 
         return SensitivityResult(
