@@ -1,9 +1,14 @@
 # MLSysSim Data Model
 
-Six **zoos** (typed registries) plus support layers. Book LEGO cells and
+Eight **zoos** (typed registries) plus support layers. Book LEGO cells and
 tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
 `core/constants.py` is a retired compatibility re-export for units; physics
 constants live in `physics/constants.py`, and domain values live in registries.
+
+This document is the *registry-level* view. The *runtime* view — how workloads,
+hardware, infrastructure, and systems feed the solver layer — is the 5-layer
+model in [architecture.qmd](architecture.qmd): the zoos below are the registries
+that populate Layers A–D of that stack.
 
 ## Zoos
 

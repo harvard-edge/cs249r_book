@@ -46,14 +46,25 @@ The CLI uses semantic exit codes so scripts and CI pipelines can react programma
 |:-----|:--------|:--------|
 | `0` | Success | Analysis completed, all assertions passed |
 | `1` | Bad input | Unknown model name, malformed YAML, missing required flag |
-| `2` | Physics violation | OOM — model does not fit in memory at the given precision |
+| `2` | Physics violation | A hard `OOMError` raised during evaluation |
 | `3` | SLA violation | A `constraints.assert` check in the YAML failed |
 
 ```bash
-mlsysim eval Llama3_70B T4 --batch-size 1
-# Exit code 2: OOM — 140 GB model weights exceed 16 GB T4 memory
-echo $?  # → 2
+mlsysim eval NoSuchModel H100
+echo $?  # → 1 (unknown model name)
+
+mlsysim eval cluster.yaml   # with a constraints.assert block that fails
+echo $?  # → 3
 ```
+
+::: {.callout-note}
+## Feasibility failures exit 0
+A quick evaluation of an infeasible configuration (e.g. `mlsysim eval Llama3_70B T4`)
+renders the scorecard with `Feasibility [FAIL]` and exits `0` — the analysis itself
+succeeded. Exit code `2` is reserved for hard out-of-memory errors raised inside the
+engine. To gate CI on feasibility, use a YAML plan with a `constraints.assert` block
+(exit code `3` on violation) or parse the `-o json` output.
+:::
 
 ---
 
@@ -150,6 +161,7 @@ When `TARGET` is a YAML file, `eval` runs the full 3-lens scorecard (Feasibility
 
 ```yaml
 version: "1.0"
+name: "llama70b-cluster"
 workload:
   name: "Llama3_70B"
   batch_size: 4096
@@ -161,9 +173,15 @@ ops:
   duration_days: 14.0
 constraints:
   assert:
-    - metric: "performance.latency"
+    - metric: "performance.step_latency"
       max: 50.0
 ```
+
+Both `version` and `name` are required top-level fields. Assertion metrics are
+addressed as `<lens>.<metric>`; the available keys are `performance.step_latency`,
+`performance.comm_overhead`, `performance.fleet_throughput`, `performance.mfu`,
+`performance.node_mfu`, `performance.scaling_efficiency`, `macro.tco_usd`,
+`macro.carbon_footprint`, `macro.energy_cost`, and `macro.capex`.
 
 ---
 
@@ -215,10 +233,10 @@ mlsysim schema [OPTIONS]
 
 **Options:**
 
-| Flag | Description |
-|:-----|:-----------|
-| `--type` | Schema type: `hardware`, `workload`, or `plan` |
-| `-o, --output` | Accepted values: `text` or `json`; schema output is always JSON |
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `-t, --type` | Schema type: `hardware`, `workload`, or `plan` | `plan` |
+| `-o, --output` | Accepted values: `text` or `json`; schema output is always JSON | `text` |
 
 **Examples:**
 
@@ -311,9 +329,9 @@ Profile a workload against the Iron Law and report which wall binds.
 mlsysim audit [OPTIONS]
 ```
 
-| Flag | Description |
-|:-----|:-----------|
-| `--workload` | Workload name to audit |
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `-w, --workload` | Workload name to audit against (e.g. `Llama3_8B`, `ResNet50`) | `Llama3_8B` |
 
 ---
 
