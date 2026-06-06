@@ -4,7 +4,7 @@ Formatting + presentation helpers for Markdown/Quarto output.
 Keep science in mlsysim/physics/; keep display here.
 """
 
-from .core.constants import ureg
+from .core.units import ureg
 
 
 class MarkdownStr(str):

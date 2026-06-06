@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 from mlsysim.hardware import Hardware, HardwareNode
-from mlsysim.core.constants import Q_, ureg
+from mlsysim.core.units import Q_, ureg
 
 def test_hardware_registry():
     a100 = Hardware.Cloud.A100
@@ -39,7 +39,7 @@ def test_tpuv4_is_not_alias_to_tpuv5p():
 
 def test_nvlink_on_cloud_gpus():
     """NVLink bandwidth lives on HardwareNode, not loose constants."""
-    from mlsysim.core.constants import GB, second
+    from mlsysim.core.units import GB, second
 
     assert Hardware.Cloud.V100.nvlink.name == "NVLink 2.0"
     assert Hardware.Cloud.V100.nvlink.bandwidth.m_as(GB / second) == 300.0
@@ -50,7 +50,7 @@ def test_nvlink_on_cloud_gpus():
 
 def test_memory_tech_bandwidth_tiers():
     """Memory-interface bandwidth tiers live in Hardware.Tech.Memory."""
-    from mlsysim.core.constants import GB, second
+    from mlsysim.core.units import GB, second
 
     assert Hardware.Tech.Memory.DDR4_3200.bandwidth.m_as(GB / second) == pytest.approx(51.2)
     assert Hardware.Tech.Memory.HBM2.bandwidth.m_as(GB / second) == pytest.approx(900)

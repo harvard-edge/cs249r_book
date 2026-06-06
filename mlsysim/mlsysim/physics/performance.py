@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 from mlsysim.core._validation import validate_positive, validate_at_least, validate_range
 
 

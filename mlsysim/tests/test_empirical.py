@@ -9,7 +9,7 @@
 # omits framework overhead, kernel scheduling, and data pipeline effects.
 
 import pytest
-from mlsysim.core.constants import Q_, ureg
+from mlsysim.core.units import Q_, ureg
 from mlsysim.engine.empirical import EMPIRICAL_ANCHORS, anchor_by_id
 from mlsysim.engine.solvers import SingleNodeModel, DistributedModel, ServingModel
 from mlsysim.hardware.registry import Hardware

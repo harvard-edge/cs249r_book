@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Any, Optional
 from ..hardware.types import HardwareNode
 from ..infrastructure.types import Datacenter, GridProfile
-from ..core.constants import ureg
+from ..core.units import ureg
 from ..core.types import (
     Quantity,
     Metadata,
@@ -116,7 +116,7 @@ class NetworkFabric(BaseModel):
 
     @property
     def bandwidth_gbs(self) -> float:
-        from ..core.constants import ureg
+        from ..core.units import ureg
         from ..core.units import GB
         return float(self.bandwidth.to(GB / ureg.second).magnitude)
 

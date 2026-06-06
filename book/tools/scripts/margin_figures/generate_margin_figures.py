@@ -684,7 +684,7 @@ def ml_systems_edge_bandwidth_ladder(candidate=None):
 
 def training_activation_memory_ladder(candidate=None):
     from mlsysim import Hardware, Models
-    from mlsysim.core.constants import GB
+    from mlsysim.core.units import GB
     from mlsysim.physics import calc_activation_memory
 
     gpt2 = Models.Language.GPT2
@@ -1040,7 +1040,7 @@ def nn_computation_paradigm_ops_ladder(candidate=None):
 
 def nn_computation_training_energy_ladder(candidate=None):
     from mlsysim import Hardware, Infrastructure, Models
-    from mlsysim.core.constants import HOURS_PER_DAY, THOUSAND, watt
+    from mlsysim.core.units import HOURS_PER_DAY, THOUSAND, watt
 
     lenet_kwh = 3 * HOURS_PER_DAY * 0.75
     a100_kw = Hardware.Cloud.A100.tdp.m_as(watt) / THOUSAND
@@ -1067,7 +1067,7 @@ def nn_computation_activation_logic_ladder(candidate=None):
 
 def nn_computation_mnist_roofline(candidate=None):
     from mlsysim import Hardware
-    from mlsysim.core.constants import KB, THOUSAND, byte, flop
+    from mlsysim.core.units import KB, THOUSAND, byte, flop
 
     mnist_dims = [784, 128, 64, 10]
     batch_size = 32
@@ -1090,7 +1090,7 @@ def nn_computation_mnist_roofline(candidate=None):
 
 def frameworks_training_memory_ladder(candidate=None):
     from mlsysim import Models
-    from mlsysim.core.constants import BYTES_FP32, GB
+    from mlsysim.core.units import BYTES_FP32, GB
 
     infer_gb = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32).m_as(GB)
     training_mid_gb = 12.5
@@ -1155,7 +1155,7 @@ def data_selection_echo_threshold(candidate=None):
 
 def model_serving_model_load_slo(candidate=None):
     from mlsysim import Hardware
-    from mlsysim.core.constants import GB, ms, second
+    from mlsysim.core.units import GB, ms, second
 
     slo_ms = 50.0
     load_ms = (10.0 / Hardware.Cloud.A100.interconnect.bandwidth.m_as(GB / second) * second).m_as(ms)

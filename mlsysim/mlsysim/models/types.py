@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
-from ..core.constants import ureg, BYTES_FP16
+from ..core.units import ureg, BYTES_FP16
 from ..core.types import (
     Quantity,
     Metadata,
@@ -225,7 +225,7 @@ class TransformerWorkload(Workload):
         Returns:
             Quantity[byte]: Total training memory per GPU
         """
-        from ..core.constants import resolve_precision
+        from ..core.units import resolve_precision
         from ..physics import calc_activation_memory
         
         _, precision_bytes = resolve_precision(precision)

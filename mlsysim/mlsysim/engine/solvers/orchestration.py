@@ -51,7 +51,7 @@ from ...physics import (
     calc_failure_probability,
     calc_pipeline_bubble,
 )
-from ...core.constants import ureg, Q_, resolve_precision
+from ...core.units import ureg, Q_, resolve_precision
 from ...infrastructure.registry import Infrastructure
 from ...literature.registry import Literature
 from ...systems.reliability import Reliability

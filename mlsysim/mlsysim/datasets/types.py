@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 
-from ..core.constants import ureg
+from ..core.units import ureg
 from ..core.types import Metadata, Quantity, require_dimensionality, require_unit_family
 
 

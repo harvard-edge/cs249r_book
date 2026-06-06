@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import pint
 
-from mlsysim.core.constants import ureg, MB
+from mlsysim.core.units import ureg, MB
 from mlsysim.core._validation import validate_at_least
 
 from ._units import _ensure_unit

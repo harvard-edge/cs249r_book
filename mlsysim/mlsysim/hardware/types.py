@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict
-from ..core.constants import Q_, ureg
+from ..core.units import Q_, ureg
 from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 
 class ComputeCore(BaseModel):

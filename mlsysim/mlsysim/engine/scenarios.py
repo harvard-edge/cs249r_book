@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, Union
-from ..core.constants import Q_
+from ..core.units import Q_
 from ..core.types import Quantity
 from ..models.types import Workload
 from ..hardware.types import HardwareNode

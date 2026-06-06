@@ -45,11 +45,11 @@ APPENDIX_NAPKIN_OVERRIDES: dict[str, dict[str, str]] = {
         "current_source": "mlsysim",
     },
     "bytes_per_param": {
-        "target_source": "mlsysim.core.constants.BYTES_FP16 + TrainingMemoryModel optimizer bytes",
+        "target_source": "mlsysim.core.units.BYTES_FP16 + TrainingMemoryModel optimizer bytes",
         "current_source": "derived",
     },
     "hours_per_day": {
-        "target_source": "mlsysim.core.constants.HOURS_PER_DAY",
+        "target_source": "mlsysim.core.units.HOURS_PER_DAY",
         "current_source": "mlsysim",
     },
 }
@@ -100,9 +100,9 @@ def refresh_yaml(path: Path, mapping: dict[str, str]) -> bool:
                 if entry.get("should_change") is not False:
                     entry["should_change"] = False
                     changed = True
-            elif str(entry.get("target_source", "")).startswith("mlsysim.core.constants"):
+            elif str(entry.get("target_source", "")).startswith("mlsysim.core.units"):
                 # Generic constants.py pointer with no mapped symbol — clarify physics-only.
-                note = "mlsysim.core.constants (physics/units) or mlsysim.physics"
+                note = "mlsysim.core.units (physics/units) or mlsysim.physics"
                 if entry.get("target_source") != note:
                     entry["target_source"] = note
                     changed = True

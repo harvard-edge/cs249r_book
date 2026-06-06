@@ -3,7 +3,7 @@ from mlsysim.models.types import TransformerWorkload
 from mlsysim.hardware.registry import Hardware
 from mlsysim.systems.registry import Systems
 from mlsysim.engine.solvers import DistributedModel, ServingModel
-from mlsysim.core.constants import Q_
+from mlsysim.core.units import Q_
 
 # Cross-solver integration tests combining multiple features
 pytestmark = pytest.mark.integration
