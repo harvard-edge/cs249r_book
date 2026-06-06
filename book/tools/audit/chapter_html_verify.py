@@ -76,6 +76,7 @@ CHAPTERS: dict[str, list[str]] = {
         "backmatter/appendix_fleet",
         "backmatter/appendix_communication",
         "backmatter/appendix_reliability",
+        "backmatter/appendix_inference",
         "backmatter/appendix_c3",
         "backmatter/appendix_assumptions",
     ],
