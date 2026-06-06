@@ -129,7 +129,7 @@ class SystemEvaluator:
             ms, throughput in 1/s, TCO in USD, carbon in metric tons).
         """
         
-        from .solver import SingleNodeModel, DistributedModel, EconomicsModel
+        from .solvers import SingleNodeModel, DistributedModel, EconomicsModel
         from .pipeline import Pipeline
 
         # Compose the pipeline dynamically based on the inputs
@@ -183,6 +183,8 @@ class SystemEvaluator:
             )
         elif "DistributedModel" in results:
             dist_res = results["DistributedModel"]
+            # Fleet-level MFU compounds two losses: per-node software efficiency
+            # (node MFU) and the distributed tax (communication + bubbles).
             effective_mfu = dist_res.node_profile.mfu * dist_res.scaling_efficiency
             feasibility = EvaluationLevel(
                 level_name="Feasibility",
@@ -216,7 +218,7 @@ class SystemEvaluator:
                 summary=f"TCO: ${econ_res.tco_usd:,.0f}",
                 metrics={
                     "tco_usd": econ_res.tco_usd,
-                    "carbon_footprint": econ_res.carbon_footprint_kg / 1000.0,
+                    "carbon_footprint": econ_res.carbon_footprint_kg / 1000.0,  # kg -> metric tons
                     "energy_cost": econ_res.opex_energy_usd,
                     "capex": econ_res.capex_usd
                 }

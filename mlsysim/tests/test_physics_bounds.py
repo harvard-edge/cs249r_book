@@ -9,7 +9,7 @@ This prevents contributors from accidentally adding a chip with
 """
 import pytest
 from mlsysim.hardware.registry import Hardware
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 
 def get_all_hardware():
     """Extracts all instantiated HardwareNode objects from the registry."""

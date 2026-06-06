@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from mlsysim.core.constants import ureg, Q_
+from mlsysim.core.units import ureg, Q_
 from mlsysim.core._validation import validate_positive, validate_at_least
 
 from ._units import _ensure_unit

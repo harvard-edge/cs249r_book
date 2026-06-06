@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 from mlsysim import Models, Hardware
-from mlsysim.core.constants import *
+from mlsysim.core.units import *
 from mlsysim.physics import calc_activation_memory, model_memory
 from mlsysim.fmt import fmt
 

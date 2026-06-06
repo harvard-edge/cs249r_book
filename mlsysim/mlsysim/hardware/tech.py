@@ -19,7 +19,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..core.constants import ureg
+from ..core.units import ureg
 from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 from ..core.registry import Registry
 from ..core.loader import load_collection

@@ -6,7 +6,7 @@ It shows how faster GPUs can actually result in lower utilization if the
 storage bandwidth cannot keep up with the compute demand.
 """
 import mlsysim
-from mlsysim.core.constants import Q_
+from mlsysim.core.units import Q_
 
 def main():
     print("Evaluating ResNet-50 Training Data Pipeline...\n")

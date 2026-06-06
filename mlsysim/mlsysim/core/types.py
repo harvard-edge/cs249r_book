@@ -1,6 +1,6 @@
 from typing import Any, Annotated, Optional
 from pydantic import AfterValidator, PlainSerializer, BaseModel, ConfigDict
-from .constants import Q_
+from .units import Q_
 from .provenance import Provenance
 
 def validate_quantity(v: Any) -> Q_:

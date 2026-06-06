@@ -60,7 +60,7 @@ def main() -> int:
     parser.add_argument(
         "--require-no-constants-import",
         action="store_true",
-        help="Fail if cells still import mlsysim.core.constants",
+        help="Fail if cells still import mlsysim.core.units",
     )
     args = parser.parse_args()
     path = args.qmd if args.qmd.is_absolute() else REPO_ROOT / args.qmd

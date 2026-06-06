@@ -8,16 +8,21 @@ from mlsysim.models.registry import Models
 
 def zoo_main(
     ctx: typer.Context,
-    category: str = typer.Argument(None, help="Category to explore: 'hardware' or 'models'"),
+    category: str = typer.Argument(
+        None, help="Category to explore: 'hardware' or 'models' (omit to list both)"
+    ),
     output: Optional[str] = typer.Option(None, "--output", "-o", help=OUTPUT_FORMAT_HELP),
 ):
     """Explore the built-in registries (The MLSys Zoo)."""
     output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown"})
 
     if not category:
-        with error_shield(output_format=output_format):
-            raise ValueError("Zoo category is required. Valid options are 'hardware' or 'models'.")
-    
+        # The argument is genuinely optional (2026-06-06 UX fix: it used to be
+        # marked optional in --help yet error out): no category renders both.
+        render_zoo_table("hardware", Hardware.list(sort_by="compute.peak_flops", reverse=True), output_format)
+        render_zoo_table("models", Models.list(sort_by="parameters", reverse=True), output_format)
+        exit_with_code(ExitCode.SUCCESS)
+
     if category.lower() == "hardware":
         items = Hardware.list(sort_by="compute.peak_flops", reverse=True)
         render_zoo_table("hardware", items, output_format)

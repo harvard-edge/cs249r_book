@@ -2,7 +2,7 @@
 
 import pytest
 
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 from mlsysim.core.units import GB, TB, USD, hour, kWh
 import math
 

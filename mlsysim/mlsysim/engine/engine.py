@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
-from ..core.constants import ureg, Q_, resolve_precision
+from ..core.units import ureg, Q_, resolve_precision
 from . import calibration as cal
 from ..physics import calc_bottleneck
 from ..core.exceptions import OOMError

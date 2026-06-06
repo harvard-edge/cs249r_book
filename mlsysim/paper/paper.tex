@@ -454,7 +454,7 @@ To maintain rigor despite analytical simplification, \mlsysim enforces a \textbf
 Dimensional consistency is a pervasive challenge in systems modeling. Mixing gigabits with gigabytes, or omitting the refractive index of fiber in latency calculations, are canonical failure modes that silently corrupt results. \mlsysim treats dimensional correctness not as a feature but as a \textbf{runtime invariant}, analogous to memory safety in Rust. The framework wraps every physical quantity using the \texttt{pint} unit library. If a user attempts to add a latency to a bandwidth, the framework raises a deterministic \texttt{DimensionalityError} before any computation proceeds, while count-like units (\texttt{flop}, \texttt{byte}, \texttt{param}) remain mutually convertible so that derived ratios such as arithmetic intensity compose naturally:
 
 \begin{lstlisting}[caption={\textbf{Dimensional Strictness.} Prevents silent unit errors at the API level.},label={lst:units}]
-from mlsysim.core.constants import Q_
+from mlsysim.core.units import Q_
 rate = Q_("989 TFLOPs/s")    # Compute throughput
 bw   = Q_("3.35 TB/s")       # Memory bandwidth
 lat  = Q_("5 us")            # Per-hop latency
@@ -462,7 +462,7 @@ lat  = Q_("5 us")            # Per-hop latency
 lat + bw  # -> raises DimensionalityError
 \end{lstlisting}
 
-This design eliminates the single most common class of bugs in back-of-the-envelope systems analysis, namely silent unit conversion errors.\footnote{The most infamous unit-conversion failure is the Mars Climate Orbiter, lost in 1999 because ground software produced thrust data in pound-force seconds while the spacecraft expected newton seconds~\citep{stephenson1999mco}.} Hardware and model specifications live in typed registries (e.g., \texttt{Hardware.Cloud.H100.memory.bandwidth = 3.35\,*\,TB/s}); the unit vocabulary lives in \texttt{core.units} (re-exported through \texttt{core.constants}), and physical constants and formulas live in \texttt{mlsysim.physics}, preventing unit mismatches at the API level. The physics formulas additionally validate the \emph{dimensionality} of their arguments, raising \texttt{DimensionalityError} when, for example, a byte count is passed where a bandwidth is expected.
+This design eliminates the single most common class of bugs in back-of-the-envelope systems analysis, namely silent unit conversion errors.\footnote{The most infamous unit-conversion failure is the Mars Climate Orbiter, lost in 1999 because ground software produced thrust data in pound-force seconds while the spacecraft expected newton seconds~\citep{stephenson1999mco}.} Hardware and model specifications live in typed registries (e.g., \texttt{Hardware.Cloud.H100.memory.bandwidth = 3.35\,*\,TB/s}); the unit vocabulary lives in \texttt{core.units}, and physical constants and formulas live in \texttt{mlsysim.physics}, preventing unit mismatches at the API level. The physics formulas additionally validate the \emph{dimensionality} of their arguments, raising \texttt{DimensionalityError} when, for example, a byte count is passed where a bandwidth is expected.
 
 \subsubsection{Taxonomic Completeness}
 \label{sec:taxonomic}
@@ -560,7 +560,7 @@ The \textbf{Hardware} registry holds 34 devices across five deployment tiers (Cl
 
 \begin{lstlisting}[caption={\textbf{Custom Hardware Node.} Composing a hardware specification with dimensional types.},label={lst:hwnode}]
 from mlsysim.hardware.types import *
-from mlsysim.core.constants import Q_
+from mlsysim.core.units import Q_
 node = HardwareNode(
     name="Custom Accelerator",
     release_year=2025,
@@ -1072,13 +1072,14 @@ Beyond numerical accuracy, dimensional strictness (\Cref{sec:dimensional}) provi
 \subsection{Design Invariant Enforcement}
 \label{sec:validation-ratchets}
 
-Dimensional strictness (\Cref{sec:dimensional}) catches unit errors at runtime. A complementary question is whether the framework's \emph{architectural} invariants hold as the codebase evolves: do all hardware specifications flow through typed registries? Does every formula carry \texttt{pint} units end-to-end? Can a contributor accidentally reintroduce a bare constant that bypasses the registry? \mlsysim answers these with four machine-checked structural invariants, enforced by a 751-test suite, each encoding a design decision that would otherwise erode through incremental changes:
+Dimensional strictness (\Cref{sec:dimensional}) catches unit errors at runtime. A complementary question is whether the framework's \emph{architectural} invariants hold as the codebase evolves: do all hardware specifications flow through typed registries? Does every formula carry \texttt{pint} units end-to-end? Can a contributor accidentally reintroduce a bare constant that bypasses the registry? \mlsysim answers these with five machine-checked structural invariants, enforced by a 749-test suite, each encoding a design decision that would otherwise erode through incremental changes:
 
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
-\item \textbf{Specification separation.} The legacy constants module (\texttt{core/constants.py}) is reduced to a units-only re-export surface, and an AST-based CI gate rejects \emph{any} module-level value defined there, alongside name-pattern checks for hardware, model, and network constants. Every domain figure must live in its category registry, not in a monolithic constants file.
+\item \textbf{Specification separation.} There is no constants module at all: the legacy \texttt{core/constants.py} was deleted outright once its last value migrated, and a CI gate now pins its \emph{absence} (any attempt to reintroduce the module, or a compatibility shim for it, fails), alongside name-pattern checks for hardware, model, and network constants. Every domain figure lives in its category registry; measurement units live in \texttt{core.units}.
 \item \textbf{Loader contract.} The YAML registry loader rejects duplicate keys outright and requires every \texttt{@tech:} and \texttt{@prov:} reference to resolve, so a typo in a data file fails at import rather than silently shadowing or orphaning a specification.
 \item \textbf{Provenance coverage.} A dedicated audit (\texttt{mlsysim.tools.audit\_provenance}, also run as a test) walks every registry leaf and fails on missing or weak provenance, enforcing the kind-specific evidence rules of \Cref{sec:speed} across all eight zoos.
 \item \textbf{Cross-registry consistency.} When the same physical quantity appears in multiple registries (e.g., NVLink bandwidth in both \textbf{Hardware} and \textbf{Systems} node definitions), a dedicated check verifies that the values agree. This prevents silent divergence between overlapping specification surfaces.
+\item \textbf{Registry immutability.} Every registry entry is a frozen \texttt{pydantic} model: attribute assignment raises at the call site. Entries are shared singletons read by every notebook cell in a rendering process, so without this guarantee a single stray write (\texttt{H100.tdp = ...}) would silently corrupt every downstream calculation; with it, the mistake fails loudly where it happens. Code that needs a perturbed variant builds an explicit copy (\texttt{model\_copy}).
 \end{enumerate}
 
 These checks are additive: each new registry entry or physics module automatically participates without manual test authoring. Empirical-anchor tests (\texttt{engine.empirical}) complete the picture by binding representative solver outputs to sourced benchmark envelopes, so a formula regression or a registry edit that moves a prediction outside its reviewed range fails CI. The effect is that the zoo architecture described in \Cref{sec:stack} is not merely documented but \emph{enforced} — a structural guarantee that the framework's design decisions survive community contributions and long-term evolution.
@@ -1295,7 +1296,7 @@ The MLSys Zoo comprises eight registries spanning the full systems stack (plus t
 
 \begin{lstlisting}[language=Python, caption={\textbf{Extending the Registry.} Defining a custom, speculative hardware entry. Because it uses the typed \texttt{HardwareNode} schema (\Cref{tab:type-schema}), it can immediately be evaluated by any Tier 1 or Tier 2 solver without risking unit mismatches.}, label={lst:speculative}, float=t]
 from mlsysim.hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
-from mlsysim.core.constants import TFLOPs, GB, TB, second, watt
+from mlsysim.core.units import TFLOPs, GB, TB, second, watt
 
 custom_accelerator = HardwareNode(
     name="Speculative GPU 2027",
@@ -1607,7 +1608,7 @@ print(f"Total Carbon: {sust.carbon_footprint_kg / 1000:.1f} tonnes CO2e")
 \begin{lstlisting}[language=Python, caption={\textbf{Data Pipeline Analysis (Tier 1).} Evaluating the ``Data Wall''. This example separates I/O bandwidth bottlenecks (storage to GPU) from CPU transformation bottlenecks (decoding and augmenting data), in the spirit of Case Study S2 but with an under-provisioned 16-worker pipeline.}, label={lst:appendix-data}, float=t]
 from mlsysim.solvers import DataModel, TransformationModel
 from mlsysim.hardware.registry import Hardware
-from mlsysim.core.constants import Q_
+from mlsysim.core.units import Q_
 
 # 1. Define the ingestion demand (e.g., training a vision model)
 # We need to feed 40,000 images per second to the GPU.
@@ -1640,7 +1641,7 @@ print(f"Accel. Utilization: "
 \begin{lstlisting}[language=Python, caption={\textbf{SLA-Driven Hardware Synthesis (Tier 2).} Instead of evaluating a known piece of hardware, the \texttt{SynthesisSolver} works backward. Given a strict latency SLA, it algebraically inverts the Roofline equations to output the minimum memory bandwidth and compute throughput required to purchase or provision.}, label={lst:appendix-synthesis}, float=t]
 from mlsysim.solvers import SynthesisSolver
 from mlsysim.models.registry import Models
-from mlsysim.core.constants import Q_
+from mlsysim.core.units import Q_
 
 # We want to serve Llama-3 8B. 
 # Our strict SLA dictates an inter-token latency of exactly 30 ms.

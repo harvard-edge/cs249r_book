@@ -109,8 +109,8 @@ def _exec_preamble() -> str:
     return textwrap.dedent(
         """
         from mlsysim import *
-        from mlsysim.core.constants import *
-        from mlsysim.core import constants
+        from mlsysim.core.units import *
+        from mlsysim.core import units
         from mlsysim.physics import SPEED_OF_LIGHT_FIBER_KM_S
         from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, check, sci_latex, fmt_math
         """
@@ -183,14 +183,14 @@ def _render_interconnect_cell() -> str:
         "```{python}\n"
         "#| echo: false\n"
         "from mlsysim import *\n"
-        "from mlsysim.core.constants import *\n"
+        "from mlsysim.core.units import *\n"
         "#| label: appendix-interconnectconstants\n"
         "# ┌── LEGO ───────────────────────────────────────────────\n"
         "# │ Context: ## Interconnect and Network Bandwidth {.unnumbered}\n"
         "# │ Goal: Formatted value/unit pairs for reference tables in this section\n"
         "# │ Exports: InterconnectConstants.*_val_str, InterconnectConstants.*_unit_str\n"
         "# │ Source:  book/tools/audit/generate_appendix_constants.py (--write interconnect)\n"
-        "from mlsysim.core import constants\n"
+        "from mlsysim.core import units\n"
         "from mlsysim.fmt import fmt, fmt_val, fmt_unit\n"
         "\n"
         f"{body}\n"
@@ -261,14 +261,14 @@ def refresh_yaml() -> int:
     return mod.main()
 
 def _check_ast_no_legacy_imports(cell: PythonCell) -> list[str]:
-    """Flag ``from mlsysim.core.constants import H100_*`` style imports in table cells."""
+    """Flag ``from mlsysim.core.units import H100_*`` style imports in table cells."""
     issues: list[str] = []
     try:
         tree = ast.parse(cell.body)
     except SyntaxError:
         return issues
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "mlsysim.core.constants":
+        if isinstance(node, ast.ImportFrom) and node.module == "mlsysim.core.units":
             for alias in node.names:
                 if alias.name not in ("Q_", "*") and alias.name.isupper():
                     issues.append(f"legacy import: {alias.name}")

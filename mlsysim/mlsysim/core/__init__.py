@@ -9,5 +9,5 @@
 # imports on Python <3.12. Access via mlsysim.Hardware etc. (from __init__.py)
 # or import directly: from mlsysim.hardware.registry import Hardware.
 
-from . import constants
-from .constants import ureg, Q_
+from . import units
+from .units import ureg, Q_

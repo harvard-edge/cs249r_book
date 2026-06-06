@@ -7,7 +7,7 @@ Tests construction, validation, explain(), run(), and repr.
 import pytest
 
 from mlsysim.engine.pipeline import Pipeline, CompositionError
-from mlsysim.engine.solver import SingleNodeModel
+from mlsysim.engine.solvers import SingleNodeModel
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 
 from ._units import _ensure_unit
 

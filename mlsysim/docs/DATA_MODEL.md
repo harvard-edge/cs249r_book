@@ -2,8 +2,9 @@
 
 Eight **zoos** (typed registries) plus support layers. Book LEGO cells and
 tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
-`core/constants.py` is a retired compatibility re-export for units; physics
-constants live in `physics/constants.py`, and domain values live in registries.
+Measurement units live in `core/units.py`, physical constants in
+`physics/constants.py`, and domain values in registries; the former
+`core/constants.py` shim is deleted (no-backward-compat policy).
 
 This document is the *registry-level* view. The *runtime* view — how workloads,
 hardware, infrastructure, and systems feed the solver layer — is the 5-layer

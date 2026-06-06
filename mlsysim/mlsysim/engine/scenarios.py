@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, Union
-from ..core.constants import Q_
+from ..core.units import Q_
 from ..core.types import Quantity
 from ..models.types import Workload
 from ..hardware.types import HardwareNode
@@ -41,13 +41,13 @@ class Scenario(BaseModel):
         """
         Runs a full multi-level evaluation of the scenario.
         """
-        from .solver import DistributedModel, EconomicsModel
+        from .solvers import DistributedModel, EconomicsModel
         
         # 1. Resolve Hardware
         hardware = self.system.node.accelerator if self.is_distributed else self.system
         
         # --- LEVEL 1: FEASIBILITY ---
-        from .solver import DataModel
+        from .solvers import DataModel
         weights = self.workload.size_in_bytes()
         mem_feasible = weights <= hardware.memory.capacity
         
@@ -91,7 +91,7 @@ class Scenario(BaseModel):
                 "sla_latency": self.sla_latency
             }
         else:
-            from .solver import SingleNodeModel
+            from .solvers import SingleNodeModel
             perf = SingleNodeModel().solve(self.workload, self.system, batch_size=batch_size, precision=precision)
             actual_latency = perf.latency
             throughput = perf.throughput
