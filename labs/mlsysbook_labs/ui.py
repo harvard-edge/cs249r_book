@@ -449,7 +449,7 @@ ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
 .output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) li {
   max-width: min(var(--mlsysbook-readable-width), 100%) !important;
 }
-.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly)) {
+.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly, .mlsysbook-panel, .mlsysbook-lab-header, .mlsysbook-action-box)) {
   width: min(var(--mlsysbook-panel-width), 100%) !important;
   max-width: min(var(--mlsysbook-panel-width), 100%) !important;
   margin-left: auto !important;
@@ -461,7 +461,7 @@ ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
   box-shadow: 0 4px 12px rgba(31, 64, 122, 0.06) !important;
   padding: 14px 18px !important;
 }
-.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly)) > div {
+.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly, .mlsysbook-panel, .mlsysbook-lab-header, .mlsysbook-action-box)) > div {
   max-width: min(var(--mlsysbook-readable-width), 100%) !important;
 }
 marimo-tabs,
