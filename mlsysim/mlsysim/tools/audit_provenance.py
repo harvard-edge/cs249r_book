@@ -40,7 +40,7 @@ from mlsysim.ops.monitoring import Monitoring
 from mlsysim.ops.runtime import MemoryProtection, RuntimeOverheads
 from mlsysim.ops.training import TrainingRunOverheads
 from mlsysim.platforms.registry import Platforms
-from mlsysim.scenarios.registry import ReferenceStats
+from mlsysim.reference_stats.registry import ReferenceStats
 from mlsysim.systems.registry import (
     Clusters,
     Fabrics,
