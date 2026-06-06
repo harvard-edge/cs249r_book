@@ -48,6 +48,12 @@ Selecting a neural network architecture is not a modeling decision but a *contra
 
 :::
 
+::: {.column-margin}
+![](images/svg/nn_architectures_inductive_bias.svg){width="100%" fig-alt="Vertical list of three architectures with a dark-to-light dot ramp: CNN (darkest, strong spatial prior), Transformer (mid), MLP (lightest, no structural prior), ordered by inductive-bias strength."}
+
+*Inductive bias from strong (CNN) to weak (MLP): stronger prior, less data needed.*
+:::
+
 ## Architectural Principles {#sec-network-architectures-architectural-principles-engineering-tradeoffs-362e}
 
 \index{Architecture!computational graph}
@@ -55,12 +61,6 @@ Selecting a neural network architecture is not a modeling decision but a *contra
 The mathematical operators established in @sec-neural-computation (matrix multiplication, activation functions, and gradient computation) form the "verbs" of neural networks. Those operators are the atoms; this chapter examines how they assemble into architectures: specialized structures optimized for specific data types and computational constraints. As defined in the silicon contract (Principle \ref{pri-silicon-contract}) (@sec-introduction-iron-law-ml-systems-c32a), every architecture makes an implicit agreement with hardware, trading computational patterns for efficiency on particular problem classes.
 
 Every neural network architecture answers one central question: *how should we structure computation to match the structure in our data?* Images have spatial locality, language has sequential dependencies, and tabular records have no inherent structure at all. The architecture encodes assumptions about these patterns directly into the computational graph, and those assumptions determine everything from parameter count to hardware utilization to deployment feasibility. Architecture selection is therefore a systems engineering problem that directly determines the iron law terms: the number of operations $O$ and the volume of data movement $D_{\text{vol}}$.
-
-::: {.column-margin}
-![](images/svg/nn_architectures_inductive_bias.svg){width="100%" fig-alt="Vertical list of three architectures with a dark-to-light dot ramp: CNN (darkest, strong spatial prior), Transformer (mid), MLP (lightest, no structural prior), ordered by inductive-bias strength."}
-
-*Inductive bias from strong (CNN) to weak (MLP): stronger prior, less data needed.*
-:::
 
 The structural assumptions that each architecture encodes are known as inductive biases[^fn-inductive-bias], and they serve as the unifying concept for this entire chapter.
 
@@ -136,7 +136,11 @@ Machine learning systems face a core engineering trade-off: **representational p
 **Systems lesson**: Architecture choice must be judged against the cost of running the model, not only the accuracy it achieves on a static benchmark. A network with more parameters and more layers can lose to a simpler one whose compute and memory budgets fit the system that has to keep it running.
 :::
 
-Five architectural families define modern neural computation, each optimized for different data characteristics. @Tbl-architecture-families maps each family to its data domain, core innovation, and dominant system bottleneck:
+Five architectural families define modern neural computation, each optimized for different data characteristics. @Tbl-architecture-families maps each family to its data domain, core innovation, and dominant system bottleneck.
+
+Each architectural choice creates distinct computational signatures that propagate through every level of the implementation stack.
+
+Throughout this book, we use five specific model architectures as recurring Lighthouse Models. These serve as consistent reference points to ground abstract concepts in concrete systems reality. Their system-level characteristics appear here, covering both qualitative roles and quantitative profiles, before each architecture receives detailed examination in its respective section. These examples are concrete implementations of the Workload Archetypes (Compute Beast, Bandwidth Hog, etc.) introduced in @sec-ml-systems-workload-archetypes-fd10.
 
 | **Architecture** | **Data Type**                 | **Core Innovation**            | **System Bottleneck**   |
 |:-----------------|:------------------------------|:-------------------------------|:------------------------|
@@ -147,10 +151,6 @@ Five architectural families define modern neural computation, each optimized for
 | **DLRM**         | Categorical (recommendations) | Embedding tables               | Memory capacity (TB+)   |
 
 : **Neural Architecture Families**: Each family targets a distinct data structure and exposes a distinct system bottleneck. The bottleneck column reads directly from the iron law: MLPs stress memory bandwidth through dense activations, CNNs stress compute throughput through high arithmetic intensity, RNNs stress sequential dependencies that prevent parallelism, transformers stress memory capacity through quadratic attention, and DLRM stresses memory capacity at terabyte scale through embedding tables. {#tbl-architecture-families}
-
-Each architectural choice creates distinct computational signatures that propagate through every level of the implementation stack.
-
-Throughout this book, we use five specific model architectures as recurring Lighthouse Models. These serve as consistent reference points to ground abstract concepts in concrete systems reality. Their system-level characteristics appear here, covering both qualitative roles and quantitative profiles, before each architecture receives detailed examination in its respective section. These examples are concrete implementations of the Workload Archetypes (Compute Beast, Bandwidth Hog, etc.) introduced in @sec-ml-systems-workload-archetypes-fd10.
 
 \index{Pareto Frontier}
 To understand *why* these specific models were chosen, consider the history of model evolution through the lens of the efficiency frontier (@fig-efficiency-frontier).
@@ -1059,7 +1059,10 @@ Consider a simplified 4-pixel image processed by a 3-neuron hidden layer:
 
 **Input**: $\mathbf{h}^{(0)} = [0.8, 0.2, 0.9, 0.1]$ (4 pixel intensities)
 
-**Weight matrix**: $\mathbf{W}^{(1)} = \begin{bmatrix} 0.5 & 0.1 & -0.2 \\ -0.3 & 0.8 & 0.4 \\ 0.2 & -0.4 & 0.6 \\ 0.7 & 0.3 & -0.1 \end{bmatrix}$ ($4{\times}3$ matrix)
+**Weight matrix**: 
+$$
+\mathbf{W}^{(1)} = \begin{bmatrix} 0.5 & 0.1 & -0.2 \\ -0.3 & 0.8 & 0.4 \\ 0.2 & -0.4 & 0.6 \\ 0.7 & 0.3 & -0.1 \end{bmatrix}\quad (4{\times}3 \text{ matrix})
+$$
 
 **Computation**:
 \begin{gather*}
@@ -1305,6 +1308,15 @@ $$ {#eq-dense-intensity}
 
 Since modern accelerators (like the A100) require intensities around `{python} A100Specs.a100_ridge_fp16_str` FLOP/byte to saturate FP16 Tensor Cores, dense layers are almost always memory-bandwidth-bound unless batch sizes exceed several hundred. This explains why "fully connected" layers are often the performance bottleneck in inference workloads, despite performing fewer total FLOPs than convolutional layers.
 
+::: {.column-margin}
+```{=latex}
+\vspace*{-30mm}
+```
+![](images/svg/vol1_nn_architectures_margin_001.svg){width="100%" fig-alt="Fully connected parameter count versus shared convolution parameters."}
+
+*Weight sharing spares convolution the fully-connected parameter explosion.*
+:::
+
 *Dense connectivity thus moves maximum data for minimum compute.* For data with inherent structure, spatial locality in images or temporal order in sequences, specialized architectures can exploit that structure for both better accuracy and better efficiency. The most established such architecture is the convolutional neural network.
 
 ## CNNs: Spatial Pattern Processing {#sec-network-architectures-cnns-spatial-pattern-processing-5b8d}
@@ -1327,11 +1339,6 @@ Spatial locality produces two key innovations that enhance efficiency for spatia
 2.  **Distinction (durable)**: Unlike MLPs, which connect every input element to every output element (global connectivity), CNNs restrict each output to a local spatial neighborhood, encoding the assumption that nearby pixels are more relevant than distant ones. This restriction eliminates entire hypothesis classes at architecture design time rather than penalizing them during training.
 3.  **Common pitfall**: A frequent misconception is that CNNs are vision-only models. The convolution operation applies to any data with a grid-like topology\index{Symmetry-Aware Architecture}: 1D convolutions process audio waveforms and time series, 2D convolutions process images and spectrograms, and 3D convolutions process video and volumetric data.
 
-::: {.column-margin}
-![](images/svg/vol1_nn_architectures_margin_001.svg){width="100%" fig-alt="Fully connected parameter count versus shared convolution parameters."}
-
-*Weight sharing spares convolution the fully-connected parameter explosion.*
-:::
 
 :::
 
@@ -1340,14 +1347,6 @@ The trade-off is explicit: CNNs sacrifice the theoretical generality of MLPs for
 ### Pattern processing needs {#sec-network-architectures-pattern-processing-needs-30b4}
 
 Spatial pattern processing addresses scenarios where the relationship between data points depends on their relative positions or proximity. Consider processing a natural image: a pixel's relationship with its neighbors is important for detecting edges, textures, and shapes. These local patterns then combine hierarchically to form more complex features: edges form shapes, shapes form objects, and objects form scenes.
-
-This hierarchical processing appears across many domains: local pixel patterns forming edges that combine into objects (computer vision), nearby time-segment correlations identifying phonemes (speech), proximate sensor correlations (sensor networks), and tissue pattern recognition (medical imaging). The approach succeeds not because it mimics the brain, but because it mirrors the compositional structure of the data itself.
-
-Focusing on image processing to illustrate these principles, if we want to detect a cat in an image, certain spatial patterns must be recognized: the triangular shape of ears, the round contours of the face, the texture of fur. These patterns maintain their meaning regardless of where they appear in the image. A cat is still a cat whether it appears in the top-left or bottom-right corner. This indicates two key requirements for spatial pattern processing: the ability to detect local patterns and the ability to recognize these patterns regardless of their position[^fn-imagenet-scale-nn]. As @fig-cnn-spatial-processing illustrates, convolutional neural networks meet both requirements through hierarchical feature extraction, where simple patterns compose into increasingly complex representations at successive layers.
-
-\index{AlexNet!ImageNet revolution}
-
-[^fn-imagenet-scale-nn]: **ImageNet**\index{ImageNet!scale}: The dataset that validated these two spatial processing requirements at scale. AlexNet's 2012 victory in the ImageNet Large Scale Visual Recognition Challenge (ILSVRC) reduced top-5 error from 26.2 percent to 15.3 percent on the 1000-class ImageNet challenge with roughly 1.2 million training images; the broader ImageNet database contained more than 14 million images across over 20,000 synsets. The enduring systems lesson: every subsequent accuracy gain (VGG, ResNet, vision transformer (ViT)) required proportionally larger datasets and compute budgets, establishing the scaling relationship between architectural inductive bias and infrastructure cost. \index{ImageNet!systems consequence}
 
 ::: {#fig-cnn-spatial-processing fig-env="figure" fig-pos="htb" fig-cap="**Spatial Feature Extraction**: Convolutional neural networks identify patterns independent of their location in an image by applying learnable filters across the input, enabling robust object recognition. These filters detect local features, and their repeated application across the image creates translation equivariance, preserving spatial relationships between detected patterns regardless of position." fig-alt="Hierarchical CNN feature extraction pipeline. Left: zebra image with a red kernel box highlighting a local receptive field. Center: stacked feature-map channels growing in depth from three to eleven across successive convolutional stages. Right: three columns of violet circles representing fully-connected layers. Illustrates compositional pattern detection from local features to global object recognition."}
 
@@ -1565,6 +1564,14 @@ at($(8-CH3.70)!0.3!(8-CH3.290)$){};
 
 :::
 
+This hierarchical processing appears across many domains: local pixel patterns forming edges that combine into objects (computer vision), nearby time-segment correlations identifying phonemes (speech), proximate sensor correlations (sensor networks), and tissue pattern recognition (medical imaging). The approach succeeds not because it mimics the brain, but because it mirrors the compositional structure of the data itself.
+
+Focusing on image processing to illustrate these principles, if we want to detect a cat in an image, certain spatial patterns must be recognized: the triangular shape of ears, the round contours of the face, the texture of fur. These patterns maintain their meaning regardless of where they appear in the image. A cat is still a cat whether it appears in the top-left or bottom-right corner. This indicates two key requirements for spatial pattern processing: the ability to detect local patterns and the ability to recognize these patterns regardless of their position[^fn-imagenet-scale-nn]. As @fig-cnn-spatial-processing illustrates, convolutional neural networks meet both requirements through hierarchical feature extraction, where simple patterns compose into increasingly complex representations at successive layers.
+
+\index{AlexNet!ImageNet revolution}
+
+[^fn-imagenet-scale-nn]: **ImageNet**\index{ImageNet!scale}: The dataset that validated these two spatial processing requirements at scale. AlexNet's 2012 victory in the ImageNet Large Scale Visual Recognition Challenge (ILSVRC) reduced top-5 error from 26.2 percent to 15.3 percent on the 1000-class ImageNet challenge with roughly 1.2 million training images; the broader ImageNet database contained more than 14 million images across over 20,000 synsets. The enduring systems lesson: every subsequent accuracy gain (VGG, ResNet, vision transformer (ViT)) required proportionally larger datasets and compute budgets, establishing the scaling relationship between architectural inductive bias and infrastructure cost. \index{ImageNet!systems consequence}
+
 \index{LeCun, Yann}
 
 CNNs put these spatial processing principles into practice through parameter sharing, local connectivity, and translation equivariance[^fn-translation-invariance], the key innovations pioneered by Yann LeCun[^fn-lecun-cnn] and @lecun1989.
@@ -1772,10 +1779,6 @@ Standard CNNs are translation-equivariant, while rotation-equivariant networks e
 
 In practice, perfect equivariance is often sacrificed for computational efficiency or training stability. Asymmetric padding\index{Convolution!padding} at image boundaries breaks perfect translation equivariance, as does strided downsampling\index{Convolution!stride}, which introduces quantization where a one-pixel shift in input produces a noninteger shift in output. Batch normalization, when computing statistics per position in some implementations, also breaks equivariance. Modern networks accept these deviations as necessary trade-offs, and the slight loss of theoretical purity rarely impacts practical performance.
 
-Different tasks impose different requirements on where equivariance should be maintained vs. where invariance should be introduced. Image classification needs only the final class label to be invariant; intermediate layers benefit from staying equivariant to preserve spatial information for hierarchical feature learning. Object detection requires equivariance throughout the network because bounding box coordinates must track object positions. Semantic segmentation demands full equivariance to the output layer since per-pixel labels must align with input positions. Image generation similarly requires equivariance to maintain spatial structure in the output. The architectural decision of where to introduce invariance through pooling or global averaging vs. maintaining equivariance reflects these task requirements and directly shapes network design.
-
-The preceding task-specific requirements illustrate the inductive bias principle defined in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e: by restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data—that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
-
 ::: {#chk-nn-architectures-spatial-inductive-bias .callout-checkpoint title="Spatial inductive bias"}
 
 CNNs succeed because they match the structure of image data. Verify you understand how:
@@ -1785,6 +1788,10 @@ CNNs succeed because they match the structure of image data. Verify you understa
 - [ ] Can you calculate why a conv layer is typically **Compute-Bound** (high arithmetic intensity) compared to other layers?
 
 :::
+
+Different tasks impose different requirements on where equivariance should be maintained vs. where invariance should be introduced. Image classification needs only the final class label to be invariant; intermediate layers benefit from staying equivariant to preserve spatial information for hierarchical feature learning. Object detection requires equivariance throughout the network because bounding box coordinates must track object positions. Semantic segmentation demands full equivariance to the output layer since per-pixel labels must align with input positions. Image generation similarly requires equivariance to maintain spatial structure in the output. The architectural decision of where to introduce invariance through pooling or global averaging vs. maintaining equivariance reflects these task requirements and directly shapes network design.
+
+The preceding task-specific requirements illustrate the inductive bias principle defined in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e: by restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data—that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
 
 CNNs naturally implement hierarchical representation learning [@bengio2013] through their layered structure. Early layers detect low-level features\index{Feature Extraction!hierarchical} like edges and textures with small receptive fields, while deeper layers combine these into increasingly complex patterns with larger receptive fields. This hierarchical organization enables CNNs to build compositional representations\index{Compositional Representation}: complex objects are represented as compositions of simpler parts. The mathematical foundation for this emerges from stacking convolutional layers, which creates a tree-like dependency structure where each deeper neuron depends on a progressively larger input region; with fixed small kernels, receptive-field side length grows roughly linearly with depth and receptive-field area grows roughly quadratically until it covers the image.
 
@@ -2163,6 +2170,10 @@ The assumption of sequential dependence guides the introduction of memory as a c
 3.  **Common pitfall**: A frequent misconception is that RNNs are obsolete. For streaming inference on resource-constrained hardware where $\mathcal{O}(S^2)$ attention memory is prohibitive, such as keyword spotting on a microcontroller, an RNN's $\mathcal{O}(1)$ state size remains the systems-justified choice.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-30mm}
+```
+
 ![](images/svg/vol1_nn_architectures_margin_002.svg){width="100%" fig-alt="Flat state memory versus rising serial latency as sequence length grows."}
 
 *RNNs hold state memory fixed, but latency grows with sequence length.*
@@ -2471,12 +2482,6 @@ While attention mechanisms were initially used as components within recurrent ar
 
 Dynamic pattern processing addresses scenarios where relationships between elements are not fixed by architecture but instead emerge from content. Language translation exemplifies this challenge: when translating "the bank by the river," understanding "bank" requires attending to "river," but in "the bank approved the loan," the important relationship is with "approved" and "loan." Unlike RNNs that process information sequentially or CNNs that use fixed spatial patterns, an architecture is required that can dynamically determine which relationships matter.
 
-This requirement for dynamic processing extends well beyond language. In protein structure prediction, interactions between amino acids depend on their chemical properties and spatial arrangements rather than linear position in the chain. In graph analysis, node relationships vary based on graph structure and node features, typically modeled by Graph Convolutional Networks (GCNs) [@kipf2016semi]. In document analysis, connections between sections depend on semantic content rather than proximity.
-
-What unifies these domains is that the system must compute relationships between all pairs of elements, weigh those relationships based on content, and use the resulting weights to selectively combine information. Unlike architectures with fixed connectivity patterns, dynamic processing requires the flexibility to modify its computation graph based on the input itself. This capability defines the attention mechanism, the foundation of the transformer architecture.
-
-To see attention in action, consider @fig-transformer-attention-visualized. When processing the pronoun "they" in the sentence, the attention mechanism must determine what "they" refers to. The attention weights (indicated by line thickness) emphasize "student" and "finish": the model has learned to link pronouns with their referents and predicates across arbitrary distances, selectively weighting the most informative tokens in the sequence. This is precisely the kind of long-range dependency that RNNs struggle to capture.
-
 ::: {#fig-transformer-attention-visualized fig-env="figure" fig-pos="htb" fig-cap="**Attention Weights Visualization**: An attention head from a transformer (layer 4, head 2) resolving the pronoun \"they.\" Line thickness indicates attention weight magnitude: the model attends most strongly to \"student\" and \"finish,\" with weaker contextual links to nearby function words. This dynamic routing replaces RNN sequential processing with $\mathcal{O}(1)$ information flow depth, enabling parallel computation across all positions simultaneously." fig-alt="Self-attention visualization labeled Layer 4 Head 2 for the sentence 'The student did not finish the homework because they were tired.' Tokens are listed vertically in two columns. Cyan attention lines connect the highlighted pronoun they on the right to all tokens on the left; thicker lines to student and finish indicate high attention weights, demonstrating pronoun-referent linking across arbitrary distances."}
 
 ```{.tikz}
@@ -2522,6 +2527,12 @@ To see attention in action, consider @fig-transformer-attention-visualized. When
 ```
 
 :::
+
+This requirement for dynamic processing extends well beyond language. In protein structure prediction, interactions between amino acids depend on their chemical properties and spatial arrangements rather than linear position in the chain. In graph analysis, node relationships vary based on graph structure and node features, typically modeled by Graph Convolutional Networks (GCNs) [@kipf2016semi]. In document analysis, connections between sections depend on semantic content rather than proximity.
+
+What unifies these domains is that the system must compute relationships between all pairs of elements, weigh those relationships based on content, and use the resulting weights to selectively combine information. Unlike architectures with fixed connectivity patterns, dynamic processing requires the flexibility to modify its computation graph based on the input itself. This capability defines the attention mechanism, the foundation of the transformer architecture.
+
+To see attention in action, consider @fig-transformer-attention-visualized. When processing the pronoun "they" in the sentence, the attention mechanism must determine what "they" refers to. The attention weights (indicated by line thickness) emphasize "student" and "finish": the model has learned to link pronouns with their referents and predicates across arbitrary distances, selectively weighting the most informative tokens in the sequence. This is precisely the kind of long-range dependency that RNNs struggle to capture.
 
 ### Algorithmic structure {#sec-network-architectures-algorithmic-structure-8468}
 
@@ -2706,8 +2717,7 @@ class QKVProjectionCosts:
 ::: {#fig-attention-weightcalc fig-env="figure" fig-pos="htb" fig-cap="**QKV Projection Computation**: The embedding matrix ($6{\times}768$) multiplies with QKV weight matrices ($768{\times}2304$) plus bias to produce combined projections ($6{\times}2304$). The 2304 output dimension contains concatenated query, key, and value projections (each 768-dimensional). This single batched matrix multiplication, requiring $6{\times}768{\times}2304$ = `{python} QKVProjectionCosts.qkv_macs_str`, replaces 3 separate projection operations for efficiency. Source: Transformer Explainer [@cho2025]." fig-alt="Matrix multiplication: 6×768 embedding times 768×2304 QKV weights plus 2304 bias equals 6×2304 output. Blue and red regions show concatenated query, key, value projections. Token labels data, visualization, em, powers, users, to."}
 
 ```{.tikz}
- \begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
-
+\begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{
   pics/key/.style = {
     code = {
@@ -2845,9 +2855,9 @@ class QKVProjectionCosts:
 \node[right= 20pt of PLUS](JED){\LARGE=};
 %%
 \scoped[on background layer]
-\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=27,yshift=-8mm,
+\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=23,yshift=-7mm,
            fill=BackColor!20,fit=(0VI)(2BI)(Q2),line width=1pt](BB1){};
-\node[above=7pt of  BB1.south,anchor=south]{$\displaystyle\sum\limits_{d=1}^{768}E_{id}\cdot W_{dj}+b_j=QKV_{ij}$};
+\node[above=5pt of  BB1.south,anchor=south]{$\displaystyle\sum\limits_{d=1}^{768}E_{id}\cdot W_{dj}+b_j=QKV_{ij}$};
 %
 \draw[outer sep=0pt,line width=1pt,draw=BackLine,fill=BackColor!45](BB1.north west)rectangle($(BB1.north east)+(0,1)$);
 \coordinate (B) at ($(BB1.north west)+(0,1)$);
@@ -3530,7 +3540,7 @@ Despite these computational costs, the effectiveness of attention has driven sus
 # │ Plot context window growth from BERT (512) to Gemini 1.5 (1M+);
 import numpy as np
 from book.tools.figures import style as book_style
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5.2))
 
 # =============================================================================
 # DATA
@@ -3847,10 +3857,6 @@ class CapacityWall:
 # Note: Use CapacityWall.cw_num_items_str directly.
 ```
 
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
-
 A quick calculation shows how fast embedding tables exceed single-GPU memory.
 
 ::: {.column-margin}
@@ -3897,6 +3903,11 @@ The five architecture families differ in their data assumptions, but many of the
 
 Those portable building blocks were shaped by the hardware available at the time. LeNet-5\index{LeNet-5} [@lecun1998] trained on CPUs with networks small enough to fit in megabytes of memory. AlexNet\index{AlexNet} [@krizhevsky2012imagenet] required GPU parallelism: its 60 million parameters and billions of floating-point operations per image were infeasible on CPUs of that era, but mapped naturally to GPU architectures designed for graphics workloads with similar parallel structure. ResNet-152 [@he2016] became trainable because residual connections and batch normalization improved optimization at depth, using available GPU training infrastructure rather than a specific memory-capacity threshold. Transformers [@vaswani2017] became practical on contemporary GPUs and later scaled dramatically as GPU/TPU memory bandwidth and distributed training infrastructure improved. This pattern continues: each building block exploits newly available computational resources while pushing against the limits of existing systems.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
+
 | **Building Block**          | **Born In**      | **Problem Solved**               | **Now Used In**                                                    |
 |:----------------------------|:-----------------|:---------------------------------|:-------------------------------------------------------------------|
 | **Dense Matrix Ops (GEMM)** | MLPs             | Universal function approximation | All architectures (feedforward layers)                             |
@@ -3905,7 +3916,11 @@ Those portable building blocks were shaped by the hardware available at the time
 | **Normalization**           | CNNs (BatchNorm) | Activation stability             | LayerNorm (Transformers), RMSNorm (LLaMA), GroupNorm (vision)      |
 | **Gating**                  | LSTMs (RNNs)     | Selective signal routing         | Transformers (MoE routing), GRUs, highway networks                 |\index{Architecture!building blocks}
 
-: **Cross-Architecture Building Blocks**: Engineering primitives that originated in one architecture family and now recur across many modern designs. Each building block solves a recurring problem (gradient flow, activation stability, signal routing), though not every architecture uses every primitive. {#tbl-dl-evolution tbl-colwidths="[20,20,25,35]"}
+: **Cross-Architecture Building Blocks**: Engineering primitives that originated in one architecture family and now recur across many modern designs. Each building block solves a recurring problem (gradient flow, activation stability, signal routing), though not every architecture uses every primitive. {#tbl-dl-evolution tbl-colwidths="[18,18,29,35]"}
+
+```{=latex}
+\endgroup
+```
 
 ### Dense operations: The universal baseline {#sec-network-architectures-evolution-perceptron-multilayer-networks-d06e}
 
@@ -4452,6 +4467,8 @@ Where:
 
 The impact of these patterns becomes clear when we consider data reuse opportunities. In CNNs, each input pixel participates in multiple convolution windows (typically nine times for a $3{\times}3$ filter), making effective data reuse necessary for performance. Modern GPUs provide multi-level cache hierarchies (L1, L2, shared memory) to capture this reuse, while software techniques like loop tiling ensure data remains in cache once loaded.
 
+Working set size\index{Working Set Size}, the amount of data needed simultaneously for computation, varies dramatically across architectures. An MLP layer might need only a few hundred KB (weights plus activations), while a transformer processing long sequences can require several MB just for storing attention patterns. These differences directly influence hardware design choices, like the balance between compute units and on-chip memory, and software optimizations like activation checkpointing or attention approximation techniques.
+
 | **Architecture** | **Parameters**                                                                                                            | **Forward Pass**                                                                                          | **Memory**                                                                                                  | **Parallelization**                     | **Bottleneck**                                                         |
 |:-----------------|:--------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------|
 | **MLPs**         | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                                              | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                              | $\mathcal{O}(d_{\text{in}}d_{\text{out}})$ weights $\mathcal{O}(B d_{\text{out}})$ activations              | Excellent Matrix ops parallel           | Memory bandwidth                                                       |
@@ -4460,8 +4477,6 @@ The impact of these patterns becomes clear when we consider data reuse opportuni
 | **Transformers** | $\mathcal{O}(d_{\text{model}}^2)$ QKV/O projections plus $\mathcal{O}(d_{\text{model}}d_{\text{ff}})$ feed-forward layers | $\mathcal{O}(S^2 \times d_{\text{model}} + S \times d_{\text{model}}^2)$ per layer                        | $\mathcal{O}(S^2)$ attention $\mathcal{O}(S \times d_{\text{model}})$ sequences                             | Excellent (positions) Limited by memory | Memory $(S^2)$                                                         |
 
 : **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d_{\text{in}}$ = input dimension, $d_{\text{out}}$ = output dimension, $d_{\text{model}}$ = transformer model dimension, $d_{\text{hidden}}$ = RNN hidden-state dimension, $k$ = kernel size, $c$ = channels, $H_{\text{img}}, W_{\text{img}}$ = spatial dimensions, $S$ = sequence length (time steps), $B$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. {#tbl-computational-complexity tbl-colwidths="[12,18,16,20,18,16]"}
-
-Working set size\index{Working Set Size}, the amount of data needed simultaneously for computation, varies dramatically across architectures. An MLP layer might need only a few hundred KB (weights plus activations), while a transformer processing long sequences can require several MB just for storing attention patterns. These differences directly influence hardware design choices, like the balance between compute units and on-chip memory, and software optimizations like activation checkpointing or attention approximation techniques.
 
 Understanding these memory access patterns is essential as architectures evolve. The shift from CNNs to transformers, for instance, has driven the development of hardware with larger on-chip memories and more advanced caching strategies to handle increased working sets and more dynamic access patterns. Future architectures will likely continue to be shaped by their memory access characteristics as much as their computational requirements.
 
@@ -4770,13 +4785,13 @@ class EnergyConsumptionAnalysis:
     energy_ratio_mult_str = fmt_multiple(round(dram_to_mac_ratio), precision=0, commas=True)
 ```
 
-Large batched GEMMs in MLPs can achieve excellent arithmetic intensity, but small-batch MLP inference often has low reuse and spends most of its energy on data movement. Each multiply-accumulate operation consumes approximately `{python} EnergyConsumptionAnalysis.energy_mac_pj_str`, while data movement from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str` per 32-bit value [@horowitz2014], about `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str` higher. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
-
 ::: {.column-margin}
 ![](images/svg/vol1_nn_architectures_margin_004.svg){width="100%" fig-alt="DRAM access energy versus MAC energy."}
 
 *Moving a value from DRAM costs far more energy than a MAC.*
 :::
+
+Large batched GEMMs in MLPs can achieve excellent arithmetic intensity, but small-batch MLP inference often has low reuse and spends most of its energy on data movement. Each multiply-accumulate operation consumes approximately `{python} EnergyConsumptionAnalysis.energy_mac_pj_str`, while data movement from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str` per 32-bit value [@horowitz2014], about `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str` higher. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
 
 Convolutional operations reduce energy consumption through data reuse but exhibit variable efficiency depending on implementation. Im2col-based convolution implementations trade memory for simplicity; a fully materialized lowering can multiply temporary storage and memory traffic, up to $K^2$ for stride-1 $K{\times}K$ filters away from the borders. Direct convolution implementations can achieve substantially better energy efficiency by eliminating redundant data movement, particularly for larger kernel sizes where im2col duplication is most severe.
 
@@ -5162,7 +5177,7 @@ class WildlifeModelSizing:
         f"\\text{{{total_runtime_mb_str}}} \\ll \\text{{{edge_ram_mb_str}}}~\\checkmark"
     )
     compute_check_math = fmt_math(
-        f"\\frac{{{mnv2_mflop_value_str} \\times 10^6 \\text{{ INT8 ops}}}}{{{edge_int8_tops_value_str} \\times 10^12 \\text{{ INT8 ops/s}}}} = "
+        f"\\frac{{{mnv2_mflop_value_str} \\times 10^6 \\text{{ INT8 ops}}}}{{{edge_int8_tops_value_str} \\times 10^{12} \\text{{ INT8 ops/s}}}} = "
         f"{compute_latency_ms_str} \\text{{ latency}} \\ll {target_latency_ms_str} \\text{{ target}}~\\checkmark"
     )
     accuracy_target_pct_str = fmt_percent(accuracy_target_pct/100, precision=0, commas=False, style='symbol')
@@ -5184,6 +5199,11 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 
 **Step 2**: Constraint analysis. @Tbl-nn-architectures-wildlife-constraints catalogs the five deployment constraints and the architectural choices each forces:
 
+```{=latex}
+\begin{minipage}{\linewidth}
+\renewcommand{\arraystretch}{1.35}
+```
+
 | **Constraint**   | **Requirement**                | **Implication**                                    |
 |:-----------------|:-------------------------------|:---------------------------------------------------|
 | **Connectivity** | None (offline)                 | All inference must run on-device                   |
@@ -5194,12 +5214,18 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 
 : **Wildlife Monitoring Constraints**: Five deployment constraints and the architectural choices they force for the camera-trap scenario. Each row eliminates a class of solutions: no connectivity rules out the cloud, the 2 W power envelope rules out GPUs, and the 100 MB memory budget forces aggressive quantization before any model search begins. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[16,33,51]"}
 
+
+
 **Step 3**: Architecture evaluation using lighthouse benchmarks.
 Compare candidates against our Lighthouse models:
 
 - **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` params, `{python} WildlifeModelSizing.resnet_gflop_str`): Too compute- and power-heavy for this device. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` FP32, it is also marginal against the `{python} WildlifeModelSizing.model_budget_mb_str` model budget before quantization, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
 - **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` params, `{python} WildlifeModelSizing.mnv1_mflop_str`): Promising. `{python} WildlifeModelSizing.mnv1_fp32_mb_str` at FP32, `{python} WildlifeModelSizing.mnv1_int8_mb_str` quantized to INT8. Power-efficient depthwise separable convolutions.
 - **KWS DS-CNN** (`{python} WildlifeModelSizing.kws_example_params_str` params, `{python} WildlifeModelSizing.kws_example_mflop_str`): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
+
+```{=latex}
+\end{minipage}
+```
 
 **Architecture selection**: MobileNetV2 variant with width multiplier 0.75
 
