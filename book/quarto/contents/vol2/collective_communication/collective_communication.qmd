@@ -58,8 +58,8 @@ The gap between that assumption and reality reveals a fundamental asymmetry in *
 ***Gradient Synchronization***\index{Gradient Synchronization!definition} is the collective communication protocol executed at each training step in which every worker transmits its locally computed gradient tensor to all other workers, receives their gradients, and computes an aggregate update that all workers apply identically to their model copies.
 
 1.  **Significance (quantitative)**: A 70B-parameter model in BF16 generates 140 GB of gradient data per worker per step. Synchronizing across 1,000 GPUs via ring AllReduce at 50 GB/s per link requires approximately $2 \times 140/50 \approx 5.6$ seconds of communication per step, dominating the bandwidth (data-movement) term in the iron law and consuming 40--70 percent of total training time before overlap techniques are applied.
-2.  **Distinction (durable)**: Unlike parameter-server approaches (where all workers send gradients to a centralized aggregator whose bandwidth scales as $\mathcal{O}(N)$), ring AllReduce distributes the communication across all workers so that each worker's per-step communication cost stays constant at $2 \times (N-1)/N \times M$ regardless of cluster size.
-3.  **Common pitfall**: A frequent misconception is that gradient synchronization overhead scales with the number of GPUs. In ring AllReduce, per-node communication volume is constant as the cluster grows—the bottleneck is the gradient volume per step (proportional to model size), not the number of participants.
+2.  **Observation**: Unlike parameter-server approaches (where all workers send gradients to a centralized aggregator whose bandwidth scales as $\mathcal{O}(N)$), ring AllReduce distributes the communication across all workers so that each worker's per-step communication cost stays constant at $2 \times (N-1)/N \times M$ regardless of cluster size.
+3.  **Pitfall**: A frequent misconception is that gradient synchronization overhead scales with the number of GPUs. In ring AllReduce, per-node communication volume is constant as the cluster grows—the bottleneck is the gradient volume per step (proportional to model size), not the number of participants.
 
 :::
 
@@ -358,8 +358,8 @@ Every message our gradient sends obeys the linear cost model $T(n) = \alpha + n/
 ***α-β Model (Hockney Model)***\index{Alpha-Beta Model!definition} is the linear communication cost model $T(n) = \alpha + n/\beta$ that decomposes message transfer time into a fixed startup latency ($\alpha$, the per-message overhead) and a message-size-dependent bandwidth term ($n/\beta$, proportional to bytes transferred), enabling algorithm designers to predict when message fusion or gradient compression will improve throughput [@hockney1994].
 
 1.  **Significance (quantitative)**: For InfiniBand NDR at $\alpha \approx 2\,\mu\text{s}$ and $\beta \approx 50\,\text{GB/s}$, the crossover size $n^* = \alpha \cdot \beta \approx 100\,\text{KB}$. A 4 KB routing message is far below $n^*$, so the startup tax dominates; fusing 100 such messages into one 400 KB message reduces communication cost from $100\alpha = 200\,\mu\text{s}$ to one $\alpha + n/\beta \approx 10\,\mu\text{s}$, a 20$\times$ improvement. A 140 GB gradient tensor is far above $n^*$, so bandwidth dominates and reducing payload bytes is the effective lever.
-2.  **Distinction (durable)**: Unlike idealized throughput models that treat bandwidth as the sole communication cost, the α-β model reveals that $N$ small messages of size $n/N$ cost up to $N\times$ more than one large message of size $n$ when $n/N \ll n^*$, explaining why NCCL fuses small AllReduce calls and why MoE routing algorithms buffer tokens before launching collectives.
-3.  **Common pitfall**: A frequent misconception is that gradient compression always helps. If the compressed gradient size remains well above $n^*$, compression reduces the bandwidth term but leaves the latency term unchanged. Even shrinking a 70B model's gradient payload from 140 GB to 1.4 GB leaves the message firmly bandwidth-bound; it does not turn the operation into a low-latency exchange.
+2.  **Observation**: Unlike idealized throughput models that treat bandwidth as the sole communication cost, the α-β model reveals that $N$ small messages of size $n/N$ cost up to $N\times$ more than one large message of size $n$ when $n/N \ll n^*$, explaining why NCCL fuses small AllReduce calls and why MoE routing algorithms buffer tokens before launching collectives.
+3.  **Pitfall**: A frequent misconception is that gradient compression always helps. If the compressed gradient size remains well above $n^*$, compression reduces the bandwidth term but leaves the latency term unchanged. Even shrinking a 70B model's gradient payload from 140 GB to 1.4 GB leaves the message firmly bandwidth-bound; it does not turn the operation into a low-latency exchange.
 
 :::
 
@@ -640,8 +640,8 @@ If a GPU simply opens a socket and sends a massive gradient to another GPU, the 
 ***Collective Operation***\index{Collective Operation!definition} is a distributed communication pattern in which all processes in a group participate simultaneously to aggregate, broadcast, or redistribute data, with the correctness guarantee that each participant receives the result prescribed by the collective's semantics regardless of message ordering or arrival time.
 
 1.  **Significance (quantitative)**: The right collective algorithm determines whether communication scales with cluster size or remains constant. Ring AllReduce achieves bandwidth-optimal $2(N-1)/N \times M / \beta$ per node (constant in $N$), while a naive reduce-then-broadcast approach costs $\mathcal{O}(N \times M / \beta)$, making it 500$\times$ worse for $N=1024$. Algorithm selection thus directly determines whether the $\text{BW}$ term in the iron law is the training bottleneck.
-2.  **Distinction (durable)**: Unlike point-to-point communication (where one sender and one receiver exchange data independently), a collective operation coordinates the entire process group—every participant must invoke the collective before any can complete it, and the library guarantees a consistent result even when different processes contribute different data.
-3.  **Common pitfall**: A frequent misconception is that one collective algorithm suits all message sizes. Ring AllReduce achieves near-optimal bandwidth for large gradient tensors but has $\mathcal{O}(N)$ latency—for small messages like MoE routing decisions (~4 KB), a tree-based algorithm reduces latency to $\mathcal{O}(\log N)$ steps at the cost of suboptimal bandwidth utilization (the bandwidth-optimal recursive halving-doubling alternative is covered in @sec-communication-butterfly), requiring workload-specific algorithm selection rather than a single default.
+2.  **Observation**: Unlike point-to-point communication (where one sender and one receiver exchange data independently), a collective operation coordinates the entire process group—every participant must invoke the collective before any can complete it, and the library guarantees a consistent result even when different processes contribute different data.
+3.  **Pitfall**: A frequent misconception is that one collective algorithm suits all message sizes. Ring AllReduce achieves near-optimal bandwidth for large gradient tensors but has $\mathcal{O}(N)$ latency—for small messages like MoE routing decisions (~4 KB), a tree-based algorithm reduces latency to $\mathcal{O}(\log N)$ steps at the cost of suboptimal bandwidth utilization (the bandwidth-optimal recursive halving-doubling alternative is covered in @sec-communication-butterfly), requiring workload-specific algorithm selection rather than a single default.
 
 :::
 
@@ -707,7 +707,7 @@ In an AllToAll, every process has a unique piece of data for every other process
 *All-to-All traffic scales worse than AllReduce.*
 :::
 
-This is why Expert Parallelism (MoE) and large-scale recommendation systems\index{Recommendation Systems} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AllToAll) determines the scaling ceiling.
+This is why Expert Parallelism (MoE) and large-scale recommendation systems\index{Recommendation System} often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs. AllToAll) determines the scaling ceiling.
 
 ::::
 
@@ -1511,7 +1511,7 @@ Rail-optimized routing and hierarchical AllReduce reinforce each other. In the h
 
 **Scenario**: A collective communication library must determine whether another GPU sits on a local NVLink switch or 100 meters away across an InfiniBand fabric.
 
-**System**: NVIDIA's Collective Communications Library (NCCL) performs a topology-detection phase at initialization to map these physical realities.
+**Mechanism**: NVIDIA's Collective Communications Library (NCCL) performs a topology-detection phase at initialization to map these physical realities.
 
 **Systems lesson**: Collective performance depends on matching the communication algorithm to the physical topology. Without topology discovery, a correct AllReduce can still route traffic through the wrong links and lose most of the available bandwidth.
 
@@ -1588,8 +1588,8 @@ We solve the conflict between compression and convergence with error feedback. T
 ***Error Feedback***\index{Error Feedback!definition} is a distributed-training technique for gradient compression that maintains a per-worker residual accumulator $e_t$, re-injecting the compression error back into the next gradient update so that information deferred by the compressor is never permanently discarded.
 
 1.  **Significance (quantitative)**: Top-k sparsification at 1 percent keeps only the largest 1 percent of gradient values by magnitude, reducing AllReduce data volume from 140 GB to 1.4 GB for a 70B model—a 100$\times$ bandwidth reduction. Without error feedback, the discarded 99 percent of gradient values are lost, causing training loss to plateau 2–5 percent above the dense baseline. With error feedback, the residual accumulates until small components cross the Top-k threshold in subsequent steps, recovering convergence at the same asymptotic rate as uncompressed SGD.
-2.  **Distinction (durable)**: Unlike lossy compression (which permanently discards sub-threshold gradient components), error feedback is a delayed transmission strategy: the residual $e_t$ telescopes across steps so that $\frac{1}{K}\sum_{t=1}^{K} v_t \to \frac{1}{K}\sum_{t=1}^{K} g_t$ as $K \to \infty$, making the long-run average of transmitted gradients equal to the true gradient average.
-3.  **Common pitfall**: A frequent misconception is that error feedback is built into standard gradient compressors. PyTorch's built-in DDP gradient compression does not implement error feedback by default; without it, Top-k and 1-bit quantization introduce systematic bias that accumulates across steps, typically degrading final model accuracy by 1–3 percent on benchmark tasks compared to the feedback-corrected version.
+2.  **Observation**: Unlike lossy compression (which permanently discards sub-threshold gradient components), error feedback is a delayed transmission strategy: the residual $e_t$ telescopes across steps so that $\frac{1}{K}\sum_{t=1}^{K} v_t \to \frac{1}{K}\sum_{t=1}^{K} g_t$ as $K \to \infty$, making the long-run average of transmitted gradients equal to the true gradient average.
+3.  **Pitfall**: A frequent misconception is that error feedback is built into standard gradient compressors. PyTorch's built-in DDP gradient compression does not implement error feedback by default; without it, Top-k and 1-bit quantization introduce systematic bias that accumulates across steps, typically degrading final model accuracy by 1–3 percent on benchmark tasks compared to the feedback-corrected version.
 
 :::
 
@@ -2008,35 +2008,35 @@ At a larger scale this is still tractable: a 70B-parameter model on 8 NVLink-con
 
 Communication optimization attracts persistent misconceptions because the interaction between latency, bandwidth, topology, and compression creates nonobvious failure modes that simple mental models miss.
 
-**Fallacy**: *Bandwidth is the only metric that matters.*
+A common fallacy is this: *Bandwidth is the only metric that matters.*
 
 For small messages (pipeline parallelism activations, MoE tokens), latency ($\alpha$) dominates. Buying 400G networking will not help if the message takes 5 μs to serialize in software. The critical message size $n^* = \alpha \cdot \beta$ determines which metric to optimize: below $n^*$, reduce latency; above it, increase bandwidth.
 
-**Pitfall**: *Assuming AllReduce works for everything.*
+A recurring pitfall is this: *Assuming AllReduce works for everything.*
 
 AllReduce creates a global barrier and assumes all participants contribute identical data shapes. In Expert Parallelism (MoE) and Recommendation Systems, where each worker needs to send distinct data to every other worker, AllReduce is fundamentally wrong. These workloads require AllToAll, which has $\mathcal{O}(N^2)$ logical connections and hits network contention limits at much smaller cluster sizes.
 
-**Fallacy**: *Pipeline parallelism eliminates communication overhead.*
+A common fallacy is this: *Pipeline parallelism eliminates communication overhead.*
 
 Pipeline parallelism replaces AllReduce with point-to-point activation transfers between adjacent stages, and the per-message cost is genuinely cheaper. Pipeline introduces a different overhead: bubble idleness. With $p$ pipeline stages, at least $(p-1)/(p-1+m)$ of GPU-time is idle while the pipeline fills and drains, where $m$ is the number of microbatches. For deep pipelines ($p \geq 8$), this requires $m \geq 32$ microbatches to keep the bubble below 20 percent, which constrains batch size, activation memory, and convergence. The choice between data parallelism and pipeline parallelism is not "communication vs. no communication" but a trade between bandwidth-bound AllReduce and time-bound bubble overhead.
 
-**Pitfall**: *Using Ring AllReduce by default without checking message size and topology.*
+A recurring pitfall is this: *Using Ring AllReduce by default without checking message size and topology.*
 
 Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but pays $\mathcal{O}(N)$ latency. For a 1 MB gradient across 64 GPUs with $\alpha = 10\ \mu\text{s}$, Tree AllReduce wins because Ring's 1,260 μs latency penalty exceeds Tree's 1,000 μs bandwidth penalty. The log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ determines when to switch algorithms; $N\alpha\beta$ is only a coarse upper-scale heuristic.
 
-**Fallacy**: *Gradient compression is safe without error feedback.*
+A common fallacy is this: *Gradient compression is safe without error feedback.*
 
 Top-k sparsification can achieve 99 percent compression, but naively discarding small gradients causes divergence. Without error feedback ($e_{t+1} = (g_t + e_t) - v_t$), gradients below the threshold are lost forever, accumulating systematic bias that eventually destabilizes training.
 
-**Pitfall**: *Evaluating gradient compression by communication speedup alone.*
+A recurring pitfall is this: *Evaluating gradient compression by communication speedup alone.*
 
 A compression scheme that achieves 100$\times$ communication speedup is worthless if it degrades model quality enough to require 2$\times$ more training iterations to reach the target accuracy. The right metric is *time-to-accuracy*, not time-per-iteration. Communication microbenchmarks measure the former while the engineering decision depends on the latter, and the two diverge whenever compression introduces gradient bias or variance that slows convergence. Validate compression on the target convergence benchmark with the deployment training schedule, not on a synthetic AllReduce microbenchmark alone.
 
-**Fallacy**: *Async collectives always hide latency.*
+A common fallacy is this: *Async collectives always hide latency.*
 
 Python's `dist.all_reduce(..., async_op=True)` only returns control to the CPU. The LogP model distinguishes network latency $L_{\text{lat}}$ (overlappable) from processor overhead $o$ (nonoverlappable). If the GPU compute kernel is shorter than the communication overhead, the GPU still stalls. Communication can only be hidden when $T_{\text{compute}} > o$.
 
-**Pitfall**: *Silent data corruption in the network.*
+A recurring pitfall is this: *Silent data corruption in the network.*
 
 Networks are not perfect. A bad cable, faulty NIC, or firmware bug can corrupt data below the level where the training framework sees an explicit error. At 10,000 nodes running 24/7, even very rare bit errors can appear often enough to matter. The communication-specific lesson is that bandwidth tuning is incomplete without end-to-end validation: checksums, collective result checks, gradient-norm sanity tests, and fault-tolerance mechanisms must catch corrupted gradients before they become model updates.
 
@@ -2056,19 +2056,19 @@ class CommInfraRecap:
     ib_ndr_bw_gb_per_s_str = fmt_qty(ib_bw, GB/second, precision=0, commas=False)
 ```
 
-**Fallacy**: *Flat AllReduce is good enough for multi-node training.*
+A common fallacy is this: *Flat AllReduce is good enough for multi-node training.*
 
 A flat Ring AllReduce treats all links as equal, routing data across `{python} CommInfraRecap.ib_ndr_bw_gb_per_s_str` InfiniBand when `{python} CommInfraRecap.nvlink_h100_bw_gb_per_s_str` NVLink is available within the node. For an 8-node cluster with 8 GPUs per node, hierarchical AllReduce reduces inter-node traffic by 8$\times$ compared to flat Ring, achieving roughly a 6$\times$ speedup. Ignoring the bandwidth hierarchy leaves the majority of intra-node bandwidth unused while overloading the scarce inter-node bandwidth.
 
-**Pitfall**: *Using the ring AllReduce formula for intra-node communication.*
+A recurring pitfall is this: *Using the ring AllReduce formula for intra-node communication.*
 
 The ring AllReduce cost model assumes a logical ring topology, which matches the inter-node communication pattern across InfiniBand. It does not match intra-node communication. Within a DGX-class node, GPUs talk through NVLink and NVSwitch, which provides all-to-all connectivity rather than a ring. The actual intra-node AllReduce often uses a single-step reduce through the NVSwitch crossbar, with latency closer to a single hop than to the $\mathcal{O}(N)$ ring cost. Capacity planning that applies the ring formula uniformly overstates intra-node communication time by an order of magnitude and pushes the parallelism boundary outward unnecessarily. Use the crossbar model inside the node, the ring or tree model across nodes, and the hierarchical sum for global AllReduce.
 
-**Fallacy**: *Rank-to-GPU mapping does not affect collective performance.*
+A common fallacy is this: *Rank-to-GPU mapping does not affect collective performance.*
 
 If the job scheduler assigns ranks to GPUs without considering the physical topology, hierarchical AllReduce and rail-optimized routing may route traffic suboptimally. A common symptom is that `nccl-tests` achieves full bandwidth on the cluster, but the actual training job achieves only 50--60 percent because ranks are assigned across nodes in a way that prevents rail alignment. Verify that rank assignment matches the expected topology (e.g., ranks 0--7 on Node 0, ranks 8--15 on Node 1) before benchmarking communication performance.
 
-**Pitfall**: *Benchmarking collectives without recording placement context.*
+A recurring pitfall is this: *Benchmarking collectives without recording placement context.*
 
 A collective benchmark is not reusable evidence unless it records rank order, NIC rail binding, NCCL topology configuration, and node allocation. Without that context, teams compare results from different physical layouts and mistake placement differences for library or hardware regressions.
 
