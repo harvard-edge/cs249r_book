@@ -4049,27 +4049,31 @@ print(
 
 An important aspect of PTQ is the calibration\index{Quantization!calibration} step, which selects the clipping range $[\alpha, \beta]$ for quantizing model weights and activations. The effectiveness of precision reduction depends heavily on this chosen range: without proper calibration, quantization may cause significant accuracy degradation. Calibration ensures that the chosen range minimizes information loss and preserves model performance.
 
-Walk through the PTQ pipeline in @fig-ptq-calibration step by step. A calibration dataset\index{Calibration Dataset!representative traffic}, a representative subset of training or validation data, is passed through the pretrained model to estimate the numerical distribution of activations and weights. This distribution then defines the clipping range for quantization. In the algorithm, observers are lightweight runtime collectors that record tensor ranges, granularity is the scope over which one range is shared, and the zero-point is the integer value that represents real zero in an affine mapping. @Alg-ptq-calibration states the same deployment contract operationally: calibration produces fixed range metadata that the runtime will use when it executes the quantized model.
+Walk through the PTQ pipeline in @fig-ptq-calibration step by step. A calibration dataset\index{Calibration Dataset!representative traffic}, a representative subset of training or validation data, is passed through the pretrained model to estimate the numerical distribution of activations and weights. This distribution then defines the clipping range for quantization. In the algorithm, observers are lightweight runtime collectors that record tensor ranges, granularity is the scope over which one range is shared, and the zero-point is the integer value that represents real zero in an affine mapping. @Algo-ptq-calibration states the same deployment contract operationally: calibration produces fixed range metadata that the runtime will use when it executes the quantized model.
 
-::: {#alg-ptq-calibration name="Post-training quantization calibration"}
+```pseudocode
+#| label: algo-ptq-calibration
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Post-training quantization calibration}
+\begin{algorithmic}
+\Require pretrained model $f_\theta$; representative calibration set $C$; bit width $b$; granularity (layer/group/channel); method (max, entropy, percentile)
+\Ensure quantized weights and per-group range metadata $\{(\alpha_g, \beta_g, s_g, z_g)\}$
+\State attach observers to weights and selected activation tensors, at the chosen granularity
+\For{each batch in $C$}
+    \State run $f_\theta$ without updating parameters; record per-group value distributions \Comment{calibration pass}
+\EndFor
+\For{each quantization group $g$}
+    \State select clipping range $[\alpha_g, \beta_g]$ by the chosen method
+    \State derive scale $s_g$, zero-point $z_g$ mapping $[\alpha_g, \beta_g]$ into the $b$-bit integer range
+\EndFor
+\State quantize static weights; export activation range metadata for inference
+\State if accuracy falls below the production threshold, widen ranges, change granularity, or move to QAT
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: Pretrained model $f_{\theta}$; representative calibration set $C$; target bit width $b$; granularity choice (layerwise, groupwise, or channelwise); calibration method (max, entropy, or percentile).
-
-**Output**: Quantized model parameters and range metadata $\{(\alpha_g,\beta_g,s_g,z_g)\}$ for each quantization group $g$.
-
-1. Attach observers to the weights and selected activation tensors according to the chosen granularity.
-2. Run the calibration set $C$ through $f_{\theta}$ without updating model parameters.
-3. For each quantization group $g$, collect the observed value distribution or summary statistics.
-4. Select a clipping range $[\alpha_g,\beta_g]$ using the calibration method.
-5. Derive the scale $s_g$ and zero-point $z_g$ that map $[\alpha_g,\beta_g]$ into the $b$-bit integer range.
-6. Quantize static weights and export activation range metadata for inference.
-7. Validate the quantized model against the production accuracy threshold; if it fails, widen ranges, change granularity, reduce aggressiveness, or move to QAT.
-
-**Systems cost**: Step 2 pays one calibration pass over $C$ and avoids retraining. Steps 4 through 6 convert observed ranges into fixed metadata and $b$-bit weights: FP32-to-INT8 weight quantization cuts stored weight bytes by 4$\times$, while static activation ranges trade runtime efficiency for the risk of saturation or wasted integer levels when calibration data misses deployment tails.
-
-:::
-
-The quantization step converts model parameters to a lower-precision format, producing the final quantized model.
+The single calibration pass over $C$ avoids retraining, and FP32-to-INT8 weight quantization cuts stored weight bytes by 4$\times$. The price is that the static activation ranges fixed in the loop risk saturation or wasted integer levels when the calibration data misses deployment tails. The quantization step then converts model parameters to the lower-precision format, producing the final quantized model.
 
 ::: {#fig-ptq-calibration fig-env="figure" fig-pos="htb" fig-cap="**Post-Training Quantization**: Calibration with a representative dataset determines optimal quantization ranges for model weights and activations, minimizing information loss during quantization to create efficient, lower-precision models. This process converts a pretrained model into a quantized version suitable for deployment on resource-constrained devices." fig-alt="Vertical flowchart with four boxes connected by arrows. Pretrained model and calibration data feed into calibration step, which feeds into quantization step, producing final quantized model output."}
 

@@ -1014,26 +1014,31 @@ $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 
 For realistic output length distributions with high variance, wasted compute can exceed 50 percent.
 
-Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. @Alg-continuous-batching-decode-scheduler states the scheduler as a decode loop: completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. This technique is central to the throughput-latency trade-off that defines large-scale LLM serving---Archetype A workloads (GPT-4/Llama-3, @sec-vol2-introduction-archetypes) would be economically unviable without it, because their memory-bandwidth-bound decode phase leaves compute cores idle waiting for weights to load, and only by interleaving unrelated requests can the bandwidth be saturated.
+Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. @Algo-continuous-batching-decode-scheduler states the scheduler as a decode loop: completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. This technique is central to the throughput-latency trade-off that defines large-scale LLM serving---Archetype A workloads (GPT-4/Llama-3, @sec-vol2-introduction-archetypes) would be economically unviable without it, because their memory-bandwidth-bound decode phase leaves compute cores idle waiting for weights to load, and only by interleaving unrelated requests can the bandwidth be saturated.
 
-::: {#alg-continuous-batching-decode-scheduler name="Continuous batching decode scheduler"}
+```pseudocode
+#| label: algo-continuous-batching-decode-scheduler
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Continuous batching decode scheduler}
+\begin{algorithmic}
+\Require waiting queue $Q$; active set $A$; KV-cache page allocator; active-token capacity $C_{\text{tok}}$; batched decode kernel
+\Ensure generated tokens for completed requests; a continually refreshed active batch
+\While{the service is running}
+    \State admit requests from $Q$ while capacity and free KV-cache pages remain; allocate state, append to $A$
+    \State run one batched decode kernel over all sequences in $A$
+    \State append each sampled token; extend its KV-cache pages
+    \State remove completed or length-limited sequences from $A$; return their pages to the allocator
+    \If{HBM pressure exceeds the policy threshold}
+        \State preempt low-priority sequences by paging their KV-cache to CPU DRAM
+    \EndIf
+    \State fill freed capacity from $Q$, or resume paused sequences whose pages now fit
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: Waiting queue $Q$; active sequence set $A$; GPU KV-cache page allocator; maximum active-token budget $B_{\max}$; model replica with a batched decode kernel.
-
-**Output**: Generated tokens for completed requests and a continually refreshed active batch.
-
-1. Admit requests from $Q$ while batch capacity and free KV-cache pages remain; allocate their prompt and KV-cache state and append them to $A$.
-2. Run one batched decode kernel over all sequences in $A$.
-3. Append each sampled token to its sequence and extend the corresponding KV-cache pages.
-4. Remove completed or length-limited sequences from $A$ and return their KV-cache pages to the allocator.
-5. If HBM pressure exceeds the serving policy's threshold, preempt lower-priority sequences by moving their KV-cache pages to CPU DRAM and marking those sequences paused.
-6. Fill newly freed capacity from $Q$ or resume paused sequences whose KV-cache pages now fit, then repeat the decode loop.
-
-**Systems cost**: Steps 1, 4, and 6 reuse slots as requests arrive, finish, or resume, preventing active-token capacity from idling behind the longest sequence in the batch. Step 5 adds HBM-to-CPU-DRAM transfer latency when memory pressure forces preemption, so the throughput gain scales with output-length variance and must be balanced against KV-cache movement.
-
-:::
-
-Unlike static or dynamic batching, which group requests at the *request* level, continuous batching operates at the *iteration* level, dynamically reshaping the compute tensor at each clock cycle. As @fig-continuous-batching-comparison illustrates, static batching leaves the GPU idle while waiting for the longest request, whereas continuous batching keeps it saturated.
+Admitting, completing, and refilling slots on every iteration keeps active-token capacity from idling behind the longest sequence in the batch, while the preemption path adds HBM-to-CPU-DRAM transfer latency under memory pressure. The throughput gain therefore scales with output-length variance and must be balanced against KV-cache movement. Unlike static or dynamic batching, which group requests at the *request* level, continuous batching operates at the *iteration* level, dynamically reshaping the compute tensor at each clock cycle. As @fig-continuous-batching-comparison illustrates, static batching leaves the GPU idle while waiting for the longest request, whereas continuous batching keeps it saturated.
 
 ::: {#fig-continuous-batching-comparison fig-env="figure" fig-pos="htb" fig-cap="**Static vs. Continuous Batching**: In static batching (A), all requests in a batch must wait for the longest request to complete before the GPU can begin the next batch, leading to significant idle compute time (shaded gray). Continuous batching (B) allows new requests to enter the batch as soon as any request finishes, keeping the GPU saturated and dramatically improving throughput." fig-alt="Two-panel timeline comparison. Left: Static batching shows requests of different lengths with large white space representing idle time. Right: Continuous batching shows requests filling the gaps as soon as one ends."}
 
@@ -2667,23 +2672,34 @@ Autoregressive generation is inherently sequential: each token depends on previo
 
 [^fn-speculative-cpu-analogy]: **Speculative Execution (CPU to LLM)**\index{Speculative Decoding!CPU analogy}: Borrows from CPU branch prediction, where processors execute instructions ahead of confirmation and roll back on misprediction. The critical difference: CPU speculation is invisible to software, while LLM speculation requires explicit draft-verify logic and adds a second model's memory footprint to the serving budget. The trade-off is extra compute and memory for 2--3$\times$ latency reduction, but only when draft acceptance rates exceed roughly 70 percent.
 
-Speculative decoding has three operational phases: a Draft phase\index{Speculative Decoding!draft phase}, a Verification phase\index{Speculative Decoding!verification phase}, and an Acceptance phase\index{Speculative Decoding!acceptance phase}. @Alg-speculative-decoding states the exact sampling contract behind those phases. A small draft model generates $K$ candidate tokens autoregressively, the target model verifies those tokens in one parallel forward pass, and rejection sampling ensures that the emitted tokens still follow the target model's distribution. @Fig-speculative-decoding-inf illustrates this draft-verify-accept flow.
+Speculative decoding has three operational phases: a Draft phase\index{Speculative Decoding!draft phase}, a Verification phase\index{Speculative Decoding!verification phase}, and an Acceptance phase\index{Speculative Decoding!acceptance phase}. @Algo-speculative-decoding states the exact sampling contract behind those phases. A small draft model generates $K$ candidate tokens autoregressively, the target model verifies those tokens in one parallel forward pass, and rejection sampling ensures that the emitted tokens still follow the target model's distribution. @Fig-speculative-decoding-inf illustrates this draft-verify-accept flow.
 
-::: {#alg-speculative-decoding name="Speculative decoding"}
+```pseudocode
+#| label: algo-speculative-decoding
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Speculative decoding}
+\begin{algorithmic}
+\Require target distribution $p_\theta(\cdot \mid \cdot)$; draft distribution $q_\phi(\cdot \mid \cdot)$; prefix $y_{1:t}$; draft length $K$
+\Ensure one or more new tokens distributed as $p_\theta$
+\For{$i = 1$ to $K$}
+    \State draft $\hat{y}_{t+i}$ from $q_\phi(\cdot \mid y_{1:t}, \hat{y}_{t+1:t+i-1})$
+\EndFor
+\State run $p_\theta$ once on the prefix plus all $K$ drafts to obtain target distributions for the drafted positions and final next-token position
+\For{$i = 1$ to $K$}
+    \State $a_i \gets \min\!\left(1,\frac{p_\theta(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}{q_\phi(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}\right)$
+    \State accept $\hat{y}_{t+i}$ with probability $a_i$
+    \If{$\hat{y}_{t+i}$ is rejected}
+        \State sample one corrected token from the normalized positive residual $(p_\theta-q_\phi)_+$
+        \State emit accepted draft tokens and the corrected token; discard the remaining draft; start a new round
+    \EndIf
+\EndFor
+\State if all $K$ drafts were accepted, emit them and sample one extra token from the target distribution
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: Target model distribution $p_\theta$; draft model distribution $q_\phi$; current prefix $y_{1:t}$; draft length $K$.
-
-**Output**: One or more new tokens sampled from the target distribution $p_\theta$.
-
-1. Use the draft model to sample candidate tokens $\hat{y}_{t+1:t+K}$ autoregressively from $q_\phi(\cdot \mid y_{1:t}, \hat{y}_{t+1:i-1})$.
-2. Run the target model once on the prefix plus all $K$ drafted tokens to compute $p_\theta(\cdot \mid y_{1:t}, \hat{y}_{t+1:i-1})$ for each drafted position.
-3. For $i=1,\ldots,K$, accept the drafted token $\hat{y}_{t+i}$ with probability $\min(1, p_\theta(\hat{y}_{t+i}) / q_\phi(\hat{y}_{t+i}))$.
-4. If a drafted token is rejected, sample a corrected token from the normalized positive residual distribution $(p_\theta - q_\phi)_+$ at that position, append it to the prefix, discard the remaining draft, and start a new round.
-5. If all $K$ drafted tokens are accepted, append them and sample one additional token from the target model's final-position distribution.
-
-**Systems cost**: Step 1 adds $K$ cheap draft decode steps and a second model's memory footprint, while step 2 replaces up to $K+1$ sequential target-model decode steps with one parallel verification pass. Steps 3 through 5 deliver speedup only when the acceptance rate is high enough that the saved target-model HBM traffic exceeds the draft and verification overhead.
-
-:::
+The $K$ draft steps and the second model's memory footprint are the price; the win is the single verification pass, which replaces up to $K+1$ sequential target-model decodes. That win is realized only when the acceptance rate is high enough that the saved target-model HBM traffic outweighs the draft and verification overhead.
 
 ::: {#fig-speculative-decoding-inf fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $K$ tokens. The target model verifies all $K$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Timeline comparison of two decoding methods. Top: standard decoding with 4 sequential generation steps. Bottom: speculative decoding with fast draft, parallel verify, then 3 accepted tokens (green) and 1 rejected (pink). Braces show time savings."}
 
@@ -3973,24 +3989,26 @@ A foundational result in load balancing theory [@mitzenmacher2001] shows that qu
 
 [^fn-balls-bins-routing]: **Balls-into-Bins (Power of Two Choices)**\index{Power of Two Choices!routing}: With random placement, maximum bin load is $\Theta(\log R / \log \log R)$; with two random choices and greedy selection, it drops to $\Theta(\log \log R)$. For a 1,000-server inference fleet, this reduces worst-case queue depth from roughly 5 to roughly 2, cutting P99 tail latency by nearly half while adding only the overhead of a single extra queue-length probe per request.
 
-The procedure is deliberately small, but the load signal must match the serving workload. For a homogeneous vision fleet, current queue length may be enough. For an LLM fleet, active tokens, estimated remaining decode work, and KV-cache pressure better approximate the work a replica has already accepted. @Alg-power-two-choices-routing states a representative routing loop: probe two replicas, compare normalized work, and route without polling the whole fleet. @Eq-two-choices-max-queue formalizes why this small change matters, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
+The procedure is deliberately small, but the load signal must match the serving workload. For a homogeneous vision fleet, current queue length may be enough. For an LLM fleet, active tokens, estimated remaining decode work, and KV-cache pressure better approximate the work a replica has already accepted. @Algo-power-two-choices-routing states a representative routing loop: probe two replicas, compare normalized work, and route without polling the whole fleet. @Eq-two-choices-max-queue formalizes why this small change matters, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
 
-::: {#alg-power-two-choices-routing name="Power-of-two choices request routing"}
+```pseudocode
+#| label: algo-power-two-choices-routing
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Power-of-two choices request routing}
+\begin{algorithmic}
+\Require replica set $\mathcal{S}$; request $r$; capacity weights $w_s$; per-replica work signal $W_s$ (queue length, active tokens, predicted work, or KV-cache occupancy)
+\Ensure a selected replica for $r$
+\State sample two candidate replicas $s_a, s_b$ from $\mathcal{S}$ \Comment{uniform if homogeneous, capacity-weighted if not}
+\State query $W_{s_a}, W_{s_b}$; estimate incremental work $\hat{c}(r)$ (expected output tokens or KV pages)
+\State $u_s \gets (W_s + \hat{c}(r)) / w_s$ for $s \in \{s_a, s_b\}$ \Comment{normalized post-admission load}
+\State route $r$ to the candidate with smaller $u_s$ \Comment{ties broken by locality or cache affinity}
+\State update the chosen replica's local admission state
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: Replica set $\mathcal{S}$; incoming request $r$; capacity weight $w_s$ for each replica $s$; per-replica load signal $L_s$ such as queue length, active-token count, predicted remaining work, or KV-cache occupancy.
-
-**Output**: A selected replica for request $r$.
-
-1. Sample two candidate replicas $s_a,s_b$ from $\mathcal{S}$; use uniform sampling for homogeneous fleets and capacity-weighted sampling for heterogeneous fleets.
-2. Query both replicas or their local load-balancer state for $L_{s_a}$ and $L_{s_b}$.
-3. Estimate the incremental work $\hat{c}(r)$ imposed by the request, such as expected output tokens or required KV-cache pages.
-4. Compute normalized post-admission load $u_s=(L_s+\hat{c}(r))/w_s$ for each candidate.
-5. Route $r$ to the candidate with lower $u_s$, breaking ties with locality, cache affinity, or recent error signals.
-6. Update the chosen replica's local admission state so the next routing decision observes the new work.
-
-**Systems cost**: Steps 1 and 2 pay two probes, and step 6 pays one state update per request, which is $\mathcal{O}(1)$ coordination rather than an all-replica scan. Steps 3 through 5 reduce tail latency only when the load signal reflects true work: in LLM serving, request count alone can hide a 10-token request behind a 500-token request, while active-token and KV-cache signals expose the risk.
-
-:::
+The two probes and the one state update per request are $\mathcal{O}(1)$ coordination rather than an all-replica scan, and the tail-latency win materializes only when the load signal reflects true work: in LLM serving, request count alone can hide a 10-token request behind a 500-token one, while active-token and KV-cache signals expose the risk.
 
 $$E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log R)$$ {#eq-two-choices-max-queue}
 

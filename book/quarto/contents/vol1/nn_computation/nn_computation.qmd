@@ -4210,26 +4210,31 @@ While forward propagation computes predictions, backward propagation determines 
 
 The process begins at the network's output, where we compare predicted digit probabilities with the true label. This error then flows backward through the network, with each layer's weights receiving an update signal based on their contribution to the final prediction. The computation follows the chain rule\index{Chain Rule!gradient decomposition}\index{Gradient!chain rule} of calculus, breaking down the complex relationship between weights and final error into manageable steps.
 
-The mathematical foundations of backpropagation provide the theoretical basis for training neural networks, but practical implementation requires software support. Modern frameworks implement automatic differentiation systems that handle gradient computation automatically, eliminating manual derivative implementation [@wengert1964]. @Sec-appdx-algorithm-foundations-chain-rule-automatic-differentiation-e0eb derives the chain rule formally and shows why reverse-mode automatic differentiation computes all parameter gradients in a single backward pass, and @sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7 walks through the backward-pass algorithm step by step and explains why it costs roughly twice the FLOPs of the forward pass. @Sec-ml-frameworks-framework-implementation-automatic-differentiation-1407 later examines the systems engineering aspects of these frameworks. The core implementation contract is shown in @alg-backpropagation-training-step: the forward pass must save the values that the backward pass will need.
+The mathematical foundations of backpropagation provide the theoretical basis for training neural networks, but practical implementation requires software support. Modern frameworks implement automatic differentiation systems that handle gradient computation automatically, eliminating manual derivative implementation [@wengert1964]. @Sec-appdx-algorithm-foundations-chain-rule-automatic-differentiation-e0eb derives the chain rule formally and shows why reverse-mode automatic differentiation computes all parameter gradients in a single backward pass, and @sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7 walks through the backward-pass algorithm step by step and explains why it costs roughly twice the FLOPs of the forward pass. @Sec-ml-frameworks-framework-implementation-automatic-differentiation-1407 later examines the systems engineering aspects of these frameworks. The core implementation contract is shown in @algo-backpropagation-training-step: the forward pass must save the values that the backward pass will need.
 
-::: {#alg-backpropagation-training-step name="Backpropagation training step"}
+```pseudocode
+#| label: algo-backpropagation-training-step
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Backpropagation training step}
+\begin{algorithmic}
+\Require mini-batch inputs $\mathbf{X}$, labels $\mathbf{y}$; $N_L$ layers with parameters $\{\mathbf{W}^{(\ell)}, \mathbf{b}^{(\ell)}\}_{\ell=1}^{N_L}$; loss $\mathcal{L}$
+\Ensure parameter gradients $\{\nabla_{\mathbf{W}^{(\ell)}}\mathcal{L}, \nabla_{\mathbf{b}^{(\ell)}}\mathcal{L}\}$ for the optimizer
+\State $\mathbf{A}^{(0)} \gets \mathbf{X}$
+\For{$\ell = 1$ to $N_L$}
+    \State compute $\mathbf{Z}^{(\ell)}, \mathbf{A}^{(\ell)}$; save the activation and local values its derivative needs \Comment{forward pass}
+\EndFor
+\State compute loss $\mathcal{L}(\mathbf{A}^{(N_L)}, \mathbf{y})$; seed the output gradient $\nabla_{\mathbf{A}^{(N_L)}}\mathcal{L}$
+\For{$\ell = N_L$ down to $1$}
+    \State use the saved forward values to compute $\nabla_{\mathbf{W}^{(\ell)}}\mathcal{L}, \nabla_{\mathbf{b}^{(\ell)}}\mathcal{L}$
+    \State propagate $\nabla_{\mathbf{A}^{(\ell-1)}}\mathcal{L}$ to the previous layer \Comment{same local rule repeats}
+\EndFor
+\State \Return the accumulated parameter gradients
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: Mini-batch inputs $\mathbf{X}$; labels $\mathbf{y}$; $L$ network layers with parameters $\{\mathbf{W}^{(\ell)},\mathbf{b}^{(\ell)}\}_{\ell=1}^L$; loss function $\mathcal{L}$.
-
-**Output**: Parameter gradients $\{\nabla_{\mathbf{W}^{(\ell)}}\mathcal{L},\nabla_{\mathbf{b}^{(\ell)}}\mathcal{L}\}_{\ell=1}^L$ for the optimizer.
-
-1. Set $\mathbf{A}^{(0)} \gets \mathbf{X}$.
-2. For each layer $\ell=1,\ldots,L$, compute $\mathbf{Z}^{(\ell)}$ and $\mathbf{A}^{(\ell)}$, then save the activation and any local values needed by that layer's derivative.
-3. Compute the batch loss $\mathcal{L}(\mathbf{A}^{(L)},\mathbf{y})$ and seed the output gradient $\nabla_{\mathbf{A}^{(L)}}\mathcal{L}$.
-4. For each layer $\ell=L,\ldots,1$, use the saved forward values and the incoming gradient to compute $\nabla_{\mathbf{W}^{(\ell)}}\mathcal{L}$ and $\nabla_{\mathbf{b}^{(\ell)}}\mathcal{L}$.
-5. Propagate the gradient to the previous activation so the next layer in the reverse traversal can repeat the same local calculation.
-6. Return the accumulated parameter gradients to the optimizer.
-
-**Systems cost**: Step 2 keeps each layer's activation and local derivative inputs live until steps 4 and 5 consume them in reverse. Peak activation memory therefore scales with batch size, layer count, and activation width, which is why training can exceed inference memory even when the parameter count is unchanged.
-
-:::
-
-The word "save" in @alg-backpropagation-training-step is where the systems cost enters. The same backward traversal that computes gradients also forces the system to store intermediate values\index{Storage!activation, backpropagation}\index{Memory Footprint!training overhead}, which has significant implications for memory requirements during training:
+Saving activations in the forward loop of @algo-backpropagation-training-step is where the systems cost enters\index{Storage!activation, backpropagation}\index{Memory Footprint!training overhead}: each activation stays live until the backward pass reaches its layer, so peak activation memory scales with batch size, layer count, and activation width. This is why training can exceed inference memory even when the parameter count is unchanged:
 
 ::: {#psp-nn-computation-memory-cost-backprop .callout-perspective title="The memory cost of backprop"}
 
@@ -4565,30 +4570,34 @@ class MnistEpochLocal:
 
 The complete training process combines forward propagation, backward propagation, and weight updates into a systematic training loop\index{Training Loop!iterative learning}. This loop repeats until the network achieves satisfactory performance or reaches a predetermined number of iterations.
 
-A single pass through the entire training dataset is called an epoch\index{Epoch!dataset iteration}[^fn-epoch-training-nn]. For MNIST, with `{python} MnistEpochLocal.training_examples_str` training images and a batch size of `{python} MnistEpochLocal.batch_size_str`, each epoch consists of `{python} MnistEpochLocal.epoch_batches_str` batch iterations. @Alg-minibatch-sgd summarizes the complete mini-batch SGD procedure\index{Stochastic Gradient Descent!mini-batch procedure}.
+A single pass through the entire training dataset is called an epoch\index{Epoch!dataset iteration}[^fn-epoch-training-nn]. For MNIST, with `{python} MnistEpochLocal.training_examples_str` training images and a batch size of `{python} MnistEpochLocal.batch_size_str`, each epoch consists of `{python} MnistEpochLocal.epoch_batches_str` batch iterations. @Algo-minibatch-sgd summarizes the complete mini-batch SGD procedure\index{Stochastic Gradient Descent!mini-batch procedure}.
 
 [^fn-epoch-training-nn]: **Epoch**: One complete pass through all training data. The number of epochs is a direct multiplier on total compute cost: a 100-epoch MNIST run executes 100$\times$ more forward and backward passes than a single epoch. At frontier scale, this multiplier becomes the binding constraint: GPT-3 trained for only ~1 epoch over 300 billion tokens because the per-epoch cost already consumed thousands of GPU-weeks. \index{Epoch!training cycles}
 
-::: {#alg-minibatch-sgd name="Mini-batch stochastic gradient descent"}
+```pseudocode
+#| label: algo-minibatch-sgd
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Mini-batch stochastic gradient descent}
+\begin{algorithmic}
+\Require training set $T_{\text{train}}=\{(x_i,y_i)\}_{i=1}^{D}$; rate $\eta$; batch size $B$; epochs $E$; initial $\theta_0$
+\Ensure trained parameters $\theta$
+\State $\theta \gets \theta_0$
+\For{$e = 1$ to $E$}
+    \State shuffle $T_{\text{train}}$ \Comment{reduce order-dependent patterns}
+    \For{each mini-batch $\mathcal{M}$ of size $B$}
+        \State $\hat{y}_i \gets f_\theta(x_i)$ for all $(x_i,y_i) \in \mathcal{M}$
+        \State $\mathcal{L}_{\mathcal{M}} \gets \tfrac{1}{B}\sum_{(x_i,y_i)\in \mathcal{M}} \ell(\hat{y}_i, y_i)$
+        \State $\theta \gets \theta - \eta\, \nabla_\theta \mathcal{L}_{\mathcal{M}}$ \Comment{backpropagate, then update}
+    \EndFor
+    \State evaluate on validation; stop if the convergence criterion is met
+\EndFor
+\State \Return $\theta$
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: Training set $T_{\text{train}}=\{(x_i,y_i)\}_{i=1}^N$; learning rate $\eta$; batch size $B$; number of epochs $E$; initial parameters $\theta_0$.
-
-**Output**: Trained parameters $\theta$.
-
-1. Set $\theta \gets \theta_0$.
-2. For each epoch $e=1,\ldots,E$, shuffle $T_{\text{train}}$ to reduce order-dependent patterns.
-3. Partition the shuffled data into mini-batches $M$ of size $B$.
-4. For each mini-batch $M$, compute predictions $\hat{y}_i=f_{\theta}(x_i)$ for all $(x_i,y_i)\in M$.
-5. Compute the batch loss $\mathcal{L}_M=\frac{1}{B}\sum_{(x_i,y_i)\in M}\ell(\hat{y}_i,y_i)$.
-6. Backpropagate $\mathcal{L}_M$ to obtain $\nabla_{\theta}\mathcal{L}_M$.
-7. Update parameters: $\theta \gets \theta-\eta\nabla_{\theta}\mathcal{L}_M$.
-8. Evaluate on validation data at the chosen cadence and stop if the convergence criterion is met.
-
-**Systems cost**: Steps 3 through 6 make $B$ the hardware unit of work: larger $B$ increases activation memory while improving matrix utilization and accelerator occupancy. Step 7 updates parameters once per batch rather than once per example, so $B$ also controls the gradient-update cadence until memory capacity, memory bandwidth, or convergence becomes the limiting resource.
-
-:::
-
-The inner loop in @alg-minibatch-sgd is the unit that the hardware repeatedly executes. Forward propagation creates activations for every example in the current mini-batch, backward propagation consumes those activations to compute gradients, and the update mutates the parameters once per batch rather than once per example. During training, we monitor several key metrics: training loss tracks the average loss over recent batches, validation accuracy measures performance on held-out test data, and learning progress indicates how quickly the network improves. For our digit recognition task, we might observe accuracy climb from 10 percent (random guessing) to over 95 percent through multiple epochs of training.
+The mini-batch loop makes the batch size $B$ the hardware unit of work: a larger $B$ improves matrix utilization and accelerator occupancy but raises activation memory, and because the update fires once per batch rather than once per example, $B$ also sets the gradient-update cadence, until capacity, bandwidth, or convergence becomes the limit. The inner loop in @algo-minibatch-sgd is the unit that the hardware repeatedly executes. Forward propagation creates activations for every example in the current mini-batch, backward propagation consumes those activations to compute gradients, and the update mutates the parameters once per batch rather than once per example. During training, we monitor several key metrics: training loss tracks the average loss over recent batches, validation accuracy measures performance on held-out test data, and learning progress indicates how quickly the network improves. For our digit recognition task, we might observe accuracy climb from 10 percent (random guessing) to over 95 percent through multiple epochs of training.
 
 #### Convergence and stability considerations {#sec-neural-computation-convergence-stability-considerations-a9b7}
 

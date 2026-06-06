@@ -237,7 +237,7 @@ local function render_pseudocode_block_latex(global_options)
       options["pdf-no-end"] = nil_to_default(options["pdf-no-end"], "false")
       options["pdf-indent-lines"] = nil_to_default(options["pdf-indent-lines"], "false")
       options["pdf-italic-comment"] = nil_to_default(options["pdf-italic-comment"], "true")
-      options["pdf-right-comment"] = nil_to_default(options["pdf-right-comment"], "false")
+      options["pdf-right-comment"] = nil_to_default(options["pdf-right-comment"], "true")
       options["pdf-comment-color"] = nil_to_default(options["pdf-comment-color"], "black")
       options["pdf-comment-delimiter"] = nil_to_default(options["pdf-comment-delimiter"], "$\\triangleright$"):gsub("%%", "%%%%")
       
@@ -322,6 +322,157 @@ local function render_pseudocode_block_latex(global_options)
   return filter
 end
 
+-- ── EPUB: static rendering (pseudocode.js does not run in most e-readers) ─────
+local function take_braced(s)
+  local depth = 1
+  for i = 1, #s do
+    local c = s:sub(i, i)
+    if c == "{" then
+      depth = depth + 1
+    elseif c == "}" then
+      depth = depth - 1
+      if depth == 0 then
+        return s:sub(1, i - 1), s:sub(i + 1)
+      end
+    end
+  end
+  return s, ""
+end
+
+local function replace_braced(s, cmd, pre, post)
+  local result = ""
+  local pat = "\\" .. cmd .. "{"
+  while true do
+    local a, b = s:find(pat, 1, true)
+    if not a then
+      return result .. s
+    end
+    result = result .. s:sub(1, a - 1) .. pre
+    local content, rest = take_braced(s:sub(b + 1))
+    result = result .. content .. post
+    s = rest
+  end
+end
+
+local function remove_braced(s, cmd)
+  local result = ""
+  local pat = "\\" .. cmd .. "{"
+  while true do
+    local a, b = s:find(pat, 1, true)
+    if not a then
+      return result .. s
+    end
+    result = result .. s:sub(1, a - 1)
+    local _, rest = take_braced(s:sub(b + 1))
+    s = rest
+  end
+end
+
+local function epub_step_md(line)
+  local t = line:gsub("^%s+", ""):gsub("%s+$", "")
+  if t == "" then
+    return nil
+  end
+  local comment = nil
+  local ca, cb = t:find("\\Comment{", 1, true)
+  if ca then
+    comment = take_braced(t:sub(cb + 1))
+  end
+  t = remove_braced(t, "Comment")
+  t = t:gsub("\\quad", " "):gsub("\\;", " "):gsub("\\,", " "):gsub("\\!", "")
+  t = replace_braced(t, "ElsIf", "**else if** ", " **then**")
+  t = replace_braced(t, "If", "**if** ", " **then**")
+  t = replace_braced(t, "For", "**for** ", " **do**")
+  t = replace_braced(t, "While", "**while** ", " **do**")
+  t = replace_braced(t, "Until", "**until** ", "")
+  t = replace_braced(t, "textbf", "**", "**")
+  t = replace_braced(t, "textit", "*", "*")
+  t = t:gsub("\\Statex%s*", ""):gsub("\\State%s*", "")
+  t = t:gsub("\\Require%s*", ""):gsub("\\Ensure%s*", "")
+  t = t:gsub("\\Return%s*", "**return** ")
+  t = t:gsub("\\EndFor", "**end for**"):gsub("\\EndWhile", "**end while**"):gsub("\\EndIf", "**end if**")
+  t = t:gsub("\\EndProcedure", "**end procedure**"):gsub("\\EndFunction", "**end function**")
+  t = t:gsub("\\Else", "**else**"):gsub("\\Repeat", "**repeat**")
+  t = t:gsub("%s+$", "")
+  if comment then
+    comment = comment:gsub("\\quad", " "):gsub("\\;", " "):gsub("\\,", " ")
+    t = t .. "  — *" .. comment .. "*"
+  end
+  if t == "" then
+    return nil
+  end
+  return t
+end
+
+local function render_pseudocode_block_epub(global_options)
+  local filter = {
+    CodeBlock = function(el)
+      if not el.attr.classes:includes("pseudocode") then
+        return el
+      end
+
+      local _, source_code = extract_source_code_options(el.text, "html")
+      local options = extract_source_code_options(el.text, "html")
+      local algorithm_id = options["label"]
+
+      local caption = global_options.caption_prefix
+      local ca, cb = source_code:find("\\caption{", 1, true)
+      if ca then
+        caption = take_braced(source_code:sub(cb + 1))
+      end
+
+      local numtxt = ""
+      if algorithm_id and global_options.caption_number then
+        local n = tostring(global_options.html_current_number)
+        if global_options.html_chapter_level then
+          n = global_options.html_chapter_level .. "." .. n
+        end
+        numtxt = " " .. n
+      end
+
+      local body = source_code:match("\\begin{algorithmic}.-\n(.-)\\end{algorithmic}") or ""
+
+      local md = { "**" .. global_options.caption_prefix .. numtxt .. "** " .. caption, "" }
+      local reqlines = {}
+      local steps = {}
+      for line in (body .. "\n"):gmatch("([^\n]*)\n") do
+        local trimmed = line:gsub("^%s+", "")
+        if trimmed:find("^\\Require") then
+          local c = epub_step_md((trimmed:gsub("^\\Require%s*", "")))
+          if c then table.insert(reqlines, "**Require:** " .. c) end
+        elseif trimmed:find("^\\Ensure") then
+          local c = epub_step_md((trimmed:gsub("^\\Ensure%s*", "")))
+          if c then table.insert(reqlines, "**Ensure:** " .. c) end
+        else
+          local s = epub_step_md(trimmed)
+          if s then table.insert(steps, s) end
+        end
+      end
+
+      if #reqlines > 0 then
+        table.insert(md, table.concat(reqlines, "  \n"))
+        table.insert(md, "")
+      end
+      for i, s in ipairs(steps) do
+        table.insert(md, i .. ". " .. s)
+      end
+
+      local parsed = pandoc.read(table.concat(md, "\n"), "markdown")
+      local div = pandoc.Div(parsed.blocks)
+      div.attr.classes = pandoc.List()
+      div.attr.classes:insert("pseudocode-epub")
+      if algorithm_id then
+        div.attr.identifier = algorithm_id
+        global_options.html_identifier_number_mapping[algorithm_id] = global_options.html_current_number
+        global_options.html_current_number = global_options.html_current_number + 1
+      end
+      return div
+    end,
+  }
+
+  return filter
+end
+
 local function render_pseudocode_block(global_options)
   local filter = {
     CodeBlock = function(el)
@@ -329,7 +480,9 @@ local function render_pseudocode_block(global_options)
     end,
   }
 
-  if quarto.doc.is_format("html") then
+  if quarto.doc.is_format("epub") then
+    filter = render_pseudocode_block_epub(global_options)
+  elseif quarto.doc.is_format("html") then
     filter = render_pseudocode_block_html(global_options)
   elseif quarto.doc.is_format("latex") then
     filter = render_pseudocode_block_latex(global_options)

@@ -1195,7 +1195,7 @@ for epoch in range(num_epochs):
 
 The `optimizer.zero_grad()` call marks the boundary between one update and the next. Gradients accumulate\index{Gradient Accumulation!framework behavior} across calls to `backward()`, so clearing them explicitly prevents stale gradients from contaminating the next batch. The same accumulation behavior later becomes useful for large effective batch sizes, but only when the training loop manages the boundary deliberately.
 
-The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Alg-adam-update makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
+The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Algo-adam-update makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
 
 ::: {.column-margin}
 ![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A single stacked memory bar split into three segments, Params, Grads, and Adam optimizer state in a 1 to 1 to 2 ratio, with the optimizer-state segment highlighted as the largest single piece, half the total."}
@@ -1203,24 +1203,23 @@ The `optimizer.step()` method is the other boundary: it consumes the current gra
 *Adam state is the largest piece: 2$\times$ the weights, half of training memory.*
 :::
 
-::: {#alg-adam-update name="Adam parameter update"}
+```pseudocode
+#| label: algo-adam-update
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Adam parameter update (one optimizer step)}
+\begin{algorithmic}
+\Require gradient $g_t = \nabla\mathcal{L}(\theta_t)$; step $t$; rate $\eta$; decays $\beta_1,\beta_2$; constant $\epsilon$
+\Ensure updated parameter $\theta_{t+1}$; moment buffers $m_t, v_t$ carried to the next step
+\State $m_t \gets \beta_1 m_{t-1} + (1-\beta_1)\, g_t$ \Comment{first moment (momentum)}
+\State $v_t \gets \beta_2 v_{t-1} + (1-\beta_2)\, g_t^2$ \Comment{second moment (variance)}
+\State $\hat{m}_t \gets m_t / (1-\beta_1^{t})$; \quad $\hat{v}_t \gets v_t / (1-\beta_2^{t})$ \Comment{bias correction}
+\State $\theta_{t+1} \gets \theta_t - \eta\, \hat{m}_t / (\sqrt{\hat{v}_t} + \epsilon)$ \Comment{parameter update}
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: Parameter tensor $\theta_t$; gradient $g_t = \nabla \mathcal{L}(\theta_t)$; step index $t$; learning rate $\eta$; decay rates $\beta_1,\beta_2$; stability constant $\epsilon$.
-
-**State**: First moment $m_{t-1}$ and second moment $v_{t-1}$ for the same parameter tensor, initialized to zero and persisted across optimizer steps.
-
-**Output**: Updated parameter tensor $\theta_{t+1}$ and updated moment buffers $m_t$ and $v_t$.
-
-1. Update the first moment: $m_t \gets \beta_1 m_{t-1} + (1-\beta_1) g_t$.
-2. Update the second moment: $v_t \gets \beta_2 v_{t-1} + (1-\beta_2) g_t^2$.
-3. Bias-correct the estimates: $\hat{m}_t \gets m_t/(1-\beta_1^t)$ and $\hat{v}_t \gets v_t/(1-\beta_2^t)$.
-4. Update the parameter: $\theta_{t+1} \gets \theta_t - \eta \hat{m}_t/(\sqrt{\hat{v}_t}+\epsilon)$.
-
-**Systems cost**: Steps 1 and 2 update two persistent moment buffers per parameter, so parameter plus optimizer state is roughly 3$\times$ the parameter memory before gradients, activations, and FP32 master weights are counted. Step 4 then reads those buffers on every optimizer update, turning the state footprint into repeated bandwidth traffic as well as capacity pressure.
-
-:::
-
-Framework implementations manage the allocator and access patterns for these optimizer states, but they do not remove the cost. Each Adam step reads the gradient, parameter, first moment, and second moment, then writes back the updated moments and parameter. The abstraction reduces implementation burden; the systems budget still pays for two extra tensors that must occupy memory and move through the hierarchy every step.
+Steps 1 and 2 keep two persistent moment buffers per parameter, so parameters plus optimizer state reach roughly 3$\times$ the parameter memory before gradients, activations, and FP32 master weights are counted. Framework implementations manage the allocator and access patterns for these optimizer states, but they do not remove the cost. Each Adam step reads the gradient, parameter, first moment, and second moment, then writes back the updated moments and parameter. The abstraction reduces implementation burden; the systems budget still pays for two extra tensors that must occupy memory and move through the hierarchy every step.
 
 #### Learning rate scheduling integration {#sec-model-training-learning-rate-scheduling-integration-451b}
 
@@ -1500,7 +1499,31 @@ $$ \text{Memory per batch} = B \times \sum_{\ell=1}^{N_L} (s_\ell + a_\ell) $$ {
 This memory requirement compounds with the weights, gradients, and optimizer memory discussed in the previous section. @Eq-total-training-memory gives the full training memory footprint:
 $$ \text{Total Memory} = \text{Memory}_{\text{weights}} + \text{Memory}_{\text{gradients}} + \text{Memory}_{\text{optimizer}} + \text{Memory per batch} $$ {#eq-total-training-memory}
 
-To manage these substantial memory requirements, training systems use several sophisticated strategies. Gradient checkpointing is a basic approach, strategically recomputing some intermediate values during the backward pass rather than storing them. While this increases computational work, it can significantly reduce memory usage, enabling training of deeper networks or larger batch sizes on memory-constrained hardware [@chen2016training].
+To manage these substantial memory requirements, training systems use several sophisticated strategies. Gradient checkpointing is a basic approach, strategically recomputing some intermediate values during the backward pass rather than storing them. While this increases computational work, it can significantly reduce memory usage, enabling training of deeper networks or larger batch sizes on memory-constrained hardware [@chen2016training]. @Algo-gradient-checkpointing makes the trade explicit: the forward pass keeps activations at only a sparse set of checkpoint layers, and the backward pass recomputes the rest on demand.
+
+```pseudocode
+#| label: algo-gradient-checkpointing
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Gradient checkpointing (activation recomputation)}
+\begin{algorithmic}
+\Require $N_L$-layer network; checkpoint set $\mathcal{C} \subseteq \{1,\dots,N_L\}$ (e.g.\ every $\sqrt{N_L}$ layers)
+\Ensure parameter gradients, at reduced peak activation memory
+\For{$\ell = 1$ to $N_L$}
+    \State forward layer $\ell$; store its activation only if $\ell \in \mathcal{C}$ \Comment{drop the rest}
+\EndFor
+\For{$\ell = N_L$ down to $1$}
+    \If{the activation of layer $\ell$ was dropped}
+        \State recompute the forward segment from the nearest stored checkpoint through layer $\ell$
+    \EndIf
+    \State compute the layer's gradient; free the activation
+\EndFor
+\State \Return the accumulated gradients
+\end{algorithmic}
+\end{algorithm}
+```
+
+Spacing checkpoints every $\sqrt{N_L}$ layers can drop peak activation memory from $\mathcal{O}(N_L)$ to $\mathcal{O}(\sqrt{N_L})$, paid for by extra forward work over checkpoint segments during the backward pass. That is the lever that fits a network too large to train within accelerator memory, trading the iron law's operation term for activation capacity.
 
 The efficiency of these memory management strategies depends heavily on the underlying hardware architecture. Accelerator systems, with their high computational throughput but limited memory bandwidth\index{Accelerator!memory bandwidth limitations}, often encounter different bottlenecks than CPU systems. Memory bandwidth limitations on accelerators mean that even when sufficient storage exists, moving data between memory and compute units can become the primary performance constraint [@jouppi2017].
 
@@ -4631,7 +4654,7 @@ $$
 \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
 $$
 
-Flash Attention decomposes this computation by partitioning queries into tiles and keys/values into tiles. For each query tile $Q_i$ (size $b{\times}d$):
+@Algo-streaming-attention decomposes this computation by partitioning the queries and the keys/values into tiles small enough to fit in SRAM, then streaming over the key/value tiles while maintaining the running softmax statistics needed to assemble each output tile, without ever forming the full score matrix.
 
 ::: {.column-margin}
 ![](images/svg/vol1_training_margin_003.svg){width="100%" fig-alt="Two-rung memory ladder comparing a full 4096 by 4096 attention matrix at about 64 MB with a 128 by 128 SRAM tile at about 64 KB."}
@@ -4639,14 +4662,28 @@ Flash Attention decomposes this computation by partitioning queries into tiles a
 *FlashAttention swaps the full attention matrix for small SRAM tiles.*
 :::
 
-1. Initialize output block $Y_i = \mathbf{0}$ and normalizer $l_i = \mathbf{0}$ in SRAM
-2. For each key-value block $(K_j, V_j)$:
-   - Load $Q_i$, $K_j$, $V_j$ into SRAM
-   - Compute attention scores: $Z_{ij} = Q_i K_j^T / \sqrt{d_k}$ (size $b{\times}b$, fits in SRAM)
-   - Update the running row-wise maximum $m_i$ and normalizer $l_i$ from $Z_{ij}$ (online softmax statistics across all key blocks)
-   - Accumulate: Rescale the previous $Y_i$ by the corrected normalizer and add the contribution from $\exp(Z_{ij} - m_i) V_j$
-   - Discard $Z_{ij}$ and the per-tile exponentials (no HBM storage)
-3. Write final $Y_i$ to HBM
+```pseudocode
+#| label: algo-streaming-attention
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{FlashAttention: tiled attention with online softmax}
+\begin{algorithmic}
+\Require queries $Q$, keys $K$, values $V$ for a length-$S$ sequence; tile size $b$
+\Ensure attention output $Y$, without materializing the $S\times S$ score matrix
+\For{each query tile $Q_i$}
+    \State $Y_i^{\text{acc}} \gets \mathbf{0}$; row-wise max $m_i \gets -\infty$; row-wise normalizer $l_i \gets 0$ \Comment{in SRAM}
+    \For{each key/value tile $(K_j, V_j)$}
+        \State load $Q_i, K_j, V_j$ into SRAM;\ $Z_{ij} \gets Q_i K_j^\top / \sqrt{d_k}$
+        \State $m_i' \gets \max(m_i,\operatorname{rowmax}(Z_{ij}))$ \Comment{new stable max}
+        \State $Y_i^{\text{acc}} \gets Y_i^{\text{acc}}\odot e^{m_i-m_i'} + e^{Z_{ij}-m_i'}V_j$
+        \State $l_i \gets l_i\odot e^{m_i-m_i'} + \operatorname{rowsum}(e^{Z_{ij}-m_i'})$;\quad $m_i \gets m_i'$
+        \State discard $Z_{ij}$ \Comment{never written to HBM}
+    \EndFor
+    \State $Y_i \gets Y_i^{\text{acc}} / l_i$;\ write $Y_i$ to HBM
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+```
 
 No $S{\times}S$ matrix ever exists in HBM. The largest intermediate tensor is $b{\times}b$ (typically $b = 128$), requiring only 64 KB for a $128{\times}128$ FP32 matrix compared to 64 MB for the full $4096{\times}4096$ matrix.
 
