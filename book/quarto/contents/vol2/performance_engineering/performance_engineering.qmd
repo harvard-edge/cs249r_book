@@ -2363,43 +2363,43 @@ The case study demonstrates how disparate optimizations compound sequentially, t
 
 A team upgrades their inference cluster from A100s to H100s, expecting a 3$\times$ latency reduction based on the spec sheet's teraFLOP/s rating, only to find their generative model barely runs 15 percent faster. The trap is pervasive: assuming that raw compute capacity dictates inference speed when the workload is entirely bound by memory bandwidth.
 
-A common fallacy is this: *More FLOP/s means faster inference.*
+**Fallacy**: *More FLOP/s means faster inference.*
 
 The roofline model demonstrates that most inference operations are memory-bound, not compute-bound. A GPU with 2$\times$ the peak FLOP/s but the same memory bandwidth will not generate tokens any faster for batch-1 LLM decode. The correct metric for memory-bound workloads is bandwidth, not FLOP/s. This fallacy leads organizations to purchase the most expensive compute hardware when a mid-range GPU with equivalent HBM bandwidth would deliver identical inference throughput.
 
-A recurring pitfall is this: *Planning FP8 adoption as an automatic training-time halving.*
+**Pitfall**: *Planning FP8 adoption as an automatic training-time halving.*
 
 FP8 doubles the peak TFLOP/s and doubles the effective memory bandwidth, but these gains are realized only for operations that are bottlenecked by compute or bandwidth at FP16. Element-wise operations like activation functions are already limited by kernel launch overhead, not by precision. Communication-bound distributed training steps gain nothing from reduced arithmetic precision if the communication volume (gradient sizes) is not also reduced. The actual speedup depends on the fraction of execution time spent in precision-sensitive operations.
 
-A common fallacy is this: *The largest kernel is the whole performance problem.*
+**Fallacy**: *The largest kernel is the whole performance problem.*
 
 The profiling case study in @sec-performance-engineering-case-study illustrates this pitfall. Engineers naturally focus on the single largest kernel, which is often the GEMM in a transformer layer. When the GEMM is already near-optimal, however, the remaining performance budget is distributed across dozens of smaller operations: normalization, activation, attention scoring, KV cache management, and kernel launch overhead. Collectively, these "small" operations can consume more than half of total execution time. Graph compilation and systematic fusion address this long tail more effectively than further GEMM optimization.
 
-A recurring pitfall is this: *Applying speculative decoding without considering batch dynamics.*
+**Pitfall**: *Applying speculative decoding without considering batch dynamics.*
 
 Speculative decoding excels at batch size 1, where decode is deeply memory-bound and the verification step is essentially "free" (the GPU has ample spare compute). At large batch sizes, decode approaches the compute-bound regime, and the verification step adds meaningful compute cost. Furthermore, the variable number of accepted tokens per request complicates continuous batching schedulers. In high-throughput serving scenarios with large batches, the overhead of speculation may outweigh its latency benefits.
 
-A common fallacy is this: *MoE expert count is a free scaling knob.*
+**Fallacy**: *MoE expert count is a free scaling knob.*
 
 Increasing the number of experts in an MoE model increases total parameters (capacity) without proportionally increasing per-token compute, which seems like a free lunch. Each additional expert, however, increases: (1) total memory requirements, requiring more GPUs; (2) AllToAll communication volume for expert routing; (3) load balancing difficulty, since the router must distribute tokens across more experts; and (4) training instability, as more experts compete for activation. Beyond approximately 64--256 experts, the system-level costs often outweigh the capacity benefits.
 
-A recurring pitfall is this: *Using graph compilers as a substitute for kernel analysis.*
+**Pitfall**: *Using graph compilers as a substitute for kernel analysis.*
 
 Graph compilers have improved dramatically, but they remain limited by their cost models and fusion heuristics. FlashAttention required human insight to recognize that attention could be reformulated as a tiled algorithm with online softmax, an algorithmic insight beyond the scope of ordinary compiler rewrite rules. Similarly, speculative decoding and MoE routing require algorithmic innovation that compilers cannot discover. Compilers automate known optimizations; human engineers discover new ones.
 
-A common fallacy is this: *The lowest supported precision is always the best precision.*
+**Fallacy**: *The lowest supported precision is always the best precision.*
 
 Aggressive quantization (INT4 weights, INT4 KV cache, FP8 activations) can degrade model quality in ways that are difficult to detect with standard benchmarks but visible to users. Perplexity on a held-out dataset may change by less than 1 percent, but the model may produce subtly worse responses for edge cases, rare languages, or complex reasoning tasks. The correct approach is targeted quantization: apply the most aggressive precision to the least sensitive components (KV cache, intermediate activations) and preserve higher precision for the most sensitive (first and last layers, attention logits). Calibration on a representative dataset, followed by evaluation on diverse quality benchmarks, is essential before deploying any quantized model to production.
 
-A recurring pitfall is this: *Measuring throughput without measuring quality.*
+**Pitfall**: *Measuring throughput without measuring quality.*
 
 A model serving system that generates 200 tokens/second is not twice as good as one generating 100 tokens/second if the first system achieves that throughput by using INT4 quantization that degrades answer quality by 15 percent. Performance metrics must always be reported alongside quality metrics. The correct optimization target is the Pareto frontier of throughput vs. quality, not throughput alone.
 
-A common fallacy is this: *A single profiling run is sufficient to characterize performance.*
+**Fallacy**: *A single profiling run is sufficient to characterize performance.*
 
 ML system performance is nonstationary. GPU thermal throttling reduces clock speeds (and therefore FLOP/s) after sustained workloads, sometimes by 10--15 percent. Memory fragmentation accumulates over hours of serving, gradually reducing effective batch size. Network congestion varies with cluster-wide traffic patterns. A profiling run during a cold start may show different bottleneck patterns than one after hours of production serving. Reliable performance characterization requires profiling under realistic, sustained conditions, ideally sampling multiple times across a production run.
 
-A recurring pitfall is this: *Optimizing for average case while ignoring tail latency.*
+**Pitfall**: *Optimizing for average case while ignoring tail latency.*
 
 A serving system may achieve excellent average inter-token latency (30 ms) while exhibiting P99 latency of 500 ms due to garbage collection pauses in the Python runtime, CUDA memory allocation stalls, or occasional AllReduce delays from network congestion. For interactive applications, the user experience is dominated by the worst case, not the average. Performance engineering for production systems must profile and optimize tail latency specifically, often through techniques orthogonal to the throughput optimizations in this chapter: preallocated memory pools, CUDA graph replay (which eliminates allocation variance), and priority scheduling for latency-sensitive requests.
 
