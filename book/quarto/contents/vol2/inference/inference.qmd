@@ -1603,11 +1603,13 @@ Recommendation systems present a third constraint regime that resembles neither.
 
 ### Feature-parallel batching for recommendation systems {#sec-inference-scale-featureparallel-batching-recommendation-systems-2a3f}
 
+Recommendation batching starts by grouping work around embedding locality rather than request shape. @Fig-feature-parallel-pipeline shows how the request is split into feature-specific paths before the dense ranking head recombines the retrieved representations.
+
 ::: {#fig-feature-parallel-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Feature-Parallel Batching Pipeline**: Requests are batched by feature type (Users, Items, Context) and dispatched to specialized embedding servers in parallel. The retrieved embeddings are then concatenated and processed by the dense ranking head. This architecture enables scaling to trillions of parameters by decoupling embedding storage from dense compute." fig-alt="Flow diagram showing a request entering a feature extraction layer. The request is split into User, Item, and Context parallel paths, each hitting sharded embedding servers. Outputs converge into a dense MLP ranking head."}
 ![](images/svg/feature-parallel-pipeline.svg)
 :::
 
-Recommendation systems expose the same scheduling principle under a different bottleneck. As @fig-feature-parallel-pipeline shows, their computation pattern involves:
+Recommendation systems expose the same scheduling principle under a different bottleneck. Their computation pattern involves:
 
 1. **Sparse feature lookup**\index{Sparse Feature Lookup}: Retrieve embeddings for user, item, and context features
 
@@ -4747,9 +4749,7 @@ The fastest response comes from batch size scaling\index{Scaling!batch size}, wh
 
 ### The cold start problem {#sec-inference-scale-cold-start-problem-ecf9}
 
-Cold start latency represents a significant challenge for serverless inference, with model loading often dominating the total startup time.
-
-Unlike stateless web services that start in seconds, inference services have significant startup latency as defined in @eq-cold-start-time:
+Cold start latency represents a significant challenge for serverless inference because model loading often dominates the total startup time. Unlike stateless web services that start in seconds, inference services must provision hardware, load weights, and warm runtime kernels before serving traffic, as @eq-cold-start-time defines:
 
 $$T_{\text{cold start}} = T_{\text{provision}} + T_{\text{load}} + T_{\text{warmup}}$$ {#eq-cold-start-time}
 
@@ -5028,13 +5028,11 @@ The cost savings above depend on anticipating traffic before it arrives. As @fig
 
 ### Warm pool management {#sec-inference-scale-warm-pool-management-a360}
 
-Maintaining a pool of prewarmed replicas reduces effective cold start time:
-
-Warm pool sizing starts from the expected spike and per-replica throughput:
+Maintaining a pool of prewarmed replicas reduces effective cold start time by buying idle readiness before demand arrives. Warm pool sizing starts from the expected spike and per-replica throughput:
 
 $$\text{Warm pool size} = \frac{\text{Max expected spike}}{\text{Per-replica throughput}} \times \text{Headroom factor}$$
 
-For example, if max spike is 2$\times$ normal and headroom factor is 1.5:
+For example, if the maximum expected spike is 2$\times$ normal and the headroom factor is 1.5, the fleet needs three times the minimum pool capacity available before the spike arrives:
 
 $$\text{Warm pool} = 2 \times 1.5 = 3 \times \text{minimum pool capacity}$$
 
@@ -5052,7 +5050,7 @@ When a traffic spike hits, the scaling sequence activates hot replicas immediate
 
 ### Scaling response time analysis {#sec-inference-scale-scaling-response-time-analysis-0dbf}
 
-The total time to respond to a scaling event is given by @eq-scaling-response:
+The scaling response budget is the sum of the control loop's detection, decision, provisioning, and warmup delays. @Eq-scaling-response makes those phases explicit:
 
 $$T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provision}} + T_{\text{warmup}}$$ {#eq-scaling-response}
 
@@ -5071,11 +5069,9 @@ Each component offers distinct optimization opportunities. Detection speed impro
 
 ### Spot and preemptible instances {#sec-inference-scale-spot-preemptible-instances-c969}
 
-Cloud providers may offer discounted GPU instances[^fn-spot-inference] that can be reclaimed with short notice:
+Cloud providers may offer discounted GPU instances[^fn-spot-inference] that can be reclaimed with short notice, so the scheduling decision is whether the workload can drain, reroute, or recompute without violating its SLO. @Tbl-gpu-instance-types lays out the three GPU instance classes and the workloads each suits best:
 
 [^fn-spot-inference]: **Spot Instance Economics**\index{Spot Instance Economics}\index{Spot Instances!inference}: Cloud providers have sold unused GPU capacity at large discounts, sometimes with 30-second to 2-minute termination notice. For inference, termination destroys in-flight requests and KV cache state, requiring graceful drain logic and rapid request re-routing. The savings can justify this complexity for burst and best-effort traffic tiers but are unsuitable for SLO-critical paths where termination would violate latency guarantees.
-
-@Tbl-gpu-instance-types lays out the three GPU instance classes and the workloads each suits best:
 
 | **Instance Type**    |  **Discount**  | **Interruption Notice** |   **Use Case**  |
 |:---------------------|:--------------:|:-----------------------:|:---------------:|

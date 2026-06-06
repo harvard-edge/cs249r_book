@@ -129,15 +129,13 @@ class MobileNetLighthouseSetup:
 
 ::: {#lhs-benchmarking-mobilenet-deployment-validation .callout-lighthouse title="MobileNetV2 deployment validation"}
 
-Throughout this chapter, we validate the complete optimization pipeline using MobileNetV2 (introduced in @sec-network-architectures-lighthouse-roster-model-biographies-a763) as our lighthouse example. MobileNetV2 refines v1's depthwise separable design with inverted residuals and linear bottlenecks while maintaining a similar parameter scale. MobileNetV2 exemplifies the deployment challenges where benchmarking determines success or failure. The validation questions that follow preview the three dimensions we develop throughout this chapter. Each section makes these questions concrete with specific metrics and methodologies.
-
-**Optimization pipeline**:
+Throughout this chapter, we validate the complete optimization pipeline using MobileNetV2 (introduced in @sec-network-architectures-lighthouse-roster-model-biographies-a763) as our lighthouse example. MobileNetV2 refines v1's depthwise separable design with inverted residuals and linear bottlenecks while maintaining a similar parameter scale. MobileNetV2 exemplifies the deployment challenges where benchmarking determines success or failure: compression can reduce model size, hardware acceleration can reduce inference latency, and only benchmarking can determine whether those gains survive the full deployment pipeline.
 
 1. **Model compression** (@sec-model-compression): INT8 quantization\index{Quantization!INT8 compression ratio} reduces MobileNetV2 from `{python} MobileNetLighthouseSetup.mobilenet_v2_size_mb_str` to `{python} MobileNetLighthouseSetup.mobilenet_v2_int8_size_mb_str` (`{python} MobileNetLighthouseSetup.mobilenet_v2_compression_ratio_mult_str` compression)
 2. **Hardware acceleration** (@sec-hardware-acceleration): EdgeTPU deployment\index{Edge TPU!inference latency} achieves `{python} MobileNetLighthouseSetup.edgetpu_latency_ms_str` inference vs. `{python} MobileNetLighthouseSetup.cpu_latency_ms_str` on CPU
 3. **Benchmarking validation** (this chapter): Verify the pipeline delivers in practice
 
-**Validation questions**:
+The same example also previews the three validation questions developed throughout the chapter:
 
 - **System**: Does EdgeTPU actually achieve `{python} MobileNetLighthouseSetup.edgetpu_latency_ms_str`, or do preprocessing and data transfer add 10 ms of overhead?
 - **Model quality**: Did INT8 quantization preserve accuracy? What about edge cases with unusual lighting?
@@ -1136,23 +1134,11 @@ While benchmarks like MLPerf reveal *how fast* a system is, micro-benchmarking t
 
 #### Framework profilers {.unnumbered}
 
-Tools like PyTorch Profiler\index{Framework Profiler!performance analysis tool} capture the "logical" execution flow:
-
-*   Which layer is taking the most time?
-*   Are CPU and GPU synchronized or overlapped?
-*   Is the data loader keeping up?
-
-The key metric is step time breakdown (data loading vs. compute vs. communication).
+Tools like PyTorch Profiler\index{Framework Profiler!performance analysis tool} capture the logical execution flow of a training or inference step. They identify which layer dominates runtime, whether CPU and GPU work overlap or synchronize unnecessarily, and whether the data loader keeps the accelerator supplied. The diagnostic metric is the step-time breakdown across data loading, compute, and communication, because that breakdown tells the engineer which subsystem owns the next optimization.
 
 #### Kernel profilers {.unnumbered}
 
-Tools like NVIDIA Nsight Systems and Compute\index{Kernel Profiler!hardware-level analysis} capture "physical" execution on the hardware:
-
-*   Is this matrix multiplication compute bound or memory bound?
-*   Is the system hitting 100 percent occupancy on the Streaming Multiprocessors?
-*   Are memory coalescing rules being respected?
-
-The key metric is roofline analysis (FLOP/s vs. memory bandwidth).
+Tools like NVIDIA Nsight Systems and Compute\index{Kernel Profiler!hardware-level analysis} capture physical execution on the hardware. They determine whether a matrix multiplication is compute bound or memory bound, whether the Streaming Multiprocessors reach high occupancy, and whether memory accesses obey coalescing rules. The diagnostic metric is roofline position, because FLOP/s relative to memory bandwidth reveals whether more arithmetic throughput can help or whether the kernel is waiting on data movement.
 
 The recommended workflow is to start with the Framework Profiler to find the slow layer (for example, "The Attention Block is slow"). Then, use the Kernel Profiler to diagnose the physics (for example, "The Softmax kernel is memory bound because it is reading too many bytes per FLOP"). This targeted approach avoids the "optimization without measurement" trap.
 
@@ -1988,9 +1974,7 @@ MLPerf Training\index{MLPerf Training!standardized framework} [@mattson2020mlper
 
 ### Training benchmark motivation {#sec-benchmarking-training-benchmark-motivation-f365}
 
-The impact of standardized training measurement is striking.
-
-@Fig-mlperf-training-improve demonstrates that performance improvements across successive MLPerf Training benchmark versions have consistently outpaced Moore's Law\index{Moore's Law!outpaced by ML training improvements}, with ResNet training speedups exceeding 30$\times$ over five years while semiconductor scaling would predict only 6.6$\times$. This exponential improvement illustrates a core principle: what gets measured gets improved. The standardized benchmarking framework creates competitive pressure that drives rapid optimization across the entire ML computing stack.
+The impact of standardized training measurement is striking: @fig-mlperf-training-improve demonstrates that performance improvements across successive MLPerf Training benchmark versions have consistently outpaced Moore's Law\index{Moore's Law!outpaced by ML training improvements}, with ResNet training speedups exceeding 30$\times$ over five years while semiconductor scaling would predict only 6.6$\times$. This exponential improvement illustrates a core principle: what gets measured gets improved. The standardized benchmarking framework creates competitive pressure that drives rapid optimization across the entire ML computing stack.
 
 ::: {#fig-mlperf-training-improve fig-env="figure" fig-pos="htb" fig-cap="**MLPerf Training Progress**: Standardized benchmarks reveal that machine learning training performance consistently surpasses Moore's Law, indicating substantial gains from systems-level optimizations. These trends emphasize how focused measurement and iterative improvement drive rapid advancements in ML training efficiency and scalability. Source: [@tschand2025]." fig-alt="Line chart with nine model benchmarks from 2018 to 2024 showing relative performance gains, with most exceeding the Moore's law baseline of 6.6×. Mask R-CNN shows the largest gain, up to 48×."}
 
@@ -2188,26 +2172,20 @@ Training benchmarks serve four interconnected functions. First, they enable hard
 
 ### Training metrics {#sec-benchmarking-training-metrics-0f1a}
 
-From a systems perspective, training benchmarks assess how efficiently a model reaches a predefined accuracy threshold. Metrics like throughput and scalability are only meaningful relative to whether the model achieves its target accuracy; without this constraint, optimizing raw speed may be misleading.
-
-MLPerf Training codifies this by defining specific accuracy targets per task: a system that trains quickly but misses the target is invalid, and one that converges accurately but too slowly is impractical. Effective benchmarking balances speed, efficiency, and accuracy convergence.
+From a systems perspective, training benchmarks assess how efficiently a model reaches a predefined accuracy threshold. Metrics like throughput and scalability are only meaningful relative to whether the model achieves its target accuracy; without this constraint, optimizing raw speed may be misleading. MLPerf Training codifies this by defining specific accuracy targets per task: a system that trains quickly but misses the target is invalid, and one that converges accurately but too slowly is impractical. Effective benchmarking balances speed, efficiency, and accuracy convergence.
 
 #### Time and throughput {#sec-benchmarking-time-throughput-1252}
 
-One of the primary metrics for evaluating training efficiency is the time required to reach a predefined accuracy threshold\index{Time-to-Accuracy!training benchmark primary metric}. Training time $(T_{\text{train}})$ measures how long a model takes to converge to an acceptable performance level, reflecting the overall computational efficiency of the system. Let $\text{Accuracy}(t)$ be the model's accuracy at training time $t$, and let **target accuracy** be the benchmark-specific threshold (for example, 75.9 percent top-1 accuracy for ResNet-50 on ImageNet in MLPerf). @Eq-training-time-benchmark formally defines this metric:
+One of the primary metrics for evaluating training efficiency is the time required to reach a predefined accuracy threshold\index{Time-to-Accuracy!training benchmark primary metric}. Training time $(T_{\text{train}})$ measures how long a model takes to converge to an acceptable performance level, reflecting the overall computational efficiency of the system. Let $\text{Accuracy}(t)$ be the model's accuracy at training time $t$, and let **target accuracy** be the benchmark-specific threshold (for example, 75.9 percent top-1 accuracy for ResNet-50 on ImageNet in MLPerf). @Eq-training-time-benchmark formally defines this metric, keeping the benchmark focused on how quickly a system achieves meaningful results:
 
 $$T_{\text{train}} = \operatorname{arg\,min}_{t} \big\{ \text{Accuracy}(t) \geq \text{target accuracy} \big\}$$ {#eq-training-time-benchmark}
-
-Time-to-accuracy ensures that benchmarking focuses on how quickly and effectively a system can achieve meaningful results.
 
 **Throughput**\index{Throughput!definition}[^fn-throughput-etymology], often expressed as the number of training samples processed per second, provides an additional measure of system performance. Let $N_{\text{samples}}$ be the total number of training samples processed and $T_{\text{train}}$ the training time from @eq-training-time-benchmark. @Eq-throughput-benchmark shows:
 $$\text{Throughput} = \frac{N_{\text{samples}}}{T_{\text{train}}}$$ {#eq-throughput-benchmark}
 
 [^fn-throughput-etymology]: **Throughput**: From manufacturing, where it measured units passing through a production line per unit time. The term entered computing in the 1960s batch-processing era. The manufacturing origin carries a systems lesson: throughput and latency are inherently opposed, because batching increases throughput (more units per hour) at the cost of individual item wait time. In ML serving, this manifests as the batch-size trade-off: larger batches improve GPU utilization but increase per-request latency.
 
-Throughput alone does not guarantee meaningful results, as a model may process a large number of samples quickly without necessarily reaching the desired accuracy.
-
-For example, in MLPerf Training, the benchmark for ResNet-50 may require reaching an accuracy target like 75.9 percent top-1 on the ImageNet dataset. A system that processes 10,000 images per second but fails to achieve this accuracy is not considered a valid benchmark result, while a system that processes fewer images per second but converges efficiently is preferable. This highlights why throughput should be evaluated in relation to time-to-accuracy rather than as an independent performance measure.
+Throughput alone does not guarantee meaningful results, as a model may process a large number of samples quickly without necessarily reaching the desired accuracy. For example, in MLPerf Training, the benchmark for ResNet-50 may require reaching an accuracy target like 75.9 percent top-1 on the ImageNet dataset. A system that processes 10,000 images per second but fails to achieve this accuracy is not considered a valid benchmark result, while a system that processes fewer images per second but converges efficiently is preferable. This highlights why throughput should be evaluated in relation to time-to-accuracy rather than as an independent performance measure.
 
 #### Scalability and parallelism {#sec-benchmarking-scalability-parallelism-1124}
 
@@ -4765,7 +4743,7 @@ Dynamic benchmarking approaches like Dynabench[^fn-dynabench] [@kiela2021] addre
 
 ### Holistic system-model-data evaluation {#sec-benchmarking-holistic-systemmodeldata-evaluation-8fda}
 
-We have now examined all three dimensions of our benchmarking framework: system benchmarks that validate hardware performance, model benchmarks that verify compression preserved quality, and data benchmarks that assess training set representativeness. Each dimension, evaluated independently, might pass with excellent scores. Yet AI benchmarking has traditionally evaluated these dimensions as separate entities, and this isolation creates blind spots where failures hide. Real-world AI performance emerges from the interaction of all three dimensions, and optimizing one can expose weaknesses in another.
+Passing system, model, and data benchmarks independently is not enough. A system benchmark can validate hardware performance, a model benchmark can verify that compression preserved quality, and a data benchmark can assess training set representativeness, yet the deployed system can still fail because the three dimensions interact. Real-world AI performance emerges from that interaction, and optimizing one dimension can expose weaknesses in another.
 
 Consider a concrete failure cascade: a team achieves excellent MLPerf Inference scores by deploying an INT8-quantized model on optimized hardware. System benchmarks pass. The quantized model, however, was validated only on ImageNet-distributed test data; deployment reveals accuracy degradation on factory-floor images with different lighting characteristics. Model quality benchmarks would have caught the quantization sensitivity. Further investigation shows the training data contained no images with industrial lighting—a data quality gap that no amount of system or model optimization can address.
 

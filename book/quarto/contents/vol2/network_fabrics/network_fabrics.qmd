@@ -352,13 +352,13 @@ However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of 
 
 ### Reach and medium: Copper vs. optics {#sec-network-fabrics-copper-optics}
 
-The choice of physical medium determines the reach and economics of each link. Three categories recur in ML cluster design:
+The choice of physical medium determines how far a link can reach before latency, power, and cost reshape the cluster geometry. The three recurring categories serve different parts of that placement decision:
 
 - **DAC (Direct Attach Copper)**\index{DAC}: Passive copper cables offering the lowest latency and cost (~\$50), but limited to ~3 meters. Used exclusively within a rack.
 - **AOC (Active Optical Cable)**\index{AOC}: Fiber with permanently attached transceivers, suitable for 3 to 30 meter runs (~\$500). The conversion between electrical and optical signals, combined with Forward Error Correction (FEC)[^fn-fec-latency], adds hundreds of nanoseconds to every link.
+- **Pluggable Optics**\index{Pluggable Optics}: Separate transceivers and fiber cords, used for runs exceeding 30 meters to the network core.
 
 [^fn-fec-latency]: **FEC (Forward Error Correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is so fragile that the hardware must use FEC to reconstruct corrupted bits. This adds 100--200 ns per hop---a "latency tax" that is physically unavoidable. In a three-tier fat-tree, FEC alone can contribute over 1 $\mu$s to the round-trip time, making it a significant component of the $\alpha$ latency term.
-- **Pluggable Optics**\index{Pluggable Optics}: Separate transceivers and fiber cords, used for runs exceeding 30 meters to the network core.
 
 The sequence is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical Interconnect} extend a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
 
@@ -424,7 +424,7 @@ RDMA bypasses this entire layer. By offloading the transport logic to the NIC ha
 
 ### InfiniBand and RoCE {#sec-network-fabrics-ib-roce}
 
-Two transport protocols are widely used in GPU clusters:
+GPU clusters commonly choose between two RDMA transport stacks, and the decision is a reliability-versus-operations trade-off: InfiniBand provides losslessness as a native fabric property, while RoCE preserves Ethernet economics and ecosystem breadth at the cost of more delicate congestion control.
 
 - **InfiniBand (IB)**\index{InfiniBand}[^fn-infiniband-origin]: A purpose-built HPC architecture designed for point-to-point, switched fabrics [@infiniband2000spec]. It uses hardware-level **credit-based flow control**\index{Credit-Based Flow Control}: a sender must hold a credit (representing available buffer space at the receiver) before transmitting. IB is therefore inherently lossless at the link layer. It includes a **Subnet Manager (SM)**\index{Subnet Manager} for global routing and **Virtual Lanes (VLs)**\index{Virtual Lane} for traffic isolation.
 - **RoCE (RDMA over Converged Ethernet)**\index{RoCE}: Implements RDMA semantics over standard Ethernet. RoCEv2 encapsulates IB transport headers in UDP/IP packets. While it allows using multi-vendor Ethernet switches, it requires sophisticated congestion control (PFC and ECN) to approximate the losslessness that IB provides natively.
@@ -1047,9 +1047,7 @@ Verify your understanding of hierarchical switch fabrics:
 
 [^fn-switch-radix-density]: **Switch Radix**\index{Switch Radix!port density}: High-end switches (for example, NVIDIA Quantum-2) can feature a radix of 64 ports, each at 400 Gb/s. This density allows a two-tier fat-tree to support up to 2,048 GPUs with only two switch hops. As model scale pushes toward 100,000 GPUs, increasing switch radix (to 128 or 256), grouping accelerators into larger local domains, or accepting topology constraints are the main ways to avoid adding more tiers and the resulting latency/cost explosion.
 
-Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts_str` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ three-tier tree requires roughly $5k^2/4 \approx$ `{python} FatTreeScaling.fat_tree_switches_str` switches across the core, aggregation, and edge layers. At `{python} FatTreeScaling.switch_cost_low_str` to `{python} FatTreeScaling.switch_cost_high_str` per switch, the switching layer alone represents `{python} FatTreeScaling.infra_cost_low_m_str` to `{python} FatTreeScaling.infra_cost_high_m_str`.
-
-However, scale imposes a latency tax. Typical **hop counts**\index{Hop Count} are 2 for intra-pod (leaf-spine-leaf) and 4 for inter-pod (leaf-spine-core-spine-leaf). Each additional hop introduces serialization delay and switch processing time, adding microseconds to the $\alpha$ latency term that accumulates during the thousands of synchronization steps in a training run.
+Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts_str` hosts, but the added scale carries both cost and latency. A non-blocking $k=64$ three-tier tree requires roughly $5k^2/4 \approx$ `{python} FatTreeScaling.fat_tree_switches_str` switches across the core, aggregation, and edge layers; at `{python} FatTreeScaling.switch_cost_low_str` to `{python} FatTreeScaling.switch_cost_high_str` per switch, the switching layer alone represents `{python} FatTreeScaling.infra_cost_low_m_str` to `{python} FatTreeScaling.infra_cost_high_m_str`. Typical **hop counts**\index{Hop Count} also rise from 2 for intra-pod traffic (leaf-spine-leaf) to 4 for inter-pod traffic (leaf-spine-core-spine-leaf), adding serialization delay and switch processing time to the $\alpha$ latency term across thousands of synchronization steps. Rail-optimized topologies respond to both pressures by matching the physical cabling pattern to the collective communication pattern.
 
 ### Rail-optimized topology {#sec-network-fabrics-rail-optimized}
 
