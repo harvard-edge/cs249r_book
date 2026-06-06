@@ -81,6 +81,8 @@ def audit_main(
             efficiency=0.45
         )
 
+        # Relative speed via inverse latency: 1.0 = H100 parity, 0.5 = the local
+        # device takes twice as long for the same workload.
         ratio = h100_eval.performance.metrics['latency'] / eval_obj.performance.metrics['latency']
 
         if output_format == "json":

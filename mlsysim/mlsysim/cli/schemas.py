@@ -3,7 +3,7 @@ from typing import Optional, Any, List
 import yaml
 from pathlib import Path
 
-from mlsysim.core.constants import Q_, ureg
+from mlsysim.core.units import Q_, ureg
 from mlsysim.core.types import Quantity, require_unit_family
 from mlsysim.core.units import normalize_precision
 from mlsysim.models.registry import Models

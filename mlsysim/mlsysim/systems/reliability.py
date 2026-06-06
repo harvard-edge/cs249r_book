@@ -75,11 +75,19 @@ class Reliability(Registry):
     )
     SdcRatePerGpuHr = 1e-6
     Recovery = RecoveryProfile(
+        # Two DISTINCT detection quantities (clarified 2026-06-06; they are not
+        # interchangeable): heartbeat_timeout_s is the missed-heartbeat interval
+        # alone (the lower bound on detection); detection_time_s is the
+        # end-to-end budget — timeout plus failure confirmation and propagation
+        # to the controller — before any recovery action begins.
         heartbeat_timeout_s=sourced(
             30,
             pc.RECOVERY_TIME_ASSUMPTIONS,
             name="Heartbeat timeout",
-            description="Failure detection latency before reschedule.",
+            description=(
+                "Missed-heartbeat interval after which a coordinator declares a "
+                "worker failed; the lower bound on failure detection."
+            ),
         ),
         reschedule_time_s=sourced(
             60,
@@ -90,8 +98,11 @@ class Reliability(Registry):
         detection_time_s=sourced(
             60,
             pc.RECOVERY_TIME_ASSUMPTIONS,
-            name="Recovery-budget detection time",
-            description="Reference failure-detection time used in the recovery-budget example.",
+            name="End-to-end failure-detection time",
+            description=(
+                "Heartbeat timeout plus failure confirmation and propagation to "
+                "the controller, before recovery actions begin."
+            ),
         ),
         restart_time_s=sourced(
             180,

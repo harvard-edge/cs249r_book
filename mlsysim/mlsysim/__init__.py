@@ -31,7 +31,7 @@ from .ops import Ops
 from .engine import calibration
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
-from .core.constants import *  # noqa: F401,F403
+from .core.units import *  # noqa: F401,F403
 
 # AUTHORITATIVE PHYSICS FORMULAS
 from .physics import *  # noqa: F401,F403

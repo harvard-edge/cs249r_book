@@ -5,7 +5,7 @@ come from mlsysim's canonical constants.
 
 Approach:
   1. Build a registry of (canonical_name, numeric_value, magnitude_tolerance)
-     from mlsysim.core.constants.
+     from mlsysim.core.units.
   2. Walk every chapter QMD's Python cells. For each numeric literal
      assignment, check if (a) the variable name resembles a canonical name
      fragment AND (b) the literal matches the canonical value (within
@@ -65,7 +65,7 @@ CANONICAL = [
     ("shared_per_sm",  228,   0.02, "Hardware.Cloud.H100.memory.shared_memory_per_sm (KiB)"),
     ("sm_count",       132,   0.02, "Hardware.Cloud.H100.compute.sm_count"),
 
-    # On-chip / off-chip latency + access energy (ns / pJ) — Hardware.Tech / core/constants.py
+    # On-chip / off-chip latency + access energy (ns / pJ) — Hardware.Tech / core/units.py
     ("hbm_latency",    300,   0.05, "Hardware.Tech.Memory.DRAM.latency (ns)"),
     ("hbm_energy",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
     ("hbm_access",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),

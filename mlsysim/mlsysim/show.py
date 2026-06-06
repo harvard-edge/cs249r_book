@@ -17,7 +17,7 @@ Usage in tutorials:
            ["H100",  6.1, 0.42]])
 """
 
-from .core.constants import ureg
+from .core.units import ureg
 
 
 def _format_value(v):

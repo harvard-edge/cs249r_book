@@ -1,7 +1,7 @@
 # MLSysIM constants audit YAMLs (historical)
 
 These files record the **2025–2026 constants → registry migration** audit for each
-chapter: which LEGO cells used flat `mlsysim.core.constants` symbols and where they
+chapter: which LEGO cells used flat `mlsysim.core.units` symbols and where they
 should source values after migration.
 
 **Current source of truth:**
@@ -17,7 +17,7 @@ should source values after migration.
 | MLOps thresholds | `mlsysim/ops/` → `Ops.Monitoring.*` |
 | Solver/engine defaults | `mlsysim/core/calibration.py` → `mlsysim.engine.calibration.*` |
 | Economics | `mlsysim/infra/pricing.py` → `Infrastructure.Pricing.*` |
-| Physics / units only | `mlsysim/core/constants.py`, `mlsysim/physics/` |
+| Physics / units only | `mlsysim/core/units.py`, `mlsysim/physics/` |
 | Symbol → replacement map | `book/tools/audit/migrate_constants_to_registry.py` |
 | Live manifest | `book/tools/audit/artifacts/registry_migration_manifest.json` |
 
