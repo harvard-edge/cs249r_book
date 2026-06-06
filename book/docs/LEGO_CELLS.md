@@ -118,3 +118,77 @@ automate the checklist; until then, apply this contract in review.
 - `./book/binder check refs --scope inline-python` — chapter exec validation
 - `book/tools/audit/book_check_registry_sources.py` — legacy alias / constant import gate
 - `mlsysim/tests/test_constants_allowlist.py` — CI lock on `constants.py` surface
+
+## Audit runbook (last-minute cleanup)
+
+Use this pass before chapter sign-off or pre-push `/precheck`.
+
+### Phase 0 — Inventory
+
+```bash
+export PYTHONPATH=mlsysim
+python3 book/tools/audit/lego_focal_verify.py book/quarto/contents/vol1 book/quarto/contents/vol2
+python3 book/tools/audit/fmt/audit_fmt_usage.py --root book/quarto/contents
+python3 book/tools/audit/fmt/fmt_prose_contract.py --root book/quarto/contents
+```
+
+Rank chapters by focal-verify failures + `{python}` ref density. Ledger:
+`book/tools/audit/artifacts/lego_audit_ranked_chapters.md`.
+
+### Phase 1 — Gates (per chapter or corpus)
+
+```bash
+CH=book/quarto/contents/vol1/introduction/introduction.qmd
+./book/binder check code --scope lego-dead-code --path "$CH"
+./book/binder check code --scope lego-prose-units --path "$CH"
+python3 book/tools/audit/audit_math_canonical.py "$CH"
+./book/binder check math --scope canonical --path "$CH"
+python3 book/tools/scripts/maintenance/validate_inline_refs.py --path "$CH"
+```
+
+### Phase 2 — Naming contract
+
+Every `*_str` export must match its formatter (see `.claude/rules/lego-units.md`):
+
+- **Closed-fixed:** `*_w_str`, `*_gb_per_s_str` → typed fmt with pinned `unit=`
+- **Open:** generic `*_str` → `fmt()` and prose supplies unit
+- **Scale:** `*_b_str` → `fmt_params(..., scale="B")`; `*_m_str` → `fmt_count(..., scale="M")`
+- **Avoid false tokens:** `top_k_neighbors_str` not `top_k_str` when K is a dimension
+
+### Phase 3 — Prose preview (after each fix batch)
+
+```bash
+PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_prose.py "$CH" --flagged-only
+```
+
+### Phase 4 — HTML ground truth
+
+```bash
+./book/binder build html --vol1 introduction/introduction --skip-hygiene --skip-validate -v
+python3 book/tools/audit/fmt/audit_html.py book/quarto/_build/html-vol1/contents/vol1/introduction/introduction.html
+```
+
+Spot-check rendered prose for double units and literal `{python}`.
+
+### Phase 5–6 — Capstone
+
+```bash
+./book/tools/audit/verify_lego_pipeline.sh   # or /precheck before push
+```
+
+Sign-off template: `book/tools/audit/artifacts/lego_audit_signoff.md`.
+
+### Follow-up: distance / length exports (P5)
+
+Some cells still use **open** `fmt()` for meters while prose supplies the unit:
+
+```python
+distance_str = fmt(distance_m, precision=2, commas=False)
+# prose: ... `{python} EdgeLatencyDistance.distance_str` meters ...
+```
+
+This pass deferred a corpus-wide decision on:
+
+- **Comma rule** — no commas for small decimals (2.8 m, 3.33 m); commas when displaying km or values ≥ 1,000 m.
+- **Closed vs open** — compare `LightLatency.distance_str` (`fmt_qty`, closed km) vs `BrakingDistance` / `EdgeLatencyDistance` (open m + prose “meters”).
+- **`fmt_length` helper** — optional typed formatter (pinned `unit=` or auto m/km) if the pattern repeats; see P5 in `lego_audit_signoff.md`.
