@@ -129,7 +129,7 @@ class SystemEvaluator:
             ms, throughput in 1/s, TCO in USD, carbon in metric tons).
         """
         
-        from .solver import SingleNodeModel, DistributedModel, EconomicsModel
+        from .solvers import SingleNodeModel, DistributedModel, EconomicsModel
         from .pipeline import Pipeline
 
         # Compose the pipeline dynamically based on the inputs

@@ -16,7 +16,7 @@ from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.registry import Systems
 from mlsysim.infrastructure.registry import Infrastructure, Grids
-from mlsysim.engine.solver import (
+from mlsysim.engine.solvers import (
     SingleNodeModel,
     ServingModel,
     TrainingMemoryModel,

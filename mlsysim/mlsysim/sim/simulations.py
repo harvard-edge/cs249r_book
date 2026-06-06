@@ -13,7 +13,7 @@ from .ledger import SystemLedger, PerformanceMetrics, SustainabilityMetrics, Eco
 from .personas import Persona
 from ..engine.scenarios import Scenario
 from ..engine.engine import Engine
-from ..engine.solver import SustainabilityModel, EconomicsModel, ReliabilityModel
+from ..engine.solvers import SustainabilityModel, EconomicsModel, ReliabilityModel
 from ..systems.types import Fleet
 from ..infrastructure.registry import Infrastructure
 

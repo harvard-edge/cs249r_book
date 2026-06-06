@@ -1,7 +1,7 @@
 """Data-ingestion and preprocessing pipeline solvers.
 
-These implementations live outside ``engine.solver`` so the public import
-module can stay small while domain logic remains easier to review.
+Domain implementations behind ``mlsysim.solvers`` (the public import
+path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
 """
 
 # ruff: noqa: F401

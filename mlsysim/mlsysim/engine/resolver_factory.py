@@ -1,6 +1,6 @@
 import logging
 from typing import Type, Dict
-from .solver import BaseResolver
+from .solvers import BaseResolver
 
 logger = logging.getLogger(__name__)
 

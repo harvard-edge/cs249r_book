@@ -2,7 +2,7 @@ import pytest
 
 import mlsysim
 from mlsysim.core.constants import Q_
-from mlsysim.engine.solver import (
+from mlsysim.engine.solvers import (
     DistributedModel,
     EconomicsModel,
     ServingModel,
