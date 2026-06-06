@@ -3,12 +3,18 @@
 
 Policy
 ------
-Only **closed** exports (domain formatters, ``fmt_qty``, ``fmt_percent``, or
-``*_unit_str`` names fed by open ``fmt()``) carry their own unit glyph. Prose
-must not repeat that unit after the ref.
+Only **closed** exports (domain formatters, ``fmt_qty``, ``fmt_percent`` with
+``style='prose'|'symbol'``, ``fmt_count(scale=...)``, ``fmt_multiple``, or
+``*_unit_str`` names fed by open ``fmt()`` on a unit-suffixed name) carry their
+own unit glyph. Prose must not repeat that unit after the ref.
 
-**Open** exports (``fmt()``, ``fmt_int()`` on bare scalars) intentionally leave
-the unit to prose — ``32 GPUs``, ``95 percent``, ``10 ms`` are valid.
+**Open** exports (``fmt()``, ``fmt_int()`` on bare scalars, ``fmt_percent`` with
+``style='number'``) intentionally leave the unit to prose — ``32 GPUs``,
+``95 percent``, ``10 ms``, ``295 FLOP/byte`` are valid when the export is open.
+
+Complements ``fmt/fmt_prose_contract.py`` (percent/USD/scale/mult glyph rules).
+This checker owns **domain-unit** duplication: bandwidth, FLOP rate, arithmetic
+intensity, memory, carbon intensity, length, power, latency, etc.
 
 Legacy inline LEGO suppressions are skipped by this checker,
 but authored chapters should not introduce them; use source-of-truth values or a
@@ -37,6 +43,7 @@ CLOSED_DOMAIN_FMT = re.compile(
     r"fmt_latency|fmt_percent|fmt_rate|fmt_usd|fmt_eur|fmt_time|fmt_tokens|fmt_params|"
     r"fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
     r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_throughput|"
+    r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|"
     r"fmt_sci_qty)\s*\(",
     re.M | re.I,
 )
@@ -52,10 +59,11 @@ FMT_SUFFIX = re.compile(
 # Unit/currency tokens immediately after a closing backtick on a _str ref.
 PROSE_UNIT_AFTER_REF = re.compile(
     r"`\{python\}\s+([A-Za-z_][\w.]*_str)`\s*"
-    r"(ms|mW|MW|GW|kW|Wh|kWh|MWh|GWh|"
+    r"(FLOPs?/byte|flops?/byte|g/kWh|kg/kWh|km/h|"
+    r"ms|mW|MW|GW|kW|Wh|kWh|MWh|GWh|"
     r"GB|MB|KB|GiB|TiB|TB|"
     r"seconds?|secs?|minutes?|mins?|hours?|hrs?|weeks?|months?|years?|"
-    r"percent|GPUs?|QPS|FLOPS|TFLOP/?s|PFLOP/?s|"
+    r"percent|GPUs?|QPS|FLOPS|TFLOP/?s|PFLOP/?s|GFLOP/?s|"
     r"flights?|tokens?|images?|nodes?|servers?|"
     r"USD|\$|%|×|x\b|tonnes?|metric tons?)",
     re.I,
@@ -88,14 +96,15 @@ _FMT_UNITS: dict[str, frozenset[str]] = {
     "fmt_percent": frozenset({"percent", "%"}),
     "fmt_usd": frozenset({"$", "usd"}),
     "fmt_eur": frozenset({"eur"}),
-    "fmt_rate": frozenset({"qps", "tflop/s", "tflops/s", "gb/s", "tb/s"}),
-    "fmt_flop_rate": frozenset({"flop/s", "flops/s", "tflop/s", "tflops/s", "pflop/s", "pflops/s"}),
+    "fmt_rate": frozenset({"qps", "tflop/s", "tflops/s", "gb/s", "tb/s", "km/h"}),
+    "fmt_flop_rate": frozenset({"flop/s", "flops/s", "tflop/s", "tflops/s", "pflop/s", "pflops/s", "gflop/s"}),
     "fmt_flops": frozenset({"flop", "flops", "kflop", "mflop", "gflop", "tflop", "pflop"}),
     "fmt_ops_rate": frozenset({"ops/s", "tops", "tops/s"}),
     "fmt_arithmetic_intensity": frozenset({"flop/byte", "flops/byte"}),
     "fmt_length": frozenset({"m", "meter", "meters", "metre", "metres", "km", "kilometer", "kilometers"}),
     "fmt_compute_efficiency": frozenset({"tflop/s/w", "tflops/s/w"}),
     "fmt_carbon_intensity": frozenset({"g/kwh", "kg/kwh"}),
+    "fmt_bandwidth": frozenset({"gb/s", "tb/s", "gib/s", "tib/s", "mb/s", "kb/s"}),
     "fmt_emissions": frozenset({"t", "tonne", "tonnes", "metric ton", "metric tons", "kg", "g"}),
     "fmt_latency": frozenset({"ns", "us", "µs", "ms", "s", "sec", "secs", "second", "seconds",
                                "minute", "minutes", "hour", "hours"}),
@@ -180,6 +189,8 @@ def _normalize_unit(token: str) -> str:
         return "x"
     if t.startswith("metric ton"):
         return "metric tons" if t.endswith("s") else "metric ton"
+    # Normalize slash compounds (FLOP/byte, g/kWh, TFLOP/s, …).
+    t = t.replace("flops/", "flop/").replace("tflops/", "tflop/").replace("gflops/", "gflop/")
     return t
 
 

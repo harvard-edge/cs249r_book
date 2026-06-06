@@ -141,10 +141,18 @@ Rank chapters by focal-verify failures + `{python}` ref density. Ledger:
 CH=book/quarto/contents/vol1/introduction/introduction.qmd
 ./book/binder check code --scope lego-dead-code --path "$CH"
 ./book/binder check code --scope lego-prose-units --path "$CH"
+python3 book/tools/audit/book_check_lego_prose_units.py "$CH"
+python3 book/tools/audit/fmt/fmt_prose_contract.py "$CH"
 python3 book/tools/audit/audit_math_canonical.py "$CH"
 ./book/binder check math --scope canonical --path "$CH"
 python3 book/tools/scripts/maintenance/validate_inline_refs.py --path "$CH"
 ```
+
+**Prose-unit contract (two lanes):** `lego-prose-units` / `book_check_lego_prose_units.py`
+flags domain glyphs (`FLOP/byte`, `TFLOP/s`, `g/kWh`, `GB`, …) immediately after a
+**closed** `` `{python} *_str` `` export. `fmt_prose_contract.py` flags `%`, `$`, scale,
+and `×` duplication. Open `fmt()` exports intentionally keep units in prose.
+See `book/tools/audit/artifacts/lego_closed_prose_audit.md`.
 
 ### Phase 2 — Naming contract
 
