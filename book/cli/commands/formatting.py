@@ -6,7 +6,7 @@ list spacing, div spacing, and table formatting.
 
 Usage:
     binder format blanks   — Collapse extra blank lines
-    binder format python   — Format Python code blocks (Black, 70 chars)
+    binder format python   — Format Python code blocks (Black; display 70, LEGO 150)
     binder format lists    — Fix bullet list spacing
     binder format divs     — Fix div/callout spacing
     binder format tables   — Prettify grid tables
@@ -118,7 +118,7 @@ class FormatCommand:
         table.add_column("Description", style="white", width=45)
 
         table.add_row("blanks", "Collapse extra blank lines (native)")
-        table.add_row("python", "Format Python code blocks via Black (70 chars)")
+        table.add_row("python", "Format Python via Black (display 70, LEGO cells 150)")
         table.add_row("lists", "Fix bullet list spacing (blank line before lists)")
         table.add_row("divs", "Fix div/callout spacing (paragraph ↔ list gaps)")
         table.add_row("tables", "Prettify grid tables (align columns, bold headers)")
