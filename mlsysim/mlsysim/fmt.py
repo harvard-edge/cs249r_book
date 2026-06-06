@@ -1234,6 +1234,7 @@ _RATE_UNITS = {
     "models/year", "reads/year", "photos/patient",
     "utterances/speaker", "cameras/store", "boards/store",
     "cases/day",
+    "km/h",
 }
 
 
@@ -1952,6 +1953,17 @@ def fmt_time(
     )
 
 
+def _pick_length_unit(qty):
+    """Auto-select meter vs kilometer for prose length display."""
+    from .core.units import kilometer, meter
+
+    q = qty.to(meter)
+    mag = abs(q.magnitude)
+    if mag < 1000:
+        return meter
+    return kilometer
+
+
 def _pick_memory_unit(qty, *, binary=False):
     from .core.units import GB, GiB, KB, KiB, MB, MiB, PB, TB, TiB, byte
 
@@ -2282,6 +2294,27 @@ def fmt_energy_per_flop(quantity, *, unit=None, precision=None, commas=False, lo
     q = quantity.to(display_unit)
     p = _resolve_display_precision(q.magnitude, precision)
     return fmt_qty(q, display_unit, precision=p, commas=commas, lower_bound=lower_bound)
+
+
+def fmt_length(quantity, *, unit=None, precision=None, commas=None):
+    """Format length/distance quantities for prose (m or km).
+
+    When ``unit`` is omitted, values under 1,000 m render in meters; longer
+    distances auto-scale to km. Default comma policy: none for meter magnitudes
+    below 1,000; commas enabled for km and for meter values ≥ 1,000.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_length() requires a Pint Quantity.")
+    from .core.units import meter
+
+    display_unit = (
+        _coerce_unit(unit) if unit is not None else _pick_length_unit(quantity)
+    )
+    q = quantity.to(display_unit)
+    p = _resolve_display_precision(q.magnitude, precision)
+    if commas is None:
+        commas = display_unit != meter or abs(q.magnitude) >= 1000
+    return fmt_qty(q, display_unit, precision=p, commas=commas)
 
 
 def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=False):

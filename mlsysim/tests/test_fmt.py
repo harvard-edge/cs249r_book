@@ -35,6 +35,7 @@ from mlsysim.fmt import (
     fmt_magnitude,
     fmt_flop_rate,
     fmt_flops,
+    fmt_length,
     fmt_ops_rate,
     fmt_water,
     fmt_water_rate,
@@ -1021,6 +1022,7 @@ class TestDomainFormatters:
         assert fmt_rate(12, "cameras/store", precision=0, commas=False) == "12 cameras/store"
         assert fmt_rate(3, "boards/store", precision=0, commas=False) == "3 boards/store"
         assert fmt_rate(1000, "cases/day", precision=0, commas=True) == "1,000 cases/day"
+        assert fmt_rate(120, "km/h", precision=0, commas=False) == "120 km/h"
 
     def test_small_physical_label_helpers(self):
         from mlsysim.core.units import second
@@ -1254,3 +1256,18 @@ class TestAuditRepairs:
     def test_fmt_usd_positive_unchanged(self):
         assert fmt_usd(15000) == "\\$15,000"
         assert fmt_usd(8000, approx=True, marker="*") == "~\\$8,000*"
+
+
+class TestFmtLength:
+    def test_fmt_length_meters_small_no_commas(self):
+        from mlsysim.core.units import meter
+
+        assert fmt_length(2.8 * meter, unit=meter, precision=1) == "2.8 m"
+
+    def test_fmt_length_kilometers_commas(self):
+        from mlsysim.core.units import kilometer
+
+        assert fmt_length(3600 * kilometer, unit=kilometer, precision=0) == "3,600 km"
+
+    def test_fmt_rate_kmh(self):
+        assert fmt_rate(120, "km/h", precision=0, commas=False) == "120 km/h"
