@@ -216,7 +216,7 @@ Beyond gang scheduling, topology awareness via **placement groups**[^fn-placemen
 
 [^fn-gang-scheduling]: **Gang Scheduling**\index{Gang Scheduling!origins}: Formalized by @ousterhout1982scheduling for parallel systems, where the "Ousterhout matrix" co-schedules related threads across processors in synchronized time slices. In ML clusters, the constraint is stricter: synchronous AllReduce requires all workers simultaneously, so partial allocation wastes 100 percent of held resources rather than merely degrading throughput. A 1,024-GPU job holding 900 GPUs while waiting for 124 more burns approximately \$1,800/hour in idle capacity [@burns2016].
 
-GPU heterogeneity adds a second challenging dimension. Many clusters contain mixtures of A100 and H100 accelerators with different memory capacities (`{python} ClusterEconomicsContext.a100_mem_gb_str` vs. `{python} ClusterEconomicsContext.h100_mem_gb_str`), compute throughput, and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
+GPU heterogeneity adds a second challenging dimension. Many clusters contain mixtures of A100 and H100 accelerators with different compute throughput (`{python} ClusterEconomicsContext.a100_mem_gb_str` and `{python} ClusterEconomicsContext.h100_mem_gb_str` HBM capacities are comparable, but H100 Tensor Core throughput is roughly twice the A100 rate) and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
 
 Job duration unpredictability compounds these challenges further. A training run may converge early and complete in days rather than weeks. Hardware failures may abort jobs unexpectedly, returning resources at unpredictable times. Hyperparameter searches may reveal early that certain configurations will not succeed, leading to voluntary termination. Traditional scientific computing workloads, such as weather simulations or molecular dynamics, have more predictable runtimes that enable better scheduling decisions: the scheduler can project when resources will become available and plan accordingly. ML workloads deny this luxury, forcing schedulers to operate with deep uncertainty about when current jobs will release resources.
 
@@ -1432,13 +1432,15 @@ class SpotTrainingEconomics:
     on_demand_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     spot_rate = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.to(USD / hour).magnitude
     checkpoint_overhead_fraction = 0.05
-    interruptions = 14
+    interruptions_per_day = 14
     restart_hours = 0.5
     # ┌── 2. EXECUTE ───────────────────────────────────────
     on_demand_cost = gpus * run_hours * on_demand_rate
     spot_base_cost = gpus * run_hours * spot_rate
     checkpoint_extra_hours = checkpoint_overhead_fraction * run_hours
-    restart_total_hours = interruptions * restart_hours
+    run_days = run_hours // HOURS_PER_DAY
+    restart_interruptions = interruptions_per_day * run_days
+    restart_total_hours = restart_interruptions * restart_hours
     spot_total_hours = run_hours + checkpoint_extra_hours + restart_total_hours
     spot_total_cost = gpus * spot_total_hours * spot_rate
     savings = on_demand_cost - spot_total_cost
@@ -1446,8 +1448,8 @@ class SpotTrainingEconomics:
     longer_pct = (spot_total_hours / run_hours - 1) * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(on_demand_cost == 344064, f"Expected on-demand cost 344064, got {on_demand_cost}")
-    check(abs(spot_total_hours - 359.8) < 1e-9, f"Expected 359.8 hours, got {spot_total_hours}")
-    check(abs(spot_total_cost - 128952.32) < 1e-2, f"Expected spot cost 128952.32, got {spot_total_cost}")
+    check(abs(spot_total_hours - 450.8) < 1e-9, f"Expected 450.8 hours, got {spot_total_hours}")
+    check(abs(spot_total_cost - 161566.72) < 1e-2, f"Expected spot cost 161566.72, got {spot_total_cost}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     on_demand_rate_str = fmt_usd(on_demand_rate, precision=0, commas=False, per="GPU-hour")
     spot_rate_str = fmt_usd(spot_rate, precision=2, commas=False, per="GPU-hour")
@@ -1463,7 +1465,8 @@ class SpotTrainingEconomics:
     spot_gpus_str = fmt_count(gpus, commas=False, label="GPU")
     spot_run_hours_str = fmt_time(run_hours, 'hour', precision=0, commas=False, style='word')
     checkpoint_overhead_pct_str = fmt_percent(checkpoint_overhead_fraction, precision=0, commas=False, style='prose')
-    restart_interruptions_str = fmt(interruptions, precision=0, commas=False)
+    restart_interruptions_str = fmt_count(restart_interruptions, commas=False, label="interruption")
+    interruptions_per_day_str = fmt_count(interruptions_per_day, commas=False, label="interruption")
     restart_hours_each_str = fmt_time(restart_hours, 'hour', precision=1, commas=False, style='word')
     restart_min_str = fmt_time(restart_hours * 60, 'minute', precision=0, commas=False, style='word')
     model_params_b_str = fmt_params(70 * BILLION, precision=0, commas=False)
@@ -1477,7 +1480,7 @@ Consider training a `{python} SpotTrainingEconomics.model_params_b_str` paramete
 
 **On-demand**\index{On-Demand Capacity}: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.on_demand_rate_str` = `{python} SpotTrainingEconomics.on_demand_cost_str`
 
-**Spot** (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.restart_interruptions_str` interruptions/day with `{python} SpotTrainingEconomics.restart_min_str` restart):
+**Spot** (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.interruptions_per_day_str` interruptions/day with `{python} SpotTrainingEconomics.restart_min_str` restart):
 
 - Base cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.spot_rate_str` = `{python} SpotTrainingEconomics.spot_base_cost_str`
 - Checkpoint overhead: `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` = `{python} SpotTrainingEconomics.checkpoint_extra_hours_str`
@@ -2291,7 +2294,7 @@ class DebugValueCalc:
     debug_util_after = 0.84
     debug_target_util = 0.80
     a100_80_count = 400
-    a100_40_count = 400
+    a100_40_count = 424
     v100_count = 200
     a100_80_memory = 80 * GB
     a100_40_memory = 40 * GB
@@ -2337,7 +2340,7 @@ class DebugValueCalc:
     check(abs(debug_recovered - 409.6) < 0.01, f"Expected ~410 recovered GPUs, got {debug_recovered}")
     check(large_job_total_gpus == 1200, "Large-job demand should match scenario")
     check(medium_job_total_gpus == 256, "Medium-job demand should match scenario")
-    check(a100_80_nodes == 50 and a100_40_nodes == 50 and v100_nodes == 50, "Inventory should map to 50-node pools")
+    check(a100_80_nodes == 50 and a100_40_nodes == 53 and v100_nodes == 50, "Inventory should map to node pools totaling 1,024 GPUs")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     debug_productive_gain_str = fmt_int(debug_productive_gain, commas=False)
