@@ -316,6 +316,43 @@ def _validate_count_value(
         )
 
 
+_UNIT_LABEL_NORMALIZATION = {
+    "KFLOPs": "KFLOP",
+    "MFLOPs": "MFLOP",
+    "GFLOPs": "GFLOP",
+    "TFLOPs": "TFLOP",
+    "PFLOPs": "PFLOP",
+    "EFLOPs": "EFLOP",
+    "ZFLOPs": "ZFLOP",
+    "KFLOPs/s": "KFLOP/s",
+    "MFLOPs/s": "MFLOP/s",
+    "GFLOPs/s": "GFLOP/s",
+    "TFLOPs/s": "TFLOP/s",
+    "PFLOPs/s": "PFLOP/s",
+    "EFLOPs/s": "EFLOP/s",
+    "ZFLOPs/s": "ZFLOP/s",
+    "Gbps": "Gb/s",
+    "Mbit/s": "Mb/s",
+    "Gbit/s": "Gb/s",
+    "Tbit/s": "Tb/s",
+    "B": "bytes",
+    "flop/B": "FLOP/byte",
+    "pJ/B": "pJ/byte",
+    "pJ/flop": "pJ/FLOP",
+    "µs": "μs",
+}
+
+
+def _normalize_unit_label(label: str) -> str:
+    """Map a pint compact unit label onto the book's canonical display label.
+
+    Single source of truth shared by ``fmt_unit`` and ``fmt_qty``'s suffix
+    builder (2026-06: fmt_unit previously carried a divergent local map that
+    missed EFLOPs/s, KFLOPs/s, and bare work units such as TFLOPs).
+    """
+    return _UNIT_LABEL_NORMALIZATION.get(label, label.replace("µs", "μs"))
+
+
 def _coerce_unit(display_unit):
     """Return a Pint Unit from a Pint unit-like object or unit string."""
     if isinstance(display_unit, str):
@@ -471,6 +508,26 @@ def fmt(quantity, unit=None, precision=1, commas=True,
     return out
 
 
+def _round_half_away_from_zero(val):
+    """Round to the nearest integer with .5 ties going away from zero.
+
+    Python's built-in ``round()`` uses banker's rounding (2.5 → 2, 3.5 → 4),
+    which renders adjacent half-values inconsistently in prose. Decimal
+    ``ROUND_HALF_UP`` rounds ties away from zero for both signs
+    (2.5 → 3, -2.5 → -3) and works on the decimal repr, so near-integer
+    float noise (7.9999999999) still lands on the intended integer (8).
+    """
+    import decimal
+
+    with decimal.localcontext() as ctx:
+        ctx.prec = 60
+        return int(
+            decimal.Decimal(repr(float(val))).quantize(
+                decimal.Decimal("1"), rounding=decimal.ROUND_HALF_UP
+            )
+        )
+
+
 def fmt_int(
     quantity,
     unit=None,
@@ -484,15 +541,26 @@ def fmt_int(
     Format a value as an integer for narrative text.
 
     Explicit source-level opt-in for integer display of computed values.
-    Equivalent to ``fmt(round(val), precision=0, ...)`` but makes editorial
-    intent visible at the call site.
+    Rounds half away from zero (2.5 → 3, -2.5 → -3) and delegates to
+    ``fmt(..., precision=0, ...)`` so commas and approx markers still apply.
+
+    Safety: a nonzero value that would round to ``0`` raises instead of
+    silently rendering as zero (same contract as ``fmt``'s precision guard).
     """
     if unit:
         if isinstance(quantity, ureg.Quantity):
             quantity = quantity.to(unit)
     val = _numeric_magnitude(quantity)
+    rounded = _round_half_away_from_zero(val)
+    if rounded == 0 and abs(val) > 1e-12:
+        raise ValueError(
+            f"Formatting Precision Error: Value {val} rounds to '0' under "
+            f"fmt_int. This hides the actual value. Use fmt({val!r}, "
+            f"precision=...) with enough precision to show the magnitude, "
+            f"or change units so integer display is meaningful."
+        )
     return fmt(
-        round(val),
+        rounded,
         precision=0,
         commas=commas,
         prefix=prefix,
@@ -566,7 +634,14 @@ def fmt_usd(
         suffix: Legacy escape hatch while the corpus is being migrated. New
             QMD code should use ``scale=`` and/or ``per=`` instead.
     """
-    amount = _usd_amount_magnitude(amount, per)
+    amount = _numeric_magnitude(_usd_amount_magnitude(amount, per))
+
+    # Conventional sign-first rendering: -$500, never $-500. The sign is
+    # extracted here so scale division and the escaped \$ prefix below always
+    # operate on the absolute amount (works for all scale=/per= variants).
+    negative = amount < 0
+    if negative:
+        amount = -amount
 
     if marker and marker not in _USD_MARKERS:
         raise ValueError(
@@ -591,7 +666,9 @@ def fmt_usd(
     suffix = suffix or structured_suffix
     suffix += marker
 
-    prefix = "~\\$" if approx else "\\$"
+    # approx + negative reads "~-\$500": the approximation marker scopes the
+    # whole signed amount.
+    prefix = f"{'~' if approx else ''}{'-' if negative else ''}\\$"
 
     if precision == 0:
         return fmt_int(amount, commas=commas, prefix=prefix, suffix=suffix)
@@ -655,22 +732,16 @@ def fmt_unit(quantity, default="-"):
     Extract the unit string of a Pint Quantity. Returns a MarkdownStr.
     For non-Pint values, returns ``default`` wrapped in MarkdownStr.
 
-    Pairs with ``fmt_val()`` for value/unit table columns.
+    Pairs with ``fmt_val()`` for value/unit table columns. Labels are
+    normalized through the shared ``_UNIT_LABEL_NORMALIZATION`` table so a
+    unit column always matches the suffix ``fmt_qty`` would render for the
+    same quantity (``EFLOPs/second`` → ``EFLOP/s``, ``TFLOPs`` → ``TFLOP``).
 
-    >>> fmt_unit(80 * GB)        # "gigabyte"
+    >>> fmt_unit(80 * GB)        # "GB"
     >>> fmt_unit(80)             # "-"
     """
     if isinstance(quantity, ureg.Quantity):
-        unit_label = f"{quantity.units}"
-        for plural_rate, canonical_rate in {
-            "MFLOPs/s": "MFLOP/s",
-            "GFLOPs/s": "GFLOP/s",
-            "TFLOPs/s": "TFLOP/s",
-            "PFLOPs/s": "PFLOP/s",
-            "ZFLOPs/s": "ZFLOP/s",
-        }.items():
-            unit_label = unit_label.replace(plural_rate, canonical_rate)
-        out = MarkdownStr(unit_label)
+        out = MarkdownStr(_normalize_unit_label(f"{quantity.units}"))
     else:
         out = MarkdownStr(default)
     assert isinstance(out, MarkdownStr), "fmt_unit() must return MarkdownStr"
@@ -871,7 +942,12 @@ def fmt_pp(points, precision=None, commas=False, style="prose", attributive=Fals
         return MarkdownStr(f"{num} pp")
     if attributive:
         return MarkdownStr(f"{num} percentage-point")
-    word = "percentage point" if num == "1" else "percentage points"
+    # Singular agrees with the absolute rendered magnitude: "1 percentage
+    # point" AND "-1 percentage point" (a string compare on "1" missed the
+    # negative case and rendered "-1 percentage points"; fixed 2026-06).
+    num_value = _parse_formatted_number(num)
+    singular = num_value is not None and abs(num_value) == 1
+    word = "percentage point" if singular else "percentage points"
     return MarkdownStr(f"{num} {word}")
 
 
@@ -1028,7 +1104,8 @@ def _fmt_scaled_count_quantity(
 ):
     raw_v = _numeric_magnitude(value.to(unit) if isinstance(value, ureg.Quantity) else value)
     _validate_count_value(raw_v, allow_fractional=False, require_integer=True)
-    scale = _auto_decimal_scale(raw_v) if scale == "auto" else scale
+    auto_scaled = scale == "auto"
+    scale = _auto_decimal_scale(raw_v) if auto_scaled else scale
     divisor, glyph = _resolve_decimal_scale(
         scale,
         what=f"{what} scale",
@@ -1037,6 +1114,28 @@ def _fmt_scaled_count_quantity(
     )
     v = raw_v / divisor
     p = _resolve_scaled_count_precision(v, precision)
+    if auto_scaled and scale is not None:
+        # Boundary fix (2026-06): _auto_decimal_scale picks the divisor from
+        # the RAW value, so 999,999,999 lands on "M" and then ROUNDS to a
+        # 1000.0M mantissa at display precision. When the rounded mantissa
+        # reaches 1000, promote to the next larger scale (M→B→T) so the
+        # display reads "1B", not "1000.0M". At the largest scale (T) there
+        # is nowhere to promote; keep the value and group digits with commas.
+        order = sorted(_DECIMAL_SCALE_FACTORS, key=_DECIMAL_SCALE_FACTORS.get)
+        while abs(float(f"{v:.{p}f}")) >= 1000:
+            idx = order.index(scale)
+            if idx + 1 >= len(order):
+                commas = True
+                break
+            scale = order[idx + 1]
+            divisor, glyph = _resolve_decimal_scale(
+                scale,
+                what=f"{what} scale",
+                style=scale_style,
+                attributive=attributive,
+            )
+            v = raw_v / divisor
+            p = _resolve_scaled_count_precision(v, precision)
     return fmt(
         v,
         precision=p,
@@ -1532,33 +1631,6 @@ def fmt_frac(numerator, denominator, result=None, unit=None):
     return out
 
 
-_UNIT_LABEL_NORMALIZATION = {
-    "KFLOPs": "KFLOP",
-    "MFLOPs": "MFLOP",
-    "GFLOPs": "GFLOP",
-    "TFLOPs": "TFLOP",
-    "PFLOPs": "PFLOP",
-    "EFLOPs": "EFLOP",
-    "ZFLOPs": "ZFLOP",
-    "KFLOPs/s": "KFLOP/s",
-    "MFLOPs/s": "MFLOP/s",
-    "GFLOPs/s": "GFLOP/s",
-    "TFLOPs/s": "TFLOP/s",
-    "PFLOPs/s": "PFLOP/s",
-    "EFLOPs/s": "EFLOP/s",
-    "ZFLOPs/s": "ZFLOP/s",
-    "Gbps": "Gb/s",
-    "Mbit/s": "Mb/s",
-    "Gbit/s": "Gb/s",
-    "Tbit/s": "Tb/s",
-    "B": "bytes",
-    "flop/B": "FLOP/byte",
-    "pJ/B": "pJ/byte",
-    "pJ/flop": "pJ/FLOP",
-    "µs": "μs",
-}
-
-
 def _compact_unit_suffix(display_unit) -> str:
     """Derive a leading-space compact unit label from a pint display unit."""
     # Currency is not a fmt_qty value-kind. It must go through fmt_usd(), which
@@ -1575,8 +1647,7 @@ def _compact_unit_suffix(display_unit) -> str:
         label = f"{_coerce_unit(display_unit):~P}"
     except Exception:
         label = f"{display_unit}"
-    label = _UNIT_LABEL_NORMALIZATION.get(label, label.replace("µs", "μs"))
-    return f" {label}"
+    return f" {_normalize_unit_label(label)}"
 
 
 def _quantity_suffix(display_unit, *, unit_label=None, per=None, extra_suffix=""):
