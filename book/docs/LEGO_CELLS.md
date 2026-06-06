@@ -15,6 +15,13 @@ playbook (`.claude/rules/lego-verify.md`), and pre-commit checks
 cluster. Place the cell **immediately above** the first `{python}` reference that
 uses its exports.
 
+**Chapter-anchor exception:** When one scenario's numbers must stay consistent
+across a problem callout, a later walkthrough, and a summary bullet, mark the
+header with `# │ Scope: chapter-anchor` and a one-line rationale. Focal verify
+then allows multi-section reference span; render and cell-exec gates still apply.
+This is not the unrelated mega-class anti-pattern (different exports in
+disconnected narratives hundreds of lines apart).
+
 ## Cell contract
 
 Each LEGO cell should include:
@@ -62,7 +69,10 @@ The A100 ridge is `{python} A100RidgeExample.ridge_str` FLOP/byte.
 
 - **Mega-classes** — one class whose exports appear in multiple distant sections
   or unrelated callouts (anti-pattern: `TrainingDimensions` spanning forward-pass
-  prose and a wave-quantization table hundreds of lines apart).
+  prose and a wave-quantization table hundreds of lines apart). **Exception:**
+  `# │ Scope: chapter-anchor` when the same scenario thread intentionally reuses
+  the same exports (KWS case-study targets, a lighthouse profile + takeaway,
+  GPT-3 household-year anchor, build/buy TCO + summary).
 - **Cross-cell reads** — a later cell referencing `OtherClass.some_str` without
   redefining inputs in the same cell (hidden exec-order dependency).
 - **Duplicate classes** — two cells for the same story (e.g. separate table and
