@@ -3965,7 +3965,7 @@ For each image in the batch, this produces a probability distribution over the p
 # │          MnistFlopsCalc.double_ratio_mult_str, MnistFlopsCalc.double_ratio_exact_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_percent, fmt_qty_int, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_percent, fmt_qty_int, check, MarkdownStr, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistFlopsCalc:
@@ -4050,7 +4050,9 @@ class MnistFlopsCalc:
     total_mops_str = fmt_int(total_mops_value, commas=False)
     per_image_kops_str = fmt_int(per_image_kops, commas=False)
     layer1_pct_str = fmt_percent(layer1_pct / 100, precision=1, commas=False, style='prose')
-    arith_intensity_str = fmt(arith_intensity, precision=1, commas=False)
+    arith_intensity_str = fmt_arithmetic_intensity(
+        ((total_flops_value / batch_size) * flop) / inference_total, unit=flop / byte, precision=1, commas=False
+    )
     batch_in_str = fmt(batch_in_values, precision=0, commas=True)
     batch_h1_str = fmt(batch_h1_values, precision=0, commas=True)
     batch_h2_str = fmt(batch_h2_values, precision=0, commas=True)
@@ -4074,7 +4076,7 @@ class MnistFlopsCalc:
 **Systems insight**:
 
 1. **Layer 1 dominates**: The first layer accounts for `{python} MnistFlopsCalc.layer1_pct_str` of all operations because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
-2. **Compute vs. memory**: At `{python} MnistFlopsCalc.per_image_kops_str` KOp per image and ~`{python} MnistFlopsCalc.inference_kb_str` memory, this network has a matmul-dominated arithmetic intensity of ~`{python} MnistFlopsCalc.arith_intensity_str` FLOP/byte—firmly in the memory-bound regime for most hardware (see the Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 for how arithmetic intensity determines whether a workload is memory bound or compute bound). A modern GPU achieving ten TFLOP/s would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
+2. **Compute vs. memory**: At `{python} MnistFlopsCalc.per_image_kops_str` KOp per image and ~`{python} MnistFlopsCalc.inference_kb_str` memory, this network has a matmul-dominated arithmetic intensity of ~`{python} MnistFlopsCalc.arith_intensity_str`—firmly in the memory-bound regime for most hardware (see the Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 for how arithmetic intensity determines whether a workload is memory bound or compute bound). A modern GPU achieving ten TFLOP/s would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
 3. **Scaling intuition**: Doubling the hidden layer widths (784 → 256 → 128 → 10) increases $O$ by ~`{python} MnistFlopsCalc.double_ratio_mult_str` to ~`{python} MnistFlopsCalc.double_total_mops_str` MOp. This comes from recomputing each layer: layers 1 and 3 double, layer 2 quadruples, so the total grows by about `{python} MnistFlopsCalc.double_ratio_exact_mult_str` rather than 4$\times$.
 
 :::
@@ -5634,7 +5636,7 @@ These foundations equip engineers to reason about neural networks from first pri
 # │          FallacyQuantExamples.training_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_time, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FallacyQuantExamples:
@@ -5688,9 +5690,9 @@ class FallacyQuantExamples:
     pipeline_over_ms_str = fmt_time(pipeline_over, 'millisecond', precision=0, commas=False)
     imbalance_ratio_str = MarkdownStr(f"{majority_class}:{minority_class}")
     imbalance_majority_acc_str = fmt_percent(imbalance_majority_acc / 100, precision=0, commas=False, style='symbol')
-    mnist_arith_intensity_str = fmt(mnist_arith_intensity, precision=1, commas=False)
-    a100_ridge_str = fmt_int(round(a100_ridge), commas=False)
-    h100_ridge_str = fmt_int(round(h100_ridge), commas=False)
+    mnist_arith_intensity_str = fmt_arithmetic_intensity(mnist_arith_intensity * flop / byte, unit=flop / byte, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=0, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.H100.ridge_point(), unit=flop / byte, precision=0, commas=False)
     training_ratio_mult_str = fmt_multiple(training_ratio, precision=1, commas=False)
 ```
 
@@ -5728,7 +5730,7 @@ Data scientists develop models with unlimited time budgets, assuming deployment 
 
 **Fallacy**: *More compute automatically means faster training.*
 
-Teams purchase expensive GPUs expecting proportional speedups, then discover workloads are memory bound. Arithmetic intensity\index{Arithmetic Intensity!GPU utilization} determines which resource constrains performance. The MNIST forward-pass analysis in @tbl-nn-computation-mnist-flops and the roofline model in @sec-appdx-machine-foundations-roofline-model-2529 show why small networks like MNIST (784 to 128 to 64 to 10) have arithmetic intensity of approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str` FLOP/byte, far below the hundreds of FLOP/byte often required to keep high-throughput accelerators compute-bound. For memory-bound workloads, a commodity CPU can match an expensive accelerator; for compute-bound GPT-scale models, accelerators provide the large speedups they were built for. This mismatch explains why teams report widely varying utilization depending on model architecture.
+Teams purchase expensive GPUs expecting proportional speedups, then discover workloads are memory bound. Arithmetic intensity\index{Arithmetic Intensity!GPU utilization} determines which resource constrains performance. The MNIST forward-pass analysis in @tbl-nn-computation-mnist-flops and the roofline model in @sec-appdx-machine-foundations-roofline-model-2529 show why small networks like MNIST (784 to 128 to 64 to 10) have arithmetic intensity of approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str`, far below the hundreds of FLOP/byte often required to keep high-throughput accelerators compute-bound. For memory-bound workloads, a commodity CPU can match an expensive accelerator; for compute-bound GPT-scale models, accelerators provide the large speedups they were built for. This mismatch explains why teams report widely varying utilization depending on model architecture.
 
 **Pitfall**: *Extrapolating accuracy improvements without considering diminishing returns.*
 

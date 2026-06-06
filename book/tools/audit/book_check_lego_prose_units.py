@@ -36,7 +36,7 @@ CLOSED_DOMAIN_FMT = re.compile(
     r"(?:fmt_qty|fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|"
     r"fmt_latency|fmt_percent|fmt_rate|fmt_usd|fmt_eur|fmt_time|fmt_tokens|fmt_params|"
     r"fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
-    r"fmt_compute_efficiency|fmt_carbon_intensity|fmt_throughput|"
+    r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_throughput|"
     r"fmt_sci_qty)\s*\(",
     re.M | re.I,
 )
@@ -79,6 +79,8 @@ _SUFFIX_UNITS: dict[str, frozenset[str]] = {
     "tonnes": frozenset({"t", "tonne", "tonnes", "metric ton", "metric tons"}),
     "tonne": frozenset({"t", "tonne", "tonnes", "metric ton", "metric tons"}),
     "gbps": frozenset({"gbps", "gb/s", "gib/s"}),
+    "m": frozenset({"m", "meter", "meters", "metre", "metres"}),
+    "km": frozenset({"km", "kilometer", "kilometers", "kilometre", "kilometres"}),
     "tflop": frozenset({"tflop", "tflops", "tflop/s", "tflops/s"}),
 }
 
@@ -91,6 +93,7 @@ _FMT_UNITS: dict[str, frozenset[str]] = {
     "fmt_flops": frozenset({"flop", "flops", "kflop", "mflop", "gflop", "tflop", "pflop"}),
     "fmt_ops_rate": frozenset({"ops/s", "tops", "tops/s"}),
     "fmt_arithmetic_intensity": frozenset({"flop/byte", "flops/byte"}),
+    "fmt_length": frozenset({"m", "meter", "meters", "metre", "metres", "km", "kilometer", "kilometers"}),
     "fmt_compute_efficiency": frozenset({"tflop/s/w", "tflops/s/w"}),
     "fmt_carbon_intensity": frozenset({"g/kwh", "kg/kwh"}),
     "fmt_emissions": frozenset({"t", "tonne", "tonnes", "metric ton", "metric tons", "kg", "g"}),
@@ -107,7 +110,7 @@ _FMT_UNITS: dict[str, frozenset[str]] = {
 
 def _name_suffix_units(name: str) -> frozenset[str]:
     m = re.search(
-        r"_(w|kw|mw|j|mj|wh|kwh|mwh|gwh|gb|tb|gib|ms|s|kg|gbps|tflop|tonnes?|tonne)_str$",
+        r"_(w|kw|mw|j|mj|wh|kwh|mwh|gwh|gb|tb|gib|ms|s|kg|gbps|m|km|tflop|tonnes?|tonne)_str$",
         name,
         re.I,
     )

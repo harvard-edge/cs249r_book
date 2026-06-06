@@ -1211,7 +1211,7 @@ The Roofline's diagnostic power extends beyond individual kernels to entire trai
 # │          RooflineLandscapeMath.train_intensity_str,
 # │          RooflineLandscapeMath.train_gap_mult_str, figure inputs
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt
+from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_multiple
 
 class RooflineLandscapeMath:
     """Computed values for the H100 Roofline landscape figure."""
@@ -1233,15 +1233,15 @@ class RooflineLandscapeMath:
     check(train_intensity > ridge, "Training landscape point should be compute-bound.")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────────
-    decode_intensity_str = fmt(decode_intensity, precision=0, commas=False)
+    decode_intensity_str = fmt_arithmetic_intensity(decode_intensity * (flop / byte), precision=0, commas=False)
     training_batch_size_str = fmt(training_batch_size, precision=0, commas=False)
-    train_intensity_str = fmt(train_intensity, precision=0, commas=True)
+    train_intensity_str = fmt_arithmetic_intensity(train_intensity * (flop / byte), precision=0, commas=True)
     train_gap_mult_str = fmt_multiple(train_gap, precision=0, commas=True)
     peak_rate_for_plot = peak_rate.to(TFLOPs / second).magnitude
     bandwidth_for_plot = bandwidth.to(TB / second).magnitude
 ```
 
-@Fig-roofline-landscape makes these relationships visible for the H100. Notice how LLM decode at batch size 1 sits deep in the memory-bound region, achieving less than 1 percent of peak compute, while LLM training at large batch sizes crosses the ridge point into the compute-bound regime. Under the batch-size `{python} RooflineLandscapeMath.training_batch_size_str` simplification used in the running example, the `{python} RooflineLandscapeMath.train_gap_mult_str` gap between these two workloads' arithmetic intensities (~`{python} RooflineLandscapeMath.decode_intensity_str` FLOP/byte for decode vs. ~`{python} RooflineLandscapeMath.train_intensity_str` FLOP/byte for training) explains why the same hardware that delivers excellent training throughput can appear woefully underutilized during inference.
+@Fig-roofline-landscape makes these relationships visible for the H100. Notice how LLM decode at batch size 1 sits deep in the memory-bound region, achieving less than 1 percent of peak compute, while LLM training at large batch sizes crosses the ridge point into the compute-bound regime. Under the batch-size `{python} RooflineLandscapeMath.training_batch_size_str` simplification used in the running example, the `{python} RooflineLandscapeMath.train_gap_mult_str` gap between these two workloads' arithmetic intensities (~`{python} RooflineLandscapeMath.decode_intensity_str` for decode vs. ~`{python} RooflineLandscapeMath.train_intensity_str` for training) explains why the same hardware that delivers excellent training throughput can appear woefully underutilized during inference.
 
 ::: {#fig-roofline-landscape fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Landscape: NVIDIA H100 (FP16)**: H100 roofline showing the memory-bandwidth and peak-compute ceilings, with representative ML workloads spanning memory-bound and compute-bound regions." fig-alt="Log-log roofline plot for H100 FP16 showing memory-bound and compute-bound regions with five ML workloads from LLM decode at the low-intensity left edge to LLM training on the compute roof."}
 
@@ -1376,7 +1376,7 @@ class RooflineCaptionRecap:
     h100_ridge_str = fmt_arithmetic_intensity((h_h100.compute.peak_flops / h_h100.memory.bandwidth), unit=flop / byte, precision=1, commas=False)
 ```
 
-The roofline in @fig-roofline-landscape is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the FP16 ridge point (~`{python} RooflineCaptionRecap.h100_ridge_str` FLOP/byte for `{python} RooflineCaptionRecap.h100_fp16_tflop_per_s_str` over `{python} RooflineCaptionRecap.h100_bw_tb_per_s_str`). ML workloads span the full range: LLM decode at batch size 1 is deeply memory-bound, while LLM training at large batch sizes is compute-bound. The position of each workload determines whether faster memory or faster compute would improve performance.
+The roofline in @fig-roofline-landscape is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the FP16 ridge point (~`{python} RooflineCaptionRecap.h100_ridge_str` for `{python} RooflineCaptionRecap.h100_fp16_tflop_per_s_str` over `{python} RooflineCaptionRecap.h100_bw_tb_per_s_str`). ML workloads span the full range: LLM decode at batch size 1 is deeply memory-bound, while LLM training at large batch sizes is compute-bound. The position of each workload determines whether faster memory or faster compute would improve performance.
 
 The Roofline Model also reveals a subtle but important insight about the interaction between batch size and hardware utilization. Increasing the batch size for a given model raises the arithmetic intensity because the weight matrix is loaded once but multiplied against a larger activation matrix (more FLOPs for the same bytes transferred). This shifts the workload point rightward on the plot, potentially crossing the ridge point from memory-bound to compute-bound territory. The arithmetic intensity grows linearly with batch size (doubling the batch size doubles the FLOPs while keeping the weight loading unchanged), creating a simple and predictable relationship between batch size and hardware utilization.
 
@@ -1421,7 +1421,19 @@ The Roofline's diagnostic power makes it one of the most practically useful anal
 # │          RooflineInferenceMath.inf_flops_math, RooflineInferenceMath.inf_throughput_math,
 # │          RooflineInferenceMath.inf_peak_pct_str, RooflineInferenceMath.train_intensity_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_math, fmt_params, fmt_memory, fmt_bandwidth, fmt_flop_rate, fmt_magnitude, fmt_percent
+from mlsysim.fmt import (
+    check,
+    fmt,
+    fmt_math,
+    fmt_params,
+    fmt_memory,
+    fmt_bandwidth,
+    fmt_flop_rate,
+    fmt_magnitude,
+    fmt_percent,
+    fmt_arithmetic_intensity,
+    fmt_count,
+)
 
 class RooflineInferenceMath:
     """Formatted math strings for the roofline inference vs training intensity example."""
@@ -1433,22 +1445,25 @@ class RooflineInferenceMath:
     h_h100 = Hardware.Cloud.H100
     h100_bw = h_h100.memory.bandwidth
     h100_peak = h_h100.compute.peak_flops
-    ridge = (h_h100.compute.peak_flops / h_h100.memory.bandwidth).to(flop / byte).magnitude
+    ridge_q = h_h100.compute.peak_flops / h_h100.memory.bandwidth
+    ridge = ridge_q.to(flop / byte).magnitude
     params_count = params.to(param).magnitude
     params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     params_b_value_str = fmt_magnitude(params, unit=Bparam, precision=0, commas=False)
     h100_bw_tb_s_value_str = fmt_magnitude(h100_bw, unit=TB / second, precision=2, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_peak, unit=TFLOP / second, precision=0, commas=False)
-    h100_ridge_str = fmt(ridge, precision=1, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity(ridge_q, unit=flop / byte, precision=1, commas=False)
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────
     inf_flops = 2 * params * flop / param
     inf_weight = params * weight_bytes_per_param
-    inf_intensity = (inf_flops / inf_weight).to(flop / byte).magnitude
-    inf_throughput = (h100_bw * inf_intensity * flop / byte).to(TFLOP / second)
+    inf_intensity_q = inf_flops / inf_weight
+    inf_intensity = inf_intensity_q.to(flop / byte).magnitude
+    inf_throughput = (h100_bw * inf_intensity_q).to(TFLOP / second)
     inf_peak_pct = (inf_throughput / h100_peak).to_base_units().magnitude * 100
-    train_intensity = batch_size * inf_intensity
+    train_intensity_q = batch_size * inf_intensity_q
+    train_intensity = train_intensity_q.to(flop / byte).magnitude
 
     # ┌── 3. GUARD ────────────────────────────────────────────
     check(abs(inf_intensity - 1.0) < 1e-9, "Decode intensity should be 1 FLOP/byte")
@@ -1458,17 +1473,19 @@ class RooflineInferenceMath:
     # ┌── 4. OUTPUT ───────────────────────────────────────────
     inf_weight_gb_str = fmt_memory(inf_weight, unit=GB, precision=0, commas=True)
     inf_weight_gb_value_str = fmt_magnitude(inf_weight, unit=GB, precision=0, commas=True)
-    inf_intensity_str = fmt(inf_intensity, precision=0, commas=False)
+    inf_intensity_value_str = fmt(inf_intensity, precision=0, commas=False)
+    inf_intensity_str = fmt_arithmetic_intensity(inf_intensity_q, precision=0, commas=False)
     inf_throughput_tflop_s_value_str = fmt_magnitude(inf_throughput, unit=TFLOP / second, precision=2, commas=False)
     inf_peak_pct_str = fmt_percent(inf_peak_pct / 100, precision=2, commas=False, style='prose')
     batch_size_str = fmt_count(batch_size, precision=0, commas=False)
-    train_intensity_str = fmt(train_intensity, precision=0, commas=True)
+    train_intensity_value_str = fmt(train_intensity, precision=0, commas=True)
+    train_intensity_str = fmt_arithmetic_intensity(train_intensity_q, precision=0, commas=True)
     inf_flops_math = fmt_math(f"2 \\times {params_b_value_str} \\times 10^9")
     inf_intensity_math = fmt_math(
-        f"\\frac{{2 \\times {params_b_value_str} \\times 10^9}}{{{inf_weight_gb_value_str} \\times 10^9}} = {inf_intensity_str}"
+        f"\\frac{{2 \\times {params_b_value_str} \\times 10^9}}{{{inf_weight_gb_value_str} \\times 10^9}} = {inf_intensity_value_str}"
     )
-    inf_throughput_math = fmt_math(f"{h100_bw_tb_s_value_str} \\times {inf_intensity_str} = {inf_throughput_tflop_s_value_str}")
-    train_intensity_math = fmt_math(f"{batch_size_str} \\times {inf_intensity_str} = {train_intensity_str}")
+    inf_throughput_math = fmt_math(f"{h100_bw_tb_s_value_str} \\times {inf_intensity_value_str} = {inf_throughput_tflop_s_value_str}")
+    train_intensity_math = fmt_math(f"{batch_size_str} \\times {inf_intensity_value_str} = {train_intensity_value_str}")
 ```
 
 The same arithmetic-intensity calculation separates the running model's inference and training regimes.
@@ -1499,7 +1516,7 @@ class RooflineCalloutRecap:
     )
 ```
 
-Consider our `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str` model on an H100 with `{python} RooflineInferenceMath.h100_fp16_tflop_per_s_str` peak compute and `{python} RooflineInferenceMath.h100_bw_tb_per_s_str` memory bandwidth. The ridge point is `{python} RooflineCalloutRecap.h100_ridge_str` FLOP/byte.
+Consider our `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str` model on an H100 with `{python} RooflineInferenceMath.h100_fp16_tflop_per_s_str` peak compute and `{python} RooflineInferenceMath.h100_bw_tb_per_s_str` memory bandwidth. The ridge point is `{python} RooflineCalloutRecap.h100_ridge_str`.
 
 **Inference (decode, batch size 1)**: Each token loads `{python} RooflineInferenceMath.inf_weight_gb_str` of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I =$ `{python} RooflineInferenceMath.inf_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str` (the ridge point), the workload is deeply memory-bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOP/s, which is about `{python} RooflineInferenceMath.inf_peak_pct_str` of the H100's peak `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`. No amount of additional compute will help; only more memory bandwidth improves throughput.
 
@@ -3196,7 +3213,7 @@ class H100TdpRackRecap:
     cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=False)
     comm_phase_w_str = fmt_power(comm_phase_power, unit=watt, precision=0, commas=False)
     power_delta_w_str = fmt_power(power_delta, unit=watt, precision=0, commas=False)
-    power_delta_kw_str = fmt_int(cluster_power_delta, kW, commas=False)
+    power_delta_kw_str = fmt_qty_int(cluster_power_delta, kilowatt, commas=False)
     transition_us_str = fmt_time(transition, microsecond, precision=0, commas=False)
     power_rate_gw_per_s_str = fmt_qty(power_rate, GW / second, precision=2, commas=False)
     node_gpus_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
@@ -3931,7 +3948,7 @@ class CheckpointComputeTradeoff:
     num_gpus_str = fmt(num_gpus, precision=0, commas=True)
     mtbf_system_s_str = fmt_time(mtbf_system_s, unit=second, precision=0, commas=True)
     mtbf_system_hr_str = fmt_time(mtbf_system_hr, 'hour', precision=0, commas=False, style='word')
-    tau_opt_s_str = fmt_int(tau_opt_s, commas=False)
+    tau_opt_s_str = fmt_time(round(tau_opt_s), second, precision=0, commas=False)
     tau_opt_min_str = fmt_time(round(tau_opt_s / SECONDS_PER_MINUTE), 'minute', precision=0, commas=False, style='word')
     overhead_pct_str = fmt_percent(overhead_pct / 100, precision=1, commas=False, style='prose')
 ```
@@ -4311,7 +4328,7 @@ class RooflineFallaciesRecap:
 
 **Pitfall**: *Planning training throughput from peak FLOP/s alone.*
 
-Procurement teams often select accelerators by comparing peak FLOP/s specifications. This reasoning ignores the Roofline Model's central insight: if the workload's arithmetic intensity falls below the ridge point, memory bandwidth, not compute, limits performance. The H100's ridge point is approximately `{python} RooflineFallaciesRecap.h100_ridge_str` FLOP/byte. LLM inference operates at 1--2 FLOP/byte, achieving less than 1 percent of peak FLOP/s. Even LLM training, which benefits from batching, typically achieves 30--50 percent of peak FLOP/s due to memory-bound attention kernels, activation recomputation, and communication stalls. Selecting hardware by peak FLOP/s alone is analogous to selecting a car by top speed while ignoring fuel efficiency for a daily commute.
+Procurement teams often select accelerators by comparing peak FLOP/s specifications. This reasoning ignores the Roofline Model's central insight: if the workload's arithmetic intensity falls below the ridge point, memory bandwidth, not compute, limits performance. The H100's ridge point is approximately `{python} RooflineFallaciesRecap.h100_ridge_str`. LLM inference operates at 1--2 FLOP/byte, achieving less than 1 percent of peak FLOP/s. Even LLM training, which benefits from batching, typically achieves 30--50 percent of peak FLOP/s due to memory-bound attention kernels, activation recomputation, and communication stalls. Selecting hardware by peak FLOP/s alone is analogous to selecting a car by top speed while ignoring fuel efficiency for a daily commute.
 
 **Fallacy**: *Power and cooling constraints can be handled after accelerator purchase.*
 
