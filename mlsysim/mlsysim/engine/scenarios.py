@@ -10,7 +10,7 @@ from .evaluation import SystemEvaluation, EvaluationLevel
 from ..models.registry import Models as _Models
 from ..hardware.registry import Hardware as _Hardware
 from ..systems.registry import Clusters as _Clusters
-from ..scenarios.registry import ReferenceStats as _ReferenceStats
+from ..reference_stats.registry import ReferenceStats as _ReferenceStats
 
 class Scenario(BaseModel):
     """

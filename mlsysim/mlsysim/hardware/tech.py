@@ -106,7 +106,7 @@ class OpEnergy(BaseModel):
     @field_validator("energy", mode="after")
     @classmethod
     def _validate_energy(cls, v):
-        return require_dimensionality(v, ureg.joule, "energy")
+        return require_unit_family(v, ureg.joule / ureg.flop, "energy", "operation")
 
 
 class EffectiveComputeEnergy(BaseModel):

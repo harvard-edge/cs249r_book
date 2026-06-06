@@ -42,7 +42,7 @@ FMT_QTY_ASSIGN = re.compile(
 DOMAIN_FMT_ASSIGN = re.compile(
     r"^\s*(?P<name>\w+_str)\s*=\s*(?:fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|"
     r"fmt_latency|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
-    r"fmt_compute_efficiency|fmt_carbon_intensity)\s*\(",
+    r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity)\s*\(",
     re.M,
 )
 MASG_TO_CLOSED = re.compile(

@@ -558,7 +558,7 @@ System benchmarks serve two functions. For practitioners, they enable informed h
 # │ Exports: a100_fp16_tflop_per_s_str, a100_fp32_tflop_per_s_str,
 # │          a100_bw_tb_per_s_str, a100_ridge_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_int
+from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_arithmetic_intensity
 
 class A100Roofline:
     """A100 hardware constants for roofline analysis."""
@@ -575,10 +575,10 @@ class A100Roofline:
     a100_fp16_tflop_per_s_str = fmt_flop_rate(_a100_fp16, unit=TFLOP / second, precision=0, commas=False)
     a100_fp32_tflop_per_s_str = fmt_flop_rate(_a100_fp32, unit=TFLOP / second, precision=1, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(_a100_bw, unit=TB / second, precision=2, commas=False)
-    a100_ridge_str = fmt_int(round(_a100_ridge), commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
 ```
 
-Effective benchmark interpretation requires knowing the performance characteristics of target hardware. Whether a specific AI workload is compute bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOP/byte[^fn-flops-throughput], determines performance limits. Consider an NVIDIA A100 GPU\index{Accelerator!specifications, roofline analysis example} with `{python} A100Roofline.a100_fp16_tflop_per_s_str` of FP16 Tensor Core performance (FP32 is `{python} A100Roofline.a100_fp32_tflop_per_s_str`) and `{python} A100Roofline.a100_bw_tb_per_s_str` memory bandwidth (SXM variant). Dividing peak compute by peak bandwidth yields an arithmetic intensity threshold\index{Arithmetic Intensity!threshold for compute vs. memory bound} of `{python} A100Roofline.a100_ridge_str` FLOP/byte. Workloads below this threshold are bottlenecked by memory bandwidth, while those above are bottlenecked by compute capacity. The roofline model in @sec-hardware-acceleration-roofline-model-42ff provides the architectural foundation for interpreting these benchmark results. @Sec-appdx-machine-foundations-roofline-model-2529 derives the roofline equation and the ridge-point threshold from first principles, so the arithmetic intensity bound used here can be reconstructed for any accelerator.
+Effective benchmark interpretation requires knowing the performance characteristics of target hardware. Whether a specific AI workload is compute bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOP/byte[^fn-flops-throughput], determines performance limits. Consider an NVIDIA A100 GPU\index{Accelerator!specifications, roofline analysis example} with `{python} A100Roofline.a100_fp16_tflop_per_s_str` of FP16 Tensor Core performance (FP32 is `{python} A100Roofline.a100_fp32_tflop_per_s_str`) and `{python} A100Roofline.a100_bw_tb_per_s_str` memory bandwidth (SXM variant). Dividing peak compute by peak bandwidth yields an arithmetic intensity threshold\index{Arithmetic Intensity!threshold for compute vs. memory bound} of `{python} A100Roofline.a100_ridge_str`. Workloads below this threshold are bottlenecked by memory bandwidth, while those above are bottlenecked by compute capacity. The roofline model in @sec-hardware-acceleration-roofline-model-42ff provides the architectural foundation for interpreting these benchmark results. @Sec-appdx-machine-foundations-roofline-model-2529 derives the roofline equation and the ridge-point threshold from first principles, so the arithmetic intensity bound used here can be reconstructed for any accelerator.
 
 ::: {#dfn-benchmarking-machine-learning-system-benchmarks .callout-definition title="Machine learning system benchmarks"}
 
@@ -610,7 +610,7 @@ Effective benchmark interpretation requires knowing the performance characterist
 # │          bert_util_b1_str, utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, check, fmt_bandwidth, fmt_flop_rate
+from mlsysim.fmt import fmt_int, fmt, check, fmt_bandwidth, fmt_flop_rate, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RooflineExamples:
@@ -632,7 +632,6 @@ class RooflineExamples:
 
     # BERT (Memory Bound at Batch=1)
     bert_model = Models.Language.BERT_Base
-    bert_flops_b = bert_model.inference_flops.to(Bparam).magnitude
     bert_weight = bert_model.size_in_bytes(BYTES_FP32)
     bert_util_peak = 0.85
 
@@ -653,16 +652,16 @@ class RooflineExamples:
     # A100 context
     a100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
-    a100_ridge_str = fmt_int(round(ridge_point), commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity((peak_flops / peak_bw), unit=flop / byte, precision=1, commas=False)
 
     # ResNet
-    resnet_ai_str = fmt(resnet_ai, precision=0, commas=False)
+    resnet_ai_str = fmt_arithmetic_intensity(resnet_ai * flop / byte, unit=flop / byte, precision=0, commas=False)
     resnet_util_min_str = fmt_percent(resnet_util_min / 100, precision=0, commas=False, style='prose')
     resnet_util_max_str = fmt_percent(resnet_util_max / 100, precision=0, commas=False, style='prose')
     resnet_perf_tflop_per_s_str = fmt_flop_rate(resnet_perf_tflops, unit=TFLOP / second, precision=1, commas=False)
 
     # BERT
-    bert_ai_b1_str = fmt(bert_ai_b1, precision=0, commas=False)
+    bert_ai_b1_str = fmt_arithmetic_intensity((bert_model.inference_flops / bert_weight), unit=flop / byte, precision=0, commas=False)
     bert_perf_b1_tflop_per_s_str = fmt_flop_rate(bert_perf_b1, unit=TFLOP / second, precision=1, commas=False)
     bert_util_b1_str = fmt_percent(bert_util_b1 / 100, precision=1, commas=False, style='prose')
     utilization_peak_pct_str = fmt_percent(bert_util_peak, precision=0, commas=False, style='prose')
@@ -670,7 +669,7 @@ class RooflineExamples:
 
 [^fn-flops-throughput]: **FLOP/s (Floating-Point Operations Per Second)**: The gap between advertised peak FLOP/s and achieved FLOP/s is the central tension in hardware benchmarking. The A100 advertises `{python} RooflineExamples.a100_fp16_tflop_per_s_str` FP16 Tensor Core, but real workloads achieve 30--60 percent of peak depending on arithmetic intensity and memory access patterns. Reporting peak FLOP/s without utilization context is the most common benchmarking distortion. \index{FLOP/s!peak vs. achieved}
 
-High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOP/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50\index{ResNet-50!roofline analysis} forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} RooflineExamples.resnet_ai_str` FLOP/byte, enabling `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance (approximately `{python} RooflineExamples.resnet_perf_tflop_per_s_str` achieved vs. `{python} RooflineExamples.a100_fp16_tflop_per_s_str` theoretical) [@choquette2021]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOP/byte) become memory bandwidth limited, using only a fraction of the GPU's computational capacity. Considering only weight loading bytes, a BERT inference\index{BERT!roofline analysis at batch 1} with batch size one achieves only ~`{python} RooflineExamples.bert_ai_b1_str` FLOP/byte arithmetic intensity, limiting performance to ~`{python} RooflineExamples.bert_perf_b1_tflop_per_s_str` (`{python} RooflineExamples.a100_bw_tb_per_s_str` $\times$ `{python} RooflineExamples.bert_ai_b1_str` FLOP/byte), representing roughly `{python} RooflineExamples.bert_util_b1_str` of peak computational capability. Including additional data movement (KV cache and activations) would lower this further, illustrating how data movement assumptions significantly affect roofline predictions. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the same calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the intensity-to-utilization steps applied here generalize to any model-hardware pair.
+High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOP/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50\index{ResNet-50!roofline analysis} forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} RooflineExamples.resnet_ai_str`, enabling `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance (approximately `{python} RooflineExamples.resnet_perf_tflop_per_s_str` achieved vs. `{python} RooflineExamples.a100_fp16_tflop_per_s_str` theoretical) [@choquette2021]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOP/byte) become memory bandwidth limited, using only a fraction of the GPU's computational capacity. Considering only weight loading bytes, a BERT inference\index{BERT!roofline analysis at batch 1} with batch size one achieves only ~`{python} RooflineExamples.bert_ai_b1_str` arithmetic intensity, limiting performance to ~`{python} RooflineExamples.bert_perf_b1_tflop_per_s_str` (`{python} RooflineExamples.a100_bw_tb_per_s_str` $\times$ `{python} RooflineExamples.bert_ai_b1_str`), representing roughly `{python} RooflineExamples.bert_util_b1_str` of peak computational capability. Including additional data movement (KV cache and activations) would lower this further, illustrating how data movement assumptions significantly affect roofline predictions. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the same calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the intensity-to-utilization steps applied here generalize to any model-hardware pair.
 
 ::: {.column-margin}
 ![](images/svg/vol1_benchmarking_margin_002.svg){width="100%" fig-alt="BERT batch 1 dot left of ridge and batch 32 dot near compute plateau."}
@@ -709,7 +708,19 @@ A worked BERT inference estimate\index{BERT!inference deployment prediction} sho
 # │          BertRoofline.utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_bandwidth, fmt_flop_rate, fmt_flops, fmt_magnitude, fmt_memory, fmt_params
+from mlsysim.fmt import (
+    fmt_int,
+    fmt,
+    check,
+    MarkdownStr,
+    fmt_bandwidth,
+    fmt_flop_rate,
+    fmt_flops,
+    fmt_magnitude,
+    fmt_memory,
+    fmt_params,
+    fmt_arithmetic_intensity,
+)
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BertRoofline:
@@ -734,7 +745,7 @@ class BertRoofline:
     p_b32 = Engine.solve(m_bert, h_a100, batch_size=batch_32, precision="fp32", efficiency=0.85)
 
     bert_params_m = m_bert.parameters.to(Mparam).magnitude
-    bert_flops_b = m_bert.inference_flops.to(Bparam).magnitude
+    bert_flops_g = m_bert.inference_flops.to(GFLOPs).magnitude
     bert_weight = p_b1.memory_footprint
 
     ai_b1 = (m_bert.inference_flops / p_b1.memory_footprint).to(flop / byte).magnitude
@@ -742,7 +753,7 @@ class BertRoofline:
     perf_b1 = (p_b1.throughput * m_bert.inference_flops).to(TFLOP / second)
     util_b1 = p_b1.mfu * 100.0
 
-    flops_b32 = bert_flops_b * batch_32
+    flops_b32 = bert_flops_g * batch_32
     ai_b32 = (m_bert.inference_flops * batch_32 / p_b1.memory_footprint).to(flop / byte).magnitude
 
     # Is it compute bound now?
@@ -756,7 +767,7 @@ class BertRoofline:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ai_b32 > ai_b1, "Batching must increase Arithmetic Intensity.")
     check(140 <= ridge_point <= 160, f"A100 FP16 ridge should be ~153 FLOP/byte, got {ridge_point:.0f}.")
-    check(abs(ai_b1 - bert_flops_b * BILLION / (bert_weight.to(MB).magnitude * MILLION)) < 1.0, "Weights-only AI must match FLOPs ÷ weight bytes.")
+    check(abs(ai_b1 - bert_flops_g * BILLION / (bert_weight.to(MB).magnitude * MILLION)) < 1.0, "Weights-only AI must match FLOPs ÷ weight bytes.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bert_params_m_str = fmt_params(m_bert.parameters, scale="M", precision=0, commas=False)
@@ -765,13 +776,15 @@ class BertRoofline:
     bert_weight_mb_value_str = fmt_magnitude(bert_weight, unit=MB, precision=0, commas=False)
     bert_weight_mb_str = fmt_memory(bert_weight, unit=MB, precision=0, commas=False)
 
-    bert_ai_b1_str = fmt_int(round(ai_b1), commas=False)
+    bert_ai_b1_str = fmt_arithmetic_intensity((m_bert.inference_flops / p_b1.memory_footprint), unit=flop / byte, precision=0, commas=False)
     bert_perf_b1_tflop_per_s_str = fmt_flop_rate(perf_b1, unit=TFLOP / second, precision=1, commas=False)
     bert_util_b1_str = fmt_percent(util_b1 / 100, precision=1, commas=False, style='prose')
 
     bert_batch32_gflop_value_str = fmt_magnitude(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
     bert_batch32_gflop_str = fmt_flops(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
-    bert_ai_b32_str = fmt_int(round(ai_b32), commas=False)
+    bert_ai_b32_str = fmt_arithmetic_intensity(
+        (m_bert.inference_flops * batch_32 / p_b1.memory_footprint), unit=flop / byte, precision=0, commas=False
+    )
 
     # Wrap mixed prose+math in MarkdownStr() — use raw (unsuffixed) values
     bert_ai_eq_str = MarkdownStr(f"({bert_gflop_value_str} $\\times$ $10^{{9}}$) ÷ ({bert_weight_mb_value_str} $\\times$ $10^{{6}}$)")
@@ -786,7 +799,7 @@ class BertRoofline:
 
     a100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
-    a100_ridge_str = fmt_int(round(ridge_point), commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, precision=1, commas=False)
 ```
 
 ::: {#nbk-benchmarking-roofline-analysis-bert-inference .callout-notebook title="Roofline analysis for BERT inference"}
@@ -797,21 +810,21 @@ class BertRoofline:
 
 - Peak compute: `{python} BertRoofline.a100_fp16_tflop_per_s_str` (FP16 Tensor Core)
 - Memory bandwidth: `{python} BertRoofline.a100_bw_tb_per_s_str`
-- Ridge point: `{python} BertRoofline.a100_fp16_tflop_per_s_str` ÷ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.a100_ridge_str` FLOP/byte
+- Ridge point: `{python} BertRoofline.a100_fp16_tflop_per_s_str` ÷ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.a100_ridge_str`
 
-Any workload with arithmetic intensity below `{python} BertRoofline.a100_ridge_str` FLOP/byte is memory bound; above is compute bound.
+Any workload with arithmetic intensity below `{python} BertRoofline.a100_ridge_str` is memory bound; above is compute bound.
 
 **Step 2**: BERT-base characteristics.
 
 - Parameters: `{python} BertRoofline.bert_params_m_str` = `{python} BertRoofline.bert_weight_mb_str` (FP32)
 - FLOPs per inference: ~`{python} BertRoofline.bert_gflop_str` (forward pass with sequence length $S=128$)
 - Data movement: ~`{python} BertRoofline.bert_weight_mb_str` (must load all weights from memory)
-- Arithmetic intensity: `{python} BertRoofline.bert_ai_eq_str` = `{python} BertRoofline.bert_ai_b1_str` FLOP/byte (weights-only model; see note in main text)
+- Arithmetic intensity: `{python} BertRoofline.bert_ai_eq_str` = `{python} BertRoofline.bert_ai_b1_str` (weights-only model; see note in main text)
 
 **Step 3**: Performance prediction.
 Since `{python} BertRoofline.bert_ai_b1_str` < `{python} BertRoofline.a100_ridge_str`, BERT at batch = 1 is memory-bound:
 
-Achievable perf = `{python} BertRoofline.bert_ai_b1_str` FLOP/byte $\times$ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str`
+Achievable perf = `{python} BertRoofline.bert_ai_b1_str` $\times$ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str`
 
 GPU utilization = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str` ÷ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_util_b1_str`
 
@@ -820,7 +833,7 @@ Increase batch size to `{python} BertRoofline.batch32_str`:
 
 - Same `{python} BertRoofline.bert_weight_mb_str` of weights, but `{python} BertRoofline.batch32_str`$\times$ more compute
 - New FLOPs: `{python} BertRoofline.bert_b32_flops_eq_str` = `{python} BertRoofline.bert_batch32_gflop_str`
-- New intensity: `{python} BertRoofline.bert_ai_b32_eq_str` = `{python} BertRoofline.bert_ai_b32_str` FLOP/byte
+- New intensity: `{python} BertRoofline.bert_ai_b32_eq_str` = `{python} BertRoofline.bert_ai_b32_str`
 
 Since `{python} BertRoofline.bert_ai_b32_str` > `{python} BertRoofline.a100_ridge_str`, batch = 32 is compute-bound:
 
@@ -2325,7 +2338,7 @@ Training large-scale machine learning models requires substantial computational 
 # │          energy_reg_str, energy_l1_str, energy_l2_str,
 # │          gpt3_energy_mwh_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, fmt_qty
+from mlsysim.fmt import fmt, fmt_multiple, fmt_qty, fmt_energy_per_flop
 from mlsysim.core.units import MWh, pJ, byte
 
 class EnergyPerOp:
@@ -2342,9 +2355,9 @@ class EnergyPerOp:
     dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ.to(pJ).magnitude / 1000) * THOUSAND
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_fp32_pj_str = fmt_qty(ENERGY_FLOP_FP32_PJ, pJ, precision=1, commas=False)
-    energy_fp16_pj_str = fmt_qty(ENERGY_FLOP_FP16_PJ, pJ, precision=1, commas=False)
-    energy_int8_pj_str = fmt_qty(ENERGY_OP_INT8_PJ, pJ, precision=1, commas=False)
+    energy_fp32_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
+    energy_fp16_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP16_PJ, precision=1, commas=False)
+    energy_int8_pj_str = fmt_energy_per_flop(ENERGY_OP_INT8_PJ, precision=1, commas=False)
     energy_reg_pj_str = fmt_qty(ENERGY_REG_PJ, pJ, precision=2, commas=False)
     energy_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
     energy_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
@@ -2377,7 +2390,7 @@ class EnergyBreakdownCalc:
     e_fp32_load = (m_fp32 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
     e_fp32_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_FLOP_FP32_PJ).to(uJ)
     e_int8_load = (m_int8 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
-    e_int8_compute = (Models.Vision.MobileNetV2.inference_flops * (ENERGY_OP_INT8_PJ / flop)).to(uJ)
+    e_int8_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_OP_INT8_PJ).to(uJ)
     e_fp32_total = e_fp32_load + e_fp32_compute
     e_int8_total = e_int8_load + e_int8_compute
     s_load = (e_fp32_load / e_int8_load).to_base_units().magnitude
@@ -2639,7 +2652,7 @@ To account for this, benchmarks often measure tail latency\index{Tail Latency!p9
 
 These measurements form the basis for Service Level Objectives (SLOs) and Service Level Agreements (SLAs), which formalize performance expectations.
 
-::: {#dfn-benchmarking-slo-vs-sla .callout-definition title="SLO vs. SLA"}
+::: {#dfn-benchmarking-slo-vs-sla .callout-definition title="SLOs and SLAs"}
 
 ***SLOs and SLAs***\index{SLO!definition}\index{SLA!definition} are performance commitment specifications for production ML serving systems: a Service Level Objective (SLO) is the internal engineering target that the team optimizes toward, while a Service Level Agreement (SLA) is the external contractual threshold whose breach triggers financial penalties.
 
@@ -5036,7 +5049,7 @@ class PrecisionEnergySummary:
     ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
     dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
     fp32_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
-    int8_pj = ENERGY_OP_INT8_PJ.to(pJ).magnitude
+    int8_pj = ENERGY_OP_INT8_PJ.to(pJ / flop).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     e_fp32_load = (m_params * MILLION * 4 * dram_pj) / MILLION

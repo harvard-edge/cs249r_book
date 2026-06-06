@@ -31,7 +31,7 @@ class ComputationGraph(BaseModel):
     @field_validator("total_ops", mode="after")
     @classmethod
     def _validate_total_ops(cls, v):
-        return require_unit_family(v, ureg.count, "total_ops", "operation")
+        return require_unit_family(v, ureg.flop, "total_ops", "operation")
 
     @field_validator("parameter_count", mode="after")
     @classmethod
@@ -46,7 +46,7 @@ class ComputationGraph(BaseModel):
     @field_validator("arithmetic_intensity", mode="after")
     @classmethod
     def _validate_arithmetic_intensity(cls, v):
-        return require_unit_families(v, ureg.count / ureg.byte, "arithmetic_intensity", ("operation", "data"))
+        return require_unit_families(v, ureg.flop / ureg.byte, "arithmetic_intensity", ("operation", "data"))
     
     def __repr__(self):
         return f"ComputationGraph({self.name}, {self.total_ops:~P})"
@@ -105,7 +105,7 @@ class Workload(BaseModel):
     @field_validator("inference_flops", mode="after")
     @classmethod
     def _validate_inference_flops(cls, v):
-        return require_unit_family(v, ureg.count, "inference_flops", "operation")
+        return require_unit_family(v, ureg.flop, "inference_flops", "operation")
 
     @field_validator("inference_energy", mode="after")
     @classmethod
@@ -179,7 +179,7 @@ class TransformerWorkload(Workload):
     @field_validator("training_ops", mode="after")
     @classmethod
     def _validate_training_ops(cls, v):
-        return require_unit_family(v, ureg.count, "training_ops", "operation")
+        return require_unit_family(v, ureg.flop, "training_ops", "operation")
 
     @field_validator("training_tokens", "training_accelerators_ref", mode="after")
     @classmethod
