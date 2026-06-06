@@ -1585,17 +1585,24 @@ The hardware dictates the software abstraction, which in turn shapes what archit
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt, fmt_flop_rate
+from mlsysim import Hardware
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str, TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str, TensorCoreTdpRecap.tc_vs_cuda_ratio_mult_str, TensorCoreTdpRecap.h100_fp32_cuda_tflop_per_s_str
 class TensorCoreTdpRecap:
 
+    _h100 = Hardware.Cloud.H100
+    _fp16_tc = _h100.compute.peak_flops
+    _fp8_tc = _h100.compute.precision_flops["fp8"]
+    _fp32_cuda = _h100.compute.precision_flops["fp32_cuda"]
+    _tc_vs_cuda = (_fp16_tc / _fp32_cuda).to("").magnitude
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
-    h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs / second, precision=0, commas=True)
-    tc_vs_cuda_ratio_mult_str = fmt_multiple(64.0, precision=0, commas=False)
-    h100_fp32_cuda_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops / 64, unit=TFLOPs / second, precision=1, commas=False)
+    h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(_fp16_tc, unit=TFLOPs / second, precision=0, commas=False)
+    h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(_fp8_tc, unit=TFLOPs / second, precision=0, commas=True)
+    tc_vs_cuda_ratio_mult_str = fmt_multiple(_tc_vs_cuda, precision=1, commas=False)
+    h100_fp32_cuda_tflop_per_s_str = fmt_flop_rate(_fp32_cuda, unit=TFLOPs / second, precision=0, commas=False)
 ```
 
 1.  **Significance (quantitative)**: Tensor Cores provide the bulk of the H100's `{python} TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str` FP16/BF16 peak (and ~`{python} TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str` at FP8)—roughly `{python} TensorCoreTdpRecap.tc_vs_cuda_ratio_mult_str` the ~`{python} TensorCoreTdpRecap.h100_fp32_cuda_tflop_per_s_str` delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
@@ -3484,7 +3491,7 @@ class PodTrainingMath:
     _flops_sci = f"{_total_flops:.2e}"
     _flops_mantissa = _flops_sci.split("e+")[0]
     _flops_exp = int(_flops_sci.split("e+")[1])
-    pod_flops_math = fmt_math(f"6 \\times {gpt3_params_b_value_str} \\times {gpt3_tokens_b_value_str} \\times 10^{{9}}")
+    pod_flops_math = fmt_math(f"6 \\times {gpt3_params_b_value_str} \\times 10^{{9}} \\times {gpt3_tokens_b_value_str} \\times 10^{{9}}")
     total_flops_math = fmt_math(f"{_flops_mantissa} \\times 10^{{{_flops_exp}}}")
     n_params_math = fmt_math(f"P = {gpt3_params_b_value_str} \\times 10^9")
     n_tokens_math = fmt_math(f"D = {gpt3_tokens_b_value_str} \\times 10^9")
@@ -3508,7 +3515,7 @@ class InfraFrontierPodTrainingRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Training a `{python} InfraFrontierPodTrainingRecap.frontier_params_b_str` model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming `{python} PodTrainingMath.gpt3_tokens_billion_str`). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` FLOP/s, or about `{python} PodTrainingMath.cluster_eflop_per_s_str` EFLOP/s, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of FP8 peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
+Training a `{python} InfraFrontierPodTrainingRecap.frontier_params_b_str` model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming `{python} PodTrainingMath.gpt3_tokens_billion_str`). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` FLOP/s, or about `{python} PodTrainingMath.cluster_eflop_per_s_str`, yielding a physics-limit training time of approximately 12 hours.
 
 In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time beyond the physics limit. A simplified multiplier chain reaches an approximately 18-hour system minimum; production schedules can stretch to days or weeks once queueing, data readiness, debugging, reruns, and site-specific operational margins enter the plan. The central theme is unchanged: at pod scale, infrastructure imperfections dominate over the raw capability of the silicon. Recovering this lost time is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
@@ -3601,7 +3608,7 @@ We can derive the training time for our `{python} InfraFrontierPodTimeRecap.fron
    `{python} PodTrainingMath.total_flops_math` FLOPs
 
 2. **Cluster throughput**: `{python} PodTrainingMath.n_gpus_str` H100 GPUs at `{python} PodTrainingMath.h100_fp8_tflop_per_s_str` peak, operating at `{python} PodTrainingMath.mfu_pct_str` MFU:
-   `{python} PodTrainingMath.cluster_throughput_math` FLOP/s sustained $\approx$ `{python} PodTrainingMath.cluster_eflop_per_s_str` EFLOP/s
+   `{python} PodTrainingMath.cluster_throughput_math` FLOP/s sustained $\approx$ `{python} PodTrainingMath.cluster_eflop_per_s_str`
 
 3. **Idealized Training Time** (the "physics limit"):
    (`{python} PodTrainingMath.total_flops_math` FLOPs)/(`{python} PodTrainingMath.cluster_throughput_math` FLOP/s) $\div 3600 \approx$ `{python} TrainingTime175B.t_physics_hr_str`
@@ -3670,7 +3677,7 @@ At this scale, the unit of analysis is no longer a rack or pod of independent se
 
 ***Warehouse-Scale Computer (WSC)***\index{Warehouse-Scale Computer!definition}\index{WSC!data center scale} is a building-scale computing system in which thousands of servers are operated as a single coherent machine (with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system), enabling training workloads that would be physically impossible on any single machine.
 
-1.  **Significance (quantitative)**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` ExaFLOP/s FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` EFLOP/s at FP8), enabling 175B-class training workloads at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
+1.  **Significance (quantitative)**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` at FP8), enabling 175B-class training workloads at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
 2.  **Observation**: Unlike a general-purpose compute cluster (which runs many independent jobs on separate nodes with no requirement for tight coupling), a WSC training cluster operates as a single synchronous instrument in which every node must participate in every AllReduce, making the failure or slowdown of a single node a cluster-wide performance event.
 3.  **Pitfall**: A frequent misconception is that WSC design is primarily software engineering or IT operations. WSC design is building-level computer architecture: the physical layout (rack placement to minimize inter-rack hops), power delivery chain (PUE targets, liquid cooling manifolds), and network topology must be co-designed as a unified system: a mistake at any layer propagates through all layers.
 
