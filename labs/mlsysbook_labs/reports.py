@@ -263,6 +263,23 @@ def report_export_panel(report: LabReport, *, include_json: bool = True, include
     """Return local download controls plus an optional visible Markdown fallback."""
     import marimo as mo
 
+    incomplete = tuple(str(item) for item in report.snapshot.get("incomplete_fields", ()) if item)
+    if incomplete:
+        missing_items = "".join(f"<li>{html.escape(item)}</li>" for item in incomplete)
+        return mo.Html(
+            f"""
+<div class="mlsysbook-panel mlsysbook-report-panel" style="border-left:4px solid #B42318;">
+  <h2>Report Locked</h2>
+  <p class="mlsysbook-action-note">
+    Complete the required lab work before downloading the local report.
+  </p>
+  <ul style="margin:10px 0 0 18px; color:#475467; line-height:1.6;">
+    {missing_items}
+  </ul>
+</div>
+"""
+        )
+
     controls = report_export(report, include_json=include_json)
     if not include_fallback:
         return mo.vstack([controls], align="center")

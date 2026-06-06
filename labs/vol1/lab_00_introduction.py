@@ -12,17 +12,19 @@ app = marimo.App(width="full")
 # determines whether it can run at all.
 #
 # Four sections:
-#   1. Concept blocks with structured checks (3 total)
-#   2. Interface Orientation — case, guess, controls, evidence, decision, report
+#   1. What this curriculum means
+#   2. What tracks are available
+#   3. How every later lab is structured
+#   4. Track selection and local report
 # No physics instruments (introduced in Lab 01+).
 # No prediction locks in anger (students haven't read Chapter 1 yet).
 # Progressive disclosure: each check gates the next concept.
 #
 # Concepts covered (all from pre-reading context, no chapter required):
-#   1. The 95% Problem — ML systems ≠ ML models
-#   2. Physical constraints partition deployment into distinct regimes
-#   3. Constraints are immovable — the choice of regime is the architecture
-#   4. UI scaffolding — every recurring component demonstrated before Lab 01
+#   1. ML systems labs are about deployed behavior, not isolated models.
+#   2. A track is a recurring learning lens, not a career choice.
+#   3. Later labs repeat a case -> guess -> evidence -> decision -> report loop.
+#   4. The report unlocks only after the orientation and track choice are complete.
 #
 # Design Ledger: initialized with deployment context at completion.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -100,9 +102,9 @@ def _(LabMetadata):
         mlsysim_version="0.1.2",
     )
     lab_learning_objectives = (
-        "Identify why production ML systems are constrained by infrastructure, not only model accuracy.",
-        "Choose a canonical track and explain the physical constraint that makes it distinct.",
-        "Recognize the recurring lab rhythm: read the case, make a guess, explore evidence, decide, and report.",
+        "Explain what an ML systems lab is trying to teach.",
+        "Compare the four canonical tracks and choose one recurring learning lens.",
+        "Recognize the repeated lab rhythm: case, guess, controls, evidence, decision, and report.",
     )
     lab_big_takeaways = (
         "The same model idea becomes a different systems problem on 📱 iPhone, 💍 Oura Ring, 🚕 RoboTaxi, and ☁️ Cloud Fleet.",
@@ -131,14 +133,15 @@ def _(ACADEMIC_LAB_CSS, LAB_CSS, lab_metadata, mo):
             </h1>
             <p style="margin: 0 0 20px 0; font-size: 1.05rem; color: #94a3b8;
                       max-width: 620px; line-height: 1.65;">
-                This course is not about machine learning. It is about the infrastructure
-                that makes machine learning possible — and the physical laws that govern it.
+                This orientation shows how the lab sequence works: choose a track,
+                learn the repeated workflow, and see how later labs adapt the same
+                concept to your selected context.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Orientation · 3 Concept Checks · Interface Tour
+                    Orientation · Track Choice · Interface Tour
                 </span>
                 <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
@@ -217,7 +220,7 @@ def _(COLORS, lab_learning_objectives, mo):
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     <strong>20&ndash;25 min</strong><br/>
-                    3 Concept Checks &middot; Interface Tour
+                    Orientation Checks &middot; Interface Tour
                 </div>
             </div>
         </div>
@@ -231,10 +234,10 @@ def _(COLORS, lab_learning_objectives, mo):
                 Lab Map
             </div>
             <div style="font-size: 0.86rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <strong>Part A:</strong> 95% infrastructure problem &middot;
-                <strong>Part B:</strong> physical regimes &middot;
-                <strong>Part C:</strong> recurring lab interface &middot;
-                <strong>Synthesis:</strong> choose your track and download the local report.
+                <strong>Part A:</strong> what ML systems means &middot;
+                <strong>Part B:</strong> your track options &middot;
+                <strong>Part C:</strong> the recurring lab interface &middot;
+                <strong>Synthesis:</strong> choose a track, review takeaways, and unlock the local report.
             </div>
         </div>
 
@@ -248,9 +251,8 @@ def _(COLORS, lab_learning_objectives, mo):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                "If a model reaches 99% accuracy in a Jupyter notebook, what are the 95% of
-                engineering problems that still stand between that model and a deployed product
-                &mdash; and which physical law determines which problems you cannot solve with software?"
+                "What kind of work will these labs ask you to do, and how will your
+                chosen track change the story without changing the core lesson?"
             </div>
         </div>
     </div>
@@ -258,59 +260,52 @@ def _(COLORS, lab_learning_objectives, mo):
     return
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: CONCEPT CHECKS
+# ZONE B: ORIENTATION CHECKS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CONCEPT 1: THE 95% PROBLEM ────────────────────────────────────────────────
-# _act_why: "You believe ML engineering is about models. The data shows 95% is infrastructure."
+# ─── ORIENTATION 1: WHAT THIS COURSE MEANS ─────────────────────────────────────
+# _act_why: "Students should know what kind of work these labs ask them to do before any technical scenario appears."
 @app.cell
 def _(mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## The 95% Problem
+        ## What Does This Lab Sequence Mean?
 
-        When Google published a study of their internal ML systems in 2015, they found
-        something that surprised the field. In a production ML system, the actual model —
-        the neural network, the training algorithm, the matrix math — accounts for roughly
-        **5% of the total codebase**.
+        These labs are not a second textbook and they are not a quiz bank. They are a
+        repeated way to practice systems thinking around machine learning.
 
-        The other **95%** is infrastructure: data pipelines, serving systems, monitoring,
-        hardware resource management, configuration, feature stores, deployment tooling.
-
-        This has a direct implication for how you should think about your role as an engineer:
+        Each lab gives you a small situation, a few choices to make, some evidence to
+        inspect, and a short report to download at the end. The technical ideas get
+        more specific over time, but the page structure stays familiar.
         """),
         mo.Html("""
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;">
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px;
                         padding: 20px; border-left: 5px solid #ef4444;">
                 <div style="font-weight: 800; color: #991b1b; margin-bottom: 8px;">
-                    ML Engineering
+                    A Model In Isolation
                 </div>
                 <div style="color: #7f1d1d; font-size: 0.9rem; line-height: 1.6;">
-                    Build and improve the model. Choose the architecture.
-                    Tune hyperparameters. Improve accuracy. <br/><br/>
-                    <strong>Optimizes the 5%.</strong>
+                    You ask whether the model is accurate on a dataset. That matters,
+                    but it is only one part of the work.
                 </div>
             </div>
             <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px;
                         padding: 20px; border-left: 5px solid #16a34a;">
                 <div style="font-weight: 800; color: #14532d; margin-bottom: 8px;">
-                    ML Systems Engineering
+                    A Model In A System
                 </div>
                 <div style="color: #14532d; font-size: 0.9rem; line-height: 1.6;">
-                    Build the infrastructure that makes the model run reliably
-                    at scale, within hardware constraints, in production. <br/><br/>
-                    <strong>Optimizes the 95%.</strong>
+                    You ask where the model runs, what it costs, how fast it must respond,
+                    what can fail, and what evidence would make the design defensible.
                 </div>
             </div>
         </div>
         """),
         mo.md("""
-        A model that achieves 99% accuracy in a Jupyter notebook is **not a product**.
-        It becomes a product only when it can run in real-time on real hardware,
-        serve thousands of concurrent users, recover from failures, detect when it
-        degrades, and update without downtime. That is the engineering this course teaches.
+        Lab 00 only orients you to that pattern. Lab 01 is where the first real
+        technical idea begins.
         """),
     ])
     return
@@ -321,15 +316,12 @@ def _(mo):
 def _(mo):
     check1 = mo.ui.radio(
         options={
-            "A)  The model architecture — choosing transformers over CNNs": "A",
-            "B)  The training algorithm — selecting Adam vs SGD": "B",
-            "C)  The serving infrastructure — how the model runs reliably in production": "C",
-            "D)  The dataset size — gathering more labeled training examples": "D",
+            "A)  Memorize facts about four devices": "A",
+            "B)  Tune model accuracy before anything else": "B",
+            "C)  Practice a repeated workflow for making evidence-backed systems decisions": "C",
+            "D)  Choose a permanent career specialization": "D",
         },
-        label="""**Check your understanding.** A startup ships a model with 94% accuracy.
-    Six months later, accuracy has silently dropped to 81% in production — but no code
-    has changed. As an ML Systems engineer, which part of the system is your *primary*
-    domain for diagnosing and fixing this?""",
+        label="""**Orientation check.** What are these labs mainly trying to help you practice?""",
     )
     return (check1,)
 
@@ -347,29 +339,20 @@ def _(check1, mo):
         _correct = check1.value == "C"
         _feedback = {
             "A": (
-                "**Not quite.** The architecture hasn't changed — the model itself is unchanged. "
-                "The issue is that the *world* changed while the model stayed fixed. "
-                "Model architecture is an ML concern; detecting and responding to drift "
-                "is a *systems* concern — monitoring, pipelines, retraining triggers."
+                "**Not quite.** The devices give each track a concrete story, but the goal "
+                "is not memorization. The devices help you reason about constraints."
             ),
             "B": (
-                "**Not quite.** The training algorithm only runs during training. "
-                "Once the model is deployed, SGD vs Adam no longer matters. "
-                "The degradation happened in production — that's the systems layer: "
-                "monitoring, data pipelines, serving infrastructure."
+                "**Not quite.** Accuracy matters, but these labs ask what else must be true "
+                "before an ML idea can become a reliable system."
             ),
             "C": (
-                "**Correct.** The model hasn't changed — but the world it's operating in has. "
-                "This is *silent degradation*, one of the defining challenges of ML systems. "
-                "Your job is not to debug code; it's to build monitoring that detects when "
-                "production data drifts away from training data, and pipelines that respond. "
-                "That's the 95%."
+                "**Correct.** You will repeatedly read a situation, make a guess, inspect "
+                "evidence, decide what you would defend, and download a short report."
             ),
             "D": (
-                "**Not quite.** More training data would help if you were retraining — "
-                "but the immediate problem is that you don't even *know* the model is degrading "
-                "until someone complains. The systems problem is the absence of monitoring. "
-                "Data collection is part of the solution, but detecting the problem comes first."
+                "**Not quite.** A track is only a learning lens. You can understand all four "
+                "tracks while developing deeper intuition for one recurring context."
             ),
         }
 
@@ -383,7 +366,7 @@ def _(check1, mo):
     _check1_view
     return
 
-# ─── CONCEPT 2: PHYSICAL CONSTRAINTS PARTITION DEPLOYMENT ─────────────────────
+# ─── ORIENTATION 2: WHAT A TRACK CHANGES ──────────────────────────────────────
 
 @app.cell
 def _(check1, mo):
@@ -392,11 +375,14 @@ def _(check1, mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## Why Constraints Drive Architecture
+        ## What Is A Track?
 
-        The same model cannot simply be "resized" to run everywhere.
-        Three physical laws carve the deployment landscape into distinct regimes
-        that no amount of software engineering can bridge:
+        A track is the context you carry through the labs. It changes the story,
+        the device, the stakeholder, the primary metric, and the guardrails.
+        It does **not** change the chapter concept everyone is learning.
+
+        You can think of it as four students solving the same kind of problem
+        under four different sets of constraints:
         """),
         mo.Html("""
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 16px 0;">
@@ -405,13 +391,12 @@ def _(check1, mo):
                         padding: 18px; border-top: 4px solid #6366f1;">
                 <div style="font-size: 1.4rem; margin-bottom: 6px;">⚡</div>
                 <div style="font-weight: 800; color: #1e293b; font-size: 0.95rem; margin-bottom: 6px;">
-                    The Speed of Light
+                    Where It Runs
                 </div>
                 <div style="color: #64748b; font-size: 0.85rem; line-height: 1.5;">
-                    London to New York = ~28 ms one-way, ~56 ms round-trip.
-                    A self-driving car that needs a 10 ms decision loop
-                    <strong>cannot route to a remote datacenter</strong>.
-                    Physics sets this floor. No GPU upgrade helps.
+                    Cloud fleet, robotaxi, phone, and wearable hardware create
+                    different limits. The same technique can be useful in one
+                    context and irrelevant in another.
                 </div>
             </div>
 
@@ -419,13 +404,12 @@ def _(check1, mo):
                         padding: 18px; border-top: 4px solid #ef4444;">
                 <div style="font-size: 1.4rem; margin-bottom: 6px;">🌡️</div>
                 <div style="font-weight: 800; color: #1e293b; font-size: 0.95rem; margin-bottom: 6px;">
-                    Thermodynamics
+                    What You Optimize
                 </div>
                 <div style="color: #64748b; font-size: 0.85rem; line-height: 1.5;">
-                    Heat accumulates faster than a small enclosure can dissipate it.
-                    A smartphone running a heavy model continuously
-                    <strong>throttles its processor after 90 seconds</strong>.
-                    No software fix prevents heat.
+                    One track may care first about cost, another about latency,
+                    another about battery, and another about memory. The report
+                    should use the track's metrics.
                 </div>
             </div>
 
@@ -433,26 +417,20 @@ def _(check1, mo):
                         padding: 18px; border-top: 4px solid #10b981;">
                 <div style="font-size: 1.4rem; margin-bottom: 6px;">💾</div>
                 <div style="font-weight: 800; color: #1e293b; font-size: 0.95rem; margin-bottom: 6px;">
-                    Memory Physics
+                    What You Defend
                 </div>
                 <div style="color: #64748b; font-size: 0.85rem; line-height: 1.5;">
-                    Moving data through memory costs energy and takes time.
-                    A microcontroller with 256 KB of SRAM
-                    <strong>cannot page memory from disk</strong>.
-                    If the model doesn't fit, it doesn't run.
+                    The final decision should sound like it belongs to the
+                    selected track's stakeholder. That keeps the lab from being
+                    a generic worksheet.
                 </div>
             </div>
 
         </div>
         """),
         mo.md("""
-        These three constraints — latency floors, power limits, and memory capacity —
-        divide the world into four fundamentally different deployment environments.
-        Engineers who treat deployment as an afterthought collide with these walls
-        after months of architectural work.
-
-        **The insight of ML Systems engineering:** choose your regime *first*,
-        because the physics of that regime constrains every design decision that follows.
+        The track choice is there to make the lab feel concrete. It is not a
+        hidden prerequisite and it is not a career sorting mechanism.
         """),
     ])
     return
@@ -466,27 +444,27 @@ def _(check1, mo):
 def _(mo):
     model_size = mo.ui.checkbox(
         value=False,
-        label="Use a smaller model with fewer parameters"
+        label="The story and stakeholder voice"
     )
 
     quantization = mo.ui.checkbox(
         value=False,
-        label="Apply INT8 quantization to reduce precision"
+        label="The device and hardware assumptions"
     )
 
     move_server = mo.ui.checkbox(
         value=False,
-        label="Move the datacenter server physically closer"
+        label="The primary metric and guardrails"
     )
 
     faster_gpu = mo.ui.checkbox(
         value=False,
-        label="Use a faster GPU with higher TFLOPS"
+        label="The report framing"
     )
 
     edge_deploy = mo.ui.checkbox(
         value=False,
-        label="Deploy the model directly on the vehicle"
+        label="The chapter's core learning objective"
     )
     return (edge_deploy, faster_gpu, model_size, move_server, quantization)
 
@@ -505,11 +483,10 @@ def _(
 
     if check2empty():
         _check2_prompt = mo.vstack([
-            mo.md("""**Check your understanding.** An autonomous vehicle perception system
-        is routed to a cloud datacenter 2,000 km away. Round-trip latency is 40 ms.
-        The safety requirement is a 10 ms end-to-end decision loop."""),
+            mo.md("""**Orientation check.** When you choose a track, which parts of
+        later labs should change automatically?"""),
 
-            mo.md("""Select **all approaches** that could actually solve the latency problem:"""),
+            mo.md("""Select **all** that should change because of the track:"""),
             model_size,
             quantization,
             move_server,
@@ -534,17 +511,17 @@ def _(
 ):
     mo.stop(check1.value is None or check2empty())
 
-    _correct_set = {'move_server', 'edge_deploy'}
-    _has_wrong     = model_size.value or quantization.value or faster_gpu.value
-    _missing_right = not (move_server.value and edge_deploy.value)
-    _exactly_right = move_server.value and edge_deploy.value and not _has_wrong
+    _correct_set = {'model_size', 'quantization', 'move_server', 'faster_gpu'}
+    _has_wrong     = edge_deploy.value
+    _missing_right = not (model_size.value and quantization.value and move_server.value and faster_gpu.value)
+    _exactly_right = not _has_wrong and not _missing_right
 
     _option_labels = {
-        'model_size':   "Use a smaller model",
-        'quantization': "Apply INT8 quantization",
-        'move_server':  "Move the server physically closer",
-        'faster_gpu':   "Use a faster GPU",
-        'edge_deploy':  "Deploy on the vehicle",
+        'model_size':   "Story and stakeholder voice",
+        'quantization': "Device and hardware assumptions",
+        'move_server':  "Primary metric and guardrails",
+        'faster_gpu':   "Report framing",
+        'edge_deploy':  "Chapter core learning objective",
     }
 
     _rows = ""
@@ -570,37 +547,27 @@ def _(
 
     _explanation = """
     <div style="margin-top:14px; font-size:0.9rem; color:#1e293b; line-height:1.7;">
-        <strong>The physics:</strong> The 40 ms latency comes from the speed of light
-        across 2,000 km of fiber — approximately 200,000 km/s.
-        No software change, no GPU upgrade, no model compression
-        removes this physical floor. <br/><br/>
-        <strong>Smaller models</strong> and <strong>faster GPUs</strong> reduce
-        <em>compute time</em>, but the round-trip latency is dominated by
-        <em>propagation delay</em> — they don't help. <br/><br/>
-        <strong>Moving the server physically closer</strong> or
-        <strong>deploying directly on the vehicle</strong> are the only solutions
-        because they reduce the distance the signal must travel.
-        This is why Edge ML exists as a deployment paradigm — not as a preference,
-        but as a physical necessity.
+        <strong>Track-specific:</strong> story, stakeholder, device assumptions,
+        metrics, guardrails, and report framing should all change with the track. <br/><br/>
+        <strong>Shared across tracks:</strong> the chapter's core learning objective
+        stays the same. Everyone learns the same MLSys idea, but each track
+        materializes it in a different setting.
     </div>
     """
 
     _title = "✅ Exactly right." if _exactly_right else (
         "⚠️ Partially right — review the highlighted options." if not _has_wrong else
-        "⚠️ Not quite — some selections add compute speed, not reduce propagation delay."
+        "⚠️ Not quite — the core lesson should stay shared across tracks."
     )
     _border = "#16a34a" if _exactly_right else ("#f59e0b" if not _has_wrong else "#ef4444")
     _bg_outer = "#f0fdf4" if _exactly_right else ("#fffbeb" if not _has_wrong else "#fef2f2")
 
-    # The physics-violation callout reinforces *why* cloud-side fixes don't
-    # work. It reads as scolding when the student already picked the two
-    # correct answers, so we suppress it on an exactly-right submission and
-    # let the prose explanation + math peek carry the point (#1305).
+    # Keep feedback in the same answer box so students know where a click
+    # produced its explanation.
     _items = [
-        mo.md("""**Check your understanding.** An autonomous vehicle perception system
-    is routed to a cloud datacenter 2,000 km away. Round-trip latency is 40 ms.
-    The safety requirement is a 10 ms end-to-end decision loop."""),
-        mo.md("""Select **all approaches** that could actually solve the latency problem:"""),
+        mo.md("""**Orientation check.** When you choose a track, which parts of
+    later labs should change automatically?"""),
+        mo.md("""Select **all** that should change because of the track:"""),
         model_size,
         quantization,
         move_server,
@@ -618,26 +585,15 @@ def _(
 
     if not _exactly_right:
         _items.append(mo.callout(mo.md(
-            "**INFEASIBLE — Cloud inference violates physics.**\n\n"
-            "Distance: 2,000 km | Speed in fiber: ~200,000 km/s | "
-            "Round-trip: 2 × 2,000 / 200,000 = **20 ms** | "
-            "AV SLA: 10 ms | **Verdict: physically impossible.** "
-            "No GPU upgrade, no model compression, no software optimization "
-            "can fix this. The model must move to the vehicle."
-        ), kind="danger"))
+            "**Track rule of thumb:** the track should change the narrative and "
+            "constraints, but it should not change what concept the lab teaches."
+        ), kind="warn"))
 
     _items.append(mo.accordion({
-        "Math Peek: Propagation Delay": mo.md("""
-    **Formula:**
-    $$
-    t_{\\text{round-trip}} = \\frac{2d}{c \\cdot n}
-    $$
-
-    **Variables:**
-    - **d**: distance between client and server (km)
-    - **c**: speed of light in vacuum (299,792 km/s)
-    - **n**: fiber refractive index factor (~0.67)
-    - At d = 2,000 km: t = 2 × 2,000 / (299,792 × 0.67) ≈ 20 ms — exceeds 10 ms SLA by 2x
+        "Why keep one shared concept?": mo.md("""
+    If every track taught a different idea, students could not compare notes.
+    The track should change the concrete material: device, workload, metric,
+    guardrail, stakeholder, and report. The underlying concept stays common.
     """)
     }))
 
@@ -688,10 +644,9 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label):
         mo.md("""
         ## The Four Canonical Tracks
 
-        The physical constraints above do not create a generic continuum. In this
-        course they resolve into four canonical tracks. You will choose one as
-        your recurring point of view. Later labs will change the story, metrics,
-        and decisions automatically from that choice.
+        The course supports four canonical tracks. You will choose one as your
+        recurring point of view. Later labs will change the story, metrics, and
+        decisions automatically from that choice while keeping the core concept shared.
         """),
         mo.Html(f"""
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 16px 0;">
@@ -709,7 +664,7 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label):
     ])
     return
 
-# ─── CHECK 3 (constraint reasoning) ───────────────────────────────────────────
+# ─── CHECK 3 (lab workflow) ───────────────────────────────────────────────────
 
 @app.cell
 def _(check1, check2empty, mo):
@@ -717,17 +672,12 @@ def _(check1, check2empty, mo):
 
     check3 = mo.ui.radio(
         options={
-            "A)  Cloud ML — access to the most compute": "A",
-            "B)  Edge ML — low latency and local processing": "B",
-            "C)  Mobile ML — runs on the patient's own device": "C",
-            "D)  TinyML — lowest power, can run for months on a battery": "D",
+            "A)  Read the case, guess first, explore evidence, decide, then report": "A",
+            "B)  Skip the case and tune controls until the answer looks right": "B",
+            "C)  Download a report before making the required decisions": "C",
+            "D)  Treat the track as a separate topic from the lab": "D",
         },
-        label="""**Check your understanding.** A hospital wants to deploy an AI system
-    that detects sepsis from ICU sensor readings. Requirements: results within 2 ms of
-    each sensor reading, no patient data can leave the hospital network, and the sensor
-    node must run for 6 months on a small battery without replacement.
-
-    Which deployment paradigm is the *only* one that satisfies all three requirements simultaneously?""",
+        label="""**Orientation check.** What workflow should you expect to repeat in later labs?""",
     )
     return (check3,)
 
@@ -744,33 +694,23 @@ def _(check1, check2empty, check3, mo):
 def _(check1, check2empty, check3, mo):
     mo.stop(check1.value is None or check2empty() or check3.value is None)
 
-    _correct = check3.value == "D"
+    _correct = check3.value == "A"
     _feedback = {
         "A": (
-            "**Not quite.** Cloud ML violates two of the three requirements. "
-            "Round-trip latency to a cloud server is 10–500 ms — far above the 2 ms requirement. "
-            "And patient data would leave the hospital network, violating the privacy constraint. "
-            "Cloud gives you power, but power is not the binding constraint here."
+            "**Correct.** Later labs repeat this order so the interface stays familiar "
+            "while the technical ideas become more substantial."
         ),
         "B": (
-            "**Closer, but not sufficient.** Edge ML achieves low latency and local processing, "
-            "satisfying the first two requirements. But an edge server draws tens of watts "
-            "continuously — it cannot run for 6 months on a small battery. "
-            "The power constraint eliminates it. Edge is right for latency; wrong for energy."
+            "**Not quite.** Controls are there to create evidence, not to hide the case. "
+            "You should understand the situation before changing settings."
         ),
         "C": (
-            "**Not quite.** Mobile ML runs locally (satisfying privacy) and can meet the "
-            "latency target, but sustained operation at smartphone-level power draws "
-            "3–5 W. A small sensor battery would last hours, not months. "
-            "The energy envelope makes mobile ML infeasible for always-on sensing."
+            "**Not quite.** The report should come after the required parts, summary, "
+            "and takeaways. It is the artifact of your work, not the starting point."
         ),
         "D": (
-            "**Correct.** TinyML is the only paradigm that satisfies all three simultaneously. "
-            "Inference happens directly on the sensor node — no network latency, no data "
-            "leaving the hospital. Microcontrollers running at microwatts can sustain "
-            "always-on sensing for months on a coin-cell battery. "
-            "The model must fit in kilobytes — that is the engineering challenge this regime imposes. "
-            "Notice: this was not a software preference. It was a constraint analysis."
+            "**Not quite.** The track should be threaded through the lab. It changes "
+            "the scenario, evidence, and report framing for the same shared concept."
         ),
     }
 
@@ -1022,26 +962,20 @@ def _(
 def _(check1, check2empty, check3, mo):
     mo.stop(
         check1.value is None or check2empty() or check3.value is None,
-        mo.md("_Complete all three checks above to unlock your deployment context selection._")
+        mo.md("_Complete the orientation checks above to unlock your track selection._")
     )
 
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## Scenario Brief
+        ## Choose Your Track
 
-        You have now seen why deployment context is a first-order engineering decision,
-        not an afterthought. For the next 15 labs, you will carry one deployment context
-        as your primary lens — the physical regime whose constraints will test every
-        optimization technique you learn.
+        You have now seen what a track does. For the rest of Volume I, you will
+        carry one deployment context as your primary learning lens. Every student
+        learns the same concepts; the track changes the concrete story and evidence.
 
-        **This is not a career choice.** It is a choice of which physical law will
-        be your primary adversary. You will understand all four regimes —
-        but you will develop deep intuition for one.
-
-        ## Your Track
-
-        Choose one canonical track. Later labs will read this choice from the
+        **This is not a career choice.** It is a way to keep the examples coherent
+        from lab to lab. Later labs will read this choice from the
         local Design Ledger and adapt narrative, device assumptions, metrics,
         guardrails, and report framing automatically.
         """),
@@ -1204,11 +1138,11 @@ def _(
         "primary_metrics": _track_profile.primary_metrics,
         "guardrail_metrics": _track_profile.guardrail_metrics,
         "dominant_constraints": _track_profile.dominant_constraints,
-        "check1_answer":      check1.value,
-        "check1_correct":     check1.value == "C",
-        "check2_selections":  check2value_list(),
-        "check3_answer":      check3.value,
-        "check3_correct":     check3.value == "D",
+        "orientation_goal_answer": check1.value,
+        "orientation_goal_correct": check1.value == "C",
+        "track_change_selections": check2value_list(),
+        "lab_workflow_answer": check3.value,
+        "lab_workflow_correct": check3.value == "A",
     })
 
     _arc_rows = "".join([
@@ -1284,89 +1218,6 @@ def _(
     ])
     return
 
-@app.cell
-def _(
-    build_lab_report,
-    check1,
-    check2empty,
-    check2value_list,
-    check3,
-    context_selector,
-    get_track_profile,
-    lab_big_takeaways,
-    lab_learning_objectives,
-    lab_metadata,
-    mo,
-    report_export_panel,
-):
-    mo.stop(
-        check1.value is None
-        or check2empty()
-        or check3.value is None
-        or context_selector.value is None,
-        mo.md("_Complete the checks and choose your track to unlock the local report._"),
-    )
-
-    _track_id = context_selector.value
-    _profile = get_track_profile(_track_id)
-    _selected = f"{_profile.label} ({_profile.category})"
-    _report = build_lab_report(
-        lab_metadata,
-        track=_profile.label,
-        scenario="Lab 00 track selection and lab-interface orientation",
-        learning_objectives=lab_learning_objectives,
-        predictions={
-            "production_ml_domain": check1.value,
-            "physical_constraint_actions": ", ".join(check2value_list()),
-            "always_on_sensing_regime": check3.value,
-        },
-        evidence_summary={
-            "selected_track": _selected,
-            "hardware_ref": _profile.hardware_ref,
-            "system_ref": _profile.system_ref or "single-device profile",
-            "dominant_constraints": ", ".join(_profile.dominant_constraints),
-        },
-        final_decision=f"Use {_profile.label} as the student's canonical track for subsequent labs.",
-        big_takeaways=lab_big_takeaways,
-        reflections={
-            "diagnosis": "Deployment context determines which constraints matter first.",
-            "tradeoff": f"{_profile.label} emphasizes {_profile.primary_metrics[0]} while preserving {_profile.guardrail_metrics[0]}.",
-            "residual_risk": "This orientation report records track intent; later labs must validate feasibility with MLSysIM solver outputs.",
-        },
-        residual_risk=(
-            "Lab 00 establishes the track and source references. Later labs may expose "
-            "additional constraints that change a specific design choice inside the same track."
-        ),
-        source_trace={
-            "track_id": _profile.track_id,
-            "hardware_ref": _profile.hardware_ref,
-            "system_ref": _profile.system_ref or "single-device profile",
-            "source_policy": _profile.source_policy,
-            "report_builder": "mlsysbook_labs.build_lab_report",
-        },
-        result_snapshot={
-            "track_id": _profile.track_id,
-            "track_label": _profile.label,
-            "hardware_ref": _profile.hardware_ref,
-            "system_ref": _profile.system_ref,
-            "check1_correct": check1.value == "C",
-            "check3_correct": check3.value == "D",
-        },
-    )
-
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "Your Lab 00 report is generated locally from the current notebook state. "
-                "The fallback text panel contains the same Markdown artifact if browser download fails."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
-    return
-
 # ─── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, check1, check2empty, check3, context_selector, mo):
@@ -1390,22 +1241,19 @@ def _(COLORS, check1, check2empty, check3, context_selector, mo):
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
-                    <strong>1. The model is the 5% &mdash; the infrastructure is the 95%.</strong>
-                    A model that reaches 99% accuracy in a notebook is not a product until it runs
-                    reliably, monitors its own degradation, and serves requests within physical
-                    constraints. ML Systems Engineering optimizes the 95% that makes deployment possible.
+                    <strong>1. These labs practice a workflow, not just answers.</strong>
+                    You will read a case, make a guess, inspect evidence, choose a defensible
+                    decision, and download a short report.
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>2. Physical constraints partition deployment into four incommensurable regimes.</strong>
-                    The speed of light, thermodynamics, and memory physics create four distinct operating
-                    envelopes &mdash; Cloud, Edge, Mobile, TinyML &mdash; that no software engineering
-                    can bridge. Choosing the wrong regime makes the system impossible, not just slow.
+                    <strong>2. A track gives the work a concrete point of view.</strong>
+                    iPhone, Oura Ring, RoboTaxi, and Cloud Fleet change the story,
+                    device assumptions, metrics, guardrails, and report framing.
                 </div>
                 <div>
-                    <strong>3. Every later lab repeats the same learning loop.</strong>
-                    You will read a case, make a guess, explore evidence, decide, and
-                    write a short report. That repeated structure lets the technical
-                    ideas get harder without making the interface feel new each time.
+                    <strong>3. The core lesson stays shared across tracks.</strong>
+                    Your track changes how the lesson is materialized, but every student
+                    is learning the same chapter concept.
                 </div>
             </div>
         </div>
@@ -1464,6 +1312,89 @@ def _(COLORS, check1, check2empty, check3, context_selector, mo):
     ])
     return
 
+@app.cell
+def _(
+    build_lab_report,
+    check1,
+    check2empty,
+    check2value_list,
+    check3,
+    context_selector,
+    get_track_profile,
+    lab_big_takeaways,
+    lab_learning_objectives,
+    lab_metadata,
+    mo,
+    report_export_panel,
+):
+    mo.stop(
+        check1.value is None
+        or check2empty()
+        or check3.value is None
+        or context_selector.value is None,
+        mo.md("_Complete the orientation checks and choose your track to unlock the local report._"),
+    )
+
+    _track_id = context_selector.value
+    _profile = get_track_profile(_track_id)
+    _selected = f"{_profile.label} ({_profile.category})"
+    _report = build_lab_report(
+        lab_metadata,
+        track=_profile.label,
+        scenario="Lab 00 track selection and lab-interface orientation",
+        learning_objectives=lab_learning_objectives,
+        predictions={
+            "orientation_goal": check1.value,
+            "track_specific_elements": ", ".join(check2value_list()),
+            "recurring_lab_workflow": check3.value,
+        },
+        evidence_summary={
+            "selected_track": _selected,
+            "hardware_ref": _profile.hardware_ref,
+            "system_ref": _profile.system_ref or "single-device profile",
+            "dominant_constraints": ", ".join(_profile.dominant_constraints),
+        },
+        final_decision=f"Use {_profile.label} as the student's canonical track for subsequent labs.",
+        big_takeaways=lab_big_takeaways,
+        reflections={
+            "orientation": "Later labs use the same case, guess, controls, evidence, decision, and report rhythm.",
+            "track_choice": f"{_profile.label} changes the scenario and constraints while preserving the shared concept.",
+            "report_readiness": "The report unlocks only after the orientation checks, synthesis, and track choice are complete.",
+        },
+        residual_risk=(
+            "Lab 00 records the student's track and interface orientation. Later labs "
+            "must still build evidence for each concrete design decision."
+        ),
+        source_trace={
+            "track_id": _profile.track_id,
+            "hardware_ref": _profile.hardware_ref,
+            "system_ref": _profile.system_ref or "single-device profile",
+            "source_policy": _profile.source_policy,
+            "report_builder": "mlsysbook_labs.build_lab_report",
+        },
+        result_snapshot={
+            "track_id": _profile.track_id,
+            "track_label": _profile.label,
+            "hardware_ref": _profile.hardware_ref,
+            "system_ref": _profile.system_ref,
+            "orientation_goal_correct": check1.value == "C",
+            "lab_workflow_correct": check3.value == "A",
+        },
+    )
+
+    mo.vstack([
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "Your Lab 00 orientation report is generated locally from the current "
+                "track choice and completed orientation checks."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
+    ])
+    return
+
 # ─── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
 @app.cell
 def _(COLORS, context_selector, get_track_profile, mo, track_display_label):
@@ -1510,6 +1441,14 @@ def _(COLORS, context_selector, get_track_profile, mo, track_display_label):
 # --- Auxiliary methods ---------------------------------------------------------
 @app.cell
 def _(edge_deploy, faster_gpu, model_size, move_server, quantization):
+    _check2_labels = {
+        'model_size': 'story and stakeholder voice',
+        'quantization': 'device and hardware assumptions',
+        'move_server': 'primary metric and guardrails',
+        'faster_gpu': 'report framing',
+        'edge_deploy': "chapter core learning objective",
+    }
+
     def check2empty():
         return not (model_size.value or quantization.value or move_server.value or faster_gpu.value or edge_deploy.value)
 
@@ -1519,7 +1458,7 @@ def _(edge_deploy, faster_gpu, model_size, move_server, quantization):
         if (model_size.value or quantization.value or move_server.value or faster_gpu.value or edge_deploy.value):
             for item in ['model_size', 'quantization', 'move_server' ,'faster_gpu', 'edge_deploy']:
                 if globals()[item].value:
-                    check2values.append(item)
+                    check2values.append(_check2_labels[item])
         return check2values
 
     return check2empty, check2value_list

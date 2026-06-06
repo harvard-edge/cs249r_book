@@ -807,17 +807,32 @@ def _(
         incomplete_fields=tuple(_incomplete),
     )
 
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This V1-01 diagnosis memo is generated locally from the selected track, "
-                "your inputs, and the computed evidence."
+    if _incomplete:
+        _status = mo.vstack([
+            mo.md("## Report Status"),
+            mo.callout(
+                mo.md(
+                    "Finish the required predictions and decisions before downloading "
+                    "the Lab 01 diagnosis memo."
+                ),
+                kind="warn",
             ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
+            report_export_panel(_report),
+        ])
+    else:
+        _status = mo.vstack([
+            mo.md("## Download Report"),
+            mo.callout(
+                mo.md(
+                    "This V1-01 diagnosis memo is generated locally from the selected track, "
+                    "your inputs, and the computed evidence."
+                ),
+                kind="info",
+            ),
+            report_export_panel(_report),
+        ])
+
+    _status
     return
 
 

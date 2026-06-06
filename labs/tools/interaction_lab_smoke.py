@@ -45,10 +45,12 @@ DEFAULT_HTML_PAGES = (
 )
 FALLBACK_TAB_LABELS = ("Part A", "Part B", "Part C", "Part D", "Part E", "Synthesis")
 LAB00_UNLOCK_ACTIONS = (
-    ("orientation check 1", ("C)  The serving infrastructure", "C) The serving infrastructure")),
-    ("latency fix: move server", ("Move the datacenter server physically closer",)),
-    ("latency fix: deploy on vehicle", ("Deploy the model directly on the vehicle",)),
-    ("orientation check 3", ("D)  TinyML", "D) TinyML")),
+    ("orientation check 1", ("C)  Practice a repeated workflow", "C) Practice a repeated workflow")),
+    ("track changes: story", ("The story and stakeholder voice",)),
+    ("track changes: device", ("The device and hardware assumptions",)),
+    ("track changes: metrics", ("The primary metric and guardrails",)),
+    ("track changes: report", ("The report framing",)),
+    ("orientation check 3", ("A)  Read the case, guess first", "A) Read the case, guess first")),
 )
 
 
