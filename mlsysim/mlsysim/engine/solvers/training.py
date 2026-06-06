@@ -253,7 +253,8 @@ class TrainingMemoryModel(ForwardModel):
             weights = weights / dp_size
 
         # Step 2: activations scale with the local microbatch and layers owned by
-        # this pipeline stage. bpp is already bytes/element, not a FP16 ratio.
+        # this pipeline stage. bpp is bytes/element; the Korthikanti constants
+        # inside calc_activation_memory are FP16-based and scale by bpp/2.
         local_microbatch = max(1, math.ceil(batch_size / (dp_size * gradient_accumulation_steps)))
         layers_per_stage = max(1, math.ceil(model.layers / pp_size))
         hidden_dim = model.hidden_dim or 4096
@@ -262,6 +263,7 @@ class TrainingMemoryModel(ForwardModel):
             seq_len=seq_len,
             batch_size=local_microbatch,
             hidden_dim=hidden_dim,
+            n_heads=getattr(model, "heads", None),
             precision_bytes=bpp,
             strategy=activation_checkpointing,
         )

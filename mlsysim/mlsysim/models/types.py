@@ -246,12 +246,14 @@ class TransformerWorkload(Workload):
         if zero_stage >= 3:
             weight_mem = weight_mem / dp_size
             
-        # 3. Activation Memory (proportional to B, S, H)
+        # 3. Activation Memory (proportional to B, S, H; quadratic attention
+        # term needs the head count when strategy='none')
         act_mem = calc_activation_memory(
             n_layers=self.layers,
             seq_len=seq_len,
             batch_size=batch_size,
             hidden_dim=self.hidden_dim or 4096,
+            n_heads=self.heads,
             precision_bytes=bpp,
             strategy=strategy
         )

@@ -57,10 +57,13 @@ def test_golden_training_memory_llama3_8b_h100():
     assert result.weights.m_as("GB") == pytest.approx(16.060000000000002)
     assert result.gradients.m_as("GB") == pytest.approx(16.060000000000002)
     assert result.optimizer_state.m_as("GB") == pytest.approx(96.36)
-    assert result.activations.m_as("GB") == pytest.approx(21.47483648)
+    # 2026-06-06 audit: re-pinned to the Korthikanti-exact selective bound
+    # (34*s*b*h FP16 bytes per layer). The previous 21.47 GB came from a
+    # 10-coefficient model with doubled FP16 bytes that matched no source.
+    assert result.activations.m_as("GB") == pytest.approx(36.507222016)
     assert result.communication_buffers.m_as("GB") == pytest.approx(0.803)
-    assert result.total_memory.m_as("GB") == pytest.approx(150.75783648)
-    assert result.memory_utilization == pytest.approx(1.7550522051751614)
+    assert result.total_memory.m_as("GB") == pytest.approx(165.790222016)
+    assert result.memory_utilization == pytest.approx(1.9300522051751614)
 
 
 def test_golden_serving_llama3_8b_h100():
