@@ -2678,43 +2678,43 @@ class StorageFallaciesBandwidth:
     bw_ratio_mult_str = fmt_multiple(bw_ratio_val, precision=1, commas=True)
 ```
 
-A common fallacy is this: *NVMe is fast enough to feed GPUs directly without pipelining.*
+**Fallacy**: *NVMe is fast enough to feed GPUs directly without pipelining.*
 
 A single NVMe drive delivers `{python} StorageFallaciesBandwidth.nvme_bw_gb_per_s_str`, while an H100 consumes `{python} StorageFallaciesBandwidth.h100_bw_tb_per_s_str` from HBM. The gap is roughly `{python} StorageFallaciesBandwidth.bw_ratio_mult_str`. Even four drives in RAID-0 only close this gap to about 120$\times$ before overhead. Without pipelining and prefetching to hide the latency of loading from NVMe to host DRAM to HBM, every batch transfer introduces a stall equal to the transfer time. NVMe speed is necessary but nowhere near sufficient; the entire pipeline architecture (multi-worker loading, prefetch buffers, async transfers) exists precisely because no single storage device can match accelerator bandwidth. The confusion arises because NVMe bandwidth is quoted in *absolute terms* (GB/s), which sounds impressive, but the relevant metric is the *ratio* of storage bandwidth to accelerator consumption rate, and this ratio is unfavorable by two to three orders of magnitude.
 
-A recurring pitfall is this: *Relying on prefetching to hide object storage latency.*
+**Pitfall**: *Relying on prefetching to hide object storage latency.*
 
 Prefetching hides *average* latency, not *tail* latency. Object storage P99 latency can spike to several hundred milliseconds during congestion or cross-region failover. A prefetch buffer of depth $Q_{\text{prefetch}}$ absorbs variance up to $Q_{\text{prefetch}} \times T_{\text{compute}}$ milliseconds. If a tail-latency spike exceeds this window, the buffer drains and the accelerator stalls. For training jobs that run for weeks, even rare P99.9 spikes occur frequently enough (thousands of times per day at scale) to measurably reduce utilization. The mitigation is not to assume prefetching solves all problems, but to provision buffer depth based on measured tail latency and to stage data on local NVMe where possible.
 
-A common fallacy is this: *Millions of small training files are harmless at scale.*
+**Fallacy**: *Millions of small training files are harmless at scale.*
 
 Storing each training sample as an individual file (one JPEG per image, one JSON per text sample) is natural for data collection but catastrophic for training at scale. Each file requires metadata operations (`open()`, `stat()`, `close()`) that serialize on the metadata server. At 10,000 concurrent workers, metadata operations become the bottleneck long before data bandwidth saturates. The solution is to aggregate samples into large sequential shards (TFRecord, WebDataset tar, Parquet) during preprocessing. This reduces metadata operations by 10,000 to 100,000$\times$ and transforms random access patterns into sequential streaming.
 
-A recurring pitfall is this: *Ignoring egress costs when designing the storage architecture.*
+**Pitfall**: *Ignoring egress costs when designing the storage architecture.*
 
 Cloud egress costs are invisible during development but can dominate at scale. Under a representative \$0.09/GB cross-boundary egress fee, a training job that reads a 100 TB dataset from object storage 10 times incurs \$90,000 in egress fees, far exceeding the annual storage cost of \$27,600 under the object-storage price assumption above. These fees apply when reads cross a region, provider, or internet boundary; same-region reads may be free or discounted, which is exactly why the cost stays hidden until a cross-region or multi-cloud topology makes it unavoidable. Teams that prototype with small datasets on object storage and then scale up discover that their storage architecture is economically unsustainable. The fix is to budget egress costs explicitly and to design the data pipeline to minimize cross-tier transfers, typically by staging data on local NVMe at job start rather than streaming from object storage each epoch.
 
-A common fallacy is this: *Average write bandwidth is enough for checkpoint design.*
+**Fallacy**: *Average write bandwidth is enough for checkpoint design.*
 
 Checkpoints are written by all nodes simultaneously, creating bursts that can exceed steady-state bandwidth by 10$\times$ or more. A parallel file system sized for average write load will bottleneck during checkpoint storms, extending $T_{\text{write}}$ and reducing the effective training throughput. The parallel file system must be provisioned for peak burst bandwidth, not average, even though the burst capacity sits idle most of the time.
 
-A recurring pitfall is this: *Assuming faster accelerators automatically improve training throughput.*
+**Pitfall**: *Assuming faster accelerators automatically improve training throughput.*
 
 When an organization upgrades from A100 to H100 GPUs, they expect training time to decrease proportionally to the compute improvement. If the storage pipeline was already marginal on A100s, delivering data just fast enough to avoid stalls, the faster H100 compute simply hits the I/O wall sooner. The accelerator upgrade reduces $T_{\text{compute}}$ without reducing $T_{\text{I/O}}$, which means the data stall ratio increases. Every accelerator upgrade must be accompanied by a storage pipeline audit to ensure that the faster compute does not simply expose a previously hidden storage bottleneck.
 
-A common fallacy is this: *RAID configurations optimized for databases are suitable for ML training.*
+**Fallacy**: *RAID configurations optimized for databases are suitable for ML training.*
 
 Database-oriented RAID configurations like RAID 5 or RAID 6 prioritize redundancy over raw bandwidth, incurring a 15–25 percent write performance penalty due to parity calculations. This overhead is unnecessary for ML workloads where training data is immutable and already backed up in durable object storage. For local NVMe caches feeding accelerators, the correct choice is RAID 0 (striping), which maximizes sequential read throughput by combining the bandwidth of all drives without parity overhead. The data on local NVMe is a *cache*, not a *source of truth*; losing it to a drive failure costs a re-staging operation, not data loss.
 
-A recurring pitfall is this: *Creating full copies for each dataset snapshot.*
+**Pitfall**: *Creating full copies for each dataset snapshot.*
 
 Naive dataset versioning is financially and operationally unsustainable at scale. For a 10 TB dataset, creating a full copy for each version quickly exhausts storage budgets and slows experimentation cycles. A 5 percent change between versions stores 9.5 TB of redundant data. The correct approach uses content-addressable storage or delta encoding\index{Delta Encoding}, where only changed samples are stored. This reduces the storage cost of a new version from 10 TB to roughly 500 GB, a 20$\times$ reduction. Tools like DVC (Data Version Control) and lakeFS implement this pattern, tracking dataset lineage without duplicating unchanged content.
 
-A common fallacy is this: *Compression always helps because it reduces the amount of data to read.*
+**Fallacy**: *Compression always helps because it reduces the amount of data to read.*
 
 This is only true if the pipeline is I/O-bound. Compression reduces I/O volume but increases CPU load due to decompression. For a CPU-bound pipeline where complex data augmentation already saturates the host processor, adding decompression work makes the bottleneck *worse*, not *better*, leading to a net decrease in throughput to the accelerator. The correct approach is to profile the pipeline first: if the host CPU is the bottleneck, use uncompressed or lightly compressed formats (LZ4); if storage or network I/O is the bottleneck, use aggressive compression (zstd, gzip). The optimal compression level is a property of the pipeline's bottleneck, not a universal constant.
 
-A recurring pitfall is this: *Choosing a compression format before profiling the pipeline bottleneck.*
+**Pitfall**: *Choosing a compression format before profiling the pipeline bottleneck.*
 
 Teams often standardize on one compression format for operational simplicity, then apply it to every dataset regardless of access pattern. That shortcut hides the real question: whether the job is paying more for bytes moved or cycles spent decoding them. A storage pipeline should choose compression after measuring CPU utilization, storage bandwidth, network bandwidth, and accelerator idle time on representative batches; otherwise the format becomes another fixed assumption that moves the bottleneck rather than reducing it.
 
