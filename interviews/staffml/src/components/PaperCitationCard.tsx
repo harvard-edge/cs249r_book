@@ -16,7 +16,8 @@ export interface PaperCitationCardProps {
   paperUrl: string;
   releaseId: string;
   releaseHash: string;    // full hex digest; first 7 chars are shown above the fold.
-  buildDate?: string;     // ISO 8601; rendered as a human-readable date next to the version.
+  buildDate: string;      // ISO 8601 (e.g. "2026-04-22T12:34:56Z"); required because
+                          // the citation year is derived from it for stable hydration.
   doi?: string;           // optional — register via Zenodo per ARCHITECTURE.md §15 #2
   className?: string;
 }
@@ -24,13 +25,21 @@ export interface PaperCitationCardProps {
 function bibtex({
   releaseId,
   releaseHash,
+  buildDate,
   doi,
 }: {
   releaseId: string;
   releaseHash: string;
+  buildDate: string;
   doi?: string;
 }): string {
-  const year = new Date().getFullYear();
+  // Year MUST come from buildDate (a stable prop), not `new Date()`. With
+  // Next's static export the HTML is generated at build time but hydrates
+  // on the client whenever the user visits — `new Date().getFullYear()`
+  // would mismatch around midnight UTC on Dec 31 / Jan 1, or any time the
+  // site is viewed in a year after the build year. The build-time date is
+  // the right anchor for a citation anyway.
+  const year = new Date(buildDate).getUTCFullYear();
   const version = `v${releaseId}`;
   const hashLine = `  note = {Release hash: ${releaseHash.slice(0, 16)}},\n`;
   const doiLine = doi ? `  doi = {${doi}},\n` : "";
@@ -53,11 +62,11 @@ export default function PaperCitationCard({
   className,
 }: PaperCitationCardProps) {
   const [copied, setCopied] = useState(false);
-  const cite = bibtex({ releaseId, releaseHash, doi });
+  const cite = bibtex({ releaseId, releaseHash, buildDate, doi });
   const shortHash = releaseHash.slice(0, 7);
-  const buildDateLabel = buildDate
-    ? new Date(buildDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
-    : null;
+  const buildDateLabel = new Date(buildDate).toLocaleDateString("en-US", {
+    year: "numeric", month: "long", day: "numeric",
+  });
 
   const handleCopy = async () => {
     try {
