@@ -1149,7 +1149,7 @@ This logic extends to the temporal dimension, where the scheduler must weigh the
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: es_s1_str, es_s2_str, es_s3p1_str, es_s3p2_str, es_s3_str,
-# │          es_rescale_hours_str, es_vs_wait_str, es_vs_imm_str
+# │          es_rescale_hours_str, es_trails_wait_pct_str, es_vs_imm_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, check, fmt_time
 
@@ -1166,21 +1166,23 @@ class ElasticScaling:
     s1_work = window_h * tp_128
     s2_run_h = window_h - wait_h
     s2_work = s2_run_h * tp_512
-    s3_phase1 = wait_h * tp_256
+    s3_phase1 = wait_h * tp_128
     s3_phase2_h = window_h - wait_h - rescale_h
-    s3_phase2 = s3_phase2_h * tp_512
+    s3_phase2 = s3_phase2_h * tp_256
     s3_work = s3_phase1 + s3_phase2
-    elastic_vs_wait_pct = (s3_work - s2_work) / s2_work * 100
+    elastic_trails_wait_pct = (s2_work - s3_work) / s2_work * 100
+    elastic_trails_wait_pct_r = round(elastic_trails_wait_pct)
     elastic_vs_immediate = s3_work / s1_work
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(s1_work == 24.0, f"S1: expected 24.0, got {s1_work}")
     check(s2_work == 64.0, f"S2: expected 64.0, got {s2_work}")
-    check(abs(s3_phase2 - 63.5) < 0.1, f"S3 phase 2: expected ~63.5, got {s3_phase2}")
-    check(abs(s3_work - 70.7) < 0.1, f"S3 total: expected ~70.7, got {s3_work}")
+    check(abs(s3_phase2 - 35.7) < 0.2, f"S3 phase 2: expected ~35.7, got {s3_phase2}")
+    check(abs(s3_work - 39.7) < 0.2, f"S3 total: expected ~39.7, got {s3_work}")
+    check(elastic_trails_wait_pct_r == 38, f"trail: expected 38%, got {elastic_trails_wait_pct_r}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     es_s1_str = fmt(s1_work, precision=0, commas=False)
     es_s2_str = fmt(s2_work, precision=0, commas=False)
-    es_s3p1_str = fmt(s3_phase1, precision=1, commas=False)
+    es_s3p1_str = fmt(s3_phase1, precision=0, commas=False)
     es_s3p2_str = fmt(s3_phase2, precision=1, commas=False)
     es_s3_str = fmt(s3_work, precision=1, commas=False)
     es_rescale_hours_str = fmt_time(rescale_h, 'hour', precision=2, commas=False, style='word')
@@ -1189,7 +1191,7 @@ class ElasticScaling:
     # Pre-compute the full Phase 2 math expression to avoid the
     # `\(...\)` + inline-`{python}` interaction anti-pattern that drops
     # the middle of the expression in rendered HTML (math.md §2).
-    es_s3p2_math = fmt_math(rf"(24 - 4 - {rescale_h:.2f}) \times 3.2 \approx {s3_phase2:.1f}")
+    es_s3p2_math = fmt_math(rf"(24 - 4 - {rescale_h:.2f}) \times 1.8 \approx {s3_phase2:.1f}")
     s1_gpus = 128
     s2_gpus = 512
     s3_gpus = 256
@@ -1206,7 +1208,7 @@ class ElasticScaling:
     es_tp_512_str = fmt(tp_512, precision=1, commas=False)
     es_eff_256_pct_str = fmt_percent(tp_256 / (2 * tp_128), precision=0, commas=False, style='prose')
     es_eff_512_pct_str = fmt_percent(tp_512 / (4 * tp_128), precision=0, commas=False, style='prose')
-    es_vs_wait_pct_str = fmt_percent(elastic_vs_wait_pct / 100, precision=1, commas=False, style='prose')
+    es_trails_wait_pct_str = fmt_percent(elastic_trails_wait_pct_r / 100, precision=0, commas=False, style='prose')
     es_vs_imm_factor_mult_str = fmt_multiple(elastic_vs_immediate, precision=1, commas=False)
 ```
 
@@ -1220,9 +1222,9 @@ Consider a large language model training job with a target batch size that requi
 
 **Strategy 2 -- wait for capacity (gang scheduling)**: The job waits in the queue for `{python} ElasticScaling.es_wait_h_str` until `{python} ElasticScaling.es_s2_gpus_str` become available, then runs for `{python} ElasticScaling.es_s2_run_h_str`. Total work: $20 \times 3.2 =$ `{python} ElasticScaling.es_s2_str` epochs.
 
-**Strategy 3 -- elastic scaling (step-up)**: The job starts immediately with `{python} ElasticScaling.es_gpus_128_str`. After `{python} ElasticScaling.es_wait_h_str`, `{python} ElasticScaling.es_gpus_256_str` become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.8 =$ `{python} ElasticScaling.es_s3p1_str` epochs. Phase 2: `{python} ElasticScaling.es_s3p2_math` epochs. Total work: `{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` = `{python} ElasticScaling.es_s3_str` epochs.
+**Strategy 3 -- elastic scaling (step-up)**: The job starts immediately with `{python} ElasticScaling.es_gpus_128_str`. After `{python} ElasticScaling.es_wait_h_str`, `{python} ElasticScaling.es_gpus_256_str` become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.0 =$ `{python} ElasticScaling.es_s3p1_str` epochs. Phase 2: `{python} ElasticScaling.es_s3p2_math` epochs. Total work: `{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` = `{python} ElasticScaling.es_s3_str` epochs.
 
-The elastic strategy outperforms waiting by approximately `{python} ElasticScaling.es_vs_wait_pct_str` and the immediate small-scale run by nearly `{python} ElasticScaling.es_vs_imm_factor_mult_str`. However, if the re-scaling cost exceeded `{python} ElasticScaling.es_rescale_break_even_h_str` (due to slow checkpoint transfer or compilation), Strategy 2 would become superior.
+The elastic strategy completes nearly `{python} ElasticScaling.es_vs_imm_factor_mult_str` the epoch-equivalent work of the immediate small-scale run, but still trails gang scheduling by about `{python} ElasticScaling.es_trails_wait_pct_str`. That gap shrinks when queue waits grow or peak capacity stays scarce; re-scaling overhead is only `{python} ElasticScaling.es_rescale_min_str`, and if that tax exceeded `{python} ElasticScaling.es_rescale_break_even_h_str` (due to slow checkpoint transfer or compilation), Strategy 3 would fall further behind Strategy 2.
 
 :::
 
