@@ -197,14 +197,35 @@ class FormatCommand:
     def _collapse_blank_lines(content: str) -> str:
         """Replace multiple consecutive blank lines with a single blank line.
 
-        Preserves content inside code blocks.
+        Preserves content inside code blocks and HTML comments. Fence
+        tracking must ignore HTML comments: commented-out figures often
+        contain partial code blocks whose unbalanced ``` lines would
+        otherwise desync the toggle, making the formatter treat real
+        code cells as prose for the rest of the file.
         """
         lines = content.split("\n")
         result = []
         in_code_block = False
+        in_html_comment = False
         blank_count = 0
 
         for line in lines:
+            if in_html_comment:
+                # Leave commented-out regions verbatim; their fences
+                # (often unbalanced) must not toggle code-block state.
+                result.append(line)
+                if "-->" in line:
+                    in_html_comment = False
+                continue
+
+            if not in_code_block and "<!--" in line and "-->" not in line:
+                if blank_count > 0:
+                    result.append("")
+                    blank_count = 0
+                result.append(line)
+                in_html_comment = True
+                continue
+
             if line.strip().startswith("```"):
                 in_code_block = not in_code_block
                 if blank_count > 0:
