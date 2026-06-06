@@ -167,6 +167,29 @@ class TrainingScaleProfiles(Registry):
     )
 
 
+class FleetEvolution(Registry):
+    """Reusable conclusion profile for multiplicative fleet-efficiency reasoning."""
+
+    TargetGain = sourced(
+        100,
+        pc.FLEET_EVOLUTION_HEURISTIC,
+        name="Fleet-evolution target gain",
+        description="Reference total efficiency gain for conclusion synthesis.",
+    )
+    HardwareGain = sourced(
+        4.0,
+        pc.FLEET_EVOLUTION_HEURISTIC,
+        name="Fleet-evolution hardware gain",
+        description="Reference workload-dependent hardware contribution.",
+    )
+    AlgorithmGain = sourced(
+        2.5,
+        pc.FLEET_EVOLUTION_HEURISTIC,
+        name="Fleet-evolution algorithmic gain",
+        description="Reference workload-compatible compression or distillation contribution.",
+    )
+
+
 class StorageTrainingCorpus(Registry):
     """Reusable storage-chapter running example for a 175B-model training corpus."""
 
@@ -674,6 +697,7 @@ class ReferenceStats(Registry):
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
+    FleetEvolution = FleetEvolution
     StorageTrainingCorpus = StorageTrainingCorpus
     ModelLoading = ModelLoading
     ServingProfiles = ServingProfiles

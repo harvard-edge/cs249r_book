@@ -489,6 +489,18 @@ ORCHESTRATION_ASSUMPTIONS = _est(
     notes="First-pass scheduler assumptions for analytical examples; production clusters should calibrate from trace data.",
 )
 
+FLEET_EVOLUTION_HEURISTIC = Provenance(
+    id="prov:fleet-evolution-heuristic",
+    kind=ProvenanceKind.HEURISTIC,
+    ref="MLSysIM fleet-evolution heuristic for conclusion synthesis",
+    notes=(
+        "Pedagogical multiplicative gain profile used to reason about how "
+        "hardware, algorithmic, and orchestration improvements combine. The "
+        "numbers are scenario anchors, not forecasts."
+    ),
+    verified="2026-06-06",
+)
+
 CRITICAL_BATCH_SIZE_ESTIMATES = _lit(
     "prov:mccandlish-critical-batch-2018",
     "McCandlish et al. (2018), An Empirical Model of Large-Batch Training",
