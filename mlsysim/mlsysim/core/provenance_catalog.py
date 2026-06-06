@@ -10,7 +10,7 @@ def _ds(
     ref: str,
     url: str,
     *,
-    verified: str = "2025-03-06",
+    verified: str = "2026-03-06",
     notes: str | None = None,
 ) -> Provenance:
     """Creates a Provenance object for a hardware datasheet or technical specification."""
@@ -29,7 +29,7 @@ def _lit(
     ref: str,
     *,
     url: str | None = None,
-    verified: str = "2025-03-06",
+    verified: str = "2026-03-06",
     notes: str | None = None,
 ) -> Provenance:
     """Creates a Provenance object for peer-reviewed literature or academic whitepapers."""
@@ -49,7 +49,7 @@ def _est(
     notes: str,
     *,
     url: str | None = None,
-    verified: str = "2025-03-06",
+    verified: str = "2026-03-06",
 ) -> Provenance:
     """Creates a Provenance object for expert estimates or rules of thumb."""
     return Provenance(
@@ -68,7 +68,7 @@ def _conv(id: str, ref: str, *, notes: str | None = None) -> Provenance:
         id=id,
         kind=ProvenanceKind.CONVENTION,
         ref=ref,
-        verified="2025-03-06",
+        verified="2026-03-06",
         notes=notes,
     )
 
@@ -79,7 +79,7 @@ IEA_WEO_2023 = Provenance(
     kind=ProvenanceKind.INDUSTRY_REPORT,
     ref="IEA World Energy Outlook 2023 (rounded gCO2/kWh)",
     url="https://www.iea.org/reports/world-energy-outlook-2023",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 UPTIME_PUE_2022 = Provenance(
@@ -87,7 +87,7 @@ UPTIME_PUE_2022 = Provenance(
     kind=ProvenanceKind.INDUSTRY_REPORT,
     ref="Uptime Institute Global Data Center Survey 2022",
     url="https://uptimeinstitute.com/resources/research-and-reports/uptime-institute-global-data-center-survey-2022",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 CLUSTER_TIER_CONVENTIONS = _conv(
@@ -108,13 +108,13 @@ REFERENCE_WORKLOAD_SCALE = Provenance(
     id="prov:reference-workload-scale",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative real-world scale anchors (Gmail volume, Google searches, Waymo sensor rate) for order-of-magnitude intuition",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 TINYML_ANOMALY_CASE = Provenance(
     id="prov:tinyml-anomaly-case",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
     id="prov:clinical-imaging-workflow-anchors",
@@ -131,14 +131,14 @@ OURA_SLEEP_STAGE_STUDY = _lit(
 ENERGY_SCALE_ANCHORS = Provenance(
     id="prov:energy-scale-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
-    ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling 1 L water ~100 kJ, US household electricity ~10.7 MWh/year) for order-of-magnitude intuition about ML energy",
-    verified="2025-03-06",
+    ref="Everyday energy-scale comparison anchors (smartphone charge ~40 kJ, boiling a cup of water ~100 kJ, US household electricity ~10.7 MWh/year) for order-of-magnitude intuition about ML energy",
+    verified="2026-03-06",
 )
 MOBILE_DEVICE_ANCHORS = Provenance(
     id="prov:mobile-device-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Mobile/edge device reference figures (flagship phone battery ~15 Wh / 3000 mAh @ 3.7 V, mobile NPU power 3-4 W, object-detector ~2 W) for on-device ML intuition",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 EDGE_DEVICE_SPECTRUM_ANCHORS = _est(
     "prov:edge-device-spectrum-anchors",
@@ -189,7 +189,7 @@ FRAMEWORK_RUNTIME_OVERHEAD_REFERENCE = _conv(
 
 RELIABILITY_MTTF_LITERATURE = _lit(
     "prov:reliability-mttf-literature",
-    "Kokolis et al. (2025, HPCA); Zu et al. (2024, NSDI); Barroso et al. (2019) — order-of-magnitude steady-state MTTF",
+    "Kokolis et al. (2025, HPCA); Zu et al. (2024, NSDI); Barroso et al. (2018) — order-of-magnitude steady-state MTTF",
     url="https://doi.org/10.1109/hpca61900.2025.00096",
 )
 
@@ -197,7 +197,7 @@ ILLUSTRATIVE_IOWA_CARBON = Provenance(
     id="prov:illustrative-iowa-carbon",
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative high-carbon US grid contrast (not IEA country average)",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 HYDRO_QUEBEC_GRID = _ds(
@@ -252,7 +252,7 @@ GOOGLE_TPU_V1 = _lit(
 GOOGLE_TPU_V2_V3 = _lit(
     "prov:google-tpu-v2-v3",
     "Jouppi et al. (2020), A Domain-Specific Supercomputer for Training Deep Neural Networks",
-    url="https://arxiv.org/abs/2007.13828",
+    url="https://doi.org/10.1145/3360307",
 )
 
 GOOGLE_TPU_V4 = _lit(
@@ -511,7 +511,7 @@ CRITICAL_BATCH_SIZE_ESTIMATES = _lit(
 WAKE_VISION = _ds(
     "prov:wake-vision-dataset",
     "Wake Vision / doorbell-classifier TinyML reference",
-    "https://github.com/TI-malaria/wake-vision",
+    "https://github.com/harvard-edge/Wake_Vision",
 )
 
 REFERENCE_ANOMALY_MLP = _conv(
@@ -558,7 +558,7 @@ POPE_INFERENCE = _lit(
 MEGASCALE = _lit(
     "prov:jiang-megascale-2024",
     "Jiang et al. (2024), MegaScale: Scaling Large Language Model Training",
-    url="https://arxiv.org/abs/2404.02054",
+    url="https://arxiv.org/abs/2402.15627",
 )
 
 MEGATRON_OVERLAP = _lit(
@@ -581,7 +581,7 @@ DGX_GPUS_PER_HOST = _conv(
 GIBIANSKY_ALLREDUCE = _lit(
     "prov:gibiansky-allreduce-factor",
     "Gibiansky (2017), Ring AllReduce communication identity (2× factor)",
-    url="https://arxiv.org/abs/1707.05077",
+    url="https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/",
 )
 
 INFINIBAND_SPEC = _ds(
@@ -596,7 +596,7 @@ INFINIBAND_NDR_GBS = Provenance(
     ref="InfiniBand NDR 400 Gbps per port → 50 GB/s",
     url="https://www.infinibandta.org/",
     notes="Byte rate = line rate ÷ 8.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 INFINIBAND_HDR_GBS = Provenance(
@@ -605,7 +605,7 @@ INFINIBAND_HDR_GBS = Provenance(
     ref="InfiniBand HDR 200 Gbps per port → 25 GB/s",
     url="https://www.infinibandta.org/",
     notes="Byte rate = line rate ÷ 8.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 INFINIBAND_XDR_GBS = Provenance(
@@ -614,7 +614,7 @@ INFINIBAND_XDR_GBS = Provenance(
     ref="InfiniBand XDR 800 Gbps per port → 100 GB/s",
     url="https://www.infinibandta.org/",
     notes="Byte rate = line rate ÷ 8 (2025 generation).",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 ETHERNET_400G_GBS = Provenance(
@@ -622,7 +622,7 @@ ETHERNET_400G_GBS = Provenance(
     kind=ProvenanceKind.DERIVED,
     ref="400 GbE → 50 GB/s",
     notes="Byte rate = 400 Gb/s ÷ 8.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 ETHERNET_800G_GBS = Provenance(
@@ -630,7 +630,7 @@ ETHERNET_800G_GBS = Provenance(
     kind=ProvenanceKind.DERIVED,
     ref="800 GbE → 100 GB/s",
     notes="Byte rate = 800 Gb/s ÷ 8.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 ROCE_100G_GBS = Provenance(
@@ -638,7 +638,7 @@ ROCE_100G_GBS = Provenance(
     kind=ProvenanceKind.DERIVED,
     ref="100 GbE RoCE → 12.5 GB/s",
     notes="Byte rate = 100 Gb/s ÷ 8.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 FABRIC_LATENCY_ASSUMPTIONS = _conv(
@@ -796,7 +796,7 @@ CLOUD_PRICING_2024 = Provenance(
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative US cloud list prices (2024–2025 order of magnitude)",
     notes="GPU-hour, egress, and electricity rate anchors; not a specific vendor quote.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 STORAGE_PRICING_2024 = Provenance(
@@ -804,7 +804,7 @@ STORAGE_PRICING_2024 = Provenance(
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative cloud/object-storage list prices (2024 order of magnitude)",
     notes="S3, Glacier, and NVMe tier rate anchors for data-engineering scenarios.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 LABELING_PRICING_2024 = Provenance(
@@ -812,7 +812,7 @@ LABELING_PRICING_2024 = Provenance(
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative data-labeling cost ranges (2024 estimates)",
     notes="Crowd, bounding-box, and medical labeling tiers for workflow examples.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 FLEET_ECONOMICS_2024 = Provenance(
@@ -820,13 +820,13 @@ FLEET_ECONOMICS_2024 = Provenance(
     kind=ProvenanceKind.ILLUSTRATIVE,
     ref="Illustrative internal GPU-hour and chargeback rates (2024)",
     notes="On-demand, spot, and internal chargeback references for fleet orchestration examples.",
-    verified="2025-03-06",
+    verified="2026-03-06",
 )
 
 BARROSO_DATACENTER_ECONOMICS = _lit(
     "prov:barroso-datacenter-economics",
-    "Barroso et al. (2018), The Datacenter as a Computer",
-    url="https://doi.org/10.1201/9781351066146",
+    "Barroso et al. (2018), The Datacenter as a Computer (3rd ed.)",
+    url="https://doi.org/10.1007/978-3-031-01761-2",
 )
 
 CAPACITY_LEAD_TIMES = _est(

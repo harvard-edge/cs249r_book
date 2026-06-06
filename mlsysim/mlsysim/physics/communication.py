@@ -94,7 +94,8 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     Parameters
     ----------
     message_bytes : Quantity
-        Total message size (M) transmitted by a single node.
+        Per-node buffer size (M) held by each participant; the ring exchanges
+        (N-1)/N of it per node.
     n_gpus : int
         Number of participating GPUs (N).
     bandwidth_bytes_s : Quantity
@@ -110,6 +111,7 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     validate_at_least(n_gpus, 1, "n_gpus")
     msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
     bw = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
+    validate_positive(bw, "bandwidth_bytes_s")
     lat = _ensure_unit(latency_s, ureg.second, "latency_s")
     n = n_gpus
     bw_term = (n - 1) / n * msg / bw
@@ -158,14 +160,28 @@ def calc_hierarchical_allreduce_time(
     Quantity
         Total time required for the hierarchical operation in seconds.
     """
-    t_reduce = calc_ring_allreduce_time(
-        message_bytes, gpus_per_node, intra_node_bw, intra_node_lat
-    )
-    reduced_message = _ensure_unit(message_bytes, ureg.byte, "message_bytes") / gpus_per_node
+    validate_at_least(gpus_per_node, 1, "gpus_per_node")
+    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    intra_bw = _ensure_unit(intra_node_bw, ureg.byte / ureg.second, "intra_node_bw")
+    validate_positive(intra_bw, "intra_node_bw")
+    intra_lat = _ensure_unit(intra_node_lat, ureg.second, "intra_node_lat")
+    g = gpus_per_node
+
+    # Phase 1 — intra-node Reduce-Scatter: each of the g ranks ends up owning a
+    # fully reduced 1/g chunk. Ring cost: (g-1)/g * M/beta + (g-1) * alpha.
+    t_reduce_scatter = (g - 1) / g * msg / intra_bw + (g - 1) * intra_lat
+
+    # Phase 2 — inter-node ring AllReduce over the M/g chunk each node owns.
     t_allreduce_inter = calc_ring_allreduce_time(
-        reduced_message, n_nodes, inter_node_bw, inter_node_lat
+        msg / g, n_nodes, inter_node_bw, inter_node_lat
     )
-    t_broadcast = calc_ring_allreduce_time(
-        reduced_message, gpus_per_node, intra_node_bw, intra_node_lat
-    )
-    return t_reduce + t_allreduce_inter + t_broadcast
+
+    # Phase 3 — intra-node AllGather: redistribute the reduced chunks so every
+    # rank holds the full result. Same ring cost as the Reduce-Scatter.
+    t_all_gather = (g - 1) / g * msg / intra_bw + (g - 1) * intra_lat
+
+    # (Audit fix 2026-06-06: the previous implementation ran a FULL intra-node
+    # AllReduce of M — already equal to RS+AG combined — plus a second intra-node
+    # AllReduce of M/g labeled "broadcast", inflating the intra-node term by
+    # (1 + 1/g) and contradicting the 3-phase algorithm documented above.)
+    return (t_reduce_scatter + t_allreduce_inter + t_all_gather).to(ureg.second)

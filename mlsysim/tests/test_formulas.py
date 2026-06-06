@@ -271,17 +271,36 @@ class TestTransformerTrainingFlops:
 # ======================================================================
 
 class TestActivationMemory:
-    """Activation memory with Korthikanti coefficients (34/10/2)."""
+    """Activation memory, Korthikanti et al. (2023) Sec. 4.1 exact bounds.
+
+    Constants are FP16 bytes (precision_bytes=2 is identity scale):
+    none = 34*s*b*h + 5*a*s^2*b ; selective = 34*s*b*h ; full = 2*s*b*h.
+    Re-pinned 2026-06-06 (the previous 34/10/2-times-bytes model double-
+    counted FP16 width, and its selective=10 matched no published source).
+    """
 
     def test_no_recompute(self):
-        # 1 layer, S=1024, B=1, H=768, precision_bytes=1 (default)
-        # 34 * 1024 * 1 * 768 * 1 = 26,738,688 bytes per layer
-        result = calc_activation_memory(1, 1024, 1, 768, strategy="none")
-        assert result.m_as(ureg.byte) == pytest.approx(34 * 1024 * 1 * 768, rel=1e-6)
+        # 1 layer, S=1024, B=1, H=768, a=12 heads, FP16 default
+        result = calc_activation_memory(1, 1024, 1, 768, n_heads=12, strategy="none")
+        expected = 34 * 1024 * 1 * 768 + 5 * 12 * 1024 * 1024 * 1
+        assert result.m_as(ureg.byte) == pytest.approx(expected, rel=1e-6)
+
+    def test_no_recompute_requires_heads(self):
+        with pytest.raises(ValueError, match="n_heads"):
+            calc_activation_memory(1, 1024, 1, 768, strategy="none")
+
+    def test_unknown_strategy_rejected(self):
+        with pytest.raises(ValueError, match="strategy"):
+            calc_activation_memory(1, 1024, 1, 768, strategy="checkpointing")
 
     def test_selective_recompute(self):
         result = calc_activation_memory(1, 1024, 1, 768, strategy="selective")
-        assert result.m_as(ureg.byte) == pytest.approx(10 * 1024 * 1 * 768, rel=1e-6)
+        assert result.m_as(ureg.byte) == pytest.approx(34 * 1024 * 1 * 768, rel=1e-6)
+
+    def test_precision_scales_relative_to_fp16(self):
+        fp16 = calc_activation_memory(1, 1024, 1, 768, precision_bytes=2)
+        fp32 = calc_activation_memory(1, 1024, 1, 768, precision_bytes=4)
+        assert fp32.m_as(ureg.byte) == pytest.approx(2 * fp16.m_as(ureg.byte))
 
     def test_full_recompute(self):
         result = calc_activation_memory(1, 1024, 1, 768, strategy="full")

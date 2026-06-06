@@ -455,9 +455,11 @@ def test_formula_helpers():
             f"  ✗ fmt_unit() FLOP rate notation: got '{fmt_unit(A100_FLOPS_FP16_TENSOR)}', expected 'TFLOP/s'"
         )
         ok = False
-    if fmt_unit(1 * GFLOPs) != "GFLOPs":
+    # 2026-06-06 audit: fmt_unit now shares fmt_qty's label table, so bare
+    # FLOP work units render singular ('GFLOP'), matching prose suffixes.
+    if fmt_unit(1 * GFLOPs) != "GFLOP":
         FAILURES.append(
-            f"  ✗ fmt_unit() FLOP count notation: got '{fmt_unit(1 * GFLOPs)}', expected 'GFLOPs'"
+            f"  ✗ fmt_unit() FLOP count notation: got '{fmt_unit(1 * GFLOPs)}', expected 'GFLOP'"
         )
         ok = False
 

@@ -100,8 +100,8 @@ class OrchestrationModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
-            Wait time, system length, and utilization metrics.
+        OrchestrationResult
+            Wait time, queue length, utilization, and stability metrics.
         """
         # ρ = λ / μ  (Utilization)
         # μ = 1 / avg_duration

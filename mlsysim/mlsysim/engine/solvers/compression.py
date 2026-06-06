@@ -112,6 +112,26 @@ class CompressionModel(ForwardModel):
         CompressionResult
             Compression metrics including memory savings, inference speedup,
             and estimated accuracy delta.
+
+        Notes
+        -----
+        Conventions and branch logic:
+
+        - Sizes are measured against an **FP32 baseline** (4 bytes/param), so
+          quantization's ``compression_ratio = 32 / target_bitwidth``.
+        - ``estimated_accuracy_delta`` is a signed fraction (e.g. -0.005 =
+          -0.5 percentage points top-1), taken from survey medians in
+          ``engine/calibration.py`` (Gholami 2021 for quantization; Blalock
+          2020 for pruning, where degradation goes exponential past the
+          ~50% sparsity threshold).
+        - ``inference_speedup`` depends on the Roofline regime: memory-bound
+          workloads gain the full compression ratio (less data to move);
+          compute-bound workloads gain only what the hardware's low-precision
+          path provides (1.0 when unsupported). For pruning, only structured
+          and 2:4 N:M sparsity translate into compute speedup; unstructured
+          sparsity saves storage only.
+        - Unknown ``method`` values fall through to a no-op result
+          (ratio 1.0, delta 0.0).
         """
         from ...core._validation import validate_at_least, validate_range
         validate_at_least(target_bitwidth, 1, "target_bitwidth")

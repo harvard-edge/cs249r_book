@@ -157,6 +157,9 @@ def calc_pipeline_bubble(n_stages, n_microbatches, v_stages=1):
     float
         The fraction of time spent idle (0.0 to 1.0).
     """
+    validate_at_least(n_stages, 1, "n_stages")
+    validate_at_least(n_microbatches, 1, "n_microbatches")
+    validate_at_least(v_stages, 1, "v_stages")
     return (n_stages - 1) / (v_stages * n_microbatches + n_stages - 1)
 
 

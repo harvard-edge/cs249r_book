@@ -117,6 +117,17 @@ class Pipeline:
         -------
         dict
             Merged results from all stages, keyed by resolver name.
+
+        Notes
+        -----
+        Stage wiring is **by parameter name**: each resolver receives only the
+        kwargs matching its ``solve()`` signature, and after each stage the
+        result model's fields are flattened into the shared namespace so a
+        later stage can consume them (e.g. a ``ScalingResult.optimal_tokens``
+        feeds a later ``tokens=`` parameter only if the names line up). When
+        two stages produce a field of the same name, the later stage's value
+        overwrites the earlier one. Missing required parameters are not
+        pre-validated here; the resolver's own ``solve()`` raises naturally.
         """
         accumulated = dict(kwargs)
         stage_results = {}

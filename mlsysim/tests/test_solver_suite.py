@@ -1636,12 +1636,18 @@ class TestBoundaryConditions:
     """Edge cases and boundary conditions for solvers and formulas."""
 
     def test_pipeline_bubble_v_zero_guarded(self):
-        """calc_pipeline_bubble with V=0 should be handled gracefully (or raise ZeroDivisionError)."""
-        # bubble = (P-1) / (V*M + P-1). With V=0, M=4, P=4: (3)/(0+3) = 1.0
-        # This is mathematically valid; it degenerates to (P-1)/(P-1) = 1.0
-        # which means 100% bubble — correct when no virtual stages contribute.
-        result = calc_pipeline_bubble(n_stages=4, n_microbatches=4, v_stages=0)
-        assert result == pytest.approx(1.0)
+        """calc_pipeline_bubble rejects v_stages < 1 with a clear ValueError.
+
+        v_stages=0 is not a physical schedule (interleaved pipelining requires
+        at least one virtual stage per device); the old behavior silently
+        degenerated to a 100% bubble. Guards added in the 2026-06-06 audit
+        make the invalid input loud instead. n_stages=1 + n_microbatches=0
+        (the old 0/0 path) is likewise rejected.
+        """
+        with pytest.raises(ValueError):
+            calc_pipeline_bubble(n_stages=4, n_microbatches=4, v_stages=0)
+        with pytest.raises(ValueError):
+            calc_pipeline_bubble(n_stages=1, n_microbatches=0)
 
     def test_pipeline_bubble_single_stage_is_zero(self):
         """With P=1 (single stage), the bubble fraction should be 0."""

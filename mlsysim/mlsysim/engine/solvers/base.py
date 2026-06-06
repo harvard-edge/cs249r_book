@@ -26,7 +26,19 @@ class BaseResolver(ABC):
 
     @classmethod
     def schema(cls) -> dict:
-        """Return a summary of this resolver's interface."""
+        """Return a machine-readable summary of this resolver's interface.
+
+        Used by the CLI (``mlsysim solvers``) and notebooks to introspect a
+        resolver without instantiating it.
+
+        Returns
+        -------
+        dict
+            Keys: ``resolver`` (class name), ``type`` ('model' / 'solver' /
+            'optimizer'), ``walls`` (the taxonomy walls this resolver
+            addresses, from ``engine/walls.py``), ``requires`` (declared
+            input names), and ``produces`` (result class name, or 'Any').
+        """
         from ..walls import walls_for_resolver
         wall_info = [
             {"number": w.number, "name": w.name, "domain": w.domain.value}

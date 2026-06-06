@@ -174,7 +174,7 @@ class DistributedModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        DistributedResult
             Metrics including DP/TP/EP latency, the Pipeline Bubble penalty,
             and the final Scaling Efficiency.
         """
@@ -239,7 +239,10 @@ class DistributedModel(ForwardModel):
                 # Hierarchical: Ring within node, then Ring across nodes
                 t_comm_dp = calc_hierarchical_allreduce_time(
                     message_bytes=gradient_size,
-                    n_nodes=dp_size // fleet.node.accelerators_per_node,
+                    # ceil, not floor: 12 ranks on 8-GPU nodes span 2 nodes;
+                    # flooring to 1 modeled ZERO inter-node traffic (audit
+                    # fix 2026-06-06).
+                    n_nodes=math.ceil(dp_size / fleet.node.accelerators_per_node),
                     gpus_per_node=fleet.node.accelerators_per_node,
                     intra_node_bw=fleet.node.intra_node_bw,
                     inter_node_bw=fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio,
@@ -399,7 +402,45 @@ class MoERoutingModel(ForwardModel):
         routing_imbalance_factor: float = 1.0,
         fleet: Optional[Fleet] = None,
     ) -> MoERoutingResult:
-        """Estimate effective active parameters and optional EP all-to-all latency."""
+        """Estimate effective active parameters and optional EP all-to-all latency.
+
+        Single-factor imbalance model: a router that overloads hot experts
+        behaves as if each token activated
+        ``top_k * routing_imbalance_factor`` experts (capped at the model's
+        expert count), inflating active parameters and routed traffic by the
+        same multiplier. The routed payload per step is
+        ``batch * seq_len * hidden_dim * bytes_per_param * top_k *
+        multiplier`` bytes, of which the fraction ``(ep_size - 1) / ep_size``
+        crosses ranks (a token's target expert is local with probability
+        1/ep_size under uniform placement).
+
+        Parameters
+        ----------
+        model : SparseTransformerWorkload
+            MoE workload (experts, active_experts_per_token, hidden_dim,
+            active_parameters).
+        batch_size : int
+            Sequences per step (>= 1).
+        seq_len : int
+            Tokens per sequence (>= 1).
+        precision : str
+            Numerical precision; sets bytes per routed activation element.
+        ep_size : int
+            Expert-parallel group size (1 = no expert parallelism, no
+            all-to-all cost).
+        routing_imbalance_factor : float
+            >= 1.0; 1.0 is perfectly balanced routing, larger values
+            approximate hot experts.
+        fleet : Fleet, optional
+            If given (and ep_size > 1), prices the all-to-all exchange over
+            the fleet fabric (bandwidth deflated by oversubscription).
+
+        Returns
+        -------
+        MoERoutingResult
+            Effective active experts/parameters, the dispatch volume (MB),
+            and the all-to-all latency (ms) when a fleet is provided.
+        """
         from ...core._validation import validate_at_least, validate_range
 
         precision, precision_bytes = resolve_precision(precision)
@@ -499,7 +540,7 @@ class TopologyModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        TopologyResult
             Effective bandwidth, bisection fraction, and average hops.
         """
         # Compute bisection bandwidth fraction β.
@@ -560,7 +601,47 @@ class ParallelismOptimizer(BaseOptimizer):
               max_tp: Optional[int] = None, max_pp: Optional[int] = None,
               overlap_comm: bool = True) -> ParallelismOptimizerResult:
         """
-        Searches for the optimal parallelism split.
+        Search for the parallelism split (TP x PP x DP) that maximizes MFU.
+
+        Exhaustive sweep over power-of-two TP and PP degrees with
+        ``TP * PP * DP = total_accelerators``. TP is capped at the node size
+        by default (tensor parallelism needs NVLink-class bandwidth).
+        Candidates are pre-screened for memory feasibility — per-GPU weights
+        plus same-size gradients must fit in 90% of HBM capacity, with
+        weights sharded by TP*PP — then each survivor is priced with
+        ``DistributedModel`` and ranked by
+        ``MFU = scaling_efficiency * efficiency``.
+
+        Parameters
+        ----------
+        model : Workload
+            The model to train.
+        fleet : Fleet
+            The cluster (total accelerators, node size, fabric).
+        batch_size : int
+            Global batch size in samples.
+        precision : str
+            Numerical precision.
+        efficiency : float
+            Single-node software efficiency in (0, 1]; multiplied by the
+            distributed scaling efficiency to form the MFU objective.
+        max_tp : int, optional
+            Cap on tensor-parallel degree (default: accelerators per node).
+        max_pp : int, optional
+            Cap on pipeline-parallel degree (default: cluster size).
+        overlap_comm : bool
+            Whether DP communication overlaps the backward pass.
+
+        Returns
+        -------
+        ParallelismOptimizerResult
+            Best {tp, pp, dp} config with its MFU, throughput, step time,
+            and the top-5 candidate list.
+
+        Raises
+        ------
+        ValueError
+            If no factorization is memory-feasible for this cluster.
         """
         n_gpus = fleet.total_accelerators
         gpus_per_node = fleet.node.accelerators_per_node

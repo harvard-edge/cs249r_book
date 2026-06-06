@@ -93,7 +93,7 @@ class DataModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        DataResult
             Pipeline metrics including utilization and stall probability.
         """
         # 1. Resolve Hardware Supply
@@ -164,7 +164,7 @@ class TransformationModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        TransformationResult
             Transform time, bottleneck status, and accelerator utilization.
         """
         # T_transform = (B × S_sample) / C_throughput

@@ -35,6 +35,12 @@ class _UniqueKeyLoader(yaml.SafeLoader):
 
 
 def _construct_unique_mapping(loader: _UniqueKeyLoader, node, deep: bool = False):
+    """Mapping constructor that raises ``ValueError`` on duplicate keys.
+
+    PyYAML's default behavior is last-key-wins, which would let a duplicated
+    registry field silently shadow an earlier value; this makes that a load
+    error instead, naming the offending file.
+    """
     loader.flatten_mapping(node)
     mapping = {}
     source = getattr(getattr(loader, "stream", None), "name", "<yaml>")
@@ -53,12 +59,23 @@ _UniqueKeyLoader.add_constructor(
 
 
 def _caller_module(default: str = __name__) -> str:
+    """Module name of the caller's caller (two frames up).
+
+    Used to stamp ``__module__`` on dynamically built Registry classes so
+    they introspect (repr, pickle, docs) as belonging to the registry module
+    that called ``load_registry``/``load_collection``, not to this loader.
+    """
     frame = inspect.currentframe()
     caller = frame.f_back.f_back if frame and frame.f_back and frame.f_back.f_back else None
     return caller.f_globals.get("__name__", default) if caller else default
 
 
 def _load_mapping(yaml_file) -> dict[str, Any]:
+    """Load one YAML file as a dict using the duplicate-key-rejecting loader.
+
+    Raises ``ValueError`` if the document is not a mapping (a bare list or
+    scalar at top level would otherwise fail much later, inside pydantic).
+    """
     path = Path(yaml_file)
     with path.open(encoding="utf-8") as fh:
         raw = yaml.load(fh, Loader=_UniqueKeyLoader)

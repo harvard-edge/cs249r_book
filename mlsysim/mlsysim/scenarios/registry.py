@@ -119,8 +119,12 @@ class EnergyAnchors(Registry):
         40_000 * _joule, pc.ENERGY_SCALE_ANCHORS,
         name="Smartphone full charge", description="Approximate energy to fully charge a smartphone battery.")
     BoilingWater = sourced_qty(
+        # 4.186 J/g·K x 80 K x ~250 g ≈ 84 kJ; ~100 kJ with kettle losses. A full
+        # LITER takes ~335 kJ — the anchor is cup-sized, and the name now says so
+        # (audit fix 2026-06-06: value was right for a cup, name claimed 1 L).
         100_000 * _joule, pc.ENERGY_SCALE_ANCHORS,
-        name="Boiling 1 L of water", description="Approximate energy to bring one liter of water to a boil.")
+        name="Boiling a cup (~250 mL) of water",
+        description="Approximate energy to bring one cup (~250 mL) of water to a boil.")
     USHouseholdAnnualElectricity = sourced_qty(
         10.7 * MWh, pc.ENERGY_SCALE_ANCHORS,
         name="US household annual electricity",
