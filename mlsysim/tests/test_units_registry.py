@@ -211,7 +211,7 @@ def test_model_loading_anchors():
 
     assert loading.StableDiffusionV15CheckpointSize.to(GB).magnitude == pytest.approx(5.0)
     assert loading.StableDiffusionV15PickleLoadTime.to(second).magnitude == pytest.approx(15.0)
-    assert loading.StableDiffusionV15SafetensorsLoadTime.to(second).magnitude == pytest.approx(0.5)
+    assert loading.StableDiffusionV15SafetensorsLoadTime.to(second).magnitude == pytest.approx(1.5)
     assert loading.PcieSwapReferenceModelSize.to(GB).magnitude == pytest.approx(10.0)
     assert loading.StableDiffusionV15CheckpointSize.provenance.ref
 
