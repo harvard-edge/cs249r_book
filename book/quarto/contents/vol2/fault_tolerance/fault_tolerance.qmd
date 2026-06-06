@@ -2323,10 +2323,12 @@ If checkpoints occur hourly, the system wastes \$24,000 per day waiting for stor
 # │
 # │ Imports: mlsysim public API (Models, Systems, ReferenceStats, units, fmt helpers), math
 # │ Exports: CheckpointOverheadCalc.{archA,dense20b,bert,archB,resnet,vision_transformer}_*_str,
+# │          CheckpointOverheadCalc.archA_fp32_tb_str,
 # │          CheckpointOverheadCalc.write_bw_gb_per_s_str, mtbf_hr_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.physics import calc_checkpoint_size
+from mlsysim.solvers import TrainingMemoryModel
 import math
 
 class CheckpointOverheadCalc:
@@ -2338,6 +2340,17 @@ class CheckpointOverheadCalc:
         Models.Language.GPT3.parameters,
         bytes_per_param=checkpoint_bytes_per_param,
     )
+    archA_fp32_bytes = (
+        TrainingMemoryModel()
+        .solve(
+            Models.Language.GPT3,
+            Hardware.Cloud.A100,
+            batch_size=1,
+            precision="fp32",
+        )
+        .total_memory
+    )
+    check(archA_fp32_bytes > archA_size, "Mixed-precision checkpoint must be smaller than FP32 total")
     dense20b_size = checkpoint_archetypes.Dense20BTransformerCheckpointSize
     bert_size = Models.Language.BERT_Large.size_in_bytes(BYTES_FP32)
     archB_size = checkpoint_archetypes.EmbeddingHeavyRecommenderCheckpointSize
@@ -2396,6 +2409,7 @@ class CheckpointOverheadCalc:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     # -- Checkpoint sizes
     archA_ckpt_tb_str = fmt_memory(archA_size, unit=TB, precision=1, commas=False)
+    archA_fp32_tb_str = fmt_qty(archA_fp32_bytes, TB, precision=1, commas=False)
     dense20b_ckpt_gb_str = fmt_memory(dense20b_size, unit=GB, precision=0, commas=False)
     bert_ckpt_gb_str = fmt_memory(bert_size, unit=GB, precision=1, commas=False)
     archB_ckpt_tb_str = fmt_memory(archB_size, unit=TB, precision=0, commas=False)
@@ -2435,9 +2449,9 @@ class CheckpointOverheadCalc:
     archA_shard_gb_str = fmt_qty(archA_shard, GB, precision=1, commas=False)
 ```
 
-The Archetype A row below uses the mixed-precision optimizer checkpoint footprint (12 bytes per parameter), distinct from the full FP32 training-state total (`{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str`) cited in the introduction.
+The Archetype A row below uses the mixed-precision optimizer footprint (`{python} CheckpointOverheadCalc.archA_ckpt_tb_str`), not the full FP32 training-state total (`{python} CheckpointOverheadCalc.archA_fp32_tb_str`) cited in the introduction.
 
-| **Model Type**                   |                       **Checkpoint Size**                        | **Write Time (`{python} CheckpointOverheadCalc.write_bw_gb_per_s_str`)** | **Optimal Interval (`{python} CheckpointOverheadCalc.mtbf_hr_str` GPU-only MTBF)** |                           **Save Overhead**                           |
+| **Model Type**                   |               **Mixed-Precision Checkpoint Size**                | **Write Time (`{python} CheckpointOverheadCalc.write_bw_gb_per_s_str`)** | **Optimal Interval (`{python} CheckpointOverheadCalc.mtbf_hr_str` GPU-only MTBF)** |                           **Save Overhead**                           |
 |:---------------------------------|:----------------------------------------------------------------:|:------------------------------------------------------------------------:|:----------------------------------------------------------------------------------:|:---------------------------------------------------------------------:|
 | **Archetype A (175B dense LLM)** |       `{python} CheckpointOverheadCalc.archA_ckpt_tb_str`        |           `{python} CheckpointOverheadCalc.archA_write_s_str`            |              `{python} CheckpointOverheadCalc.archA_interval_min_str`              |        `{python} CheckpointOverheadCalc.archA_overhead_pct_str`       |
 | **20B dense transformer class**  |      `{python} CheckpointOverheadCalc.dense20b_ckpt_gb_str`      |          `{python} CheckpointOverheadCalc.dense20b_write_s_str`          |            `{python} CheckpointOverheadCalc.dense20b_interval_min_str`             |      `{python} CheckpointOverheadCalc.dense20b_overhead_pct_str`      |
@@ -2446,7 +2460,7 @@ The Archetype A row below uses the mixed-precision optimizer checkpoint footprin
 | **ResNet-50**                    |       `{python} CheckpointOverheadCalc.resnet_ckpt_mb_str`       |           `{python} CheckpointOverheadCalc.resnet_write_s_str`           |              `{python} CheckpointOverheadCalc.resnet_interval_s_str`               |       `{python} CheckpointOverheadCalc.resnet_overhead_pct_str`       |
 | **Vision transformer class**     | `{python} CheckpointOverheadCalc.vision_transformer_ckpt_gb_str` |     `{python} CheckpointOverheadCalc.vision_transformer_write_s_str`     |        `{python} CheckpointOverheadCalc.vision_transformer_interval_s_str`         | `{python} CheckpointOverheadCalc.vision_transformer_overhead_pct_str` |
 
-: **Checkpoint Overhead by Model Type**: Checkpoint sizes use the mixed-precision optimizer footprint for large LLMs (see Archetype A note above), not the full FP32 training-state total (`{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str`). Larger models require longer save times but also benefit from longer optimal checkpoint intervals. The percentage column reports save-only checkpoint write tax, not total Young-Daly waste; at the optimum, expected rework adds a comparable term. {#tbl-checkpoint-overhead-by-model}
+: **Checkpoint Overhead by Model Type**: Checkpoint sizes use the mixed-precision optimizer footprint for large LLMs (see Archetype A note above), not the `{python} CheckpointOverheadCalc.archA_fp32_tb_str` full FP32 training-state total from the introduction. Larger models require longer save times but also benefit from longer optimal checkpoint intervals. The percentage column reports save-only checkpoint write tax, not total Young-Daly waste; at the optimum, expected rework adds a comparable term. {#tbl-checkpoint-overhead-by-model}
 
 While the theoretical overhead of checkpointing appears manageable for individual models, writing these massive state files introduces a new bottleneck. When thousands of GPUs simultaneously attempt to write gigabytes of data to a shared file system, the resulting I/O congestion threatens to bring the entire cluster to a halt. The scale of that I/O burst is easiest to see by expanding the example from one model to thousands of simultaneous writers.
 
@@ -2454,7 +2468,7 @@ While the theoretical overhead of checkpointing appears manageable for individua
 
 **Scenario**: A training job saves a distributed checkpoint from thousands of accelerators at the same instant.
 
-**Mechanism**: For the `{python} CheckpointOverheadCalc.archA_ckpt_tb_str` Archetype A checkpoint above, `{python} CheckpointOverheadCalc.archA_workers_str` would each write roughly `{python} CheckpointOverheadCalc.archA_shard_gb_str` of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: 10,000 GPUs, each holding a 10 GB shard of model or embedding state, can flood the network fabric with 100 TB of simultaneous writes.
+**Mechanism**: For the `{python} CheckpointOverheadCalc.archA_ckpt_tb_str` mixed-precision optimizer footprint in the Archetype A row above—not the `{python} CheckpointOverheadCalc.archA_fp32_tb_str` full FP32 total—`{python} CheckpointOverheadCalc.archA_workers_str` would each write roughly `{python} CheckpointOverheadCalc.archA_shard_gb_str` of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: 10,000 GPUs, each holding a 10 GB shard of model or embedding state, can flood the network fabric with 100 TB of simultaneous writes.
 
 **Systems lesson**: A checkpoint storm occurs when massive parallel writes overwhelm the cluster's I/O infrastructure, causing switch buffers to overflow and storage controllers to lock up.
 
