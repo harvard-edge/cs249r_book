@@ -35,7 +35,7 @@ from mlsysim.physics import (
     calc_monthly_egress_cost,
     calc_fleet_tco,
 )
-from mlsysim.core.constants import ureg, Q_, MB, GB
+from mlsysim.core.units import ureg, Q_, MB, GB
 
 # ======================================================================
 # _ensure_unit

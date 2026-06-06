@@ -239,10 +239,12 @@ def test_schema_rejects_unknown_type():
     assert "Unknown schema type" in payload["reason"]
 
 
-def test_zoo_requires_category():
-    result = runner.invoke(app, ["zoo", "-o", "json"])
+def test_zoo_without_category_lists_both():
+    # 2026-06-06 UX fix: the CATEGORY argument is genuinely optional now
+    # (--help always marked it optional, but the command used to error).
+    # Omitting it renders both registries and exits 0.
+    result = runner.invoke(app, ["zoo"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.stdout)
-    assert payload["status"] == "error"
-    assert "Zoo category is required" in payload["reason"]
+    assert result.exit_code == 0
+    assert "Hardware Zoo" in result.stdout
+    assert "Models Zoo" in result.stdout

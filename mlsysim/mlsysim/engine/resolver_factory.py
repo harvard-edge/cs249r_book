@@ -1,6 +1,6 @@
 import logging
 from typing import Type, Dict
-from .solver import BaseResolver
+from .solvers import BaseResolver
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +27,18 @@ class ResolverFactory:
             return
             
         # 1. Register Built-ins (via __subclasses__)
+        # Importing `solver` executes the module, which defines every built-in
+        # resolver class — only then does __subclasses__ see them. The walk is
+        # recursive because resolvers form a hierarchy (BaseResolver ->
+        # BaseSolver/ForwardModel/BaseOptimizer -> concrete classes); "Base"-
+        # prefixed intermediates are skipped as non-instantiable scaffolding.
         from . import solver
         def register_subclasses(base_class):
             for subclass in base_class.__subclasses__():
                 if not subclass.__name__.startswith("Base"):
                     cls._registry[subclass.__name__] = subclass
                 register_subclasses(subclass)
-                
+
         register_subclasses(solver.BaseResolver)
         
         # 2. Register Third-Party Plugins

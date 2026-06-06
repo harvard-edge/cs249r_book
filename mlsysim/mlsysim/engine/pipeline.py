@@ -20,7 +20,7 @@ Example
 from __future__ import annotations
 
 from typing import Any, Dict, List
-from .solver import BaseResolver
+from .solvers import BaseResolver
 
 
 class CompositionError(Exception):

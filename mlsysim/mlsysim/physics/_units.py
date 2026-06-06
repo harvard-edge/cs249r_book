@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pint
 
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 
 
 def _ensure_unit(val, expected_unit, param_name="Value"):

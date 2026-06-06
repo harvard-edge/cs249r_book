@@ -3,7 +3,7 @@
 
 import unittest
 from mlsysim import Hardware, Models
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 
 class TestMLSysRegistry(unittest.TestCase):
     def test_hardware_ridge_points(self):
@@ -21,7 +21,7 @@ class TestMLSysRegistry(unittest.TestCase):
     def test_model_size(self):
         """Test model weight storage calculations."""
         gpt3 = Models.Language.GPT3
-        from mlsysim.core.constants import BYTES_FP16, BYTES_INT4
+        from mlsysim.core.units import BYTES_FP16, BYTES_INT4
         
         # GPT-3 175B @ FP16 (2 bytes) = 350 GB
         size_fp16 = gpt3.size_in_bytes(BYTES_FP16)

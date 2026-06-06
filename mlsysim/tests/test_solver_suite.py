@@ -16,7 +16,7 @@ from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.registry import Systems
 from mlsysim.infrastructure.registry import Infrastructure, Grids
-from mlsysim.engine.solver import (
+from mlsysim.engine.solvers import (
     SingleNodeModel,
     ServingModel,
     TrainingMemoryModel,
@@ -47,7 +47,7 @@ from mlsysim.models.types import SparseTransformerWorkload
 from mlsysim.physics import calc_activation_memory, calc_pipeline_bubble
 from mlsysim.systems.types import NetworkFabric
 from mlsysim.engine.engine import Engine, PerformanceProfile
-from mlsysim.core.constants import ureg, Q_
+from mlsysim.core.units import ureg, Q_
 from mlsysim.core.exceptions import OOMError
 
 # ======================================================================
@@ -798,7 +798,7 @@ class TestCompressionModel:
 
     def test_constants_and_registry_import(self):
         """Units from constants.py; reliability and literature from registries."""
-        from mlsysim.core.constants import (
+        from mlsysim.core.units import (
             ureg, Q_,
             BYTES_FP16, BYTES_FP32, BYTES_INT8, BYTES_INT4,
         )

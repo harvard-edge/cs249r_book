@@ -1,68 +1,26 @@
 """Single-node, network-roofline, efficiency, and inverse-design solvers.
 
-These implementations live outside ``engine.solver`` so the public import
-module can stay small while domain logic remains easier to review.
+Domain implementations behind ``mlsysim.solvers`` (the public import
+path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
 """
 
-# ruff: noqa: F401
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, List, Optional, Type
 
 from ..engine import Engine, PerformanceProfile
 from ..results import (
-    SolverResult,
-    DistributedResult,
-    ReliabilityResult,
-    CheckpointResult,
-    SustainabilityResult,
-    ServingResult,
-    TrainingMemoryResult,
-    ServingCapacityResult,
-    MoERoutingResult,
-    ContinuousBatchingResult,
-    WeightStreamingResult,
-    TailLatencyResult,
-    EconomicsResult,
-    DataResult,
-    TopologyResult,
     EfficiencyResult,
-    TransformationResult,
-    ScalingResult,
-    CompressionResult,
     SynthesisResult,
-    OrchestrationResult,
-    InferenceScalingResult,
     SensitivityResult,
-    ResponsibleEngineeringResult,
-    ParallelismOptimizerResult,
-    BatchingOptimizerResult,
-    PlacementOptimizerResult,
 )
-from ...physics import (
-    calc_ring_allreduce_time,
-    calc_hierarchical_allreduce_time,
-    calc_all_to_all_time,
-    calc_bottleneck,
-    calc_mtbf_cluster,
-    calc_mtbf_node,
-    calc_young_daly_interval,
-    calc_failure_probability,
-    calc_pipeline_bubble,
-)
-from ...core.constants import ureg, Q_, resolve_precision
-from ...infrastructure.registry import Infrastructure
+from ...core.units import ureg, Q_, resolve_precision
 from ...literature.registry import Literature
-from ...systems.reliability import Reliability
 from .. import calibration as cal
 from ...core.types import Quantity
-from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
+from ...models.types import Workload
 from ...hardware.types import HardwareNode
-from ...systems.types import Fleet, NetworkFabric, Node
-from ...infrastructure.types import Datacenter
-from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
-from .utils import _inter_node_latency, _intra_node_latency
+from ...systems.types import Fleet
+from .base import BaseSolver, ForwardModel
 
 class SingleNodeModel(ForwardModel):
     """
@@ -209,6 +167,9 @@ class NetworkRooflineModel(ForwardModel):
         is_network_bound = network_time > compute_time
         latency = max(compute_time.to("ms").magnitude, network_time.to("ms").magnitude) * ureg.ms
 
+        # MFU follows from the binding ceiling: useful FLOPs delivered per step
+        # over fleet peak. HFU adds the recompute/kernel work the hardware does
+        # beyond model FLOPs, via the calibrated HFU:MFU ratio.
         achieved_rate = (training_ops / latency.to("s")).to(total_flops.units)
         mfu = min((achieved_rate / total_flops).to_base_units().magnitude, 1.0)
         hfu = min(mfu * cal.HFU_MFU_RATIO, 1.0)
@@ -375,34 +336,38 @@ class SensitivitySolver(BaseSolver):
             Per-parameter sensitivities, the binding constraint name, and the
             baseline latency.
         """
-        from copy import deepcopy
-        from ...hardware.types import ComputeCore
-
         baseline = Engine.solve(model, hardware, precision=precision, efficiency=efficiency)
         t_base = baseline.latency.to("ms").magnitude
         factor = 1.0 + perturbation_pct / 100.0
         sensitivities = {}
 
-        hw_flops = deepcopy(hardware)
-        hw_flops.compute = ComputeCore(
-            peak_flops=hardware.compute.peak_flops * factor,
-            precision_flops={k: v * factor for k, v in hardware.compute.precision_flops.items()}
-        )
+        # Registry hardware entries are frozen shared singletons, so each
+        # perturbation builds a modified COPY via model_copy(update=...) rather
+        # than assigning to the node (2026-06-06; the old deepcopy-then-assign
+        # pattern relied on mutability that frozen=True now forbids).
+        hw_flops = hardware.model_copy(update={
+            "compute": hardware.compute.model_copy(update={
+                "peak_flops": hardware.compute.peak_flops * factor,
+                "precision_flops": {k: v * factor for k, v in hardware.compute.precision_flops.items()},
+            })
+        })
         t_flops = Engine.solve(model, hw_flops, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["peak_flops"] = (t_flops - t_base) / t_base if t_base > 0 else 0.0
 
-        hw_bw = deepcopy(hardware)
-        hw_bw.memory = deepcopy(hardware.memory)
-        hw_bw.memory.bandwidth = hardware.memory.bandwidth * factor
+        hw_bw = hardware.model_copy(update={
+            "memory": hardware.memory.model_copy(update={"bandwidth": hardware.memory.bandwidth * factor})
+        })
         t_bw = Engine.solve(model, hw_bw, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_bandwidth"] = (t_bw - t_base) / t_base if t_base > 0 else 0.0
 
-        hw_mem = deepcopy(hardware)
-        hw_mem.memory = deepcopy(hardware.memory)
-        hw_mem.memory.capacity = hardware.memory.capacity * factor
+        hw_mem = hardware.model_copy(update={
+            "memory": hardware.memory.model_copy(update={"capacity": hardware.memory.capacity * factor})
+        })
         t_mem = Engine.solve(model, hw_mem, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_capacity"] = (t_mem - t_base) / t_base if t_base > 0 else 0.0
 
+        # The binding constraint is the parameter whose upgrade moves latency
+        # most (abs() because improvements show up as negative sensitivities).
         binding = max(sensitivities, key=lambda k: abs(sensitivities[k]))
 
         return SensitivityResult(

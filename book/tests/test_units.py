@@ -32,7 +32,7 @@ _mlsysim_project = os.path.join(_repo_root, "mlsysim")    # contains the package
 sys.path.insert(0, _mlsysim_project)
 sys.path.insert(0, _book_dir)
 
-from mlsysim.core.constants import *
+from mlsysim.core.units import *
 from mlsysim.physics import *
 from mlsysim.fmt import fmt, fmt_sci, fmt_unit
 from mlsysim import Hardware, Models, Systems, Literature, ReferenceStats

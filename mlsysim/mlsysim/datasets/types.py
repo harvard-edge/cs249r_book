@@ -1,12 +1,12 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 
-from ..core.constants import ureg
+from ..core.units import ureg
 from ..core.types import Metadata, Quantity, require_dimensionality, require_unit_family
 
 
 class DatasetProfile(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     training_examples: Optional[Quantity] = None
     test_examples: Optional[Quantity] = None

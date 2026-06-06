@@ -1,68 +1,29 @@
 """LLM serving, batching, tail-latency, and inference-scaling solvers.
 
-These implementations live outside ``engine.solver`` so the public import
-module can stay small while domain logic remains easier to review.
+Domain implementations behind ``mlsysim.solvers`` (the public import
+path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
 """
 
-# ruff: noqa: F401
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Type
+from typing import Optional
 
-from ..engine import Engine, PerformanceProfile
 from ..results import (
-    SolverResult,
-    DistributedResult,
-    ReliabilityResult,
-    CheckpointResult,
-    SustainabilityResult,
     ServingResult,
-    TrainingMemoryResult,
     ServingCapacityResult,
-    MoERoutingResult,
     ContinuousBatchingResult,
     WeightStreamingResult,
     TailLatencyResult,
-    EconomicsResult,
-    DataResult,
-    TopologyResult,
-    EfficiencyResult,
-    TransformationResult,
-    ScalingResult,
-    CompressionResult,
-    SynthesisResult,
-    OrchestrationResult,
     InferenceScalingResult,
-    SensitivityResult,
-    ResponsibleEngineeringResult,
-    ParallelismOptimizerResult,
     BatchingOptimizerResult,
-    PlacementOptimizerResult,
 )
-from ...physics import (
-    calc_ring_allreduce_time,
-    calc_hierarchical_allreduce_time,
-    calc_all_to_all_time,
-    calc_bottleneck,
-    calc_mtbf_cluster,
-    calc_mtbf_node,
-    calc_young_daly_interval,
-    calc_failure_probability,
-    calc_pipeline_bubble,
-)
-from ...core.constants import ureg, Q_, resolve_precision
-from ...infrastructure.registry import Infrastructure
-from ...literature.registry import Literature
-from ...systems.reliability import Reliability
+from ...core.units import ureg, Q_, resolve_precision
 from .. import calibration as cal
 from ...core.types import Quantity
-from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
+from ...models.types import TransformerWorkload
 from ...hardware.types import HardwareNode
-from ...systems.types import Fleet, NetworkFabric, Node
-from ...infrastructure.types import Datacenter
-from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
-from .utils import _inter_node_latency, _intra_node_latency
+from .base import BaseOptimizer, ForwardModel
 
 class ServingModel(ForwardModel):
     """
@@ -157,18 +118,26 @@ class ServingModel(ForwardModel):
             raise ValueError(f"network_bandwidth ({network_bandwidth:~P}) must be positive")
 
         # 1. Pre-fill Phase (with optional prompt caching)
+        # Prefer the precision-specific FLOP rate (e.g. FP16 tensor cores); fall back
+        # to the generic peak when the registry has no entry for this dtype.
         peak_flops_prefill = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
-        # Prompt caching: only new tokens need prefill computation
+        # Prompt caching: only new tokens need prefill computation. The max(1, ...)
+        # floor keeps the model well-defined even when nearly the whole prompt is
+        # cached — at least one token must pass through prefill to produce output.
         new_tokens = max(1, seq_len - cached_prefix_len)
         # Linear layer FLOPs: 2 * params * tokens * batch (standard 2P approximation)
         linear_flops = 2 * model.parameters.to(ureg.count).magnitude * new_tokens * batch_size
         # Attention FLOPs: 2 * n_layers * n_heads * head_dim * seq_len^2 * batch_size
         # This captures the O(S^2) self-attention cost, which dominates for long contexts.
+        # getattr-with-fallback tolerates plain Workloads that lack transformer
+        # geometry; the `or` guards convert an explicit None into the same default.
         n_layers = getattr(model, 'layers', 1) or 1
         n_heads = getattr(model, 'heads', 32) or 32
         head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
         # Upper-bound approximation: each new token attends over the final context.
-        # When cached_prefix_len=0, new_tokens == seq_len so this simplifies to S^2.
+        # The leading 4 = 2 FLOPs/MAC x 2 attention matmuls (QK^T scores and
+        # attention-weighted V). When cached_prefix_len=0, new_tokens == seq_len
+        # so this simplifies to S^2.
         attention_flops = 4 * n_layers * n_heads * head_dim * new_tokens * seq_len * batch_size
         prefill_ops = (linear_flops + attention_flops) * ureg.flop
         t_prefill_compute = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms")
@@ -176,25 +145,38 @@ class ServingModel(ForwardModel):
         prefill_chunk_time: Optional[Quantity] = None
         decode_stall_bound: Optional[Quantity] = None
         if prefill_chunk_tokens is not None:
+            # Chunked prefill (Sarathi-Serve): split the prompt into bounded chunks
+            # so prefill work can interleave with ongoing decode iterations. Total
+            # compute is unchanged; what we gain is a bound on how long any single
+            # chunk can stall a decode step.
             prefill_chunks = max(1, math.ceil(new_tokens / prefill_chunk_tokens))
             chunk_times = []
             tokens_remaining = new_tokens
             while tokens_remaining > 0:
                 chunk_tokens = min(prefill_chunk_tokens, tokens_remaining)
                 chunk_linear = 2 * model.parameters.to(ureg.count).magnitude * chunk_tokens * batch_size
+                # Conservative: every chunk's tokens attend over the full final
+                # context (seq_len), matching the upper-bound convention above.
                 chunk_attention = 4 * n_layers * n_heads * head_dim * chunk_tokens * seq_len * batch_size
                 chunk_ops = (chunk_linear + chunk_attention) * ureg.flop
                 chunk_time = (chunk_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
                 chunk_times.append(chunk_time)
                 tokens_remaining -= chunk_tokens
+            # The slowest chunk is the worst-case decode interference window.
             prefill_chunk_time = max(chunk_times, key=lambda t: t.to("ms").magnitude)
             decode_stall_bound = prefill_chunk_time
+        # One kernel-dispatch tax per chunk: chunking trades extra launch overhead
+        # for bounded decode stalls (prefill_chunks == 1 when chunking is off).
         t_prefill = t_prefill_compute + (hardware.dispatch_tax * prefill_chunks)
 
         # KV-cache covers the full sequence (cached prefix + new tokens)
         kv_cache_bytes = model.get_kv_cache_size(seq_len=seq_len, batch_size=batch_size, precision=bpp)
 
         # 2. Disaggregated Serving (KV-Cache Transfer)
+        # Splitwise/DistServe style: prefill and decode run on different nodes, so
+        # the prompt's KV cache must cross the network before decoding can start.
+        # That transfer lands on TTFT (the first token waits for it); decode then
+        # reads from the decode node's own HBM.
         if decode_hardware:
             t_transfer = (kv_cache_bytes / network_bandwidth).to("ms")
             t_prefill += t_transfer
@@ -215,6 +197,9 @@ class ServingModel(ForwardModel):
         t_decode_per_token += layer_tax
 
         # 5. Speculative Decoding
+        # A small draft model proposes K tokens cheaply; the target model verifies
+        # them in one parallel pass. The win comes from amortizing the target's
+        # memory-bound weight load over several accepted tokens per step.
         if draft_model:
             # Time to generate 1 token with draft model (uses draft model's own KV cache, not target's)
             draft_weights_bytes = draft_model.size_in_bytes(bpp)
@@ -240,6 +225,8 @@ class ServingModel(ForwardModel):
             # Effective ITL
             t_decode_per_token = (t_draft_phase + t_verify) / expected_tokens
 
+        # Memory-wall feasibility on the decode node: weights + full-sequence KV
+        # (+ draft weights when speculating — the draft lives alongside the target).
         total_memory_required = model_weights_bytes + kv_cache_bytes
         if draft_model:
             total_memory_required += draft_model.size_in_bytes(bpp)
@@ -374,7 +361,11 @@ class ServingCapacityModel(ForwardModel):
             precision=precision,
             efficiency=efficiency,
         )
+        # A request "costs" output_tokens decode steps, so replica QPS capacity is
+        # token throughput spread over the per-request token budget.
         per_replica_qps = batching.throughput_tokens_per_sec / output_tokens if output_tokens > 0 else 0.0
+        # Queue-free request latency: one prefill plus output_tokens decode steps.
+        # Queue wait is layered on top of this per candidate replica count below.
         base_request_latency = (serving.ttft + serving.itl * output_tokens).to("ms")
 
         if not serving.feasible or not batching.feasible or per_replica_qps <= 0:
@@ -399,6 +390,9 @@ class ServingCapacityModel(ForwardModel):
                 bottleneck=bottleneck,
             )
 
+        # The queueing model's "service time" is the replica's capacity interval
+        # (1/QPS-capacity in ms): how long a replica is occupied per request from
+        # the scheduler's point of view, not the request's wall-clock latency.
         capacity_service_ms = 1000.0 / per_replica_qps
         best_tail: Optional[TailLatencyResult] = None
         best_queue_wait = Q_(float("inf"), "ms")
@@ -406,6 +400,8 @@ class ServingCapacityModel(ForwardModel):
         required_replicas = max_replicas
         feasible = False
 
+        # Scan replica counts upward; queue wait shrinks monotonically with more
+        # servers, so the first count that meets the target is the minimum.
         for replicas in range(1, max_replicas + 1):
             tail = TailLatencyModel().solve(
                 arrival_rate_qps=qps,
@@ -413,6 +409,10 @@ class ServingCapacityModel(ForwardModel):
                 num_replicas=replicas,
                 service_time_cv=service_time_cv,
             )
+            # TailLatencyModel folds the service time into its P99; strip it back
+            # out to isolate pure queue wait, which we then add to the *request's*
+            # real latency (TTFT + decode), a different quantity from the
+            # capacity interval used inside the queueing model.
             queue_wait = max(0.0, tail.p99_latency.to("ms").magnitude - capacity_service_ms) * ureg.ms
             estimated_p99 = (base_request_latency + queue_wait).to("ms")
             best_tail = tail
@@ -425,6 +425,10 @@ class ServingCapacityModel(ForwardModel):
 
         qps_capacity = required_replicas * per_replica_qps
         utilization = qps / qps_capacity if qps_capacity > 0 else float("inf")
+        # Name what binds: an unstable queue at max_replicas means raw capacity is
+        # short; a stable queue that still misses P99 means tail latency binds; a
+        # base latency already over target means no replica count can ever help
+        # (the fix is a faster model/hardware, not more replicas).
         if not feasible:
             bottleneck = "Tail Latency" if best_tail and best_tail.is_stable else "Capacity"
         elif base_request_latency.magnitude > target_p99_latency_ms:
@@ -528,6 +532,8 @@ class ContinuousBatchingModel(ForwardModel):
         prefill_ops = (linear_flops + attention_flops) * ureg.flop
         t_prefill = (prefill_ops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
 
+        # KV budget is whatever HBM remains after the weights are pinned resident;
+        # the concurrent-request count is bounded by how many sequences fit in it.
         model_weights_bytes = model.size_in_bytes(bpp)
         max_memory_for_kv = hardware.memory.capacity - model_weights_bytes
 
@@ -552,6 +558,8 @@ class ContinuousBatchingModel(ForwardModel):
             seq_len, batch_size=1, page_size_tokens=page_size, bytes_per_elem=bpp
         )
 
+        # int() truncates: a partially-fitting sequence cannot be admitted, so the
+        # memory-derived limit rounds down; the scheduler cap then takes the min.
         max_possible_requests = int((max_memory_for_kv / bytes_per_seq).to_base_units().magnitude)
         active_requests = min(max_possible_requests, max_batch_size)
 
@@ -563,13 +571,18 @@ class ContinuousBatchingModel(ForwardModel):
 
         total_kv_cache = bytes_per_seq * active_requests
 
-        # Throughput
+        # Throughput: each decode step streams weights once (shared by the whole
+        # batch) plus every active sequence's KV — the memory-bound step time.
         t_decode_per_token = ((model_weights_bytes + total_kv_cache) / hardware.memory.bandwidth).to("ms")
 
         if active_requests == 0 or t_decode_per_token.magnitude == 0:
+            # Degenerate cases (nothing fits, or zero step time) — report zero
+            # throughput rather than dividing by zero below.
             throughput = 0.0
             speedup = 1.0
         else:
+            # One step emits one token per active request, so tokens/s is the
+            # batch size over the step time.
             throughput = (active_requests / t_decode_per_token).to("1/s").magnitude
             # Static batching comparison:
             # With contiguous KV allocation, memory fragmentation limits the max batch.
@@ -633,11 +646,13 @@ class WeightStreamingModel(ForwardModel):
         h_dim = model.hidden_dim or 4096
         head_dim = h_dim // (model.heads or 32)
 
-        # KV dimensions per layer per sequence
+        # KV dimensions per layer per sequence; the factor 2 counts the separate
+        # K and V tensors stored per attention head.
         bytes_per_seq_per_layer = seq_len * n_heads * head_dim * 2 * bpp.magnitude
         total_kv_bytes = bytes_per_seq_per_layer * model.layers * batch_size * ureg.byte
 
-        # Let's add 10% overhead for working memory
+        # 10% headroom for the current layer's activation working set — small next
+        # to KV at these batch sizes, but not free.
         total_memory_required = (total_kv_bytes * 1.1).to("GB")
 
         feasible = total_memory_required <= hardware.memory.capacity
@@ -653,7 +668,9 @@ class WeightStreamingModel(ForwardModel):
         layer_params = model.parameters / model.layers
         layer_weight_bytes = layer_params.to(ureg.count).magnitude * bpp.magnitude * ureg.byte
 
-        # Injection time (MemoryX -> WSE)
+        # Injection time (MemoryX -> WSE). Fall back to a calibrated default when
+        # the registry entry is missing or zero — a zero injection bandwidth would
+        # otherwise make the division below blow up.
         inj_bw = hardware.interconnect.bandwidth if hardware.interconnect else Q_(cal.FALLBACK_INTERCONNECT_BANDWIDTH_GB_S, "GB/s")
         if inj_bw.magnitude == 0:
             inj_bw = Q_(cal.FALLBACK_INTERCONNECT_BANDWIDTH_GB_S, "GB/s")
@@ -676,7 +693,8 @@ class WeightStreamingModel(ForwardModel):
             layer_decode_flops = 2 * layer_params.to(ureg.count).magnitude * batch_size * ureg.flop
         layer_compute_time = (layer_decode_flops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
 
-        # True layer time is bounded by the slowest process
+        # True layer time is bounded by the slowest process: weight streaming
+        # overlaps injection with compute, so per-layer latency is max(), not sum.
         if layer_compute_time >= layer_injection_time:
             bottleneck = "Compute-Bound"
             layer_time = layer_compute_time
@@ -744,6 +762,8 @@ class TailLatencyModel(ForwardModel):
         validate_nonnegative(service_time_cv, "service_time_cv")
         from ...physics import calc_queue_latency_mmc
 
+        # Queueing theory works in rates: mean service time (ms) -> per-server
+        # service rate mu (requests/s).
         service_rate_hz = 1000.0 / service_latency_ms if service_latency_ms > 0 else 0.0
 
         rho, p50_w, p99_w = calc_queue_latency_mmc(arrival_rate_qps, service_rate_hz, num_replicas)
@@ -926,6 +946,8 @@ class BatchingOptimizer(BaseOptimizer):
                 return 1e12 # Infeasible due to memory
 
             service_latency = res.ttft + (res.itl * seq_len)
+            # Requests are grouped b-at-a-time, so the queue sees batches arriving
+            # at qps/b — larger batches mean fewer, slower queue customers.
             tail_res = tail_model.solve(arrival_rate_qps / b, service_latency.m_as("ms"), num_replicas)
 
             if not tail_res.is_stable or tail_res.p99_latency.m_as("ms") > sla_latency_ms:

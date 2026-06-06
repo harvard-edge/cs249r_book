@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mlsysim.core.constants import Q_, ureg
+from mlsysim.core.units import Q_, ureg
 from mlsysim.hardware.types import ComputeCore, MemoryHierarchy
 from mlsysim.models.types import TransformerWorkload
 from mlsysim.systems.types import NetworkFabric
