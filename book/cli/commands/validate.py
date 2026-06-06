@@ -136,13 +136,24 @@ LABEL_DEF_PATTERNS = {
         re.compile(r"\{#(lst-[\w-]+)"),              # {#lst-xyz ...}
         re.compile(r"#\|\s*label:\s*(lst-[\w-]+)"),  # #| label: lst-xyz
     ],
-    "Algorithm": [re.compile(r"\{#(alg-[\w-]+)")],   # {#alg-xyz}
+    # `alg-` is Quarto's native algorithm float; `algo-` is the
+    # mlsysbook-ext/pseudocode extension's prefix (native @alg- collides with
+    # Quarto's algorithm theorem env and FATALs the build, so the book uses
+    # @algo-). Accept both, including the pseudocode chunk-option label form.
+    "Algorithm": [
+        re.compile(r"\{#(algo?-[\w-]+)"),              # {#alg-xyz} / {#algo-xyz}
+        re.compile(r"#\|\s*label:\s*(algo?-[\w-]+)"),  # #| label: algo-xyz (pseudocode ext)
+    ],
 }
-LABEL_REF_PATTERN = re.compile(r"@((?:[Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lg)-[\w-]+)")
+LABEL_REF_PATTERN = re.compile(r"@((?:[Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lgo|[Aa]lg)-[\w-]+)")
+# Pseudocode algorithm label declared as a chunk option inside a ```pseudocode
+# fence (`#| label: algo-xyz`). Harvested even inside code fences so @algo-
+# references resolve (see _run_unreferenced_labels). Accepts alg-/algo-.
+PSEUDOCODE_LABEL_PATTERN = re.compile(r"#\|\s*label:\s*(algo?-[\w-]+)")
 
 EXCLUDED_CITATION_PREFIXES = (
-    "fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "ch-", "nb-",
-    "Fig-", "Tbl-", "Sec-", "Eq-", "Lst-", "Alg-",
+    "fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "algo-", "ch-", "nb-",
+    "Fig-", "Tbl-", "Sec-", "Eq-", "Lst-", "Alg-", "Algo-",
 )
 
 # Captionless float baseline: per-file counts of pre-existing violations
@@ -2250,6 +2261,17 @@ class ValidateCommand:
                         if "-->" in line:
                             in_html_comment = False
                         continue
+
+                # Pseudocode algorithm labels are declared as a chunk option
+                # (`#| label: algo-xyz`) INSIDE a ```pseudocode fence, so the
+                # code-block skip below would hide them and leave every
+                # @algo-/@Algo- reference unresolved. A chunk-option label is a
+                # genuine definition wherever it lives, so harvest it before the
+                # skip. (mlsysbook-ext/pseudocode; native @alg- collides with
+                # Quarto's algorithm theorem env, hence the algo- prefix.)
+                algo_def = PSEUDOCODE_LABEL_PATTERN.match(stripped)
+                if algo_def:
+                    defined.setdefault(algo_def.group(1), (file, idx, "Algorithm"))
 
                 if stripped.startswith("```"):
                     in_code_block = not in_code_block

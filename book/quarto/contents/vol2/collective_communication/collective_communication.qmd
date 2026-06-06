@@ -877,25 +877,30 @@ Ring AllReduce[^fn-ring-bandwidth-optimal] arranges nodes in a logical ring ($0 
 
 [^fn-ring-bandwidth-optimal]: **Bandwidth-Optimal**\index{Ring AllReduce!bandwidth optimality}: Ring AllReduce achieves the information-theoretic lower bound of $2(N-1)/N \cdot M/\beta$ bytes per node, meaning no correct AllReduce algorithm can move fewer bytes per node regardless of topology or strategy. This optimality holds because every GPU must receive $M(N-1)/N$ bytes of "new" information from other GPUs and contribute the same amount, and Ring saturates every link in every step.
 
-The algorithm splits the vector of size $M$ into $N$ chunks and then alternates communication and local reduction in two named phases: Scatter-Reduce\index{Ring AllReduce!scatter-reduce phase} followed by AllGather\index{Ring AllReduce!AllGather phase}. @Alg-ring-allreduce states the mechanics before the figure and trace make the same dataflow concrete.
+The algorithm splits the vector of size $M$ into $N$ chunks and then alternates communication and local reduction in two named phases: Scatter-Reduce\index{Ring AllReduce!scatter-reduce phase} followed by AllGather\index{Ring AllReduce!AllGather phase}. @Algo-ring-allreduce states the mechanics before the figure and trace make the same dataflow concrete.
 
-::: {#alg-ring-allreduce name="Ring AllReduce"}
+```pseudocode
+#| label: algo-ring-allreduce
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Ring AllReduce}
+\begin{algorithmic}
+\Require $N$ ranks in a logical ring; each rank $i$ starts with tensor $G_i$ of $M$ bytes, split into $N$ chunks
+\Ensure every rank holds $G = \sum_{i=0}^{N-1} G_i$
+\State assign the ring order $0\to 1\to\dots\to N{-}1\to 0$
+\For{$N-1$ scatter-reduce steps}
+    \State each rank sends one chunk (or partial sum) right, receives one from the left, and adds it into the matching local sum
+\EndFor
+\State each rank now owns one fully reduced chunk of $G$
+\For{$N-1$ all-gather steps}
+    \State each rank forwards a reduced chunk around the ring and stores the chunks it receives
+\EndFor
+\State \Return the complete reduced tensor $G$, held on every rank
+\end{algorithmic}
+\end{algorithm}
+```
 
-**Require**: $N$ ranks arranged in a logical ring; each rank $i$ starts with tensor $G_i$ of size $M$ bytes, partitioned into $N$ equal chunks.
-
-**Output**: Every rank holds the reduced tensor $G=\sum_{i=0}^{N-1}G_i$.
-
-1. Partition each local tensor into chunks of size $M/N$ and assign a ring order $0\to1\to\dots\to N-1\to0$.
-2. For $N-1$ Scatter-Reduce steps, each rank sends one chunk or partial sum to its right neighbor, receives one from its left neighbor, and adds the received contribution into the matching local partial sum.
-3. After Scatter-Reduce, each rank owns one fully reduced chunk of $G$.
-4. For $N-1$ AllGather steps, each rank forwards fully reduced chunks around the same ring while storing the chunks it receives.
-5. After AllGather, concatenate the $N$ reduced chunks so every rank holds the complete reduced tensor $G$.
-
-**Systems cost**: Steps 2 and 4 perform $2(N-1)$ sequential send/receive rounds. Each rank moves $M/N$ bytes per round, for $2(N-1)M/N$ bytes sent per rank and the same amount received; the bandwidth term reaches the lower bound, but the latency term is $2(N-1)\alpha$.
-
-:::
-
-The data flow during the Scatter-Reduce phase is illustrated in @fig-ring-allreduce.
+Across the $2(N-1)$ send/receive rounds each rank moves $M/N$ bytes per round, for $2(N-1)M/N$ bytes sent and the same received: the bandwidth term reaches the information-theoretic lower bound, while the latency term grows as $2(N-1)\alpha$. The data flow during the Scatter-Reduce phase is illustrated in @fig-ring-allreduce.
 
 ::: {#fig-ring-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce Data Flow**: Nodes arranged in a logical ring exchange chunks in two phases: a Scatter-Reduce phase (each node accumulates one chunk's partial sum) followed by an AllGather phase (complete sums circulate to all nodes). The figure shows the ring laid out horizontally with a wrap-around bus closing the loop; every link is used simultaneously, achieving bandwidth optimality." fig-alt="Horizontal linear layout of N GPUs forming a logical ring, with an orthogonal wrap-around bus closing the loop. Arrows show data flow along the ring; color-coded chunks at each GPU represent partial gradient sums."}
 

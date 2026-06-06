@@ -2238,9 +2238,31 @@ class TilingPrinciple:
 
 A fundamental mismatch exists between the *computational graph* (which sees a single `{python} TilingPrinciple.layer_dim_str` $\times$ `{python} TilingPrinciple.layer_dim_str` matrix multiplication) and the *physical silicon* (which possesses a fixed `{python} TilingPrinciple.array_dim_str` $\times$ `{python} TilingPrinciple.array_dim_str` systolic array). Bridging this gap requires **the tiling principle**\index{Tiling!principle, hardware-graph bridge}: the process of partitioning large tensor operations into "tiles" that fit exactly into the hardware's fast local memory (SRAM or Scratchpad).
 
-To process our `{python} TilingPrinciple.layer_dim_str`-wide layer on a `{python} TilingPrinciple.array_dim_str`-wide systolic array, the compiler must decompose the operation into `{python} TilingPrinciple.tile_count_str` individual tiles. This is not merely a software convenience; it is a physical requirement. Each tile is fetched from slow HBM, "staged" in fast SRAM, and then "pulsed" through the systolic array.
+To process our `{python} TilingPrinciple.layer_dim_str`-wide layer on a `{python} TilingPrinciple.array_dim_str`-wide systolic array, the compiler must decompose the operation into `{python} TilingPrinciple.tile_count_str` individual tiles. This is not merely a software convenience; it is a physical requirement. Each tile is fetched from slow HBM, "staged" in fast SRAM, and then "pulsed" through the systolic array. @Algo-tiled-gemm states the loop nest a compiler emits for this decomposition: stream tiles of $A$ and $B$ on chip and accumulate their product into a tile of $C$ before writing it back.
 
-This tiling pattern is the central mechanism behind high-performance ML systems. It allows the hardware to maintain high system efficiency $(\eta_{\text{hw}})$ by ensuring that for every byte loaded from main memory, the data is reused `{python} TilingPrinciple.reuse_factor_mult_str` within the systolic grid. An engineer who understands tiling understands the "silicon contract": if a layer's dimensions are not multiples of the tile size (for example, a width of 129 on a 128 array), the system pays a *fringe tax* in underutilized silicon, where 127 units sit idle while one unit finishes the "remainder" tile.
+```pseudocode
+#| label: algo-tiled-gemm
+#| pdf-line-number: true
+\begin{algorithm}
+\caption{Tiled (blocked) matrix multiply}
+\begin{algorithmic}
+\Require $A \in \mathbb{R}^{M\times K}$, $B \in \mathbb{R}^{K\times N}$; tile sizes $T_M, T_N, T_K$
+\Ensure $C = AB$
+\For{each row tile $i_0$ (size $T_M$)}
+    \For{each column tile $j_0$ (size $T_N$)}
+        \State initialize the $C$-tile accumulator to zero on chip
+        \For{each $k_0$ over $K$ in steps of $T_K$}
+            \State load $A$-tile $[i_0,k_0]$ and $B$-tile $[k_0,j_0]$ on chip
+            \State accumulate the tile product into the $C$-tile \Comment{each loaded byte reused $T_N$ or $T_M$ times}
+        \EndFor
+        \State write the $C$-tile back to memory
+    \EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+```
+
+The tile sizes are the lever. A larger tile reuses each loaded byte across more multiply-accumulate operations, raising the kernel's arithmetic intensity and pushing it toward the compute-bound side of the roofline; the ceiling is how much of $A$, $B$, and $C$ fits in fast on-chip memory at once. This tiling pattern is the central mechanism behind high-performance ML systems. It allows the hardware to maintain high system efficiency $(\eta_{\text{hw}})$ by ensuring that for every byte loaded from main memory, the data is reused `{python} TilingPrinciple.reuse_factor_mult_str` within the systolic grid. An engineer who understands tiling understands the "silicon contract": if a layer's dimensions are not multiples of the tile size (for example, a width of 129 on a 128 array), the system pays a *fringe tax* in underutilized silicon, where 127 units sit idle while one unit finishes the "remainder" tile.
 
 ::: {.column-margin}
 ![](images/svg/vol1_hw_acceleration_margin_001.svg){width="100%" fig-alt="An efficiency curve that holds high up to a tile width of 128, then drops sharply at 129 where a fringe tile appears; the region past the cliff is shaded red."}

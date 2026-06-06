@@ -2345,7 +2345,7 @@ Every modern ML framework defaults to reverse mode\index{Automatic Differentiati
 
 A neural network has one scalar loss but millions of parameters. Forward mode computes one parameter's gradient per pass, requiring $P$ passes for $P$ parameters. Reverse mode computes all $P$ gradients in a single backward pass. For a model with 100 million parameters, that is the difference between 100 million forward passes and exactly one backward pass, a speedup proportional to the parameter count.
 
-This asymmetry makes reverse mode the only viable option for training. Consider a function where $x$ influences the output through two distinct paths. @Lst-reverse_simple defines such a function, and @alg-reverse-mode-ad-trace states the general reverse-mode contract before the following worked trace makes one concrete input visible.
+This asymmetry makes reverse mode the only viable option for training. Consider a function where $x$ influences the output through two distinct paths. @Lst-reverse_simple defines such a function, and @algo-reverse-mode-ad-trace states the general reverse-mode contract before the following worked trace makes one concrete input visible.
 
 ::: {#lst-reverse_simple lst-cap="**Reverse Mode Automatic Differentiation**: Basic example of reverse mode automatic differentiation."}
 
@@ -2380,24 +2380,31 @@ class GPT3ReverseModeParams:
     gpt3_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
 ```
 
-::: {#alg-reverse-mode-ad-trace name="Reverse-mode automatic differentiation"}
+```pseudocode
+#| label: algo-reverse-mode-ad-trace
+#| pdf-line-number: true
 
-**Require**: Scalar output node $y$ in a directed acyclic computation graph; topologically ordered nodes $v_1,\ldots,v_n$; for each node, the stored forward value and local derivative rule.
+\begin{algorithm}
+\caption{Reverse-mode automatic differentiation}
+\begin{algorithmic}
+\Require directed acyclic graph with scalar output $y$; nodes $v_1,\dots,v_n$ in topological order; a local derivative rule for each node
+\Ensure adjoints $\bar{v}_i = \partial y / \partial v_i$ for the requested input or parameter nodes
+\For{$i = 1$ to $n$}
+    \State compute $v_i$, store its value and parent edges \Comment{forward pass}
+\EndFor
+\State $\bar{v}_i \gets 0$ for all $i$; \quad $\bar{y} \gets 1$
+\For{$i = n$ down to $1$}
+    \For{each parent $u$ of $v_i$}
+        \State $\bar{u} \gets \bar{u} + \bar{v}_i \, \partial v_i / \partial u$ \Comment{accumulate via the chain rule}
+    \EndFor
+    \State release stored values once every rule that needs them has run
+\EndFor
+\State \Return the adjoints for the requested nodes
+\end{algorithmic}
+\end{algorithm}
+```
 
-**State**: For each node $v_i$, the adjoint $\bar{v}_i=\partial y/\partial v_i$ stores the accumulated sensitivity of the output to that node.
-
-**Output**: Adjoint values for the requested input or parameter nodes.
-
-1. Run the graph forward in topological order, storing each node value and the parent edges required by its local derivative rule.
-2. Initialize every adjoint to zero and seed the output adjoint: $\bar{y}\gets 1$.
-3. Traverse nodes in reverse topological order.
-4. For each parent $u$ of the current node $v$, accumulate $\bar{u}\gets \bar{u}+\bar{v}\,\partial v/\partial u$ using the stored forward values.
-5. Release any stored forward value whose local derivative rules have all consumed it.
-6. Return the adjoints for the requested input or parameter nodes.
-
-**Systems cost**: Step 1 retains forward values and graph edges until steps 3 through 5 consume them in reverse, so reverse mode computes all requested parameter gradients in one backward traversal but trades that compute efficiency for activation and graph memory proportional to the live forward state.
-
-:::
+The structure of @algo-reverse-mode-ad-trace is also its cost. The forward pass retains every node value and parent edge until the reverse traversal consumes them, so reverse mode buys all $P$ gradients in a single backward pass at the price of activation and graph memory proportional to the live forward state. That memory, not the arithmetic, is what the rest of this section must manage.
 
 For the concrete function in @lst-reverse_simple with $x=2.0$, the forward pass stores $a=x^2=4.0$, $b=\sin(x)\approx0.9093$, and $c=ab\approx3.637$. Seeding $\bar{c}=1.0$, the reverse multiplication gives $\bar{a}=0.9093$ and $\bar{b}=4.0$; the square path contributes $0.9093\cdot4.0=3.637$ to $\bar{x}$, and the sine path adds $4.0\cos(2.0)$. The final derivative is $\partial c/\partial x=\bar{x}\approx1.972$.
 
