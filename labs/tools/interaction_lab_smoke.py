@@ -163,17 +163,62 @@ def _safe_marimo_code(lab: Path, port: int) -> str:
         "--port",
         str(port),
     ]
-    # Some local editable installs can register broken import finders. Marimo's
-    # package detector calls every finder while instantiating the notebook, so
-    # remove the known-broken TinyTorch editable finder before Marimo starts.
-    return (
-        "import runpy, sys; "
-        "sys.meta_path=[finder for finder in sys.meta_path "
-        'if "__editable___tinytorch" not in repr(finder) '
-        'and "__editable___tinytorch" not in getattr(finder, "__module__", "")]; '
-        f"sys.argv={argv!r}; "
-        'runpy.run_module("marimo.__main__", run_name="__main__")'
+    # Some local editable installs register import finders that raise while
+    # Marimo's package detector probes modules. Filter editable/broken finders
+    # and wrap find_spec before Marimo captures it in its formatter hooks.
+    return f"""
+import importlib.util
+import runpy
+import sys
+
+
+def _mlsysbook_finder_name(finder):
+    return " ".join(
+        str(part)
+        for part in (
+            repr(finder),
+            getattr(finder, "__module__", ""),
+            getattr(type(finder), "__module__", ""),
+        )
     )
+
+
+def _mlsysbook_keep_finder(finder):
+    name = _mlsysbook_finder_name(finder)
+    if "__editable__" in name:
+        return False
+    probe = getattr(finder, "find_spec", None)
+    if probe is None:
+        return True
+    try:
+        probe("__mlsysbook_missing_probe__", None, None)
+    except TypeError:
+        try:
+            probe("__mlsysbook_missing_probe__", None)
+        except Exception:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+sys.meta_path = [finder for finder in sys.meta_path if _mlsysbook_keep_finder(finder)]
+_mlsysbook_original_find_spec = importlib.util.find_spec
+
+
+def _mlsysbook_safe_find_spec(name, package=None):
+    try:
+        return _mlsysbook_original_find_spec(name, package)
+    except NameError as exc:
+        if "spec_from_loader" in str(exc) or "spec_from_file_location" in str(exc):
+            return None
+        raise
+
+
+importlib.util.find_spec = _mlsysbook_safe_find_spec
+sys.argv = {argv!r}
+runpy.run_module("marimo.__main__", run_name="__main__")
+"""
 
 
 def safe_marimo_env() -> dict[str, str]:
@@ -182,13 +227,54 @@ def safe_marimo_env() -> dict[str, str]:
     sitecustomize_dir.mkdir(parents=True, exist_ok=True)
     (sitecustomize_dir / "sitecustomize.py").write_text(
         """
+import importlib.util
 import sys
 
-sys.meta_path = [
-    finder for finder in sys.meta_path
-    if "__editable___tinytorch" not in repr(finder)
-    and "__editable___tinytorch" not in getattr(finder, "__module__", "")
-]
+
+def _mlsysbook_finder_name(finder):
+    return " ".join(
+        str(part)
+        for part in (
+            repr(finder),
+            getattr(finder, "__module__", ""),
+            getattr(type(finder), "__module__", ""),
+        )
+    )
+
+
+def _mlsysbook_keep_finder(finder):
+    name = _mlsysbook_finder_name(finder)
+    if "__editable__" in name:
+        return False
+    probe = getattr(finder, "find_spec", None)
+    if probe is None:
+        return True
+    try:
+        probe("__mlsysbook_missing_probe__", None, None)
+    except TypeError:
+        try:
+            probe("__mlsysbook_missing_probe__", None)
+        except Exception:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+sys.meta_path = [finder for finder in sys.meta_path if _mlsysbook_keep_finder(finder)]
+_mlsysbook_original_find_spec = importlib.util.find_spec
+
+
+def _mlsysbook_safe_find_spec(name, package=None):
+    try:
+        return _mlsysbook_original_find_spec(name, package)
+    except NameError as exc:
+        if "spec_from_loader" in str(exc) or "spec_from_file_location" in str(exc):
+            return None
+        raise
+
+
+importlib.util.find_spec = _mlsysbook_safe_find_spec
 """.lstrip(),
         encoding="utf-8",
     )
