@@ -1027,7 +1027,7 @@ Continuous batching (also called iteration-level batching) decouples batch membe
 5. If HBM pressure exceeds the serving policy's threshold, preempt lower-priority sequences by moving their KV-cache pages to CPU DRAM and marking those sequences paused.
 6. Fill newly freed capacity from $Q$ or resume paused sequences whose KV-cache pages now fit, then repeat the decode loop.
 
-**Systems cost**: The scheduler pays an admission, completion, and memory-accounting step at every decode iteration, and preemption adds HBM-to-CPU-DRAM transfer latency when memory pressure spikes. The payoff is immediate slot reuse: a Llama-2 70B service on 8$\times$ A100 GPUs can keep batch slots occupied instead of idling behind the longest sequence.
+**Systems cost**: Steps 1, 4, and 6 reuse slots as requests arrive, finish, or resume, preventing active-token capacity from idling behind the longest sequence in the batch. Step 5 adds HBM-to-CPU-DRAM transfer latency when memory pressure forces preemption, so the throughput gain scales with output-length variance and must be balanced against KV-cache movement.
 
 :::
 
@@ -2678,7 +2678,7 @@ Speculative decoding has three operational phases: a Draft phase\index{Speculati
 4. If a drafted token is rejected, sample a corrected token from the normalized positive residual distribution $(p_\theta - q_\phi)_+$ at that position, append it to the prefix, discard the remaining draft, and start a new round.
 5. If all $K$ drafted tokens are accepted, append them and sample one additional token from the target model's final-position distribution.
 
-**Systems cost**: Each round adds $K$ cheap draft decode steps and a second model's memory footprint, but replaces up to $K+1$ sequential target-model decode steps with one parallel verification pass. The method speeds serving only when the acceptance rate is high enough that the saved target-model HBM traffic exceeds the draft and verification overhead.
+**Systems cost**: Step 1 adds $K$ cheap draft decode steps and a second model's memory footprint, while step 2 replaces up to $K+1$ sequential target-model decode steps with one parallel verification pass. Steps 3 through 5 deliver speedup only when the acceptance rate is high enough that the saved target-model HBM traffic exceeds the draft and verification overhead.
 
 :::
 
@@ -3985,7 +3985,7 @@ The procedure is deliberately small, but the load signal must match the serving 
 5. Route $r$ to the candidate with lower $u_s$, breaking ties with locality, cache affinity, or recent error signals.
 6. Update the chosen replica's local admission state so the next routing decision observes the new work.
 
-**Systems cost**: Routing pays two probes and one state update per request, which is $\mathcal{O}(1)$ coordination rather than an all-replica scan. The benefit depends on measuring the right load: in LLM serving, request count alone can hide a 10-token request behind a 500-token request, while active-token and KV-cache signals expose the tail-latency risk.
+**Systems cost**: Steps 1 and 2 pay two probes, and step 6 pays one state update per request, which is $\mathcal{O}(1)$ coordination rather than an all-replica scan. Steps 3 through 5 reduce tail latency only when the load signal reflects true work: in LLM serving, request count alone can hide a 10-token request behind a 500-token request, while active-token and KV-cache signals expose the risk.
 
 :::
 
