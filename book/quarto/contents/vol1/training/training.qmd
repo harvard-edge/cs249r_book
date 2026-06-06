@@ -544,10 +544,10 @@ $$
 
 **Attention matmuls** (Q $\times$ K^T and Attn $\times$ V):
 \begin{gather*}
-\text{FLOPs}_{\text{QK}} = `{python} GPT2Compute.mac_factor_str` \times B \times N_{\text{heads}} \times S \times S \times d_{\text{head}}
+\text{FLOPs}_{QK} = `{python} GPT2Compute.mac_factor_str` \times B \times N_{\text{heads}} \times S \times S \times d_{\text{head}}
 = `{python} GPT2Compute.attn_qk_billion_str` \text{ billion FLOPs}
 \\
-\text{FLOPs}_{\text{Attn}\times\text{V}} = \text{FLOPs}_{\text{QK}};\quad
+\text{FLOPs}_{\text{Attn}\times V} = \text{FLOPs}_{QK};\quad
 \text{pair total} \approx `{python} GPT2Compute.attn_pair_billion_str` \text{ billion FLOPs}
 \end{gather*}
 
@@ -1421,12 +1421,12 @@ Training systems must maintain intermediate values (activations)\index{Activatio
 
 Consider a batch of training examples passing through a network. The forward pass computes and stores:
 \begin{gather*}
-\mathbf{z}^{(\ell)} = \mathbf{a}^{(\ell-1)}\mathbf{W}^{(\ell)} + \mathbf{b}^{(\ell)}
+\mathbf{Z}^{(\ell)} = \mathbf{A}^{(\ell-1)}\mathbf{W}^{(\ell)} + \mathbf{b}^{(\ell)}
 \\
-\mathbf{a}^{(\ell)} = f(\mathbf{z}^{(\ell)})
+\mathbf{A}^{(\ell)} = f(\mathbf{Z}^{(\ell)})
 \end{gather*}
 
-Both $\mathbf{z}^{(\ell)}$ and $\mathbf{a}^{(\ell)}$ must be cached for the backward pass. This creates a multiplicative effect on memory usage: each layer's memory requirement is multiplied by the batch size, and the optimizer's memory overhead (discussed in the previous section) applies to each parameter. Quantifying these costs for our GPT-2 Lighthouse Model reveals the scale of the activation memory challenge.
+Both $\mathbf{Z}^{(\ell)}$ and $\mathbf{A}^{(\ell)}$ must be cached for the backward pass. This creates a multiplicative effect on memory usage: each layer's memory requirement is multiplied by the batch size, and the optimizer's memory overhead (discussed in the previous section) applies to each parameter. Quantifying these costs for our GPT-2 Lighthouse Model reveals the scale of the activation memory challenge.
 
 For GPT-2, the calculation decomposes that pressure into per-layer attention, feed-forward, and training-state costs.
 
@@ -1452,7 +1452,7 @@ For GPT-2 with batch size $B$ = `{python} GPT2ActivationMemory.batch_size_str`, 
 
 - Attention activations: $B \times S \times d \times 4$ (Q, K, V, output) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.hidden_dim_str` $\times$ $4 \times 2$ bytes (FP16) = `{python} GPT2ActivationMemory.attn_act_mb_str`
 - FFN activations: $B \times S \times (4d)$ (intermediate expansion) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.ffn_dim_str` $\times$ 2 bytes = `{python} GPT2ActivationMemory.ffn_act_mb_str`
-- Attention scores: $5 \times a \times S^2 \times B$ bytes for the $S{\times}S$ score, softmax, and dropout buffers across $a$ = `{python} GPT2ActivationMemory.heads_str` heads = `{python} GPT2ActivationMemory.attn_scores_mb_str`—the dominant term, quadratic in sequence length, and exactly what selective recomputation discards
+- Attention scores: $5 \times N_{\text{heads}} \times S^2 \times B$ bytes for the $S{\times}S$ score, softmax, and dropout buffers across $N_{\text{heads}}$ = `{python} GPT2ActivationMemory.heads_str` heads = `{python} GPT2ActivationMemory.attn_scores_mb_str`—the dominant term, quadratic in sequence length, and exactly what selective recomputation discards
 - Layer norm states: Minimal (~`{python} GPT2ActivationMemory.layernorm_mb_str` per layer)
 - Total per layer: ~`{python} GPT2ActivationMemory.per_layer_mb_str` (attention + FFN + attention scores + layer norm states)
 
@@ -1497,7 +1497,7 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 #### Memory-computation trade-offs {#sec-model-training-memorycomputation-tradeoffs-411e}
 
-Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-Computation Tradeoff!training systems}. Each forward pass through the network generates a set of activations that must be stored for the backward pass. For a neural network with $N_L$ layers, let $s_\ell$ represent the size of intermediate computations (like $z^{(\ell)}$) and $a_\ell$ represent the activation outputs at layer $\ell$. Processing a batch of $B$ examples requires storing the memory specified by @eq-activation-memory-per-batch:
+Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-Computation Tradeoff!training systems}. Each forward pass through the network generates a set of activations that must be stored for the backward pass. For a neural network with $N_L$ layers, let $s_\ell$ represent the size of intermediate computations (like $\mathbf{Z}^{(\ell)}$) and $a_\ell$ represent the activation outputs at layer $\ell$. Processing a batch of $B$ examples requires storing the memory specified by @eq-activation-memory-per-batch:
 
 $$ \text{Memory per batch} = B \times \sum_{\ell=1}^{N_L} (s_\ell + a_\ell) $$ {#eq-activation-memory-per-batch}
 
@@ -2402,8 +2402,8 @@ where $F_{\text{access}} \approx 0.1$ for typical training workloads. Storage sy
 #### Preprocessing {#sec-model-training-preprocessing-523c}
 
 Once data arrives from storage, preprocessing transforms raw inputs into model-ready tensors. This process builds on the data pipeline patterns established in @sec-data-engineering, typically implemented through extract, load, transform (ELT) pipelines where raw data is loaded first and transformed on-demand during training. Preprocessing throughput scales with parallelism, as expressed in @eq-preprocess-throughput:
-$$R_{\text{preprocessing}} = \frac{N_{\text{workers}}}{t_{\text{transform}}}$$ {#eq-preprocess-throughput}
-where $N_{\text{workers}}$ parallel processing threads each perform transformations requiring $t_{\text{transform}}$ seconds. Training architectures employ multiple workers to ensure preprocessing keeps pace with accelerator consumption rates---a single thread performing image augmentation at 30 ms per batch cannot feed an accelerator that computes a forward pass in 10 ms.
+$$R_{\text{preprocessing}} = \frac{N_{\text{workers}}}{T_{\text{transform}}}$$ {#eq-preprocess-throughput}
+where $N_{\text{workers}}$ parallel processing threads each perform transformations requiring $T_{\text{transform}}$ seconds. Training architectures employ multiple workers to ensure preprocessing keeps pace with accelerator consumption rates---a single thread performing image augmentation at 30 ms per batch cannot feed an accelerator that computes a forward pass in 10 ms.
 
 Preprocessed data must then transfer to the accelerator before computation can begin. The overall training throughput is therefore constrained by the slowest of three stages, as @eq-training-bottleneck makes explicit:
 $$R_{\text{training}} =\min(R_{\text{preprocessing}}, \text{BW}_{\text{GPU\_transfer}}, R_{\text{compute}})$$ {#eq-training-bottleneck}
@@ -2624,7 +2624,7 @@ class NetworkWall:
 3. **Network time**: At `{python} NetworkWall.network_bw_gb_per_s_str` InfiniBand (100 Gbps): `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` = `{python} NetworkWall.network_time_s_str`.
 4. **Compute time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
 
-**Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $t_{\text{communication}} > t_{\text{computation}}$. Solutions include gradient compression, which sends fewer or lower-precision gradient bytes while checking convergence impact; overlapping computation with communication, as implemented in Horovod [@sergeev2018horovod]; and using faster interconnects (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. InfiniBand at `{python} NetworkWall.network_bw_gb_per_s_str`).
+**Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{communication}} > T_{\text{computation}}$. Solutions include gradient compression, which sends fewer or lower-precision gradient bytes while checking convergence impact; overlapping computation with communication, as implemented in Horovod [@sergeev2018horovod]; and using faster interconnects (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. InfiniBand at `{python} NetworkWall.network_bw_gb_per_s_str`).
 
 :::
 
@@ -2683,7 +2683,7 @@ class MemoryHierarchyBandwidth:
 ```
 
 Storage devices provide 1--2 GB/s, system memory delivers 50--100 GB/s, and accelerator HBM achieves `{python} MemoryHierarchyBandwidth.v100_bw_gb_per_s_str` or higher. Each tier is orders of magnitude faster than the one below it, which means data that flows freely within accelerator memory creates a severe bottleneck when it must be fetched from disk. This cascading bandwidth hierarchy explains why the iteration time of a well-pipelined system is governed by the *maximum* of its component latencies rather than their *sum*, as @eq-iteration-time shows:
-$$t_{\text{iteration}} =\max(t_{\text{fetch}}, t_{\text{process}}, t_{\text{transfer}})$$ {#eq-iteration-time}
+$$T_{\text{iteration}} =\max(T_{\text{fetch}}, T_{\text{process}}, T_{\text{transfer}})$$ {#eq-iteration-time}
 
 When pipeline stages overlap correctly (fetching the next batch from storage while preprocessing the current one and transferring the previous one to the accelerator), the iteration time equals the duration of the slowest stage rather than the sum of all stages. This overlap is exactly what prefetching achieves, turning a serial bottleneck into a parallel pipeline where each tier operates concurrently on different batches.
 
@@ -2714,7 +2714,7 @@ To keep accelerators fed despite this bandwidth reduction, pipeline architecture
 $$M_{\text{required}} = (N_{\text{prefetch}} + N_{\text{processing}} + N_{\text{transfer}}) \times M_{\text{batch}}$$ {#eq-buffer-memory}
 
 The critical design constraint is that preprocessing must complete faster than accelerator computation, as @eq-pipeline-condition states. When this inequality is violated, expensive accelerators idle while CPUs finish transforming data:
-$$t_{\text{preprocessing}} < t_{\text{compute}}$$ {#eq-pipeline-condition}
+$$T_{\text{preprocessing}} < T_{\text{compute}}$$ {#eq-pipeline-condition}
 
 For image classification pipelines where resizing, augmentation, and normalization consume 20--40 ms per batch on a single CPU thread, while a modern GPU completes the forward-backward pass in 10--15 ms, satisfying this inequality requires parallel preprocessing with four to eight worker threads. This is exactly the configuration that @sec-model-training-data-prefetching-pipeline-overlapping-e984 optimizes.
 

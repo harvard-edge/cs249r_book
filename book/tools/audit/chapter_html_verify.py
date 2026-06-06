@@ -131,11 +131,29 @@ def _qmd_path(vol: str, ch_path: str) -> Path:
     return REPO_ROOT / "book/quarto/contents" / vol / f"{ch_path}.qmd"
 
 
+def _prepare_single_chapter_build(vol: str) -> None:
+    """Drop stale chapter HTML so post-render xref scan cannot false-fail.
+
+    Fast single-chapter binder builds only re-render the target QMD; leftover
+    HTML from prior full or partial builds remains under ``html-{vol}/`` and
+    ``verify_rendered_xrefs.py`` scans the whole output tree.
+    """
+    build_dir = REPO_ROOT / "book/quarto/_build" / f"html-{vol}"
+    contents = build_dir / "contents" / vol
+    if contents.is_dir():
+        for html in contents.rglob("*.html"):
+            html.unlink()
+    search_json = build_dir / "search.json"
+    if search_json.is_file():
+        search_json.unlink()
+
+
 def _build_html(vol: str, ch_path: str) -> tuple[bool, float, str]:
     name = ch_path.split("/")[-1]
     binder_vol = f"--{vol}"
     binder_ch = f"{vol}/{name}"
     log = Path(f"/tmp/render_{vol}_{name}.log")
+    _prepare_single_chapter_build(vol)
     t0 = time.monotonic()
     proc = subprocess.run(
         ["./book/binder", "build", "html", binder_vol, binder_ch,

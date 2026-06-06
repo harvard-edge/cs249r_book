@@ -205,16 +205,37 @@ PYTHONPATH=mlsysim python3 book/tools/audit/fmt/audit_lego_html.py
 Do not commit truncated `book/quarto/config/_quarto-html-vol*.yml` after binder
 builds — restore from git if the render list shrinks.
 
-### Phase 4 — HTML ground truth
+### Phase 4 — Per-chapter replayable verify (PASS bar)
+
+One chapter at a time: binder HTML build, every LEGO cell, every inline ref in
+rendered HTML prose, optional LLM coherence review. Writes a certificate under
+`book/tools/audit/artifacts/lego_chapter_reports/`.
 
 ```bash
-./book/binder build html --vol1 introduction/introduction --skip-hygiene --skip-validate -v
-python3 book/tools/audit/fmt/audit_html.py book/quarto/_build/html-vol1/contents/vol1/introduction/introduction.html
+./book/tools/audit/verify_lego_chapter.sh vol1 introduction
+./book/tools/audit/verify_lego_chapter.sh vol2 network_fabrics
 ```
 
-Spot-check rendered prose for double units and literal `{python}`.
+**PASS requires:** HTML build clean; cells `N/N`; rendered prose refs `N/N` (value
++ HTML context); LLM coherence not `FAIL`. Re-run the same command after fixes.
 
-### Phase 5–6 — Capstone
+Corpus sweep (sequential, resumable):
+
+```bash
+./book/tools/audit/run_all_lego_chapters.sh
+# failures → book/tools/audit/artifacts/lego_chapter_failures.txt
+# progress  → book/tools/audit/artifacts/lego_chapter_progress.md
+```
+
+### Phase 5 — HTML spot checks
+
+```bash
+python3 book/tools/audit/fmt/audit_html.py book/quarto/_build/html-audit/vol1/introduction.html
+```
+
+Spot-check certificates for substituted QMD→HTML prose; no literal `{python}`.
+
+### Phase 6 — Capstone
 
 ```bash
 ./book/tools/audit/verify_lego_pipeline.sh   # or /precheck before push

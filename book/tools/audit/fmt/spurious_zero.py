@@ -38,6 +38,7 @@ _FALSE_POSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"1\.0\s*\(perfect\)",
         r"\[0\.5,\s*2\.0\]",
         r"\\(?:approx|times|exp|lbrack|rbrack|hat|mathbf|partial|mathcal|frac|begin|end|cdot|;|,|\(|\[)",
+        r"[\d,]+\.0\s*times\s*10",
         r"\\text\{[^}]*\d+\.0",
         r"PUE of [\d,]+\.0",
         r"PUE values of [\d,]+\.0",

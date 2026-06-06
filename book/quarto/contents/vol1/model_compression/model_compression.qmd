@@ -1194,7 +1194,7 @@ Formalizing this process, let $W \in \mathbb{R}^{m \times n}$ represent a weight
 $$
 \hat{W} = M \odot W
 $$
-where $\odot$ represents the element-wise Hadamard product\index{Hadamard Product!pruning mask}. The mask $M$ is constructed based on a pruning criterion, typically weight magnitude. A common approach is magnitude-based pruning, which removes a fraction $s$ of the lowest-magnitude weights by defining a threshold $\delta_{\text{prune}}$ such that:
+where $\odot$ represents the element-wise Hadamard product\index{Hadamard Product!pruning mask}. The mask $M$ is constructed based on a pruning criterion, typically weight magnitude. A common approach is magnitude-based pruning, which removes a fraction $\rho_{\text{sparse}}$ of the lowest-magnitude weights by defining a threshold $\delta_{\text{prune}}$ such that:
 $$
 M_{i,j} =
 \begin{cases}
@@ -1202,7 +1202,7 @@ M_{i,j} =
 0, & \text{otherwise}
 \end{cases}
 $$
-where $\delta_{\text{prune}}$ is chosen to ensure that only the largest $(1 - s)$ fraction of weights remain. This method assumes that larger-magnitude weights contribute more to the network's function, making them preferable for retention.
+where $\delta_{\text{prune}}$ is chosen to ensure that only the largest $(1 - \rho_{\text{sparse}})$ fraction of weights remain. This method assumes that larger-magnitude weights contribute more to the network's function, making them preferable for retention.
 
 The primary advantage of unstructured pruning is memory efficiency. By reducing the number of nonzero parameters, pruned models require less storage, which benefits deployment on embedded or mobile devices with limited memory.
 
@@ -2649,7 +2649,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 
 :::
 
-The main tensor-decomposition families differ in how they trade compression against inference overhead. **CP decomposition**\index{CP Decomposition!definition}\index{Tensor Decomposition!CP decomposition} expresses a tensor as a sum of rank-one components, $\mathcal{A} \approx \sum_{r=1}^{k} u_r \otimes v_r \otimes w_r$, which can be compact but sensitive to rank choice. **Tucker decomposition**\index{Tucker Decomposition!definition}\index{Tensor Decomposition!Tucker decomposition} keeps a small core tensor with factor matrices, $\mathcal{A} \approx \mathcal{G} \times _1 U \times _2 V \times _3 W$, making the retained interactions more explicit at the cost of a more complex representation. **Tensor-Train (TT)**\index{Tensor Decomposition!Tensor-Train} factorizes very high-dimensional tensors into a sequence of lower-rank factors, making it most attractive when the original tensor order is too large for a single matrix-like factorization to capture efficiently.
+The main tensor-decomposition families differ in how they trade compression against inference overhead. **CP decomposition**\index{CP Decomposition!definition}\index{Tensor Decomposition!CP decomposition} expresses a tensor as a sum of rank-one components, $\mathcal{X} \approx \sum_{r=1}^{k} u_r \otimes v_r \otimes w_r$, which can be compact but sensitive to rank choice. **Tucker decomposition**\index{Tucker Decomposition!definition}\index{Tensor Decomposition!Tucker decomposition} keeps a small core tensor with factor matrices, $\mathcal{X} \approx \mathcal{G} \times _1 U \times _2 V \times _3 W$, making the retained interactions more explicit at the cost of a more complex representation. **Tensor-Train (TT)**\index{Tensor Decomposition!Tensor-Train} factorizes very high-dimensional tensors into a sequence of lower-rank factors, making it most attractive when the original tensor order is too large for a single matrix-like factorization to capture efficiently.
 
 Tensor decomposition applies to convolutional filters (approximating 4D weight tensors), attention mechanisms in transformers, and embedding layers in NLP models. The trade-offs mirror LRMF: compression vs. information loss, and the additional computational overhead of tensor contractions during inference.
 
@@ -2836,11 +2836,11 @@ NAS faces a chicken-and-egg problem: we cannot know how good an architecture is 
 
 NAS is therefore a **bi-level optimization problem**\index{NAS!bi-level optimization}[^fn-bilevel-optimization-nas]: the outer loop searches the architecture space $\mathcal{A}$, while the inner loop trains candidate architectures to evaluate performance. Formally, we seek the optimal architecture $\alpha^*$ that minimizes validation loss $\mathcal{L}_{\text{val}}$ under constraints $C$ (latency, memory):
 $$
-\alpha^* = \operatorname{arg\,min}_{\alpha \in \mathcal{A}} \mathcal{L}_{\text{val}}(w^*(\alpha), \alpha) \quad \text{subject to} \quad C(\alpha) \leq C_{\text{max}}
+\alpha^* = \operatorname{arg\,min}_{\alpha \in \mathcal{A}} \mathcal{L}_{\text{val}}(\theta^*(\alpha), \alpha) \quad \text{subject to} \quad C(\alpha) \leq C_{\text{max}}
 $$
-where $w^*(\alpha)$ represents the optimal weights for architecture $\alpha$, obtained by minimizing training loss:
+where $\theta^*(\alpha)$ represents the optimal weights for architecture $\alpha$, obtained by minimizing training loss:
 $$
-w^*(\alpha) = \operatorname{arg\,min}_{w} \mathcal{L}_{\text{train}}(w, \alpha)
+\theta^*(\alpha) = \operatorname{arg\,min}_{\theta} \mathcal{L}_{\text{train}}(\theta, \alpha)
 $$
 
 [^fn-bilevel-optimization-nas]: **Bi-Level Optimization**: A mathematical programming formulation where one optimization problem is nested inside another, first formalized by Heinrich von Stackelberg in 1934 for economic leader-follower games. In NAS, the outer level selects architecture while the inner level trains weights to convergence—and the inner problem must be solved *for every candidate the outer level evaluates*. This nesting is why early NAS required 22,400 GPU-days (537,600 GPU-hours): each architecture evaluation demanded full training. Weight-sharing methods collapse the inner loop by amortizing a single training run across all candidates, reducing cost by 1,000$\times$. \index{Optimization!bi-level, NAS cost}
@@ -5062,9 +5062,9 @@ While reducing computation is essential, memory constraints often prove more lim
 
 When the profile points to memory rather than arithmetic, the architecture must reduce the working set or the number of expensive memory accesses. Activations, feature maps, and parameters can exceed cache, SRAM, accelerator memory, or edge-device storage even when the FLOP count is acceptable. Memory-efficient architectures therefore try to preserve useful information while storing or moving less data.
 
-DenseNet\index{DenseNet!feature reuse} illustrates the feature-reuse response\index{Memory Optimization!feature reuse}. In a traditional convolutional network, each layer computes a new set of feature maps, increasing the activation footprint as the network deepens. DenseNet connects layers so later computations can reuse earlier feature maps instead of relearning similar representations. In a standard convolutional network with $N_L$ layers, if each layer generates $k$ new feature maps, the total number of feature maps grows linearly:
+DenseNet\index{DenseNet!feature reuse} illustrates the feature-reuse response\index{Memory Optimization!feature reuse}. In a traditional convolutional network, each layer computes a new set of feature maps, increasing the activation footprint as the network deepens. DenseNet connects layers so later computations can reuse earlier feature maps instead of relearning similar representations. In a standard convolutional network with $N_L$ layers, if each layer generates $g$ new feature maps, the total number of feature maps grows linearly:
 $$
-\mathcal{O}(N_L k)
+\mathcal{O}(N_L g)
 $$
 
 DenseNet changes the growth pattern by making previously computed features available to later layers. The gain is not automatic compression; the architecture spends connectivity and bookkeeping to avoid recomputing or relearning information that is already present.
@@ -5105,11 +5105,11 @@ Modern neural networks consist of sequences of operations such as convolution, b
 
 The read-compute-write cycle creates memory bandwidth bottlenecks for operations with low arithmetic intensity (FLOP/byte). The memory traffic for $N$ unfused operations operating on tensors of size $M$ bytes is:
 $$
-\text{Memory}_{\text{unfused}} = 2NM
+D_{\text{vol,unfused}} = 2NM
 $$
 where each operation reads ($M$ bytes) and writes ($M$ bytes) intermediate results. Operator fusion reduces this to:
 $$
-\text{Memory}_{\text{fused}} = 2M
+D_{\text{vol,fused}} = 2M
 $$
 by reading inputs once, computing all operations in sequence, and writing final outputs once.
 
