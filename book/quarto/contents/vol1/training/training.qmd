@@ -1351,8 +1351,12 @@ class GPT2ActivationMemory:
     # Individual parts for formatting (approximate for display)
     attn_act = batch_size * seq_len * hidden_dim * 4 * BYTES_FP16
     ffn_act = batch_size * seq_len * ffn_dim * BYTES_FP16
+    # Attention-score buffers (Korthikanti et al. 2023): QK^T scores, softmax
+    # output, and dropout mask together cost 5*a*S^2*B bytes per layer at FP16 —
+    # the dominant term, and exactly what selective recomputation discards.
+    attn_scores = (5 * heads * seq_len * seq_len * batch_size) * byte
     layernorm = 10.0 * MB
-    per_layer = attn_act + ffn_act + layernorm
+    per_layer = attn_act + ffn_act + attn_scores + layernorm
 
     # Step 5: C. Parameters & State
     params = model.size_in_bytes(BYTES_FP16)
@@ -1382,6 +1386,8 @@ class GPT2ActivationMemory:
 
     attn_act_mb_str = fmt_memory(attn_act, unit=MB, precision=1, commas=False)
     ffn_act_mb_str = fmt_memory(ffn_act, unit=MB, precision=1, commas=False)
+    attn_scores_mb_str = fmt_memory(attn_scores, unit=MB, precision=1, commas=False)
+    heads_str = fmt(heads, precision=0, commas=False)
     layernorm_mb_str = fmt_memory(layernorm, unit=MB, precision=0, commas=False)
     per_layer_mb_str = fmt_memory(per_layer, unit=MB, precision=1, commas=False)
 
@@ -1450,12 +1456,13 @@ For GPT-2 with batch size $B$ = `{python} GPT2ActivationMemory.batch_size_str`, 
 
 - Attention activations: $B \times S \times d \times 4$ (Q, K, V, output) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.hidden_dim_str` $\times$ $4 \times 2$ bytes (FP16) = `{python} GPT2ActivationMemory.attn_act_mb_str`
 - FFN activations: $B \times S \times (4d)$ (intermediate expansion) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.ffn_dim_str` $\times$ 2 bytes = `{python} GPT2ActivationMemory.ffn_act_mb_str`
+- Attention scores: $5 \times a \times S^2 \times B$ bytes for the $S{\times}S$ score, softmax, and dropout buffers across $a$ = `{python} GPT2ActivationMemory.heads_str` heads = `{python} GPT2ActivationMemory.attn_scores_mb_str`—the dominant term, quadratic in sequence length, and exactly what selective recomputation discards
 - Layer norm states: Minimal (~`{python} GPT2ActivationMemory.layernorm_mb_str` per layer)
-- Total per layer: ~`{python} GPT2ActivationMemory.per_layer_mb_str` (attention + FFN + layer norm states)
+- Total per layer: ~`{python} GPT2ActivationMemory.per_layer_mb_str` (attention + FFN + attention scores + layer norm states)
 
 **Full Model Activation Memory.**
 
-- Total activation memory (library estimate, includes attention-score buffers and framework overhead beyond the per-layer line items): `{python} GPT2ActivationMemory.total_act_gb_str`
+- Total activation memory (library estimate, includes residual-stream and framework buffers beyond the line items above): `{python} GPT2ActivationMemory.total_act_gb_str`
 - Parameters (FP16): `{python} GPT2ActivationMemory.params_gb_str`
 - Gradients: `{python} GPT2ActivationMemory.grad_gb_str`
 - Optimizer state (Adam, FP32): `{python} GPT2ActivationMemory.opt_gb_str`
@@ -6880,6 +6887,8 @@ class GPT2SummaryChapterRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     b_total_mem_gb_str = fmt_qty(b_total_mem * GB, GB, precision=1, commas=False)
     o_total_mem_gb_str = fmt_qty(o_total_mem * GB, GB, precision=1, commas=False)
+    act_fp16_gb_str = fmt_qty(act_fp16_gb * GB, GB, precision=1, commas=False)
+    act_ckpt_gb_str = fmt_qty((act_fp16_gb / checkpoint_factor) * GB, GB, precision=1, commas=False)
 ```
 
 ::: {.callout-takeaways title="Why training costs millions"}
@@ -6888,7 +6897,7 @@ class GPT2SummaryChapterRecap:
 * **Memory and convergence are coupled**: Adam converges in roughly one-third the iterations of SGD but requires 3$\times$ the memory for per-parameter state. Activations add another batch-size-dependent memory term, so optimizer choice and activation management often determine whether training fits.
 * **Profiling precedes optimization**: The iterative loop is: profile → identify bottleneck → apply targeted fix → re-profile. Optimization without profiling typically wastes effort on nonbottlenecks.
 * **Precision and I/O-aware kernels shift bottlenecks**: FP16 training with FP32 accumulation delivers about 2$\times$ throughput and memory reduction, while Flash Attention's tiling avoids materializing the full $S{\times}S$ matrix in HBM and achieves 2--4$\times$ speedups.
-* **Gradient checkpointing trades compute for memory**: Recomputing activations during the backward pass enables larger memory-feasible configurations (for example, the chapter's V100 scenario moves from 1.3 billion to 3.7 billion parameters) or achieves 3--4$\times$ activation memory reduction. It is essential when memory is the binding constraint.
+* **Gradient checkpointing trades compute for memory**: Recomputing activations during the backward pass enables larger memory-feasible configurations by cutting stored activations 3--4$\times$ (the walkthrough's fall from `{python} GPT2SummaryChapterRecap.act_fp16_gb_str` to `{python} GPT2SummaryChapterRecap.act_ckpt_gb_str` at batch 4). It is essential when memory is the binding constraint.
 * **Optimizations compose and must be applied systematically**: No single technique addresses all bottlenecks. The GPT-2 walkthrough demonstrates how mixed precision, gradient checkpointing, and data prefetching must be layered together, guided by iterative profiling, to transform an infeasible `{python} GPT2SummaryChapterRecap.b_total_mem_gb_str` memory requirement into a practical `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` configuration.
 * **Efficiency reduces scale-out, cost, and energy**: Distributed training adds communication overhead and complexity, so prefetching, mixed precision, checkpointing, and accumulation should be exhausted before scaling out. The same optimizations reduce training time, emissions, and cloud cost.
 
