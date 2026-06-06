@@ -51,6 +51,45 @@ listed here.
   comments, so use the prose checker and targeted authored-prose searches
   rather than treating the raw grep as actionable.
 
+## Reusable Cleanup Workflow
+
+Use this order for future autonomous editorial cleanup workflows:
+
+1. Start from local `dev` in a fresh sibling worktree and record the exact
+   branch, worktree, and clean/dirty status before editing.
+2. Read the active `.claude/rules` files and any task-specific review memo
+   before launching agents, so the audit rubric matches house style.
+3. Launch one read-only agent per chapter for broad chapter-level audits.
+   Require YAML findings with location, severity, rationale, and proposed
+   edit; use agents for judgment, not automatic rewrites.
+4. Triage findings centrally in book order. Accept only edits that improve the
+   chapter argument, progressive disclosure, engineering specificity, or rule
+   compliance; defer speculative additions to a separate pass.
+5. Make small, pass-oriented commits. Keep each commit tied to one task class
+   such as section flow, fallacy formatting, index placement, LEGO naming, or
+   algorithm presentation, rather than mixing unrelated chapter edits.
+6. After any heading removal, paragraph fusion, list conversion, or section
+   move, reread the affected `##` and `###` region so local fixes preserve the
+   macro flow into and out of the edited section.
+7. Preserve technical anchors that teach scale: hardware names, model names,
+   threshold values, and cut-and-napkin math should be sourced, computed, or
+   clearly framed, not generalized away.
+8. Run dedicated rule sweeps after substantive prose is stable: cross-reference
+   casing, emphasis/bold first-use, footnote placement, fallacy/pitfall form,
+   index location, notation, and standalone-book wording.
+9. Run code/LEGO checks on every touched executable cell or listing: MLSysIM
+   source of truth, formatter output names, registry-backed values, and no
+   prose-only literals where a reusable scenario already exists.
+10. Stage references separately when a new source is needed, run BetterBib or
+    the equivalent bibliography cleanup before copying into the main `.bib`,
+    and verify the local claim still matches the citation.
+11. Run final book-level litmus checks: Tokenland perspective, engineering-book
+    identity, timeless wording, progressive disclosure by chapter order, and
+    section-flow coherence.
+12. Validate with noninteractive plotting (`MPLBACKEND=Agg`), merge the finished
+    worktree into local `dev`, resolve conflicts pedagogically, rerun the
+    checks on `dev`, and retire only worktrees whose branches are fully merged.
+
 ## Needs Author Attention
 
 - Confirm whether the `.claude/rules` updates that live in `AIConfigs` should
