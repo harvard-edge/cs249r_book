@@ -26,7 +26,7 @@ from .systems.registry import Systems
 from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
 # Non-executable sourced anchors used by examples and external analyses.
-from .scenarios.registry import ReferenceStats
+from .reference_stats.registry import ReferenceStats
 from .ops import Ops
 from .engine import calibration
 
