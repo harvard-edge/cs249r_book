@@ -113,8 +113,13 @@ class SustainabilityModel(ForwardModel):
 
         duration_hours = duration_days * 24
 
-        # 2. Power
-        base_tdp = fleet.node.accelerator.tdp if fleet.node.accelerator.tdp else (700 * ureg.watt)
+        # 2. Power — fallback TDP comes from the registry (H100 reference
+        # accelerator), not a magic literal (SSOT, audit fix 2026-06-06).
+        if fleet.node.accelerator.tdp:
+            base_tdp = fleet.node.accelerator.tdp
+        else:
+            from ...hardware.registry import Cloud as _CloudHardware
+            base_tdp = _CloudHardware.H100.tdp
         # Energy proportionality: Idle power is ~30% of TDP. Dynamic power scales with compute utilization (MFU).
         idle_power = base_tdp * cal.ENERGY_IDLE_FRACTION
         dynamic_power = base_tdp * cal.ENERGY_DYNAMIC_FRACTION * mfu

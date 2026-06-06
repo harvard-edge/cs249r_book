@@ -34,7 +34,9 @@ class Registry:
 
             items.append(attr)
 
-        # Deduplicate aliases (e.g., TPUv4 = TPUv5p) by object identity
+        # Deduplicate alias attributes pointing at the same entry, by object
+        # identity. (No aliases exist today — hard-delete policy — but the
+        # guard keeps list() correct if one is ever reintroduced.)
         seen_ids = set()
         unique_items = []
         for item in items:
