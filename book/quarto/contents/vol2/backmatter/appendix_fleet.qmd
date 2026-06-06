@@ -640,7 +640,7 @@ from mlsysim.fmt import fmt, fmt_int, check, fmt_params, fmt_qty
 # │ Exports: FleetRoofline.{peak_tflop_per_s_str, bw_tb_per_s_str, ridge_str, params_b_str, weight_gb_str,
 # │          intensity_str, tokens_per_s_str}
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_rate
+from mlsysim.fmt import fmt_arithmetic_intensity, fmt_flops, fmt_rate
 
 class FleetRoofline:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -672,11 +672,12 @@ class FleetRoofline:
     weight_gb_str = fmt_qty(weight_q, GB, precision=1, commas=False)
     intensity_str = fmt_arithmetic_intensity(intensity_q, unit=flop / byte, precision=0, commas=False)
     tokens_per_s_str = fmt_rate(tokens_q.to(1 / second).magnitude, "tokens/s", precision=1)
+    decode_flops_str = fmt_flops(decode_flops, unit=GFLOP, precision=0, commas=False)
 ```
 
 For an H100---BF16 peak `{python} FleetRoofline.peak_tflop_per_s_str`, HBM bandwidth `{python} FleetRoofline.bw_tb_per_s_str`---the ridge point is `{python} FleetRoofline.ridge_str`. A workload must perform hundreds of operations per byte fetched merely to keep the arithmetic units busy.
 
-Autoregressive decoding falls far short of that line, which is why it is the defining serving bottleneck. Generating one token requires reading every model weight from HBM exactly once---`{python} FleetRoofline.weight_gb_str` for a `{python} FleetRoofline.params_b_str`-parameter model in BF16---to perform only about $2P$ operations, an intensity of `{python} FleetRoofline.intensity_str`. That sits far below the ridge point, so single-stream decode is purely bandwidth bound: throughput is the weight-read rate, about `{python} FleetRoofline.tokens_per_s_str`, no matter how much compute the accelerator advertises. Serving systems batch many requests precisely to raise this intensity, amortizing each weight read across every sequence in the batch and pushing decode back toward the compute roof.
+Autoregressive decoding falls far short of that line, which is why it is the defining serving bottleneck. Generating one token requires reading every model weight from HBM exactly once---`{python} FleetRoofline.weight_gb_str` for a `{python} FleetRoofline.params_b_str`-parameter model in BF16---to perform about `{python} FleetRoofline.decode_flops_str` of matrix work, an intensity of `{python} FleetRoofline.intensity_str`. That sits far below the ridge point, so single-stream decode is purely bandwidth bound: throughput is the weight-read rate, about `{python} FleetRoofline.tokens_per_s_str`, no matter how much compute the accelerator advertises. Serving systems batch many requests precisely to raise this intensity, amortizing each weight read across every sequence in the batch and pushing decode back toward the compute roof.
 
 The roofline is a single-accelerator law, but its logic is what scales. At fleet level the binding bandwidth is no longer HBM but the interconnect, and the bytes moved are the gradients and activations crossing the network. That ratio of network bytes to local arithmetic is the communication-computation ratio (@sec-appdx-fleet-foundations-comm-compute-ratio): the roofline of the fleet, and the lens the rest of this section applies.
 
