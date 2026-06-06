@@ -3674,7 +3674,7 @@ from mlsysim.fmt import fmt_int
 # │          m_resize_mj_str, m_npu_mj_str, m_ui_mj_str, m_total_mj_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt, fmt_int, fmt_time, fmt_memory, fmt_power, fmt_energy, check
+from mlsysim.fmt import fmt, fmt_int, fmt_time, fmt_memory, fmt_power, fmt_energy, fmt_count, check
 
 class MobileServingCalc:
     """Mobile vision pipeline: JPEG decode dominates energy; NPU handles inference at 82% utilization."""
@@ -3720,7 +3720,12 @@ class MobileServingCalc:
     m_total_mj_str = fmt_energy(m_total_mj_display, unit=mJ, precision=0, commas=False)
     battery_wh_str = fmt_energy(battery_wh, unit=Wh, precision=0, commas=False)
     sustained_mw_str = fmt_power(sustained_power_display, unit=mW, precision=0, commas=False)
-    inferences_per_battery_m_str = fmt_int(round(inferences_per_battery_m), commas=False)
+    inferences_per_battery_m_str = fmt_count(
+        (battery_wh / m_total_mj).to(count).magnitude,
+        scale="M",
+        precision=1,
+        commas=False,
+    )
     peak_memory_mb_str = fmt_memory(peak_memory, unit=MB, precision=0, commas=False)
 ```
 
@@ -3750,7 +3755,7 @@ class MobileServingCalc:
 
 *Key metrics for ML node serving*:
 
-- **Energy per inference**: `{python} MobileServingCalc.m_total_mj_str` enables ~`{python} MobileServingCalc.inferences_per_battery_m_str` million inferences per `{python} MobileServingCalc.battery_wh_str` battery (typical smartphone)
+- **Energy per inference**: `{python} MobileServingCalc.m_total_mj_str` enables ~`{python} MobileServingCalc.inferences_per_battery_m_str` inferences per `{python} MobileServingCalc.battery_wh_str` battery (typical smartphone)
 - **Thermal budget**: At `{python} MobileServingCalc.m_total_mj_str` / `{python} MobileServingCalc.m_total_ms_str` = `{python} MobileServingCalc.sustained_mw_str` sustained, indefinite operation without throttling
 - **NPU vs. CPU trade-off**: CPU fallback replaces the 12 ms, 0.8 mJ NPU inference stage with a 45 ms, 4.2 mJ CPU stage; the full pipeline would rise from 45 ms and `{python} MobileServingCalc.m_total_mj_str` to about 78 ms and 6.4 mJ before additional system overhead.
 - **Memory footprint**: `{python} MobileServingCalc.peak_memory_mb_str` peak (model + activations), competing with app memory
@@ -3884,10 +3889,11 @@ The computational intensity of managing KV caches across concurrent requests rai
 # │ How: Retrieve TDP from Hardware Digital Twins.
 # │
 # │ Imports: mlsysim (Hardware), mlsysim.constants (watt)
-# │ Exports: CarbonCostH100Tdp.h100_tdp_str
+# │ Exports: CarbonCostH100Tdp.h100_tdp_w_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt
+from mlsysim.core.units import watt
+from mlsysim.fmt import fmt_power
 
 class CarbonCostH100Tdp:
     """H100 TDP anchor for the carbon-cost-of-chat callout."""
@@ -3895,11 +3901,8 @@ class CarbonCostH100Tdp:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h_h100 = Hardware.Cloud.H100
 
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    h100_tdp_value = h_h100.tdp.to(watt).magnitude
-
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    h100_tdp_str = fmt(h100_tdp_value, precision=0, commas=False)  # e.g. "700" W
+    h100_tdp_w_str = fmt_power(h_h100.tdp, unit=watt, precision=0, commas=False)
 ```
 
 ```{python}
@@ -3972,10 +3975,10 @@ class CarbonCostCalc:
 
 **Problem**: How much energy does an H100-backed chat service spend per generated token and per `{python} CarbonCostCalc.cc_response_tokens_str` response?
 
-As LLMs scale, joules per token becomes a first-class operational metric alongside latency. For an H100 GPU (`{python} CarbonCostH100Tdp.h100_tdp_str` W TDP), the energy footprint follows from throughput and power:
+As LLMs scale, joules per token becomes a first-class operational metric alongside latency. For an H100 GPU (`{python} CarbonCostH100Tdp.h100_tdp_w_str` TDP), the energy footprint follows from throughput and power:
 
 1.  **Throughput**: `{python} CarbonCostCalc.cc_concurrent_str` concurrent requests $\times$ `{python} CarbonCostCalc.cc_tokens_req_tokens_per_s_str` per request ≈ `{python} CarbonCostCalc.cc_total_tokens_per_s_str`.
-2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_str` W (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
+2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_w_str` (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
 3.  **Energy per token**:
 
     `{python} CarbonCostCalc.cc_total_power_w_str` / `{python} CarbonCostCalc.cc_total_tokens_per_s_str` ≈ `{python} CarbonCostCalc.cc_joules_token_j_str`

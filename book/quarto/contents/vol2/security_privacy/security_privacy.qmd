@@ -93,7 +93,7 @@ Security in machine learning focuses on defending systems from adversarial behav
 
 ***Security***\index{Security!definition} is the set of system properties (confidentiality, integrity, and availability) that protect an ML system's data, model weights, and inference pipeline from intentional adversarial actions, spanning both the infrastructure layer (network intrusion, credential theft) and the algorithmic layer (model extraction, prompt injection, adversarial examples).
 
-1.  **Significance (quantitative)**: Security failures operate on both surfaces simultaneously. At the infrastructure layer, theft of a large proprietary model represents direct IP loss. At the algorithmic layer, model extraction via black-box queries can reconstruct a functionally equivalent copy with as few as 10,000–100,000 API calls (orders of magnitude cheaper than training), bypassing the investment and competitive moat. Either failure collapses the business value of the $O$ (model operations) term in the iron law.
+1.  **Significance (quantitative)**: Security failures operate on both surfaces simultaneously. At the infrastructure layer, theft of a large proprietary model represents direct IP loss. At the algorithmic layer, model extraction via black-box queries can recover decision boundaries or distill a functional approximation of a deployed model at a small fraction of its training cost (@sec-security-privacy-model-theft-1879 quantifies the query budgets), bypassing the investment and competitive moat. Either failure collapses the business value of the $O$ (model operations) term in the iron law.
 2.  **Observation**: Unlike general robustness (which addresses stochastic distribution shift from unintentional environmental change), security addresses intentional adversarial threats where an attacker actively maximizes the probability of a targeted failure, requiring worst-case rather than average-case analysis.
 3.  **Pitfall**: A frequent misconception is that traditional IT security (firewalls, access controls, encryption) adequately secures ML systems. ML introduces an algorithmic attack surface orthogonal to infrastructure: a properly authenticated API request containing an adversarial input or a prompt injection bypasses all network-layer defenses and manipulates model behavior through the model's own learned functions.
 
@@ -521,8 +521,8 @@ The lifecycle view treats models as assets to protect, but it also exposes why t
 ***Model Extraction***\index{Model Extraction!definition} is the class of attacks in which an adversary, with only black-box query access to a deployed model's prediction interface, recovers the model's parameters, decision boundaries, or behavior by analyzing observable outputs.
 
 1.  **Significance (quantitative)**: Successful extraction often costs orders of magnitude less than the original training. Published demonstrations have recovered logistic regression and decision-tree models from public APIs at small fractions of their training cost [@tramer2016stealing], and later work has reconstructed components of large language models, including OpenAI deployments studied by @carlini2024stealing, using only public query access. The chapter's BERT extraction example in this section illustrates the same dynamic on a transformer model at a query cost of tens of dollars.
-2.  **Observation**: Model extraction is distinct from direct theft of model files (which requires intrusion into the storage layer) and from model inversion (which uses model outputs to reconstruct samples of the training data rather than the model itself). Extraction's attack surface is the model's query interface, which makes it a threat every deployed ML service faces by construction whenever the model is reachable.
-3.  **Pitfall**: Treating rate limiting alone as sufficient defense. An attacker willing to issue queries slowly, distribute requests across accounts, or accept a multi-month attack window can still extract a model unless the API also reduces output information per query, detects systematic probing, and prices queries to make extraction economically irrational (@sec-security-privacy-model-extraction-defenses-8f3b).
+2.  **Observation**: Unlike direct theft of model files (which requires intrusion into the storage layer) and model inversion (which uses model outputs to reconstruct samples of the training data rather than the model itself), extraction's attack surface is the model's query interface, which makes it a threat every deployed ML service faces by construction whenever the model is reachable.
+3.  **Pitfall**: A frequent misconception is that rate limiting alone is a sufficient defense. An attacker willing to issue queries slowly, distribute requests across accounts, or accept a multi-month attack window can still extract a model unless the API also reduces output information per query, detects systematic probing, and prices queries to make extraction economically irrational (@sec-security-privacy-model-extraction-defenses-8f3b).
 
 :::
 
@@ -720,7 +720,7 @@ $$
 # │ Imports: math, mlsysim.book (fmt, check)
 # │ Exports: class_count_value_str, from_decimals_str, to_decimals_str,
 # │          decimal_digits_removed_str, bits_removed_str, retained_bits_str,
-# │          top_k_str,
+# │          top_k_neighbors_str,
 # │          topk_bits_str, topk_eliminated_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
@@ -755,7 +755,7 @@ class OutputRoundingLeakage:
     decimal_digits_removed_str = fmt(decimal_digits_removed, precision=0, commas=False)
     bits_removed_str = fmt_count(bits_removed, precision=1, commas=False, label="bit", allow_fractional=True)
     retained_bits_str = fmt_count(retained_bits, precision=1, commas=False, label="bit", allow_fractional=True)
-    top_k_str = fmt(top_k, precision=0, commas=False)
+    top_k_neighbors_str = fmt(top_k, precision=0, commas=False)
     topk_bits_str = fmt_count(topk_bits, precision=1, commas=False, label="bit", allow_fractional=True)
     topk_eliminated_pct_str = fmt_percent(topk_eliminated_pct / 100, precision=1, commas=False, style='prose')
 ```
@@ -768,7 +768,7 @@ $$
 \text{output} = \{(c_i, p_i) : i \in \text{top-}k\}
 $$
 
-For $k=$ `{python} OutputRoundingLeakage.top_k_str` on a `{python} OutputRoundingLeakage.class_count_value_str`-class problem, this reduces information leakage by approximately `{python} OutputRoundingLeakage.topk_bits_str` per query. Legitimate users often need only the top few predictions, while an extractor benefits from the full distribution.
+For $k=$ `{python} OutputRoundingLeakage.top_k_neighbors_str` on a `{python} OutputRoundingLeakage.class_count_value_str`-class problem, this reduces information leakage by approximately `{python} OutputRoundingLeakage.topk_bits_str` per query. Legitimate users often need only the top few predictions, while an extractor benefits from the full distribution.
 
 ::: {.column-margin}
 ![](images/svg/security_privacy_output_leakage_ladder.svg){width="100%" fig-alt="Two-rung ladder comparing a full 1000-score output distribution with top-5 returned scores, annotated as a 200 times reduction in exposed scores."}
@@ -901,7 +901,7 @@ class DefenseOverheadAnalysis:
 
 1.  **Cap collection**: The free tier allows `{python} DefenseOverheadAnalysis.free_tier_queries_per_day_str`, the paid tier costs `{python} DefenseOverheadAnalysis.paid_tier_price_usd_month_str` for `{python} DefenseOverheadAnalysis.paid_tier_queries_per_day_str`, and enterprise access requires authentication plus monitoring.
 2.  **Monitor probing**: The monitoring path watches for systematic measurement behavior, including more than `{python} DefenseOverheadAnalysis.alert_queries_per_day_str` from one user or median inter-query gaps below `{python} DefenseOverheadAnalysis.alert_interquery_ms_str`; the lightweight detector adds `{python} DefenseOverheadAnalysis.monitoring_ms_str` per query.
-3.  **Shape outputs**: Output shaping rounds confidences to `{python} OutputRoundingLeakage.to_decimals_str` decimal places, retaining about `{python} OutputRoundingLeakage.retained_bits_str` from each rounded scalar probability, and returns only the top-`{python} OutputRoundingLeakage.top_k_str` classes, eliminating `{python} OutputRoundingLeakage.topk_eliminated_pct_str` of distribution entries.
+3.  **Shape outputs**: Output shaping rounds confidences to `{python} OutputRoundingLeakage.to_decimals_str` decimal places, retaining about `{python} OutputRoundingLeakage.retained_bits_str` from each rounded scalar probability, and returns only the top-`{python} OutputRoundingLeakage.top_k_neighbors_str` classes, eliminating `{python} OutputRoundingLeakage.topk_eliminated_pct_str` of distribution entries.
 4.  **Price extraction**: At `{python} DefenseOverheadAnalysis.price_per_query_usd_str`, `{python} DefenseOverheadAnalysis.extraction_queries_m_str` extraction queries cost `{python} DefenseOverheadAnalysis.extraction_cost_k_usd_str`, which matches the training cost in this scenario.
 
 **Impact**: The stack changes extraction economics without pricing out normal use. A legitimate user sending `{python} DefenseOverheadAnalysis.legit_queries_per_day_str` for `{python} DefenseOverheadAnalysis.billing_days_str` pays `{python} DefenseOverheadAnalysis.legit_monthly_cost_usd_str` per month. The surrogate's accuracy drops from `{python} DefenseOverheadAnalysis.output_accuracy_no_defense_pct_str` without defenses to `{python} DefenseOverheadAnalysis.output_accuracy_with_defense_pct_str` with defenses, a `{python} DefenseOverheadAnalysis.fidelity_drop_pp_str` reduction in this scenario. Legitimate top-5 accuracy remains `{python} DefenseOverheadAnalysis.top5_accuracy_pct_str`, close to the `{python} DefenseOverheadAnalysis.baseline_top5_accuracy_pct_str` baseline. Monitoring and output shaping add `{python} DefenseOverheadAnalysis.total_defense_ms_str` on top of `{python} DefenseOverheadAnalysis.base_inference_ms_str` inference, or `{python} DefenseOverheadAnalysis.overhead_pct_str` overhead, while `{python} DefenseOverheadAnalysis.false_positive_pct_str` of users are flagged for manual review (`{python} DefenseOverheadAnalysis.false_positive_reviews_per_day_str`).
@@ -2314,8 +2314,8 @@ Differential privacy addresses this by injecting carefully calibrated noise duri
 ***Differential Privacy***\index{Differential Privacy!definition} is a mathematical guarantee that the output distribution of a randomized algorithm changes by no more than a bounded factor when any single individual's record is added to or removed from the training dataset, formalized by the $(\epsilon, \delta)$ bound $\Pr[\mathcal{A}(D) \in S] \leq e^{\epsilon} \Pr[\mathcal{A}(D') \in S] + \delta$ for adjacent datasets $D$ and $D'$ and any measurable output set $S$.
 
 1.  **Significance (quantitative)**: The privacy budget $\epsilon$ converts an algorithmic property into an engineering currency that can be allocated, composed, and depleted. Published deployments from Apple, Google, and the US Census Bureau have reported $\epsilon$ values in roughly the 1 to 10 range; smaller $\epsilon$ raises the noise floor and degrades model accuracy by 2 to 15 percent on standard benchmarks (@fig-privacy-utility-frontier). DP-SGD reduces training throughput by 2 to 10$\times$ compared to standard SGD because per-sample gradient clipping prevents the batch-level parallelism that makes accelerator training efficient.
-2.  **Observation**: Differential privacy is a property of the algorithm, not of the data. Unlike de-identification, which removes identifiers from records and fails against re-identification through auxiliary data, and unlike statistical disclosure control, which depends on the attacker's model, the DP guarantee holds against any adversary, including one with arbitrary side information about other records in the dataset.
-3.  **Pitfall**: Treating $\epsilon$ as a per-query parameter rather than as a budget across the entire interaction lifetime. Sequential composition of $k$ queries each at $\epsilon_0$ yields a total privacy loss of $k\epsilon_0$ under basic composition, tighter under advanced and Renyi accountants (@sec-security-privacy-privacy-budget-composition-edbe); a system that runs many DP-SGD training steps or answers many DP queries must therefore track cumulative loss and stop, refuse further queries, or refresh keys when the allocated budget is exhausted.
+2.  **Observation**: Unlike de-identification, which removes identifiers from records and fails against re-identification through auxiliary data, and unlike statistical disclosure control, which depends on the attacker's model, differential privacy is a property of the algorithm, not of the data: the DP guarantee holds against any adversary, including one with arbitrary side information about other records in the dataset.
+3.  **Pitfall**: A frequent misconception is that $\epsilon$ is a per-query parameter rather than a budget across the entire interaction lifetime. Sequential composition of $k$ queries each at $\epsilon_0$ yields a total privacy loss of $k\epsilon_0$ under basic composition, tighter under advanced and Renyi accountants (@sec-security-privacy-privacy-budget-composition-edbe); a system that runs many DP-SGD training steps or answers many DP queries must therefore track cumulative loss and stop, refuse further queries, or refresh keys when the allocated budget is exhausted.
 
 :::
 
@@ -2819,6 +2819,12 @@ Organizations often add defenses to individual components (encrypted storage, AP
 **Pitfall**: *Underestimating the attack surface expansion in distributed ML systems.*
 
 Organizations secure single-node ML systems effectively but fail to recognize distributed architectures multiply attack surfaces geometrically, not linearly. The shift from one machine to $n_{\text{nodes}}$ machines increases vulnerabilities by approximately $n_{\text{nodes}}^2$ due to inter-node communication channels creating $\mathcal{O}(n_{\text{nodes}}^2)$ attack vectors in all-to-all topologies or $\mathcal{O}(n_{\text{nodes}} \log n_{\text{nodes}})$ in ring topologies.
+
+::: {.column-margin}
+![](images/svg/vol2_security_privacy_margin_004.svg){width="100%" fig-alt="Quadratic channel curve rising above linear node baseline."}
+
+*The attack surface grows faster than the node count.*
+:::
 
 Distributed training across 128 GPUs in 16 machines means compromising one node injects poisoned gradients propagating to the global model. Centralized poisoning requiring 0.1 percent corruption achieves the same effect with 0.01 percent when targeting specific distributed nodes. Edge deployment exacerbates this: federated learning with 10,000 clients creates 10,000 compromise points—if 1 percent are compromised (100 devices), coordinated poisoning degrades accuracy by 10--50 percent while remaining below individual-device anomaly thresholds. Effective distributed ML security requires threat modeling acknowledging superlinear growth: securing inter-node channels, managing identity across security domains, and coordinating policies across heterogeneous infrastructure.
 

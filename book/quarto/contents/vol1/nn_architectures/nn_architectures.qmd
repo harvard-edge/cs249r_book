@@ -362,7 +362,7 @@ GPT-2 [@radford2019language]\index{GPT-2} anchors the bandwidth-bound language l
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_params, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_params, check, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AutoregressiveInferenceCost:
@@ -384,10 +384,10 @@ class AutoregressiveInferenceCost:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     params_b_str = fmt_params(model.parameters, scale="B", precision=1, commas=False)
     fp16_weight_gb_str = fmt_memory(fp16_weight, unit=GB, precision=0, commas=False)
-    intensity_fp16_str = fmt(intensity_fp16, precision=0, commas=False)
+    intensity_fp16_str = fmt_arithmetic_intensity(intensity_fp16 * flop / byte, unit=flop / byte, precision=0, commas=False)
 ```
 
-[^fn-autoregressive-inference]: **Autoregressive Generation**: A decoding strategy where each output token is conditioned on all previously generated tokens, requiring a full model forward pass per token. For a `{python} AutoregressiveInferenceCost.params_b_str`-parameter model in FP16, generating one token loads about `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of weights from HBM yet performs only a matrix-vector multiply, yielding a work-to-byte ratio of about `{python} AutoregressiveInferenceCost.intensity_fp16_str` FLOP/byte. This token-by-token serial dependency is what makes LLM inference fundamentally bandwidth-bound rather than compute bound. During generation, serving systems also keep compact attention state from earlier tokens; the attention section later names this state the key-value cache. \index{Autoregressive Generation!bandwidth bottleneck}
+[^fn-autoregressive-inference]: **Autoregressive Generation**: A decoding strategy where each output token is conditioned on all previously generated tokens, requiring a full model forward pass per token. For a `{python} AutoregressiveInferenceCost.params_b_str`-parameter model in FP16, generating one token loads about `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of weights from HBM yet performs only a matrix-vector multiply, yielding a work-to-byte ratio of about `{python} AutoregressiveInferenceCost.intensity_fp16_str`. This token-by-token serial dependency is what makes LLM inference fundamentally bandwidth-bound rather than compute bound. During generation, serving systems also keep compact attention state from earlier tokens; the attention section later names this state the key-value cache. \index{Autoregressive Generation!bandwidth bottleneck}
 
 DLRM [@naumov2019deep] anchors the sparse-recommendation lighthouse. The Deep Learning Recommendation Model was open-sourced by Meta to expose a workload that differs from CNNs and transformers in a critical way. While vision and language models are compute-heavy, recommendation systems are memory-heavy. They must look up user and item preferences in massive embedding tables that can reach terabytes in size, creating unique challenges for latency-critical serving (@sec-model-serving). DLRM is a useful benchmark for memory capacity and sparse memory access patterns in the data center.
 
@@ -418,7 +418,7 @@ The quantitative characteristics of these Lighthouse models expose a critical en
 # │          resnet_to_gpt2_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt_qty, check
+from mlsysim.fmt import fmt_int, fmt_qty, check, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class WorkloadSignatures:
@@ -451,9 +451,9 @@ class WorkloadSignatures:
     check(75 <= resnet_to_gpt2_ratio <= 85, f"Expected roughly 80x ResNet/GPT-2 intensity gap, got {resnet_to_gpt2_ratio:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    resnet_intensity_str = fmt_int(round(resnet_i), commas=False)
-    gpt2_intensity_str = fmt(gpt2_i, precision=2, commas=False)
-    mobilenet_intensity_str = fmt(mobilenet_i, precision=1, commas=False)
+    resnet_intensity_str = fmt_arithmetic_intensity(resnet_i * flop / byte, unit=flop / byte, precision=1, commas=False)
+    gpt2_intensity_str = fmt_arithmetic_intensity(gpt2_i * flop / byte, unit=flop / byte, precision=2, commas=False)
+    mobilenet_intensity_str = fmt_arithmetic_intensity(mobilenet_i * flop / byte, unit=flop / byte, precision=1, commas=False)
     resnet_to_gpt2_ratio_mult_str = fmt_multiple(resnet_to_gpt2_ratio, precision=1, commas=False)
 ```
 
@@ -567,7 +567,7 @@ class LighthouseSpecs:
     # GPT-3 context
     gpt3_fp16_gb_str = fmt_memory(Models.Language.GPT3.size_in_bytes(BYTES_FP16), unit=GB, precision=0)
 
-    dlrm_entries_b_str = fmt(dlrm_entries_b, precision=0)
+    dlrm_entries_b_str = fmt_params(m_dlrm.embedding_entries, scale="B", precision=0, commas=False)
     dlrm_model_size_gb_str = fmt_memory(dlrm_mem, unit=GB, precision=0, commas=True)
 
     mobilenet_params_m_str = fmt_params(m_mobilenet.parameters, scale="M", precision=1, commas=False)
@@ -583,13 +583,13 @@ class LighthouseSpecs:
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=True)
 ```
 
-| **Model**        | **Domain**  |                       **Params**                      |                    **FLOPs/Inf**                    |                     **Memory**                    | **Bottleneck** | **Role in Textbook**                   |
-|:-----------------|:------------|:-----------------------------------------------------:|:---------------------------------------------------:|:-------------------------------------------------:|:---------------|:---------------------------------------|
-| **ResNet-50**    | Vision      |     `{python} LighthouseSpecs.resnet_params_m_str`    |     `{python} LighthouseSpecs.resnet_gflop_str`     |   `{python} LighthouseSpecs.resnet_fp32_mb_str`   | Compute        | Dense vision throughput                |
-| **GPT-2 XL**     | Language    |      `{python} LighthouseSpecs.gpt2_params_b_str`     | `{python} LighthouseSpecs.gpt2_gflop_per_token_str` |    `{python} LighthouseSpecs.gpt2_fp32_gb_str`    | Mem. Bandwidth | Token-by-token serving                 |
-| **DLRM**         | Recommender | `{python} LighthouseSpecs.dlrm_entries_b_str` billion |                         Low                         | `{python} LighthouseSpecs.dlrm_model_size_gb_str` | Mem. Capacity  | Embedding tables and capacity planning |
-| **MobileNetV2**  | Edge Vision |   `{python} LighthouseSpecs.mobilenet_params_m_str`   |    `{python} LighthouseSpecs.mobilenet_mflop_str`   |  `{python} LighthouseSpecs.mobilenet_fp32_mb_str` | Latency        | Depthwise convolutions and efficiency  |
-| **KWS (DS-CNN)** | Audio       |      `{python} LighthouseSpecs.kws_params_k_str`      |       `{python} LighthouseSpecs.kws_mflop_str`      |     `{python} LighthouseSpecs.kws_fp32_kb_str`    | Power          | Always-on power budget                 |
+| **Model**        | **Domain**  |                     **Params**                    |                    **FLOPs/Inf**                    |                     **Memory**                    | **Bottleneck** | **Role in Textbook**                   |
+|:-----------------|:------------|:-------------------------------------------------:|:---------------------------------------------------:|:-------------------------------------------------:|:---------------|:---------------------------------------|
+| **ResNet-50**    | Vision      |   `{python} LighthouseSpecs.resnet_params_m_str`  |     `{python} LighthouseSpecs.resnet_gflop_str`     |   `{python} LighthouseSpecs.resnet_fp32_mb_str`   | Compute        | Dense vision throughput                |
+| **GPT-2 XL**     | Language    |    `{python} LighthouseSpecs.gpt2_params_b_str`   | `{python} LighthouseSpecs.gpt2_gflop_per_token_str` |    `{python} LighthouseSpecs.gpt2_fp32_gb_str`    | Mem. Bandwidth | Token-by-token serving                 |
+| **DLRM**         | Recommender |   `{python} LighthouseSpecs.dlrm_entries_b_str`   |                         Low                         | `{python} LighthouseSpecs.dlrm_model_size_gb_str` | Mem. Capacity  | Embedding tables and capacity planning |
+| **MobileNetV2**  | Edge Vision | `{python} LighthouseSpecs.mobilenet_params_m_str` |    `{python} LighthouseSpecs.mobilenet_mflop_str`   |  `{python} LighthouseSpecs.mobilenet_fp32_mb_str` | Latency        | Depthwise convolutions and efficiency  |
+| **KWS (DS-CNN)** | Audio       |    `{python} LighthouseSpecs.kws_params_k_str`    |       `{python} LighthouseSpecs.kws_mflop_str`      |     `{python} LighthouseSpecs.kws_fp32_kb_str`    | Power          | Always-on power budget                 |
 
 : **Lighthouse Model Comparison**: Quantitative characteristics and pedagogical roles of the five canonical workloads. Parameters and memory represent model weights at FP32 precision. FLOPs measured per single inference. The bottleneck column indicates the primary system constraint each model reveals: compute-bound models like ResNet stress arithmetic throughput, while bandwidth-bound models like GPT-2 stress memory transfer rates. {#tbl-lighthouse-comparison tbl-colwidths="[17,14,8,15,9,11,26]"}
 
@@ -597,7 +597,7 @@ Architecture selection is ultimately an engineering trade-off between math $(O)$
 
 -   **ResNet-50 (Compute Bound)**\index{ResNet-50!arithmetic intensity}: High intensity (roughly 40 FLOP/byte at the whole-model level in @tbl-workload-signatures, with deeper bottleneck layers reaching 100--200+ FLOP/byte). Convolutional layers reuse each weight many times across the spatial dimensions of an image. Its performance is limited by how fast the hardware can do math.
 -   **GPT-2 (Bandwidth Bound)**\index{GPT-2!arithmetic intensity}: Low intensity ($\approx 0.5$ FLOP/byte). Each token produces only a matrix-vector multiplication rather than the matrix-matrix operations of batch processing, so the system must load massive weights from memory for a single token’s math. Its performance is limited by how fast memory can move bits.
--   **MobileNet (Memory Bound on GPUs)**: Moderate whole-model intensity (~`{python} WorkloadSignatures.mobilenet_intensity_str` FLOP/byte in @tbl-workload-signatures), with individual depthwise layers falling lower once activation traffic is included. MobileNet reduces total $O$ through depthwise separable convolutions, but it moves more data relative to that work. It fits mobile hardware perfectly but often "starves" high-end GPUs optimized for dense math.
+-   **MobileNet (Memory Bound on GPUs)**: Moderate whole-model intensity (~`{python} WorkloadSignatures.mobilenet_intensity_str` in @tbl-workload-signatures), with individual depthwise layers falling lower once activation traffic is included. MobileNet reduces total $O$ through depthwise separable convolutions, but it moves more data relative to that work. It fits mobile hardware perfectly but often "starves" high-end GPUs optimized for dense math.
 
 This spectrum determines whether the system needs a faster processor or faster memory to improve performance. The Roofline Model (@sec-appdx-machine-foundations-roofline-model-2529) provides the analytical framework for quantifying these limits on specific hardware, with applied examples in @sec-hardware-acceleration. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works this intensity-to-bottleneck classification through a real accelerator specification, computing the ridge point of an A100 and showing how the same operation falls on either side of it.
 
@@ -758,6 +758,7 @@ The classic MNIST\index{MNIST} handwritten digit benchmark illustrates this gap 
 # │ Context: Callout "MNIST: Representation vs Learnability"
 # │
 # │ Goal: Contrast parameter efficiency between dense and convolutional layers.
+# │ Scope: chapter-anchor — MNIST comparison callout and later CNN callback share exports.
 # │ Show: The 50× reduction in parameter count achieved by spatial weight sharing.
 # │ How: Compare a 20M parameter MLP to a 420K parameter CNN for the same task.
 # │
@@ -1058,7 +1059,7 @@ The preceding algorithmic structure defines *what* an MLP computes; computationa
 # │          dense_batch1_intensity_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MLPLayerStats:
@@ -1083,7 +1084,7 @@ class MLPLayerStats:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mnist_mlp_macs_str = fmt_count(macs, precision=0, commas=True, label="MAC")
     mnist_neuron_mem_acc_str = fmt(mem_acc_per_neuron, precision=0, commas=True)
-    dense_batch1_intensity_str = fmt(dense_batch1_intensity, precision=1, commas=False)
+    dense_batch1_intensity_str = fmt_arithmetic_intensity(dense_batch1_intensity * flop / byte, unit=flop / byte, precision=1, commas=False)
 
 # Note: Use MLPLayerStats.mnist_mlp_macs_str directly.
 ```
@@ -1198,7 +1199,7 @@ For dense pattern processing, the memory, compute, and data-movement costs all c
 
 The core computation is dense matrix-vector multiplication (GEMV), or matrix-matrix multiplication (GEMM) when batched. This computation is regular and parallelizable, but the arithmetic intensity (FLOP/byte) is low for small batch sizes (the **batch size**\index{Batch Size} is the number of input samples processed together in one forward pass; larger batches amortize weight-loading cost over more computations). Modern processors optimize dense layers through specialized SIMD (Single Instruction, Multiple Data) units (for example, AVX-512 on CPUs) or systolic arrays (on Tensor Processing Units (TPUs)/GPUs) that amortize control overhead over massive blocks of parallel arithmetic.
 
-The resulting bottleneck is data movement. To compute 100 hidden values from 784 inputs, the system must move $784{\times}100$ weights from memory to the compute units. Applying the arithmetic intensity framework from @sec-network-architectures-understanding-arithmetic-intensity-ade5 to this layer yields roughly `{python} MLPLayerStats.dense_batch1_intensity_str` FLOP/byte (assuming FP32) if batch size is one, as shown in @eq-dense-intensity:
+The resulting bottleneck is data movement. To compute 100 hidden values from 784 inputs, the system must move $784{\times}100$ weights from memory to the compute units. Applying the arithmetic intensity framework from @sec-network-architectures-understanding-arithmetic-intensity-ade5 to this layer yields roughly `{python} MLPLayerStats.dense_batch1_intensity_str` (assuming FP32) if batch size is one, as shown in @eq-dense-intensity:
 $$
 \text{Intensity} \approx \frac{2 \cdot M \cdot N \text{ FLOPs}}{4 \cdot M \cdot N \text{ bytes}} = 0.5 \text{ FLOP/byte}
 $$ {#eq-dense-intensity}
@@ -1696,6 +1697,7 @@ The preceding architectural properties make CNNs highly amenable to systems-leve
 # │ Context: Local ResNet-50 and MobileNetV2 lighthouse profile callouts
 # │
 # │ Goal: Recompute the CNN lighthouse quantities used in the adjacent tables.
+# │ Scope: chapter-anchor — lighthouse callouts and chapter takeaway share these exports.
 # │ Show: ResNet-50 compute scale and MobileNetV2's smaller parameter/FLOP budget.
 # │ How: Retrieve local model specs from mlsysim and derive ratios.
 # │
@@ -3245,7 +3247,7 @@ The preceding self-attention implementation shows how transformers process entir
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_params, fmt_flops, fmt_bandwidth, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_params, fmt_flops, fmt_bandwidth, check, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2BandwidthProfile:
@@ -3273,14 +3275,14 @@ class GPT2BandwidthProfile:
     gpt2_params_b_str = fmt_params(gpt2.parameters, scale="B", precision=1, commas=False)
     gpt2_fp32_gb_str = fmt_memory(gpt2_fp32, unit=GB, precision=0, commas=True)
     gpt2_gflop_per_token_str = fmt_flops(gpt2_flops_per_token, unit=GFLOPs, precision=0, per="token")
-    intensity_fp32_str = fmt(intensity_fp32, precision=1, commas=False)
-    intensity_fp16_str = fmt(intensity_fp16, precision=0, commas=False)
+    intensity_fp32_str = fmt_arithmetic_intensity(intensity_fp32 * flop / byte, unit=flop / byte, precision=1, commas=False)
+    intensity_fp16_str = fmt_arithmetic_intensity(intensity_fp16 * flop / byte, unit=flop / byte, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=True)
 ```
 
 ::: {#lhs-nn-architectures-gpt-2-xl-bandwidth-lighthouse .callout-lighthouse title="GPT-2 XL (bandwidth lighthouse)"}
 
-**Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound**\index{Memory-bandwidth-bound workload} workloads. During autoregressive inference, the model must load all `{python} GPT2BandwidthProfile.gpt2_fp32_gb_str` of FP32 weights from HBM for *every generated token*, while performing only a single matrix-vector multiply per layer. The arithmetic intensity is about `{python} GPT2BandwidthProfile.intensity_fp32_str` FLOP/byte with FP32 weights in @tbl-workload-signatures, or about `{python} GPT2BandwidthProfile.intensity_fp16_str` FLOP/byte with FP16 weights, leaving compute cores idle while waiting for memory. This contrasts with ResNet-50 (compute bound, high weight reuse) and DLRM (capacity-bound, random access). @Tbl-nn-architectures-gpt2-profile summarizes the bandwidth lighthouse's quantitative properties:
+**Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound**\index{Memory-bandwidth-bound workload} workloads. During autoregressive inference, the model must load all `{python} GPT2BandwidthProfile.gpt2_fp32_gb_str` of FP32 weights from HBM for *every generated token*, while performing only a single matrix-vector multiply per layer. The arithmetic intensity is about `{python} GPT2BandwidthProfile.intensity_fp32_str` with FP32 weights in @tbl-workload-signatures, or about `{python} GPT2BandwidthProfile.intensity_fp16_str` with FP16 weights, leaving compute cores idle while waiting for memory. This contrasts with ResNet-50 (compute bound, high weight reuse) and DLRM (capacity-bound, random access). @Tbl-nn-architectures-gpt2-profile summarizes the bandwidth lighthouse's quantitative properties:
 
 | **Property**   | **Value**                                                | **System Implication**                                                                                       |
 |:---------------|:---------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------|
@@ -3370,7 +3372,7 @@ class KVCacheSizing:
     concurrent_8_gb_str = fmt_memory(concurrent_8_memory, unit=GB, precision=1, commas=False)
 ```
 
-The **KV Cache**\index{KV Cache!linear growth}[^fn-kv-cache-depth] grows linearly with sequence length ($\mathcal{O}(N_L \times 2 \times N_{\text{heads}} \times S \times d_{\text{head}})$ per request, distinct from the $\mathcal{O}(S^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about `{python} GPT2BandwidthProfile.intensity_fp32_str` FLOP/byte with FP32 weights or about `{python} GPT2BandwidthProfile.intensity_fp16_str` FLOP/byte with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's `{python} GPT2BandwidthProfile.h100_bw_tb_per_s_str`) rather than raw FLOP/s.
+The **KV Cache**\index{KV Cache!linear growth}[^fn-kv-cache-depth] grows linearly with sequence length ($\mathcal{O}(N_L \times 2 \times N_{\text{heads}} \times S \times d_{\text{head}})$ per request, distinct from the $\mathcal{O}(S^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about `{python} GPT2BandwidthProfile.intensity_fp32_str` with FP32 weights or about `{python} GPT2BandwidthProfile.intensity_fp16_str` with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's `{python} GPT2BandwidthProfile.h100_bw_tb_per_s_str`) rather than raw FLOP/s.
 
 [^fn-kv-cache-depth]: **KV Cache Memory Scaling**: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB. A single concurrent request's KV cache requires: `{python} KVCacheSizing.layers_str` layers $\times$ 2 (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions at `{python} KVCacheSizing.head_dim_str` dimensions per head $\times$ 2 bytes ≈ `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, KV cache alone (~`{python} KVCacheSizing.concurrent_8_gb_str`) rivals the model weights—and grows linearly with both context length and concurrent users. Scaling serving throughput therefore requires grouped-query attention, which shares fewer key/value heads across more query heads, shorter context windows, or KV offloading strategies that place some cache state in slower memory tiers. This is a memory systems constraint, not a model quality trade-off: the model is identical regardless of which memory strategy is chosen. \index{KV Cache!memory scaling}
 
@@ -3612,7 +3614,7 @@ This combination of dense and sparse computation makes DLRM the chapter's recomm
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_memory, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DLRMLighthouseProfile:
@@ -3622,7 +3624,6 @@ class DLRMLighthouseProfile:
     dlrm = Models.Recommendation.DLRM
     resnet = Models.Vision.ResNet50
     gpt3 = Models.Language.GPT3
-    dlrm_entries_b = 25.0  # 25 billion scalar embedding parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dlrm_model_size = dlrm.model_size
@@ -3634,7 +3635,7 @@ class DLRMLighthouseProfile:
     check(gpt3_fp16 > 100 * GB, f"Expected GPT-3 FP16 weights to be larger than 100 GB, got {gpt3_fp16.to(GB).magnitude:.0f}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dlrm_entries_b_str = fmt(dlrm_entries_b, precision=0)
+    dlrm_entries_b_str = fmt_params(dlrm.embedding_entries, scale="B", precision=0, commas=False)
     dlrm_model_size_gb_str = fmt_memory(dlrm_model_size, unit=GB, precision=0, commas=True)
     resnet_fp32_mb_str = fmt_memory(resnet_fp32, unit=MB, precision=1, commas=True)
     gpt3_fp16_gb_str = fmt_memory(gpt3_fp16, unit=GB, precision=0, commas=True)
@@ -3646,7 +3647,7 @@ class DLRMLighthouseProfile:
 
 | **Property**             | **Value**                                                      | **System Implication**                                   |
 |:-------------------------|:---------------------------------------------------------------|:---------------------------------------------------------|
-| **Embedding Parameters** | `{python} DLRMLighthouseProfile.dlrm_entries_b_str` billion    | Parameters $\times$ 4 bytes; dominates total model size. |
+| **Embedding Parameters** | `{python} DLRMLighthouseProfile.dlrm_entries_b_str`            | Parameters $\times$ 4 bytes; dominates total model size. |
 | **Model Size**           | `{python} DLRMLighthouseProfile.dlrm_model_size_gb_str` (FP32) | May exceed one device's fast memory.                     |
 | **Constraint**           | Memory Capacity                                                | Model size > Single GPU Memory.                          |
 | **Bottleneck**           | Irregular Data Movement                                        | Gather operations dominate sparse feature processing.    |
@@ -4612,7 +4613,7 @@ The same primitive mapping also determines energy budgets. Each architectural pa
 # │ Exports: energy_mac_pj_str, energy_dram_str, energy_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_energy_per_flop
 
 class EnergyConsumptionAnalysis:
     """Contrast energy cost of compute vs. data movement using Horowitz-style anchors."""
@@ -4620,7 +4621,7 @@ class EnergyConsumptionAnalysis:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
-    mac_pj = ENERGY_FLOP_FP32_PJ.to(pJ).magnitude  # pJ per FP MAC
+    mac_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude  # pJ per FP MAC
     dram_pj = ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude  # pJ per 32-bit access
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -4630,7 +4631,7 @@ class EnergyConsumptionAnalysis:
     check(dram_to_mac_ratio > 100, "DRAM access should cost over 100x a reference FP MAC.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_mac_pj_str = fmt_qty(ENERGY_FLOP_FP32_PJ, pJ, precision=1, commas=False)
+    energy_mac_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
     energy_dram_pj_str = fmt_qty(ENERGY_DRAM_ACCESS_PJ, pJ, precision=0, commas=False)
     energy_ratio_mult_str = fmt_multiple(round(dram_to_mac_ratio), precision=0, commas=True)
 ```
