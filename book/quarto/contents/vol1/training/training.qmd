@@ -2563,81 +2563,7 @@ class StorageBandwidthNvme:
 
 :::
 
-While data pipeline throughput determines how fast training data reaches the GPU, even single-node multi-GPU configurations (previewed here, detailed in @sec-model-training-scaling-training-systems-adfd) introduce a second bottleneck: the network communication required to synchronize gradients across devices. Once synchronization time exceeds compute time, communication becomes the limiting wall.
-
-```{python}
-#| echo: false
-#| label: network-wall-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ NETWORK WALL CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: The Network Wall callout—network communication overhead for
-# │          gradient synchronization in distributed training
-# │
-# │ Goal: Quantify network communication overhead in distributed training.
-# │ Show: That AllReduce time can exceed computation time for large models.
-# │ How: Calculate synchronization latency over a 100 Gbps network.
-# │
-# │ Imports: mlsysim.core.units (BYTES_FP16, byte), mlsysim.book (fmt)
-# │ Exports: model_params_b_str, gradient_size_gb_str, allreduce_gb_str,
-# │          network_time_s_str, network_bw_gb_per_s_str, n_gpus_str,
-# │          allreduce_factor_mult_str, allreduce_factor_value_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple, fmt_params, fmt_ratio, fmt_time
-
-# ┌── LEGO ───────────────────────────────────────────────
-class NetworkWall:
-    """
-    Namespace for Network Wall Calculation.
-    Scenario: Gradient synchronization bottleneck.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model = Models.Language.Llama2_7B
-    params = model.parameters
-    network_bw = Systems.Fabrics.Ethernet_100G.bandwidth  # 100 Gbps
-    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
-    n_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Gradient Size = 7 billion * 2 bytes = 14 GB
-    gradient_size = model.size_in_bytes(BYTES_FP16)
-
-    # Ring AllReduce sends 2(N_GPU-1)/N_GPU copies of the gradient per worker.
-    allreduce_factor = 2 * (n_gpus - 1) / n_gpus
-    allreduce = allreduce_factor * gradient_size
-
-    # Time = Data/Bandwidth
-    time = (allreduce / network_bw).to(second)
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_params_b_str = fmt_params(params, precision=0)
-    n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
-    gradient_size_gb_str = fmt_memory(gradient_size, unit=GB, precision=0, commas=False)
-    allreduce_factor_mult_str = fmt_multiple(allreduce_factor, precision=2, commas=False)
-    allreduce_factor_value_str = fmt_ratio(allreduce_factor, precision=2, commas=False)
-    allreduce_gb_str = fmt_memory(allreduce, unit=GB, precision=1, commas=False)
-    network_time_s_str = fmt_time(time, second, precision=2, commas=False)
-    network_bw_gb_per_s_str = fmt_bandwidth(network_bw, unit=GB / second, precision=1, commas=False)
-    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
-
-# Note: Use NetworkWall.network_time_s_str directly.
-```
-
-::: {#nbk-network-wall .callout-notebook title="The network wall"}
-
-**Problem**: A team is training a large model on `{python} NetworkWall.n_gpus_str`. Is the network the bottleneck?
-
-**Math**: For a `{python} NetworkWall.model_params_b_str`-parameter model with FP16 gradients:
-
-1. **Gradient size** (FP16): `{python} NetworkWall.gradient_size_gb_str` per step.
-2. **AllReduce cost**: Ring AllReduce sends `{python} NetworkWall.allreduce_factor_mult_str` the gradient per worker, because $2(N_{\text{GPU}}-1)/N_{\text{GPU}}$ equals `{python} NetworkWall.allreduce_factor_mult_str` for `{python} NetworkWall.n_gpus_str`. That gives `{python} NetworkWall.allreduce_factor_value_str` $\times$ `{python} NetworkWall.gradient_size_gb_str` = `{python} NetworkWall.allreduce_gb_str` total.
-3. **Network time**: At `{python} NetworkWall.network_bw_gb_per_s_str` InfiniBand (100 Gbps): `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` = `{python} NetworkWall.network_time_s_str`.
-4. **Compute time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
-
-**Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{communication}} > T_{\text{computation}}$. Solutions include gradient compression, which sends fewer or lower-precision gradient bytes while checking convergence impact; overlapping computation with communication, as implemented in Horovod [@sergeev2018horovod]; and using faster interconnects (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. InfiniBand at `{python} NetworkWall.network_bw_gb_per_s_str`).
-
-:::
+Data pipeline throughput is not the only flow that can starve the accelerator. Multi-GPU training adds a second stream of traffic, the gradient synchronization required after every step, and once synchronization time exceeds compute time, communication becomes the limiting wall. @Sec-model-training-scaling-beyond-single-node-a671 quantifies that network wall at the point where training crosses the node boundary.
 
 #### System implications {#sec-model-training-system-implications-2539}
 
@@ -3446,7 +3372,7 @@ The previous sections established what the training system does at each stage an
 
 The diagnostic methodology that transforms blueprint knowledge into actionable optimization decisions begins with a meaningful measure of training efficiency. Raw accelerator utilization percentages can be misleading because they include overhead from recomputation and padding. A more precise metric captures only the useful training work performed per second.
 
-Production systems typically achieve 30–50 percent MFU\index{Model FLOPs Utilization!origin}[^fn-mfu]; values below this range indicate optimization opportunities in one of three bottleneck categories.
+Production systems typically achieve 30–50 percent MFU\index{Model FLOPs Utilization!origin}[^fn-mfu]; values below 30 percent indicate optimization opportunities in one of three bottleneck categories.
 
 ```{python}
 #| echo: false
@@ -6529,6 +6455,82 @@ Within a single node, NVLink provides enough bandwidth to overlap gradient synch
 Recall the energy-movement invariant\index{Energy-Movement Invariant!distributed training} from @sec-data-engineering: moving data is 100--1,000$\times$ more expensive than computing on it. In distributed training, this physical law manifests as the communication tax\index{Distributed Training!communication tax}.
 
 Synchronizing gradients across a fleet of GPUs means moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{\text{move}}$ across the network) exceeds the energy for computation ($E_{\text{compute}}$), system efficiency $(\eta_{\text{hw}})$ collapses. Techniques like mixed precision (@sec-model-training-mixedprecision-training-9218) and gradient compression\index{Gradient Compression!definition}, which reduces communicated gradient bytes through sparsity, quantization, or encoding, address this directly by managing the physical limits of distributed scaling.
+
+:::
+
+A short calculation shows how quickly the inter-node fabric becomes the binding constraint.
+
+```{python}
+#| echo: false
+#| label: network-wall-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NETWORK WALL CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The Network Wall callout—network communication overhead for
+# │          gradient synchronization in distributed training
+# │
+# │ Goal: Quantify network communication overhead in distributed training.
+# │ Show: That AllReduce time can exceed computation time for large models.
+# │ How: Calculate synchronization latency over a 100 Gbps network.
+# │
+# │ Imports: mlsysim.core.units (BYTES_FP16, byte), mlsysim.book (fmt)
+# │ Exports: model_params_b_str, gradient_size_gb_str, allreduce_gb_str,
+# │          network_time_s_str, network_bw_gb_per_s_str, n_gpus_str,
+# │          allreduce_factor_mult_str, allreduce_factor_value_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple, fmt_params, fmt_ratio, fmt_time
+
+# ┌── LEGO ───────────────────────────────────────────────
+class NetworkWall:
+    """
+    Namespace for Network Wall Calculation.
+    Scenario: Gradient synchronization bottleneck.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    model = Models.Language.Llama2_7B
+    params = model.parameters
+    network_bw = Systems.Fabrics.Ethernet_100G.bandwidth  # 100 Gbps
+    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
+    n_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Gradient Size = 7 billion * 2 bytes = 14 GB
+    gradient_size = model.size_in_bytes(BYTES_FP16)
+
+    # Ring AllReduce sends 2(N_GPU-1)/N_GPU copies of the gradient per worker.
+    allreduce_factor = 2 * (n_gpus - 1) / n_gpus
+    allreduce = allreduce_factor * gradient_size
+
+    # Time = Data/Bandwidth
+    time = (allreduce / network_bw).to(second)
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    model_params_b_str = fmt_params(params, precision=0)
+    n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
+    gradient_size_gb_str = fmt_memory(gradient_size, unit=GB, precision=0, commas=False)
+    allreduce_factor_mult_str = fmt_multiple(allreduce_factor, precision=2, commas=False)
+    allreduce_factor_value_str = fmt_ratio(allreduce_factor, precision=2, commas=False)
+    allreduce_gb_str = fmt_memory(allreduce, unit=GB, precision=1, commas=False)
+    network_time_s_str = fmt_time(time, second, precision=2, commas=False)
+    network_bw_gb_per_s_str = fmt_bandwidth(network_bw, unit=GB / second, precision=1, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
+
+# Note: Use NetworkWall.network_time_s_str directly.
+```
+
+::: {#nbk-network-wall .callout-notebook title="The network wall"}
+
+**Problem**: A team scales training to `{python} NetworkWall.n_gpus_str`, one per node, connected by a 100 Gbps fabric. Is the network the bottleneck?
+
+**Math**: For a `{python} NetworkWall.model_params_b_str`-parameter model with FP16 gradients:
+
+1. **Gradient size** (FP16): `{python} NetworkWall.gradient_size_gb_str` per step.
+2. **AllReduce cost**: Ring AllReduce passes gradient shards around a logical ring, so each worker ends up sending nearly two full copies of the gradient: $2(N_{\text{GPU}}-1)/N_{\text{GPU}}$, which equals `{python} NetworkWall.allreduce_factor_mult_str` for `{python} NetworkWall.n_gpus_str`. That gives `{python} NetworkWall.allreduce_factor_value_str` $\times$ `{python} NetworkWall.gradient_size_gb_str` = `{python} NetworkWall.allreduce_gb_str` total.
+3. **Network time**: At `{python} NetworkWall.network_bw_gb_per_s_str` across the inter-node fabric (100 Gbps): `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` = `{python} NetworkWall.network_time_s_str`.
+4. **Compute time**: If forward + backward takes $1 \text{ s}$, network is the bottleneck.
+
+**Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{communication}} > T_{\text{computation}}$. Solutions include gradient compression, which sends fewer or lower-precision gradient bytes while checking convergence impact; overlapping computation with communication, as implemented in Horovod [@sergeev2018horovod]; and keeping the most frequent communication on faster links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` within a node vs. `{python} NetworkWall.network_bw_gb_per_s_str` between nodes).
 
 :::
 
