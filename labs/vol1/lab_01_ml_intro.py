@@ -193,7 +193,7 @@ def _(COLORS, mo):
                     Duration
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~51 min</strong><br/>
+                    <strong>~45 min</strong><br/>
                     Part A: ~12 min &middot; Part B: ~12 min<br/>
                     Part C: ~12 min &middot; Part D: ~9 min
                 </div>
@@ -289,7 +289,7 @@ def _(mo):
         options={
             "A) ~2x over budget (need a small trim)":                   "2x",
             "B) ~10x over budget (need significant compression)":        "10x",
-            "C) ~100x over budget (fundamentally infeasible)":           "200x",
+            "C) ~100x over budget (fundamentally infeasible)":           "100x",
             "D) It fits with INT8 quantization":                         "fits",
         },
         label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
@@ -611,7 +611,7 @@ Algorithm capacity metrics complete the picture.
 
         ```
         T  =  D_vol/BW  +  O/(R_peak * eta)  +  L_lat
-              --------     ----------------     ------
+              --------     ----------------     -----
               Data term    Compute term         Overhead
         ```
 
@@ -620,7 +620,7 @@ Algorithm capacity metrics complete the picture.
         the speedup is negligible.
 
         **Arithmetic Intensity (AI)** = O / D_vol (FLOPs per byte). Note: AI here refers to arithmetic intensity, not artificial intelligence.
-        Below the Ridge Point (R_peak / BW), the workload is **memory-bound**.
+        If the AI is below the Ridge Point (R_peak / BW), which is the ratio of peak performance to memory bandwidth, the workload is **memory-bound**, and is otherwise **compute-bound**.
         """))
 
         items.append(partB_prediction)
@@ -734,13 +734,16 @@ Algorithm capacity metrics complete the picture.
 **Iron Law -- Live Calculation** (`batch = {_batch}`)
 
 ```
-T  =  D_vol/BW              +  O/(R * eta)                       +  L
-   =  {_mem_gb:.4f} GB / {H100_BW_GBS:,} GB/s  +  {RESNET50_FLOPS*_batch:.2e} / ({H100_TFLOPS_FP16:.0f}T * {_eta})  +  {_t_ovh_ms:.3f} ms
-   =  {_t_data_ms:.4f} ms           +  {_t_comp_ms:.4f} ms                     +  {_t_ovh_ms:.4f} ms
-   =  {_t_total:.4f} ms total  (Bottleneck: {_bottleneck})
+T = D_vol/BW + O/(R * eta) +  L
 
-AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{_ridge_point:.0f} FLOPs/Byte
-     => {'MEMORY-BOUND' if _ai < _ridge_point else 'COMPUTE-BOUND'}
+D_vol/Bw    = {_mem_gb:.4f} GB / {H100_BW_GBS:.4f} GB/s = {_t_data_ms:.4f} ms
+O/(R * eta) = {RESNET50_FLOPS*_batch:.2e} / ({H100_TFLOPS_FP16:.0f}T * {_eta}) = {_t_comp_ms:.4f} ms
+L           = {_t_ovh_ms:.4f} ms
+
+T = {_t_data_ms:.4f} + {_t_comp_ms:.4f} ms + {_t_ovh_ms:.4f} = {_t_total:.4f} ms total (Bottleneck: {_bottleneck})
+
+AI = {_ai:.1f} FLOPs/Byte {'<' if _ai < _ridge_point else '>'} Ridge Point ~{_ridge_point:.0f} FLOPs/Byte
+   => {'MEMORY-BOUND' if _ai < _ridge_point else 'COMPUTE-BOUND'}
 ```
 """))
 
@@ -1011,7 +1014,7 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
         _pred = partC_prediction.value
         _actual_ratio = RESNET50_SIZE_MB * 1024 / ESP32_RAM_KB
 
-        if _pred == "200x":
+        if _pred == "100x":
             _rev = (f"**Correct.** The ratio is ~{_actual_ratio:.0f}x. "
                     "This is not a compression problem -- it is a feasibility violation. "
                     "You need a fundamentally different model architecture for TinyML.")
@@ -1118,7 +1121,7 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
         ))
         _fig.update_layout(
             barmode="group", height=380,
-            yaxis=dict(title="Magnitude (units vary)", type=_scale, gridcolor="#f1f5f9"),
+            yaxis=dict(title="Magnitude (units vary)", type=_scale, exponentformat="power" if _scale == "Log scale" else "none", gridcolor="#f1f5f9"),
             xaxis=dict(gridcolor="#f1f5f9"),
             legend=dict(orientation="h", y=1.1, x=0),
             margin=dict(l=50, r=20, t=60, b=40),
@@ -1223,8 +1226,8 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
             _rkind = "success"
         elif _pred == "100x":
             _rev = (f"**The gap is ~{_actual/100:.0f}x larger than your prediction.** "
-                    f"Actual: ~{_actual:,.0f}x. Each tier drops ~100x, "
-                    "compounding across three steps.")
+                    f"Actual: ~{_actual:,.0f}x, which is compounded across the drop from "
+                    f"Cloud to Edge and Edge to TinyML.")
             _rkind = "warn"
         elif _pred == "10000x":
             _rev = (f"**Close but ~100x too low.** Actual: ~{_actual:,.0f}x.")
@@ -1317,7 +1320,6 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
                         <strong>Read:</strong> the Introduction chapter for the D-A-M framework,
                         the Iron Law section (Ch. 1) for the full Iron Law derivation,
                         the Deployment Spectrum section (Ch. 1) for the hardware tier table.
-                        <br/><strong>Build:</strong> TinyTorch Module 01 -- implement the D-A-M diagnostic framework and Iron Law calculator from scratch.
                     </div>
                 </div>
             </div>
