@@ -28,7 +28,7 @@ _Why does the framework---the layer between mathematics and hardware---silently 
 
 Neural networks are defined by mathematics (matrix multiplications, gradient computations, activation functions), but mathematics does not execute itself. Between the equations and the silicon lies a translation layer that decides how operations are scheduled on hardware, how memory is allocated across the compute hierarchy, and how gradients flow backward through the computational graph. The framework is this translation layer, and the translation is not neutral.
 
-An eager-mode framework executes each operation immediately; that choice prioritizes debugging flexibility but can sacrifice graph-level optimizations because the compiler no longer sees the whole computation that can halve inference latency. A framework lacking support for the target accelerator renders the hardware investment useless. A framework with a rich training API but no export path to edge devices means the model cannot reach the deployment target it was designed for.
+An eager-mode framework executes each operation immediately; that choice prioritizes debugging flexibility, but because the compiler no longer sees the whole computation, it forfeits graph-level optimizations that can halve inference latency. A framework lacking support for the target accelerator renders the hardware investment useless. A framework with a rich training API but no export path to edge devices means the model cannot reach the deployment target it was designed for.
 
 Architecture choices are at least visible: engineers debate model size, layer count, and attention mechanisms explicitly. Framework choices are more insidious because they operate below the level of daily attention, silently determining which optimizations are possible, which hardware is reachable, and which deployment paths exist. In the AI Triad, the framework is the invisible mediator between Algorithm and Machine, and its design choices---baked into its compilation stack, memory management, and operator libraries, the hardware-tuned kernels that execute common operations---are difficult to reverse. Migrating between frameworks invalidates data pipelines, serving infrastructure, model checkpoints, and team expertise, typically requiring months of engineering effort for production systems. Framework selection is therefore an infrastructure commitment that determines what the system can do on the hardware it must run on.
 
@@ -67,6 +67,20 @@ The third problem is *hardware abstraction*: targeting diverse hardware from a s
 
 [^fn-eager-execution-tradeoff]: **Eager Execution**: This mode executes each operation sequentially and immediately, which enables direct debugging with standard tools but sacrifices the global view needed for graph-level optimizations. Without seeing the full sequence of computations, the framework cannot fuse operations or preplan memory, forfeiting potential speedups of over 30 percent that compilers like `torch.compile` can provide. \index{Eager Execution!optimization trade-off}
 
+What is at stake when an abstraction's interface contract stays implicit is not hypothetical.
+
+::: {#ws-frameworks-mars-climate-orbiter-units .callout-war-story title="The interface that forgot its units"}
+
+**Context**: NASA's Mars Climate Orbiter depended on ground software, spacecraft software, navigation teams, and contractor interfaces all agreeing on the physical meaning of exchanged values [@nasa1999marsclimateorbiter]. The roughly \$327M mission included a small-forces interface (SM_FORCES) that carried thruster-impulse measurements from ground operations into the navigation filter.
+
+**Failure mode**: One piece of ground software, supplied by Lockheed Martin, computed the impulse from each Angular Momentum Desaturation event in pound-force seconds. The navigation software at JPL consumed the same numbers as newton-seconds---a 4.45 times unit mismatch. The code on both sides compiled, ran, and produced numerically reasonable values; only the implicit unit contract between them was wrong.
+
+**Consequence**: On September 23, 1999, the trajectory error placed the orbiter at about 57 km above Mars rather than the intended 226 km. At that altitude the spacecraft was either destroyed in the atmosphere or skipped back into heliocentric space. Communication was permanently lost during orbit insertion.
+
+**Systems lesson**: Framework abstractions are valuable because they carry contracts: shape, dtype, device placement, and sometimes units. If those contracts are implicit, two pieces of correct code can still compose into a wrong system.
+
+:::
+
 These three problems are deeply interconnected. The execution model determines *when* differentiation occurs and *what* optimizations are possible. The abstraction layer must support both execution styles across all hardware targets. Solving any one problem in isolation leads to frameworks that excel in narrow contexts but fail in broader deployment. Because these problems are ultimately about translating mathematics into efficient hardware execution, a useful perspective is to view frameworks not as libraries but as compilers.
 
 ::: {#psp-frameworks-ml-compiler .callout-perspective title="The ML compiler"}
@@ -100,18 +114,6 @@ The compiler metaphor is not decorative. An ML framework translates logical inte
 The scale of this translation is not obvious from the API surface. A single call to `loss.backward()` triggers operation recording, memory allocation for gradients, reverse-order graph traversal, and hardware-optimized kernel dispatch---machinery that would require hundreds of lines of manual calculus for even a three-layer network. For a contemporary language model, the framework additionally orchestrates billions of floating-point operations across distributed hardware, coordinating memory hierarchies, communication protocols, and numerical precision. Building this from scratch would be economically prohibitive for most organizations, which is why the history of ML frameworks is a history of progressively automating these layers.
 
 The three problems---execution, differentiation, and abstraction---did not emerge simultaneously. Each arose as a response to scaling limitations in the previous generation of tools. Tracing this evolution reveals why modern frameworks are designed as they are and why the particular trade-offs they embody were, in hindsight, inevitable.
-
-::: {#ws-frameworks-mars-climate-orbiter-units .callout-war-story title="The interface that forgot its units"}
-
-**Context**: NASA's Mars Climate Orbiter depended on ground software, spacecraft software, navigation teams, and contractor interfaces all agreeing on the physical meaning of exchanged values [@nasa1999marsclimateorbiter]. The roughly \$327M mission included a small-forces interface (SM_FORCES) that carried thruster-impulse measurements from ground operations into the navigation filter.
-
-**Failure mode**: One piece of ground software, supplied by Lockheed Martin, computed the impulse from each Angular Momentum Desaturation event in pound-force seconds. The navigation software at JPL consumed the same numbers as newton-seconds---a 4.45 times unit mismatch. The code on both sides compiled, ran, and produced numerically reasonable values; only the implicit unit contract between them was wrong.
-
-**Consequence**: On September 23, 1999, the trajectory error placed the orbiter at about 57 km above Mars rather than the intended 226 km. At that altitude the spacecraft was either destroyed in the atmosphere or skipped back into heliocentric space. Communication was permanently lost during orbit insertion.
-
-**Systems lesson**: Framework abstractions are valuable because they carry contracts: shape, dtype, device placement, and sometimes units. If those contracts are implicit, two pieces of correct code can still compose into a wrong system.
-
-:::
 
 ## The Ladder of Abstraction {#sec-ml-frameworks-frameworks-evolved-ac68}
 
@@ -880,7 +882,7 @@ class DispatchTax:
     large_tax_pct_str = fmt_percent(round(large_tax_pct) / 100, precision=0, commas=False, style='symbol')
 ```
 
-### The dispatch tax: Python overhead vs. GPU reality {#sec-ml-frameworks-dispatch-tax}
+##### The dispatch tax: Python overhead vs. GPU reality {#sec-ml-frameworks-dispatch-tax .unnumbered}
 
 Eager execution's performance ceiling is driven by a fundamental systems mismatch: the speed of the host-side interpreter vs. the speed of the device-side silicon. We quantify this using **The Dispatch Tax**\index{Dispatch Tax!framework overhead}, defined as the fraction of time spent in the host-side orchestration (Python) vs. actual device execution (GPU).
 
@@ -1332,26 +1334,9 @@ traced = torch.jit.trace(conditional_forward, torch.tensor([1.0]))
 
 The alternative, scripting\index{JIT Compilation!scripting}, achieves generality by analyzing Python source code directly and compiling it to TorchScript IR without executing. The scripting compiler parses the abstract syntax tree (AST), converts supported operations to IR operations, and preserves the branching structure so that both branches of a conditional exist in the compiled representation. The cost of this generality is a restricted Python subset: type annotations are required where inference fails, arbitrary Python objects and standard library modules are excluded, and dynamic metaprogramming is forbidden.
 
-Tracing suits feed-forward models without conditionals (ResNet, VGG, Vision Transformer) and models where control flow depends only on hyperparameters fixed at trace time. Scripting suits models with data-dependent control flow (RNN variants, recursive networks, adaptive computation) and deployment to environments without a Python interpreter. The mechanics appear across four practical views: scripting syntax (@lst-torchscript-script), control flow preservation (@lst-torchscript-conditional), language restrictions (@lst-torchscript-restrictions), and IR inspection (@lst-torchscript-ir).
+Tracing suits feed-forward models without conditionals (ResNet, VGG, Vision Transformer) and models where control flow depends only on hyperparameters fixed at trace time. Scripting suits models with data-dependent control flow (RNN variants, recursive networks, adaptive computation) and deployment to environments without a Python interpreter.
 
-::: {#lst-torchscript-script lst-cap="**TorchScript Scripting**: Compiles Python source code directly to TorchScript IR by parsing the AST, preserving control flow structure without requiring example inputs."}
-
-```{.python}
-@torch.jit.script
-def forward(x):
-    y = x * 2
-    z = y + 1
-    return z
-
-
-# Compiles Python source code to TorchScript IR
-# No example inputs needed
-# Preserves control flow structure
-```
-
-:::
-
-The key advantage of scripting appears when handling conditionals. Unlike tracing, which captures only one branch, scripting preserves both paths in the IR.
+The key advantage of scripting appears when handling conditionals. Unlike tracing, which captures only one branch, scripting preserves both paths in the IR, as @lst-torchscript-conditional shows.
 
 ::: {#lst-torchscript-conditional lst-cap="**Scripted Control Flow**: Unlike tracing, scripting preserves both branches of conditionals in the IR, enabling correct execution based on runtime input values."}
 
@@ -1370,7 +1355,7 @@ def conditional_forward(x: torch.Tensor) -> torch.Tensor:
 
 :::
 
-To understand what the compiler produces, we can inspect the generated intermediate representation directly.
+To understand what the compiler produces, @lst-torchscript-ir inspects the generated intermediate representation directly.
 
 ::: {#lst-torchscript-ir lst-cap="**TorchScript IR Inspection**: The generated intermediate representation shows primitive operations and constants, useful for debugging and understanding compilation results."}
 
@@ -1392,31 +1377,7 @@ print(example.graph)
 
 :::
 
-However, scripting imposes constraints on what Python constructs are supported.
-
-::: {#lst-torchscript-restrictions lst-cap="**TorchScript Restrictions**: Scripting requires a restricted Python subset. Common unsupported features include arbitrary imports, NumPy operations, and f-strings."}
-
-```{.python}
-@torch.jit.script
-def invalid_script(x):
-    import numpy as np  # ERROR: Cannot import arbitrary modules
-
-    result = np.array([1, 2, 3])  # ERROR: NumPy not supported
-    print(f"Debug: {x}")  # ERROR: f-strings not supported
-    return result
-
-
-# Valid alternative:
-@torch.jit.script
-def valid_script(x: torch.Tensor) -> torch.Tensor:
-    # Use TorchScript-compatible operations
-    result = torch.tensor([1, 2, 3], dtype=x.dtype, device=x.device)
-    return result
-```
-
-:::
-
-Scripting requires a restricted Python subset because TorchScript must statically analyze code that Python normally interprets dynamically. Function signatures and variables need explicit type annotations when type inference fails, and only tensor operations, numeric types, and standard containers (lists, dicts, tuples) are permitted---no arbitrary Python objects, no standard library modules like `os` or `sys`, and no dynamic class modification or metaprogramming. These constraints are the price of compilation: every feature that makes Python flexible also makes it unpredictable for a compiler.
+However, scripting imposes constraints on what Python constructs are supported. Because TorchScript must statically analyze code that Python normally interprets dynamically, it accepts only a restricted Python subset. Function signatures and variables need explicit type annotations when type inference fails, and only tensor operations, numeric types, and standard containers (lists, dicts, tuples) are permitted---no arbitrary Python objects, no standard library modules like `os` or `sys`, and no dynamic class modification or metaprogramming, so an `import numpy` or an f-string inside a scripted function is a compile-time error. These constraints are the price of compilation: every feature that makes Python flexible also makes it unpredictable for a compiler.
 
 | **Aspect**            | **Tracing**                  | **Scripting**                 |
 |:----------------------|:-----------------------------|:------------------------------|
@@ -1655,7 +1616,7 @@ torch.compile consists of three coordinated components, each handling a distinct
 
 [^fn-triton-kernel-language]: **Triton**: TorchInductor generates Triton because its Python-like syntax provides a simpler, more stable compilation target than raw CUDA, making automated code generation tractable. This abstraction allows the compiler to handle complex GPU details like memory coalescing automatically, a requirement for performing kernel fusion. The accepted trade-off is achieving 80–95 percent of hand-tuned CUDA performance in exchange for enabling the compiler to effectively autotune kernels and reduce development time from weeks to hours. \index{Triton!performance trade-off}
 
-The generated code is cached on disk: TorchInductor maintains its own compilation cache, and Triton kernels are additionally cached in `~/.triton/cache/`. The first execution therefore pays the full compilation path: TorchDynamo intercepts bytecode and records operations into an FX graph, TorchInductor compiles the graph (5--30 seconds for transformer models), and the compiled code is cached and executed. Subsequent runs with the same input shapes dispatch directly to compiled code with microseconds of overhead; if input shapes change, TorchInductor must recompile for the new shapes, and PyTorch maintains separate compiled versions for each unique shape configuration.
+The generated code is cached on disk. The first execution therefore pays the full compilation path: TorchDynamo intercepts bytecode and records operations into an FX graph, TorchInductor compiles the graph (5--30 seconds for transformer models), and the compiled code is cached and executed. Subsequent runs with the same input shapes dispatch directly to compiled code with microseconds of overhead; if input shapes change, TorchInductor must recompile for the new shapes, and PyTorch maintains separate compiled versions for each unique shape configuration.
 
 ##### Graph breaks: Causes and detection {.unnumbered}
 
@@ -1681,58 +1642,21 @@ def conditional_compute(x):
 
 :::
 
-TorchDynamo creates a graph break: operations before the if statement are compiled, the if statement executes eagerly (evaluating which branch to take), and the chosen branch is compiled as a separate region. Unsupported operations also cause graph breaks, as @lst-graph-break-io demonstrates.
+TorchDynamo creates a graph break: operations before the `if` statement are compiled, the `if` statement executes eagerly (evaluating which branch to take), and the chosen branch is compiled as a separate region. Unsupported operations---I/O such as `print` and file access, custom Python objects, calls to non-PyTorch libraries---break the graph the same way, and every break pays the same marshalling cost: tensors move from compiled code back to Python (possibly copying from GPU to CPU), the eager operation executes, and results are marshalled into the next compiled region. Shape variation is the third trigger, through the recompilation mechanism described earlier: a function whose input shapes differ on every call, such as slicing to a runtime-dependent length, forces a fresh compilation for each unique shape.
 
-::: {#lst-graph-break-io lst-cap="**Graph Break from I/O**: Unsupported operations like `print` force a graph break, splitting compiled code into two regions with eager execution in between."}
-
-```{.python}
-@torch.compile
-def debug_compute(x):
-    y = x * 2
-    print(f"y = {y}")  # Graph break: I/O operation
-    z = y + 1
-    return z
-
-
-# Creates two compiled regions: before and after print
-```
-
-:::
-
-Common unsupported operations include I/O (`print`, file operations), custom Python objects, and calls to non-PyTorch libraries. Each graph break incurs overhead: tensors must be marshalled from compiled code back to Python (possibly copying from GPU to CPU), the eager operation executes, and results are marshalled into the next compiled region.
-
-Shape changes prevent compiled code reuse, as @lst-graph-break-shapes illustrates.
-
-::: {#lst-graph-break-shapes lst-cap="**Recompilation from Shape Changes**: Each unique input shape triggers a separate compilation, causing significant overhead when shapes vary frequently."}
-
-```{.python}
-@torch.compile
-def variable_length(x, length):
-    return x[:, :length]  # Shape changes each call
-
-
-# Each unique length triggers recompilation
-for i in range(10):
-    result = variable_length(x, i)  # 10 recompilations
-```
-
-:::
-
-The diagnostic step is to surface break locations and reasons, as @lst-graph-break-detect demonstrates.
-
-::: {#lst-graph-break-detect lst-cap="**Detecting Graph Breaks**: Setting `TORCH_LOGS` to `graph_breaks` prints each break location and reason during execution."}
-
-```{.bash}
-TORCH_LOGS="graph_breaks" python train.py
-```
-
-:::
-
-The output reports each break location and reason: `Graph break in user code at file.py:15/Reason: call to unsupported function print`. Minimizing graph breaks is key to performance: move unsupported operations outside compiled regions, replace data-dependent control flow with conditional execution (`torch.where`), or accept eager execution for inherently dynamic sections.
+Diagnosis is direct: running with the `TORCH_LOGS=graph_breaks` environment variable set prints each break's location and reason during execution. Minimizing graph breaks is key to performance: move unsupported operations outside compiled regions, replace data-dependent control flow with conditional execution (`torch.where`), or accept eager execution for inherently dynamic sections.
 
 ##### Compilation modes and backends {.unnumbered}
 
-As a project matures from prototyping to production, engineers progressively increase compilation aggressiveness\index{Graph Compilation!compilation modes}. The default mode (`mode='default'`) applies moderate optimization with fast compilation (5--30 seconds for transformer models), making it suitable for development and training where compilation overhead is amortized over many iterations. When deploying an inference server with fixed input shapes, `mode='reduce-overhead'` minimizes Python interpreter overhead by aggressively capturing operations and enabling CUDA graphs, captured GPU command sequences that can be replayed with lower launch overhead, improving throughput by 20--40 percent over the default. For production training that will run for days, `mode='max-autotune'` generates and benchmarks multiple implementation variants for each operation, increasing compilation time (minutes to hours for large models) but improving runtime performance by 10--30 percent. This progression---default for development, reduce-overhead for inference, max-autotune for long training runs---mirrors the Compilation Continuum principle we formalize later.
+As a project matures from prototyping to production, engineers progressively increase compilation aggressiveness\index{Graph Compilation!compilation modes}. The decision is a trade between compilation time and runtime aggressiveness, summarized in @tbl-compile-modes.
+
+| **Mode**          | **Compilation cost**                  | **Runtime effect**                                                                                                  | **Use when**                                                               |
+|:------------------|:--------------------------------------|:--------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------|
+| `default`         | Fast (5--30 s for transformer models) | Moderate optimization                                                                                               | Development and training, where compilation amortizes over many iterations |
+| `reduce-overhead` | Moderate                              | CUDA graphs replay captured command sequences, cutting launch overhead; 20--40 percent throughput gain over default | Inference serving with fixed input shapes                                  |
+| `max-autotune`    | Minutes to hours for large models     | Benchmarks implementation variants per operation; 10--30 percent gain over default                                  | Production training that runs for days                                     |
+
+: **torch.compile Mode Selection**: Each mode trades one-time compilation cost for runtime aggressiveness. The progression---default for development, reduce-overhead for inference, max-autotune for long training runs---mirrors the Compilation Continuum principle we formalize later. {#tbl-compile-modes tbl-colwidths="[16,21,38,25]"}
 
 The compilation mode controls *how aggressively* to optimize; the backend controls *what target* to optimize for. TorchInductor (the default) generates Triton kernels for CUDA and C++ for CPU, providing the best general-purpose performance for both training and inference. When cross-platform deployment is required, the ONNX Runtime backend\index{ONNX Runtime!compilation backend} exports the FX graph to ONNX format, enabling execution on CPUs, GPUs, mobile, and edge devices---though limited ONNX operation coverage may cause more graph breaks. For maximum inference throughput on NVIDIA GPUs, the TensorRT backend\index{TensorRT!inference compiler} compiles to NVIDIA's inference engine with deeper layer fusion, lower-precision kernels, and kernel autotuning, often achieving 1.5--2$\times$ speedup over TorchInductor. The trade-off is clear: each backend narrows the target to unlock deeper optimization, echoing the flexibility-vs.-performance axis that distinguishes eager from graph execution.
 
@@ -1785,9 +1709,9 @@ The measurement discipline has three parts. Use `torch.cuda.synchronize()` becau
 
 First execution includes compilation time: 5--10 s for small models, 30--60 s for BERT-base transformers, 5--10 min for GPT-3 scale models. This overhead is amortized across training (compile once, train for thousands of iterations) but impacts development iteration time. Compiled kernels are cached on disk; subsequent runs skip compilation.
 
-Compilation adds overhead: 100--500 MB for FX graph construction, 500 MB--2 GB peak during Triton compilation, 10--100 MB per compiled graph for storage. Runtime memory usage is similar to eager mode (kernel fusion can reduce intermediate tensors but compiled code may allocate temporary buffers). Compiled models typically use 90--110 percent of eager mode memory.
+Compilation itself consumes transient memory, from hundreds of MB to roughly 2 GB at peak during code generation, but runtime memory stays close to eager levels (typically 90--110 percent): kernel fusion saves intermediates while compiled code may allocate temporary buffers.
 
-Errors in compiled code produce stack traces pointing to generated code, not source Python code. Print statements inside compiled regions cause graph breaks (executed eagerly, not compiled). For debugging, remove `@torch.compile` to revert to eager execution, fix bugs, then re-enable compilation. Use `TORCH_COMPILE_DEBUG=1` for verbose compilation logs.
+Debugging also changes character under compilation: errors produce stack traces pointing to generated code, not source Python. The practical strategy is to remove `@torch.compile`, debug in eager execution, then re-enable compilation once the fix is verified.
 
 ##### When to use torch.compile {.unnumbered}
 
@@ -2069,7 +1993,7 @@ $$ {#eq-dispatch-overhead}
 
 When Overhead Ratio $> 1$, the model is overhead-bound. Compilation provides maximum benefit for overhead-bound workloads because it eliminates per-operation dispatch.
 
-From the case study in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1, we can quantify this effect.
+The training-step trace in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1, at the end of this chapter, works this effect through end to end; the numbers that follow preview it.
 
 ```{python}
 #| echo: false
@@ -2140,7 +2064,7 @@ class DispatchTaxSmallLarge:
     t_sw_math = fmt_math(f"T_{{\\text{{sw}}}} \\approx {large_dispatch_us} \\, \\mu s")
 ```
 
-This cumulative latency acts as a per-call tax on execution. Whether that tax dominates depends on how the hardware execution time $T_{\text{hw}}$ compares to the software overhead $T_{\text{sw}}$ (both measured in seconds), and the regimes split sharply by model size.
+Summed over $N_{\text{ops}}$ operations, the per-operation dispatch cost $t_{\text{dispatch}}$ accumulates into a per-call tax on execution. Whether that tax dominates depends on how the hardware execution time $T_{\text{hw}}$ compares to the software overhead $T_{\text{sw}}$ (both measured in seconds), and the regimes split sharply by model size.
 
 ::: {#nbk-frameworks-dispatch-tax .callout-notebook title="The dispatch tax"}
 
@@ -2643,62 +2567,19 @@ Mixed-precision training offers a third graph-level approach: store selected act
 
 Production training systems require fine-grained control over gradient flow that goes beyond the default backward pass. Three categories of control arise in practice. First, **selective gradient computation**\index{Selective gradient computation}: transfer learning and fine-tuning require freezing subsets of parameters, which the framework supports through `requires_grad=False` flags and the `.detach()` mechanism described earlier. Second, **gradient inspection and modification**\index{Gradient inspection}: debugging vanishing or exploding gradients, implementing per-tensor gradient clipping, and logging gradient statistics all require intercepting gradients mid-computation, which frameworks expose through hook APIs. Third, **custom differentiation rules**\index{Custom Differentiation Rule}: operations not in the framework's built-in library (custom CUDA kernels, novel activation functions, domain-specific operations) require user-defined forward and backward implementations.
 
-These control mechanisms share a common systems design: they are callback-based extensions that the autograd engine invokes at specific points during graph traversal, without modifying the core differentiation algorithm. This extensibility pattern allows the framework to maintain a single optimized backward pass while supporting arbitrarily complex gradient manipulation. In practice, this control appears through a few recurring PyTorch mechanisms: retained graphs, accumulated gradients, custom backward rules, hooks, and safe detachment.
+These control mechanisms share a common systems design: they are callback-based extensions that the autograd engine invokes at specific points during graph traversal, without modifying the core differentiation algorithm. This extensibility pattern allows the framework to maintain a single optimized backward pass while supporting arbitrarily complex gradient manipulation. In practice, this control appears through a few recurring PyTorch mechanisms: retained graphs, accumulated gradients, custom backward rules, hooks, and safe detachment. @Tbl-autograd-control maps each mechanism to what it controls and what it costs.
 
-Graph retention\index{Graph Retention!multiple backward passes} is a memory trade-off, not a harmless flag. By default, `backward()` frees the graph after use. Multiple backward passes for multi-loss optimization or higher-order derivatives require `retain_graph=True`, at the cost of doubled memory, as shown in @lst-retain-graph.
+| **Mechanism**                                                       | **What it controls**                                                                                          | **Cost or hazard**                                                                                             |
+|:--------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|
+| `retain_graph=True`\index{Graph Retention!multiple backward passes} | Keeps the graph alive for multiple backward passes (multi-loss objectives, higher-order derivatives)          | Roughly doubles graph memory; by default `backward()` frees the graph after one use                            |
+| Gradient accumulation                                               | Successive backward passes sum into `.grad` until `zero_grad()` resets them, enabling large effective batches | Forgetting the reset silently mixes gradients across optimization steps                                        |
+| Custom `autograd.Function`                                          | User-defined forward and backward rules for operations outside the built-in library                           | Moves the differentiation contract (what to save, how to differentiate) to the implementer                     |
+| Gradient hooks\index{Gradient Hook!inspection and modification}     | Inspecting or modifying gradients mid-traversal (clipping, logging, debugging)                                | Runs arbitrary Python per registered tensor on every backward pass                                             |
+| `.detach()`\index{Gradient Flow!tensor detachment}                  | Cuts gradient flow at a chosen boundary (frozen layers, inference outputs)                                    | The legacy `.data` attribute bypasses autograd and silently corrupts gradients; clone before in-place mutation |
 
-::: {#lst-retain-graph lst-cap="**Retaining Computation Graph**: Use retain_graph=True to run multiple backward passes on the same graph, useful for multi-loss optimization or higher-order derivatives."}
+: **Autograd Control Mechanisms**: The recurring extension points the autograd engine exposes during graph traversal, what each controls, and the memory or correctness cost each carries. {#tbl-autograd-control tbl-colwidths="[20,42,38]"}
 
-```{.python}
-x = torch.tensor([2.0], requires_grad=True)
-y = x**2
-
-
-# First backward pass - graph is freed by default
-y.backward()
-print(x.grad)  # tensor([4.])
-
-
-# Second backward on SAME y fails - graph was freed
-# y.backward()  # RuntimeError: graph already freed!
-
-
-# Solution: retain_graph=True keeps graph for multiple passes
-x.grad.zero_()
-y = x**2
-y.backward(retain_graph=True)  # First pass, keep graph
-y.backward()  # Second pass works, graph freed after this
-```
-
-:::
-
-Gradient accumulation is the complementary correctness hazard: the framework preserves accumulated gradients until the training loop resets them. As @lst-gradient-accumulation demonstrates, without calling `zero_grad()`, successive backward passes sum their gradients:
-
-::: {#lst-gradient-accumulation lst-cap="**Gradient Accumulation Behavior**: Gradients accumulate across backward passes by default. Use zero_grad() to reset gradients before each optimization step."}
-
-```{.python}
-x = torch.tensor([1.0], requires_grad=True)
-
-# First backward pass
-y = x * 2
-y.backward()
-print(x.grad)  # tensor([2.])
-
-# Second backward pass (without zero_grad)
-y = x * 3
-y.backward()
-print(x.grad)  # tensor([5.]) = 2 + 3 (accumulated!)
-
-# Reset gradients
-x.grad.zero_()
-y = x * 3
-y.backward()
-print(x.grad)  # tensor([3.])
-```
-
-:::
-
-Custom autograd functions\index{Custom Autograd Function!backward implementation} move part of the differentiation contract from the framework to the implementer. The developer explicitly specifies what to save for the backward pass and how to compute gradients. @Lst-custom-autograd-function shows the pattern:
+One mechanism deserves a closer look because it exposes the differentiation contract most directly. Custom autograd functions\index{Custom Autograd Function!backward implementation} move part of that contract from the framework to the implementer: the developer explicitly specifies what to save for the backward pass and how to compute gradients. @Lst-custom-autograd-function shows the pattern:
 
 ::: {#lst-custom-autograd-function lst-cap="**Custom Autograd Function**: Implement forward and backward methods to define custom differentiable operations, explicitly specifying tensors to save for gradient computation."}
 
@@ -2734,58 +2615,6 @@ output.backward()
 print(
     x.grad, y.grad, z.grad
 )  # tensor([3.]), tensor([2.]), tensor([1.])
-```
-
-:::
-
-Gradient hooks\index{Gradient Hook!inspection and modification} expose a controlled interception point during backpropagation: they let a system inspect or modify gradients without changing the core traversal algorithm, as shown in @lst-gradient-hooks:
-
-::: {#lst-gradient-hooks lst-cap="**Gradient Hooks**: Register hooks on tensors to inspect or modify gradients during backpropagation, useful for debugging, gradient clipping, or custom gradient manipulation."}
-
-```{.python}
-def gradient_hook(grad):
-    print(f"Gradient: {grad}")
-    # Modify gradient (e.g., gradient clipping)
-    return grad.clamp(-1.0, 1.0)
-
-
-x = torch.tensor([2.0], requires_grad=True)
-x.register_hook(gradient_hook)
-
-y = x * 10
-y.backward()
-# Prints: Gradient: tensor([10.])
-# x.grad contains clamped value: tensor([1.])
-```
-
-:::
-
-Detachment is the mechanism for intentionally cutting gradient flow\index{Gradient Flow!tensor detachment}; cloning the result before in-place mutation preserves that boundary. @Lst-detach-vs-data illustrates how the legacy `.data` attribute can silently corrupt gradient computation through in-place operations:
-
-::: {#lst-detach-vs-data lst-cap="**Safe Gradient Detachment**: Use `.detach()` to break gradient flow, and use `.detach().clone()` before in-place mutation. The legacy `.data` attribute can silently corrupt gradients through in-place operations."}
-
-```{.python}
-x = torch.tensor([1.0], requires_grad=True)
-y = x * 2
-
-# SAFE: clone before in-place mutation
-z_safe = y.detach().clone()
-z_safe.mul_(100)
-# y is unchanged; z_safe is outside the computation graph
-
-# READ-ONLY VIEW: .detach() shares storage with y
-z_view = y.detach()
-# Do not modify z_view in-place unless you intend to mutate y
-
-# DANGEROUS: .data bypasses autograd entirely
-# In-place modifications corrupt the computation graph
-z_unsafe = y.data
-z_unsafe.mul_(100)  # This modifies y's underlying storage!
-# y.backward() now computes wrong gradients
-
-# Best practice: always use .detach() for inference
-with torch.no_grad():
-    inference_output = model(x).detach()
 ```
 
 :::
@@ -2843,6 +2672,8 @@ optimizer.step()
 ```
 
 :::
+
+##### Optimizer state and checkpointing {.unnumbered}
 
 ```{python}
 #| echo: false
@@ -2925,8 +2756,6 @@ state = optimizer.state_dict()
 
 :::
 
-The mathematics of automatic differentiation were established decades before deep learning's resurgence. What changed was the systems engineering. Before framework automation, implementing gradient computation for a single fully connected layer meant writing separate forward and backward functions, manually tracking intermediate values, and verifying mathematical correctness across dozens of operations. A modern transformer involves hundreds of operations with complex dependencies; manual gradient derivation for attention, layer normalization, and residual connections would require months of careful work per architecture variant.
-
 ::: {#lst-checkpoint-save-load lst-cap="**Checkpoint Save and Load**: Save both model parameters and optimizer state to properly resume training with correct momentum and adaptive learning rate values."}
 
 ```{.python}
@@ -2945,6 +2774,8 @@ optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 ```
 
 :::
+
+The mathematics of automatic differentiation were established decades before deep learning's resurgence. What changed was the systems engineering. Before framework automation, implementing gradient computation for a single fully connected layer meant writing separate forward and backward functions, manually tracking intermediate values, and verifying mathematical correctness across dozens of operations. A modern transformer involves hundreds of operations with complex dependencies; manual gradient derivation for attention, layer normalization, and residual connections would require months of careful work per architecture variant.
 
 The breakthrough was turning this manual process into software infrastructure. A single matrix multiplication requires different gradient computations depending on which inputs require gradients, tensor shapes, hardware capabilities, and memory constraints. Autograd systems handle these variations transparently, which is why the rate of architectural innovation accelerated after frameworks matured. The mathematics did not change; software engineering made the mathematics practical to apply at scale.
 
@@ -3241,7 +3072,7 @@ The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompu
 
 #### Tensor structure and dimensions {#sec-ml-frameworks-tensor-structure-dimensions-4a14}
 
-A tensor generalizes scalars, vectors, and matrices to arbitrary dimensions. The hierarchy\index{Tensor!rank hierarchy} is straightforward: a scalar is a rank-0 tensor (single value), a vector is rank-1 (sequence of values), and a matrix is rank-2 (rows and columns). Higher ranks extend this pattern through nesting, so a rank-3 tensor is a stack of matrices---compare all four ranks side by side in @fig-tensor-data-structure-a to see how each level adds a new axis of organization.
+A tensor generalizes the familiar hierarchy\index{Tensor!rank hierarchy} of scalars (rank 0), vectors (rank 1), and matrices (rank 2) to arbitrary rank, with each rank adding one axis of organization; @fig-tensor-data-structure-a compares the four lowest ranks side by side.
 
 ::: {#fig-tensor-data-structure-a fig-env="figure" fig-pos="htb" fig-cap="**Tensor Rank Hierarchy**: Four shapes illustrating tensor ranks from left to right: a single value (rank 0, scalar), a column of values (rank 1, vector), a grid of values (rank 2, matrix), and a cube of values (rank 3, three-dimensional tensor)." fig-alt="Four shapes showing tensor ranks left to right: single box labeled Rank 0, vertical column of numbers labeled Rank 1, 2D grid of numbers labeled Rank 2, and 3D cube labeled Rank 3."}
 
@@ -3292,7 +3123,7 @@ minimum width=18,minimum height=18](3R){0};
 
 :::
 
-This rank hierarchy maps directly onto ML data. A color image is a rank-3 tensor: height by width by three channels (red, green, blue). @Fig-tensor-data-structure-b breaks this apart, stacking the three color channels and illustrating how a single photograph becomes a three-layer numerical grid. Stacking a batch of $B$ images adds a fourth dimension. In PyTorch's channel-first convention this produces a rank-4 tensor of shape $[B, 3, H, W]$; in channel-last layouts the same batch is $[B, H, W, 3]$. Every convolutional layer in a vision model consumes and produces rank-4 image tensors, which is why the tensor abstraction is so central to framework design.
+In ML data terms, a color image is a rank-3 tensor of height, width, and three color channels (@fig-tensor-data-structure-b), and a batch of $B$ images is rank-4: $[B, 3, H, W]$ in PyTorch's channel-first convention, $[B, H, W, 3]$ in channel-last layouts. That layout choice matters because every convolutional layer consumes and produces these rank-4 tensors, and the layout determines the memory access pattern the hardware sees.
 
 ::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as RGB Tensor**: Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. Credit: Niklas Lang." fig-alt="Three stacked grids in red, green, and blue representing RGB channels. Dimension labels show width three pixels, height three pixels, and three color channels, forming a rank-3 tensor for image data."}
 
@@ -4588,9 +4419,7 @@ JAX makes the most radical trade-off by treating the model as a pure function[^f
 
 [^fn-onnx-portability]: **ONNX**: The "fragmentation" ONNX addresses is that the framework used for model development may not match the runtime best suited to the deployment target. ONNX defines a hardware-agnostic graph representation that decouples the two, reducing the engineer-months of manual model conversion that would otherwise be required each time a deployment target changes. The accepted trade-off is that ONNX export can lose framework-specific optimizations or custom operators, requiring fallback implementations. \index{ONNX!framework portability}
 
-No framework optimizes all three problems simultaneously; each makes deliberate trade-offs that shape everything from API design to performance characteristics. PyTorch prioritizes the Execution Problem (eager debugging, dynamic graphs) at the cost of optimization potential. TensorFlow prioritizes the Abstraction Problem (unified deployment from cloud to microcontroller) at the cost of development flexibility. JAX reframes the Differentiation Problem (composable function transformations) at the cost of a steeper learning curve. These are the same design tensions examined in the preceding subsections, now visible even in a ten-line program. Exploratory research often benefits from PyTorch's debugging immediacy, deployment pipelines often benefit from TensorFlow's graph/export path, and algorithmic research can benefit from JAX's composable transformations. Each philosophy shapes code syntax, team workflows, debugging practices, and deployment pipelines, which is why framework migration costs are measured in engineer-months rather than engineer-days.
-
-These design differences are not arbitrary; they reflect different trade-offs between compiler visibility and human iteration latency. TensorFlow's graph compilation can reduce runtime overhead and intermediate data movement through ahead-of-time optimization. PyTorch's eager execution reduces human iteration latency outside the iron-law runtime equation, often at the cost of less compiler visibility until a graph-capture path is used. JAX's functional style gives XLA more freedom to fuse, reorder, and parallelize operations, reducing launch overhead and data movement when the traced program is stable.
+No framework optimizes all three problems simultaneously, and the ten-line program makes the trade visible in source code rather than buried in compiler internals: where state lives, when the graph exists, and what the compiler is allowed to see. The underlying currency is compiler visibility vs. human iteration latency. Graph capture and ahead-of-time compilation reduce runtime overhead and intermediate data movement; eager evaluation shortens the human iteration loop, outside the iron-law runtime equation, at the cost of compiler visibility until a graph-capture path is used; functional purity gives XLA the freedom to fuse, reorder, and parallelize when the traced program is stable. Each philosophy also shapes code syntax, team workflows, debugging practices, and deployment pipelines, which is why framework migration costs are measured in engineer-months rather than engineer-days.
 
 ### Runtime constraint map {#sec-ml-frameworks-quantitative-framework-efficiency-comparison-3b77}
 
