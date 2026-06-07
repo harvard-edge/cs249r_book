@@ -65,7 +65,7 @@ from mlsysim.core.units import *
 # │          mlsysim.fmt (domain formatters, fmt, sci, fmt_math, check)
 # │ Exports: TrainingScenarios.{cost,flops,loss,fp16}
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Models, ReferenceStats
 from mlsysim.fmt import (
     fmt_int,
     fmt,
@@ -83,13 +83,16 @@ from mlsysim.fmt import (
 
 class TrainingScenarios:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2_cost_2019 = 50_000
-    gpt4_cost_est = 100 * MILLION
-    gpt2_fwd_flops = 3e9
-    gpt2_total_flops = 1e19
+    # 2026-06-07: all GPT-2/GPT-4 anchors now come from MLSysIM (registry-first
+    # rule) — these were chapter-local literals before.
+    gpt2_model = Models.Language.GPT2
+    gpt2_cost_2019 = ReferenceStats.TrainingCostAnchors.Gpt2Cost2019
+    gpt4_cost_est = ReferenceStats.TrainingCostAnchors.Gpt4CostEstimate
+    gpt2_fwd_flops = gpt2_model.inference_flops
+    gpt2_total_flops = gpt2_model.training_ops
     adam_example_model = Models.Language.Llama2_7B
     adam_example_params = adam_example_model.parameters
-    ckpt_layers = 48
+    ckpt_layers = gpt2_model.layers
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     adam_inference = adam_example_model.size_in_bytes(BYTES_FP16)
@@ -105,12 +108,18 @@ class TrainingScenarios:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(adam_training_memory_multiplier == 6, "Adam training state should be 6x FP16 inference weights")
     check(ckpt_count == 7, f"sqrt(48) checkpoint count should round to 7, got {ckpt_count}")
+    # Prose says "over a hundred billion such passes" at ~3x the forward cost
+    # each; keep the stated total budget consistent with that narrative
+    # (2026-06-07: budget was 1e19, contradicting both the pass count and the
+    # \$50K 2019 cost anchor by ~100x).
+    implied_passes = gpt2_total_flops / (gpt2_fwd_flops * 3)
+    check(1e11 <= implied_passes < 1e12, f"FLOP budget implies {implied_passes:.1e} passes; prose claims over a hundred billion")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     gpt2_training_cost_2019_str = fmt_usd(gpt2_cost_2019, precision=0, commas=True)
     gpt4_training_cost_est_str = fmt_usd(gpt4_cost_est, scale="M", precision=0, commas=False)
     gpt2_fwd_flops_str = fmt_sci(gpt2_fwd_flops)
-    gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops * flop)
+    gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops)
     adam_example_params_b_str = fmt_params(adam_example_params, precision=0)
     adam_inference_gb_str = fmt_memory(adam_inference, unit=GB, precision=0, commas=False)
     adam_grad_gb_str = fmt_memory(adam_grad, unit=GB, precision=0, commas=False)
@@ -143,11 +152,11 @@ class TrainingScenarios:
 
 The frameworks examined in @sec-ml-frameworks provided the execution substrate: computational graphs that schedule operations, automatic differentiation that computes gradients, and hardware abstractions that target diverse accelerators. Those tools make a single training step possible. This chapter confronts what happens when that step must execute billions of times, and what systems engineering is required to do so within practical time and budget constraints.
 
-Running GPT-2 once costs a fraction of a cent, while training GPT-2\index{Training!cost asymmetry}\index{Training!inference vs. training} cost approximately `{python} TrainingScenarios.gpt2_training_cost_2019_str` in 2019. A GPT-4-class model may cost only a few cents to run once, yet its training run is commonly estimated near `{python} TrainingScenarios.gpt4_training_cost_est_str`[^fn-training-cost-scaling]. This million-to-one cost asymmetry, introduced in the Purpose section, reflects the sheer volume of computation required: tens of billions of forward passes, each followed by a backward pass, repeated across datasets measured in terabytes.
+Running GPT-2 once costs a fraction of a cent, while training GPT-2\index{Training!cost asymmetry}\index{Training!inference vs. training} cost approximately `{python} TrainingScenarios.gpt2_training_cost_2019_str` in 2019. A GPT-4-class model may cost only a few cents to run once, yet its training run is commonly estimated near `{python} TrainingScenarios.gpt4_training_cost_est_str`[^fn-training-cost-scaling]. This million-to-one cost asymmetry, introduced in the Purpose section, reflects the sheer volume of computation required: over a hundred billion forward passes, each followed by a backward pass, repeated across datasets measured in terabytes.
 
 [^fn-training-cost-scaling]: **Training Cost Scaling**\index{Training Cost!scaling trajectory}: The roughly 2,000$\times$ cost increase from GPT-2--scale training [@radford2019language] to GPT-4--class training (widely cited nine-figure estimates in industry reporting) over several years reflects three compounding factors: parameter counts, training-token budgets, and accelerator fleets all grew dramatically. Exact GPT-4 training details were not disclosed, but public estimates commonly place such training runs in the regime of tens of thousands of A100-class accelerators for months, not single-node clusters. This trajectory made training one of the largest capital expenditures for organizations building models at that scale, exceeding the annual R&D budget of most universities.
 
-A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations. Training requires tens of billions of such passes, and each backward pass costs approximately twice as much as the forward pass, yielding a computational budget on the order of `{python} TrainingScenarios.gpt2_total_flops_str` [@radford2019language]. This asymmetry makes training systems engineering a distinct discipline and explains why access to training infrastructure increasingly determines who can participate in AI development.
+A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations. Training requires over a hundred billion such passes, and each backward pass costs approximately twice as much as the forward pass, yielding a computational budget on the order of `{python} TrainingScenarios.gpt2_total_flops_str` [@radford2019language]. This asymmetry makes training systems engineering a distinct discipline and explains why access to training infrastructure increasingly determines who can participate in AI development.
 
 ::: {#dfn-training-training-systems .callout-definition title="Training systems"}
 
@@ -303,7 +312,7 @@ class GPT2LighthouseSpecs:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
     gpt2_model = Models.Language.GPT2
     gpt2_params = gpt2_model.parameters
-    gpt2_total_flops = 1e19
+    gpt2_total_flops = gpt2_model.training_ops
     gpt2_weights_fp16 = gpt2_model.size_in_bytes(BYTES_FP16)
     gpt2_weights_fp32 = gpt2_model.size_in_bytes(BYTES_FP32)
     gpt2_dataset_size = gpt2_model.training_dataset_size
@@ -313,7 +322,7 @@ class GPT2LighthouseSpecs:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────────
     gpt2_params_b_str = fmt_params(gpt2_params)
-    gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops * flop)
+    gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops)
     gpt2_weights_fp16_gb_str = fmt_memory(gpt2_weights_fp16, unit=GB, precision=0, commas=False)
     gpt2_weights_fp32_gb_str = fmt_memory(gpt2_weights_fp32, unit=GB, precision=0, commas=False)
     gpt2_dataset_size_gb_str = fmt_memory(gpt2_dataset_size, unit=GB, precision=0, commas=False)
