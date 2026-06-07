@@ -745,7 +745,7 @@ class HbmMemoryBudget:
     check(total_max < hbm_capacity, "Budget should fit within 80 GB HBM under these assumptions")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    hbm_capacity_gb_str = fmt_memory(hbm_capacity, unit=GB, precision=1, commas=False)
+    hbm_capacity_gb_str = fmt_memory_capacity(hbm_capacity, unit=GiB)
     weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=2, commas=False)
     optimizer_per_gpu_gb_str = fmt_memory(optimizer_per_gpu, unit=GB, precision=1, commas=False)
     gradient_per_gpu_gb_str = fmt_memory(gradient_per_gpu, unit=GB, precision=1, commas=False)
@@ -1016,6 +1016,7 @@ class LocalCacheRoi:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     lc_compute_ms_str = fmt_time(t_compute_ms, 'millisecond', precision=0, commas=False)
     lc_remote_io_ms_str = fmt_time(t_io_remote_ms, 'millisecond', precision=0, commas=False)
+    lc_local_io_ms_str = fmt_time(t_io_local_ms, 'millisecond', precision=0, commas=False)
     lc_util_remote_str = fmt_percent(util_remote / 100, precision=1, commas=False, style='prose')
     lc_util_local_str = fmt_percent(util_local / 100, precision=1, commas=False, style='prose')
 ```
@@ -1031,7 +1032,7 @@ GPU utilization $(\eta_{\text{hw}})$ is the fraction of step time spent in compu
 
 1. **Remote Only**\index{Warm Cache!remote-read baseline}: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + `{python} LocalCacheRoi.lc_remote_io_ms_str`) $\approx$ `{python} LocalCacheRoi.lc_util_remote_str`.
 2. **Local Cache**\index{Warm Cache!local NVMe cache}: Using prefetching into local NVMe reduces the exposed I/O wait to near zero.
-   - New Util: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + 10) $\approx$ `{python} LocalCacheRoi.lc_util_local_str`.
+   - New Util: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + `{python} LocalCacheRoi.lc_local_io_ms_str`) $\approx$ `{python} LocalCacheRoi.lc_util_local_str`.
 
 **Systems insight**: Local storage is a *GPU utilization multiplier*. In this scenario, adding a \$500 NVMe drive to a \$30,000 GPU node recovers 15 percent of the GPU's capacity that was previously wasted on I/O wait. Across a 1,000-GPU cluster, that utilization gain is equivalent to adding 150 GPUs worth of useful work without buying 150 more accelerators. In ML infrastructure, local NVMe is not auxiliary; it is the physical buffer that decouples expensive compute from unpredictable shared storage.
 
@@ -2106,9 +2107,7 @@ class BuildVsBuyStorageEconomics:
     net_annual_savings_str = fmt_usd(net_annual_savings, precision=0)
     reads_per_year_str = fmt_rate(reads_per_year, "reads/year", precision=0, commas=False)
     cloud_cost_gb_month_str = fmt_usd(cloud_cost_gb_month, precision=2, commas=False, per="GB/month")
-    breakeven_low_years_str = fmt_time(breakeven_low_years, 'year', precision=1, commas=False, style='word')
-    breakeven_high_years_str = fmt_time(breakeven_high_years, 'year', precision=1, commas=False, style='word')
-    breakeven_range_str = MarkdownStr(f"{breakeven_low_years_str}--{breakeven_high_years_str}")
+    breakeven_range_str = fmt_range(breakeven_low_years, breakeven_high_years, unit="years", precision=1)
 ```
 
 The decision to **build vs. buy**\index{Build vs. Buy!storage} storage infrastructure hinges on the trade-off between the high capital expenditure of an on-premises parallel file system and the recurring operational expenditure of cloud object storage. A 1-petabyte Lustre deployment costs roughly \$3–5 million in hardware, plus an additional `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` per year in operational overhead for power, cooling, and engineering support. Storing 1 PB in a cloud object store at `{python} BuildVsBuyStorageEconomics.cloud_cost_gb_month_str` costs `{python} BuildVsBuyStorageEconomics.cloud_storage_annual_usd_str` per year for storage alone. However, egress fees for accessing the data dominate the total cost: reading that petabyte at `{python} BuildVsBuyStorageEconomics.reads_per_year_str` adds `{python} BuildVsBuyStorageEconomics.cloud_egress_annual_usd_str` in data transfer fees. Under these assumptions, annual cloud delivery costs `{python} BuildVsBuyStorageEconomics.cloud_total_annual_usd_str`; after subtracting `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` of on-premises operations, the net savings are `{python} BuildVsBuyStorageEconomics.net_annual_savings_str` per year. The resulting hardware break-even is roughly `{python} BuildVsBuyStorageEconomics.breakeven_range_str`, not 18 to 24 months. Reaching an 18- to 24-month payback requires a hotter workload with many more full-dataset reads per year, lower capital expense, or non-egress drivers such as checkpoint latency and shared-namespace requirements. For our running example, the `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized corpus is much smaller than 1 PB, so the local-storage case is driven more by latency, repeated experiments, and checkpoint staging than by one-year egress savings alone.
@@ -2216,7 +2215,7 @@ class CheckpointModelIntro:
 
 After a thousand GPUs have been training for six hours, a power supply failure turns checkpoint storage\index{Checkpoint!storage architecture} into the difference between resuming quickly and repeating hours of work. The decisive storage questions are how quickly the most recent checkpoint was saved, where it resides, and whether it can be read back. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. This section focuses on the storage architecture that minimizes $T_{\text{write}}$, the time the training pipeline pauses to save a checkpoint.
 
-A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.optimizer_state_gb_str` of FP32 optimizer state for momentum and variance, learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
+A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.optimizer_state_gb_str` of FP32 optimizer state for momentum and variance, (the mixed-precision footprint convention used throughout this book: FP32 master weights are not separately persisted), learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
 
 ::: {.column-margin}
 ![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Margin ladder comparing a naive checkpoint storm taking about 23.9 minutes with a ZeRO-3 sharded write taking about 11.2 seconds, annotated as a 128 times reduction."}
@@ -2251,24 +2250,24 @@ class CheckpointStormDefinition:
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     weights = params * bytes_fp16
-    gradients = params * bytes_fp16
     master_weights = params * bytes_fp32
     adam_moments = params * 2 * bytes_fp32
     optimizer_state = master_weights + adam_moments
-    zero3_total = weights + gradients + optimizer_state
+    # 2026-06-07: gradients dropped from the WRITE total — they are consumed
+    # by the optimizer step and are not part of the durable checkpoint.
+    zero3_total = weights + optimizer_state
     zero3_write = zero3_total / fabric_bw
     naive_total = weights * replicas
     naive_write = naive_total / fabric_bw
     naive_write_min = naive_write.to(minute)
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(zero3_total.to(GB).magnitude == 1120, "70B sharded training-state total should be 1,120 GB with master weights")
+    check(abs(zero3_total.to(GB).magnitude - 980) < 1e-6, "70B checkpoint write should be 980 GB: FP16 weights + FP32 master + moments, no gradients")
     check(1420 < naive_write.to(second).magnitude < 1440, "Naive write at 100 GB/s should be about 1,430 s for Training_1K replicas")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
-    gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
     optimizer_state_gb_str = fmt_memory(optimizer_state, unit=GB, precision=0, commas=False)
     zero3_total_tb_str = fmt_memory(zero3_total, unit=TB, precision=2, commas=False)
     zero3_write_s_str = fmt_time(zero3_write, second, precision=1, commas=False, style='word')
@@ -2282,7 +2281,7 @@ class CheckpointStormDefinition:
 
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
 
-1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model in FP16 (`{python} CheckpointStormDefinition.weights_gb_str` of weights) trained across `{python} CheckpointStormDefinition.replicas_str` with vanilla data parallelism, every replica holds a complete copy and a naive checkpoint generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
+1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model in FP16 (`{python} CheckpointStormDefinition.weights_gb_str` of weights) trained across `{python} CheckpointStormDefinition.replicas_str` with vanilla data parallelism, every replica holds a complete copy and a naive checkpoint generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state; gradients are consumed by the update and are not persisted, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
 2.  **Observation**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes 1,400 seconds, checkpointing every 100 steps means spending $1400/(100 \times 10) = 140\%$ of compute time on checkpointing—more time saving state than doing useful training.
 
