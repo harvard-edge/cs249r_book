@@ -29,7 +29,11 @@ from .memory import (
 )
 from .communication import (
     calc_alpha_beta_crossover,
+    calc_ring_collective_data_factor,
     calc_bisection_bandwidth,
+    calc_ring_allreduce_data_factor,
+    calc_ring_allreduce_latency_steps,
+    calc_ring_allreduce_latency_time,
     calc_hop_latency,
     calc_oversubscription_effect,
     calc_point_to_point_time,
@@ -86,6 +90,10 @@ __all__ = [
     "calc_paged_kv_cache_size",
     "calc_ring_allreduce_time",
     "calc_point_to_point_time",
+    "calc_ring_allreduce_data_factor",
+    "calc_ring_collective_data_factor",
+    "calc_ring_allreduce_latency_steps",
+    "calc_ring_allreduce_latency_time",
     "calc_alpha_beta_crossover",
     "calc_oversubscription_effect",
     "calc_bisection_bandwidth",

@@ -16,6 +16,10 @@ from mlsysim.physics import (
     calc_point_to_point_time,
     calc_ring_tree_crossover_size,
     calc_double_binary_tree_allreduce_time,
+    calc_ring_allreduce_data_factor,
+    calc_ring_collective_data_factor,
+    calc_ring_allreduce_latency_steps,
+    calc_ring_allreduce_latency_time,
     calc_oversubscription_effect,
     calc_bisection_bandwidth,
     calc_hop_latency,
@@ -205,6 +209,20 @@ class TestRingAllreduce:
         result = calc_ring_allreduce_time(M, N, beta, alpha)
         expected = 2 * 7 / 8 * (1e9 / 50e9) + 2 * 7 * 500e-9
         assert result.m_as(ureg.second) == pytest.approx(expected, rel=1e-4)
+
+
+class TestRingAllreduceFactors:
+    """Reusable ring AllReduce factors and latency helpers."""
+
+    def test_data_factor(self):
+        assert calc_ring_allreduce_data_factor(1) == 0.0
+        assert calc_ring_allreduce_data_factor(8) == pytest.approx(14 / 8)
+        assert calc_ring_collective_data_factor(8) == pytest.approx(7 / 8)
+
+    def test_latency_steps_and_time(self):
+        assert calc_ring_allreduce_latency_steps(1) == 0
+        assert calc_ring_allreduce_latency_steps(8) == 14
+        assert calc_ring_allreduce_latency_time(8, Q_("500 ns")).to(ureg.second).magnitude == pytest.approx(7e-6)
 
 
 class TestPointToPointTransfer:

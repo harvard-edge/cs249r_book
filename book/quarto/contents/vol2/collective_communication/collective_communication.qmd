@@ -125,7 +125,12 @@ class AllReduceCost:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import calc_ring_allreduce_time
+    from mlsysim.physics import (
+        calc_ring_allreduce_time,
+        calc_ring_allreduce_data_factor,
+        calc_ring_allreduce_latency_time,
+        calc_ring_allreduce_latency_steps,
+    )
     from mlsysim import Models, Hardware, Systems
 
     m = Models.Language.Llama2_70B
@@ -143,9 +148,9 @@ class AllReduceCost:
     ring_total = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_ndr.bandwidth, latency_s=alpha).to(ms)
 
     # Break out terms for pedagogical display
-    ring_bw_factor = 2 * (n_gpus - 1) / n_gpus
+    ring_bw_factor = calc_ring_allreduce_data_factor(n_gpus)
     ring_bw_time = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_bw.bandwidth, latency_s=0 * second).to(ms)
-    ring_lat_time = (2 * (n_gpus - 1) * alpha).to(ms)
+    ring_lat_time = calc_ring_allreduce_latency_time(n_gpus, alpha).to(ms)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ring_total > 5000 * ms, f"AllReduce ({ring_total.to(ms).magnitude:.0f}ms) should be significant (>5s) for 70B BF16 model.")
@@ -159,7 +164,7 @@ class AllReduceCost:
     ring_bw_factor_value_str = fmt_ratio(ring_bw_factor, precision=2, commas=False)
     ib_bw_gb_per_s_str = fmt_qty(ib_bw.bandwidth, GB / second, precision=0, commas=False)
     alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
-    lat_steps_str = fmt(2 * (n_gpus - 1), precision=0, commas=False)
+    lat_steps_str = fmt(calc_ring_allreduce_latency_steps(n_gpus), precision=0, commas=False)
     params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
 ```
 
@@ -550,7 +555,12 @@ The calculation uses the bandwidth hierarchy before the chapter formalizes it: r
 from mlsysim import Hardware, Models, Systems
 from mlsysim.core.units import BILLION, GB, byte, microsecond, ms, param, second
 from mlsysim.fmt import check, fmt, fmt_count, fmt_qty, fmt_time
-from mlsysim.physics import calc_ring_allreduce_time
+from mlsysim.physics import (
+    calc_ring_allreduce_time,
+    calc_ring_allreduce_data_factor,
+    calc_ring_collective_data_factor,
+    calc_ring_allreduce_latency_time,
+)
 
 class LlamaBudgetCalc:
     """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
@@ -569,7 +579,7 @@ class LlamaBudgetCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Hierarchical AllReduce—Step 1: Intra-node ReduceScatter
-    intra_payload = gradient_bf16 * (gpus_per_node_llama - 1) / gpus_per_node_llama
+    intra_payload = gradient_bf16 * calc_ring_collective_data_factor(gpus_per_node_llama)
     intra_rs_time = (intra_payload / nvlink_bw).to(ms)
 
     # Step 2: Inter-node AllReduce (reduced payload)
@@ -1420,18 +1430,18 @@ class HierarchicalAllreduceCalc:
         latency_s=0 * second,
     ).to(ms)
 
-    intra_data = (gradient * (gpus_per_node - 1) / gpus_per_node).to(MB)  # ~875 MB
+    intra_data = (gradient * calc_ring_collective_data_factor(gpus_per_node)).to(MB)  # ~875 MB
     intra_rs = (intra_data / nvlink_bw).to(ms)
 
     inter_data = (gradient / gpus_per_node).to(MB)  # 125 MB
-    inter_ring_factor = 2 * (n_nodes_har - 1) / n_nodes_har
+    inter_ring_factor = calc_ring_allreduce_data_factor(n_nodes_har)
     inter_bw = calc_ring_allreduce_time(
         message_bytes=inter_data,
         n_gpus=n_nodes_har,
         bandwidth_bytes_s=ib_bw,
         latency_s=0 * second,
     ).to(ms)
-    inter_lat = (2 * (n_nodes_har - 1) * ib_alpha).to(ms)
+    inter_lat = calc_ring_allreduce_latency_time(n_nodes_har, ib_alpha).to(ms)
     inter_time = inter_bw + inter_lat
 
     intra_ag = intra_rs  # symmetric

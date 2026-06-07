@@ -605,7 +605,7 @@ class Scaling8GPU:
     """Scenario: 8-GPU scaling within a single node."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import calc_ring_allreduce_time
+    from mlsysim.physics import calc_ring_allreduce_time, calc_ring_allreduce_data_factor
 
     single_gpu_step_s = 1.8
     batch_per_gpu_val = 16
@@ -621,7 +621,7 @@ class Scaling8GPU:
     t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw, 0 * ms)
     comm_8gpu_ms_val = t_comm.to(ms).magnitude
 
-    sync_size = gradient_tensor * (2 * (gpus_per_node - 1) / gpus_per_node)
+    sync_size = gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node)
 
     total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
     # Speedup = (N * b/T_N) / (b/T_1) = N * (T_1 / T_N)
@@ -681,6 +681,7 @@ from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Scaling32GPU:
+    from mlsysim.physics import calc_ring_allreduce_data_factor
     NETWORK_10G_BW = Systems.Fabrics.Ethernet_10G.bandwidth
     single_gpu_step_s = 1.8
     compute_32gpu_ms = 1800
@@ -692,12 +693,14 @@ class Scaling32GPU:
     gpus = 32
     batch_per_gpu_val = 16
     global_batch_val = batch_per_gpu_val * gpus
-    ring_factor = 2 * (gpus - 1) / gpus
+    ring_factor = calc_ring_allreduce_data_factor(gpus)
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     # Intra-node phase moves the same gradient volume over the same NVLink as
     # the 8-GPU scenario (~5.8 ms). 2026-06-07: was a hardcoded 0.35 ms,
     # contradicting the value computed two scenarios earlier.
-    intra_node_ms_val = (gradient_tensor * (2 * (gpus_per_node_val - 1) / gpus_per_node_val) / nvlink_bw).to(ms).magnitude
+    intra_node_ms_val = (
+        gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node_val) / nvlink_bw
+    ).to(ms).magnitude
     from mlsysim.physics import calc_ring_allreduce_time
 
     sync_size = gradient_tensor * ring_factor
@@ -2435,6 +2438,8 @@ from mlsysim.solvers import DistributedModel
 from mlsysim.fmt import fmt, check, fmt_memory
 
 class TensorParallel3DTraffic:
+    from mlsysim.physics import calc_ring_allreduce_data_factor
+
     # ┌── 1. LOAD ─────────────────────────────────────────
     tp = 8
     pp = 16
@@ -2449,7 +2454,7 @@ class TensorParallel3DTraffic:
     # ┌── 2. EXECUTE ──────────────────────────────────────
     total_gpus = tp * pp * dp
     activation_payload = microbatch * sequence_length * hidden_dim * dtype_bytes
-    ring_factor = 2 * (tp - 1) / tp
+    ring_factor = calc_ring_allreduce_data_factor(tp)
     per_allreduce = activation_payload * ring_factor
     full_forward = per_allreduce * allreduces_per_layer * layers
     full_forward_backward = full_forward * 2

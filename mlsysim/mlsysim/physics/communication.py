@@ -53,6 +53,45 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     return (bw_term + lat_term).to(ureg.second)
 
 
+def calc_ring_allreduce_data_factor(n_gpus):
+    """Ring AllReduce bandwidth factor: 2*(N-1)/N.
+
+    This multiplier appears in the bandwidth term of the ring AllReduce
+    alpha-beta model:
+
+    ``T_ring = 2*(N-1)/N * M/beta + 2*(N-1)*alpha``
+    """
+    validate_at_least(n_gpus, 1, "n_gpus")
+    if n_gpus == 1:
+        return 0.0
+    return 2 * (n_gpus - 1) / n_gpus
+
+
+def calc_ring_collective_data_factor(n_gpus):
+    """Ring single-stage collective factor: (N-1)/N.
+
+    This multiplier appears in ring AllGather/ReduceScatter/AllToAll bandwidth terms.
+    """
+    validate_at_least(n_gpus, 1, "n_gpus")
+    if n_gpus == 1:
+        return 0.0
+    return (n_gpus - 1) / n_gpus
+
+
+def calc_ring_allreduce_latency_steps(n_gpus):
+    """Number of startup latency terms in ring AllReduce: 2(N-1)."""
+    validate_at_least(n_gpus, 1, "n_gpus")
+    return 2 * (n_gpus - 1)
+
+
+def calc_ring_allreduce_latency_time(n_gpus, latency_s):
+    """Ring AllReduce latency term only: 2(N-1) × alpha."""
+    validate_at_least(n_gpus, 1, "n_gpus")
+    alpha = _ensure_unit(latency_s, ureg.second, "latency_s")
+    validate_nonnegative(alpha, "latency_s")
+    return (calc_ring_allreduce_latency_steps(n_gpus) * alpha).to(ureg.second)
+
+
 def calc_alpha_beta_crossover(alpha_s, bandwidth_bytes_s):
     """Crossover size for the α-β model where α = n/β."""
 
