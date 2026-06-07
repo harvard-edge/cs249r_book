@@ -497,7 +497,7 @@ class HierarchicalAllReduceDebug:
 **Observation**:
 
 - **Observed latency**: `{python} HierarchicalAllReduceDebug.observed_ms_str` (well below the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring upper bound, but about `{python} HierarchicalAllReduceDebug.residual_ms_str` above the hierarchical ideal)
-- **Bandwidth utilization**: Only `{python} HierarchicalAllReduceDebug.ib_util_pct_str` of theoretical InfiniBand throughput
+- **Bandwidth utilization**: Switch counters during the inter-node phase show only `{python} HierarchicalAllReduceDebug.ib_util_pct_str` of theoretical InfiniBand throughput on the affected uplinks (end-to-end efficiency is lower still, since the intra-node phases add time)
 - **Network counters**: Show congestion on specific switch uplinks
 
 **Diagnosis**: NCCL is already using a hierarchical algorithm (`{python} HierarchicalAllReduceDebug.observed_ms_str` vs. the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring prediction confirms this). The remaining gap between observed and modeled latency can come from switch congestion on a handful of inter-node uplinks, effective-bandwidth loss, or implementation overhead, not from a fully flat algorithm.
@@ -685,13 +685,18 @@ class Scaling32GPU:
     compute_32gpu_ms = 1800
     params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude
     net_bw = NETWORK_10G_BW
-    intra_node_ms_val = 0.35
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    gpus_per_node_val = Systems.Nodes.DGX_H100.accelerators_per_node
     training_hours_1gpu = 25
     gpus = 32
     batch_per_gpu_val = 16
     global_batch_val = batch_per_gpu_val * gpus
     ring_factor = 2 * (gpus - 1) / gpus
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
+    # Intra-node phase moves the same gradient volume over the same NVLink as
+    # the 8-GPU scenario (~5.8 ms). 2026-06-07: was a hardcoded 0.35 ms,
+    # contradicting the value computed two scenarios earlier.
+    intra_node_ms_val = (gradient_tensor * (2 * (gpus_per_node_val - 1) / gpus_per_node_val) / nvlink_bw).to(ms).magnitude
     sync_size = gradient_tensor * ring_factor
     inter_node_ms_val = (sync_size / net_bw).to(ms).magnitude
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms_val
@@ -755,7 +760,11 @@ class GradAccumScenario:
     batch_per_gpu = 16
     accum_steps = 4
     compute_8gpu_ms = 1800
-    comm_8gpu_ms = 0.35
+    # Same NVLink AllReduce as the 8-GPU scaling scenario (~5.8 ms).
+    # 2026-06-07: was a hardcoded 0.35 ms contradicting that computation.
+    comm_8gpu_ms = (
+        (Models.Language.GPT2.size_in_bytes(BYTES_FP16) * (2 * (n_gpus_ga - 1) / n_gpus_ga) / Hardware.Cloud.H100.nvlink.bandwidth).to(ms).magnitude
+    )
     training_hours_1gpu = 25
     hourly_rate = 128
     baseline_cost_val = 3021
