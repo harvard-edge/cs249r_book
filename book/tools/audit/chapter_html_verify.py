@@ -100,6 +100,25 @@ HTML_MATH_RENDER_PATTERNS = [
         "literal dollar-times",
         re.compile(r"\$\s*\\times\s*\$"),
     ),
+    # 2026-06-07: added after mutation testing — an unclosed `$...` in QMD
+    # renders as a literal dollar + broken math in reader-visible prose
+    # ("$() = 1 - (1 - p)^N.") and nothing below caught it. These scan
+    # _visible_text(), which excludes rendered math spans, so legitimate
+    # `\(...\)` MathJax sources never match.
+    (
+        "unrendered math delimiter",
+        re.compile(r"\\\(|\\\)|\\\[|\\\]"),
+    ),
+    (
+        # `)` deliberately excluded: "(bandwidth/$)" and "per 1M tokens ($)"
+        # are legitimate currency parentheticals.
+        "unrendered math: $ before symbol",
+        re.compile(r"\$\s*[(=\\]"),
+    ),
+    (
+        "unresolved crossref",
+        re.compile(r"\?@(?:sec|fig|tbl|eq|lst|algo)-|(?<![\w./])@(?:sec|fig|tbl|eq|lst|algo)-[\w-]+"),
+    ),
 ]
 
 
@@ -221,7 +240,14 @@ def _visible_text(html: Path) -> str:
     content = soup.find("main") or soup.body
     if not content:
         return ""
-    for tag in content(["script", "style", "annotation", "mjx-assistive-mml"]):
+    for tag in content(["script", "style", "annotation", "mjx-assistive-mml", "pre", "code"]):
+        tag.decompose()
+    # Rendered math spans legitimately contain raw `\(...\)` source (MathJax
+    # processes client-side), and pseudocode blocks contain raw algorithmic
+    # LaTeX (pseudocode.js renders client-side too); exclude both so the
+    # unrendered-math patterns only fire on LaTeX that leaked OUTSIDE a
+    # client-rendered container. (2026-06-07)
+    for tag in content.find_all(class_=re.compile(r"\bmath\b|pseudocode")):
         tag.decompose()
     return re.sub(r"\s+", " ", content.get_text(separator=" "))
 

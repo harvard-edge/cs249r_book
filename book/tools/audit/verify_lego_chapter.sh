@@ -20,6 +20,9 @@ CH="${2:?chapter short name, e.g. introduction}"
 LOG="/tmp/lego_verify_${VOL}_${CH}.log"
 PROGRESS="$REPO/book/tools/audit/artifacts/lego_chapter_progress.md"
 REPORTS="$REPO/book/tools/audit/artifacts/lego_chapter_reports"
+# Artifacts are gitignored — a fresh checkout/worktree has no reports dir and
+# set -e kills the run at the first cp below. (2026-06-07)
+mkdir -p "$REPORTS"
 CELLS_SNAP="$REPORTS/${VOL}_${CH}_cells.json"
 PROSE_SNAP="$REPORTS/${VOL}_${CH}_prose.json"
 

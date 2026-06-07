@@ -178,15 +178,30 @@ def _find_html_contexts(value: str, paragraphs: list[str]) -> list[str]:
     return found[:3]
 
 
-def _duplicate_unit_after_value(rendered: str) -> str | None:
-    val = rendered.strip()
+def _duplicate_unit_after_value(qmd_line: str, ref: str, value: str) -> str | None:
+    """Closed-formatter value followed by the same unit typed in prose.
+
+    2026-06-07: rewritten after mutation testing showed the original version
+    received the WHOLE substituted line and compared the line's end against the
+    unit suffixes — it could effectively never fire ("150 ms ms" passed). Now
+    checks the prose immediately after each `{python} ref` token in the QMD
+    source line against the unit the formatter already emitted.
+    """
+    val = value.strip()
     for suffix in UNIT_SUFFIXES:
         if not val.endswith(suffix):
             continue
         unit = suffix.strip()
-        tail = rendered[rendered.find(val) + len(val) :] if val in rendered else ""
-        if re.search(rf"(?i)\b{re.escape(unit)}\b", tail[:30]):
-            return f"duplicate unit '{unit}' after closed formatter value"
+        token = f"`{{python}} {ref}`"
+        start = 0
+        while True:
+            idx = qmd_line.find(token, start)
+            if idx == -1:
+                break
+            tail = qmd_line[idx + len(token) :]
+            if re.match(rf"(?i)\s*{re.escape(unit)}\b", tail):
+                return f"duplicate unit '{unit}' after closed formatter value"
+            start = idx + len(token)
     return None
 
 
@@ -212,7 +227,7 @@ def _mechanical_issues(
         issues.append("value not found in HTML narrative")
     if not html_contexts:
         issues.append("no HTML prose context extracted for this ref")
-    dup = _duplicate_unit_after_value(qmd_rendered)
+    dup = _duplicate_unit_after_value(qmd_line, ref, value)
     if dup:
         issues.append(dup)
     # Spurious .0 is covered by chapter-level audit_html; skip here — wide HTML
