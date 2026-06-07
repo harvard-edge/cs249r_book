@@ -721,7 +721,7 @@ $$
 # │ Exports: class_count_value_str, from_decimals_str, to_decimals_str,
 # │          decimal_digits_removed_str, bits_removed_str, retained_bits_str,
 # │          top_k_neighbors_str,
-# │          topk_bits_str, topk_eliminated_pct_str
+# │          topk_eliminated_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt, fmt_count, fmt_percent
@@ -741,12 +741,12 @@ class OutputRoundingLeakage:
     retained_bins = 10**to_decimals + 1
     retained_bits = math.log2(retained_bins)
     fp32_reduction_bits = fp32_bits - retained_bits
-    topk_bits = math.log2(class_count / top_k)
     topk_eliminated_pct = (1 - top_k / class_count) * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(bits_removed - 13.2877) < 0.01, "Decimal rounding bit reduction changed")
     check(abs(retained_bits - 6.6582) < 0.01, "Two-decimal retained bits changed")
+    check(topk_eliminated_pct > 99, "Top-k should eliminate most softmax entries")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     class_count_value_str = fmt(class_count, precision=0, commas=False)
@@ -756,7 +756,6 @@ class OutputRoundingLeakage:
     bits_removed_str = fmt_count(bits_removed, precision=1, commas=False, label="bit", allow_fractional=True)
     retained_bits_str = fmt_count(retained_bits, precision=1, commas=False, label="bit", allow_fractional=True)
     top_k_neighbors_str = fmt(top_k, precision=0, commas=False)
-    topk_bits_str = fmt_count(topk_bits, precision=1, commas=False, label="bit", allow_fractional=True)
     topk_eliminated_pct_str = fmt_percent(topk_eliminated_pct / 100, precision=1, commas=False, style='prose')
 ```
 
@@ -768,7 +767,7 @@ $$
 \text{output} = \{(c_i, p_i) : i \in \text{top-}k\}
 $$
 
-For $k=$ `{python} OutputRoundingLeakage.top_k_neighbors_str` on a `{python} OutputRoundingLeakage.class_count_value_str`-class problem, this reduces information leakage by approximately `{python} OutputRoundingLeakage.topk_bits_str` per query. Legitimate users often need only the top few predictions, while an extractor benefits from the full distribution.
+For $k=$ `{python} OutputRoundingLeakage.top_k_neighbors_str` on a `{python} OutputRoundingLeakage.class_count_value_str`-class problem, the API returns only those top scores instead of the full softmax vector, eliminating `{python} OutputRoundingLeakage.topk_eliminated_pct_str` of the distribution entries an extractor could otherwise observe per query. Legitimate users often need only the top few predictions, while an extractor benefits from the full distribution.
 
 ::: {.column-margin}
 ![](images/svg/security_privacy_output_leakage_ladder.svg){width="100%" fig-alt="Two-rung ladder comparing a full 1000-score output distribution with top-5 returned scores, annotated as a 200 times reduction in exposed scores."}
@@ -844,7 +843,9 @@ class DefenseOverheadAnalysis:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     queries_per_class = extraction_queries / class_count
     extraction_cost_usd = extraction_queries * price_per_query_usd
-    legit_monthly_cost_usd = legit_queries_per_day * billing_days * price_per_query_usd
+    legit_monthly_cost_usd = paid_tier_price_usd_month
+    paid_tier_days_to_extract = extraction_queries / paid_tier_queries
+    paid_tier_extraction_cost_usd = (paid_tier_days_to_extract / billing_days) * paid_tier_price_usd_month
     false_positive_reviews_per_day = daily_users * false_positive_pct / 100
     fidelity_drop_pct = output_accuracy_no_defense_pct - output_accuracy_with_defense_pct
     total_defense_ms = monitoring_ms + perturbation_ms
@@ -855,6 +856,8 @@ class DefenseOverheadAnalysis:
 
     check(total_defense_ms == 2.5, f"Expected 2.5 ms overhead, got {total_defense_ms}")
     check(extraction_cost_usd == training_cost_usd, "Extraction cost should match training cost")
+    check(legit_monthly_cost_usd == paid_tier_price_usd_month, "Legitimate user should pay the flat paid tier")
+    check(paid_tier_extraction_cost_usd < extraction_cost_usd, "Tier-capped extraction should cost less than pay-as-you-go")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     from mlsysim.fmt import fmt, fmt_count, fmt_percent, fmt_pp, fmt_rate, fmt_time, fmt_usd
@@ -875,8 +878,9 @@ class DefenseOverheadAnalysis:
     alert_interquery_ms_str = fmt_time(alert_interquery_ms, unit="millisecond", precision=0, commas=False)
     price_per_query_usd_str = fmt_usd(price_per_query_usd, precision=3, commas=False, per="query")
     extraction_cost_k_usd_str = fmt_usd(extraction_cost_usd, scale="K", commas=False)
+    paid_tier_days_to_extract_str = fmt_time(paid_tier_days_to_extract, 'day', precision=0, commas=False, style='word')
+    paid_tier_extraction_cost_usd_str = fmt_usd(paid_tier_extraction_cost_usd, precision=0, commas=False)
     legit_queries_per_day_str = fmt_rate(legit_queries_per_day, "queries/day", precision=0, commas=False)
-    billing_days_str = fmt_time(billing_days, 'day', precision=0, commas=False, style='word')
     legit_monthly_cost_usd_str = fmt_usd(legit_monthly_cost_usd, precision=0, commas=False)
     output_accuracy_no_defense_pct_str = fmt_percent(output_accuracy_no_defense_pct / 100, precision=0, commas=False, style='prose')
     output_accuracy_with_defense_pct_str = fmt_percent(output_accuracy_with_defense_pct / 100, precision=0, commas=False, style='prose')
@@ -902,9 +906,9 @@ class DefenseOverheadAnalysis:
 1.  **Cap collection**: The free tier allows `{python} DefenseOverheadAnalysis.free_tier_queries_per_day_str`, the paid tier costs `{python} DefenseOverheadAnalysis.paid_tier_price_usd_month_str` for `{python} DefenseOverheadAnalysis.paid_tier_queries_per_day_str`, and enterprise access requires authentication plus monitoring.
 2.  **Monitor probing**: The monitoring path watches for systematic measurement behavior, including more than `{python} DefenseOverheadAnalysis.alert_queries_per_day_str` from one user or median inter-query gaps below `{python} DefenseOverheadAnalysis.alert_interquery_ms_str`; the lightweight detector adds `{python} DefenseOverheadAnalysis.monitoring_ms_str` per query.
 3.  **Shape outputs**: Output shaping rounds confidences to `{python} OutputRoundingLeakage.to_decimals_str` decimal places, retaining about `{python} OutputRoundingLeakage.retained_bits_str` from each rounded scalar probability, and returns only the top-`{python} OutputRoundingLeakage.top_k_neighbors_str` classes, eliminating `{python} OutputRoundingLeakage.topk_eliminated_pct_str` of distribution entries.
-4.  **Price extraction**: At `{python} DefenseOverheadAnalysis.price_per_query_usd_str`, `{python} DefenseOverheadAnalysis.extraction_queries_m_str` extraction queries cost `{python} DefenseOverheadAnalysis.extraction_cost_k_usd_str`, which matches the training cost in this scenario.
+4.  **Price extraction**: At pay-as-you-go `{python} DefenseOverheadAnalysis.price_per_query_usd_str` (above tier caps), `{python} DefenseOverheadAnalysis.extraction_queries_m_str` extraction queries cost `{python} DefenseOverheadAnalysis.extraction_cost_k_usd_str`, matching the training cost in this scenario. An attacker limited to the `{python} DefenseOverheadAnalysis.paid_tier_price_usd_month_str` tier (`{python} DefenseOverheadAnalysis.paid_tier_queries_per_day_str`) would need `{python} DefenseOverheadAnalysis.paid_tier_days_to_extract_str` and about `{python} DefenseOverheadAnalysis.paid_tier_extraction_cost_usd_str` total---cheaper on paper, but tier metering, authentication, and probing detection make sustained collection impractical before quotas intervene.
 
-**Impact**: The stack changes extraction economics without pricing out normal use. A legitimate user sending `{python} DefenseOverheadAnalysis.legit_queries_per_day_str` for `{python} DefenseOverheadAnalysis.billing_days_str` pays `{python} DefenseOverheadAnalysis.legit_monthly_cost_usd_str` per month. The surrogate's accuracy drops from `{python} DefenseOverheadAnalysis.output_accuracy_no_defense_pct_str` without defenses to `{python} DefenseOverheadAnalysis.output_accuracy_with_defense_pct_str` with defenses, a `{python} DefenseOverheadAnalysis.fidelity_drop_pp_str` reduction in this scenario. Legitimate top-5 accuracy remains `{python} DefenseOverheadAnalysis.top5_accuracy_pct_str`, close to the `{python} DefenseOverheadAnalysis.baseline_top5_accuracy_pct_str` baseline. Monitoring and output shaping add `{python} DefenseOverheadAnalysis.total_defense_ms_str` on top of `{python} DefenseOverheadAnalysis.base_inference_ms_str` inference, or `{python} DefenseOverheadAnalysis.overhead_pct_str` overhead, while `{python} DefenseOverheadAnalysis.false_positive_pct_str` of users are flagged for manual review (`{python} DefenseOverheadAnalysis.false_positive_reviews_per_day_str`).
+**Impact**: The stack changes extraction economics without pricing out normal use. A legitimate user sending `{python} DefenseOverheadAnalysis.legit_queries_per_day_str` within the paid tier pays `{python} DefenseOverheadAnalysis.legit_monthly_cost_usd_str` per month. The surrogate's accuracy drops from `{python} DefenseOverheadAnalysis.output_accuracy_no_defense_pct_str` without defenses to `{python} DefenseOverheadAnalysis.output_accuracy_with_defense_pct_str` with defenses, a `{python} DefenseOverheadAnalysis.fidelity_drop_pp_str` reduction in this scenario. Legitimate top-5 accuracy remains `{python} DefenseOverheadAnalysis.top5_accuracy_pct_str`, close to the `{python} DefenseOverheadAnalysis.baseline_top5_accuracy_pct_str` baseline. Monitoring and output shaping add `{python} DefenseOverheadAnalysis.total_defense_ms_str` on top of `{python} DefenseOverheadAnalysis.base_inference_ms_str` inference, or `{python} DefenseOverheadAnalysis.overhead_pct_str` overhead, while `{python} DefenseOverheadAnalysis.false_positive_pct_str` of users are flagged for manual review (`{python} DefenseOverheadAnalysis.false_positive_reviews_per_day_str`).
 
 **Systems insight**: The API becomes safer because information per response, query volume, detection, and price all move in the same direction. No single defense solves extraction, but layered defenses make the attack slower, easier to detect, and less economically attractive.
 
@@ -2294,10 +2298,10 @@ Together with secure multi-party computation and gradient-compression choices fr
 
 The chapter introduced seven hardware-level attack categories, four hardware-security primitives, and a framework mapping deployment contexts to defenses (@tbl-defense-selection-framework). Test whether you can apply that mapping.
 
-- [ ] Which of the four primitives in @tbl-hw-security-comparison most directly defends against fault injection on model weights, and which defends against side-channel extraction of those weights from the inference pipeline?
-- [ ] For an edge inference deployment, which combination of primitives defends against the three primary threats listed in @tbl-defense-selection-framework: physical access, side-channel attacks, and model extraction?
-- [ ] Can you explain why supply chain compromise is the hardest hardware threat to defend against with the four primitives in @tbl-hw-security-comparison, and which row of @tbl-defense-selection-framework treats it as a primary threat?
-- [ ] Given a fault injection attack and a counterfeit hardware attack against the same deployment, which is detectable at runtime by a TEE and which requires hardware attestation at boot?
+- [ ] **Primitive matching**: Which of the four primitives in @tbl-hw-security-comparison most directly defends against fault injection on model weights, and which defends against side-channel extraction of those weights from the inference pipeline?
+- [ ] **Edge defense stack**: For an edge inference deployment, which combination of primitives defends against the three primary threats listed in @tbl-defense-selection-framework: physical access, side-channel attacks, and model extraction?
+- [ ] **Supply-chain gap**: Can you explain why supply chain compromise is the hardest hardware threat to defend against with the four primitives in @tbl-hw-security-comparison, and which row of @tbl-defense-selection-framework treats it as a primary threat?
+- [ ] **TEE vs. attestation**: Given a fault injection attack and a counterfeit hardware attack against the same deployment, which is detectable at runtime by a TEE and which requires hardware attestation at boot?
 
 :::
 

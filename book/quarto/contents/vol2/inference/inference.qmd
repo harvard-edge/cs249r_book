@@ -153,10 +153,10 @@ The perceived responsiveness of interactive systems depends on both **Time to Fi
 
 Verify your understanding of when to move from single-machine to distributed inference:
 
-- [ ] A 13B model (26 GB weights) fits on a single A100. If the throughput requirements double, should you use model sharding or horizontal replication?
-- [ ] For a real-time speech-to-text service, the primary bottleneck is **inter-token latency**. Does adding more GPUs through data-parallel replication reduce this latency?
-- [ ] Why is **Model Sharding** mandatory for a 175B model on 80 GB GPUs, regardless of the request volume?
-- [ ] Identify the trade-off: what distribution overheads might make sharding across machines worse than staying within a single node?
+- [ ] **Shard vs. replicate**: A 13B model (26 GB weights) fits on a single A100. If the throughput requirements double, should you use model sharding or horizontal replication?
+- [ ] **Latency floor**: For a real-time speech-to-text service, the primary bottleneck is **inter-token latency**. Does adding more GPUs through data-parallel replication reduce this latency?
+- [ ] **Mandatory sharding**: Why is **Model Sharding** mandatory for a 175B model on 80 GB GPUs, regardless of the request volume?
+- [ ] **Cross-node overhead**: Identify the trade-off: what distribution overheads might make sharding across machines worse than staying within a single node?
 
 :::
 
@@ -335,6 +335,7 @@ class InferenceEconomics:
         lifetime_queries_latex_math = fmt_math(f"{mantissa:.2f} \\times 10^{{{exp}}}")
     else:
         lifetime_queries_latex_math = fmt_math(f"{lifetime_queries_val:,.0f}")
+    training_hardware_cost_str = fmt_usd(training_hardware_cost, commas=False)
     serving_cost_total_str = fmt_usd(serving_total_cost_val)
     training_cost_total_str = fmt_usd(training_total_cost)
     leverage_ratio_mult_str = fmt_multiple(leverage_ratio, precision=1, commas=False)
@@ -354,7 +355,7 @@ class InferenceEconomics:
     engineering_mult_str = fmt_multiple(engineering_multiplier, commas=False, precision=0)
 ```
 
-The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.n_gpu_hours_str` of hardware at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, amplified by a `{python} InferenceEconomics.engineering_mult_str` engineering overhead for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
+The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.training_hardware_cost_str` hardware for `{python} InferenceEconomics.n_gpu_hours_str` at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, plus `{python} InferenceEconomics.engineering_mult_str` additional engineering cost for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
 
 | **Application**               | **Training Cost** | **Annual Serving Cost** |     **Ratio**     |
 |:------------------------------|:-----------------:|:-----------------------:|:-----------------:|
@@ -603,10 +604,10 @@ Each level has distinct optimization levers. @Tbl-serving-hierarchy maps these l
 
 Verify your understanding of where specific optimizations sit within the serving hierarchy:
 
-- [ ] Which level of the hierarchy is responsible for managing GPU memory waste to increase concurrent request capacity?
-- [ ] If you implement **Speculative Decoding** to reduce token latency for a single request, at which level are you operating?
-- [ ] **Load Balancing** algorithms (like Power-of-Two-Choices) operate at the Service level. What is their primary optimization target?
-- [ ] True or False: Multi-tenancy and resource isolation are primarily Request-level concerns.
+- [ ] **Memory level**: Which level of the hierarchy is responsible for managing GPU memory waste to increase concurrent request capacity?
+- [ ] **Speculative decoding level**: If you implement **Speculative Decoding** to reduce token latency for a single request, at which level are you operating?
+- [ ] **Load balancing**: Load-balancing algorithms (like Power-of-Two-Choices) operate at the Service level. What is their primary optimization target?
+- [ ] **Isolation level**: True or False: Multi-tenancy and resource isolation are primarily Request-level concerns.
 
 :::
 
@@ -705,10 +706,10 @@ The choice between stateless and stateful serving is *not a framework feature* b
 
 Verify your understanding of how workload constraints drive architectural choices:
 
-- [ ] Why is **preemptive scheduling** more critical for LLMs than for vision models?
-- [ ] For which workload type is **stateful serving** (requiring sticky routing) a fundamental requirement?
-- [ ] Explain why **feature-parallel batching** is the standard for recommendation systems but not for LLMs.
-- [ ] Which dimension (batching, memory, scheduling, topology, state) is primarily affected by the **outlier features** problem in quantization?
+- [ ] **LLM vs. vision**: Why is **preemptive scheduling** more critical for LLMs than for vision models?
+- [ ] **Stateful workloads**: For which workload type is **stateful serving** (requiring sticky routing) a fundamental requirement?
+- [ ] **RecSys standard**: Explain why **feature-parallel batching** is the standard for recommendation systems but not for LLMs.
+- [ ] **Quantization impact**: Which dimension (batching, memory, scheduling, topology, state) is primarily affected by the **outlier features** problem in quantization?
 
 :::
 
@@ -1731,9 +1732,9 @@ $$\text{Lookups per shard} = \frac{\text{QPS} \times \text{lookups/request}}{\te
 
 In this scenario, the rate is `{python} RecsysLatencyBreakdown.lookups_per_shard_per_second_million_str` per second per shard.
 
-Single-threaded processing cannot sustain that rate. Instead, the system uses a batch accumulation window\index{Batching!batch, accumulation window} of `{python} RecsysLatencyBreakdown.accumulation_window_ms_str`, which yields batches of `{python} RecsysLatencyBreakdown.requests_per_batch_str` at `{python} RecsysLatencyBreakdown.platform_qps_str` and about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` lookups per shard per batch.
+Single-threaded processing cannot sustain that rate. Instead, the system uses a batch accumulation window\index{Batching!batch, accumulation window} of `{python} RecsysLatencyBreakdown.accumulation_window_ms_str`, which yields batches of `{python} RecsysLatencyBreakdown.requests_per_batch_str` at `{python} RecsysLatencyBreakdown.platform_qps_str` and about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` per shard per batch.
 
-Each embedding shard processes about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` in a batched operation, achieving high memory bandwidth utilization through sequential memory access patterns.
+Each embedding shard processes `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` in a batched operation, achieving high memory bandwidth utilization through sequential memory access patterns.
 
 As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{Latency!breakdown} composition includes request routing, batch accumulation, embedding lookup\index{Embedding Lookup}, feature processing, and ranking:
 
@@ -1853,10 +1854,11 @@ The final selection problem is to match the batching mechanism to model shape, t
 
 Verify your understanding of different batching mechanics:
 
-- [ ] A vision service has highly uniform input sizes and predictable traffic. Which is more appropriate: **static batching** or **continuous batching**?
-- [ ] For an LLM serving chat requests, why does the "Waste Ratio" ($1 - \bar{S}/S_{\text{max}}$) collapse to zero when moving from static to continuous batching?
-- [ ] Explain why **adaptive batching** (shrinking the window when traffic is high) reduces P99 latency without sacrificing throughput.
-- [ ] In **feature-parallel batching** for RecSys, which component of the fleet stack acts as the primary bottleneck: the GPU's Tensor Cores or the distributed Embedding Store's memory bandwidth?
+- [ ] **Static vs. continuous**: A vision service has highly uniform input sizes and predictable traffic. Which is more appropriate: **static batching** or **continuous batching**?
+- [ ] **Waste ratio**: For an LLM serving chat requests, why does the "Waste Ratio" ($1 - \bar{S}/S_{\text{max}}$) collapse to zero when moving from static to continuous batching?
+- [ ] **Adaptive batching**: Explain why **adaptive batching** (shrinking the window when traffic is high) reduces P99 latency without sacrificing throughput.
+- [ ] **RecSys bottleneck**: In **feature-parallel batching** for RecSys, which component of the fleet stack acts as the primary bottleneck: the GPU's Tensor Cores or the distributed Embedding Store's memory bandwidth?
+- [ ] **KV-cache budget**: For a 7B model serving 2,048-token contexts, estimate the KV-cache memory per request and roughly how many concurrent requests fit in 40 GB of free HBM, and why that capacity, not compute, usually caps the achievable batch size.
 
 :::
 
@@ -4524,7 +4526,7 @@ Consider an inference platform serving 10 tenants on shared H100 GPUs:
 - GPU utilization: `{python} NoisyNeighborQuotaScenario.gpu_util_pct_str`
 - All SLOs met
 
-Tenant 3 bursts (5$\times$ baseline). Without isolation, @tbl-inference-noisy-neighbor-no-isolation records how the burst cascades into SLO violations for all ten tenants on the shared pool:
+Tenant 3 bursts to `{python} NoisyNeighborQuotaScenario.tenant_burst_qps_str` (5$\times$ baseline). @Tbl-inference-noisy-neighbor-no-isolation records how the burst cascades into SLO violations for all ten tenants on the shared pool:
 
 | **Tenant**       | **QPS**  | **P99 Latency** | **SLO Status** |
 |:-----------------|:--------:|:---------------:|:--------------:|
@@ -4533,9 +4535,13 @@ Tenant 3 bursts (5$\times$ baseline). Without isolation, @tbl-inference-noisy-ne
 | **Tenant 3**     |   500    |      45 ms      |    Violated    |
 | **Tenants 4-10** | 100 each |     22-30 ms    |    Violated    |
 
-: **Noisy neighbor without isolation**: Per-tenant QPS, p99 latency, and SLO status when tenant 3 bursts to `{python} NoisyNeighborQuotaScenario.tenant_burst_qps_str` on a shared GPU pool with no resource quotas. {#tbl-inference-noisy-neighbor-no-isolation tbl-colwidths="[26,20,24,30]"}
+: **Noisy neighbor without isolation (unprotected pool)**: All tenants violate their latency SLO when one tenant bursts. {#tbl-inference-noisy-neighbor-no-isolation tbl-colwidths="[26,20,24,30]"}
 
-**With per-tenant quotas** (@tbl-inference-noisy-neighbor-quotas): impact contained to the offending tenant alone.
+:::
+
+::: {#nbk-inference-noisy-neighbor-quotas .callout-notebook title="Noisy neighbor with per-tenant quotas"}
+
+Enabling per-tenant quotas contains the impact to the offending tenant alone (@tbl-inference-noisy-neighbor-quotas):
 
 | **Tenant**       |                              **QPS (actual)**                              |                      **P99 Latency**                       |                             **SLO Status**                             |
 |:-----------------|:--------------------------------------------------------------------------:|:----------------------------------------------------------:|:----------------------------------------------------------------------:|

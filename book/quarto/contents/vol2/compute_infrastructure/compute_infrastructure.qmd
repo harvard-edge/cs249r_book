@@ -759,10 +759,10 @@ The interposer itself is a passive silicon substrate with etched wiring layers t
 
 Verify your understanding of 3D-stacked memory:
 
-- [ ] Why does HBM achieve higher bandwidth than DDR5 despite having a lower clock frequency?
-- [ ] What is the "generality tax" of DDR memory, and how does vertical stacking (TSVs) eliminate it?
-- [ ] If an H100 has 80 GB of HBM and a 70B parameter model requires 140 GB for weights (FP16), where must the remaining 60 GB reside?
-- [ ] True or False: HBM's primary benefit is increasing the total memory capacity available to the GPU.
+- [ ] **HBM vs. DDR5**: Why does HBM achieve higher bandwidth than DDR5 despite having a lower clock frequency?
+- [ ] **Generality tax**: What is the "generality tax" of DDR memory, and how does vertical stacking (TSVs) eliminate it?
+- [ ] **Capacity overflow**: If an H100 has 80 GB of HBM and a 70B parameter model requires 140 GB for weights (FP16), where must the remaining 60 GB reside?
+- [ ] **Bandwidth not capacity**: True or False: HBM's primary benefit is increasing the total memory capacity available to the GPU.
 
 :::
 
@@ -1585,17 +1585,24 @@ The hardware dictates the software abstraction, which in turn shapes what archit
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt, fmt_flop_rate
+from mlsysim import Hardware
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str, TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str, TensorCoreTdpRecap.tc_vs_cuda_ratio_mult_str, TensorCoreTdpRecap.h100_fp32_cuda_tflop_per_s_str
 class TensorCoreTdpRecap:
 
+    _h100 = Hardware.Cloud.H100
+    _fp16_tc = _h100.compute.peak_flops
+    _fp8_tc = _h100.compute.precision_flops["fp8"]
+    _fp32_cuda = _h100.compute.precision_flops["fp32_cuda"]
+    _tc_vs_cuda = (_fp16_tc / _fp32_cuda).to("").magnitude
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
-    h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs / second, precision=0, commas=True)
-    tc_vs_cuda_ratio_mult_str = fmt_multiple(64.0, precision=0, commas=False)
-    h100_fp32_cuda_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops / 64, unit=TFLOPs / second, precision=1, commas=False)
+    h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(_fp16_tc, unit=TFLOPs / second, precision=0, commas=False)
+    h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(_fp8_tc, unit=TFLOPs / second, precision=0, commas=True)
+    tc_vs_cuda_ratio_mult_str = fmt_multiple(_tc_vs_cuda, precision=1, commas=False)
+    h100_fp32_cuda_tflop_per_s_str = fmt_flop_rate(_fp32_cuda, unit=TFLOPs / second, precision=0, commas=False)
 ```
 
 1.  **Significance (quantitative)**: Tensor Cores provide the bulk of the H100's `{python} TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str` FP16/BF16 peak (and ~`{python} TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str` at FP8)—roughly `{python} TensorCoreTdpRecap.tc_vs_cuda_ratio_mult_str` the ~`{python} TensorCoreTdpRecap.h100_fp32_cuda_tflop_per_s_str` delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
@@ -3334,9 +3341,11 @@ The checkpoint's PUE calculation has an economic consequence: cooling overhead i
 # │ Goal: Quantify the facility-power and electricity-cost effect of air vs.
 # │       liquid cooling for the 1K training-cluster reference.
 # │ Scope: chapter-anchor — rack cooling section and build/buy recap share exports.
-# │ How: IT power × (PUE_air - PUE_liquid), using registry-backed GPU,
-# │      cooling-profile, and electricity-price values.
+# │ How: rack IT power × (PUE_air - PUE_liquid), using registry-backed rack
+# │      profile, cooling profiles, and electricity-price values.
 # │ Exports: RackCoolingTax.cluster_gpus_str,
+# │          RackCoolingTax.cluster_racks_str,
+# │          RackCoolingTax.rack_it_power_kw_str,
 # │          RackCoolingTax.h100_tdp_w_str,
 # │          RackCoolingTax.air_pue_str,
 # │          RackCoolingTax.liquid_pue_str,
@@ -3357,7 +3366,10 @@ class RackCoolingTax:
     """Cooling overhead for the registry-backed 1K H100 training cluster."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    n_gpus = Systems.Clusters.Training_1K.total_accelerators
+    fleet = Systems.Clusters.Training_1K
+    rack = Systems.Racks.DGX_H100_4Node
+    n_gpus = fleet.total_accelerators
+    n_racks = fleet.count / rack.nodes_per_rack
     gpu_tdp = Hardware.Cloud.H100.tdp
     air_pue = Infrastructure.FacilityCooling.SimpleAir.pue
     liquid_pue = Infrastructure.FacilityCooling.StateOfArt.pue
@@ -3365,7 +3377,8 @@ class RackCoolingTax:
     lifecycle_years = 3  # scenario assumption: hardware lifecycle for the TCO comparison
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    it_power = n_gpus * gpu_tdp
+    rack_it_power = rack.total_power
+    it_power = n_racks * rack_it_power
     air_total = it_power * air_pue
     liquid_total = it_power * liquid_pue
     savings = air_total - liquid_total
@@ -3374,18 +3387,23 @@ class RackCoolingTax:
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(n_gpus == 1024, "Training_1K should represent the 1,024-GPU reference cluster")
+    check(n_racks == 32, "Training_1K should occupy 32 four-node racks")
     check(air_pue > liquid_pue, "Air-cooled PUE should exceed liquid-cooled PUE")
-    check(280 < savings.to(kW).magnitude < 290, "Cooling savings should be about 287 kW")
+    check(1050 < it_power.to(kW).magnitude < 1090, "Fleet IT power should match 32 × 33.5 kW racks")
+    check(420 < savings.to(kW).magnitude < 440, "Cooling savings should scale with fleet IT power")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     cluster_gpus_str = fmt_count(n_gpus, label="GPU")
+    cluster_racks_str = fmt_count(n_racks, label="rack")
+    rack_gpus_str = fmt_count(rack.accelerator_count, label="GPU")
+    rack_it_power_kw_str = fmt_power(rack_it_power, unit=kilowatt, precision=1, commas=False)
     h100_tdp_w_str = fmt_power(gpu_tdp, unit=watt, precision=0, commas=False)
     air_pue_str = fmt(air_pue, precision=2, commas=False)
     liquid_pue_str = fmt(liquid_pue, precision=2, commas=False)
     air_overhead_pct_str = fmt_percent(air_pue - 1, precision=0, commas=False, style='prose')
     liquid_overhead_pct_str = fmt_percent(liquid_pue - 1, precision=0, commas=False, style='prose')
-    it_power_kw_str = fmt_power(it_power, unit=kilowatt, precision=1, commas=False)
-    air_total_kw_str = fmt_power(air_total, unit=kilowatt, precision=1, commas=False)
+    it_power_kw_str = fmt_power(it_power, unit=kilowatt, precision=0, commas=False)
+    air_total_kw_str = fmt_power(air_total, unit=kilowatt, precision=0, commas=False)
     liquid_total_kw_str = fmt_power(liquid_total, unit=kilowatt, precision=1, commas=False)
     savings_kw_str = fmt_power(savings, unit=kilowatt, precision=1, commas=False)
     electricity_rate_usd_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
@@ -3397,7 +3415,7 @@ class RackCoolingTax:
 
 For the chapter's `{python} RackCoolingTax.cluster_gpus_str` reference cluster, each H100 dissipates `{python} RackCoolingTax.h100_tdp_w_str`.
 
-1.  **IT power**\index{IT Power}: `{python} RackCoolingTax.cluster_gpus_str` $\times$ `{python} RackCoolingTax.h100_tdp_w_str` = `{python} RackCoolingTax.it_power_kw_str`.
+1.  **IT power**\index{IT Power}: `{python} RackCoolingTax.cluster_racks_str` $\times$ `{python} RackCoolingTax.rack_it_power_kw_str` each (`{python} RackCoolingTax.rack_gpus_str` plus host CPUs, memory, and networking) = `{python} RackCoolingTax.it_power_kw_str`.
 2.  **Air-cooled facility**: PUE `{python} RackCoolingTax.air_pue_str` adds `{python} RackCoolingTax.air_overhead_pct_str` overhead, raising facility draw to `{python} RackCoolingTax.air_total_kw_str`.
 3.  **Liquid-cooled facility**: PUE `{python} RackCoolingTax.liquid_pue_str` adds `{python} RackCoolingTax.liquid_overhead_pct_str` overhead, raising facility draw to `{python} RackCoolingTax.liquid_total_kw_str`.
 
@@ -3484,7 +3502,7 @@ class PodTrainingMath:
     _flops_sci = f"{_total_flops:.2e}"
     _flops_mantissa = _flops_sci.split("e+")[0]
     _flops_exp = int(_flops_sci.split("e+")[1])
-    pod_flops_math = fmt_math(f"6 \\times {gpt3_params_b_value_str} \\times {gpt3_tokens_b_value_str} \\times 10^{{9}}")
+    pod_flops_math = fmt_math(f"6 \\times {gpt3_params_b_value_str} \\times 10^{{9}} \\times {gpt3_tokens_b_value_str} \\times 10^{{9}}")
     total_flops_math = fmt_math(f"{_flops_mantissa} \\times 10^{{{_flops_exp}}}")
     n_params_math = fmt_math(f"P = {gpt3_params_b_value_str} \\times 10^9")
     n_tokens_math = fmt_math(f"D = {gpt3_tokens_b_value_str} \\times 10^9")
@@ -3508,7 +3526,7 @@ class InfraFrontierPodTrainingRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Training a `{python} InfraFrontierPodTrainingRecap.frontier_params_b_str` model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming `{python} PodTrainingMath.gpt3_tokens_billion_str`). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` FLOP/s, or about `{python} PodTrainingMath.cluster_eflop_per_s_str` EFLOP/s, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of FP8 peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
+Training a `{python} InfraFrontierPodTrainingRecap.frontier_params_b_str` model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming `{python} PodTrainingMath.gpt3_tokens_billion_str`). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` FLOP/s, or about `{python} PodTrainingMath.cluster_eflop_per_s_str`, yielding a physics-limit training time of approximately 12 hours.
 
 In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time beyond the physics limit. A simplified multiplier chain reaches an approximately 18-hour system minimum; production schedules can stretch to days or weeks once queueing, data readiness, debugging, reruns, and site-specific operational margins enter the plan. The central theme is unchanged: at pod scale, infrastructure imperfections dominate over the raw capability of the silicon. Recovering this lost time is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
@@ -3601,7 +3619,7 @@ We can derive the training time for our `{python} InfraFrontierPodTimeRecap.fron
    `{python} PodTrainingMath.total_flops_math` FLOPs
 
 2. **Cluster throughput**: `{python} PodTrainingMath.n_gpus_str` H100 GPUs at `{python} PodTrainingMath.h100_fp8_tflop_per_s_str` peak, operating at `{python} PodTrainingMath.mfu_pct_str` MFU:
-   `{python} PodTrainingMath.cluster_throughput_math` FLOP/s sustained $\approx$ `{python} PodTrainingMath.cluster_eflop_per_s_str` EFLOP/s
+   `{python} PodTrainingMath.cluster_throughput_math` FLOP/s sustained $\approx$ `{python} PodTrainingMath.cluster_eflop_per_s_str`
 
 3. **Idealized Training Time** (the "physics limit"):
    (`{python} PodTrainingMath.total_flops_math` FLOPs)/(`{python} PodTrainingMath.cluster_throughput_math` FLOP/s) $\div 3600 \approx$ `{python} TrainingTime175B.t_physics_hr_str`
@@ -3670,7 +3688,7 @@ At this scale, the unit of analysis is no longer a rack or pod of independent se
 
 ***Warehouse-Scale Computer (WSC)***\index{Warehouse-Scale Computer!definition}\index{WSC!data center scale} is a building-scale computing system in which thousands of servers are operated as a single coherent machine (with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system), enabling training workloads that would be physically impossible on any single machine.
 
-1.  **Significance (quantitative)**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` ExaFLOP/s FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` EFLOP/s at FP8), enabling 175B-class training workloads at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
+1.  **Significance (quantitative)**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` at FP8), enabling 175B-class training workloads at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
 2.  **Observation**: Unlike a general-purpose compute cluster (which runs many independent jobs on separate nodes with no requirement for tight coupling), a WSC training cluster operates as a single synchronous instrument in which every node must participate in every AllReduce, making the failure or slowdown of a single node a cluster-wide performance event.
 3.  **Pitfall**: A frequent misconception is that WSC design is primarily software engineering or IT operations. WSC design is building-level computer architecture: the physical layout (rack placement to minimize inter-rack hops), power delivery chain (PUE targets, liquid cooling manifolds), and network topology must be co-designed as a unified system: a mistake at any layer propagates through all layers.
 
@@ -4179,13 +4197,14 @@ class BuildBuyTcoThreshold:
     """Simplified per-node build-vs-buy utilization threshold."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    rack = Systems.Racks.DGX_H100_4Node
     cloud_h100_hourly = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
     dgx_h100_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
     amortization_years = 3  # scenario assumption: simplified node amortization window
     facility_pue = Infrastructure.FacilityCooling.StateOfArt.pue
     onprem_elec = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude
-    node_power = Hardware.Cloud.H100.tdp * gpus_per_node * 1.2  # scenario assumption: 20% non-GPU node overhead
+    node_power = rack.total_power / rack.nodes_per_rack
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     annual_cloud_cost = cloud_h100_hourly * gpus_per_node * HOURS_PER_YEAR
@@ -4206,7 +4225,7 @@ class BuildBuyTcoThreshold:
     breakeven_util_pct_str = fmt_percent(breakeven_util, precision=1, commas=False, style='prose')
 ```
 
-This simplified threshold deliberately omits facility construction, network fabric, staffing, financing, and resale value so the direction of the trade-off is visible. A DGX H100 node with `{python} BuildBuyTcoThreshold.node_gpus_str`, costing about `{python} BuildBuyTcoThreshold.node_price_usd_str` and amortized over `{python} BuildBuyTcoThreshold.amortization_years_str` years, becomes cheaper than renting equivalent cloud H100 capacity at `{python} BuildBuyTcoThreshold.cloud_h100_hourly_usd_str` when sustained utilization exceeds roughly `{python} BuildBuyTcoThreshold.breakeven_util_pct_str`, before the omitted fleet-level costs are added. The engineering lesson is not that this threshold is universal; it is that utilization, power price (`{python} BuildBuyTcoThreshold.electricity_rate_usd_str` here), and facility readiness determine whether ownership turns into leverage or idle capital.
+This simplified threshold deliberately omits facility construction, network fabric, staffing, financing, and resale value so the direction of the trade-off is visible. A DGX H100 node with `{python} BuildBuyTcoThreshold.node_gpus_str`, costing about `{python} BuildBuyTcoThreshold.node_price_usd_str` and amortized over `{python} BuildBuyTcoThreshold.amortization_years_str` years, becomes cheaper than renting equivalent cloud H100 capacity at `{python} BuildBuyTcoThreshold.cloud_h100_hourly_usd_str` when sustained utilization exceeds roughly `{python} BuildBuyTcoThreshold.breakeven_util_pct_str` of full-time use. The comparison is annualized: amortized hardware plus facility electricity versus hourly cloud rental at the same utilization, before the omitted fleet-level costs are added. The engineering lesson is not that this threshold is universal; it is that utilization, power price (`{python} BuildBuyTcoThreshold.electricity_rate_usd_str` here), and facility readiness determine whether ownership turns into leverage or idle capital.
 
 These physical and logistical constraints define warehouse-scale computer design. New technologies do not remove the walls; they move them. The technologies below matter because they change where the memory, communication, or power constraint binds.
 
@@ -4524,13 +4543,11 @@ class SummaryScaleScenario:
     flops = Hardware.Cloud.H100.compute.precision_flops["fp8"]
     bw = Hardware.Cloud.H100.memory.bandwidth
     tdp = Hardware.Cloud.H100.tdp
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    rack = Systems.Racks.DGX_H100_4Node
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params.to(param).magnitude / BILLION
-    gpu_power = tdp * gpus_per_node * 4  # 4 nodes per rack
-    support_power = (3.2 + 1.6 + 0.8 + 2.8 + 2.7) * kW
-    rack_power = gpu_power + support_power
+    rack_power = rack.total_power
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt_qty
@@ -4556,7 +4573,7 @@ class InfraFrontierClosingRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Our `{python} InfraFrontierClosingRecap.frontier_params_b_str`-parameter model has served as the persistent architectural forcing function connecting every layer of this hierarchy. At the accelerator level, processing a single token requires about 350 billion floating-point operations, yet the arithmetic is not the limiting resource on Tensor Cores. At the memory level, the 350 GB FP16 weight tensor exceeds a single accelerator's HBM capacity and saturates HBM bandwidth once it is sharded or compressed for serving; streaming these weights at `{python} SummaryScaleScenario.h100_bw_tb_per_s_str` creates a bandwidth-floor latency of over 100 ms per token for one accelerator-equivalent HBM path. Moving to the node level, the full training state -- comprising weights, gradients, optimizer states, and activations -- expands beyond 2 TB, shattering the 80 GB limit of individual chips and requiring tensor parallelism, data-parallel sharding, and memory offload. At the rack level, the thermal density of 32 such accelerators drawing `{python} SummaryScaleScenario.h100_tdp_w_str` each necessitates `{python} SummaryScaleScenario.rack_power_kw_str` of power delivery and liquid cooling infrastructure. At the pod level, training within a viable two-week window requires synchronizing over 1,000 GPUs across a non-blocking InfiniBand fabric, where the statistical certainty of hardware failure forces a checkpointing strategy that trades compute cycles for reliability. At the economics level, bursty cloud rental can beat ownership, while owned clusters become compelling only when sustained utilization is high enough to amortize hardware, power, cooling, and facility risk. Every constraint in this chapter -- from the width of the HBM bus to the topology of the data center network -- traces back to the single arithmetic fact that this model does not fit on a single chip.
+Our `{python} InfraFrontierClosingRecap.frontier_params_b_str`-parameter model has served as the persistent architectural forcing function connecting every layer of this hierarchy. At the accelerator level, processing a single token requires about 350 billion floating-point operations, yet the arithmetic is not the limiting resource on Tensor Cores. At the memory level, the 350 GB FP16 weight tensor exceeds a single accelerator's HBM capacity and saturates HBM bandwidth once it is sharded or compressed for serving; streaming these weights at `{python} SummaryScaleScenario.h100_bw_tb_per_s_str` creates a bandwidth-floor latency of over 100 ms per token for one accelerator-equivalent HBM path. Moving to the node level, the full training state -- comprising weights, gradients, optimizer states, and activations -- expands beyond 2 TB, shattering the 80 GB limit of individual chips and requiring tensor parallelism, data-parallel sharding, and memory offload. At the rack level, the thermal density of 32 such accelerators drawing `{python} SummaryScaleScenario.h100_tdp_w_str` each, plus host CPUs, memory, and networking overhead, necessitates `{python} SummaryScaleScenario.rack_power_kw_str` of power delivery and liquid cooling infrastructure. At the pod level, training within a viable two-week window requires synchronizing over 1,000 GPUs across a non-blocking InfiniBand fabric, where the statistical certainty of hardware failure forces a checkpointing strategy that trades compute cycles for reliability. At the economics level, bursty cloud rental can beat ownership, while owned clusters become compelling only when sustained utilization is high enough to amortize hardware, power, cooling, and facility risk. Every constraint in this chapter -- from the width of the HBM bus to the topology of the data center network -- traces back to the single arithmetic fact that this model does not fit on a single chip.
 
 The practical method transfers beyond this particular model. Identify the binding constraint at each level, quantify its effect, and propagate the consequence upward through the stack. Selecting the fastest accelerator is counterproductive if the cooling infrastructure cannot remove its heat. Building the densest rack is futile if the power grid cannot supply its demand. Deploying the widest network is wasteful if the workload's communication pattern does not use the bandwidth. Infrastructure engineering is therefore systems engineering in its purest form: a quantitative discipline for reasoning about how chip-level choices alter rack power, facility cooling, network topology, reliability strategy, and total cost of ownership.
 

@@ -216,7 +216,7 @@ Beyond gang scheduling, topology awareness via **placement groups**[^fn-placemen
 
 [^fn-gang-scheduling]: **Gang Scheduling**\index{Gang Scheduling!origins}: Formalized by @ousterhout1982scheduling for parallel systems, where the "Ousterhout matrix" co-schedules related threads across processors in synchronized time slices. In ML clusters, the constraint is stricter: synchronous AllReduce requires all workers simultaneously, so partial allocation wastes 100 percent of held resources rather than merely degrading throughput. A 1,024-GPU job holding 900 GPUs while waiting for 124 more burns approximately \$1,800/hour in idle capacity [@burns2016].
 
-GPU heterogeneity adds a second challenging dimension. Many clusters contain mixtures of A100 and H100 accelerators with different memory capacities (`{python} ClusterEconomicsContext.a100_mem_gb_str` vs. `{python} ClusterEconomicsContext.h100_mem_gb_str`), compute throughput, and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
+GPU heterogeneity adds a second challenging dimension. Many clusters contain mixtures of A100 and H100 accelerators with different compute throughput (`{python} ClusterEconomicsContext.a100_mem_gb_str` and `{python} ClusterEconomicsContext.h100_mem_gb_str` HBM capacities are comparable, but H100 Tensor Core throughput is roughly twice the A100 rate) and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
 
 Job duration unpredictability compounds these challenges further. A training run may converge early and complete in days rather than weeks. Hardware failures may abort jobs unexpectedly, returning resources at unpredictable times. Hyperparameter searches may reveal early that certain configurations will not succeed, leading to voluntary termination. Traditional scientific computing workloads, such as weather simulations or molecular dynamics, have more predictable runtimes that enable better scheduling decisions: the scheduler can project when resources will become available and plan accordingly. ML workloads deny this luxury, forcing schedulers to operate with deep uncertainty about when current jobs will release resources.
 
@@ -782,10 +782,10 @@ This convergence turns the paradigm choice into a workload-specific design decis
 
 Before the chapter turns to topology-aware scheduling, review the core trade-offs:
 
-- [ ] Can you explain why gang scheduling is essential for distributed training but not for inference workloads? What property of synchronous data parallelism creates the all-or-nothing requirement?
-- [ ] What CAP theorem trade-off does Slurm make differently from Kubernetes? How does this difference manifest during a network partition between the scheduler and a subset of nodes?
-- [ ] When would MIG partitioning improve cluster utilization (more concurrent inference workloads on fewer GPUs), and when would it reduce it (training jobs that need full GPU memory)?
-- [ ] Why does backfill scheduling depend on accurate job runtime estimates, and what game-theoretic incentives cause users to provide inaccurate estimates?
+- [ ] **Gang scheduling**: Can you explain why gang scheduling is essential for distributed training but not for inference workloads? What property of synchronous data parallelism creates the all-or-nothing requirement?
+- [ ] **Slurm vs. Kubernetes**: What CAP theorem trade-off does Slurm make differently from Kubernetes? How does this difference manifest during a network partition between the scheduler and a subset of nodes?
+- [ ] **MIG partitioning**: When would MIG partitioning improve cluster utilization (more concurrent inference workloads on fewer GPUs), and when would it reduce it (training jobs that need full GPU memory)?
+- [ ] **Backfill incentives**: Why does backfill scheduling depend on accurate job runtime estimates, and what game-theoretic incentives cause users to provide inaccurate estimates?
 
 :::
 
@@ -1149,7 +1149,7 @@ This logic extends to the temporal dimension, where the scheduler must weigh the
 # │
 # │ Imports: mlsysim.book (fmt, check)
 # │ Exports: es_s1_str, es_s2_str, es_s3p1_str, es_s3p2_str, es_s3_str,
-# │          es_rescale_hours_str, es_vs_wait_str, es_vs_imm_str
+# │          es_rescale_hours_str, es_trails_wait_pct_str, es_vs_imm_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, check, fmt_time
 
@@ -1166,21 +1166,23 @@ class ElasticScaling:
     s1_work = window_h * tp_128
     s2_run_h = window_h - wait_h
     s2_work = s2_run_h * tp_512
-    s3_phase1 = wait_h * tp_256
+    s3_phase1 = wait_h * tp_128
     s3_phase2_h = window_h - wait_h - rescale_h
-    s3_phase2 = s3_phase2_h * tp_512
+    s3_phase2 = s3_phase2_h * tp_256
     s3_work = s3_phase1 + s3_phase2
-    elastic_vs_wait_pct = (s3_work - s2_work) / s2_work * 100
+    elastic_trails_wait_pct = (s2_work - s3_work) / s2_work * 100
+    elastic_trails_wait_pct_r = round(elastic_trails_wait_pct)
     elastic_vs_immediate = s3_work / s1_work
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(s1_work == 24.0, f"S1: expected 24.0, got {s1_work}")
     check(s2_work == 64.0, f"S2: expected 64.0, got {s2_work}")
-    check(abs(s3_phase2 - 63.5) < 0.1, f"S3 phase 2: expected ~63.5, got {s3_phase2}")
-    check(abs(s3_work - 70.7) < 0.1, f"S3 total: expected ~70.7, got {s3_work}")
+    check(abs(s3_phase2 - 35.7) < 0.2, f"S3 phase 2: expected ~35.7, got {s3_phase2}")
+    check(abs(s3_work - 39.7) < 0.2, f"S3 total: expected ~39.7, got {s3_work}")
+    check(elastic_trails_wait_pct_r == 38, f"trail: expected 38%, got {elastic_trails_wait_pct_r}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     es_s1_str = fmt(s1_work, precision=0, commas=False)
     es_s2_str = fmt(s2_work, precision=0, commas=False)
-    es_s3p1_str = fmt(s3_phase1, precision=1, commas=False)
+    es_s3p1_str = fmt(s3_phase1, precision=0, commas=False)
     es_s3p2_str = fmt(s3_phase2, precision=1, commas=False)
     es_s3_str = fmt(s3_work, precision=1, commas=False)
     es_rescale_hours_str = fmt_time(rescale_h, 'hour', precision=2, commas=False, style='word')
@@ -1189,7 +1191,7 @@ class ElasticScaling:
     # Pre-compute the full Phase 2 math expression to avoid the
     # `\(...\)` + inline-`{python}` interaction anti-pattern that drops
     # the middle of the expression in rendered HTML (math.md §2).
-    es_s3p2_math = fmt_math(rf"(24 - 4 - {rescale_h:.2f}) \times 3.2 \approx {s3_phase2:.1f}")
+    es_s3p2_math = fmt_math(rf"(24 - 4 - {rescale_h:.2f}) \times 1.8 \approx {s3_phase2:.1f}")
     s1_gpus = 128
     s2_gpus = 512
     s3_gpus = 256
@@ -1198,7 +1200,6 @@ class ElasticScaling:
     es_wait_h_str = fmt_time(wait_h, 'hour', precision=0, commas=False, style='word')
     es_s2_gpus_str = fmt_count(s2_gpus, commas=False, label="GPU")
     es_s2_run_h_str = fmt_time(s2_run_h, 'hour', precision=0, commas=False, style='word')
-    es_s3_gpus_str = fmt_count(s3_gpus, commas=False, label="GPU")
     es_peak_gpus_str = fmt(s2_gpus, precision=0, commas=False)
     es_gpus_128_str = fmt_count(s1_gpus, commas=False, label="GPU")
     es_gpus_256_str = fmt_count(s3_gpus, commas=False, label="GPU")
@@ -1207,7 +1208,7 @@ class ElasticScaling:
     es_tp_512_str = fmt(tp_512, precision=1, commas=False)
     es_eff_256_pct_str = fmt_percent(tp_256 / (2 * tp_128), precision=0, commas=False, style='prose')
     es_eff_512_pct_str = fmt_percent(tp_512 / (4 * tp_128), precision=0, commas=False, style='prose')
-    es_vs_wait_pct_str = fmt_percent(elastic_vs_wait_pct / 100, precision=1, commas=False, style='prose')
+    es_trails_wait_pct_str = fmt_percent(elastic_trails_wait_pct_r / 100, precision=0, commas=False, style='prose')
     es_vs_imm_factor_mult_str = fmt_multiple(elastic_vs_immediate, precision=1, commas=False)
 ```
 
@@ -1221,9 +1222,9 @@ Consider a large language model training job with a target batch size that requi
 
 **Strategy 2 -- wait for capacity (gang scheduling)**: The job waits in the queue for `{python} ElasticScaling.es_wait_h_str` until `{python} ElasticScaling.es_s2_gpus_str` become available, then runs for `{python} ElasticScaling.es_s2_run_h_str`. Total work: $20 \times 3.2 =$ `{python} ElasticScaling.es_s2_str` epochs.
 
-**Strategy 3 -- elastic scaling (step-up)**: The job starts immediately with `{python} ElasticScaling.es_s3_gpus_str`. After `{python} ElasticScaling.es_wait_h_str`, `{python} ElasticScaling.es_s3_gpus_str` more GPUs become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.8 =$ `{python} ElasticScaling.es_s3p1_str` epochs. Phase 2: `{python} ElasticScaling.es_s3p2_math` epochs. Total work: `{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` = `{python} ElasticScaling.es_s3_str` epochs.
+**Strategy 3 -- elastic scaling (step-up)**: The job starts immediately with `{python} ElasticScaling.es_gpus_128_str`. After `{python} ElasticScaling.es_wait_h_str`, `{python} ElasticScaling.es_gpus_256_str` become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.0 =$ `{python} ElasticScaling.es_s3p1_str` epochs. Phase 2: `{python} ElasticScaling.es_s3p2_math` epochs. Total work: `{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` = `{python} ElasticScaling.es_s3_str` epochs.
 
-The elastic strategy outperforms waiting by approximately `{python} ElasticScaling.es_vs_wait_pct_str` and the immediate small-scale run by nearly `{python} ElasticScaling.es_vs_imm_factor_mult_str`. However, if the re-scaling cost exceeded `{python} ElasticScaling.es_rescale_break_even_h_str` (due to slow checkpoint transfer or compilation), Strategy 2 would become superior.
+The elastic strategy completes nearly `{python} ElasticScaling.es_vs_imm_factor_mult_str` the epoch-equivalent work of the immediate small-scale run, but still trails gang scheduling by about `{python} ElasticScaling.es_trails_wait_pct_str`. That gap shrinks when queue waits grow or peak capacity stays scarce; re-scaling overhead is only `{python} ElasticScaling.es_rescale_min_str`, and if that tax exceeded `{python} ElasticScaling.es_rescale_break_even_h_str` (due to slow checkpoint transfer or compilation), Strategy 3 would fall further behind Strategy 2.
 
 :::
 
@@ -1432,13 +1433,15 @@ class SpotTrainingEconomics:
     on_demand_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     spot_rate = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.to(USD / hour).magnitude
     checkpoint_overhead_fraction = 0.05
-    interruptions = 14
+    interruptions_per_day = 14
     restart_hours = 0.5
     # ┌── 2. EXECUTE ───────────────────────────────────────
     on_demand_cost = gpus * run_hours * on_demand_rate
     spot_base_cost = gpus * run_hours * spot_rate
     checkpoint_extra_hours = checkpoint_overhead_fraction * run_hours
-    restart_total_hours = interruptions * restart_hours
+    run_days = run_hours // HOURS_PER_DAY
+    restart_interruptions = interruptions_per_day * run_days
+    restart_total_hours = restart_interruptions * restart_hours
     spot_total_hours = run_hours + checkpoint_extra_hours + restart_total_hours
     spot_total_cost = gpus * spot_total_hours * spot_rate
     savings = on_demand_cost - spot_total_cost
@@ -1446,8 +1449,8 @@ class SpotTrainingEconomics:
     longer_pct = (spot_total_hours / run_hours - 1) * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(on_demand_cost == 344064, f"Expected on-demand cost 344064, got {on_demand_cost}")
-    check(abs(spot_total_hours - 359.8) < 1e-9, f"Expected 359.8 hours, got {spot_total_hours}")
-    check(abs(spot_total_cost - 128952.32) < 1e-2, f"Expected spot cost 128952.32, got {spot_total_cost}")
+    check(abs(spot_total_hours - 450.8) < 1e-9, f"Expected 450.8 hours, got {spot_total_hours}")
+    check(abs(spot_total_cost - 161566.72) < 1e-2, f"Expected spot cost 161566.72, got {spot_total_cost}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     on_demand_rate_str = fmt_usd(on_demand_rate, precision=0, commas=False, per="GPU-hour")
     spot_rate_str = fmt_usd(spot_rate, precision=2, commas=False, per="GPU-hour")
@@ -1463,7 +1466,8 @@ class SpotTrainingEconomics:
     spot_gpus_str = fmt_count(gpus, commas=False, label="GPU")
     spot_run_hours_str = fmt_time(run_hours, 'hour', precision=0, commas=False, style='word')
     checkpoint_overhead_pct_str = fmt_percent(checkpoint_overhead_fraction, precision=0, commas=False, style='prose')
-    restart_interruptions_str = fmt(interruptions, precision=0, commas=False)
+    restart_interruptions_str = fmt_count(restart_interruptions, commas=False, label="interruption")
+    interruptions_per_day_str = fmt_count(interruptions_per_day, commas=False, label="interruption")
     restart_hours_each_str = fmt_time(restart_hours, 'hour', precision=1, commas=False, style='word')
     restart_min_str = fmt_time(restart_hours * 60, 'minute', precision=0, commas=False, style='word')
     model_params_b_str = fmt_params(70 * BILLION, precision=0, commas=False)
@@ -1477,11 +1481,11 @@ Consider training a `{python} SpotTrainingEconomics.model_params_b_str` paramete
 
 **On-demand**\index{On-Demand Capacity}: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.on_demand_rate_str` = `{python} SpotTrainingEconomics.on_demand_cost_str`
 
-**Spot** (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.restart_interruptions_str` interruptions/day with `{python} SpotTrainingEconomics.restart_min_str` restart):
+**Spot** (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.interruptions_per_day_str`/day with `{python} SpotTrainingEconomics.restart_min_str` restart):
 
 - Base cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.spot_rate_str` = `{python} SpotTrainingEconomics.spot_base_cost_str`
 - Checkpoint overhead: `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` = `{python} SpotTrainingEconomics.checkpoint_extra_hours_str`
-- Restart overhead: `{python} SpotTrainingEconomics.restart_interruptions_str` interruptions $\times$ `{python} SpotTrainingEconomics.restart_hours_each_str` = `{python} SpotTrainingEconomics.restart_total_hours_str`
+- Restart overhead: `{python} SpotTrainingEconomics.restart_interruptions_str` $\times$ `{python} SpotTrainingEconomics.restart_hours_each_str` = `{python} SpotTrainingEconomics.restart_total_hours_str`
 - Total time: `{python} SpotTrainingEconomics.spot_run_hours_str` + `{python} SpotTrainingEconomics.checkpoint_extra_hours_str` + `{python} SpotTrainingEconomics.restart_total_hours_str` = `{python} SpotTrainingEconomics.spot_total_hours_str`
 - Total cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_total_hours_str` $\times$ `{python} SpotTrainingEconomics.spot_rate_str` = `{python} SpotTrainingEconomics.spot_total_cost_str`
 
@@ -1519,9 +1523,9 @@ Consider our 175B parameter model. Training requires approximately 34 days on 1,
 
 Before moving to ML-specific schedulers, review how the cost-optimization mechanisms interact:
 
-- [ ] A training job requires 512 GPUs for 14 days. Spot instances offer 65 percent discount but have 1 interruption per day with 30-minute restart overhead. Under what checkpoint frequency does spot training become more expensive than on-demand?
-- [ ] Why does fault tolerance infrastructure have a "double return" for both reliability and cost savings? What is the minimum fault tolerance investment needed to make spot instances viable?
-- [ ] An organization runs 40 percent of its workloads on reserved capacity. How would you determine whether increasing the reservation to 60 percent would save or waste money?
+- [ ] **Spot break-even**: A training job requires 512 GPUs for 14 days. Spot instances offer 65 percent discount but have 1 interruption per day with 30-minute restart overhead. Under what checkpoint frequency does spot training become more expensive than on-demand?
+- [ ] **Double return**: Why does fault tolerance infrastructure have a "double return" for both reliability and cost savings? What is the minimum fault tolerance investment needed to make spot instances viable?
+- [ ] **Reservation sizing**: An organization runs 40 percent of its workloads on reserved capacity. How would you determine whether increasing the reservation to 60 percent would save or waste money?
 
 :::
 
@@ -1618,10 +1622,10 @@ A scheduler designed for general-purpose pod placement will mishandle workloads 
 
 Consider the trade-offs between the four research schedulers:
 
-- [ ] Tiresias eliminates runtime estimates. What information does it sacrifice, and when would this sacrifice hurt scheduling quality?
-- [ ] Gandiva time-slices at iteration boundaries. For which workloads would this approach fail, and why?
-- [ ] Themis prioritizes nearly-complete jobs. Could this starve long-running pretraining jobs indefinitely?
-- [ ] Pollux adjusts both allocation and hyperparameters. What happens if the goodput model is wrong?
+- [ ] **Estimate-free scheduling**: Tiresias eliminates runtime estimates. What information does it sacrifice, and when would this sacrifice hurt scheduling quality?
+- [ ] **Time-slicing limits**: Gandiva time-slices at iteration boundaries. For which workloads would this approach fail, and why?
+- [ ] **Job starvation**: Themis prioritizes nearly-complete jobs. Could this starve long-running pretraining jobs indefinitely?
+- [ ] **Goodput-model risk**: Pollux adjusts both allocation and hyperparameters. What happens if the goodput model is wrong?
 
 :::
 
@@ -2182,9 +2186,9 @@ The "use it or lose it" reclamation policy addresses the most visible symptom of
 
 Consider a 2,000-GPU cluster shared between a research team (60 percent allocation) and a production team (40 percent allocation):
 
-- [ ] The research team is using only 30 percent of the cluster. Should the production team be able to use the idle 30 percent? What happens when the research team submits a large job?
-- [ ] A production inference workload needs 100 GPUs with guaranteed latency SLOs. A research training job can tolerate preemption. How should the priority system be configured?
-- [ ] What over-commitment ratio is appropriate if research jobs average 65 percent GPU utilization and production jobs average 85 percent?
+- [ ] **Idle reclamation**: The research team is using only 30 percent of the cluster. Should the production team be able to use the idle 30 percent? What happens when the research team submits a large job?
+- [ ] **Priority classes**: A production inference workload needs 100 GPUs with guaranteed latency SLOs. A research training job can tolerate preemption. How should the priority system be configured?
+- [ ] **Over-commitment ratio**: What over-commitment ratio is appropriate if research jobs average 65 percent GPU utilization and production jobs average 85 percent?
 
 :::
 
@@ -2291,7 +2295,7 @@ class DebugValueCalc:
     debug_util_after = 0.84
     debug_target_util = 0.80
     a100_80_count = 400
-    a100_40_count = 400
+    a100_40_count = 424
     v100_count = 200
     a100_80_memory = 80 * GB
     a100_40_memory = 40 * GB
@@ -2337,7 +2341,7 @@ class DebugValueCalc:
     check(abs(debug_recovered - 409.6) < 0.01, f"Expected ~410 recovered GPUs, got {debug_recovered}")
     check(large_job_total_gpus == 1200, "Large-job demand should match scenario")
     check(medium_job_total_gpus == 256, "Medium-job demand should match scenario")
-    check(a100_80_nodes == 50 and a100_40_nodes == 50 and v100_nodes == 50, "Inventory should map to 50-node pools")
+    check(a100_80_nodes == 50 and a100_40_nodes == 53 and v100_nodes == 50, "Inventory should map to node pools totaling 1,024 GPUs")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     debug_productive_gain_str = fmt_int(debug_productive_gain, commas=False)

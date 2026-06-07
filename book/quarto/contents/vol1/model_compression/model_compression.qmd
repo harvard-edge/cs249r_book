@@ -227,6 +227,7 @@ class QuantizationEnergyPhysics:
 
     energy_dram = ENERGY_DRAM_ACCESS_PJ
     energy_dram_per_byte = ENERGY_DRAM_PJ_PER_BYTE
+    energy_int8_fetch = energy_dram_per_byte * BYTES_INT8
     energy_dram_read_bytes = energy_dram.to(pJ).magnitude / energy_dram_per_byte.to(pJ / byte).magnitude
     energy_dram_read_bits = energy_dram_read_bytes * 8
     energy_flop_fp32 = ENERGY_FLOP_FP32_PJ
@@ -239,11 +240,15 @@ class QuantizationEnergyPhysics:
     check(bytes_fp32 / bytes_int8 == 4, "FP32-to-INT8 memory reduction should be 4x.")
     check(energy_dram_read_ratio > 10_000, "DRAM reads should exceed INT8 add energy by more than four orders of magnitude.")
     check(abs(energy_dram_read_bits - 32) < 1e-9, "The 640 pJ DRAM access should correspond to a 32-bit read under the per-byte constant.")
+    check(
+        abs(energy_int8_fetch.to(pJ).magnitude - energy_dram_per_byte.to(pJ / byte).magnitude) < 1e-9,
+        "One INT8 weight fetch should equal one byte of DRAM energy.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     energy_dram_pj_str = fmt_qty(energy_dram, pJ, precision=0, commas=False)
+    energy_int8_fetch_pj_str = fmt_qty(energy_int8_fetch, pJ, precision=0, commas=False)
     energy_dram_read_bits_value_str = fmt(energy_dram_read_bits, precision=0, commas=False)
-    energy_dram_pj_per_byte_str = fmt_energy_per_byte(energy_dram_per_byte, precision=0, commas=False)
     energy_flop_fp32_pj_str = fmt_energy_per_flop(energy_flop_fp32, precision=1, commas=False)
     energy_op_int8_pj_str = fmt_energy_per_flop(energy_op_int8, precision=1, commas=False)
     energy_float_add_ratio_mult_str = fmt_multiple(energy_float_add_ratio, precision=0, commas=False)
@@ -260,8 +265,8 @@ The energy-movement invariant $(E_{\text{move}} \gg E_{\text{compute}})$ means t
 
 According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, which decomposes execution time into data volume moved, operations performed, and fixed latency, reducing the bit-width of a weight has a roughly proportional effect on efficiency:
 
-1.  **Memory movement $(D_{\text{vol}} \times E_{\text{move}})$**: Fetching a 32-bit float from DRAM costs ≈ `{python} QuantizationEnergyPhysics.energy_dram_pj_str`. Fetching an 8-bit integer costs ≈ `{python} QuantizationEnergyPhysics.energy_dram_pj_per_byte_str`.
-2.  **Compute work $(O \times E_{\text{compute}})$**: A 32-bit FLOP costs ≈ `{python} QuantizationEnergyPhysics.energy_flop_fp32_pj_str`. An INT8 operation costs ≈ `{python} QuantizationEnergyPhysics.energy_op_int8_pj_str`.
+1.  **Memory movement $(D_{\text{vol}} \times E_{\text{move}})$**: Fetching a 32-bit float from DRAM costs ≈ `{python} QuantizationEnergyPhysics.energy_dram_pj_str`. Fetching one 8-bit weight costs ≈ `{python} QuantizationEnergyPhysics.energy_int8_fetch_pj_str`.
+2.  **Compute work $(O \times E_{\text{compute}})$**: A 32-bit multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_flop_fp32_pj_str`. An INT8 multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_op_int8_pj_str`.
 
 @Tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access.
 
@@ -2901,9 +2906,9 @@ The structural techniques covered so far (pruning, distillation, factorization, 
 
 Test your understanding of the structural optimization techniques covered so far:
 
-- [ ] Can you explain the key difference between structured and unstructured pruning in terms of hardware efficiency? Consider how each interacts with GPU and TPU execution patterns.
-- [ ] Do you understand why knowledge distillation typically preserves accuracy better than aggressive pruning? Think about what information each method retains from the original model.
-- [ ] Can you identify when to choose neural architecture search over manual architecture design? Consider the trade-offs in computational cost, design space coverage, and hardware-specific optimization.
+- [ ] **Structured vs. unstructured**: Can you explain the key difference between structured and unstructured pruning in terms of hardware efficiency? Consider how each interacts with GPU and TPU execution patterns.
+- [ ] **Distillation vs. pruning**: Do you understand why knowledge distillation typically preserves accuracy better than aggressive pruning? Think about what information each method retains from the original model.
+- [ ] **When to use NAS**: Can you identify when to choose neural architecture search over manual architecture design? Consider the trade-offs in computational cost, design space coverage, and hardware-specific optimization.
 
 :::
 
@@ -4717,6 +4722,7 @@ Precision reduction is the most impactful deployment optimization.
 **System Implications**
 
 - [ ] **Latency vs. throughput**: Why does INT8 improve throughput on GPUs but only latency on CPUs? (Hint: Parallelism vs. Instruction Efficiency).
+- [ ] **Quantization payoff**: For a 7B-parameter model served from HBM, estimate the weight memory in FP16 versus INT4 and the rough decode-throughput gain, given that autoregressive decode is memory-bandwidth-bound.
 
 :::
 
@@ -4934,9 +4940,9 @@ A final checkpoint consolidates the quantization concepts before the chapter tur
 
 Test your understanding of quantization before moving to architectural efficiency:
 
-- [ ] Can you explain why INT8 quantization provides roughly 4$\times$ memory reduction but potentially more than 4$\times$ energy reduction? Consider the energy cost of floating-point vs. integer arithmetic units.
-- [ ] Do you understand the key advantage of quantization-aware training (QAT) over post-training quantization (PTQ), and when the extra training cost is justified?
-- [ ] Can you explain why weight quantization provides nearly linear speedup with bit-width reduction for memory-bandwidth-bound LLM inference? Think about which resource is the bottleneck during autoregressive generation.
+- [ ] **INT8 memory vs. energy**: Can you explain why INT8 quantization provides roughly 4$\times$ memory reduction but potentially more than 4$\times$ energy reduction? Consider the energy cost of floating-point vs. integer arithmetic units.
+- [ ] **QAT vs. PTQ**: Do you understand the key advantage of quantization-aware training (QAT) over post-training quantization (PTQ), and when the extra training cost is justified?
+- [ ] **Bit-width speedup**: Can you explain why weight quantization provides nearly linear speedup with bit-width reduction for memory-bandwidth-bound LLM inference? Think about which resource is the bottleneck during autoregressive generation.
 
 :::
 
@@ -7314,8 +7320,8 @@ class ResNet50Int8Metrics:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     fp32_top1_str = fmt_percent(fp32_top1 / 100, precision=1, commas=False, style='prose')
     int8_top1_str = fmt_percent(int8_top1 / 100, precision=1, commas=False, style='prose')
-    fp32_latency_ms_str = fmt_time(round(fp32_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
-    int8_latency_ms_str = fmt_time(int8_latency, 'millisecond', precision=1, commas=False)
+    fp32_latency_ms_str = fmt_time(fp32_latency, 'millisecond', precision=2, commas=False)
+    int8_latency_ms_str = fmt_time(int8_latency, 'millisecond', precision=2, commas=False)
     fp32_size_mb_str = fmt_qty(fp32_size, MB, precision=1, commas=False)
     int8_size_mb_str = fmt_qty(int8_size, MB, precision=1, commas=False)
     fp32_energy_j_str = fmt_qty(fp32_energy, joule, precision=2, commas=False)
@@ -7325,7 +7331,7 @@ class ResNet50Int8Metrics:
     calibration_error_int8_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='prose')
     cpu_speedup_mult_str = fmt_multiple(cpu_speedup, precision=1, commas=False)
     top1_drop_pp_str = fmt_pp(top1_drop, precision=1, commas=False, attributive=True)
-    latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=1, commas=False)
+    latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=2, commas=False)
     size_reduction_mult_str = fmt_multiple(size_reduction, precision=0, commas=False)
     energy_improvement_mult_str = fmt_multiple(energy_improvement, precision=1, commas=False)
 ```
@@ -7341,7 +7347,7 @@ Quantizing ResNet-50 from FP32 to INT8 should be evaluated as a before-and-after
 | **Metric**            | **FP32 baseline**                                         | **INT8 result**                                                                                               | **Deployment reading**                                                |
 |:----------------------|:----------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------|
 | **Top-1 accuracy**    | `{python} ResNet50Int8Metrics.fp32_top1_str`              | `{python} ResNet50Int8Metrics.int8_top1_str` (`{python} ResNet50Int8Metrics.top1_drop_pp_str` drop)           | Aggregate accuracy mostly holds, but subgroup checks still matter.    |
-| **V100 latency**      | `{python} ResNet50Int8Metrics.fp32_latency_ms_str`        | `{python} ResNet50Int8Metrics.int8_latency_ms_str` (`{python} ResNet50Int8Metrics.latency_speedup_mult_str`)  | GPU latency improves when the runtime maps INT8 to fast kernels.      |
+| **V100 latency**      | `{python} ResNet50Int8Metrics.fp32_latency_ms_str`        | `{python} ResNet50Int8Metrics.int8_latency_ms_str`                                                            | GPU latency improves when the runtime maps INT8 to fast kernels.      |
 | **Model size**        | `{python} ResNet50Int8Metrics.fp32_size_mb_str`           | `{python} ResNet50Int8Metrics.int8_size_mb_str` (`{python} ResNet50Int8Metrics.size_reduction_mult_str`)      | The artifact becomes easier to cache, transmit, and deploy on edge.   |
 | **Energy/inference**  | `{python} ResNet50Int8Metrics.fp32_energy_j_str`          | `{python} ResNet50Int8Metrics.int8_energy_j_str` (`{python} ResNet50Int8Metrics.energy_improvement_mult_str`) | Lower precision reduces both arithmetic and memory-movement energy.   |
 | **Calibration error** | `{python} ResNet50Int8Metrics.calibration_error_fp32_str` | `{python} ResNet50Int8Metrics.calibration_error_int8_str`                                                     | Confidence calibration can drift even when accuracy looks acceptable. |

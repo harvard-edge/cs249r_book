@@ -366,16 +366,13 @@ from mlsysim import Models, Hardware
 from mlsysim.fmt import fmt, check, fmt_qty, fmt_qty_int, fmt_int, fmt_time, fmt_memory
 
 class StorageAccessPatternFacts:
-    from mlsysim.solvers import TrainingMemoryModel
-
     gpt3 = Models.Language.GPT3
     gpt3_params = gpt3.parameters
     training_tokens = ReferenceStats.StorageTrainingCorpus.TrainingTokens
     compressed_text = ReferenceStats.StorageTrainingCorpus.CompressedSource
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
     tokenized_text = training_tokens * token_id_bytes
-    mem_res = TrainingMemoryModel().solve(gpt3, Hardware.Cloud.A100, batch_size=1, precision="fp32")
-    ckpt_total = mem_res.total_memory
+    ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
     ckpt_node_count = Systems.Clusters.Training_1K.count
     ckpt_shard = ckpt_total / ckpt_node_count
     ckpt_burst = ckpt_shard * ckpt_node_count
@@ -712,7 +709,7 @@ The razor-thin margin is a defining feature of large model training. @Tbl-hbm-me
 # │      across both the intra-node split and the node count.
 # │ Exports: HbmMemoryBudget.*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import MarkdownStr, check, fmt_percent_range, fmt_qty, fmt_qty_range, fmt_memory
+from mlsysim.fmt import MarkdownStr, check, fmt_percent_range, fmt_qty_range, fmt_memory, fmt_memory_capacity
 
 class HbmMemoryBudget:
     """Per-GPU HBM budget for 175B training with sharded state."""
@@ -748,6 +745,7 @@ class HbmMemoryBudget:
     check(total_max < hbm_capacity, "Budget should fit within 80 GB HBM under these assumptions")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    hbm_capacity_gb_str = fmt_memory(hbm_capacity, unit=GB, precision=1, commas=False)
     weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=2, commas=False)
     optimizer_per_gpu_gb_str = fmt_memory(optimizer_per_gpu, unit=GB, precision=1, commas=False)
     gradient_per_gpu_gb_str = fmt_memory(gradient_per_gpu, unit=GB, precision=1, commas=False)
@@ -778,7 +776,7 @@ class HbmMemoryBudget:
 | Communication Buffers (NCCL)              |      `{python} HbmMemoryBudget.comm_range_str`      |
 | **Total Occupied**                        |    **`{python} HbmMemoryBudget.total_range_str`**   |
 
-: **HBM Memory Budget for 175B-Parameter Training**: Per-GPU allocation when splitting a 175B model eight ways inside the node and sharding optimizer and gradient state across 256 nodes. The optimizer and gradient rows are per-GPU shards after both levels of partitioning. The resulting budget occupies most of an 80 GB HBM device, leaving limited buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator. {#tbl-hbm-memory-budget}
+: **HBM Memory Budget for 175B-Parameter Training**: Per-GPU allocation when splitting a 175B model eight ways inside the node and sharding optimizer and gradient state across 256 nodes. The optimizer and gradient rows are per-GPU shards after both levels of partitioning. The resulting budget occupies most of a `{python} HbmMemoryBudget.hbm_capacity_gb_str` HBM device, leaving limited buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator. {#tbl-hbm-memory-budget}
 
 Even with aggressive partitioning, the total memory footprint consumes `{python} HbmMemoryBudget.total_pct_range_str` of the available HBM under these assumptions. This leaves a limited buffer for the incoming data pipeline, especially once fragmentation and framework workspaces are included. Any delay in fetching the next batch from host memory risks starving the accelerator, forcing it to sit idle while the most expensive resource in the system produces heat instead of gradients.
 
@@ -922,8 +920,7 @@ class NvmeTierContext:
     multimodal_audio = 5 * TB  # scenario multimodal audio corpus assumption
     multimodal_total = multimodal_images + multimodal_text + multimodal_audio
     multimodal_excess = multimodal_total - local_nvme_capacity
-    mem_res = TrainingMemoryModel().solve(Models.Language.GPT3, Hardware.Cloud.A100, batch_size=1, precision="fp32")
-    ckpt_total = mem_res.total_memory
+    ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
     check(local_nvme_capacity.to(TB).magnitude > 25, "Four 7.68 TB drives should exceed 25 TB local capacity")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_per_drive_bw, unit=GB / second, precision=0, commas=False)
@@ -1845,7 +1842,7 @@ As @fig-gds-path illustrates, the throughput improvement from GDS is most pronou
 
 **Problem**: A training node with `{python} GDSLatency.n_gpus_str` loads `{python} GDSLatency.image_kb_str` at `{python} GDSLatency.per_gpu_images_per_s_str` per GPU (`{python} GDSLatency.gds_total_images_per_s_str` total). Compare the CPU load under traditional I/O vs. GDS.
 
-**Traditional path**\index{Traditional I/O!data path}: Each image requires a DMA from NVMe to DRAM, a `memcpy` from kernel to user space, and a PCIe transfer to GPU. At `{python} GDSLatency.gds_total_images_per_s_str` with `{python} GDSLatency.gds_trad_us_str` of CPU time per image, the CPU spends `{python} GDSLatency.gds_trad_cpu_seconds_str` of CPU time per wall-clock second, consuming roughly `{python} GDSLatency.gds_trad_cpu_cores_str` cores worth of processing just for data movement.
+**Traditional path**\index{Traditional I/O!data path}: Each image requires a DMA from NVMe to DRAM, a host copy from kernel to user space, and a PCIe transfer to GPU. At `{python} GDSLatency.gds_total_images_per_s_str` with `{python} GDSLatency.gds_trad_us_str` of CPU time per image, the CPU spends `{python} GDSLatency.gds_trad_cpu_seconds_str` of CPU time per wall-clock second, consuming roughly `{python} GDSLatency.gds_trad_cpu_cores_str` cores worth of processing just for data movement.
 
 **GDS path**\index{GPU Direct Storage!data path}: Each image is DMA'd directly from NVMe to GPU. At `{python} GDSLatency.gds_bypass_us_str` of CPU time per image (for initiating the DMA), the CPU spends `{python} GDSLatency.gds_bypass_cpu_seconds_str` of CPU time per wall-clock second, freeing roughly `{python} GDSLatency.gds_freed_cpu_cores_str` cores for data augmentation.
 
@@ -2346,7 +2343,7 @@ class CheckpointStormCalc:
     overhead_pct_str = fmt_percent(overhead_pct / 100, precision=2, commas=False, style='prose')
     local_drive_count_str = fmt(local_drive_count, precision=0, commas=False)
     local_drive_bw_gb_per_s_str = fmt_bandwidth(local_drive_bw, unit=GB / second, precision=0, commas=False)
-    nodes_str = fmt_count(nodes, commas=False, label="node")
+    nodes_str = fmt(nodes, precision=0, commas=True)
     pfs_aggregate_bw_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
     checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
     checkpoint_interval_s_str = fmt_time(checkpoint_interval, second, precision=0, commas=False, style='word')
