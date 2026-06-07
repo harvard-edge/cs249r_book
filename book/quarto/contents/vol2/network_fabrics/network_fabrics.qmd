@@ -1092,32 +1092,38 @@ class RailLatency:
     FABRIC_HOP_LATENCY = Systems.SwitchFabric.HopLatency
     t_hop = FABRIC_HOP_LATENCY  # switch + wire latency
     n_nodes = 128
-    # Standard fat-tree: Leaf -> Spine -> Leaf (2 hops)
-    # Rail-optimized: Leaf (direct) (1 hop)
+    # Standard fat-tree: source Leaf -> Spine -> destination Leaf = 3 switch
+    # traversals (2026-06-07: was counted as 2, dropping the destination leaf).
+    # Rail-optimized: one shared rail switch = 1 traversal.
+    n_hops_std = 3
+    n_hops_rail = 1
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    lat_std = 2 * t_hop
-    lat_rail = 1 * t_hop
+    lat_std = n_hops_std * t_hop
+    lat_rail = n_hops_rail * t_hop
     speedup = (lat_std / lat_rail).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(speedup == 2.0, f"Speedup {speedup:.1f}x unexpected")
+    check(speedup == 3.0, f"Speedup {speedup:.1f}x unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     rol_hop_lat_us_str = fmt_time(t_hop, microsecond, precision=1, commas=False)
+    rol_std_hops_str = fmt(n_hops_std, precision=0, commas=False)
+    rol_std_lat_us_str = fmt_time(lat_std, microsecond, precision=1, commas=False)
+    rol_rail_lat_us_str = fmt_time(lat_rail, microsecond, precision=1, commas=False)
     rol_speedup_mult_str = fmt_multiple(speedup, precision=0, commas=False)
     rol_n_nodes_str = fmt_count(n_nodes, commas=False, label="node")
 ```
 
 ::: {#nbk-network-fabrics-rail-optimized-dividend .callout-notebook title="The rail-optimized dividend"}
 
-**Problem**: A team is synchronizing per-rank data-parallel gradients across `{python} RailLatency.rol_n_nodes_str`. In a standard fat-tree, each message between same-rank GPUs traverses a Leaf switch and a Spine switch (2 hops). In a rail-optimized network, all corresponding GPUs are on the same rail switch (1 hop). How much "Latency Dividend" does the rail design earn?
+**Problem**: A team is synchronizing per-rank data-parallel gradients across `{python} RailLatency.rol_n_nodes_str`. In a standard fat-tree, each message between same-rank GPUs traverses its source leaf switch, a spine switch, and the destination leaf switch (`{python} RailLatency.rol_std_hops_str` switch traversals). In a rail-optimized network, all corresponding GPUs sit on the same rail switch (one traversal). How much "Latency Dividend" does the rail design earn?
 
 **Math**:
-Communication latency ($\alpha$) is proportional to the number of switch hops.
+Communication latency ($\alpha$) is proportional to the number of switch traversals.
 
-1. **Standard latency**\index{Latency!standard}: 2 hops $\times$ `{python} RailLatency.rol_hop_lat_us_str` = 1.2 μs.
-2. **Rail-optimized**: 1 hop $\times$ `{python} RailLatency.rol_hop_lat_us_str` = 0.6 μs.
+1. **Standard latency**\index{Latency!standard}: `{python} RailLatency.rol_std_hops_str` traversals $\times$ `{python} RailLatency.rol_hop_lat_us_str` = `{python} RailLatency.rol_std_lat_us_str`.
+2. **Rail-optimized**: 1 traversal $\times$ `{python} RailLatency.rol_hop_lat_us_str` = `{python} RailLatency.rol_rail_lat_us_str`.
 3. **Result**: `{python} RailLatency.rol_speedup_mult_str` lower latency.
 
-**Systems insight**: For synchronous data-parallel AllReduce (which the training step waits on every iteration), a 2$\times$ latency reduction is the difference between 80 percent and 95 percent scaling efficiency. The scaling efficiency bound (Principle \ref{pri-scaling-efficiency}) explains why this matters: physically aligning the network to the model's same-rank traffic pattern eliminates the "Spine Tax" for the most bandwidth-hungry communication. Archetype A clusters achieve their performance because they are structured, not merely large.
+**Systems insight**: For synchronous data-parallel AllReduce (which the training step waits on every iteration), a `{python} RailLatency.rol_speedup_mult_str` latency reduction is the difference between 80 percent and 95 percent scaling efficiency. The scaling efficiency bound (Principle \ref{pri-scaling-efficiency}) explains why this matters: physically aligning the network to the model's same-rank traffic pattern eliminates the "Spine Tax" for the most bandwidth-hungry communication. Archetype A clusters achieve their performance because they are structured, not merely large.
 
 :::
 
@@ -1291,8 +1297,8 @@ class PfcStormRisk:
     pfc_p_degrade_str = MarkdownStr("0.001%")
     pfc_total_links_str = fmt(n_total_links, precision=0)
     pfc_total_transceivers_str = fmt(n_total_transceivers, precision=0)
-    pfc_safe_prob_str = fmt(p_safe, precision=2, commas=False)
-    pfc_storm_prob_decimal_str = fmt(p_storm, precision=2, commas=False)
+    pfc_safe_prob_str = fmt(p_safe, precision=3, commas=False)
+    pfc_storm_prob_decimal_str = fmt(p_storm, precision=3, commas=False)
     pfc_storm_prob_str = fmt_percent(p_storm, precision=1, commas=False, style='prose')
     pfc_storm_prob_rounded_str = fmt_percent(p_storm, precision=1, commas=False, style='prose')
     pfc_safe_prob_math = fmt_math(f"\\Pr(\\text{{safe}}) = (1 - 0.00001)^{{{pfc_total_transceivers_str}}} " f"\\approx {pfc_safe_prob_str}")
@@ -1613,7 +1619,7 @@ class NextGenLinkDensity:
     port_ratio_str = fmt_ratio(port_ratio_val, precision=0, commas=False)
 ```
 
-Higher port rates attack hop count as well as raw bandwidth. XDR InfiniBand pushes `{python} NextGenLinkDensity.xdr_port_gbit_per_s_str` per port and 800GbE pushes `{python} NextGenLinkDensity.eth_800g_port_gbit_per_s_str` per port, while `{python} NextGenLinkDensity.eth_1_6t_port_tbit_per_s_str` Ethernet switch silicon pushes aggregate capacity to `{python} NextGenLinkDensity.switch_capacity_tbit_per_s_str`. A single `{python} NextGenLinkDensity.eth_1_6t_port_tbit_per_s_str` port delivers the bandwidth of `{python} NextGenLinkDensity.port_ratio_str` 400G ports. The increased density allows architects to flatten the topology: a cluster that previously required three tiers of switches may be served by two when radix, port rate, and placement constraints line up, halving the transceiver count and reducing tail latency by removing an entire hop of switching and FEC overhead.
+Higher port rates attack hop count as well as raw bandwidth. XDR InfiniBand pushes `{python} NextGenLinkDensity.xdr_port_gbit_per_s_str` per port and 800GbE pushes `{python} NextGenLinkDensity.eth_800g_port_gbit_per_s_str` per port, while Ethernet switch silicon with `{python} NextGenLinkDensity.eth_1_6t_port_tbit_per_s_str` ports pushes aggregate capacity to `{python} NextGenLinkDensity.switch_capacity_tbit_per_s_str`. A single `{python} NextGenLinkDensity.eth_1_6t_port_tbit_per_s_str` port delivers the bandwidth of `{python} NextGenLinkDensity.port_ratio_str` 400G ports. The increased density allows architects to flatten the topology: a cluster that previously required three tiers of switches may be served by two when radix, port rate, and placement constraints line up, halving the transceiver count and reducing tail latency by removing an entire hop of switching and FEC overhead.
 
 ### Optical interconnects {#sec-network-fabrics-optical}
 
