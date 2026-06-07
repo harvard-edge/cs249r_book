@@ -234,9 +234,10 @@ class TestPointToPointTransfer:
         payload = Q_("4 KB")
         alpha = Q_("2 us")
         beta = Q_("10 GB/s")
-        expected = alpha.to(ureg.second).magnitude + (4 * 1024) / (10e9)
+        # pint KB is decimal (1000 bytes), matching the book's prose convention
+        expected = alpha.to(ureg.second).magnitude + (4 * 1000) / (10e9)
         result = calc_point_to_point_time(payload, alpha, beta)
-        assert result.to(ureg.second).m_as(ureg.second) == pytest.approx(expected, rel=1e-6)
+        assert result.to(ureg.second).magnitude == pytest.approx(expected, rel=1e-6)
 
 
 class TestDoubleBinaryTreeAllreduce:
@@ -319,7 +320,7 @@ class TestHopLatency:
 
     def test_linear_scaling(self):
         result = calc_hop_latency(3, Q_("2 us"))
-        assert result == pytest.approx(Q_("6 us"), rel=1e-6)
+        assert result.to(ureg.microsecond).magnitude == pytest.approx(6.0, rel=1e-6)
 
 # ======================================================================
 # calc_tree_allreduce_time
