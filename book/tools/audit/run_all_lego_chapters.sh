@@ -20,7 +20,7 @@ vol1_chapters=(
   introduction ml_systems ml_workflow data_engineering nn_computation
   nn_architectures frameworks training data_selection model_compression
   hw_acceleration benchmarking model_serving ml_ops responsible_engr conclusion
-  appendix_algorithm appendix_assumptions appendix_dam appendix_data appendix_machine
+  appendix_algorithm appendix_assumptions appendix_data appendix_machine
 )
 
 vol2_chapters=(
