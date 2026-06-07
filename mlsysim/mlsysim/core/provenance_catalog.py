@@ -561,6 +561,19 @@ MEGASCALE = _lit(
     url="https://arxiv.org/abs/2402.15627",
 )
 
+GPT2_TRAINING_COST_EST = _est(
+    "prov:gpt2-training-cost-estimate",
+    "Community estimate of GPT-2 (1.5B) cloud training cost in 2019 (~$50K)",
+    notes="Order-of-magnitude anchor for the training-vs-inference cost asymmetry; OpenAI did not disclose a figure. (Added 2026-06-07 when the cost moved out of a chapter-local literal.)",
+)
+
+GPT4_TRAINING_COST_EST = _est(
+    "prov:gpt4-training-cost-estimate",
+    "Industry-reported nine-figure estimate for GPT-4-class training (Altman: 'more than $100 million', Wired, 2023)",
+    url="https://www.wired.com/story/openai-ceo-sam-altman-the-age-of-giant-ai-models-is-already-over/",
+    notes="Pedagogical anchor; OpenAI has not disclosed the exact training cost. (Added 2026-06-07 when the cost moved out of a chapter-local literal.)",
+)
+
 MEGATRON_OVERLAP = _lit(
     "prov:shoeybi-megatron-2019",
     "Shoeybi et al. (2019), Megatron-LM: Training Multi-Billion Parameter Language Models",

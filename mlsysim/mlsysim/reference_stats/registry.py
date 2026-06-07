@@ -18,6 +18,7 @@ from ..core.units import (
     KiB,
     MB,
     GFLOPs,
+    MILLION,
     MWh,
     TB,
     TOPS,
@@ -168,6 +169,23 @@ class TrainingScaleProfiles(Registry):
         pc.MEGASCALE,
         name="Scaling efficiency (8192 GPUs)",
         description="Illustrative scaling efficiency at 8192 GPUs for LLM training.",
+    )
+
+
+class TrainingCostAnchors(Registry):
+    """Cited training-cost estimates anchoring the training-vs-inference cost asymmetry."""
+
+    Gpt2Cost2019 = sourced_qty(
+        50_000 * USD,
+        pc.GPT2_TRAINING_COST_EST,
+        name="GPT-2 training cost (2019)",
+        description="Widely cited estimate of GPT-2 (1.5B) cloud training cost in 2019.",
+    )
+    Gpt4CostEstimate = sourced_qty(
+        100 * MILLION * USD,
+        pc.GPT4_TRAINING_COST_EST,
+        name="GPT-4 training cost (estimate)",
+        description="Commonly cited nine-figure estimate for GPT-4-class training runs.",
     )
 
 
@@ -701,6 +719,7 @@ class ReferenceStats(Registry):
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
+    TrainingCostAnchors = TrainingCostAnchors
     FleetEvolution = FleetEvolution
     StorageTrainingCorpus = StorageTrainingCorpus
     ModelLoading = ModelLoading
