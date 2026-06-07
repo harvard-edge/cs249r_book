@@ -4483,17 +4483,29 @@ GPU memory contention is the most severe: a tenant with unexpectedly long sequen
 # │ How: Status is "Met" iff p99 latency <= SLO.
 # │
 # │ Imports: mlsysim.fmt (check, fmt, MarkdownStr)
-# │ Exports: NoisyNeighborQuotaScenario.*_str
+# │ Exports: NoisyNeighborImpact.*_str, NoisyNeighborQuotaScenario.*_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, check, fmt, MarkdownStr, fmt_percent, fmt_rate, fmt_time
 
-class NoisyNeighborQuotaScenario:
-    """Resource-quota scenario with computed SLO statuses."""
+class NoisyNeighborImpact:
+    """Shared baseline for the unprotected-pool noisy-neighbor walkthrough."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     slo_ms = 10
     tenant_base_qps = 100
     tenant_burst_qps = 500
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    slo_ms_str = fmt_time(round(slo_ms), 'millisecond', precision=0, commas=False)
+    tenant_base_qps_str = fmt_rate(tenant_base_qps, "QPS", commas=False)
+    tenant_burst_qps_str = fmt_rate(tenant_burst_qps, "QPS", commas=False)
+    gpu_util_pct_str = fmt_percent(round(70) / 100, precision=0, commas=False, style='prose')
+
+class NoisyNeighborQuotaScenario:
+    """Resource-quota scenario with computed SLO statuses."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    slo_ms = NoisyNeighborImpact.slo_ms
     tenant_throttled_qps = 120
     protected_p99_ms = 10
     burst_p99_ms = 50
@@ -4507,26 +4519,22 @@ class NoisyNeighborQuotaScenario:
     check(burst_status == "Violated", "Bursting tenant should violate the SLO")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    slo_ms_str = fmt_time(round(slo_ms), 'millisecond', precision=0, commas=False)
-    tenant_base_qps_str = fmt_rate(tenant_base_qps, "QPS", commas=False)
-    tenant_burst_qps_str = fmt_rate(tenant_burst_qps, "QPS", commas=False)
     tenant_throttled_qps_str = fmt_rate(tenant_throttled_qps, "QPS", commas=False)
     protected_p99_ms_str = fmt_time(protected_p99_ms, 'millisecond', precision=0, commas=False)
     burst_p99_ms_str = fmt_time(burst_p99_ms, 'millisecond', precision=0, commas=False)
     protected_status_str = MarkdownStr(protected_status)
     burst_status_str = MarkdownStr(burst_status)
-    gpu_util_pct_str = fmt_percent(round(70) / 100, precision=0, commas=False, style='prose')
 ```
 
 Consider an inference platform serving 10 tenants on shared H100 GPUs:
 
 **Baseline (even load)**:
 
-- Each tenant: `{python} NoisyNeighborQuotaScenario.tenant_base_qps_str`, `{python} NoisyNeighborQuotaScenario.slo_ms_str` P99 latency
-- GPU utilization: `{python} NoisyNeighborQuotaScenario.gpu_util_pct_str`
+- Each tenant: `{python} NoisyNeighborImpact.tenant_base_qps_str`, `{python} NoisyNeighborImpact.slo_ms_str` P99 latency
+- GPU utilization: `{python} NoisyNeighborImpact.gpu_util_pct_str`
 - All SLOs met
 
-Tenant 3 bursts to `{python} NoisyNeighborQuotaScenario.tenant_burst_qps_str` (5$\times$ baseline). @Tbl-inference-noisy-neighbor-no-isolation records how the burst cascades into SLO violations for all ten tenants on the shared pool:
+Tenant 3 bursts to `{python} NoisyNeighborImpact.tenant_burst_qps_str` (5$\times$ baseline). Without per-tenant quotas, the burst cascades into SLO violations for all ten tenants on the shared pool (@tbl-inference-noisy-neighbor-no-isolation):
 
 | **Tenant**       | **QPS**  | **P99 Latency** | **SLO Status** |
 |:-----------------|:--------:|:---------------:|:--------------:|
