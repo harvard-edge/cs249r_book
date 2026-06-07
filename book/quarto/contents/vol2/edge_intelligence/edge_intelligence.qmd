@@ -1938,12 +1938,12 @@ The key insight is that layers do not contribute equally to local performance ga
 
 #### Sparse update design {#sec-edge-intelligence-sparse-update-design-ee7c}
 
-Let a neural network be defined by parameters $\theta = \{\theta_1, \theta_2, \ldots, \theta_{N_{\text{layers}}}\}$ across $N_{\text{layers}}$ layers. In standard fine-tuning, we compute gradients and perform updates on all parameters:
+Let a neural network be defined by parameters $\theta = \{\theta_1, \theta_2, \ldots, \theta_{N_L}\}$ across $N_L$ layers. In standard fine-tuning, we compute gradients and perform updates on all parameters:
 $$
-\theta_i \leftarrow \theta_i - \eta \frac{\partial \mathcal{L}}{\partial \theta_i}, \quad \text{for } i = 1, \ldots, N_{\text{layers}}
+\theta_i \leftarrow \theta_i - \eta \frac{\partial \mathcal{L}}{\partial \theta_i}, \quad \text{for } i = 1, \ldots, N_L
 $$
 
-In task-adaptive sparse updates, we select a small subset $\mathcal{S} \subset \{1, \ldots, N_{\text{layers}}\}$ such that only parameters in $\mathcal{S}$ are updated:
+In task-adaptive sparse updates, we select a small subset $\mathcal{S} \subset \{1, \ldots, N_L\}$ such that only parameters in $\mathcal{S}$ are updated:
 $$
 \theta_i \leftarrow
 \begin{cases}
@@ -2515,11 +2515,11 @@ The most widely used baseline for this process is Federated Averaging (FedAvg)[^
 
 [^fn-fedavg-communication]: **FedAvg**\index{FedAvg!communication efficiency}: @mcmahan2017communication averages model weights instead of individual gradients, allowing each client to perform multiple local SGD steps (typically 1--20) before a single upload. This reduces communication by 10--100$\times$ compared to distributed SGD, making federated learning viable over mobile networks where upload bandwidth is the binding constraint. The trade-off: more local steps improve communication efficiency but increase divergence on non-IID data, requiring careful tuning per deployment.
 
-Formally, let $\mathcal{D}_k$ denote the local dataset on client $k$, and let $\theta_k^t$ be the parameters of the model on client $k$ at round $t$. Each client performs $E$ steps of SGD on its local data, yielding an update $\theta_k^{t+1}$. The central server then aggregates these updates as:
+Formally, let $\mathcal{D}_k$ denote the local dataset on client $k$, and let $\theta_k^t$ be the parameters of the model on client $k$ at round $t$. Each client performs $E$ epochs of SGD on its local data, yielding an update $\theta_k^{t+1}$. The central server then aggregates these updates as:
 $$
-\theta^{t+1} = \sum_{k=1}^{K} \frac{n_k}{n} \theta_k^{t+1}
+\theta^{t+1} = \sum_{k=1}^{C} \frac{n_k}{n} \theta_k^{t+1}
 $$
-where $n_k = |\mathcal{D}_k|$ is the number of samples on device $k$, $n = \sum_k n_k$ is the total number of samples across participating clients, and $K$ is the number of active devices in the current round.
+where $n_k = |\mathcal{D}_k|$ is the number of samples on device $k$, $n = \sum_k n_k$ is the total number of samples across participating clients, and $C$ is the number of active devices in the current round.
 
 #### Straggler mitigation {#sec-edge-intelligence-straggler-mitigation-b49d}
 
@@ -2675,7 +2675,7 @@ node[Txt,left,pos=0.75]{(4) Weighted Aggregation\\[1.15ex]$\displaystyle\theta^{
 
 :::
 
-This basic structure introduces a number of design choices and tradeoffs. The number of local steps $E$ impacts the balance between computation and communication: larger $E$ reduces communication frequency but risks divergence if local data distributions vary too much. The selection of participating clients affects convergence stability and fairness. In real-world deployments, not all devices are available at all times, and hardware capabilities may differ substantially, requiring robust participation scheduling and failure tolerance.
+This basic structure introduces a number of design choices and tradeoffs. The number of local epochs $E$ impacts the balance between computation and communication: larger $E$ reduces communication frequency but risks divergence if local data distributions vary too much. The selection of participating clients affects convergence stability and fairness. In real-world deployments, not all devices are available at all times, and hardware capabilities may differ substantially, requiring robust participation scheduling and failure tolerance.
 
 #### Federated learning convergence analysis {#sec-edge-intelligence-federated-learning-convergence-analysis-c1fc}
 
@@ -2792,7 +2792,7 @@ class FederatedConvergence:
     fc_client_epoch_reduction_mult_str = fmt_multiple(client_epoch_reduction, precision=1, commas=False)
 ```
 
-A production federated deployment with `{python} FederatedConvergence.fc_total_clients_str` clients makes the round-complexity trade-off concrete: $K$ = `{python} FederatedConvergence.fc_total_clients_str` total clients in the population, $C$ = `{python} FederatedConvergence.fc_clients_per_round_str` clients selected per round, $E$ = `{python} FederatedConvergence.fc_local_epochs_str` local epochs per round, target optimality gap $\epsilon$ = `{python} FederatedConvergence.fc_epsilon_str`, and two scenarios comparing IID data ($\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_iid_str`) vs. moderately non-IID data ($\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_non_iid_str`).
+A production federated deployment with `{python} FederatedConvergence.fc_total_clients_str` clients makes the round-complexity trade-off concrete: `{python} FederatedConvergence.fc_total_clients_str` total clients in the population, $C$ = `{python} FederatedConvergence.fc_clients_per_round_str` clients selected per round, $E$ = `{python} FederatedConvergence.fc_local_epochs_str` local epochs per round, target optimality gap $\epsilon$ = `{python} FederatedConvergence.fc_epsilon_str`, and two scenarios comparing IID data ($\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_iid_str`) vs. moderately non-IID data ($\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_non_iid_str`).
 
 IID case $(\beta_{\text{het}} = 0)$: Using the convergence bound $\epsilon \leq \frac{\sigma}{\sqrt{CER}}$ where $\sigma$ captures gradient variance (typically $\sigma \approx 1$ for normalized objectives), we solve for required rounds:
 
@@ -2913,7 +2913,7 @@ You are architecting a federated learning system for a fleet of 10 million mobil
 Consider three design decisions:
 
 1.  **Aggregation**: Do you use plain FedAvg for simplicity, reduce local epochs to limit client drift, or add personalization/clustering when one global model no longer fits the population?
-2.  **Privacy**: With a strict privacy budget of $\epsilon < 5$, how much noise must be injected, and how does that impact convergence time?
+2.  **Privacy**: With a strict privacy budget of $\varepsilon < 5$, how much noise must be injected, and how does that impact convergence time?
 3.  **Communication**: Given the bandwidth limits, should you implement gradient quantization (e.g., 8-bit) or structured sparsity?
 
 :::

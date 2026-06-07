@@ -3746,10 +3746,10 @@ A quick calculation shows how fast embedding tables exceed single-GPU memory.
 
 **Math**:
 
-1.  **Table entries**: `{python} CapacityWall.cw_num_items_str` Million.
+1.  **Table entries**: `{python} CapacityWall.cw_num_items_str` items.
 2.  **Vector size**: `{python} CapacityWall.cw_embed_dim_str` elements.
 3.  **Precision**: FP32 (4 bytes per element).
-4.  **Table size**: `{python} CapacityWall.cw_num_items_str` Million $\times$ `{python} CapacityWall.cw_embed_dim_str` $\times$ 4 bytes ≈ `{python} CapacityWall.cw_table_gb_str`.
+4.  **Table size**: `{python} CapacityWall.cw_num_items_str` items $\times$ `{python} CapacityWall.cw_embed_dim_str` $\times$ 4 bytes ≈ `{python} CapacityWall.cw_table_gb_str`.
 
 **Systems insight**: A single embedding table for one feature (Items) already consumes `{python} CapacityWall.cw_utilization_pct_str` of an `{python} CapacityWall.a100_mem_gb_str` A100 GPU. Adding a User table of the same size means the embedding tables no longer fit on a single `{python} CapacityWall.a100_mem_gb_str`, motivating either smaller tables, off-device memory, or partitioning across memory resources. DLRM is *capacity-bound*: the first question is not how many FLOPs the accelerator can deliver, but where the embedding state can physically reside.
 
@@ -5236,43 +5236,50 @@ Engineers add attention to CNNs or convolutions to transformers expecting additi
 # │ Context: Pitfall about training vs deployment hardware mismatch
 # │
 # │ Goal: Contrast datacenter and edge memory capacities.
-# │ Show: The memory gap between an 8-GPU cluster and a 4 GB edge device.
-# │ How: Convert Hardware.Cloud.A100.memory.capacity to GB, multiply by 8, and compare to edge.
+# │ Show: The memory gap between an 8-GPU A100 node and a Jetson Orin NX edge device.
+# │ How: Multiply Hardware.Cloud.A100.memory.capacity by 8; compare to
+# │      Hardware.Edge.JetsonOrinNX.memory.capacity from the registry.
 # │
-# │ Imports: mlsysim.core.units (Hardware.Cloud.A100.memory.capacity, GB),
-# │          mlsysim.fmt (fmt, check)
-# │ Exports: a100_8x_mem_gb_str, edge_mem_gb_str, memory_reduction_mult_str
+# │ Imports: mlsysim (Hardware), mlsysim.fmt (fmt_memory,
+# │          fmt_multiple, MarkdownStr, check)
+# │ Exports: A100ClusterMemory.a100_8x_mem_gb_str, edge_device_name_str,
+# │          edge_mem_gb_str, memory_reduction_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, check, fmt_memory_capacity
+from mlsysim import Hardware
+from mlsysim.fmt import fmt_memory, fmt_multiple, MarkdownStr, check
+from mlsysim.core.units import GB
 
 class A100ClusterMemory:
-    """Contrast datacenter and edge memory: 8-GPU A100 node vs 4 GB edge device."""
+    """Contrast datacenter and edge memory: 8-GPU A100 node vs Jetson Orin NX."""
 
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Registry) ───────────────────────────────────────────────
+    a100 = Hardware.Cloud.A100
+    edge_device = Hardware.Edge.JetsonOrinNX
     n_gpus = 8
-    edge_device_mem_gb = 4
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_single = Hardware.Cloud.A100.memory.capacity
-    edge_device_mem = edge_device_mem_gb * GB
-    a100_8x_mem = a100_single * n_gpus
-    memory_reduction = (a100_8x_mem / edge_device_mem).to("").magnitude
+    a100_8x_mem = a100.memory.capacity * n_gpus
+    edge_mem = edge_device.memory.capacity
+    memory_reduction = (a100_8x_mem / edge_mem).to("").magnitude
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # Registry stores HBM capacity in binary GiB (branded "80 GB"); 8x = 640 GiB.
-    check(a100_8x_mem == 640 * GiB, f"8x 80 GiB A100 node should provide 640 GiB (branded 640 GB), got {a100_8x_mem.to(GiB).magnitude:.0f} GiB.")
-    check(memory_reduction > 150, f"Expected >150x memory reduction, got {memory_reduction:.0f}x.")
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        memory_reduction >= 40,
+        f"8x A100 node memory should exceed Jetson Orin NX by at least 40x, got {memory_reduction:.1f}x.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_8x_mem_gb_str = fmt_memory_capacity(a100_8x_mem, unit=GiB, precision=0, commas=False)
-    edge_mem_gb_str = fmt_memory(edge_device_mem, unit=GB, precision=0, commas=False)
+    # Decimal GB for both sides so headline capacities divide consistently with the ratio.
+    a100_8x_mem_gb_str = fmt_memory(a100_8x_mem, unit=GB, precision=1, commas=False)
+    edge_device_name_str = MarkdownStr(edge_device.name)
+    edge_mem_gb_str = fmt_memory(edge_mem, unit=GB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(round(memory_reduction), precision=0, commas=False)
 ```
 
 **Fallacy**: *Architecture wins on training hardware transfer directly to deployment hardware.*
 
-Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy to edge devices with `{python} A100ClusterMemory.edge_mem_gb_str`—the `{python} A100ClusterMemory.memory_reduction_mult_str` reduction requires architectural changes, not merely smaller weight formats. As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack. Edge deployment compounds constraints: models must fit 10–100 MB storage, execute in 50–200 ms, and operate within 2–5 W power. Organizations deferring deployment considerations to "optimize later" encounter mismatches requiring costly redesigns that delay products by months.
+Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy to a representative edge node such as the `{python} A100ClusterMemory.edge_device_name_str` (`{python} A100ClusterMemory.edge_mem_gb_str` system memory)—a `{python} A100ClusterMemory.memory_reduction_mult_str` gap that requires architectural changes, not merely smaller weight formats. As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack. Edge deployment compounds constraints: models must fit 10–100 MB storage, execute in 50–200 ms, and operate within 2–5 W power. Organizations deferring deployment considerations to "optimize later" encounter mismatches requiring costly redesigns that delay products by months.
 
 **Pitfall**: *Ignoring KV cache growth when estimating transformer serving costs.*
 

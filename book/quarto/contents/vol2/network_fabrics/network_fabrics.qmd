@@ -483,7 +483,7 @@ Protocol choice determines whether the fabric can behave as a lossless medium; p
 # │          NetworkAlphaBeta.ib_alpha_us_str,
 # │          NetworkAlphaBeta.ib_beta_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_math, fmt_percent, fmt_time, fmt_qty
+from mlsysim.fmt import fmt, check, fmt_math, fmt_percent, fmt_time, fmt_qty, fmt_multiple
 
 class NetworkAlphaBeta:
     """Namespace for the alpha-beta communication model."""
@@ -493,11 +493,12 @@ class NetworkAlphaBeta:
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
     alpha_ib = FABRIC_ALPHA_NDR  # 1.5 us (typical for IB NDR)
     beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth  # ~50 GB/s
+    eth_alpha = Systems.SwitchFabric.AlphaRoce
+    eth_beta = Systems.Fabrics.Ethernet_100G.bandwidth
 
     # Level 2: Messages
     n_small = 4000 * byte  # scenario assumption: 4 KB control message
     n_large = 350 * MB  # scenario assumption: 350 MB gradient shard
-    n_demo_large = 100 * MB  # scenario assumption: 100 MB alpha-beta walkthrough
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     n_cross_ib = alpha_ib * beta_ib
@@ -506,24 +507,26 @@ class NetworkAlphaBeta:
     small_bw_term_pct = ((n_small / beta_ib) / t_small_ib).to_base_units().magnitude * 100
 
     t_large_ib = alpha_ib + (n_large / beta_ib)
+    t_large_eth = eth_alpha + (n_large / eth_beta)
+    large_speedup = (t_large_eth / t_large_ib).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_cross_ib < 100 * KB, f"Crossover ({n_cross_ib.to(KB).magnitude:.0f} KB) should be < 100 KB for IB")
     check(small_bw_term_pct < 10, f"Small msg should be latency-bound, got {small_bw_term_pct:.1f}% BW share")
+    check(3.5 < large_speedup < 4.5, "Large-message speedup should be about 4× for IB vs 100G Ethernet")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_cross_ib_kb_str = fmt_qty(n_cross_ib, KB, precision=0, commas=False)
     t_small_ib_us_str = fmt_time(t_small_ib, microsecond, precision=2, commas=False)
     small_bw_pct_str = fmt_percent(small_bw_term_pct / 100, precision=1, commas=False, style='prose')
     t_large_ib_ms_str = fmt_time(t_large_ib, millisecond, precision=1, commas=False)
+    t_large_eth_ms_str = fmt_time(t_large_eth, millisecond, precision=2, commas=False)
+    large_speedup_str = fmt_multiple(round(large_speedup), precision=0, commas=False)
     ib_alpha_us_str = fmt_time(alpha_ib, microsecond, precision=1, commas=False)
     ib_beta_gb_per_s_str = fmt_qty(beta_ib, GB / second, precision=0, commas=False)
     n_small_kb_str = fmt_qty(n_small, KB, precision=0, commas=False)
     n_large_mb_str = fmt_qty(n_large, MB, precision=0, commas=False)
-    n_demo_large_mb_str = fmt_qty(n_demo_large, MB, precision=0, commas=False)
     n_large_grad_mb_str = fmt_qty(n_large, MB, precision=0, commas=False)
-    eth_alpha = Systems.SwitchFabric.AlphaRoce
-    eth_beta = Systems.Fabrics.Ethernet_100G.bandwidth
     eth_alpha_us_str = fmt_time(eth_alpha, microsecond, precision=0, commas=False)
     eth_beta_gb_per_s_str = fmt_qty(eth_beta, GB / second, precision=1, commas=False)
     doubled_beta_gb_per_s_str = fmt_qty(2 * beta_ib, GB / second, precision=0, commas=False)
@@ -544,14 +547,14 @@ For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_
 Apply $T(n) = \alpha + n/\beta$ for a `{python} NetworkAlphaBeta.n_small_kb_str` control message and a `{python} NetworkAlphaBeta.n_large_mb_str` gradient shard.
 
 1. **Small message** (4 KB):
-   - InfiniBand: $1.5\,\mu\text{s} + 4 KB/50 GB/s = 1.5 + 0.08 = \mathbf{1.58\,\mu\text{s}}$
-   - Ethernet: $5.0\,\mu\text{s} + 4 KB/12.5 GB/s = 5.0 + 0.32 = \mathbf{5.32\,\mu\text{s}}$
+   - InfiniBand: $1.5\,\mu\text{s} + 4\,\text{KB}/50\,\text{GB/s} = 1.5 + 0.08 = \mathbf{1.58\,\mu\text{s}}$
+   - Ethernet: $5.0\,\mu\text{s} + 4\,\text{KB}/12.5\,\text{GB/s} = 5.0 + 0.32 = \mathbf{5.32\,\mu\text{s}}$
    - **Result**: InfiniBand is 3.4$\times$ faster purely due to lower $\alpha$.
 
-2. **Large message** (`{python} NetworkAlphaBeta.n_demo_large_mb_str`):
-   - InfiniBand: $1.5\,\mu\text{s} + 100 MB/50 GB/s = 0.0015 + 2.0 = \mathbf{2.00 ms}$
-   - Ethernet: $5.0\,\mu\text{s} + 100 MB/12.5 GB/s = 0.005 + 8.0 = \mathbf{8.01 ms}$
-   - **Result**: InfiniBand is 4$\times$ faster purely due to higher $\beta$.
+2. **Large message** (`{python} NetworkAlphaBeta.n_large_mb_str`):
+   - InfiniBand: $T = \alpha + n/\beta =$ `{python} NetworkAlphaBeta.t_large_ib_ms_str`
+   - Ethernet: $T = \alpha + n/\beta =$ `{python} NetworkAlphaBeta.t_large_eth_ms_str`
+   - **Result**: InfiniBand is `{python} NetworkAlphaBeta.large_speedup_str` faster purely due to higher $\beta$.
 
 **Systems insight**: For large-scale training, the crossover point $(n^* = \alpha\beta)$ is typically around `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Since gradients are megabytes to gigabytes, we are almost always in the bandwidth-dominated regime. However, pipeline parallelism and distributed coordination rely on small messages in the latency-dominated regime\index{Latency!dominated regime}, where wire-speed upgrades provide zero benefit and only topology and hop-count reductions matter.
 
@@ -968,7 +971,7 @@ class NetworkFatTreeRecap:
     production_2k_gpus_str = fmt(Systems.Clusters.Production_2K.total_accelerators, precision=0, commas=True)
 ```
 
-A fat-tree built from switches with radix[^fn-switch-radix-density] $k$ supports $N_{\text{hosts}} = k^3/4$ hosts at three tiers, or $k^2/2$ at two tiers. In a two-tier leaf-spine fabric using radix-64 switches (with $k$ leaves each providing $k/2$ host ports and $k/2$ spine uplinks), the topology supports up to `{python} NetworkFatTreeRecap.production_2k_gpus_str` hosts. The same radix-64 switch admits a second two-tier framing: a leaf-aggregation pod reaches only $(k/2)^2 =$ `{python} NetworkFatTreeRecap.n_gpus_str` per pod, the difference being whether the upper tier terminates as spines or uplinks to a core layer. Either comfortably accommodates our `{python} NetworkFatTreeRecap.n_gpus_str` reference cluster with only leaf and spine layers.
+A fat-tree built from switches with radix[^fn-switch-radix-density] $k$ supports $N_{\text{hosts}} = k^{3}/4$ hosts at three tiers, or $k^{2}/2$ at two tiers. In a two-tier leaf-spine fabric using radix-64 switches (with $k$ leaves each providing $k/2$ host ports and $k/2$ spine uplinks), the topology supports up to `{python} NetworkFatTreeRecap.production_2k_gpus_str` hosts. The same radix-64 switch admits a second two-tier framing: a leaf-aggregation pod reaches only $(k/2)^2 =$ `{python} NetworkFatTreeRecap.n_gpus_str` per pod, the difference being whether the upper tier terminates as spines or uplinks to a core layer. Either comfortably accommodates our `{python} NetworkFatTreeRecap.n_gpus_str` reference cluster with only leaf and spine layers.
 
 A concrete bisection estimate shows how quickly oversubscription turns into synchronization delay.
 
@@ -1471,7 +1474,7 @@ class NetworkMonitoringClusterRecap:
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
-Network performance problems in ML clusters are insidious because they manifest as **silent waste**\index{Silent Waste} rather than explicit failures. A degraded transceiver causing a 10 percent reduction in effective bandwidth might slow each training iteration by only 2–3 percent, a drift easily masked by the natural variance of checkpointing or data loading. Over a 30-day training run on `{python} NetworkMonitoringClusterRecap.n_gpus_str`, this invisible drag accumulates to roughly 14,000--22,000 wasted GPU-hours, burning about \$40,000--\$65,000 at \$3 per GPU-hour without triggering a single alarm. Traditional IT monitoring tools like SNMP or `ping` measure connectivity, not the sustained throughput required by RDMA. Effective observability\index{Monitoring!network} requires a three-layer approach: **physical monitoring**\index{Physical Monitoring} (FEC errors, signal attenuation), **transport monitoring**\index{Transport Monitoring} (PFC pause frames, retransmission rates), and **application monitoring**\index{Application Monitoring} (NCCL algorithmic bandwidth) [@jeaugey2017nccl]. Only by correlating signals across these layers can operators detect that a "slow training run" is actually caused by a single degraded cable in one rack.
+Network performance problems in ML clusters are insidious because they manifest as **silent waste**\index{Silent Waste} rather than explicit failures. A degraded transceiver causing a 10 percent reduction in effective bandwidth might slow each training iteration by only 2–3 percent, a drift easily masked by the natural variance of checkpointing or data loading. Over a 30-day training run on `{python} NetworkMonitoringClusterRecap.n_gpus_str`, this invisible drag accumulates to roughly 14,000--22,000 wasted GPU-hours, burning about \$40,000--\$65,000 at \$3 per GPU-hour without triggering a single alarm. Traditional IT monitoring tools like SNMP or ICMP ping measure connectivity, not the sustained throughput required by RDMA. Effective observability\index{Monitoring!network} requires a three-layer approach: **physical monitoring**\index{Physical Monitoring} (FEC errors, signal attenuation), **transport monitoring**\index{Transport Monitoring} (PFC pause frames, retransmission rates), and **application monitoring**\index{Application Monitoring} (NCCL algorithmic bandwidth) [@jeaugey2017nccl]. Only by correlating signals across these layers can operators detect that a "slow training run" is actually caused by a single degraded cable in one rack.
 
 ### Link-level telemetry {#sec-network-fabrics-link-telemetry}
 

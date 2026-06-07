@@ -335,6 +335,7 @@ class InferenceEconomics:
         lifetime_queries_latex_math = fmt_math(f"{mantissa:.2f} \\times 10^{{{exp}}}")
     else:
         lifetime_queries_latex_math = fmt_math(f"{lifetime_queries_val:,.0f}")
+    training_hardware_cost_str = fmt_usd(training_hardware_cost, commas=False)
     serving_cost_total_str = fmt_usd(serving_total_cost_val)
     training_cost_total_str = fmt_usd(training_total_cost)
     leverage_ratio_mult_str = fmt_multiple(leverage_ratio, precision=1, commas=False)
@@ -354,7 +355,7 @@ class InferenceEconomics:
     engineering_mult_str = fmt_multiple(engineering_multiplier, commas=False, precision=0)
 ```
 
-The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.n_gpu_hours_str` of hardware at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, amplified by a `{python} InferenceEconomics.engineering_mult_str` engineering overhead for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
+The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.training_hardware_cost_str` hardware for `{python} InferenceEconomics.n_gpu_hours_str` at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, plus `{python} InferenceEconomics.engineering_mult_str` additional engineering cost for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
 
 | **Application**               | **Training Cost** | **Annual Serving Cost** |     **Ratio**     |
 |:------------------------------|:-----------------:|:-----------------------:|:-----------------:|
@@ -1141,15 +1142,15 @@ The first baseline is traditional LLM batching, where unequal output lengths tur
 
 Traditional batching (also called static batching) processes all requests in a batch through all decode iterations until the longest sequence completes. For batch size $B$ with output lengths $\{S_1, S_2, ..., S_B\}$, the total compute performed is:
 
-$$C_{\text{traditional}} = B \times S_{\text{max}} \times c_{\text{decode}}$$
+$$O_{\text{traditional}} = B \times S_{\text{max}} \times c_{\text{decode}}$$
 
 where $S_{\text{max}} = \max_i(S_i)$ and $c_{\text{decode}}$ is the compute cost per decode iteration per sequence. However, the useful compute is only:
 
-$$C_{\text{useful}} = \sum_{i=1}^{B} S_i \times c_{\text{decode}}$$
+$$O_{\text{useful}} = \sum_{i=1}^{B} S_i \times c_{\text{decode}}$$
 
 The **waste ratio**\index{Waste Ratio} quantifies the inefficiency:
 
-$$W = 1 - \frac{C_{\text{useful}}}{C_{\text{traditional}}} = 1 - \frac{\sum_{i=1}^{B} S_i}{B \times S_{\text{max}}} = 1 - \frac{\bar{S}}{S_{\text{max}}}$$ {#eq-waste-ratio}
+$$W = 1 - \frac{O_{\text{useful}}}{O_{\text{traditional}}} = 1 - \frac{\sum_{i=1}^{B} S_i}{B \times S_{\text{max}}} = 1 - \frac{\bar{S}}{S_{\text{max}}}$$ {#eq-waste-ratio}
 
 where $\bar{S}$ is the mean output sequence length. This reveals that waste depends entirely on the ratio of mean to maximum output length within the batch. For uniform output lengths $(\bar{S} = S_{\text{max}})$, waste is zero. For highly variable lengths, waste can exceed 50 percent.
 
@@ -1731,9 +1732,9 @@ $$\text{Lookups per shard} = \frac{\text{QPS} \times \text{lookups/request}}{\te
 
 In this scenario, the rate is `{python} RecsysLatencyBreakdown.lookups_per_shard_per_second_million_str` per second per shard.
 
-Single-threaded processing cannot sustain that rate. Instead, the system uses a batch accumulation window\index{Batching!batch, accumulation window} of `{python} RecsysLatencyBreakdown.accumulation_window_ms_str`, which yields batches of `{python} RecsysLatencyBreakdown.requests_per_batch_str` at `{python} RecsysLatencyBreakdown.platform_qps_str` and about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` lookups per shard per batch.
+Single-threaded processing cannot sustain that rate. Instead, the system uses a batch accumulation window\index{Batching!batch, accumulation window} of `{python} RecsysLatencyBreakdown.accumulation_window_ms_str`, which yields batches of `{python} RecsysLatencyBreakdown.requests_per_batch_str` at `{python} RecsysLatencyBreakdown.platform_qps_str` and about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` per shard per batch.
 
-Each embedding shard processes about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` in a batched operation, achieving high memory bandwidth utilization through sequential memory access patterns.
+Each embedding shard processes `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` in a batched operation, achieving high memory bandwidth utilization through sequential memory access patterns.
 
 As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{Latency!breakdown} composition includes request routing, batch accumulation, embedding lookup\index{Embedding Lookup}, feature processing, and ranking:
 
@@ -3047,9 +3048,9 @@ The result exceeds the `{python} HardwareSetupSharding.h100_mem_gb_str` capacity
 
 The second driver is latency. Even when a model fits in memory, sharding can reduce latency by parallelizing computation. @Eq-parallel-time formalizes the potential speedup as a function of parallelization efficiency:
 
-$$T_{\text{parallel}} = \frac{T_{\text{sequential}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}}$$ {#eq-parallel-time}
+$$T_{\text{parallel}} = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}}$$ {#eq-parallel-time}
 
-where $N$ is the number of devices in the sharding group, $T_{\text{comm}}(N)$ is the communication overhead, $T_{\text{sync}}(N)$ is synchronization overhead, and $T_{\text{overlap}}$ is communication hidden behind useful compute. In the common no-overlap simplification with negligible extra synchronization, this reduces to $T_{\text{sequential}}/N + T_{\text{comm}}(N)$. Sharding provides latency benefit only when the nonoverlapped overhead is smaller than the time saved through parallelization.
+where $N$ is the number of devices in the sharding group, $T_{\text{comm}}(N)$ is the communication overhead, $T_{\text{sync}}(N)$ is synchronization overhead, and $T_{\text{overlap}}$ is communication hidden behind useful compute. In the common no-overlap simplification with negligible extra synchronization, this reduces to $T_{\text{compute}}/N + T_{\text{comm}}(N)$. Sharding provides latency benefit only when the nonoverlapped overhead is smaller than the time saved through parallelization.
 
 | **Sharding Trigger**    |  **Model Examples**  | **Minimum Sharding** |    **Strategy**    |
 |:------------------------|:--------------------:|:--------------------:|:------------------:|
@@ -4525,7 +4526,7 @@ Consider an inference platform serving 10 tenants on shared H100 GPUs:
 - GPU utilization: `{python} NoisyNeighborQuotaScenario.gpu_util_pct_str`
 - All SLOs met
 
-Tenant 3 bursts (5$\times$ baseline). Without isolation, @tbl-inference-noisy-neighbor-no-isolation records how the burst cascades into SLO violations for all ten tenants on the shared pool:
+Tenant 3 bursts to `{python} NoisyNeighborQuotaScenario.tenant_burst_qps_str` (5$\times$ baseline). @Tbl-inference-noisy-neighbor-no-isolation records how the burst cascades into SLO violations for all ten tenants on the shared pool:
 
 | **Tenant**       | **QPS**  | **P99 Latency** | **SLO Status** |
 |:-----------------|:--------:|:---------------:|:--------------:|
@@ -4534,9 +4535,13 @@ Tenant 3 bursts (5$\times$ baseline). Without isolation, @tbl-inference-noisy-ne
 | **Tenant 3**     |   500    |      45 ms      |    Violated    |
 | **Tenants 4-10** | 100 each |     22-30 ms    |    Violated    |
 
-: **Noisy neighbor without isolation**: Per-tenant QPS, p99 latency, and SLO status when tenant 3 bursts to `{python} NoisyNeighborQuotaScenario.tenant_burst_qps_str` on a shared GPU pool with no resource quotas. {#tbl-inference-noisy-neighbor-no-isolation tbl-colwidths="[26,20,24,30]"}
+: **Noisy neighbor without isolation (unprotected pool)**: All tenants violate their latency SLO when one tenant bursts. {#tbl-inference-noisy-neighbor-no-isolation tbl-colwidths="[26,20,24,30]"}
 
-**With per-tenant quotas** (@tbl-inference-noisy-neighbor-quotas): impact contained to the offending tenant alone.
+:::
+
+::: {#nbk-inference-noisy-neighbor-quotas .callout-notebook title="Noisy neighbor with per-tenant quotas"}
+
+Enabling per-tenant quotas contains the impact to the offending tenant alone (@tbl-inference-noisy-neighbor-quotas):
 
 | **Tenant**       |                              **QPS (actual)**                              |                      **P99 Latency**                       |                             **SLO Status**                             |
 |:-----------------|:--------------------------------------------------------------------------:|:----------------------------------------------------------:|:----------------------------------------------------------------------:|
