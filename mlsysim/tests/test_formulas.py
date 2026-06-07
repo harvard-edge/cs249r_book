@@ -18,6 +18,7 @@ from mlsysim.physics import (
     calc_double_binary_tree_allreduce_time,
     calc_ring_allreduce_data_factor,
     calc_ring_collective_data_factor,
+    ring_allreduce_data_factor_latex,
     calc_ring_allreduce_latency_steps,
     calc_ring_allreduce_latency_time,
     calc_oversubscription_effect,
@@ -218,6 +219,7 @@ class TestRingAllreduceFactors:
         assert calc_ring_allreduce_data_factor(1) == 0.0
         assert calc_ring_allreduce_data_factor(8) == pytest.approx(14 / 8)
         assert calc_ring_collective_data_factor(8) == pytest.approx(7 / 8)
+        assert ring_allreduce_data_factor_latex() == "2 \\times (N-1)/N"
 
     def test_latency_steps_and_time(self):
         assert calc_ring_allreduce_latency_steps(1) == 0

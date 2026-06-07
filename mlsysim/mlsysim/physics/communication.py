@@ -53,6 +53,11 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     return (bw_term + lat_term).to(ureg.second)
 
 
+def ring_allreduce_data_factor_latex(n_gpus_symbol="N"):
+    """LaTeX form for the Ring AllReduce data factor, e.g. ``2 \times (N-1)/N``."""
+    return f"2 \\times ({n_gpus_symbol}-1)/{n_gpus_symbol}"
+
+
 def calc_ring_allreduce_data_factor(n_gpus):
     """Ring AllReduce bandwidth factor: 2*(N-1)/N.
 
