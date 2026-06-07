@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from mlsysim.core.units import ureg
-from mlsysim.core._validation import validate_positive
+from mlsysim.core._validation import validate_positive, validate_range, validate_at_least
 
 from ._units import _ensure_unit
 
@@ -86,6 +86,26 @@ def calc_availability_stacked(single_availability, n_replicas):
     """System availability with k independent replicas."""
     return 1.0 - (1.0 - single_availability) ** n_replicas
 
+
+
+def calc_binomial_failure_probability(p, n):
+    """Probability of at least one failure given n independent trials.
+
+    Parameters
+    ----------
+    p : float
+        Probability of failure in a single trial (e.g., per-device per-hour).
+    n : int
+        Number of independent trials (e.g., number of devices).
+
+    Returns
+    -------
+    float
+        Dimensionless probability in [0, 1).
+    """
+    validate_range(p, 0.0, 1.0, "p")
+    validate_at_least(n, 1, "n")
+    return 1.0 - (1.0 - p) ** n
 
 def calc_failure_probability(mtbf, job_duration):
     """Probability of at least one failure during a job.

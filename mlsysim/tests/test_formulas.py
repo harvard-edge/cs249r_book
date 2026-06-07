@@ -740,3 +740,9 @@ class TestMTBFNode:
         result = calc_mtbf_node(10_000, 4, 50_000, 2, 20_000, 2)
         expected = 1 / (4/10_000 + 2/50_000 + 2/20_000)
         assert result.m_as(ureg.hour) == pytest.approx(expected, rel=1e-4)
+
+def test_calc_binomial_failure_probability():
+    from mlsysim.physics.reliability import calc_binomial_failure_probability
+    assert calc_binomial_failure_probability(1.0, 100) == 1.0
+    assert calc_binomial_failure_probability(0.0, 100) == 0.0
+    assert abs(calc_binomial_failure_probability(0.5, 2) - 0.75) < 1e-9
