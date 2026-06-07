@@ -734,8 +734,13 @@ class HbmMemoryBudget:
     gradient_per_gpu = full_gradient / (tp_degree * dp_nodes)
     total_min = weight_per_gpu + optimizer_per_gpu + activation_min + gradient_per_gpu + comm_min
     total_max = weight_per_gpu + optimizer_per_gpu + activation_max + gradient_per_gpu + comm_max
-    total_min_pct = (total_min / hbm_capacity).to("").magnitude * 100
-    total_max_pct = (total_max / hbm_capacity).to("").magnitude * 100
+    # Percentages divide by the branded "80 GB" figure the table displays,
+    # so a reader's arithmetic on the visible numbers checks out (2026-06-07:
+    # dividing by the physical 80 GiB rendered 65.9-79.9% against rows that
+    # visibly sum to 70.8-85.8% of the displayed capacity).
+    hbm_capacity_branded = hbm_capacity * GB / GiB  # GiB magnitude under the branded decimal-GB label
+    total_min_pct = (total_min / hbm_capacity_branded).to("").magnitude * 100
+    total_max_pct = (total_max / hbm_capacity_branded).to("").magnitude * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     weight_per_gpu_gb_val = weight_per_gpu.to(GB).magnitude
@@ -2281,7 +2286,7 @@ class CheckpointStormDefinition:
 
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
 
-1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model in FP16 (`{python} CheckpointStormDefinition.weights_gb_str` of weights) trained across `{python} CheckpointStormDefinition.replicas_str` with vanilla data parallelism, every replica holds a complete copy and a naive checkpoint generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state; gradients are consumed by the update and are not persisted, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
+1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model in FP16 (`{python} CheckpointStormDefinition.weights_gb_str` of weights) trained across `{python} CheckpointStormDefinition.replicas_str` with vanilla data parallelism, every replica holds a complete copy and a naive checkpoint in which each rank persists its FP16 weight copy generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state; gradients are consumed by the update and are not persisted, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
 2.  **Observation**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes 1,400 seconds, checkpointing every 100 steps means spending $1400/(100 \times 10) = 140\%$ of compute time on checkpointing—more time saving state than doing useful training.
 
@@ -2533,7 +2538,7 @@ class StorageFootprintTable:
 | Optimizer state (FP32)                     |                         1,400 GB                         | GPU HBM (ZeRO-partitioned)                                 |
 | Single checkpoint (full)                   |                         1,750 GB                         | NVMe $\to$ PFS $\to$ Object Storage                        |
 | All checkpoints (30 days, 10-min interval) | `{python} StorageFootprintTable.ckpt_fleet_total_pb_str` | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
-| Archive (retained checkpoints + dataset)   | ~`{python} StorageFootprintTable.archive_lineage_tb_str` | Glacier                                                    |
+| Archive (retained checkpoints + dataset)   | `{python} StorageFootprintTable.archive_lineage_tb_str`  | Glacier                                                    |
 
 : **175B-parameter training storage footprint**: Volume and primary storage tier for each data category in a 30-day, 256-node training run. {#tbl-data-storage-175b-footprint}
 
