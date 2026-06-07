@@ -479,19 +479,19 @@ one at a time, testing as you go.
 
 ```
 Trainer Components:
-┌────────────────────────────────────────────────┐
-│  Trainer                                       │
-│  ├── __init__       → Store components, state  │
-│  ├── train_epoch    → Forward/backward loop    │
-│  ├── evaluate       → Forward only, metrics    │
-│  ├── save_checkpoint → Serialize to disk       │
-│  └── load_checkpoint → Restore from disk       │
-│                                                │
-│  Private helpers (provided):                   │
-│  ├── _get_model_state / _set_model_state       │
-│  ├── _get_optimizer_state / _set_optimizer_state│
-│  └── _get_scheduler_state / _set_scheduler_state│
-└────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────┐
+│  Trainer                                          │
+│  ├── __init__       → Store components, state     │
+│  ├── train_epoch    → Forward/backward loop       │
+│  ├── evaluate       → Forward only, metrics       │
+│  ├── save_checkpoint → Serialize to disk          │
+│  └── load_checkpoint → Restore from disk          │
+│                                                   │
+│  Private helpers (provided):                      │
+│  ├── _get_model_state / _set_model_state          │
+│  ├── _get_optimizer_state / _set_optimizer_state  │
+│  └── _get_scheduler_state / _set_scheduler_state  │
+└───────────────────────────────────────────────────┘
 ```
 
 You will implement the five public methods. The private serialization helpers
@@ -570,24 +570,24 @@ Think of it as assembling the instruments before the orchestra plays.
 
 ```
 Trainer State After __init__:
-┌─────────────────────────────────────┐
-│  Components:                        │
-│    model       → Neural network     │
-│    optimizer   → Parameter updater  │
-│    loss_fn     → Error measure      │
-│    scheduler   → LR adjuster (opt)  │
-│    grad_clip_norm → Stability (opt) │
-│                                     │
-│  State:                             │
-│    epoch = 0                        │
-│    step = 0                         │
-│    training_mode = True             │
-│                                     │
-│  History:                           │
-│    train_loss = []                  │
-│    eval_loss = []                   │
-│    learning_rates = []              │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────┐
+│  Components:                         │
+│    model       → Neural network      │
+│    optimizer   → Parameter updater   │
+│    loss_fn     → Error measure       │
+│    scheduler   → LR adjuster (opt)   │
+│    grad_clip_norm → Stability (opt)  │
+│                                      │
+│  State:                              │
+│    epoch = 0                         │
+│    step = 0                          │
+│    training_mode = True              │
+│                                      │
+│  History:                            │
+│    train_loss = []                   │
+│    eval_loss = []                    │
+│    learning_rates = []               │
+└──────────────────────────────────────┘
 ```
 """
 
@@ -718,15 +718,15 @@ the forward-backward-update cycle that drives learning.
 
 ```
 Training Loop Flow:
-┌─────────────────────────────────────────────┐
-│  for each batch in dataloader:              │
-│    outputs = model.forward(inputs)     →    │
-│    loss = loss_fn(outputs, targets)    →    │
-│    loss.backward(grad)                →    │
-│    optimizer.step()                   →    │
-│    optimizer.zero_grad()                    │
-│  scheduler.get_lr(epoch)                    │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│  for each batch in dataloader:             │
+│    outputs = model.forward(inputs)         │
+│    loss = loss_fn(outputs, targets)        │
+│    loss.backward(grad)                     │
+│    optimizer.step()                        │
+│    optimizer.zero_grad()                   │
+│  scheduler.get_lr(epoch)                   │
+└────────────────────────────────────────────┘
 ```
 
 With gradient accumulation, the update step happens every N batches instead
@@ -1242,16 +1242,16 @@ essential for long training runs that may be interrupted.
 
 ```
 Checkpoint Contents:
-┌───────────────────────────────────┐
-│  checkpoint.pkl                   │
-│  ├── epoch: 42                    │
-│  ├── step: 1680                   │
-│  ├── model_state: {weights...}    │
-│  ├── optimizer_state: {lr, mom..} │
-│  ├── scheduler_state: {lr range}  │
-│  ├── history: {losses, lrs...}    │
-│  └── training_mode: True          │
-└───────────────────────────────────┘
+┌────────────────────────────────────┐
+│  checkpoint.pkl                    │
+│  ├── epoch: 42                     │
+│  ├── step: 1680                    │
+│  ├── model_state: {weights...}     │
+│  ├── optimizer_state: {lr, mom..}  │
+│  ├── scheduler_state: {lr range}   │
+│  ├── history: {losses, lrs...}     │
+│  └── training_mode: True           │
+└────────────────────────────────────┘
 ```
 """
 
@@ -1609,6 +1609,9 @@ def demonstrate_complete_training_pipeline():
     print("   • Checkpointing for training persistence")
     print("   • Evaluation mode for model assessment")
 
+if __name__ == "__main__":
+    demonstrate_complete_training_pipeline()
+
 # %% [markdown]
 """
 ## 📊 Systems Analysis: Training Performance and Memory
@@ -1714,7 +1717,6 @@ def analyze_training_memory():
     print("- Adam: 4× parameter memory (params + grads + 2 moment buffers)")
     print("- Gradient accumulation reduces memory but increases training time")
 
-# %%
 def analyze_checkpoint_overhead():
     """📊 Analyze checkpoint size and overhead."""
     print("\n📊 Analyzing Checkpoint Overhead...")

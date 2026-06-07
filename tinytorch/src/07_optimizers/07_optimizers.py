@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.19.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -81,7 +81,7 @@ DEFAULT_EPS = 1e-8  # Small epsilon for numerical stability in Adam
 DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What are Optimizers?
 
 Optimizers are the engines that drive neural network learning. They take gradients computed from your loss function and use them to update model parameters toward better solutions. Think of optimization as navigating a complex landscape where you're trying to find the lowest valley (minimum loss).
@@ -92,13 +92,14 @@ Imagine you're hiking in dense fog, trying to reach the bottom of a valley. You 
 
 ```
 Loss Landscape (2D visualization):
-       🏔️
-      /  \\
-   🚶 /    \\
-    /      \\
-   /   🎯   \\  ← Global minimum (goal)
-  /          \\
- 🏔️          🏔️
+
+   🏔️         🏔️
+   |         /
+    \       |
+     |     /
+      \   |
+       \ /
+        🎯  ← Global minimum (goal)
 
 Challenge: Navigate to 🎯 using only local slope information!
 ```
@@ -133,7 +134,7 @@ But sophisticated optimizers do much more than basic gradient descent!
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: Mathematical Background
 
 ### Understanding Momentum: The Physics of Optimization
@@ -141,16 +142,11 @@ But sophisticated optimizers do much more than basic gradient descent!
 Momentum in optimization works like momentum in physics. A ball rolling down a hill doesn't immediately change direction when it hits a small bump - it has momentum that carries it forward.
 
 ```
-Without Momentum (SGD):           With Momentum:
-     ↓                                ↘️
-  ←  •  →  ← oscillation           →  •  → smooth path
-     ↑                                ↙️
-
 Narrow valley problem:            Momentum solution:
-|\\     /|                        |\\     /|
-| \\ • / | ← ping-pong             | \\ •→/ | ← smoother
-|  \\ /  |   motion                |  \\ /  |   descent
-|   ●   |                        |   ●   |
+|\•➡️ ⬅️ •/|                        |\•      /|
+| \     / | ← ping-pong            | \↘️    / | ← smoother
+|  \   /  |   motion               |  \•➡️•/  |   descent
+|    ●    |                        |     ●    |
 ```
 
 **SGD with Momentum Formula:**
@@ -168,23 +164,10 @@ the gradient, which is needed for its bias-correction and adaptive scaling steps
 ### Adam: Adaptive Learning for Each Parameter
 
 Adam solves a key problem: different parameters need different learning rates. Imagine adjusting the focus and zoom on a camera - you need fine control for focus but coarse control for zoom.
-
-```
-Parameter Landscape (2 dimensions):
-
-   param2
-     ^
-     |
-   😞|    steep gradient
-     |    (needs small steps)
-     |
-  ---+--●--→ param1
-     |     \\
-     |      \\ gentle gradient
-     |       \\ (needs big steps)
+- A steep gradient would require small steps, as if it were carefully climbing down the mountain.
+- A gentle gradient would require large steps, since going fast doesn't have as large of an effect.
 
 Adam Solution: Automatic step size per parameter!
-```
 
 **Adam's Two-Memory System:**
 
@@ -473,7 +456,7 @@ if __name__ == "__main__":
     test_unit_optimizer_base()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ SGD - Stochastic Gradient Descent
 
 SGD is the foundation of neural network perf. It implements the simple but powerful idea: "move in the direction opposite to the gradient."
@@ -483,22 +466,24 @@ SGD is the foundation of neural network perf. It implements the simple but power
 Gradients point uphill (toward higher loss). To minimize loss, we go downhill:
 
 ```
-Loss Surface (side view):
+Loss Surface (side view, imagine plane):
 
     Loss
-     ^
+     ↑
      |
-  📈 |     current position
-     |    /
-     |   • ← you are here
-     |  / \\
-     | /   \\ gradient points uphill
-     |/     \\
-     ●-------\\--→ parameters
-      \\        \\
-       \\        ↘️ SGD steps downhill
-        \\        (opposite to gradient)
-         \\⭐ ← goal (minimum loss)
+     |  current position
+     |    |
+     |   /|
+     |  / |\
+     | /  |\\ gradient points uphill
+     |/   | \\
+     ●----|--\\--→ parameter
+    / \\  •   \\ ↘️ SGD steps downhill (opposite to gradient)
+   /   \\         
+  /     \\   ⭐ ← goal (minimum loss)     
+ ↙       \\
+ other
+parameter
 ```
 
 ### The Oscillation Problem
@@ -506,16 +491,21 @@ Loss Surface (side view):
 Pure SGD can get trapped oscillating in narrow valleys:
 
 ```
-Narrow valley (top view):
-  \\     /
-   \\   /   ← steep sides
-    \\ /
-  4← • →2  ← SGD bounces back and forth
-    / \\
-   1   3   instead of going down the valley
-  /     \\
- ●       \\
- goal     \\
+Narrow valley (side view, two different gradients shown as planes):
+   
+    first position
+          |
+     -----+---------- 
+     \\ / |     \\ /
+      \\  •→ ←•  \\
+      /\\     |  /\\
+     /  \\ ⭐ | /  \\
+    /    \\|  |/    \\
+    -------+--+-------  
+           |  |
+           | second position
+           |
+          goal (minimum loss)
 ```
 
 ### Momentum Solution
@@ -524,14 +514,20 @@ Momentum remembers the direction you were going and continues in that direction:
 
 ```
 With momentum:
-  \\     /
-   \\   /
-    \\ /
-     •  ← smooth path down the valley
-    / ↓
-   /   ↓
-  ●    ↓  momentum carries us through oscillations
- goal
+
+starting position
+          |
+     -----|---------- 
+     \\ / •↘     \\ /
+      \\    ↙•    \\
+      /\\ •↘     / \\
+     /  \\ ⭐   /   \\
+    /    \\|   /     \\
+    -------+----------  
+           | 
+           | 
+           |
+          goal (minimum loss)
 ```
 
 **Implementation:** SGD keeps a "velocity" buffer that accumulates momentum.
@@ -780,13 +776,13 @@ Consider a neural network with both first layer weights and output weights:
 ```
 Parameter Sensitivity Landscape:
 
-  output_weight                 first_layer_weight
-       ↑                              ↑
-       |                              |
-    😱 |  steep cliff                 |  🐌 gentle slope
-       |  (needs tiny steps)          |  (needs big steps)
-       |                              |
-    ━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━━━→
+    first_layer_weight              output_weight
+           ↑                               ↑
+           |                               |
+           |  🐌 gentle slope              |  ⛰️ steep cliff
+           |  (needs big steps)            |  (needs tiny steps)
+           |                               |
+        ━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━━━→
 
 Same learning rate = disaster!
 • Small LR: output weights learn fast, first layer crawls
@@ -1212,14 +1208,14 @@ update step size.
 ### Visual Comparison
 
 ```
-Adam weight decay:               AdamW weight decay:
+Adam weight decay:                  AdamW weight decay:
 
-gradient ──┐                    gradient ──→ adaptive ──→ param
+gradient ──┐                        gradient ──→ adaptive ──→ param
            ├─→ adaptive ──→ param                  update
 weight ────┘   scaling
 decay
-                                weight ─────────→ param
-                                decay           shrinkage
+                                    weight ─────────→ param
+                                    decay           shrinkage
 
 Coupled (inconsistent)          Decoupled (consistent)
 ```
