@@ -2227,6 +2227,7 @@ For our 10,000-GPU cluster with calculated system MTBF of 3.69 hours (from @sec-
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.solvers import TrainingMemoryModel
+from mlsysim.physics import calc_young_daly_interval
 
 class YoungDalyOptimal:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -2235,7 +2236,7 @@ class YoungDalyOptimal:
     aggregate_ckpt_bw = float(Systems.Reliability.Recovery.checkpoint_write_bw_gbs) * (GB / second)
     # ┌── 2. EXECUTE ───────────────────────────────────────
     t_write = (_mem.total_memory / aggregate_ckpt_bw).to(second)
-    tau_opt = (2 * t_write * mtbf) ** 0.5
+    tau_opt = calc_young_daly_interval(t_write, mtbf)
     overhead_pct = ((t_write / tau_opt) + (tau_opt / (2 * mtbf))).to("").magnitude * 100
     hourly_interval = 1 * hour
     hourly_overhead_pct = ((t_write / hourly_interval) + (hourly_interval / (2 * mtbf))).to("").magnitude * 100
@@ -2332,15 +2333,16 @@ If checkpoints occur hourly, the system wastes \$24,000 per day waiting for stor
 # │ How: Load named model sizes, reusable checkpoint archetype sizes, reliability
 # │      bandwidth/MTBF anchors; then compute write_time, tau_opt, and overhead.
 # │
-# │ Imports: mlsysim public API (Models, Systems, ReferenceStats, units, fmt helpers), math
+# │ Imports: mlsysim public API (Models, Systems, ReferenceStats, units, fmt helpers),
+# │          mlsysim.physics (calc_young_daly_interval)
 # │ Exports: CheckpointOverheadCalc.{archA,dense20b,bert,archB,resnet,vision_transformer}_*_str,
 # │          CheckpointOverheadCalc.archA_fp32_tb_str,
 # │          CheckpointOverheadCalc.write_bw_gb_per_s_str, mtbf_hr_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.physics import calc_checkpoint_size
+from mlsysim.physics import calc_young_daly_interval
 from mlsysim.solvers import TrainingMemoryModel
-import math
 
 class CheckpointOverheadCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
@@ -2380,20 +2382,15 @@ class CheckpointOverheadCalc:
     resnet_write = (resnet_size / write_bw).to(second)
     vision_transformer_write = (vision_transformer_size / write_bw).to(second)
 
-    def young_daly_interval(write_time, _mtbf=mtbf):
-        # Bind the class-level MTBF at definition time: a bare `mtbf` inside this
-        # function resolves to the module namespace, where an earlier figure cell
-        # defines a dimensionless `mtbf = 2.0`, breaking the unit math.
-        interval_s = math.sqrt((2 * write_time * _mtbf).to(second**2).magnitude)
-        return interval_s * second
-
     # Optimal interval = sqrt(2 * write_time * MTBF) [Young-Daly formula]
-    archA_interval = young_daly_interval(archA_write)
-    dense20b_interval = young_daly_interval(dense20b_write)
-    bert_interval = young_daly_interval(bert_write)
-    archB_interval = young_daly_interval(archB_write)
-    resnet_interval = young_daly_interval(resnet_write)
-    vision_transformer_interval = young_daly_interval(vision_transformer_write)
+    # Bind the class-level MTBF at call time to avoid any upstream namespace collision
+    # with later tutorial cells that define bare `mtbf` scalars.
+    archA_interval = calc_young_daly_interval(archA_write, mtbf)
+    dense20b_interval = calc_young_daly_interval(dense20b_write, mtbf)
+    bert_interval = calc_young_daly_interval(bert_write, mtbf)
+    archB_interval = calc_young_daly_interval(archB_write, mtbf)
+    resnet_interval = calc_young_daly_interval(resnet_write, mtbf)
+    vision_transformer_interval = calc_young_daly_interval(vision_transformer_write, mtbf)
 
     # Save overhead = write_time / optimal_interval * 100
     archA_overhead_ratio = (archA_write / archA_interval).to_base_units().magnitude
@@ -2818,6 +2815,7 @@ Recovery validation is the final and often overlooked step. After loading a chec
 #| label: lego-recovery-budget
 from mlsysim import *
 from mlsysim.solvers import TrainingMemoryModel
+from mlsysim.physics import calc_mtbf_cluster
 
 class RecoveryBudget:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -2831,8 +2829,8 @@ class RecoveryBudget:
     shard_read_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
     n_gpus_1k = Systems.Clusters.Training_1K.total_accelerators
     n_gpus_10k = Systems.Clusters.Training_10K.total_accelerators
-    mtbf_1k = (float(Systems.Reliability.Gpu.mttf_hours) / n_gpus_1k) * hour
-    mtbf_10k = (float(Systems.Reliability.Gpu.mttf_hours) / n_gpus_10k) * hour
+    mtbf_1k = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, n_gpus_1k)
+    mtbf_10k = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, n_gpus_10k)
     failures_per_day_1k = (24 * hour / mtbf_1k).to("").magnitude
     failures_per_day_10k = (24 * hour / mtbf_10k).to("").magnitude
 

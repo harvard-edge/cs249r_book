@@ -3923,6 +3923,7 @@ In multi-tenant clusters where multiple training jobs share the same physical in
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_int, fmt_time
+from mlsysim.physics import calc_mtbf_cluster, calc_young_daly_interval
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: CheckpointComputeTradeoff.frontier_params_b_str,
@@ -3934,8 +3935,6 @@ from mlsysim.fmt import fmt_int, fmt_time
 # │          CheckpointComputeTradeoff.tau_opt_s_str,
 # │          CheckpointComputeTradeoff.tau_opt_min_str,
 # │          CheckpointComputeTradeoff.overhead_pct_str
-import math
-
 class CheckpointComputeTradeoff:
     # ┌── 1. LOAD ──────────────────────────────────────────
     model = Models.Language.GPT3
@@ -3950,14 +3949,14 @@ class CheckpointComputeTradeoff:
     training_state = weights + gradients + optimizer
     t_write = (training_state / write_bw).to(second)
     t_write_value = t_write.to(second).magnitude
-    mtbf_system_s = Systems.Reliability.Gpu.mttf_hours * SEC_PER_HOUR / num_gpus
-    mtbf_system_hr = mtbf_system_s / SEC_PER_HOUR
-    tau_opt_s = math.sqrt(2 * t_write_value * mtbf_system_s)
-    overhead_pct = t_write_value / tau_opt_s * 100
+    mtbf_system_hr = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, num_gpus)
+    mtbf_system_s = (mtbf_system_hr * hour).to(second)
+    tau_opt_s = calc_young_daly_interval(t_write, mtbf_system_s)
+    overhead_pct = (t_write / tau_opt_s).to("").magnitude * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(t_write_value - 21) < 1, "Checkpoint write time should be about 21 s")
-    check(800 < tau_opt_s < 900, "Optimal checkpoint interval should be about 14 min")
+    check(800 < tau_opt_s.to(second).magnitude < 900, "Optimal checkpoint interval should be about 14 min")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)

@@ -697,8 +697,10 @@ class Scaling32GPU:
     # the 8-GPU scenario (~5.8 ms). 2026-06-07: was a hardcoded 0.35 ms,
     # contradicting the value computed two scenarios earlier.
     intra_node_ms_val = (gradient_tensor * (2 * (gpus_per_node_val - 1) / gpus_per_node_val) / nvlink_bw).to(ms).magnitude
+    from mlsysim.physics import calc_ring_allreduce_time
+
     sync_size = gradient_tensor * ring_factor
-    inter_node_ms_val = (sync_size / net_bw).to(ms).magnitude
+    inter_node_ms_val = calc_ring_allreduce_time(message_bytes=sync_size, n_gpus=gpus, bandwidth_bytes_s=net_bw, latency_s=0 * ms).to(ms).magnitude
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms_val
     total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
     compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
@@ -760,10 +762,19 @@ class GradAccumScenario:
     batch_per_gpu = 16
     accum_steps = 4
     compute_8gpu_ms = 1800
+    from mlsysim.physics import calc_ring_allreduce_time
+
     # Same NVLink AllReduce as the 8-GPU scaling scenario (~5.8 ms).
     # 2026-06-07: was a hardcoded 0.35 ms contradicting that computation.
     comm_8gpu_ms = (
-        (Models.Language.GPT2.size_in_bytes(BYTES_FP16) * (2 * (n_gpus_ga - 1) / n_gpus_ga) / Hardware.Cloud.H100.nvlink.bandwidth).to(ms).magnitude
+        calc_ring_allreduce_time(
+            message_bytes=Models.Language.GPT2.size_in_bytes(BYTES_FP16),
+            n_gpus=n_gpus_ga,
+            bandwidth_bytes_s=Hardware.Cloud.H100.nvlink.bandwidth,
+            latency_s=0 * ms,
+        )
+        .to(ms)
+        .magnitude
     )
     training_hours_1gpu = 25
     hourly_rate = 128
@@ -3232,6 +3243,8 @@ class YoungDaly:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    from mlsysim.physics import calc_young_daly_interval
+
     t_write_min = 5.0
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
     gpu_cost_hr = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
@@ -3242,24 +3255,21 @@ class YoungDaly:
     sparse_interval_hr_val = 8
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # T_opt = sqrt(2 * C * MTBF)
-    # Convert all to minutes
-    c_min = t_write_min
-    mtbf_min = cluster_mtbf_hr * 60
-
-    t_opt_min_val = math.sqrt(2 * c_min * mtbf_min)
-    t_opt_hr_val = t_opt_min_val / 60
+    # T_opt = sqrt(2 * C * MTBF), shared helper keeps this formula canonical.
+    t_opt = calc_young_daly_interval(t_write_min * minute, cluster_mtbf_hr * hour)
+    t_opt_min_val = t_opt.to(minute).magnitude
+    t_opt_hr_val = t_opt.to(hour).magnitude
 
     # Overhead: (C/T_opt) + (T_opt / 2 * MTBF)
     # (Simplified Young-Daly first-order approximation)
-    ckpt_overhead = c_min / t_opt_min_val
-    rework_overhead = (t_opt_min_val / 2) / mtbf_min
+    ckpt_overhead = t_write_min / t_opt_min_val
+    rework_overhead = (t_opt_min_val / 2) / cluster_mtbf_hr
     total_overhead = ckpt_overhead + rework_overhead
 
     # Daily dollar loss due to suboptimal (15 min) vs. optimal
     # (Context for the text argument)
     daily_cost = num_gpus * gpu_cost_hr * HOURS_PER_DAY
-    safe_overhead = (c_min / safe_interval_min) + (safe_interval_min / (2 * 60 * cluster_mtbf_hr))
+    safe_overhead = (t_write_min / safe_interval_min) + (safe_interval_min / (2 * 60 * cluster_mtbf_hr))
     loss_safe = safe_overhead * daily_cost
     loss_opt = total_overhead * daily_cost
     diff_daily = loss_safe - loss_opt

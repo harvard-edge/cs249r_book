@@ -138,15 +138,14 @@ class AllReduceCost:
     # Gradient size (BF16 = 2 bytes/param)
     gradient_qty = m.parameters * (2 * byte / param)
 
-    # Use library formula for Ring AllReduce time
-    # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha)
-    t_ring = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_ndr.bandwidth, latency_s=alpha)
-    ring_total = t_ring.to(ms)
+    # Use shared library formula for Ring AllReduce time
+    # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha).
+    ring_total = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_ndr.bandwidth, latency_s=alpha).to(ms)
 
     # Break out terms for pedagogical display
     ring_bw_factor = 2 * (n_gpus - 1) / n_gpus
-    ring_bw_time = (ring_bw_factor * gradient_qty / ib_bw.bandwidth).to(ms)
-    ring_lat_time = (ring_total - ring_bw_time).to(ms)
+    ring_bw_time = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_bw.bandwidth, latency_s=0 * second).to(ms)
+    ring_lat_time = (2 * (n_gpus - 1) * alpha).to(ms)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ring_total > 5000 * ms, f"AllReduce ({ring_total.to(ms).magnitude:.0f}ms) should be significant (>5s) for 70B BF16 model.")
@@ -551,6 +550,7 @@ The calculation uses the bandwidth hierarchy before the chapter formalizes it: r
 from mlsysim import Hardware, Models, Systems
 from mlsysim.core.units import BILLION, GB, byte, microsecond, ms, param, second
 from mlsysim.fmt import check, fmt, fmt_count, fmt_qty, fmt_time
+from mlsysim.physics import calc_ring_allreduce_time
 
 class LlamaBudgetCalc:
     """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
@@ -574,7 +574,9 @@ class LlamaBudgetCalc:
 
     # Step 2: Inter-node AllReduce (reduced payload)
     inter_payload = gradient_bf16 / gpus_per_node_llama
-    inter_ring_bw_time = (2 * (n_nodes_llama - 1) / n_nodes_llama * inter_payload / ib_bw).to(ms)
+    inter_ring_bw_time = calc_ring_allreduce_time(
+        message_bytes=inter_payload, n_gpus=n_nodes_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second
+    ).to(ms)
     inter_ring_lat_time = (2 * (n_nodes_llama - 1) * ib_alpha).to(ms)
 
     # Step 3: Intra-node AllGather (symmetric)
@@ -583,7 +585,7 @@ class LlamaBudgetCalc:
     hier_total_llama = intra_rs_time + inter_ring_bw_time + inter_ring_lat_time + intra_ag_time
 
     # Flat Ring AllReduce (BF16)
-    flat_ring_bw = (2 * (n_gpus_llama - 1) / n_gpus_llama * gradient_bf16 / ib_bw).to(ms)
+    flat_ring_bw = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second).to(ms)
     flat_ring_lat = (2 * (n_gpus_llama - 1) * ib_alpha).to(ms)
     flat_total = flat_ring_bw + flat_ring_lat
 
@@ -1370,6 +1372,7 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 from mlsysim.core.units import GB, MB, microsecond, ms, second
 from mlsysim import Hardware, Systems
 from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_qty, fmt_time
+from mlsysim.physics import calc_ring_allreduce_time
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
@@ -1384,14 +1387,25 @@ class HierarchicalAllreduceCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     flat_data = 2 * gradient  # bandwidth-optimal Ring sends ~2×
-    flat_time = (flat_data / ib_bw).to(ms)
+    flat_data = 2 * gradient
+    flat_time = calc_ring_allreduce_time(
+        message_bytes=gradient,
+        n_gpus=n_nodes_har * gpus_per_node,
+        bandwidth_bytes_s=ib_bw,
+        latency_s=0 * second,
+    ).to(ms)
 
     intra_data = (gradient * (gpus_per_node - 1) / gpus_per_node).to(MB)  # ~875 MB
     intra_rs = (intra_data / nvlink_bw).to(ms)
 
     inter_data = (gradient / gpus_per_node).to(MB)  # 125 MB
     inter_ring_factor = 2 * (n_nodes_har - 1) / n_nodes_har
-    inter_bw = (inter_ring_factor * inter_data / ib_bw).to(ms)
+    inter_bw = calc_ring_allreduce_time(
+        message_bytes=inter_data,
+        n_gpus=n_nodes_har,
+        bandwidth_bytes_s=ib_bw,
+        latency_s=0 * second,
+    ).to(ms)
     inter_lat = (2 * (n_nodes_har - 1) * ib_alpha).to(ms)
     inter_time = inter_bw + inter_lat
 
