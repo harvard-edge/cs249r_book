@@ -164,8 +164,17 @@ HARDCODED_HARDWARE = re.compile(
 #   2026-06-03 (Oura/MobileNetV2 source-of-truth audit): Oura case-study
 #   accuracy anchors belong in ReferenceStats.OuraSleepStudy; MobileNetV2 alpha
 #   profile parameter counts belong in Models.Vision.*.
+#   2026-06-07 (LEGO verify hardening audit): GPT-2/GPT-4 training anchors were
+#   chapter-local literals in training.qmd; they now live in
+#   Models.Language.GPT2 (training_ops, inference_flops, layers) and
+#   ReferenceStats.TrainingCostAnchors (Gpt2Cost2019, Gpt4CostEstimate).
 HARDCODED_REGISTRY = re.compile(
     r"\b(?:scaling_factor|cf_scaling_factor|training_flops_per_token_param)\s*=\s*6\b|"
+    r"\bgpt2_total_flops\s*=\s*1e\d+\b|"
+    r"\bgpt2_fwd_flops\s*=\s*3e9\b|"
+    r"\bgpt2_cost_2019\s*=\s*50_?000\b|"
+    r"\bgpt4_cost_est\s*=\s*100\s*\*\s*MILLION|"
+    r"\bckpt_layers\s*=\s*48\b|"
     r"\b(?:psi_threshold)\s*=\s*0\.2\b|"
     r"\b(?:pue)\s*=\s*1\.2\b|"
     r"\b(?:mfu|case2_mfu)\s*=\s*0\.45\b|"
