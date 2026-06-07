@@ -681,7 +681,7 @@ from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Scaling32GPU:
-    from mlsysim.physics import calc_ring_allreduce_data_factor
+    from mlsysim.physics import calc_ring_allreduce_data_factor, calc_ring_allreduce_time
 
     NETWORK_10G_BW = Systems.Fabrics.Ethernet_10G.bandwidth
     single_gpu_step_s = 1.8
@@ -700,10 +700,13 @@ class Scaling32GPU:
     # the 8-GPU scenario (~5.8 ms). 2026-06-07: was a hardcoded 0.35 ms,
     # contradicting the value computed two scenarios earlier.
     intra_node_ms_val = (gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node_val) / nvlink_bw).to(ms).magnitude
-    from mlsysim.physics import calc_ring_allreduce_time
 
     sync_size = gradient_tensor * ring_factor
-    inter_node_ms_val = calc_ring_allreduce_time(message_bytes=sync_size, n_gpus=gpus, bandwidth_bytes_s=net_bw, latency_s=0 * ms).to(ms).magnitude
+    # The helper applies the 2(N-1)/N ring factor itself, so it takes the raw
+    # gradient size; sync_size (gradient x ring factor) is kept for display.
+    inter_node_ms_val = (
+        calc_ring_allreduce_time(message_bytes=gradient_tensor, n_gpus=gpus, bandwidth_bytes_s=net_bw, latency_s=0 * ms).to(ms).magnitude
+    )
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms_val
     total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
     compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
@@ -3269,7 +3272,8 @@ class YoungDaly:
     # Overhead: (C/T_opt) + (T_opt / 2 * MTBF)
     # (Simplified Young-Daly first-order approximation)
     ckpt_overhead = t_write_min / t_opt_min_val
-    rework_overhead = (t_opt_min_val / 2) / cluster_mtbf_hr
+    # Both operands in hours: T_opt/2 divided by the cluster MTBF.
+    rework_overhead = (t_opt_hr_val / 2) / cluster_mtbf_hr
     total_overhead = ckpt_overhead + rework_overhead
 
     # Daily dollar loss due to suboptimal (15 min) vs. optimal
