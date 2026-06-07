@@ -2498,7 +2498,9 @@ class GPT2DataPipeline:
     n_v100_gpus = 8
 
     pcie_bw = Hardware.Cloud.V100.interconnect.bandwidth
-    random_access_bw = Hardware.Tech.Storage.NvmeGen3.bandwidth * f_access
+    # Same Gen4 device as the sequential figure quoted beside it (2026-06-07:
+    # was Gen3, so 7 GB/s sequential sat next to a Gen3-derived 0.35 GB/s).
+    random_access_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth * f_access
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     tokens_per_batch = batch_size * seq_len
@@ -3406,8 +3408,9 @@ class LlamaTraining:
         f"6 \\times {model.parameters.to(Bparam).magnitude:.0f} \\times 10^9 \\times {ub_tokens_t_scalar_str} \\times 10^{{12}}"
         f" \\approx {flops_mantissa} \\times 10^{{{flops_exp}}}"
     )
+    ub_effective_scalar_str = fmt(effective_flops.to(TFLOP / second).magnitude, precision=1, commas=False)
     ub_time_math = fmt_math(
-        f"{flops_mantissa} \\times 10^{{{flops_exp}}} / ({ub_effective_tflop_per_s_str} \\times 10^{{12}})"
+        f"{flops_mantissa} \\times 10^{{{flops_exp}}} / ({ub_effective_scalar_str} \\times 10^{{12}})"
         f" \\approx {time_mantissa} \\times 10^{{{time_exp}}}"
     )
 
@@ -4458,7 +4461,7 @@ class MixedPrecisionSpeedup:
 - FP16 throughput: ~`{python} MixedPrecisionSpeedup.throughput_fp16_samples_per_s_str`
 - Speedup: `{python} MixedPrecisionSpeedup.v100_mp_speedup_mult_str` faster training
 
-Cost impact on a `{python} MixedPrecisionLossScaling.n_v100_gpus_str` cluster:
+Cost impact on a cluster of `{python} MixedPrecisionLossScaling.n_v100_gpus_str`:
 
 - FP32: `{python} MixedPrecisionLossScaling.fp32_cost_str` for `{python} MixedPrecisionLossScaling.fp32_weeks_str`
 - FP16: `{python} MixedPrecisionLossScaling.fp16_cost_str` for `{python} MixedPrecisionLossScaling.fp16_weeks_str`
@@ -4466,7 +4469,7 @@ Cost impact on a `{python} MixedPrecisionLossScaling.n_v100_gpus_str` cluster:
 
 **Quality impact**: minimal. GPT-2 perplexity stays within 0.5 percent of the FP32 baseline, well within noise margin.
 
-**Systems insight**: Mixed precision converts the same `{python} MixedPrecisionLossScaling.n_v100_gpus_str` cluster from a `{python} MixedPrecisionLossScaling.fp32_weeks_str`, `{python} MixedPrecisionLossScaling.fp32_cost_str` job into a `{python} MixedPrecisionLossScaling.fp16_weeks_str`, `{python} MixedPrecisionLossScaling.fp16_cost_str` job with no measurable convergence cost—a quality-neutral speedup that pays for itself in `{python} MixedPrecisionLossScaling.savings_days_str` of saved wall-clock time.
+**Systems insight**: Mixed precision converts the same cluster of `{python} MixedPrecisionLossScaling.n_v100_gpus_str` from a job of `{python} MixedPrecisionLossScaling.fp32_weeks_str` and `{python} MixedPrecisionLossScaling.fp32_cost_str` into one of `{python} MixedPrecisionLossScaling.fp16_weeks_str` and `{python} MixedPrecisionLossScaling.fp16_cost_str` with no measurable convergence cost—a quality-neutral speedup that pays for itself in `{python} MixedPrecisionLossScaling.savings_days_str` of saved wall-clock time.
 
 :::
 
@@ -4697,10 +4700,12 @@ class AttentionMemoryCalc:
     fa_seq_len_str = fmt(seq_len, precision=0)
     embed_dim_str = fmt(embed_dim, precision=0, commas=False)
     fa_n_heads_str = fmt_count(n_heads, commas=False, label="head")
-    bytes_fp32_str = fmt_memory(BYTES_FP32, unit=byte, precision=0, commas=False)
     attn_matrix_mb_str = fmt_memory(attn_matrix, unit=MB, precision=1, commas=False)
     total_attn_gb_str = fmt_memory(total_attn, unit=GB, precision=1, commas=False)
-    attn_bytes_formula_str = MarkdownStr(f"${fa_seq_len_str}^2 \\times {bytes_fp32_str}$")
+    # Scalar byte width inside the formula; the prose supplies the word "bytes"
+    # (2026-06-07: was the closed "4 B" string, rendering "4 B$ bytes").
+    bytes_fp32_scalar_str = fmt(BYTES_FP32.to(byte).magnitude, precision=0, commas=False)
+    attn_bytes_formula_str = MarkdownStr(f"${fa_seq_len_str}^2 \\times {bytes_fp32_scalar_str}$")
 ```
 
 The memory bottleneck emerges from materializing the $S{\times}S$ intermediate matrices for scores and probabilities. For a sequence length of `{python} AttentionMemoryCalc.fa_seq_len_str` with embedding dimension `{python} AttentionMemoryCalc.embed_dim_str` (typical for a single attention head), the attention score matrix alone requires `{python} AttentionMemoryCalc.attn_bytes_formula_str` bytes = `{python} AttentionMemoryCalc.attn_matrix_mb_str` in FP32. With `{python} AttentionMemoryCalc.fa_n_heads_str`, this grows to `{python} AttentionMemoryCalc.total_attn_gb_str` just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
@@ -6932,7 +6937,7 @@ Teams treat scale as a monotonic lever: if a 7B-parameter model works well, a 20
 
 **Pitfall**: *Assuming distributed training automatically accelerates development.*
 
-More accelerators should mean faster training---but the communication tax (@sec-model-training-scaling-training-systems-adfd) often eats the gains. Small models on `{python} FallaciesPitfallsSetup.fp_gpu_count_str` spend `{python} FallaciesPitfallsSetup.fp_sync_overhead_range_str` of time synchronizing gradients, achieving only `{python} FallaciesPitfallsSetup.fp_actual_speedup_range_mult_str` speedup instead of the ideal `{python} FallaciesPitfallsSetup.fp_gpu_ideal_speedup_mult_str`. A well-optimized single A100 completing training in `{python} FallaciesPitfallsSetup.fp_single_gpu_hours_str` can outperform a poorly configured `{python} FallaciesPitfallsSetup.fp_gpu_count_str` cluster taking `{python} FallaciesPitfallsSetup.fp_cluster_hours_str`. The overhead of debugging distributed configurations, managing gradient synchronization, and handling stragglers often exceeds the time saved. Always profile and exhaust single-machine optimizations before distributing.
+More accelerators should mean faster training---but the communication tax (@sec-model-training-scaling-training-systems-adfd) often eats the gains. Small models on `{python} FallaciesPitfallsSetup.fp_gpu_count_str` spend `{python} FallaciesPitfallsSetup.fp_sync_overhead_range_str` of time synchronizing gradients, achieving only `{python} FallaciesPitfallsSetup.fp_actual_speedup_range_mult_str` speedup instead of the ideal `{python} FallaciesPitfallsSetup.fp_gpu_ideal_speedup_mult_str`. A well-optimized single A100 completing training in `{python} FallaciesPitfallsSetup.fp_single_gpu_hours_str` can outperform a poorly configured cluster of `{python} FallaciesPitfallsSetup.fp_gpu_count_str` taking `{python} FallaciesPitfallsSetup.fp_cluster_hours_str`. The overhead of debugging distributed configurations, managing gradient synchronization, and handling stragglers often exceeds the time saved. Always profile and exhaust single-machine optimizations before distributing.
 
 **Fallacy**: *Hyperparameters transfer directly from small-scale experiments to large-scale training.*
 
