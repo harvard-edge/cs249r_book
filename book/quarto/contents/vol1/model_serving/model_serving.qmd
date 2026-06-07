@@ -1897,7 +1897,7 @@ class ResolutionScalingCalc:
     measured_slowdown_mult_str = fmt_multiple(measured_slowdown_factor_value, precision=1, commas=False)
 ```
 
-Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} ResolutionScalingCalc.r2_str` theoretically yields `{python} ResolutionScalingCalc.theoretical_slowdown_mult_str` slowdown (measured: `{python} ResolutionScalingCalc.measured_slowdown_mult_str` due to fixed overhead amortization). However, at high resolutions, models move toward memory-bandwidth sensitivity as activation tensors exceed cache capacity, with arithmetic intensity decreasing toward the roofline ridge point.
+Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} ResolutionScalingCalc.r2_str` theoretically yields `{python} ResolutionScalingCalc.theoretical_slowdown_mult_str` slowdown (measured: `{python} ResolutionScalingCalc.measured_slowdown_mult_str` due to fixed overhead amortization). Higher resolution also shifts the compute-memory balance, but toward compute: every convolution weight is reused across more spatial positions, so FLOPs and activation traffic both grow quadratically while the fixed weight traffic is amortized, and arithmetic intensity rises further above the roofline ridge point. The serving costs of resolution are quadratic latency growth and quadratic activation-memory pressure, not a bandwidth bottleneck.
 
 ```{python}
 #| echo: false
@@ -1907,9 +1907,11 @@ Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} Re
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @tbl-resolution-bottleneck (Resolution and Compute Bottleneck)
 # │
-# │ Goal: Demonstrate the shift from compute-bound to memory-bound operation.
-# │ Show: That increasing resolution decreases arithmetic intensity.
-# │ How: Compare activation sizes and FLOPs per element against the ridge point.
+# │ Goal: Quantify how input resolution shifts ResNet-50 arithmetic intensity.
+# │ Show: FLOPs and activations grow quadratically while weight traffic is
+# │       fixed, so intensity RISES with resolution (deeper into compute-bound).
+# │ How: Scale registry FLOPs and a 224×224 activation footprint by (R/224)²;
+# │      divide by total traffic (fixed weights + activation reads/writes).
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: act_*_mb_str, ai_*_str, ridge_point_flops_per_byte_str
@@ -1917,20 +1919,35 @@ Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} Re
 from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory
 
 class ResolutionBottleneckCalc:
-    """Shows that increasing resolution decreases arithmetic intensity toward the roofline ridge point."""
+    """Shows that higher resolution raises arithmetic intensity: quadratic FLOPs amortize the fixed weight traffic."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    act_224 = 12.5 * MB  # scenario assumption: 224×224 activation size
-    act_384 = 36.8 * MB  # scenario assumption: 384×384 activation size
-    act_512 = 65.5 * MB  # scenario assumption: 512×512 activation size
-    act_640 = 102.4 * MB  # scenario assumption: 640×640 activation size
-
-    ai_224_value = 85 * (flop / byte)  # scenario assumption: 224×224 arithmetic intensity
-    ai_384_value = 49 * (flop / byte)  # scenario assumption: 384×384 arithmetic intensity
-    ai_512_value = 28 * (flop / byte)  # scenario assumption: 512×512 arithmetic intensity
-    ai_640_value = 18 * (flop / byte)  # scenario assumption: 640×640 arithmetic intensity
-
+    resnet = Models.Vision.ResNet50
+    base_dim = Datasets.ImageNet.image_width
+    base_flops = resnet.inference_flops
+    weight_bytes = resnet.size_in_bytes(BYTES_FP32)
+    act_224 = 12.5 * MB  # scenario assumption: 224×224 activation footprint
+    act_rw_factor = 2  # scenario assumption: each activation written once, read once
     ridge_point_value = 16 * (flop / byte)  # scenario assumption: V100 ridge point
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # FLOPs and activation footprint both scale with (R/224)²; weight traffic
+    # does not. 2026-06-07: replaces hand-typed intensities that DECREASED
+    # with resolution — they implied constant FLOPs, inverting the physics.
+    scale_384 = (384 / base_dim) ** 2
+    scale_512 = (512 / base_dim) ** 2
+    scale_640 = (640 / base_dim) ** 2
+    act_384 = act_224 * scale_384
+    act_512 = act_224 * scale_512
+    act_640 = act_224 * scale_640
+    ai_224_value = (base_flops / (weight_bytes + act_rw_factor * act_224)).to(flop / byte)
+    ai_384_value = (base_flops * scale_384 / (weight_bytes + act_rw_factor * act_384)).to(flop / byte)
+    ai_512_value = (base_flops * scale_512 / (weight_bytes + act_rw_factor * act_512)).to(flop / byte)
+    ai_640_value = (base_flops * scale_640 / (weight_bytes + act_rw_factor * act_640)).to(flop / byte)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(ai_640_value > ai_224_value, "Intensity must rise with resolution: weights amortize over more spatial positions")
+    check((ai_224_value / ridge_point_value).to("").magnitude > 1, "ResNet-50 at 224x224 is compute-bound on V100")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     act_224_mb_str = fmt_memory(act_224, unit=MB, precision=1, commas=False)
@@ -1953,9 +1970,9 @@ class ResolutionBottleneckCalc:
 | **$224{\times}224$** | `{python} ResolutionBottleneckCalc.act_224_mb_str` | `{python} ResolutionBottleneckCalc.ai_224_flops_per_byte_str` |    Compute     |
 | **$384{\times}384$** | `{python} ResolutionBottleneckCalc.act_384_mb_str` | `{python} ResolutionBottleneckCalc.ai_384_flops_per_byte_str` |    Compute     |
 | **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` | `{python} ResolutionBottleneckCalc.ai_512_flops_per_byte_str` |    Compute     |
-| **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` | `{python} ResolutionBottleneckCalc.ai_640_flops_per_byte_str` |   Near ridge   |
+| **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` | `{python} ResolutionBottleneckCalc.ai_640_flops_per_byte_str` |    Compute     |
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (14 TFLOP/s FP32; the SXM2 variant runs 15.7 TFLOP/s FP32) with 900 GB/s of HBM2 memory bandwidth, the ridge point is approximately 16 FLOP/byte. At $224{\times}224$, compute dominates; by $640{\times}640$, the model is close enough to the ridge that further resolution increases, lower-bandwidth hardware, or cache misses can make memory bandwidth the limiting factor. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity rises with resolution: FLOPs and activation traffic grow quadratically while the fixed weight traffic is amortized over more spatial positions. For a V100 PCIe (14 TFLOP/s FP32; the SXM2 variant runs 15.7 TFLOP/s FP32) with 900 GB/s of HBM2 memory bandwidth, the ridge point is approximately `{python} ResolutionBottleneckCalc.ridge_point_flops_per_byte_str`; every row sits above it, so higher resolution drives the workload deeper into the compute-bound regime. The serving costs of resolution are quadratic latency and activation-memory growth, not memory bandwidth. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
 
 #### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
 
