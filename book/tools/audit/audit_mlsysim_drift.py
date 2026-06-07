@@ -104,6 +104,12 @@ CANONICAL = [
     ("gpt3_train_energy_mwh", 1287, 0.05, "Models.Language.GPT3.training_energy_mwh"),
     ("gpt3_train_ops",       3.14e23, 0.05, "Models.Language.GPT3.training_ops"),
 
+    # GPT-2 training anchors (2026-06-07: moved out of training.qmd literals)
+    ("gpt2_total_flops",     1.5e21, 0.05, "Models.Language.GPT2.training_ops"),
+    ("gpt2_fwd_flops",       3e9,    0.02, "Models.Language.GPT2.inference_flops"),
+    ("gpt2_cost_2019",       50000,  0.05, "ReferenceStats.TrainingCostAnchors.Gpt2Cost2019"),
+    ("gpt4_cost_est",        100e6,  0.05, "ReferenceStats.TrainingCostAnchors.Gpt4CostEstimate"),
+
     # Interconnect bandwidth (GB/s)
     ("pcie_gen4_gb",   32,    0.05, "Hardware.Cloud.A100.interconnect.bandwidth (x16)"),
     ("pcie_gen5_gb",   64,    0.05, "Hardware.Cloud.H100.interconnect.bandwidth (x16)"),
