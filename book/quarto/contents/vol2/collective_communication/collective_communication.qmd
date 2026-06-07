@@ -574,10 +574,13 @@ class LlamaBudgetCalc:
 
     # Step 2: Inter-node AllReduce (reduced payload)
     inter_payload = gradient_bf16 / gpus_per_node_llama
+    inter_ring_total = calc_ring_allreduce_time(
+        message_bytes=inter_payload, n_gpus=n_nodes_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha
+    ).to(ms)
     inter_ring_bw_time = calc_ring_allreduce_time(
         message_bytes=inter_payload, n_gpus=n_nodes_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second
     ).to(ms)
-    inter_ring_lat_time = (2 * (n_nodes_llama - 1) * ib_alpha).to(ms)
+    inter_ring_lat_time = (inter_ring_total - inter_ring_bw_time).to(ms)
 
     # Step 3: Intra-node AllGather (symmetric)
     intra_ag_time = intra_rs_time
@@ -585,9 +588,14 @@ class LlamaBudgetCalc:
     hier_total_llama = intra_rs_time + inter_ring_bw_time + inter_ring_lat_time + intra_ag_time
 
     # Flat Ring AllReduce (BF16)
-    flat_ring_bw = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second).to(ms)
-    flat_ring_lat = (2 * (n_gpus_llama - 1) * ib_alpha).to(ms)
-    flat_total = flat_ring_bw + flat_ring_lat
+    flat_ring_total = calc_ring_allreduce_time(
+        message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha
+    ).to(ms)
+    flat_ring_bw = calc_ring_allreduce_time(
+        message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second
+    ).to(ms)
+    flat_ring_lat = (flat_ring_total - flat_ring_bw).to(ms)
+    flat_total = flat_ring_total
 
     ccr_hier = (hier_total_llama / compute_per_step).to_base_units().magnitude
     ccr_flat = (flat_total / compute_per_step).to_base_units().magnitude
@@ -749,7 +757,7 @@ class MoeAllToAll:
     remote_gpus = n_gpus - 1
     data_per_transfer = tokens_per_transfer * bytes_per_token
     total_sent = remote_gpus * data_per_transfer
-    bw_time = (data_per_transfer / beta).to(microsecond)
+    bw_time = (calc_point_to_point_time(data_per_transfer, alpha, beta) - alpha).to(microsecond)
     bw_time_us_approx = round(bw_time.to(microsecond).magnitude)
     per_transfer = alpha + bw_time_us_approx * microsecond
     serialized = remote_gpus * per_transfer
@@ -1098,13 +1106,29 @@ plt.style.use('seaborn-v0_8-whitegrid')
 N = 256
 bandwidth_gbps = 200
 bandwidth_bytes_sec = bandwidth_gbps * BILLION / 8
-latency_sec = 1e-6
+latency = 1e-6 * second
 
 message_sizes = np.logspace(3, 10, 100)
 
-t_ring = 2 * (N - 1) * latency_sec + (2 * (N - 1) / N) * (message_sizes / bandwidth_bytes_sec)
-t_tree = 2 * np.log2(N) * latency_sec + (2 * np.log2(N)) * (message_sizes / bandwidth_bytes_sec)
-t_dbt = 2 * np.log2(N) * latency_sec * 1.2 + (2 * (N - 1) / N) * (message_sizes / bandwidth_bytes_sec) * 1.05
+t_ring = np.array([
+    calc_ring_allreduce_time(size * byte, N, bandwidth_bytes_sec * byte / second, latency).to(second).magnitude
+    for size in message_sizes
+])
+t_tree = np.array([
+    calc_tree_allreduce_time(size * byte, N, bandwidth_bytes_sec * byte / second, latency).to(second).magnitude
+    for size in message_sizes
+])
+t_dbt = np.array([
+    calc_double_binary_tree_allreduce_time(
+        size * byte,
+        N,
+        bandwidth_bytes_sec * byte / second,
+        latency,
+        latency_factor=1.2,
+        bandwidth_factor=1.05,
+    ).to(second).magnitude
+    for size in message_sizes
+])
 
 t_ring_ms = t_ring * THOUSAND
 t_tree_ms = t_tree * THOUSAND
@@ -1183,9 +1207,10 @@ Nevertheless, the crossover formula remains the essential mental model for under
 ```{python}
 #| echo: false
 #| label: ring-vs-tree-calc
+import math
 from mlsysim.fmt import check, fmt, fmt_percent, fmt_qty, fmt_time
 from mlsysim.core.units import GB, MB, microsecond, second
-import math
+from mlsysim.physics import calc_ring_allreduce_time, calc_tree_allreduce_time, calc_ring_tree_crossover_size
 
 class RingVsTree:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1198,13 +1223,13 @@ class RingVsTree:
     beta = beta_gbs * GB / second
     # ┌── 2. EXECUTE ───────────────────────────────────────
     log2N = int(math.log2(N))
-    ring_lat = (2 * (N - 1) * alpha).to(microsecond)
-    tree_lat = (2 * log2N * alpha).to(microsecond)
-    ring_bw = (2 * (N - 1) / N * M / beta).to(microsecond)
-    tree_bw = (2 * log2N * M / beta).to(microsecond)
-    ring_total = ring_lat + ring_bw
-    tree_total = tree_lat + tree_bw
-    crossover = (N * alpha * beta / log2N).to(MB)
+    ring_total = calc_ring_allreduce_time(M, N, beta, alpha).to(microsecond)
+    ring_bw = calc_ring_allreduce_time(M, N, beta, 0 * second).to(microsecond)
+    ring_lat = (ring_total - ring_bw).to(microsecond)
+    tree_total = calc_tree_allreduce_time(M, N, beta, alpha).to(microsecond)
+    tree_bw = calc_tree_allreduce_time(M, N, beta, 0 * second).to(microsecond)
+    tree_lat = (tree_total - tree_bw).to(microsecond)
+    crossover = calc_ring_tree_crossover_size(N, alpha, beta)
     tree_win_margin_pct = ((ring_total - tree_total) / ring_total).to_base_units().magnitude * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ring_lat == 1260 * microsecond, f"Ring lat = {ring_lat.to(microsecond).magnitude}")
