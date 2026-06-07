@@ -25,6 +25,7 @@ A short napkin-math callout at the start shows how several assumptions combine (
 
 from mlsysim import *
 from mlsysim.core.units import *
+from mlsysim.physics import calc_mtbf_cluster
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLEET QUICK CALC EXAMPLES
@@ -35,7 +36,8 @@ from mlsysim.core.units import *
 # │ Show:    Failure rate, AllReduce time, carbon footprint.
 # │ How:     Scalar arithmetic from mlsysim.core.units.
 # │
-# │ Imports: mlsysim.core.units (...), mlsysim.book (fmt, check)
+# │ Imports: mlsysim.core.units (...), mlsysim.book (fmt, check),
+# │          mlsysim.physics (calc_mtbf_cluster)
 # │ Exports: FleetQuickCalc.n_small_str, FleetQuickCalc.mttf_hours_str,
 # │          FleetQuickCalc.fail_hr_str, FleetQuickCalc.fail_day_str,
 # │          FleetQuickCalc.n_large_str, FleetQuickCalc.fail_large_str,
@@ -81,11 +83,15 @@ class FleetQuickCalc:
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Failure rate
-    fail_per_hour = n_gpus_small / mttf_h
-    fail_per_day = fail_per_hour * HOURS_PER_DAY
-    fail_large_per_day = (n_gpus_large / mttf_h) * HOURS_PER_DAY
+    cluster_mtbf_small = calc_mtbf_cluster(mttf_h, n_gpus_small)
+    cluster_mtbf_large = calc_mtbf_cluster(mttf_h, n_gpus_large)
+    fail_per_hour = 1 / cluster_mtbf_small
+    fail_per_day = fail_per_hour * HOURS_PER_DAY * hour
+    fail_large_per_day = 1 / cluster_mtbf_large * HOURS_PER_DAY * hour
 
-    # AllReduce time
+    # AllReduce time — the napkin-math 2M/beta form the adjacent prose spells
+    # out ("approximately 2 x grad/bw"); the exact 2(N-1)/N ring model lives in
+    # calc_ring_allreduce_time and the AllReduce cost model section below.
     grad_q = model_params.to(param).magnitude * BYTES_FP16
     allreduce_time = (2 * grad_q / ib_bw).to(second)
 
@@ -321,6 +327,7 @@ Network specifications define how fast data moves, but they say nothing about ho
 #| label: appendix-reliability-constants
 from mlsysim.core import units
 from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, fmt_memory, fmt_rate, fmt_time
+from mlsysim.physics import calc_mtbf_cluster
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -355,7 +362,8 @@ class ReliabilityConstants:
         + Systems.Reliability.Recovery.reschedule_time_s * second
         + recovery_checkpoint / (Systems.Reliability.Recovery.checkpoint_write_bw_gbs * GB / second)
     )
-    recovery_failures_per_day = Systems.Clusters.Frontier_8K.total_accelerators / Systems.Reliability.Gpu.mttf_hours * HOURS_PER_DAY
+    frontier_cluster_mtbf = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, Systems.Clusters.Frontier_8K.total_accelerators)
+    recovery_failures_per_day = 1 / frontier_cluster_mtbf * HOURS_PER_DAY * hour
     recovery_lost_time_per_day = recovery_time * recovery_failures_per_day
     recovery_checkpoint_gb_str = fmt_memory(recovery_checkpoint, unit=GB, precision=0, commas=False)
     recovery_time_s_str = fmt_time(recovery_time, second, precision=1, commas=False)

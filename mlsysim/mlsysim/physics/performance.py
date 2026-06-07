@@ -70,6 +70,28 @@ def calc_amdahls_speedup(p, s):
     return 1 / ((1 - p) + (p / s))
 
 
+def calc_strong_scaling_speedup(num_devices, communication_fraction):
+    """
+    Strong scaling speedup with communication fraction overhead.
+
+    Parameters
+    ----------
+    num_devices : int
+        Number of participating devices (>= 1).
+    communication_fraction : float
+        Fraction of single-device step time spent on communication in the
+        baseline system (0.0 to 1.0).
+
+    Returns
+    -------
+    float
+        The effective strong-scaling speedup.
+    """
+    validate_at_least(num_devices, 1, "num_devices")
+    validate_range(communication_fraction, 0.0, 1.0, "communication_fraction")
+    return num_devices / (1 + (num_devices - 1) * communication_fraction)
+
+
 def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     """
     Roofline bottleneck analysis (Williams et al., 2009).

@@ -501,13 +501,13 @@ class NetworkAlphaBeta:
     n_large = 350 * MB  # scenario assumption: 350 MB gradient shard
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    n_cross_ib = alpha_ib * beta_ib
+    n_cross_ib = calc_alpha_beta_crossover(alpha_ib, beta_ib)
 
-    t_small_ib = alpha_ib + (n_small / beta_ib)
+    t_small_ib = calc_point_to_point_time(n_small, alpha_ib, beta_ib)
     small_bw_term_pct = ((n_small / beta_ib) / t_small_ib).to_base_units().magnitude * 100
 
-    t_large_ib = alpha_ib + (n_large / beta_ib)
-    t_large_eth = eth_alpha + (n_large / eth_beta)
+    t_large_ib = calc_point_to_point_time(n_large, alpha_ib, beta_ib)
+    t_large_eth = calc_point_to_point_time(n_large, eth_alpha, eth_beta)
     large_speedup = (t_large_eth / t_large_ib).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -603,13 +603,19 @@ alpha_eth = alpha_eth_q.to(second).magnitude
 beta_eth = beta_eth_q.to(byte / second).magnitude
 
 n = np.logspace(0, 10, 1000)
-t_ib = alpha_ib + n / beta_ib
-t_eth = alpha_eth + n / beta_eth
+t_ib = np.array([
+    calc_point_to_point_time(size * byte, alpha_ib_q, beta_ib_q).to(second).magnitude
+    for size in n
+])
+t_eth = np.array([
+    calc_point_to_point_time(size * byte, alpha_eth_q, beta_eth_q).to(second).magnitude
+    for size in n
+])
 
-n_cross_ib_q = alpha_ib_q * beta_ib_q
+n_cross_ib_q = calc_alpha_beta_crossover(alpha_ib_q, beta_ib_q)
 n_cross_ib = n_cross_ib_q.to(byte).magnitude
 t_cross_ib = 2 * alpha_ib
-n_cross_eth_q = alpha_eth_q * beta_eth_q
+n_cross_eth_q = calc_alpha_beta_crossover(alpha_eth_q, beta_eth_q)
 n_cross_eth = n_cross_eth_q.to(byte).magnitude
 t_cross_eth = 2 * alpha_eth
 
@@ -847,8 +853,11 @@ class NonBlockingOversubscription:
     oversubscription_ratio = 2.0
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    relative_throughput = 1 / ((1 - comm_fraction) + comm_fraction * oversubscription_ratio)
-    throughput_loss_pct = (1 - relative_throughput) * 100
+    relative_throughput, throughput_loss = calc_oversubscription_effect(
+        comm_fraction,
+        oversubscription_ratio,
+    )
+    throughput_loss_pct = throughput_loss * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(throughput_loss_pct - 23.0769230769) < 1e-6, f"Expected about 23.1%, got {throughput_loss_pct}")
@@ -1000,10 +1009,11 @@ class BisectionScaling:
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
     gradient = 100 * GB  # scenario assumption: per-GPU gradient shard
+
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gpus_per_side = n_gpus // 2
-    bw_1_1_q = gpus_per_side * beta
-    bw_4_1_q = bw_1_1_q / 4
+    bw_1_1_q = calc_bisection_bandwidth(gpus_per_side, beta)
+    bw_4_1_q = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=4.0)
     total_data = gpus_per_side * gradient
     time_1_1 = total_data / bw_1_1_q
     time_4_1 = total_data / bw_4_1_q
@@ -1098,8 +1108,8 @@ class RailLatency:
     n_hops_std = 3
     n_hops_rail = 1
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    lat_std = n_hops_std * t_hop
-    lat_rail = n_hops_rail * t_hop
+    lat_std = calc_hop_latency(n_hops_std, t_hop)
+    lat_rail = calc_hop_latency(n_hops_rail, t_hop)
     speedup = (lat_std / lat_rail).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(speedup == 3.0, f"Speedup {speedup:.1f}x unexpected")
@@ -1790,8 +1800,8 @@ class BandwidthFallacy:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # T(n) = alpha + n/beta, computed via pint to keep units explicit.
-    t_hdr = alpha + (msg / ib_hdr.bandwidth)
-    t_ndr = alpha + (msg / ib_ndr.bandwidth)
+    t_hdr = calc_point_to_point_time(msg, alpha, ib_hdr.bandwidth)
+    t_ndr = calc_point_to_point_time(msg, alpha, ib_ndr.bandwidth)
 
     speedup_pct = (1 - (t_ndr / t_hdr).to_base_units().magnitude) * 100
 
@@ -1831,8 +1841,10 @@ class BisectionWasteRecap:
     oversub_ratio_b = 4
     cluster_cost_m = 300
     comm_fraction = 0.30
-    rel_throughput = 1 / ((1 - comm_fraction) + (comm_fraction * oversub_ratio_b))
-    waste_val = (1 - rel_throughput) * cluster_cost_m
+    rel_throughput, throughput_loss = calc_oversubscription_effect(
+        comm_fraction, oversub_ratio_b
+    )
+    waste_val = throughput_loss * cluster_cost_m
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     waste_m_str = fmt_usd((waste_val) * MILLION, precision=1, commas=False, scale="M")
 ```

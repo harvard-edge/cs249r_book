@@ -5757,6 +5757,7 @@ Not all workloads benefit equally from adding more GPUs. The relationship betwee
 # │ Plot effective throughput vs GPU count for compute-bound, balanced,
 import numpy as np
 from book.tools.figures import style as book_style
+from mlsysim.physics import calc_strong_scaling_speedup
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.0))
 
@@ -5774,14 +5775,14 @@ scenarios = [
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for sc in scenarios:
-    speedup = N / (1 + (N - 1) * sc['r'])
+    speedup = np.vectorize(calc_strong_scaling_speedup)(N, sc['r'])
     if sc['marker']:
         ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2.0, marker=sc['marker'], markersize=6)
     else:
         ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2)
 
 ideal_speedup = N
-worst_speedup = N / (1 + (N - 1) * 0.40)
+worst_speedup = np.vectorize(calc_strong_scaling_speedup)(N, 0.40)
 ax.fill_between(N, ideal_speedup, worst_speedup, color=COLORS['RedL'], alpha=0.15)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
@@ -6497,13 +6498,15 @@ class NetworkWall:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient Size = 7 billion * 2 bytes = 14 GB
     gradient_size = model.size_in_bytes(BYTES_FP16)
+    from mlsysim.physics import calc_ring_allreduce_time, calc_ring_allreduce_data_factor
 
     # Ring AllReduce sends 2(N_GPU-1)/N_GPU copies of the gradient per worker.
-    allreduce_factor = 2 * (n_gpus - 1) / n_gpus
+    allreduce_factor = calc_ring_allreduce_data_factor(n_gpus)
     allreduce = allreduce_factor * gradient_size
 
-    # Time = Data/Bandwidth
-    time = (allreduce / network_bw).to(second)
+    # Time = Ring AllReduce formula (bandwidth-only here)
+    # Using the shared helper keeps the communication model consistent.
+    time = calc_ring_allreduce_time(gradient_size, n_gpus, network_bw, 0 * second)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_params_b_str = fmt_params(params, precision=0)

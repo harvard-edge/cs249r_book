@@ -125,7 +125,12 @@ class AllReduceCost:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import calc_ring_allreduce_time
+    from mlsysim.physics import (
+        calc_ring_allreduce_time,
+        calc_ring_allreduce_data_factor,
+        calc_ring_allreduce_latency_time,
+        calc_ring_allreduce_latency_steps,
+    )
     from mlsysim import Models, Hardware, Systems
 
     m = Models.Language.Llama2_70B
@@ -138,15 +143,14 @@ class AllReduceCost:
     # Gradient size (BF16 = 2 bytes/param)
     gradient_qty = m.parameters * (2 * byte / param)
 
-    # Use library formula for Ring AllReduce time
-    # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha)
-    t_ring = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_ndr.bandwidth, latency_s=alpha)
-    ring_total = t_ring.to(ms)
+    # Use shared library formula for Ring AllReduce time
+    # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha).
+    ring_total = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_ndr.bandwidth, latency_s=alpha).to(ms)
 
     # Break out terms for pedagogical display
-    ring_bw_factor = 2 * (n_gpus - 1) / n_gpus
-    ring_bw_time = (ring_bw_factor * gradient_qty / ib_bw.bandwidth).to(ms)
-    ring_lat_time = (ring_total - ring_bw_time).to(ms)
+    ring_bw_factor = calc_ring_allreduce_data_factor(n_gpus)
+    ring_bw_time = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_bw.bandwidth, latency_s=0 * second).to(ms)
+    ring_lat_time = calc_ring_allreduce_latency_time(n_gpus, alpha).to(ms)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ring_total > 5000 * ms, f"AllReduce ({ring_total.to(ms).magnitude:.0f}ms) should be significant (>5s) for 70B BF16 model.")
@@ -160,7 +164,7 @@ class AllReduceCost:
     ring_bw_factor_value_str = fmt_ratio(ring_bw_factor, precision=2, commas=False)
     ib_bw_gb_per_s_str = fmt_qty(ib_bw.bandwidth, GB / second, precision=0, commas=False)
     alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
-    lat_steps_str = fmt(2 * (n_gpus - 1), precision=0, commas=False)
+    lat_steps_str = fmt(calc_ring_allreduce_latency_steps(n_gpus), precision=0, commas=False)
     params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
 ```
 
@@ -551,6 +555,12 @@ The calculation uses the bandwidth hierarchy before the chapter formalizes it: r
 from mlsysim import Hardware, Models, Systems
 from mlsysim.core.units import BILLION, GB, byte, microsecond, ms, param, second
 from mlsysim.fmt import check, fmt, fmt_count, fmt_qty, fmt_time
+from mlsysim.physics import (
+    calc_ring_allreduce_time,
+    calc_ring_allreduce_data_factor,
+    calc_ring_collective_data_factor,
+    calc_ring_allreduce_latency_time,
+)
 
 class LlamaBudgetCalc:
     """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
@@ -569,13 +579,16 @@ class LlamaBudgetCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Hierarchical AllReduce—Step 1: Intra-node ReduceScatter
-    intra_payload = gradient_bf16 * (gpus_per_node_llama - 1) / gpus_per_node_llama
+    intra_payload = gradient_bf16 * calc_ring_collective_data_factor(gpus_per_node_llama)
     intra_rs_time = (intra_payload / nvlink_bw).to(ms)
 
     # Step 2: Inter-node AllReduce (reduced payload)
     inter_payload = gradient_bf16 / gpus_per_node_llama
-    inter_ring_bw_time = (2 * (n_nodes_llama - 1) / n_nodes_llama * inter_payload / ib_bw).to(ms)
-    inter_ring_lat_time = (2 * (n_nodes_llama - 1) * ib_alpha).to(ms)
+    inter_ring_total = calc_ring_allreduce_time(message_bytes=inter_payload, n_gpus=n_nodes_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
+    inter_ring_bw_time = calc_ring_allreduce_time(
+        message_bytes=inter_payload, n_gpus=n_nodes_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second
+    ).to(ms)
+    inter_ring_lat_time = (inter_ring_total - inter_ring_bw_time).to(ms)
 
     # Step 3: Intra-node AllGather (symmetric)
     intra_ag_time = intra_rs_time
@@ -583,9 +596,10 @@ class LlamaBudgetCalc:
     hier_total_llama = intra_rs_time + inter_ring_bw_time + inter_ring_lat_time + intra_ag_time
 
     # Flat Ring AllReduce (BF16)
-    flat_ring_bw = (2 * (n_gpus_llama - 1) / n_gpus_llama * gradient_bf16 / ib_bw).to(ms)
-    flat_ring_lat = (2 * (n_gpus_llama - 1) * ib_alpha).to(ms)
-    flat_total = flat_ring_bw + flat_ring_lat
+    flat_ring_total = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
+    flat_ring_bw = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second).to(ms)
+    flat_ring_lat = (flat_ring_total - flat_ring_bw).to(ms)
+    flat_total = flat_ring_total
 
     ccr_hier = (hier_total_llama / compute_per_step).to_base_units().magnitude
     ccr_flat = (flat_total / compute_per_step).to_base_units().magnitude
@@ -1082,13 +1096,18 @@ In practice, the bandwidth term approaches $2M/\beta$ (optimal) while maintainin
 # │ Show: Three curves; crossover regions; N=256, 200 Gbps.
 # │ How: t_ring, t_tree, t_dbt from alpha-beta model; matplotlib.
 # │
-# │ Imports: matplotlib.pyplot (plt), numpy (np)
+# │ Imports: matplotlib.pyplot (plt), numpy (np), mlsysim.physics AllReduce models
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Log-log plot of AllReduce time vs message size for Ring, Tree, DBT;
 import matplotlib.pyplot as plt
 import numpy as np
+from mlsysim.physics import (
+    calc_ring_allreduce_time,
+    calc_tree_allreduce_time,
+    calc_double_binary_tree_allreduce_time,
+)
 
 plt.style.use('seaborn-v0_8-whitegrid')
 
@@ -1096,13 +1115,31 @@ plt.style.use('seaborn-v0_8-whitegrid')
 N = 256
 bandwidth_gbps = 200
 bandwidth_bytes_sec = bandwidth_gbps * BILLION / 8
-latency_sec = 1e-6
+latency = 1e-6 * second
 
 message_sizes = np.logspace(3, 10, 100)
 
-t_ring = 2 * (N - 1) * latency_sec + (2 * (N - 1) / N) * (message_sizes / bandwidth_bytes_sec)
-t_tree = 2 * np.log2(N) * latency_sec + (2 * np.log2(N)) * (message_sizes / bandwidth_bytes_sec)
-t_dbt = 2 * np.log2(N) * latency_sec * 1.2 + (2 * (N - 1) / N) * (message_sizes / bandwidth_bytes_sec) * 1.05
+t_ring = np.array(
+    [calc_ring_allreduce_time(size * byte, N, bandwidth_bytes_sec * byte / second, latency).to(second).magnitude for size in message_sizes]
+)
+t_tree = np.array(
+    [calc_tree_allreduce_time(size * byte, N, bandwidth_bytes_sec * byte / second, latency).to(second).magnitude for size in message_sizes]
+)
+t_dbt = np.array(
+    [
+        calc_double_binary_tree_allreduce_time(
+            size * byte,
+            N,
+            bandwidth_bytes_sec * byte / second,
+            latency,
+            latency_factor=1.2,
+            bandwidth_factor=1.05,
+        )
+        .to(second)
+        .magnitude
+        for size in message_sizes
+    ]
+)
 
 t_ring_ms = t_ring * THOUSAND
 t_tree_ms = t_tree * THOUSAND
@@ -1181,9 +1218,15 @@ Nevertheless, the crossover formula remains the essential mental model for under
 ```{python}
 #| echo: false
 #| label: ring-vs-tree-calc
+import math
 from mlsysim.fmt import check, fmt, fmt_percent, fmt_qty, fmt_time
 from mlsysim.core.units import GB, MB, microsecond, second
-import math
+from mlsysim.physics import (
+    calc_ring_allreduce_time,
+    calc_ring_allreduce_latency_steps,
+    calc_tree_allreduce_time,
+    calc_ring_tree_crossover_size,
+)
 
 class RingVsTree:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1196,13 +1239,15 @@ class RingVsTree:
     beta = beta_gbs * GB / second
     # ┌── 2. EXECUTE ───────────────────────────────────────
     log2N = int(math.log2(N))
-    ring_lat = (2 * (N - 1) * alpha).to(microsecond)
+    # Latency terms come from exact closed forms (the guards pin them exactly);
+    # deriving them by subtraction or via a seconds round-trip leaves FP residue.
+    ring_total = calc_ring_allreduce_time(M, N, beta, alpha).to(microsecond)
+    ring_bw = calc_ring_allreduce_time(M, N, beta, 0 * second).to(microsecond)
+    ring_lat = (calc_ring_allreduce_latency_steps(N) * alpha).to(microsecond)
+    tree_total = calc_tree_allreduce_time(M, N, beta, alpha).to(microsecond)
+    tree_bw = calc_tree_allreduce_time(M, N, beta, 0 * second).to(microsecond)
     tree_lat = (2 * log2N * alpha).to(microsecond)
-    ring_bw = (2 * (N - 1) / N * M / beta).to(microsecond)
-    tree_bw = (2 * log2N * M / beta).to(microsecond)
-    ring_total = ring_lat + ring_bw
-    tree_total = tree_lat + tree_bw
-    crossover = (N * alpha * beta / log2N).to(MB)
+    crossover = calc_ring_tree_crossover_size(N, alpha, beta)
     tree_win_margin_pct = ((ring_total - tree_total) / ring_total).to_base_units().magnitude * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ring_lat == 1260 * microsecond, f"Ring lat = {ring_lat.to(microsecond).magnitude}")
@@ -1370,6 +1415,11 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 from mlsysim.core.units import GB, MB, microsecond, ms, second
 from mlsysim import Hardware, Systems
 from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_qty, fmt_time
+from mlsysim.physics import (
+    calc_ring_allreduce_time,
+    calc_ring_allreduce_latency_time,
+    calc_ring_collective_data_factor,
+)
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
@@ -1383,16 +1433,22 @@ class HierarchicalAllreduceCalc:
     ib_alpha = 3 * microsecond  # scenario assumption: alpha-beta base latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Flat ring uses the deliberate ~2x simplification the prose math shows
+    # (T = 2M/beta); the exact 2(N-1)/N factor appears in the inter-node step.
     flat_data = 2 * gradient  # bandwidth-optimal Ring sends ~2×
     flat_time = (flat_data / ib_bw).to(ms)
 
-    intra_data = (gradient * (gpus_per_node - 1) / gpus_per_node).to(MB)  # ~875 MB
+    intra_data = (gradient * calc_ring_collective_data_factor(gpus_per_node)).to(MB)  # ~875 MB
     intra_rs = (intra_data / nvlink_bw).to(ms)
 
     inter_data = (gradient / gpus_per_node).to(MB)  # 125 MB
-    inter_ring_factor = 2 * (n_nodes_har - 1) / n_nodes_har
-    inter_bw = (inter_ring_factor * inter_data / ib_bw).to(ms)
-    inter_lat = (2 * (n_nodes_har - 1) * ib_alpha).to(ms)
+    inter_bw = calc_ring_allreduce_time(
+        message_bytes=inter_data,
+        n_gpus=n_nodes_har,
+        bandwidth_bytes_s=ib_bw,
+        latency_s=0 * second,
+    ).to(ms)
+    inter_lat = calc_ring_allreduce_latency_time(n_nodes_har, ib_alpha).to(ms)
     inter_time = inter_bw + inter_lat
 
     intra_ag = intra_rs  # symmetric
