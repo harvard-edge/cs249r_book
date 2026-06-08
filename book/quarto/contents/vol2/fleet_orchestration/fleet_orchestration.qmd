@@ -864,7 +864,34 @@ $$ S_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j)) $$ {#eq-fleet-orchestration
 
 where $g_i$ and $g_j$ are GPUs assigned to the job, $d(g_i, g_j)$ is their topological distance (0 for same node, 1 for same rack, 2 for different racks), and $w(\cdot)$ is a weighting function that increases with distance. The scheduler minimizes this score when selecting an allocation from the set of feasible placements. The weighting function encodes the performance impact of each topology level: $w(0) = 0$ (same node, NVLink, no penalty), $w(1) = 1$ (same rack, one switch hop), $w(2) = 10$ (different racks, multiple switch hops). The tenfold weight difference between same-rack and cross-rack placements reflects the disproportionate performance impact of crossing spine switches.
 
-More sophisticated algorithms distinguish between parallelism strategies, recognizing that different communication patterns have different bandwidth and latency requirements. Tensor parallelism requires the highest bandwidth and lowest latency because it exchanges activation tensors at every layer; it should be confined to NVLink domains within a single node. Pipeline parallelism tolerates moderate latency because it sends activations between stages less frequently (once per microbatch per stage boundary rather than at every layer); it can span nodes within a rack where InfiniBand provides sufficient bandwidth. Data parallelism, with its bulk gradient synchronization that can overlap with computation, operates efficiently across racks because the communication is less latency-sensitive and can use the available bandwidth effectively. @Fig-topology-placement quantifies the impact: topology-aware scheduling can reduce AllReduce latency by 4.8$\times$ compared to random placement.
+More sophisticated algorithms distinguish between parallelism strategies, recognizing that different communication patterns have different bandwidth and latency requirements. Tensor parallelism requires the highest bandwidth and lowest latency because it exchanges activation tensors at every layer; it should be confined to NVLink domains within a single node. Pipeline parallelism tolerates moderate latency because it sends activations between stages less frequently (once per microbatch per stage boundary rather than at every layer); it can span nodes within a rack where InfiniBand provides sufficient bandwidth. Data parallelism, with its bulk gradient synchronization that can overlap with computation, operates efficiently across racks because the communication is less latency-sensitive and can use the available bandwidth effectively.
+
+@Algo-topology-aware-placement combines these pieces into a single decision: the all-or-nothing gang constraint of @sec-fleet-orchestration-gang-scheduling, the locality score of @eq-fleet-orchestration-locality-score, and the parallelism-to-topology mapping just described. The scheduler enumerates the allocations that fit, scores each by communication cost, and takes the cheapest, leaving the job queued rather than stranding accelerators when none does.
+
+```pseudocode
+#| label: algo-topology-aware-placement
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Topology-aware placement}
+\begin{algorithmic}
+\Require job requesting $N$ accelerators with tensor-, pipeline-, and data-parallel groups; cluster topology with per-level link costs $w(\cdot)$
+\Ensure an all-or-nothing placement of least communication cost, or the job stays queued
+\State enumerate the feasible slots: sets of $N$ free accelerators that satisfy every resource dimension \Comment{gang: all or nothing}
+\If{no feasible slot exists}
+    \State leave the job queued without holding any accelerators \Comment{prevents hold-and-wait deadlock}
+\EndIf
+\For{each feasible slot}
+    \State map tensor-parallel ranks within an NVLink domain, pipeline stages within a rack, data-parallel replicas across racks
+    \State score the slot by $S_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j))$
+\EndFor
+\State \Return the feasible slot of least $S_{\text{locality}}$ \Comment{topology-optimal, atomic}
+\end{algorithmic}
+\end{algorithm}
+```
+
+Scattered placement runs AllReduce 4.8$\times$ slower than a topology-aware slot, a gap @fig-topology-placement breaks out across four placement strategies from random to topology-optimal.
 
 ::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology Placement Impact**: Reducing AllReduce latency by 4.8$\times$ through topology-aware scheduling (rack/rail optimization) compared to random placement for a 1 GB gradient sync on 64 GPUs." fig-alt="Bar chart comparing AllReduce latency for Random, Rack-Aware, Rail-Optimized, and Topology-Optimal placement. 4.8× speedup from Random to Topology-Optimal."}
 
@@ -1011,7 +1038,7 @@ Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-w
 - Pipeline stages scattered across racks (2 switch hops instead of 1)
 - Data parallel replicas randomly distributed
 
-The tensor parallel communication alone illustrates the impact. With NVLink at `{python} FleetTopologyInterconnect.nvlink_h100_gb_per_s_str`, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_mult_str` slowdown. The 4.8$\times$ AllReduce-latency gap in @fig-topology-placement is a communication-only measurement; it does not become a 4.8$\times$ end-to-end penalty because synchronous training overlaps much of that communication with the next iteration's compute. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), the residual exposed communication compounds to 15 to 30 percent total training throughput degradation, the figure to carry forward for 3D-parallel jobs.
+The tensor parallel communication alone illustrates the impact. With NVLink at `{python} FleetTopologyInterconnect.nvlink_h100_gb_per_s_str`, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_mult_str` slowdown. The `{python} TopologyPlacement.speedup_mult_str` AllReduce-latency gap in @fig-topology-placement is a communication-only measurement; it does not become a `{python} TopologyPlacement.speedup_mult_str` end-to-end penalty because synchronous training overlaps much of that communication with the next iteration's compute. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), the residual exposed communication compounds to 15 to 30 percent total training throughput degradation, the figure to carry forward for 3D-parallel jobs.
 
 :::
 
