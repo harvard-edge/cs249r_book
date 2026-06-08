@@ -409,7 +409,7 @@ The third inversion is **write pattern**\index{Write Pattern}. Transactional sys
 
 As @tbl-storage-assumptions shows, these inversions have a fourth, subtler dimension: the read/write ratio shifts dramatically by lifecycle phase. During training, reads dominate writes by 100:1 or more, as the system streams through data continuously and saves checkpoints occasionally. During checkpoint-heavy phases in fault-prone clusters, writes can briefly dominate. During data preprocessing, both reads and writes are heavy. No single storage configuration optimizes for all phases, which is why ML systems require a multi-tier hierarchy rather than a single storage technology.
 
-A fifth inversion emerges when comparing training and inference workloads. *Training* reads datasets sequentially and writes checkpoints in bursts. *Inference*, by contrast, reads model weights once at startup (a large sequential read of potentially hundreds of gigabytes), then performs no further storage I/O during normal operation because the model resides entirely in HBM. The storage challenge for inference is cold-start latency: the time required to load a model from storage to HBM when scaling up or recovering from failure. A 175B parameter model in FP16 occupies 350 GB; loading it from NVMe at 14 GB/s takes 25 seconds, while loading from a parallel file system at 4 GB/s per node takes nearly 90 seconds. For serving workloads with strict availability requirements, this cold-start time drives the design toward keeping warm replicas in host DRAM or using model sharding to parallelize the load across multiple storage devices.
+A fifth inversion emerges when comparing training and inference workloads. *Training* reads datasets sequentially and writes checkpoints in bursts. *Inference*, by contrast, reads model weights once at startup (a large sequential read of potentially hundreds of gigabytes), then performs no further storage I/O during normal operation because the model resides entirely in HBM. The storage challenge for inference is cold-start latency: the time required to load a model from storage to HBM when scaling up or recovering from failure. Because the model is read once and then resident, the binding constraint flips from sustained streaming throughput to a single bulk read whose duration depends entirely on which tier supplies the weights, with a parallel file system taking several times longer than local NVMe. @Sec-storage-inference derives the concrete load times for a 175B model. For serving workloads with strict availability requirements, this cold-start time drives the design toward keeping warm replicas in host DRAM or using model sharding to parallelize the load across multiple storage devices.
 
 When scaling from a single user to thousands of concurrent inference requests, the storage challenge shifts from a single-stream throughput problem to a massive fan-out distribution problem. A serving cluster with 100 replicas of our 175B parameter model requires 35 TB of model weights distributed across the cluster. When a new model version is deployed (a **model rollout**\index{Model Rollout!storage bandwidth}), all 100 replicas must be updated, triggering a 35 TB data distribution event that must complete within minutes to minimize serving disruption. This is analogous to the checkpoint storm in training but in reverse: Instead of many nodes *writing* to a central location simultaneously, many nodes are *reading* the same data simultaneously. The storage system must sustain this burst read bandwidth for model distribution while continuing to serve inference requests from the existing model version without degradation.
 
@@ -425,8 +425,6 @@ You are designing the storage subsystem for a new ML training cluster with 512 G
 4. Given the write pattern (bursty checkpoints every 15 minutes), what percentage of time is the storage system in "write mode" vs. "read mode"?
 
 :::
-
-The storage hierarchy described in the next section is the engineering response to these inverted requirements.
 
 Understanding which storage tier can keep accelerators fed is essential to system design. @Fig-access-patterns-vol2 plots the required I/O throughput to sustain full GPU utilization against model size, with horizontal ceilings for each storage tier overlaid. Below the NVMe ceiling, local SSDs can sustain the training feed; between NVMe and parallel-filesystem ceilings, only Lustre-class storage suffices; and beyond the parallel-filesystem ceiling, the workload enters the storage-bottleneck regime where no single tier can sustain the accelerators on its own.
 
@@ -524,7 +522,7 @@ The bandwidth ratios between adjacent tiers reveal the severity of each transiti
 
 These bandwidth cliffs have a critical implication: the pipeline cannot simply "stream through" the hierarchy in real time. If the accelerator consumes data at `{python} StoragePyramidContext.h100_bw_tb_per_s_str` from HBM, and the next tier down delivers only 200 GB/s, then HBM can be emptied in under 50 ms but takes 400 ms to refill from host DRAM. The only way the accelerator avoids stalling is if the batch it needs next is already in HBM before it finishes the current batch. This is *why* every tier in the hierarchy serves as a prefetch buffer for the tier above it: host DRAM buffers data for HBM, NVMe buffers data for host DRAM, the parallel file system buffers data for NVMe, and object storage is the ultimate source of truth. Each buffer must be deep enough to absorb the latency and bandwidth variance of the tier below it.
 
-The bandwidth arithmetic also explains *why* increasing cluster size creates storage pressure. A single node with 8 GPUs needs roughly 4 to 40 GB/s of storage bandwidth (depending on workload). A cluster of 256 such nodes needs 1,000 to 10,000 GB/s. A cluster of 10,000 nodes needs 40 to 400 TB/s. At the upper end, even a world-class parallel file system with 1,000 OSS nodes delivering 1 TB/s aggregate cannot satisfy the demand, and the architecture must rely on local NVMe caching to reduce the load on shared storage.
+The bandwidth arithmetic also explains *why* increasing cluster size creates storage pressure. A single node with 8 GPUs needs roughly 4 to 40 GB/s of storage bandwidth (depending on workload). A cluster of 256 such nodes needs 1,000 to 10,000 GB/s. A cluster of 10,000 nodes needs 40 to 400 TB/s. At the upper end, even a world-class parallel file system with 1,000 object storage servers (the data-serving nodes introduced in the parallel file system tier below) delivering 1 TB/s aggregate cannot satisfy the demand, and the architecture must rely on local NVMe caching to reduce the load on shared storage.
 
 The severity of that cluster-level pressure depends sharply on the data modality.
 
@@ -837,47 +835,33 @@ The gap between host DRAM bandwidth and HBM bandwidth is the first major cliff i
 #| echo: false
 #| label: storage-nvme-tier-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ NVME TIER: I/O BANDWIDTH, HDD COMPARISON, AND CHECKPOINT WRITE TIMES
+# │ NVME TIER: I/O BANDWIDTH AND HDD COMPARISON
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-storage-tier2-nvme—NVMe I/O characteristics, HDD contrast,
-# │          and local checkpoint staging times.
+# │ Context: @sec-storage-tier2-nvme—NVMe I/O characteristics and HDD contrast.
 # │
-# │ Goal:    Quantify raw image bandwidth, HDD IOPS shortfall, and per-node
-# │          checkpoint write times to NVMe vs PFS.
-# │ Show:    150 MB/s raw image BW; 10x HDD slowdown; 10% HDD ceiling;
-# │          0.3s NVMe / 1.0s PFS
-# │          checkpoint write for a 175B model shard.
-# │ How:     BW = images/s × size; HDD ratio = images/s/IOPS; ckpt time =
-# │          shard_GB/drive_BW.
+# │ Goal:    Quantify raw image bandwidth and the HDD IOPS shortfall.
+# │ Show:    150 MB/s raw image BW; 10x HDD slowdown; 10% HDD ceiling.
+# │ How:     BW = images/s × size; HDD ratio = images/s/IOPS.
 # │
 # │ Imports: mlsysim.core.units (Hardware.Tech.Storage.NvmeGen4.bandwidth, GB, second, BILLION, THOUSAND,
 # │          MILLION)
 # │ Exports: NVMeTierCalcs.raw_bw_mb_per_s_str, .hdd_slowdown_factor_mult_str,
-# │          .hdd_util_ceiling_pct_str, .ckpt_nvme_s_str, .ckpt_pfs_s_str
+# │          .hdd_util_ceiling_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_count, fmt_time, fmt_rate, fmt_memory, fmt_bandwidth
+from mlsysim.fmt import check, fmt, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth
 
 class NVMeTierCalcs:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    nvme_bw_raw = Hardware.Tech.Storage.NvmeGen4.bandwidth
-    pfs_node_bw = 4.0 * (GB / second)  # scenario per-node PFS bandwidth assumption
     images_per_sec = 1000
     img_size = 150 * KB  # scenario ImageNet average image-size assumption
     hdd_iops = Systems.Storage.Hdd7200Rpm.iops
     imagenet_images = 1_280_000
-
-    # Checkpoint sizing (175B GPT-3 training-state footprint, local duplicate)
-    ckpt_total = Models.Language.GPT3.parameters * (10 * (byte / param))
-    n_nodes = 256
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     raw_bw = images_per_sec * img_size / second
     raw_bw_val = raw_bw.to(MB / second).magnitude
     hdd_slowdown_val = images_per_sec / hdd_iops
     hdd_util_ceiling_pct_val = hdd_iops / images_per_sec * 100
-    node_shard = ckpt_total / n_nodes
-    ckpt_nvme = node_shard / (4 * nvme_bw_raw)
-    ckpt_pfs = node_shard / pfs_node_bw
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(raw_bw_val == 150, "Raw image BW should be 150 MB/s")
@@ -892,8 +876,6 @@ class NVMeTierCalcs:
     hdd_iops_str = fmt_rate(hdd_iops, "IOPS", precision=0, commas=False)
     hdd_slowdown_factor_mult_str = fmt_multiple(hdd_slowdown_val, precision=0, commas=False)
     hdd_util_ceiling_pct_str = fmt_percent(hdd_util_ceiling_pct_val / 100, precision=0, commas=False, style='prose')
-    ckpt_nvme_s_str = fmt_time(ckpt_nvme, second, precision=1, commas=False, style='word')
-    ckpt_pfs_s_str = fmt_time(ckpt_pfs, second, precision=1, commas=False, style='word')
 ```
 
 ```{python}
@@ -901,13 +883,11 @@ class NVMeTierCalcs:
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-tier2-nvme
 # │ Exports: NvmeTierContext.*
-from mlsysim import Hardware, Models
-from mlsysim.solvers import TrainingMemoryModel
-from mlsysim.fmt import fmt, check, fmt_qty, fmt_qty_int, fmt_int, fmt_time, fmt_memory, fmt_bandwidth
+from mlsysim import Hardware
+from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
 
 class NvmeTierContext:
     LOCAL_NVME_DRIVES_PER_NODE_REF = 4 * count  # pedagogical: NVMe drives per node
-    gpt3_params = Models.Language.GPT3.parameters
     training_tokens = ReferenceStats.StorageTrainingCorpus.TrainingTokens
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
     tokenized_shard = 3 * GB  # scenario tokenized shard size assumption
@@ -922,7 +902,6 @@ class NvmeTierContext:
     multimodal_audio = 5 * TB  # scenario multimodal audio corpus assumption
     multimodal_total = multimodal_images + multimodal_text + multimodal_audio
     multimodal_excess = multimodal_total - local_nvme_capacity
-    ckpt_total = gpt3_params * ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
     check(local_nvme_capacity.to(TB).magnitude > 25, "Four 7.68 TB drives should exceed 25 TB local capacity")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_per_drive_bw, unit=GB / second, precision=0, commas=False)
@@ -936,8 +915,6 @@ class NvmeTierContext:
     multimodal_excess_tb_str = fmt_memory(multimodal_excess, unit=TB, precision=1, commas=False)
     tokenized_shard_count_str = fmt(tokenized_shard_count_val, precision=0)
     tokenized_shard_gb_str = fmt_memory(tokenized_shard, unit=GB, precision=0, commas=False)
-    gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
-    ckpt_total_gb_str = fmt_qty_int(ckpt_total, GB, commas=False)
 ```
 ### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
 
@@ -983,7 +960,7 @@ A standard ImageNet training pipeline makes the cost of the wrong format visible
 
 The central challenge at this tier is the I/O wall: a single NVMe drive is roughly 500$\times$ slower than HBM, and even a four-drive RAID-0 stripe remains roughly 120$\times$ slower. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPU Direct Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of 100 MB/s might view 28 GB/s from a local RAID-0 stripe as superabundant. Relative to the accelerator's appetite, however, 28 GB/s is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
 
-Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability. For a `{python} NvmeTierContext.gpt3_params_b_str` parameter checkpoint of `{python} NvmeTierContext.ckpt_total_gb_str` sharded across 256 nodes, each node's roughly 7 GB shard writes to local NVMe in approximately `{python} NVMeTierCalcs.ckpt_nvme_s_str`, compared to `{python} NVMeTierCalcs.ckpt_pfs_s_str` if the same per-node shard were written directly to a parallel file system where the node competes with hundreds of other writers. The optimal checkpoint frequency depends on cluster failure rates and checkpoint write time, but the storage-side design goal is already clear: minimize $T_{\text{write}}$ through tiered staging by writing to local NVMe at full bandwidth, then background-copying to shared storage.
+Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability, since a per-node shard written directly to a contended parallel file system takes several times longer than the same shard written to local drives. The optimal checkpoint frequency depends on cluster failure rates and checkpoint write time, but the storage-side design goal is already clear: minimize $T_{\text{write}}$ through tiered staging by writing to local NVMe at full bandwidth, then background-copying to shared storage. @Sec-storage-checkpointing works the timings through in full.
 
 ```{python}
 #| echo: false
@@ -1272,7 +1249,7 @@ The final tier provides long-term preservation for compliance and auditability. 
 
 The primary value of archive storage is organizational memory. When a model trained two years ago produces unexpected behavior in production, the ability to recover the exact training data, hyperparameters, and intermediate checkpoints for forensic analysis depends on archive storage. Organizations that aggressively purge old data to save costs discover, often at the worst possible moment, that they cannot reproduce or explain the behavior of deployed models.
 
-Automated **lifecycle policies**\index{Lifecycle Policy} govern the transition of data between tiers based on access recency. A typical policy for ML infrastructure moves checkpoints as follows: the most recent three checkpoints remain on the parallel file system for fast recovery; checkpoints older than 72 hours are transitioned to object storage; checkpoints older than 90 days are transitioned to archive storage; and checkpoints older than two years are deleted unless flagged for regulatory retention. Without automation, teams either hoard data on expensive tiers (wasting budget) or delete data too aggressively (losing reproducibility). The lifecycle policy encodes the organization's cost-recovery trade-off in a declarative rule that requires no manual intervention.
+Automated **lifecycle policies**\index{Lifecycle Policy} govern the transition of data between tiers based on access recency. As one illustration of how such automation is expressed, a time-based rule for ML infrastructure might move checkpoints as follows: the most recent three checkpoints remain on the parallel file system for fast recovery; checkpoints older than 72 hours are transitioned to object storage; checkpoints older than 90 days are transitioned to archive storage; and checkpoints older than two years are deleted unless flagged for regulatory retention. The running example later adopts a count-based variant of the same idea (@sec-storage-checkpointing), where the transition rule keys on checkpoint count rather than age. Without automation, teams either hoard data on expensive tiers (wasting budget) or delete data too aggressively (losing reproducibility). The lifecycle policy encodes the organization's cost-recovery trade-off in a declarative rule that requires no manual intervention.
 
 ```{python}
 #| echo: false
@@ -2285,7 +2262,7 @@ class CheckpointStormDefinition:
 
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
 
-1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model, each replica holds `{python} CheckpointStormDefinition.weights_gb_str` FP16 weights, `{python} CheckpointStormDefinition.gradients_gb_str` gradients, and `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str`, a naive checkpoint of that full per-replica state generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3 sharding collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
+1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model, each replica holds `{python} CheckpointStormDefinition.weights_gb_str` FP16 weights, `{python} CheckpointStormDefinition.gradients_gb_str` gradients, and `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str`, a naive checkpoint of that full per-replica state generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3, an optimizer-state-sharding scheme in which each node stores only its $1/N$ slice of the state rather than a full replica, collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
 2.  **Observation**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
 
@@ -2407,7 +2384,7 @@ class CheckpointFleetRetention:
     retained_every_100_count_str = fmt(retained_every_100_count_val, precision=0)
 ```
 
-The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every 10 minutes over a 30-day training run generates roughly `{python} CheckpointFleetRetention.checkpoint_count_str` checkpoints, each `{python} CheckpointTotalGbRecap.ckpt_total_gb_str`, for a total of approximately `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` of checkpoint data. Retaining all of them is neither necessary nor economical. A common retention policy keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` to roughly `{python} CheckpointFleetRetention.retention_recent_tb_str` (three live full checkpoints) while preserving `{python} CheckpointFleetRetention.retained_every_100_count_str` historical snapshots in object storage for posttraining analysis.
+The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every 10 minutes over a 30-day training run generates roughly `{python} CheckpointFleetRetention.checkpoint_count_str` checkpoints, each `{python} CheckpointTotalGbRecap.ckpt_total_gb_str`, for a total of approximately `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` of checkpoint data. Retaining all of them is neither necessary nor economical. The retention policy this run adopts keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` to roughly `{python} CheckpointFleetRetention.retention_recent_tb_str` (three live full checkpoints) while preserving `{python} CheckpointFleetRetention.retained_every_100_count_str` historical snapshots in object storage for posttraining analysis.
 
 Incremental checkpointing offers a further optimization for reducing $T_{\text{write}}$. Rather than saving the entire model state every checkpoint, an incremental checkpoint saves only the parameters that changed since the last full checkpoint. For models where a large fraction of parameters are frozen (such as fine-tuning scenarios where only the last few layers are updated), incremental checkpoints can be orders of magnitude smaller than full checkpoints. The trade-off is recovery complexity: restoring from an incremental checkpoint requires applying a chain of incremental updates to a base checkpoint, which extends recovery time. Most production systems use a hybrid approach, saving incremental checkpoints frequently and full checkpoints periodically (every 10th to 100th increment).
 
@@ -2471,23 +2448,9 @@ The choice between synchronous and asynchronous checkpointing depends on the rat
 
 Beyond the choice of synchronous or asynchronous methods, **checkpoint format optimization**\index{Checkpoint Format Optimization} reduces the per-node I/O volume. In the simplest data-parallel setup, every node holds an identical copy of the model weights, so a naive checkpoint would redundantly save the same data from every node. Sharded checkpoint protocols avoid that redundancy by saving shards instead of full replicas. DeepSpeed's **zero-redundancy checkpointing**\index{Checkpointing!zero-redundancy} uses its ZeRO optimizer-state partitioning: each of the $H$ nodes saves only its $1/H$ shard of the optimizer state, and the system saves one consolidated copy of the weights. PyTorch's **Distributed Checkpoint (DCP)**\index{Distributed Checkpoint} protocol follows the same storage principle by writing each rank's sharded data to a distinct file. For our 175B model using ZeRO-3 across 256 nodes, the result is concrete: each node writes only its roughly 7 GB shard of the total `{python} CheckpointTotalGbRecap.ckpt_total_gb_str` state, reducing the local write from minutes to around a second on one NVMe drive, or well below a second on a local stripe.
 
-Threading these numbers through our running example makes the checkpoint overhead concrete. The full checkpoint for the 175B parameter model includes 350 GB of FP16 model weights and roughly 1,400 GB of Adam optimizer state, totaling approximately `{python} CheckpointTotalGbRecap.ckpt_total_gb_str`. With ZeRO-3 partitioning this state across 256 nodes, each node is responsible for roughly 7 GB. Writing this shard to four local NVMe drives at 28 GB/s aggregate takes roughly 0.25 seconds. The subsequent asynchronous copy to the durable parallel file system, assuming a conservative 4 GB/s of dedicated bandwidth per node, completes in just under two seconds. The exposed pipeline pause is the local write, while the longer PFS copy happens in the background and overlaps with subsequent training. At a checkpoint interval of 10 minutes, the exposed checkpoint overhead is less than 0.1 percent of training time.
+The tiered-staging derivation in @sec-storage-checkpointing already threaded these per-node shard sizes and write times through the running example, and the same arithmetic governs distributed coordination: the exposed pipeline pause is the local NVMe write, while the durable copy to the parallel file system overlaps with subsequent training.
 
-Feature stores and model registries, the operational systems that manage feature serving and model versioning, are also built on top of this storage hierarchy. Their production architecture is an operations problem; the storage point is that they depend on the same tiering, durability, and latency boundaries introduced here. One adjacent workload does belong in this chapter before it turns to storage fallacies: retrieval infrastructure reverses the training access pattern and therefore stresses a different part of the hierarchy. Vector databases, specialized storage systems for approximate nearest-neighbor search in embedding spaces, serve the retrieval-augmented generation pipeline by making that reversed access pattern operational.
-
-## Retrieval Infrastructure: Vector Indexes {#sec-data-storage-retrieval-infrastructure}
-
-The storage hierarchy so far has optimized the training fuel line: large shards, sequential reads, and checkpoint bursts. Retrieval-augmented inference adds a storage workload that belongs in the same chapter because it reverses the access pattern again. A retrieval system first converts documents into vectors that represent semantic meaning, then serves an inference request by finding nearby vectors and returning their source documents as context. Instead of streaming sequential blobs via formats like TFRecord or Parquet, the storage system now traverses high-dimensional vector graphs.
-
-::: {#psp-data-storage-iops-bottleneck-high-dimensional-search .callout-perspective title="The IOPS bottleneck in high-dimensional search"}
-
-This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth**\index{Sequential Read Bandwidth} to **random-access IOPS**\index{Random-Access IOPS}. Vector databases must traverse high-dimensional graph indexes to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. In-memory HNSW-style graph indexes\index{HNSW} make the same graph-navigation idea fast when the index fits in DRAM, while hybrid search\index{Hybrid Search} combines vector similarity with lexical or metadata filters and therefore stresses both random vector traversal and document fetches. Disk-backed graph indexes such as DiskANN show how billion-scale search can trade DRAM footprint against SSD-backed graph traversal while targeting high recall and low query latency [@subramanya2019diskann].
-
-:::
-
-This makes retrieval infrastructure a useful counterexample to the training fuel line. The same hierarchy still applies, but the objective changes: training storage hides sequential bandwidth behind prefetching, whereas vector search spends storage budget on the index levels that keep random graph traversal inside the serving latency SLO. A disk-backed index is economical only if the extra SSD traversals do not erase the quality gain from searching a larger corpus.
-
-That serving-time counterexample completes the access-pattern contrast. Before the chapter moves to synthetic data, the running example needs one consolidated accounting table so the training dataset, checkpoints, and archive lineage are visible against the same storage hierarchy.
+With the checkpoint accounting now derived in full, the running example's storage demands can be consolidated against the same hierarchy, so the training dataset, checkpoints, and archive lineage are visible side by side.
 
 ```{python}
 #| echo: false
@@ -2545,7 +2508,21 @@ The total data moved through the hierarchy\index{Storage!total data movement} is
 
 :::
 
-The storage footprint just assembled assumes human-authored training data. When the fleet exhausts that supply, the storage architecture changes again, because synthesized data must carry its own provenance.
+Feature stores and model registries, the operational systems that manage feature serving and model versioning, are also built on top of this storage hierarchy, depending on the same tiering, durability, and latency boundaries introduced here. Training streams its fuel sequentially and writes checkpoints in bursts; retrieval-augmented inference reverses that access pattern, replacing sequential streaming with random graph traversal, so the same hierarchy must now serve a workload it was not tuned for. Vector databases, specialized storage systems for approximate nearest-neighbor search in embedding spaces, serve the retrieval-augmented generation pipeline by making that reversed access pattern operational.
+
+## Retrieval Infrastructure: Vector Indexes {#sec-data-storage-retrieval-infrastructure}
+
+The storage hierarchy so far has optimized the training fuel line: large shards, sequential reads, and checkpoint bursts. Retrieval-augmented inference adds a storage workload that belongs in the same chapter because it reverses the access pattern again. A retrieval system first converts documents into vectors that represent semantic meaning, then serves an inference request by finding nearby vectors and returning their source documents as context. Instead of streaming sequential blobs via formats like TFRecord or Parquet, the storage system now traverses high-dimensional vector graphs.
+
+::: {#psp-data-storage-iops-bottleneck-high-dimensional-search .callout-perspective title="The IOPS bottleneck in high-dimensional search"}
+
+This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth**\index{Sequential Read Bandwidth} to **random-access IOPS**\index{Random-Access IOPS}. Vector databases must traverse high-dimensional graph indexes to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. In-memory hierarchical navigable small world (HNSW) graph indexes\index{HNSW} make the same graph-navigation idea fast when the index fits in DRAM, while hybrid search\index{Hybrid Search} combines vector similarity with lexical or metadata filters and therefore stresses both random vector traversal and document fetches. Disk-backed graph indexes such as DiskANN show how billion-scale search can trade DRAM footprint against SSD-backed graph traversal while targeting high recall and low query latency [@subramanya2019diskann].
+
+:::
+
+This makes retrieval infrastructure a useful counterexample to the training fuel line. The same hierarchy still applies, but the objective changes: training storage hides sequential bandwidth behind prefetching, whereas vector search spends storage budget on the index levels that keep random graph traversal inside the serving latency SLO. A disk-backed index is economical only if the extra SSD traversals do not erase the quality gain from searching a larger corpus. The retrieval workload thus reuses the same physical hierarchy while inverting the objective, which closes the access-pattern contrast that the fuel line opened.
+
+The storage architecture changes again when the fleet exhausts its supply of human-authored training data, because synthesized data must carry its own provenance.
 
 ## The Synthetic Fuel Line {#sec-storage-synthetic-fuel}
 
