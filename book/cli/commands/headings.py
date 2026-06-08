@@ -95,7 +95,9 @@ SKIP_HEADINGS = {
     "1-bit Adam: Compression-aware optimization",
 }
 
-DAM_AXES = {"Data", "Algorithm", "Machine", "Computation", "Communication", "Coordination"}
+# "Compute" added 2026-06: the C³ first axis was unified from "Computation"
+# to "Compute" (the c3-taxonomy figure / part-principles / prose-triad form).
+DAM_AXES = {"Data", "Algorithm", "Machine", "Compute", "Computation", "Communication", "Coordination"}
 
 # Concept terms from §10.3 that stay lowercase even at heading sentence start.
 CONCEPT_TERMS_LOWER = {
