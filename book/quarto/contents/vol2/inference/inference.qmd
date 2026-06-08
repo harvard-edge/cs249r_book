@@ -1031,7 +1031,7 @@ Continuous batching (also called iteration-level batching) decouples batch membe
 \end{algorithm}
 ```
 
-Admitting, completing, and refilling slots on every iteration keeps active-token capacity from idling behind the longest sequence in the batch, while the preemption path adds HBM-to-CPU-DRAM transfer latency under memory pressure. The throughput gain therefore scales with output-length variance and must be balanced against KV-cache movement. Unlike static or dynamic batching, which group requests at the *request* level, continuous batching operates at the *iteration* level, dynamically reshaping the compute tensor at each clock cycle. As @fig-continuous-batching-comparison illustrates, static batching leaves the GPU idle while waiting for the longest request, whereas continuous batching keeps it saturated.
+Admitting, completing, and refilling slots on every iteration keeps active-token capacity from idling behind the longest sequence in the batch, while the preemption path adds HBM-to-CPU-DRAM transfer latency under memory pressure. The throughput gain therefore scales with output-length variance and must be balanced against KV-cache movement. As @fig-continuous-batching-comparison illustrates, static batching leaves the GPU idle while waiting for the longest request, whereas continuous batching keeps it saturated.
 
 ::: {#fig-continuous-batching-comparison fig-env="figure" fig-pos="htb" fig-cap="**Static vs. Continuous Batching**: In static batching (A), all requests in a batch must wait for the longest request to complete before the GPU can begin the next batch, leading to significant idle compute time (shaded gray). Continuous batching (B) allows new requests to enter the batch as soon as any request finishes, keeping the GPU saturated and dramatically improving throughput." fig-alt="Two-panel timeline comparison. Left: Static batching shows requests of different lengths with large white space representing idle time. Right: Continuous batching shows requests filling the gaps as soon as one ends."}
 
@@ -1341,11 +1341,7 @@ Average latency comparison
 - Traditional: `{python} BatchingWorkedExample.trad_lat_ms_str` (all requests)
 - Continuous: (`{python} BatchingWorkedExample.r1_lat_ms_str` + `{python} BatchingWorkedExample.r3_lat_str` + `{python} BatchingWorkedExample.r4_lat_str` + `{python} BatchingWorkedExample.r2_lat_str`) / 4 = `{python} BatchingWorkedExample.cont_avg_lat_str`
 
-The result, depicted in @fig-continuous-batching, is a `{python} BatchingWorkedExample.latency_red_str` reduction in average latency, exactly matching the waste ratio.
-
-::: {#fig-continuous-batching fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. Continuous Batching**: Top: Traditional batching wastes 37.5 percent of GPU cycles as completed requests (R1, R3, R4) wait idle for the longest request (R2). Bottom: Continuous batching immediately frees slots upon completion, allowing new requests (R5, R6, R7) to join. This eliminates waste and increases effective throughput." fig-alt="Two timeline diagrams: traditional batching with idle slots vs. continuous batching with immediate slot reuse."}
-![](images/svg/continuous-batching.svg)
-:::
+The result is a `{python} BatchingWorkedExample.latency_red_str` reduction in average latency, exactly matching the waste ratio and realizing the slot-reuse pattern of @fig-continuous-batching-comparison.
 
 #### When continuous batching provides maximum benefit {#sec-inference-scale-continuous-batching-provides-maximum-benefit-a406}
 
@@ -1586,7 +1582,7 @@ class A100HardwareScenario:
 
 **Scenario**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is `{python} A100HardwareScenario.p50_latency_ms_str` and P95 is `{python} A100HardwareScenario.p95_latency_ms_str`, both within SLO, but P99 spikes to `{python} A100HardwareScenario.p99_latency_ms_str` against a `{python} A100HardwareScenario.p99_target_ms_str` target. GPU utilization appears healthy at `{python} A100HardwareScenario.gpu_utilization_pct_str`.
 
-**Setup**: The system runs on `{python} A100HardwareScenario.num_gpus_str` A100-`{python} A100HardwareScenario.a100_mem_gb_str` GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations, but PCIe limits tensor-parallel communication. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The distribution layer is the real problem: dynamic request-level batching uses max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, and the largest `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches experience head-of-line blocking because FIFO batching holds short requests behind long-sequence requests.
+**Setup**: The system runs on `{python} A100HardwareScenario.num_gpus_str` A100-`{python} A100HardwareScenario.a100_mem_gb_str` GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations, but PCIe limits tensor-parallel communication. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The scheduling policy is the real problem: dynamic request-level batching uses max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, and the largest `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches experience head-of-line blocking because FIFO batching holds short requests behind long-sequence requests.
 
 **Systems lesson**: The root cause is not the hardware layer but the scheduling policy. Implement priority-aware scheduling with separate batch size limits by request type:
 
@@ -1594,7 +1590,7 @@ class A100HardwareScenario:
 2. **Differentiated batching**\index{Batching!differentiated}: Limit short-request batches to `{python} A100HardwareScenario.short_batch_size_str`, medium to `{python} A100HardwareScenario.medium_batch_size_str`, long to `{python} A100HardwareScenario.long_batch_size_str`
 3. **Priority preemption**\index{Priority Preemption}: Allow short requests to preempt long-running sequences when P99 approaches SLO
 
-After implementing these changes, P99 dropped to `{python} A100HardwareScenario.p99_after_ms_str`. High average GPU utilization can mask head-of-line blocking that affects only a small percentage of requests but drives P99; @fig-fleet-stack gives the full isolation framework.
+After implementing these changes, P99 dropped to `{python} A100HardwareScenario.p99_after_ms_str`. High average GPU utilization can mask head-of-line blocking that affects only a small percentage of requests but drives P99; @sec-inference-scale-multitenancy-isolation-688c develops the full isolation framework for keeping one workload's tail from degrading another.
 
 :::
 
@@ -1849,7 +1845,7 @@ This optimization weighs both the current queue length and the kernel-efficiency
 
 ### Quantitative summary: Batching strategy selection {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
 
-The final selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. @Fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage.
+The final selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. That match depends on where in the request path the latency budget is actually spent.
 
 ::: {#chk-inference-batching-strategy-trade-offs .callout-checkpoint title="Batching strategy trade-offs"}
 
@@ -1863,33 +1859,7 @@ Verify your understanding of different batching mechanics:
 
 :::
 
-Before selecting a batching strategy, it is essential to understand where latency accumulates across the full request lifecycle. @Fig-inference-request-flow maps each stage from client to response, revealing the "serving tax" that serialization, routing, and coordination impose outside of GPU compute.
-
-::: {#fig-inference-request-flow fig-env="figure" fig-pos="htb" fig-cap="**Inference Request Lifecycle**: A sequence diagram showing how a user request traverses the serving stack. The 'Serving Tax' is the time spent in the Router, Queue, and Scheduler before the GPU begins mathematical execution." fig-alt="Sequence diagram with five participants (User, Router, KV Cache Manager, Iteration Scheduler, GPU) showing a chat completion request flow: the Router reserves KV cache slots, enqueues the request with the Scheduler, and an iteration loop dispatches prefill and decode batches to the GPU until the response streams back to the user."}
-
-```{text}
-sequenceDiagram
-    participant User
-    participant Router
-    participant KV_Cache as KV Cache Manager
-    participant Scheduler as Iteration Scheduler
-    participant GPU
-
-    User->>Router: POST /v1/chat/completions
-    Router->>KV_Cache: Check capacity/Reserve slots
-    KV_Cache-->>Router: Slot handle
-    Router->>Scheduler: Add to Wait Queue
-
-    loop Every Iteration
-        Scheduler->>GPU: Execute Batch (Prefill/Decode)
-        GPU-->>Scheduler: Logits/Next Tokens
-        Scheduler->>KV_Cache: Update block status
-    end
-
-    Scheduler->>User: Stream Result
-```
-
-:::
+Before selecting a batching strategy, it is essential to understand where latency accumulates across the full request lifecycle. @Fig-inference-lifecycle maps each stage from client to response, revealing the "serving tax" that serialization, routing, and coordination impose outside of GPU compute.
 
 ::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**: A detailed view of the request lifecycle: client requests arrive at a load balancer, then undergo preprocessing (tokenization) on the CPU. The data moves to the GPU for the compute-bound prefill stage and the memory-bound decode stage, which uses the KV cache. Finally, the response is postprocessed on the CPU (detokenization) and sent back. This visualization highlights the critical \"Serving Tax\" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time." fig-alt="Flowchart showing a request moving from CPU (Preprocessing) to GPU (Prefill Stage, Decode Stage) and back to CPU (Postprocessing). Red annotations below highlight latency sources such as routing, TTFT, and per-token decode time."}
 
@@ -1923,7 +1893,7 @@ Is it autoregressive text generation?
 
 Even a well-tuned continuous batching strategy cannot eliminate a deeper, architecture-specific bottleneck for large language models. The context window of every active request must be stored in GPU memory, making KV cache management the next binding constraint on serving throughput.
 
-## KV Cache Management {#sec-inference-scale-kv-cache-management-04ed}
+## Memory and Decode-Time Management {#sec-inference-scale-kv-cache-management-04ed}
 
 As an LLM generates a 2,000-word essay, it must constantly recall every word it has previously written. It does this by storing intermediate attention states in a rapidly expanding memory buffer known as the KV Cache. Unmanaged, this cache will aggressively fragment GPU memory, causing out-of-memory crashes even when 40 percent of the VRAM is technically free.
 
@@ -2011,7 +1981,7 @@ plt.close()
 
 :::
 
-The visualization reveals why the Distribution Layer must sometimes shard models that would otherwise fit on a single GPU. Sharding provides the memory headroom needed to maintain high batch sizes for long-context requests. Without sharding, a 128K context request effectively "evicts" all other users from the GPU.
+The visualization reveals why the replica level must sometimes shard models that would otherwise fit on a single GPU. Sharding provides the memory headroom needed to maintain high batch sizes for long-context requests. Without sharding, a 128K context request effectively "evicts" all other users from the GPU.
 
 The same formula can be turned into an explicit batch-size limit for production hardware.
 
@@ -2128,7 +2098,7 @@ $$ \text{Total Memory} = M_{\text{weights}} + (\text{Batch} \times \text{Context
 Available Memory for KV = `{python} KVCacheCapacityEstimator.total_hbm_gb_str` (Total) - `{python} KVCacheCapacityEstimator.weight_gb_str` (Weights) - `{python} KVCacheCapacityEstimator.system_gb_str` (System) = `{python} KVCacheCapacityEstimator.available_kv_gb_str`.
 `{python} KVCacheCapacityEstimator.step3_max_batch_math`
 
-**Systems insight**: Even with GQA, 128K-context requests consume tens of gigabytes of KV cache, so the system serves only a small number of concurrent long-context requests before memory becomes the binding constraint. Addressing this requires PagedAttention (to reduce fragmentation) and KV-cache quantization or sharding.
+**Systems insight**: Even with GQA, the shared-KV-head attention variant from @sec-performance-engineering-quant-strategies that the 8-head count above already reflects, 128K-context requests consume tens of gigabytes of KV cache, so the system serves only a small number of concurrent long-context requests before memory becomes the binding constraint. Addressing this requires PagedAttention (to reduce fragmentation) and KV-cache quantization or sharding.
 
 :::
 
@@ -2437,7 +2407,7 @@ class PrefixCachingAnalysis:
 
 ### KV cache compression and architectural optimization {#sec-inference-scale-kv-cache-compression-943a}
 
-During autoregressive generation, the Key-Value (KV) cache stores the key and value projections for all previously generated tokens. This cache grows linearly with sequence length and batch size, often becoming the dominant memory consumer in LLM serving. The calculation uses a 64-KV-head multi-head attention baseline so the grouped-query attention subsection can isolate the head-count reduction as a separate architectural lever. For a 70B parameter model with 80 layers, 64 heads, head dimension 128, and sequence length 4096 in FP16, the KV cache requires:
+The capacity techniques above tolerate the cache; compression shrinks it. The calculation here uses a 64-KV-head multi-head attention baseline so the grouped query attention subsection can isolate the head-count reduction as a separate architectural lever. For a 70B parameter model with 80 layers, 64 heads, head dimension 128, and sequence length 4096 in FP16, the KV cache requires:
 
 ```{python}
 #| echo: false
@@ -2525,9 +2495,7 @@ Compressing the KV cache to INT4 reduces it to approximately `{python} KVCacheCa
 
 #### Grouped query attention (GQA) {#sec-inference-scale-gqa}
 
-An architectural complement to quantization is **Grouped Query Attention (GQA)**\index{Grouped Query Attention} [@ainslie2023]. In standard Multi-Head Attention (MHA), every attention head has its own key and value projections. In GQA, multiple query heads share a single key-value head. A model with 32 query heads and 8 KV heads uses a group size of 4: every 4 query heads share one K and one V projection.
-
-The impact on KV cache size is proportional to the KV head reduction. For our earlier 70B model, switching from MHA (64 KV heads) to GQA with 8 KV heads shrinks the KV cache by 8$\times$:
+Grouped query attention\index{Grouped Query Attention} [@ainslie2023], the shared-KV-head architecture established in @sec-performance-engineering-quant-strategies, is the second lever on cache size, complementary to quantization: where quantization shrinks the bytes per cached element, GQA shrinks how many key-value heads are cached per layer. The serving consequence is the head-count arithmetic. For our earlier 70B model, switching from the MHA baseline of 64 KV heads to GQA with 8 KV heads shrinks the KV cache by 8$\times$:
 
 $$
 \text{KV cache (GQA)} = `{python} KVCacheCalc.gqa_kv_fp16_formula_math` \text{ GB (FP16)}
@@ -2609,9 +2577,9 @@ class PrecisionDividend:
 
 :::
 
-### Speculative decoding {#sec-inference-scale-speculative-decoding-c438}
+### Speculative decoding as a serving policy {#sec-inference-scale-speculative-decoding-c438}
 
-The previous optimization improved capacity by shrinking state; speculative decoding attacks latency by letting the large model verify several proposed tokens in one pass.
+@Sec-performance-engineering-speculative established speculative decoding as an algorithmic optimization: a small draft model proposes $K$ tokens, the target model verifies them in one parallel forward pass, and rejection sampling guarantees the emitted tokens follow the target model's distribution exactly, so the technique is lossless and bounded by the draft acceptance rate $\alpha_{\text{acc}}$. The serving question is different. The mechanism is a knob the scheduler turns per endpoint, and turning it on consumes resources that the rest of the fleet is already competing for. This section treats speculation as a serving policy: when the scheduler should enable it, how its memory cost interacts with KV-cache admission, and what it does to the SLA the endpoint is bound by.
 
 ::: {.column-margin}
 ![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
@@ -2619,124 +2587,7 @@ The previous optimization improved capacity by shrinking state; speculative deco
 *Decode is memory-bound; parallel verification moves work toward the ridge.*
 :::
 
-::: {#dfn-inference-speculative-decoding .callout-definition title="Speculative decoding"}
-
-***Speculative Decoding***\index{Speculative Decoding!definition}\index{Speculative Decoding!target model} is a latency optimization that uses a smaller Draft Model to predict multiple future tokens, which are then verified in parallel by the full Target Model in a single forward pass.
-
-1.  **Significance (quantitative)**: It breaks the sequential bottleneck of autoregressive generation, reducing wall-clock latency $(L_{\text{lat}})$ by a factor of 2--3$\times$ depending on the acceptance rate of the draft tokens. It trades extra compute $(O)$ for reduced time.
-2.  **Observation**: Unlike standard autoregressive decoding (one token at a time), speculative decoding enables batch-of-tokens verification, increasing the arithmetic intensity of the target model's forward pass.
-3.  **Pitfall**: A frequent misconception is that speculative decoding "always speeds up" inference. In reality, it is a probabilistic bet\index{Speculative Decoding!probabilistic tradeoff}: if the draft model is too inaccurate (low acceptance rate), the extra compute and overhead of verification can actually make the system slower than sequential decoding.
-
-:::
-
-The same draft-verify structure has a familiar division of labor.
-
-::: {#psp-inference-analogy-executive-assistant .callout-perspective title="Analogy: The executive and the assistant"}
-
-Imagine an executive (the large Target Model) writing an important letter. Normally, the executive types it out one word at a time, looking up complex information for every word (Autoregressive Decoding). This is slow.
-
-In speculative decoding\index{Speculative Decoding!rejection sampling}\index{Speculative Decoding!speculation tax}, a junior assistant (the small Draft Model) quickly types up a draft of the next 5 words. The executive reads the draft and verifies it instantly (Parallel Verification). If the first 3 words are perfect, the executive accepts them. If the 4th word is wrong, the executive crosses it out, writes the correct word, discards the 5th word, and asks the assistant for a new draft starting from there. The executive still produces a perfect letter, but much faster because reading and verifying is computationally cheaper than composing from scratch.
-
-:::
-
-Autoregressive generation is inherently sequential: each token depends on previous tokens. Speculative decoding[^fn-speculative-cpu-analogy] [@leviathan2023speculative; @chen2023accelerating] breaks this bottleneck by having a small, fast model guess the next several tokens, allowing the massive main model to verify them all in a single parallel step.
-
-[^fn-speculative-cpu-analogy]: **Speculative Execution (CPU to LLM)**\index{Speculative Decoding!CPU analogy}: Borrows from CPU branch prediction, where processors execute instructions ahead of confirmation and roll back on misprediction. The critical difference: CPU speculation is invisible to software, while LLM speculation requires explicit draft-verify logic and adds a second model's memory footprint to the serving budget. The trade-off is extra compute and memory for 2--3$\times$ latency reduction, but only when draft acceptance rates exceed roughly 70 percent.
-
-Speculative decoding has three operational phases: a Draft phase\index{Speculative Decoding!draft phase}, a Verification phase\index{Speculative Decoding!verification phase}, and an Acceptance phase\index{Speculative Decoding!acceptance phase}. @Algo-speculative-decoding states the exact sampling contract behind those phases. A small draft model generates $K$ candidate tokens autoregressively, the target model verifies those tokens in one parallel forward pass, and rejection sampling ensures that the emitted tokens still follow the target model's distribution. @Fig-speculative-decoding-inf illustrates this draft-verify-accept flow.
-
-```pseudocode
-#| label: algo-speculative-decoding
-#| pdf-line-number: true
-\begin{algorithm}
-\caption{Speculative decoding}
-\begin{algorithmic}
-\Require target distribution $p_\theta(\cdot \mid \cdot)$; draft distribution $q_\phi(\cdot \mid \cdot)$; prefix $y_{1:t}$; draft length $K$
-\Ensure one or more new tokens distributed as $p_\theta$
-\For{$i = 1$ to $K$}
-    \State draft $\hat{y}_{t+i}$ from $q_\phi(\cdot \mid y_{1:t}, \hat{y}_{t+1:t+i-1})$
-\EndFor
-\State run $p_\theta$ once on the prefix plus all $K$ drafts to obtain target distributions for the drafted positions and final next-token position
-\For{$i = 1$ to $K$}
-    \State $a_i \gets \min\!\left(1,\frac{p_\theta(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}{q_\phi(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}\right)$
-    \State accept $\hat{y}_{t+i}$ with probability $a_i$
-    \If{$\hat{y}_{t+i}$ is rejected}
-        \State sample one corrected token from the normalized positive residual $(p_\theta-q_\phi)_+$
-        \State emit accepted draft tokens and the corrected token; discard the remaining draft; start a new round
-    \EndIf
-\EndFor
-\State if all $K$ drafts were accepted, emit them and sample one extra token from the target distribution
-\end{algorithmic}
-\end{algorithm}
-```
-
-The $K$ draft steps and the second model's memory footprint are the price; the win is the single verification pass, which replaces up to $K+1$ sequential target-model decodes. That win is realized only when the acceptance rate is high enough that the saved target-model HBM traffic outweighs the draft and verification overhead.
-
-::: {#fig-speculative-decoding-inf fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $K$ tokens. The target model verifies all $K$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Timeline comparison of two decoding methods. Top: standard decoding with 4 sequential generation steps. Bottom: speculative decoding with fast draft, parallel verify, then 3 accepted tokens (green) and 1 rejected (pink). Braces show time savings."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
-  \definecolor{DraftColor}{HTML}{FCE4CC}
-  \definecolor{VerifyColor}{HTML}{D1E6F3}
-  \definecolor{AcceptColor}{HTML}{D4EFDF}
-  \definecolor{RejectColor}{HTML}{F5D2D5}
-
-  \tikzset{
-     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.7cm, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center}
-  }
-
-  % Baseline
-  \node[anchor=west] (std_title) at (0, 4) {\textbf{Standard Decoding} (Sequential)};
-  \draw[->] (0, 3.5) -- (8, 3.5) node[right] {Time};
-
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm] (gen1) at (1, 3.7) {Gen T1};
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm, right=0.1cm of gen1] (gen2) {Gen T2};
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm, right=0.1cm of gen2] (gen3) {Gen T3};
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm, right=0.1cm of gen3] (gen4) {Gen T4};
-
-  % Speculative
-  \node[anchor=west] (spec_title) at (0, 2) {\textbf{Speculative Decoding}};
-  \draw[->] (0, 1.5) -- (8, 1.5) node[right] {Time};
-
-  % Draft Step
-  \node[stepbox, fill=DraftColor, minimum width=2.0cm] (draft) at (1.2, 1.0) {Draft Model\\Gen [T1..T4]};
-  \node[below, font=\tiny\usefont{T1}{phv}{m}{n}] at (draft.south) {Fast, Low latency};
-
-  % Verify Step
-  \node[stepbox, fill=VerifyColor, minimum width=2.0cm, right=0.3cm of draft] (verify) {Target Model\\Verify [T1..T4]};
-  \node[below, font=\tiny\usefont{T1}{phv}{m}{n}] at (verify.south) {Parallel Forward Pass};
-
-  % Outcome
-  \node[stepbox, fill=AcceptColor, minimum width=0.5cm] (t1) at (5.0, 1.8) {T1};
-  \node[stepbox, fill=AcceptColor, minimum width=0.5cm, right=0.1cm of t1] (t2) {T2};
-  \node[stepbox, fill=AcceptColor, minimum width=0.5cm, right=0.1cm of t2] (t3) {T3};
-  \node[stepbox, fill=RejectColor, minimum width=0.5cm, right=0.1cm of t3] (t4) {T4};
-
-  \draw[->, thick, black!50] (draft) -- (verify);
-  \draw[->, thick, black!50] (verify) -- (t1.west |- verify.east);
-
-  \node[right=0.2cm of t4, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=left] {Accept 3\\Reject 1};
-
-  % Speedup annotation
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 3.2) -- (6.6, 3.2) node[midway, below=0.2cm, font=\scriptsize\usefont{T1}{phv}{m}{n}] {Standard Time};
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 0.5) -- (4.8, 0.5) node[midway, below=0.2cm, font=\scriptsize\usefont{T1}{phv}{m}{n}] {Speculative Time};
-
-\end{tikzpicture}
-```
-
-:::
-
-The mathematical guarantee is crucial: speculative decoding is *provably lossless*\index{Speculative Decoding!lossless guarantee}. By using rejection sampling, the accepted tokens follow exactly the target model's distribution. The draft model only determines the speed of generation, not the quality. A terrible draft model simply produces no speedup (all tokens are rejected), but the output remains identical to standard autoregressive generation.
-
-#### Speedup analysis {#sec-inference-scale-speculative-speedup}
-
-The speedup depends on the **acceptance rate**\index{Speculative Decoding!acceptance rate} $\alpha_{\text{acc}}$ (probability that the draft token matches the target model's distribution) and the **draft length**\index{Speculative Decoding!draft length} $K$. The expected number of emitted tokens per round, including the target model's correction token, is approximately $\sum_{i=0}^{K} \alpha_{\text{acc}}^i = \frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$.
-
-::: {.column-margin}
-![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Speculative decoding speedup threshold around 70 percent acceptance."}
-
-*Speculative decoding's speedup hinges on the acceptance rate.*
-:::
+The latency win is real but conditional, and the condition is the acceptance rate. The expected number of tokens emitted per round, including the correction token, is $\frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$, which collapses toward 1 as acceptance falls. For $K = 5$ draft tokens and a draft model 20$\times$ faster than the target, that sensitivity is steep:
 
 ```{python}
 #| echo: false
@@ -2744,7 +2595,7 @@ The speedup depends on the **acceptance rate**\index{Speculative Decoding!accept
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ SPECULATIVE DECODING SPEEDUP ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-inference-scale-speculative-speedup speedup analysis prose
+# │ Context: @sec-inference-scale-speculative-decoding-c438 acceptance-sensitivity bullets
 # │
 # │ Goal: Compute expected latency speedup from speculative decoding at K=5 draft
 # │       tokens with a 20x-faster draft model, across three acceptance rates
@@ -2809,23 +2660,27 @@ class SpeculativeSpeedup:
     et_low_str = fmt_count(et_low, precision=2, commas=False, label="token", allow_fractional=True)
 ```
 
-For $K = 5$ draft tokens and a draft model that is 20$\times$ faster than the target:
-
 - **High acceptance** $(\alpha_{\text{acc}} = 0.9)$: Expected `{python} SpeculativeSpeedup.et_high_str` per round, speedup of `{python} SpeculativeSpeedup.sp_high_mult_str`.
 - **Medium acceptance** $(\alpha_{\text{acc}} = 0.7)$: Expected `{python} SpeculativeSpeedup.et_med_str` per round, speedup of `{python} SpeculativeSpeedup.sp_med_mult_str`.
 - **Low acceptance** $(\alpha_{\text{acc}} = 0.5)$: Expected `{python} SpeculativeSpeedup.et_low_str` per round, speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
 
-The acceptance rate varies dramatically by context. Predictable text achieves $\alpha_{\text{acc}} > 0.9$, while creative reasoning or code generation may see $\alpha_{\text{acc}} < 0.5$. In practice, well-aligned model pairs (sharing training data and architecture) commonly achieve average acceptance rates of 0.6--0.8, yielding 1.5--3$\times$ latency improvements.
+Predictable text achieves $\alpha_{\text{acc}} > 0.9$, while creative reasoning or code generation may fall below 0.5; well-aligned model pairs that share training data and architecture commonly land at 0.6--0.8. Because acceptance is a property of the workload, not of the hardware, a single global setting is wrong for a mixed fleet: the same speculation that halves time per token on a chat endpoint can slow a code-generation endpoint that sits below the break-even acceptance rate. The serving system must therefore decide per endpoint, and three serving concerns govern that decision.
 
-#### System design and hardware cost {#sec-inference-scale-speculative-hardware}
+#### The speculation tax and KV-cache admission {#sec-inference-scale-speculative-admission}
 
-Deploying speculative decoding requires solving several system-level challenges. Draft model selection balances speed against acceptance rate. **Self-speculative decoding**\index{Self-Speculative Decoding} uses early exit from the target model itself as the draft, avoiding the need for a separate model at the cost of lower alignment. Advanced variants like **Medusa**\index{Medusa} [@cai2024medusa] add lightweight prediction heads to the target model backbone, while **Lookahead decoding**\index{Lookahead Decoding} uses Jacobi iteration to avoid draft models entirely.
+The first concern is memory. The draft model is not free state: it requires its own GPU allocation for weights, and each in-flight request that uses speculation reserves a small additional KV cache for the draft model alongside the target's. Pairing a 7B draft model with a 70B target adds roughly 14 GB of weights per replica plus per-request draft cache. This *speculation tax*\index{Speculative Decoding!speculation tax} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall: every gigabyte the draft model holds is a gigabyte the admission controller cannot allocate to a concurrent request. Speculation therefore shrinks the maximum batch size the node can admit, trading aggregate throughput for the latency of individual requests. The admission controller and the speculation policy cannot be tuned independently; enabling speculation lowers the concurrency ceiling that the KV-cache wall already imposes.
 
-The resource implications are significant. The draft model requires its own GPU memory allocation for weights, KV cache, and activations. Introducing a 7B parameter draft model to support a 70B target model consumes an additional 14 GB of weights plus reserving its own per-request KV cache. This *speculation tax* reduces the memory budget available for concurrent requests, creating a fundamental tension between *latency* (improving time-per-token for individuals) and *throughput* (reducing the maximum batch size for the node). Operators often disable speculation for high-traffic, throughput-bound endpoints, reserving it for latency-sensitive real-time interaction.
+#### The latency-throughput tension under an SLA {#sec-inference-scale-speculative-sla}
+
+The second concern is which service-level objective the endpoint is bound by. Speculation improves time per output token but, by lowering the concurrency ceiling, reduces the requests per second a replica can sustain. An endpoint with a tight time-to-first-token or per-token latency SLA, such as interactive chat, benefits: the speculation tax buys headroom against the latency target that matters. An endpoint bound by a throughput SLA, such as bulk document processing or batch summarization, is harmed: speculation spends batch capacity to improve a latency metric no one is measuring, and the lost concurrency directly threatens the throughput target. The decision is therefore an SLA question. The scheduler enables speculation on latency-bound endpoints and disables it on throughput-bound ones, and on a shared replica serving both it must account for the draft model's resident cost against the stricter of the two budgets.
+
+#### Per-endpoint scheduling {#sec-inference-scale-speculative-scheduling}
+
+The third concern is that these decisions are dynamic, not static configuration. Acceptance rate drifts with the traffic mix, and the value of speculation collapses at high load: when a replica is already near its concurrency ceiling, the decode phase is closer to compute-bound and the marginal latency benefit of speculation shrinks even as its memory tax stays fixed. Production schedulers therefore treat speculation as a runtime knob gated on observed load and acceptance. They enable it for latency-sensitive endpoints during normal operation, disable it under traffic spikes to reclaim KV-cache pages for admission, and may switch draft strategies per endpoint. **Self-speculative decoding**\index{Self-Speculative Decoding} uses early exit from the target model itself as the draft, eliminating the separate-model memory tax at the cost of lower acceptance; **Medusa**\index{Medusa} [@cai2024medusa] adds lightweight prediction heads to the target backbone; **Lookahead decoding**\index{Lookahead Decoding} uses Jacobi iteration to avoid a draft model entirely. Each variant trades a different slice of the speculation tax against acceptance, and the scheduler chooses among them per endpoint based on which SLA binds and how much KV-cache budget remains.
 
 ### KV cache in distributed settings {#sec-inference-scale-kv-cache-distributed-settings-712e}
 
-The tensor and pipeline parallelism strategies from @sec-inference-scale-model-sharding-inference-82b3 introduce additional KV cache management complexity:
+@Sec-inference-scale-model-sharding-inference-82b3 develops the tensor and pipeline parallelism strategies that distribute a model across devices; here we note the consequence each one carries for KV-cache management:
 
 Under tensor parallelism, the KV cache is sharded across devices along with attention heads. Each device stores cache for its subset of heads.
 
@@ -2839,7 +2694,7 @@ Device 7: KV cache for heads 56-63
 
 Cross-device sharing adds a constraint: prefix caching across tensor-parallel devices requires cache to be sharded identically on all devices. This is automatic when prefixes are processed with the same tensor-parallel configuration.
 
-KV cache migration presents a further challenge. When consistent hashing routes a conversation to a different replica (due to failure or rebalancing), the KV cache must be migrated:
+KV cache migration presents a further challenge. When the router moves a conversation to a different replica because of failure or rebalancing (routing keyed on a hash of the session ID, the consistent-hashing scheme developed in @sec-inference-scale-consistent-hashing-stateful-routing-ae5b), the KV cache must be migrated:
 
 ```
 Migration options:
@@ -2988,7 +2843,7 @@ The schedule ensures decode latency remains bounded regardless of incoming promp
 
 :::
 
-### Dynamic memory swapping and multi-tenancy {#sec-inference-scale-lora-multi-tenancy}
+### Adapter state and locality {#sec-inference-scale-lora-multi-tenancy}
 
 KV-cache management makes one GPU safe for many concurrent requests; multi-tenant adapter serving asks the same serving process to manage another kind of resident state. The KV cache is per-token attention state. A LoRA adapter is per-tenant weight delta. Both must be available at the moment a decode step runs, and both can erase batching gains if the scheduler ignores locality. As serving platforms scale to support thousands of concurrent users on a single foundation model, personalization introduces a new memory bottleneck. Low-Rank Adaptation (LoRA) stores a small set of user- or task-specific adapter weights that modify a shared base model without copying the full model. When 10,000 users each have a unique LoRA adapter applied to the same 140 GB base model, replicating the base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific adapters are brought into the fast on-chip working set as needed.
 
@@ -3333,7 +3188,6 @@ class MoEEconomics:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim.physics import memory_from_params
-from mlsysim.physics.memory import calc_kv_cache_size
 
     _moe = Models.Language.DeepSeek_V3
     dense_params = 400 * Bparam  # illustrative dense baseline
