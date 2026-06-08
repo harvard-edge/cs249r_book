@@ -4149,7 +4149,7 @@ Body: {"prompt": "test"}
 Response: 200 OK with valid output, or error
 ```
 
-Standard health checks are necessary but insufficient for GPU-accelerated servers, which face hardware-specific failure modes.
+Deep health checks are the primary defense against a failure mode that does not exist in traditional web servers: silent hardware degradation. A GPU with degraded HBM modules may continue to respond to process-level probes while producing output corrupted by NaN propagation or silent bit errors in activation tensors. The replica returns HTTP 200 and passes every liveness and readiness probe, yet every generated sequence is nonsense. Deep health checks catch this by validating the *tensor output* of a known probe input against expected bounds—checking, for example, that logit distributions stay within a plausible entropy range and that no NaN or Inf values appear in the output. Standard health checks are necessary but insufficient for GPU-accelerated servers, which face these hardware-specific failure modes.
 
 ::: {#exmp-inference-health-checks-gpu-inference .callout-example title="Health checks for GPU inference"}
 
@@ -4229,6 +4229,8 @@ The **circuit breaker pattern**\index{Circuit Breaker!circuit breaker pattern}[^
 [^fn-circuit-breaker-serving]: **Circuit Breaker**\index{Circuit Breaker!serving}: Named after the electrical safety device that cuts current before wires overheat. In inference serving, the three-state machine (closed, open, half-open) prevents a single overloaded GPU replica from cascading failure to the entire fleet: once error rate exceeds threshold, the breaker opens and fails requests fast (microseconds) rather than waiting for timeout (seconds), protecting upstream callers and preserving capacity for healthy replicas.
 
 Backpressure propagation complements the breaker by making overload visible upstream. When queue depth crosses a threshold, the server returns a signal such as `503 Service Unavailable`; the load balancer marks the replica as degraded and routes fewer requests to it. If all replicas become degraded, the system shifts from routing control to admission control, rejecting some requests at the edge rather than accepting work it cannot serve within the latency SLO. Circuit breakers isolate unhealthy replicas; backpressure tells the rest of the system to slow down before retries amplify the failure.
+
+In ML serving, backpressure can trigger *graceful degradation* rather than outright rejection. A saturated LLM fleet under KV cache pressure has several ML-specific relief valves short of returning an error: the serving system can evict older conversational turns from the KV cache to reduce context window and free memory, disable speculative decoding to reclaim the GPU memory its draft model occupies, or route new requests to a smaller quantized fallback model until the primary queue drains. Each of these responses trades output quality or latency for continued availability, which is often preferable to rejection from the user's perspective. The system designer must specify which degradation modes are acceptable at each pressure tier, because the correct tradeoff depends on the application—a real-time assistant tolerates context truncation better than silent quality degradation.
 
 ```{python}
 #| echo: false
@@ -4454,9 +4456,9 @@ def admit_request(tenant_id, request):
 
 :::
 
-Soft quotas with fair sharing provide a more flexible alternative. Each tenant has a nominal quota (for example, 100 QPS), but when the cluster is underutilized (50 percent capacity), tenants can burst to 2$\times$ their quota. When the cluster saturates (90 percent capacity), quotas are enforced. This approach maximizes utilization during low-traffic periods while protecting tenants during contention.
+Soft quotas with fair sharing provide a more flexible alternative. Each tenant has a nominal token generation quota (for example, 10,000 tokens/sec), but when the cluster is underutilized (50 percent capacity), tenants can burst to 2$\times$ their quota. When the cluster saturates (90 percent capacity), quotas are enforced. This approach maximizes utilization during low-traffic periods while protecting tenants during contention.
 
-When total demand exceeds capacity, max-min fairness allocates resources to maximize the minimum allocation across tenants. The algorithm first gives each tenant an equal share, then redistributes unused capacity from tenants whose demand falls below their equal share. For three tenants with demands of 300, 200, and 800 QPS competing for 1,000 QPS of capacity, max-min fairness yields allocations of 300, 200, and 500 -- each tenant receives up to its demand or its fair share, whichever is less, with excess capacity redistributed proportionally.
+When total demand exceeds capacity, max-min fairness allocates resources to maximize the minimum allocation across tenants. The algorithm first gives each tenant an equal share, then redistributes unused capacity from tenants whose demand falls below their equal share. Raw request counts are an inadequate unit for this calculation because, as @sec-inference-scale-multitenancy-isolation-688c establishes, equal request counts are not equal load—a tenant issuing long-context summarization requests consumes far more KV cache and decode compute than a tenant issuing short classification queries. Token generation rate\index{Token Generation Rate} (tokens/sec) serves as the appropriate bounding metric, capturing both throughput and memory pressure. For three tenants with demands of 30,000, 20,000, and 80,000 tokens/sec competing for a GPU pool capable of 100,000 tokens/sec, max-min fairness yields allocations of 30,000, 20,000, and 50,000 -- each tenant receives up to its demand or its fair share, whichever is less, with excess capacity redistributed proportionally.
 
 ### Priority scheduling {#sec-inference-scale-priority-scheduling-3e37}
 
@@ -4771,7 +4773,7 @@ At internet-launch scale, the same cold-start window turns from a capacity-plann
 
 ### Predictive scaling {#sec-inference-scale-predictive-scaling-ee73}
 
-Predictive scaling\index{Predictive Scaling} anticipates demand before it occurs, initiating scaling ahead of traffic changes. The simplest and most effective approach uses time-series forecasting on historical traffic patterns. @Lst-predictive-scaling shows a simplified forecasting function combining daily and weekly seasonality with trend estimation.
+Predictive scaling\index{Predictive Scaling} anticipates demand before it occurs, initiating scaling ahead of traffic changes. The simplest and most effective approach uses time-series forecasting on historical traffic patterns. @Lst-predictive-scaling shows a simplified forecasting function combining daily and weekly seasonality with trend estimation. For generative LLM services, however, forecasting request volume alone is insufficient: a volume spike of long-context summarization requests exhausts KV cache far faster than the same volume of short-context chat completions, because each long-context request can hold tens of thousands of tokens in active KV cache while decode completes. Accurate predictive scaling for LLM fleets must therefore forecast the *mix* of request types alongside total volume, treating a shift toward long-context requests as a memory-bound demand increase even when request count is unchanged.
 
 ::: {#lst-predictive-scaling lst-cap="**Predictive Scaling**: Time-series demand forecasting combining daily seasonality, weekly seasonality, and trend estimation."}
 
@@ -4806,9 +4808,9 @@ scheduled_scaling:
     target_replicas: 50  # 5x normal
     ramp_up: 30min  # Start scaling 30min before
 
-  - event: "weekly_newsletter"
-    cron: "0 10 * * 1"  # Every Monday 10am
-    target_replicas: 20  # 2x normal
+  - event: "nightly_rag_embedding_refresh"
+    cron: "0 2 * * *"  # Every night at 2am
+    target_replicas: 20  # 2x normal; batch embedding workload exhausts KV-cache headroom
     duration: 2h
 ```
 
