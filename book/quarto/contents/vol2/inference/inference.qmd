@@ -1073,67 +1073,7 @@ vLLM implements a virtual memory mechanism similar to an operating system's swap
 
 :::
 
-Continuous batching removes waste caused by variable output length, but it does not make every request equally cheap. Reasoning-heavy inference pushes the same problem further: a prompt may demand test-time work proportional to task difficulty, forcing schedulers to budget compute per request instead of only filling decode slots.
-
-::: {.column-margin}
-![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in slate. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times."}
-
-*Reasoning expands latency about 128 times over fast pattern-matching.*
-:::
-
-### The logic wall: Test-time compute scaling {#sec-inference-logic-wall}
-
-Test-time scaling turns reasoning into a serving resource. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage].
-
-From a serving-systems perspective, the relevant shift is the work issued per request. Extra reasoning consumes latency budget, KV-cache residency, and accelerator time. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or CoT tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second also needs a policy for allocating thinking time.
-
-```{python}
-#| echo: false
-#| label: logic-scaling-calc
-from mlsysim.fmt import fmt_int, check, fmt, fmt_time
-
-class LogicScaling:
-    """The latency tax of test-time reasoning."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    LOGIC_WALL_REASONING_STEPS_EXAMPLE = 128  # pedagogical reasoning-steps example
-    t_std = 100 * ms  # pedagogical standard 1-token decode
-    reasoning_steps = LOGIC_WALL_REASONING_STEPS_EXAMPLE  # tokens of 'thought' before the answer
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_reasoning = (t_std * reasoning_steps).to(second)
-    latency_expansion = reasoning_steps
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(latency_expansion == 128, f"Exp {latency_expansion} unexpected")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    steps_str = fmt_int(reasoning_steps, commas=False)
-    time_s_str = fmt_time(t_reasoning, second, precision=1, commas=False, style='word')
-
-    @classmethod
-    def plot(cls):
-        """Visualizes the Logic Wall latency expansion."""
-        from book.tools.figures import style as book_style
-
-        return book_style.bar_compare(
-            labels=["Fast (Pattern)", "Slow (Reasoning)"],
-            values=[cls.t_std.to(second).magnitude, cls.t_reasoning.to(second).magnitude],
-            title="Inference Scaling: Reasoning Depth",
-            ylabel="Latency (Seconds)",
-        )
-```
-
-::: {#nbk-inference-napkin-math-scaling-reasoning-depth .callout-notebook title="Scaling reasoning depth"}
-
-**Problem**: Calculate the latency impact of a model that uses `{python} LogicScaling.steps_str` "Thinking Tokens" to solve a complex math proof vs. a standard answer.
-
-1. **Standard response**: 1 token answer = 100 ms.
-2. **Reasoning response**: `{python} LogicScaling.steps_str` of internal search/CoT before the answer.
-3. **The latency**: `{python} LogicScaling.steps_str` $\times$ 100 ms = `{python} LogicScaling.time_s_str`.
-
-**Systems insight**: Test-time scaling transforms the serving architecture from a throughput factory to a search engine. While standard serving optimizes for tokens per second, reasoning-heavy models are constrained by steps per second. This creates a "Reasoning SLO": users may tolerate 12 seconds for a correct proof, but not for a simple greeting. In the Machine Learning Fleet, this motivates **Dynamic Compute Allocation**\index{Dynamic Compute Allocation}, where the scheduler grants more "Thinking Time" to harder prompts.
-
-:::
-
-The batching analysis that follows treats the logic wall as a scheduling problem. Once requests can vary from a short pattern match to a long reasoning trace, the waste created by grouping unequal work becomes the baseline cost that any test-time compute policy must control.
+The throughput numbers establish that continuous batching wins when output lengths vary, but they do not show where the gain comes from or how large it can grow. Quantifying the waste that traditional batching leaves on the table turns that intuition into a number a scheduler can act on.
 
 ### Quantitative analysis: Traditional vs. continuous batching {#sec-inference-scale-quantitative-analysis-traditional-vs-continuous-batching-ca70}
 
@@ -1843,9 +1783,71 @@ This optimization weighs both the current queue length and the kernel-efficiency
 
 : **Triton Adaptive Batching: ResNet-50 on V100**: Observed batch size, average latency, and sustained throughput for the Triton inference server's adaptive batcher under increasing traffic on ResNet-50 (V100). {#tbl-inference-triton-adaptive-batching}
 
+Every batching strategy to this point assumes the work per request is fixed once a request is admitted: continuous batching and adaptive windows tune *when* requests join a batch and how long the system waits, but the number of decode steps each request needs is treated as given. Reasoning-heavy inference breaks that assumption. When a model can spend more tokens thinking before it answers, the work per request becomes a variable the scheduler must set, not a property it can only observe.
+
+::: {.column-margin}
+![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in slate. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times."}
+
+*Reasoning expands latency about 128 times over fast pattern-matching.*
+:::
+
+### The logic wall: Test-time compute scaling {#sec-inference-logic-wall}
+
+Test-time scaling turns reasoning into a serving resource. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage].
+
+From a serving-systems perspective, the relevant shift is the work issued per request. Extra reasoning consumes latency budget, KV-cache residency, and accelerator time. Models that move from "fast thinking" (instant pattern matching) to "slow thinking" (deliberative reasoning) push pressure from HBM bandwidth toward **Test-Time Compute**\index{Test-Time Compute}: the scheduler must decide how many search steps or CoT tokens a request may consume. The **Logic Wall**\index{Logic Wall} is the resulting serving constraint: for complex problems, compute per request grows with task difficulty, and a fleet optimized for tokens per second also needs a policy for allocating thinking time. This is a different control than the batch-window tuning of the previous section: adaptive batching decides when requests run together, while test-time compute decides how much work each request is allowed to do.
+
+```{python}
+#| echo: false
+#| label: logic-scaling-calc
+from mlsysim.fmt import fmt_int, check, fmt, fmt_time
+
+class LogicScaling:
+    """The latency tax of test-time reasoning."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    LOGIC_WALL_REASONING_STEPS_EXAMPLE = 128  # pedagogical reasoning-steps example
+    t_std = 100 * ms  # pedagogical standard 1-token decode
+    reasoning_steps = LOGIC_WALL_REASONING_STEPS_EXAMPLE  # tokens of 'thought' before the answer
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_reasoning = (t_std * reasoning_steps).to(second)
+    latency_expansion = reasoning_steps
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(latency_expansion == 128, f"Exp {latency_expansion} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    steps_str = fmt_int(reasoning_steps, commas=False)
+    time_s_str = fmt_time(t_reasoning, second, precision=1, commas=False, style='word')
+
+    @classmethod
+    def plot(cls):
+        """Visualizes the Logic Wall latency expansion."""
+        from book.tools.figures import style as book_style
+
+        return book_style.bar_compare(
+            labels=["Fast (Pattern)", "Slow (Reasoning)"],
+            values=[cls.t_std.to(second).magnitude, cls.t_reasoning.to(second).magnitude],
+            title="Inference Scaling: Reasoning Depth",
+            ylabel="Latency (Seconds)",
+        )
+```
+
+::: {#nbk-inference-napkin-math-scaling-reasoning-depth .callout-notebook title="Scaling reasoning depth"}
+
+**Problem**: Calculate the latency impact of a model that uses `{python} LogicScaling.steps_str` "Thinking Tokens" to solve a complex math proof vs. a standard answer.
+
+1. **Standard response**: 1 token answer = 100 ms.
+2. **Reasoning response**: `{python} LogicScaling.steps_str` of internal search/CoT before the answer.
+3. **The latency**: `{python} LogicScaling.steps_str` $\times$ 100 ms = `{python} LogicScaling.time_s_str`.
+
+**Systems insight**: Test-time scaling transforms the serving architecture from a throughput factory to a search engine. While standard serving optimizes for tokens per second, reasoning-heavy models are constrained by steps per second. This creates a "Reasoning SLO": users may tolerate 12 seconds for a correct proof, but not for a simple greeting. In the Machine Learning Fleet, this motivates **Dynamic Compute Allocation**\index{Dynamic Compute Allocation}, where the scheduler grants more "Thinking Time" to harder prompts.
+
+:::
+
+Variable work per request closes the batching story: continuous and adaptive batching handle variation the system observes, while test-time compute is variation the system chooses. With both the batching mechanism and the per-request compute budget now on the table, the remaining task is to decide which combination a given workload should run.
+
 ### Quantitative summary: Batching strategy selection {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
 
-The final selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. That match depends on where in the request path the latency budget is actually spent.
+The selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. That match depends on where in the request path the latency budget is actually spent.
 
 ::: {#chk-inference-batching-strategy-trade-offs .callout-checkpoint title="Batching strategy trade-offs"}
 
@@ -5174,30 +5176,9 @@ GPTQ [@frantar2023gptq] is the weight-only choice when deployment needs 4-bit co
 
 [^fn-hessian-quantization]: **Hessian Matrix in Quantization**\index{Quantization!Hessian matrix}\index{Hessian!quantization}: The Hessian $H = X^T X$ captures second-order sensitivity: weights with large diagonal entries have outsized impact on model outputs. GPTQ exploits this to quantize insensitive weights aggressively while preserving sensitive ones, achieving 3--4-bit quantization with less than 1 percent perplexity degradation. Without Hessian guidance, naive uniform quantization below 8-bit typically destroys model quality.
 
-The algorithm processes the model layer by layer. For each layer, it first runs a small calibration dataset (typically 128--256 samples) to collect the activations that determine local sensitivity. It then quantizes weights in an order informed by that sensitivity and updates the remaining weights so the layer's output changes as little as possible. The Hessian matrix $H = X^T X$ is the compact representation of this sensitivity information; GPTQ uses an efficient inverse-Hessian update rather than treating every rounded weight as an independent error.
+GPTQ processes the model one layer at a time, quantizing each weight matrix column by column[^fn-gptq-column-wise] and compensating the still-unquantized columns so the layer's output drifts as little as possible. The serving consequence is a two-part deploy-time cost: a calibration pass over 128--256 representative samples that must match production traffic, and a per-layer second-order update that makes quantization minutes-to-hours of offline work rather than a one-shot cast. Both are paid once before deployment, so they do not touch serving latency, but a calibration set that misrepresents the deployed traffic mix is the failure mode to test for before rollout.
 
-#### Column-wise processing algorithm {#sec-inference-gptq-column-wise-processing-c01a}
-
-GPTQ processes each weight matrix column by column, using Cholesky decomposition of $H^{-1}$ for efficiency. The factorization turns the inverse-Hessian compensation into a stable triangular update, so each rounded column can adjust the remaining columns without recomputing a full inverse.
-
-```
-For each layer's weight matrix W:
-  1. Compute Hessian: H = X^T X from calibration activations
-  2. Apply Cholesky factorization to H^{-1}
-  3. For each column q = 1 to d_col:
-     a. Quantize column: w_q = round(W[:,q] / Δ) * Δ
-     b. Compute quantization error: δ = W[:,q] - w_q
-     c. Update remaining columns to compensate:
-        W[:,q+1:] += δ * [H^{-1}][:,q+1:] / [H^{-1}]_{qq}
-```
-
-The compensation step propagates quantization error to unquantized columns, where the Hessian-weighted update minimizes output deviation. This achieves $\mathcal{O}(d_{\text{row}} \cdot d_{\text{col}}^2)$ complexity vs. $\mathcal{O}(d_{\text{row}} \cdot d_{\text{col}}^3)$ for a naive full inverse-Hessian update.
-
-The quantization formula is:
-
-$$w_q = \text{round}\left(\frac{w}{\Delta}\right) \cdot \Delta$$
-
-where $\Delta$ is the quantization step size. GPTQ uses per-group quantization with group sizes of 128 weights, enabling finer-grained scaling that reduces quantization error for outlier channels.
+[^fn-gptq-column-wise]: **GPTQ column-wise update**\index{GPTQ!column-wise update}: GPTQ factors the inverse Hessian $H^{-1}$ via Cholesky decomposition so the compensation becomes a stable triangular update: after rounding column $q$, the residual error is propagated to columns $q{+}1{:}$ weighted by $[H^{-1}][:,q{+}1{:}] / [H^{-1}]_{qq}$. The factorization avoids recomputing a full inverse per column, giving $\mathcal{O}(d_{\text{row}} \cdot d_{\text{col}}^2)$ work instead of the naive $\mathcal{O}(d_{\text{row}} \cdot d_{\text{col}}^3)$. Per-group scaling (group size 128) gives outlier channels a finer step than a single per-matrix scale.
 
 @Tbl-gptq-performance summarizes GPTQ performance across Llama model sizes:
 
@@ -5213,20 +5194,7 @@ GPTQ's strengths include fast quantization without retraining, minimal quality l
 
 ### AWQ: Activation-aware weight quantization {#sec-inference-scale-awq-activationaware-weight-quantization-abec}
 
-AWQ [@lin2025] attacks the same weight-only serving goal from the activation side. Weights connected to channels with large activation magnitudes have disproportionate impact on outputs, so AWQ protects weights based on the magnitude of activations they produce rather than on weight magnitude alone.
-
-The AWQ algorithm proceeds in four steps:
-
-1. Run calibration samples to measure per-channel activation magnitudes
-2. Identify "salient" channels with large activations
-3. Scale weights for salient channels up before quantization
-4. Scale outputs down correspondingly (fused into subsequent layer)
-
-For weight matrix $W$ and activation statistics $s$ (per-channel activation magnitudes), the scaling rule is:
-
-$$W' = W \cdot \text{diag}(s^{\alpha_{\text{awq}}})$$
-
-where $\alpha_{\text{awq}} \in [0.5, 1.0]$ controls scaling aggressiveness. This preserves salient channels while allowing aggressive quantization of less important weights.
+AWQ [@lin2025] attacks the same weight-only serving goal from the activation side. A calibration pass measures per-channel activation magnitudes, and the weights feeding the few high-magnitude channels are scaled up before quantization (with a matching scale folded into the next layer), so those salient weights keep their resolution while the rest are quantized aggressively. Its serving advantage over GPTQ is that protecting salient channels avoids the per-column error-feedback pass, so calibration is lighter and data-free of any reference output; the risk to test is that the salient-channel scaling must fuse into the deployed graph without a separate runtime op, or the memory win is eaten by an extra kernel.
 
 @Tbl-awq-vs-gptq summarizes how AWQ\index{AWQ} compares to GPTQ\index{GPTQ} across error compensation, calibration cost, quality, speed, and hardware compatibility.
 
@@ -5244,21 +5212,7 @@ AWQ can achieve 0.5-1 percent lower perplexity degradation than GPTQ at the same
 
 ### SmoothQuant: Migrating quantization difficulty {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
 
-SmoothQuant [@xiao2023smoothquant] is the serving path for W8A8 deployments where activation quantization matters, especially compute-bound prefill. It addresses the activation outlier problem by migrating quantization difficulty from activations to weights. Weights have predictable distributions; activations have unpredictable outliers. SmoothQuant transfers the outlier problem to weights where it can be handled with per-channel scaling.
-
-The core technique inserts smoothing operations that divide activations by per-channel scales while multiplying weights by the same scales:
-
-$$Y = X W = (X \cdot \text{diag}(s)^{-1}) \cdot (\text{diag}(s) \cdot W) = \hat{X} \hat{W}$$
-
-The transformation is mathematically equivalent but produces smoother activation distributions.
-
-Migration strength $\alpha_{\text{sq}}$ controls the trade-off:
-
-$$s_j = \max(|X_j|)^{\alpha_{\text{sq}}} / \max(|W_j|)^{1-\alpha_{\text{sq}}}$$
-
-- $\alpha_{\text{sq}} = 0$: No migration, activations remain difficult
-- $\alpha_{\text{sq}} = 1$: Full migration, weights absorb all difficulty
-- $\alpha_{\text{sq}} = 0.5$: Balanced (typical setting)
+SmoothQuant [@xiao2023smoothquant] is the serving path for W8A8 deployments where activation quantization matters, especially compute-bound prefill. Activations carry unpredictable outliers that defeat INT8; weights do not. SmoothQuant divides activations by a per-channel scale and multiplies the corresponding weights by the same scale, an algebraically identical transform that leaves the layer output unchanged while moving the hard-to-quantize range out of the activations and into the more forgiving weights. Its serving consequence is that the scales fold into the existing weights and a cheap activation division, so the smoothed model runs on a standard INT8 path at near-zero runtime overhead; the risk to test is that the migration only shifts outliers rather than removing them, so a calibration set whose activation extremes differ from production can still clip.
 
 In the W8A8 deployment regime, SmoothQuant enables INT8 quantization for both weights and activations. @Tbl-smoothquant-w8a8 shows how W8A8 compares to FP16 baseline and weight-only quantization:
 
@@ -5280,20 +5234,9 @@ The crucial realization is that outliers are artifacts of the coordinate basis r
 
 #### QuaRot (quantization with rotation) {#sec-inference-quarot-rotation-quantization-7a02}
 
-QuaRot applies orthogonal Hadamard transforms to weights and activations:
+QuaRot rotates the weight and activation spaces with an orthogonal Hadamard transform[^fn-quarot-hadamard] so that any single outlier is spread evenly across all dimensions, leaving a distribution with no dominant value that uniform low-bit quantization can capture. Because the rotation is orthogonal, the layer output is unchanged and the transform needs no calibration data, which is what lets QuaRot reach W4A4 where the compensation and migration methods stop at higher precision. The serving consequence is a runtime cost the other methods do not pay: the rotation runs inline on every forward pass, adding roughly 3 percent overhead, so the test before rollout is whether the W4A4 memory-and-bandwidth win clears that standing tax on the target hardware.
 
-$$X' = X \cdot H, \quad W' = H^T \cdot W$$
-
-where $H$ is a Hadamard matrix (orthogonal, efficiently computable without storage).
-
-The Hadamard transform works because for a vector with one extreme outlier, it distributes that outlier's magnitude across all dimensions:
-
-```
-Original:  [1000, 1, 1, 1]     # One large outlier
-Hadamard:  [502, 500, 500, 500] # Uniform distribution
-```
-
-After transformation, no single value dominates, enabling uniform quantization.
+[^fn-quarot-hadamard]: **Hadamard rotation in QuaRot**\index{QuaRot!Hadamard rotation}: QuaRot transforms activations as $X' = X \cdot H$ and weights as $W' = H^T \cdot W$, where $H$ is an orthogonal Hadamard matrix, computed structurally without being stored. Orthogonality preserves $X W = X' W'^{\,T}$, so the layer output is unchanged. The outlier-spreading effect is concrete: a vector $[1000, 1, 1, 1]$ with one extreme value becomes roughly $[502, 500, 500, 500]$ after the transform, so no single coordinate dominates the quantization range.
 
 @Tbl-quarot-vs-smoothquant contrasts QuaRot's\index{QuaRot} rotation-based approach with SmoothQuant's\index{SmoothQuant} migration:
 
