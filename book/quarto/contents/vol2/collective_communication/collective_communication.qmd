@@ -531,29 +531,24 @@ The calculation uses the bandwidth hierarchy before the chapter formalizes it: r
 # │ Context: §Putting the Model to Work: Llama 70B Communication Budget
 # │          (@sec-communication-llama-budget) prose paragraphs
 # │
-# │ Goal: Quantify hierarchical AllReduce vs. flat Ring AllReduce for a 70B
-# │       model across 128 GPUs (16 nodes × 8 GPUs) to show that hierarchical
-# │       decomposition cuts inter-node traffic by 8×, enabling overlap.
+# │ Goal: Quantify the headline gap between flat Ring AllReduce and
+# │       hierarchical AllReduce for a 70B model across 128 GPUs
+# │       (16 nodes × 8 GPUs). The per-phase derivation is deferred to
+# │       §Hierarchical AllReduce; here only the totals are surfaced.
 # │ Show: hier_total_llama_ms ≈ 929 ms vs flat_total_ms ≈ 5,557 ms—inline.
-# │ How: α-β model applied per tier: NVLink ReduceScatter → IB Ring → NVLink
-# │      AllGather; comm-to-compute ratio computed for both strategies.
+# │ How: α-β model applied per tier (NVLink ReduceScatter → IB Ring → NVLink
+# │      AllGather) to compute the hierarchical total, compared to a flat ring.
 # │
 # │ Imports: mlsysim.core.units (Hardware.Cloud.H100.nvlink.bandwidth,
 # │          Systems.Fabrics.InfiniBand_NDR.bandwidth, GB, second, ms)
-# │ Exports: gradient_bf16_gb_str, intra_rs_time_ms_str, inter_payload_gb_str,
-# │          inter_ring_bw_time_ms_str, inter_ring_lat_time_ms_str,
-# │          intra_ag_time_ms_str, hier_total_llama_ms_str, flat_total_ms_str,
-# │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str,
-# │          nvlink_bw_gb_per_s_str, ib_bw_gb_per_s_str
+# │ Exports: gradient_bf16_gb_str, hier_total_llama_ms_str, flat_total_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models, Systems
-from mlsysim.core.units import BILLION, GB, byte, microsecond, ms, param, second
-from mlsysim.fmt import check, fmt, fmt_count, fmt_qty, fmt_time
+from mlsysim.core.units import GB, byte, microsecond, ms, param, second
+from mlsysim.fmt import check, fmt_qty, fmt_time
 from mlsysim.physics import (
     calc_ring_allreduce_time,
-    calc_ring_allreduce_data_factor,
     calc_ring_collective_data_factor,
-    calc_ring_allreduce_latency_time,
 )
 
 class LlamaBudgetCalc:
@@ -569,7 +564,6 @@ class LlamaBudgetCalc:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # H100 NVLink 4.0
     ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # NDR 400 Gbps per port
     ib_alpha = 3 * microsecond  # scenario assumption: alpha-beta base latency
-    compute_per_step = 200 * ms  # scenario assumption: illustrative compute step
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Hierarchical AllReduce—Step 1: Intra-node ReduceScatter
@@ -591,13 +585,8 @@ class LlamaBudgetCalc:
 
     # Flat Ring AllReduce (BF16)
     flat_ring_total = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
-    flat_ring_bw = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second).to(ms)
-    flat_ring_lat = (flat_ring_total - flat_ring_bw).to(ms)
     flat_total = flat_ring_total
 
-    ccr_hier = (hier_total_llama / compute_per_step).to_base_units().magnitude
-    ccr_flat = (flat_total / compute_per_step).to_base_units().magnitude
-    inter_ring_bw_time_display = round(inter_ring_bw_time.to(ms).magnitude, 2)
     flat_total_rounded = round(flat_total.to(ms).magnitude)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -605,27 +594,13 @@ class LlamaBudgetCalc:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gradient_bf16_gb_str = fmt_qty(gradient_bf16, GB, precision=0, commas=False)
-    intra_rs_time_ms_str = fmt_time(intra_rs_time, ms, precision=1, commas=False)
-    inter_payload_gb_str = fmt_qty(inter_payload, GB, precision=1, commas=False)
-    inter_ring_bw_time_ms_str = fmt_time(inter_ring_bw_time_display, ms, precision=1, commas=False)
-    inter_ring_lat_time_ms_str = fmt_time(inter_ring_lat_time, ms, precision=2, commas=False)
-    intra_ag_time_ms_str = fmt_time(intra_ag_time, ms, precision=1, commas=False)
     hier_total_llama_ms_str = fmt_time(hier_total_llama, ms, precision=1, commas=False)
     flat_total_ms_str = fmt_time(flat_total_rounded, ms, precision=0, commas=True)
-    ccr_hier_str = fmt(ccr_hier, precision=1, commas=False)
-    ccr_flat_str = fmt(ccr_flat, precision=1, commas=False)
-    n_gpus_llama_str = fmt(n_gpus_llama, precision=0, commas=False)
-    nvlink_bw_gb_per_s_str = fmt_qty(nvlink_bw, GB / second, precision=0, commas=False)
-    ib_bw_gb_per_s_str = fmt_qty(ib_bw, GB / second, precision=0, commas=False)
 ```
 
-Using BF16 gradients (a common practice that halves communication volume to `{python} LlamaBudgetCalc.gradient_bf16_gb_str`), the hierarchical AllReduce decomposes as follows:
+Using BF16 gradients (a common practice that halves communication volume to `{python} LlamaBudgetCalc.gradient_bf16_gb_str`), the contrast is stark. Routing the full gradient over the slow inter-node fabric, as a flat Ring AllReduce does, costs roughly `{python} LlamaBudgetCalc.flat_total_ms_str`. Confining most of the traffic to NVLink and sending only the reduced shard over InfiniBand cuts that to approximately `{python} LlamaBudgetCalc.hier_total_llama_ms_str`. The difference is not marginal; it determines whether communication can be hidden behind computation or whether it becomes the critical path.
 
-1. **Intra-Node ReduceScatter** (NVLink at `{python} LlamaBudgetCalc.nvlink_bw_gb_per_s_str`): Each GPU exchanges 7/8 of the gradient locally. Time: `{python} LlamaBudgetCalc.intra_rs_time_ms_str`.
-2. **Inter-Node Ring AllReduce** (InfiniBand NDR at `{python} LlamaBudgetCalc.ib_bw_gb_per_s_str`): Each GPU synchronizes only `{python} LlamaBudgetCalc.inter_payload_gb_str` across 16 nodes. Bandwidth time: `{python} LlamaBudgetCalc.inter_ring_bw_time_ms_str`. Latency time: `{python} LlamaBudgetCalc.inter_ring_lat_time_ms_str`.
-3. **Intra-Node AllGather** (NVLink): Distributes the final result locally. Time: `{python} LlamaBudgetCalc.intra_ag_time_ms_str`.
-
-The total hierarchical AllReduce takes approximately `{python} LlamaBudgetCalc.hier_total_llama_ms_str`, compared to `{python} LlamaBudgetCalc.flat_total_ms_str` for a flat Ring AllReduce that ignores the bandwidth hierarchy. This difference is not marginal; it determines whether communication can be hidden behind computation or whether it becomes the critical path.
+The per-phase breakdown behind these numbers (the intra-node reduction, the reduced inter-node exchange, and the intra-node redistribution) requires the collective primitives this section has not yet introduced. @Sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338 names those primitives and works the full three-phase derivation; the budget here establishes only that the bandwidth hierarchy is worth respecting, and by how much.
 
 ### Theory vs. practice: The NCCL reality gap {#sec-communication-nccl-reality}
 
