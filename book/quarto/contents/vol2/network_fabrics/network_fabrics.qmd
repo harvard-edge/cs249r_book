@@ -275,7 +275,7 @@ Each of these inversions traces back to a specific physical or protocol constrai
 
 The levels are not an inventory of networking topics; they are the causal chain that turns synchronous ML traffic into infrastructure requirements. Large gradient messages first stress the wire and transport, then force topology choices that preserve bisection bandwidth, then expose congestion behavior that ordinary enterprise networks can hide, and finally determine whether the whole cluster behaves like one training machine.
 
-The remainder of this chapter ascends this stack, starting from the copper and glass at the bottom.
+The remainder of this chapter ascends this stack, starting from the copper and glass at the bottom. Having reached the top rung, the chapter then turns to the operational layers that surround the fabric in production: sharing it across tenants, observing it under load, and evolving it as the underlying technology moves the ceiling.
 
 ## Level 1: Wire and Link {#sec-network-fabrics-wire-link}
 
@@ -974,7 +974,9 @@ class NetworkFatTreeRecap:
     production_2k_gpus_str = fmt(Systems.Clusters.Production_2K.total_accelerators, precision=0, commas=True)
 ```
 
-A fat-tree built from switches with radix[^fn-switch-radix-density] $k$ supports $N_{\text{hosts}} = k^{3}/4$ hosts at three tiers, or $k^{2}/2$ at two tiers. In a two-tier leaf-spine fabric using radix-64 switches (with $k$ leaves each providing $k/2$ host ports and $k/2$ spine uplinks), the topology supports up to `{python} NetworkFatTreeRecap.production_2k_gpus_str` hosts. The same radix-64 switch admits a second two-tier framing: a leaf-aggregation pod reaches only $(k/2)^2 =$ `{python} NetworkFatTreeRecap.n_gpus_str` per pod, the difference being whether the upper tier terminates as spines or uplinks to a core layer. Either comfortably accommodates our `{python} NetworkFatTreeRecap.n_gpus_str` reference cluster with only leaf and spine layers.
+A fat-tree built from switches with radix[^fn-switch-radix-density] $k$ supports $N_{\text{hosts}} = k^{3}/4$ hosts at three tiers, and two distinct two-tier framings, which differ only in whether the upper tier is treated as the cluster's edge or as an aggregation layer below a future core.
+
+The first framing counts every switch in the two tiers as line-rate capacity for hosts. With radix-64 switches, the fabric spends half of each leaf's ports on hosts and half on spine uplinks, giving $k^{2}/2 =$ `{python} NetworkFatTreeRecap.production_2k_gpus_str` host ports across the pod. The second framing reserves the upper tier as aggregation that will later uplink to a core layer rather than terminating hosts: each leaf still provides $k/2$ host ports, but the pod now contains only $k/2$ leaves, so it reaches $(k/2)^2 =$ `{python} NetworkFatTreeRecap.n_gpus_str` hosts per pod. The two counts are the same switches accounted differently: whether the upper tier terminates as the cluster spine or as a pod aggregation stage. Either framing comfortably accommodates our `{python} NetworkFatTreeRecap.n_gpus_str` reference cluster with only leaf and spine layers.
 
 A concrete bisection estimate shows how quickly oversubscription turns into synchronization delay.
 
@@ -1219,7 +1221,7 @@ Topology provides the structural capacity for our cluster of `{python} NetworkFa
 
 ## Level 4: Fabric Behavior (Congestion, Routing) {#sec-network-fabrics-behavior}
 
-Real fabrics deviate from theoretical full $\text{BW}_{\text{bisect}}$ due to **congestion**, and the impact of this congestion is qualitatively different in ML clusters than in general-purpose networks. Web traffic is stochastic and asynchronous: if one user's request is delayed by 50 ms, it does not penalize the thousands of other users on the network. The Bulk Synchronous Parallel (BSP) execution model governs ML training, by contrast. Every GPU must complete its communication before any GPU can proceed to the next compute step, creating a weakest-link dynamic where the slowest flow in the fabric dictates the iteration time for the entire cluster. If a single link out of 10,000 becomes congested and doubles its latency, the effective throughput of the entire supercomputer drops for that step. In this synchronized regime, tail latency is the dominant performance constraint, not an outlier metric.
+Real fabrics deviate from theoretical full $\text{BW}_{\text{bisect}}$ due to **congestion**, and the impact of this congestion is qualitatively different in ML clusters than in general-purpose networks. The BSP barrier introduced earlier is what makes the difference: web traffic is stochastic and asynchronous, so one user's 50 ms delay does not penalize the thousands of others, but under BSP the slowest flow in the fabric dictates the iteration time for the entire cluster. If a single link out of 10,000 becomes congested and doubles its latency, the effective throughput of the entire supercomputer drops for that step. In this synchronized regime, tail latency is the dominant performance constraint, not an outlier metric.
 
 ::: {#dfn-network-fabrics-bulk-synchronous-parallel-bsp .callout-definition title="Bulk synchronous parallel (BSP)"}
 
@@ -1231,7 +1233,7 @@ Real fabrics deviate from theoretical full $\text{BW}_{\text{bisect}}$ due to **
 
 :::
 
-Because BSP enforces a global barrier at each superstep, the entire cluster moves at the speed of the slowest packet. A single congested switch port can stall 10,000 GPUs, making **tail latency (P99)**\index{Tail Latency}\index{P99} more critical than average throughput.
+This is why **tail latency (P99)**\index{Tail Latency}\index{P99}, not average throughput, is the metric that governs a training fabric: one congested switch port stalls the barrier, and the barrier stalls the cluster. The mechanisms that keep tail latency bounded therefore become the central concern of fabric behavior.
 
 ### Priority flow control (PFC) {#sec-network-fabrics-pfc}
 
@@ -1714,17 +1716,9 @@ However, CPO introduces new challenges. Optical components are sensitive to temp
 
 ### Disaggregated and composable architectures {#sec-network-fabrics-disaggregated}
 
-The conventional node architecture bundles a fixed ratio of compute, memory, and networking in each server: 8 GPUs, 640 GB of HBM, 2 TB of DDR, and 8 InfiniBand HCAs in a DGX H100. This fixed bundling is suboptimal for workloads that need a different ratio. Training a 175B model needs more memory capacity per GPU than training a 7B model. Inference serving needs more network bandwidth per GPU (to handle request traffic) than training (which has predictable, batch-oriented communication). The fixed node architecture forces organizations to provision for the most demanding ratio across all workloads, wasting resources on workloads that need a different balance; disaggregated architecture\index{Architecture!disaggregated} tries to relax that fixed ratio.
+The conventional node bundles a fixed ratio of compute, memory, and networking, and @sec-compute-cxl established why that ratio is wasteful when one workload needs more memory capacity per GPU and another needs more network bandwidth: CXL memory pooling lets a processor in one chassis reach memory in another with load/store semantics, and disaggregated designs\index{Architecture!disaggregated} decouple compute, memory, and networking into independently composable pools. The fabric-specific consequence is what concerns this chapter. Once memory pooling and resource composition cross the node boundary, the rigid distinction between intra-node NVLink domains and inter-node InfiniBand domains softens into a single memory fabric, and the synchronization backbone shifts from a fixed node boundary to a composable one.
 
-CXL (Compute Express Link)\index{CXL} is one mechanism that makes this disaggregation plausible rather than just a scheduler abstraction. CXL 3.0 enables memory pooling\index{Memory!pooling}, allowing a processor in one chassis to access memory in another with load/store semantics rather than RDMA message passing. Memory pooling points toward architectures where the rigid distinction between intra-node NVLink domains and inter-node InfiniBand domains softens into a memory fabric, allowing the scheduler to compose virtual nodes with workload-specific resource ratios.
-
-Disaggregated architectures decouple compute, memory, and networking into separate, independently scalable pools. A disaggregated system might have a pool of GPU compute modules, a pool of CXL-attached memory modules, and a pool of network interface modules, all connected through a high-bandwidth fabric. The orchestration layer composes these pools into virtual nodes with the exact ratio of resources that each workload requires.
-
-The systems value is resource-ratio matching rather than modularity for its own sake. Upgrading compute (replacing GPU modules with a newer generation) does not require replacing the memory or networking components. Scaling memory capacity (for larger models) does not require purchasing additional GPUs. Failure of a compute module does not take down the associated memory or networking resources.
-
-Industry examples serve as partial steps toward the resource-ratio problem rather than as proof that full disaggregation has arrived. Research projects and specialized systems explore disaggregated designs for ML infrastructure. Intel's data-centric architecture strategy and AMD's MI300X (which combines GPU compute dies and CPU dies on the same package with a unified memory controller) represent partial steps toward disaggregation. Full disaggregation, where GPUs are separated from memory by a fabric rather than co-located on the same interposer, requires CXL-class bandwidth and latency to be competitive, which is why disaggregated architectures and CXL are deeply intertwined.
-
-The deployment timeline is less important than the architectural dependency chain: disaggregated ML infrastructure depends on memory-fabric latency, silicon photonics for inter-pool communication, and software that can manage resource composition without hiding the resulting $\alpha$-$\beta$ costs. Infrastructure planners should track this direction because facilities built for fixed nodes may later host more composable systems. The durable lesson is that disaggregation shifts the synchronization backbone from a fixed node boundary to a composable fabric; the same $\alpha$-$\beta$ costs, power-per-bit limits, and observability requirements still decide whether it works.
+That shift does not repeal the physics this chapter has developed. A composed virtual node still pays the same $\alpha$-$\beta$ costs on every cross-pool access, the same power-per-bit limits on the links that carry it, and the same observability requirements that keep an oversubscribed path from masquerading as slow accelerators. The durable lesson is that disaggregation relocates the synchronization backbone rather than eliminating it: whether a composable fabric works is decided by the same fabric properties that decide whether a fixed-node fabric works.
 
 ## Fallacies and Pitfalls {#sec-network-fabrics-fallacies}
 
