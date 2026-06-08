@@ -136,7 +136,7 @@ A single GPU with 100 terabytes of memory and an exaflop of compute would make d
 
 ### The physics of the cluster {#sec-distributed-training-systems-physics-cluster-a42d}
 
-Before optimizing algorithms, we must understand the physical constraints of the Machine Learning Fleet. The performance of any distributed training job is governed by the distributed step-time law (Principle \ref{pri-distributed-step-time}), introduced alongside the fleet law in @sec-vol2-introduction-fleet-law:
+Before optimizing algorithms, we must understand the physical constraints of the Machine Learning Fleet. The performance of any distributed training job is governed by the fleet law (Principle \ref{pri-distributed-step-time}), introduced in @sec-vol2-introduction-fleet-law, which decomposes the per-step time:
 
 $$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}} $$
 
@@ -235,11 +235,11 @@ Tensor parallelism across server racks connected by standard Ethernet will stall
 
 :::
 
-The decision tree reveals that parallelism strategy selection is not a preference but a consequence of physical constraints. The next question is *how* these constraints shape the mechanics of a distributed training step on a real cluster.
+The decision tree reveals that parallelism strategy selection is not a preference but a consequence of physical constraints. This is a constraint-level preview: the communication-volume formulas above name what each strategy moves, but their full meaning depends on the mechanics of tensor, pipeline, and hybrid parallelism developed over the rest of the chapter. @Sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a completes the filter once those mechanics are in place. The next question is *how* these constraints shape the mechanics of a distributed training step on a real cluster.
 
 ## The Distributed Training Step {#sec-distributed-training-systems-systems-distributed-training-fundamentals-97da}
 
-The central challenge of distributed training is ensuring that 1,024 GPUs, operating completely independently, agree on a single, mathematically rigorous set of updated weights at the end of each training iteration. The single-machine optimization techniques discussed in the previous section only delay the inevitable; eventually, the computation must span multiple devices.
+The selection constraints of the previous section assumed the job must be split; the question now is what a distributed step must guarantee. The central challenge is ensuring that 1,024 GPUs, operating completely independently, agree on a single, mathematically rigorous set of updated weights at the end of each training iteration.
 
 ::: {#dfn-distributed-training-distributed-training .callout-definition title="Distributed training"}
 
@@ -257,19 +257,17 @@ A useful mental model frames these distributed strategies as loop transformation
 *   **Tensor Parallelism = Vectorization (single instruction, multiple data (SIMD)).** We split the inner loops (matrix multiplication) across devices. This is "Cluster-Scale SIMD," where NVLink acts as the vector register file.
 *   **Pipeline Parallelism = Instruction Pipelining.** We split the sequential operations (layers) across devices. Just as a CPU pipeline stages fetch/decode/execute, the cluster stages Layer 1/Layer 2/Layer 3 to keep all ALUs busy.
 
-Optimizing locally before scaling horizontally ensures that distributed systems operate efficiently at each node while adding the coordination mechanisms necessary for multi-machine training. When model complexity and dataset sizes exceed the capacity of individual devices, distributed training[^fn-distbelief-distributed] spreads the workload across multiple machines that coordinate to train a single model.
+Whichever loop a strategy unrolls, distributed training[^fn-distbelief-distributed] spreads the workload across machines that must coordinate to train a single model. Coordination here means keeping every model shard or replica on a compatible training step. Basic barriers can keep a small research run ordered, but long-running training jobs also need timeout, checkpoint, and recovery mechanisms so one failed worker does not waste days of compute. @Sec-fault-tolerance-reliability examines those reliability engineering challenges in depth.
 
 [^fn-distbelief-distributed]: **Distributed Training**: Google's DistBelief\index{DistBelief!distributed training} (2012) was the first framework to train neural networks across thousands of machines, but its parameter server architecture created bandwidth bottlenecks at central nodes. This limitation drove the shift to decentralized AllReduce patterns in successors like Horovod and PyTorch DistributedDataParallel (DDP), where replicated data-parallel workers synchronize gradients at cost $2(N-1)/N$ per worker rather than concentrating traffic at a single server.
 
-Coordination in this chapter means keeping every model shard or replica on a compatible training step. Basic barriers can keep a small research run ordered, but long-running training jobs also need timeout, checkpoint, and recovery mechanisms so one failed worker does not waste days of compute. @Sec-fault-tolerance-reliability examines those reliability engineering challenges in depth.
-
-The progression from single-device to distributed training follows a systematic scaling path where each stage builds on the previous level's challenges. Single-GPU training requires only local memory management and straightforward forward/backward passes, establishing the baseline computational patterns. Scaling to multiple GPUs within a single node introduces high-bandwidth communication requirements, typically handled through NVLink[^fn-nvlink-intranode] or PCIe connections with NCCL[^fn-nccl-topology] optimization while preserving the single-machine simplicity of fault tolerance and scheduling.
+Each rung of the scaling path inherits the previous one's challenges. Single-GPU training needs only local memory management and forward/backward passes. Scaling to multiple GPUs within a node adds high-bandwidth communication, handled through NVLink[^fn-nvlink-intranode] or PCIe with NCCL[^fn-nccl-topology] optimization while preserving single-machine fault tolerance and scheduling.
 
 [^fn-nvlink-intranode]: **NVLink**\index{NVLink!distributed training}: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainNvlinkIntro.nvlink_a100_gb_per_s_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_gb_per_s_str` bidirectional bandwidth, roughly `{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_low_mult_str`--`{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_high_mult_str` InfiniBand HDR per port. This bandwidth gap is why tensor parallelism, which requires AllReduce on every layer, is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric.
 
 [^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**\index{NCCL!topology}: Released in 2015, NCCL automatically selects ring, tree, or hierarchical AllReduce algorithms based on detected hardware topology: NVLink within nodes, InfiniBand across nodes. This topology-aware routing is critical because a naive single-ring AllReduce across 128 nodes would force all traffic through the slowest inter-node link, collapsing bandwidth utilization to under 30 percent.
 
-The leap to multi-node distributed training introduces new complexity dimensions: network communication overhead, fault tolerance requirements, and cluster orchestration challenges. Each scaling stage compounds the previous challenges as communication bottlenecks intensify, synchronization overhead grows, and failure probability increases. Practitioners should therefore optimize single-GPU performance before scaling to ensure efficient resource utilization at each level.
+The leap to multi-node training adds network communication overhead, fault tolerance requirements, and cluster orchestration. Because each stage compounds the previous one's bottlenecks, single-GPU performance must be optimized before scaling out, so inefficiency does not multiply across the fleet.
 
 ::: {#psp-distributed-training-distributed-training-complexity .callout-perspective title="Distributed training complexity"}
 
@@ -277,9 +275,7 @@ Although distributed-training frameworks abstract away much of the complexity th
 
 :::
 
-Despite this complexity, the core workflow is mechanically straightforward; the engineering challenge is making it fast and reliable at scale. The most common pattern, data parallelism, involves splitting the dataset into nonoverlapping subsets, assigning each subset to a different GPU, and performing forward and backward passes independently on each device. Once gradients are computed on each GPU, they are synchronized and aggregated before updating the model parameters, ensuring that all devices learn in a consistent manner. The coordinated flow of data splitting, computation, and gradient synchronization (@fig-dist-train-data-parallelism) forms the foundation of distributed training, with each GPU processing its batch independently before synchronization brings all gradients together.
-
-Distributed training systems must orchestrate multi-machine computation by splitting the work, managing communication between machines, and maintaining synchronization throughout training. The AllReduce operations that aggregate gradients across devices can consume 10--40 percent of total training time even with well-tuned implementation, and this overhead compounds as systems scale.
+Despite this complexity, the core workflow is mechanically straightforward; the engineering challenge is making it fast and reliable at scale. The recurring cost is the gradient synchronization that aggregates results across devices, an overhead that compounds as systems scale, as @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488 quantifies.
 
 Four approaches address different constraint regimes. Data parallelism divides the training data across machines while each maintains a full model copy, making it the simplest approach for models that fit in single-device memory. Model parallelism splits the model itself across devices when parameters exceed single-device memory. Pipeline parallelism partitions models into sequential stages that process microbatches concurrently, improving utilization over naive model parallelism. Hybrid approaches integrate multiple strategies, enabling training at scales where any single approach would fail. Each strategy becomes necessary only after its predecessor reaches a physical ceiling.
 
@@ -517,7 +513,7 @@ Stepping back from that specific cluster to the design space, @fig-coll-comm con
 
 :::
 
-The trade-off visible in @fig-coll-comm is between *bandwidth* and *latency*: Ring AllReduce achieves bandwidth-efficient utilization with $\mathcal{O}(N)$ latency steps, while Tree AllReduce reduces latency to $\mathcal{O}(\log N)$ at the cost of potential congestion near the root. High-performance libraries such as NCCL select between these topologies automatically based on message size and cluster topology.
+The trade-off visible in @fig-coll-comm is between *bandwidth* and *latency*: a ring spreads bandwidth evenly but adds a latency step per hop, while a tree shortens the latency path at the cost of potential congestion near the root. High-performance libraries such as NCCL select between these topologies automatically based on message size and cluster topology. @Sec-collective-communication formalizes the latency complexity of each topology and derives when a ring beats a tree.
 
 #### Synchronization models {#sec-distributed-training-systems-systems-synchronization-models-396f}
 
@@ -535,7 +531,7 @@ BSP provides strong guarantees where every worker sees identical parameter value
 
 Stale Synchronous Parallel\index{Stale Synchronous Parallel!bounded staleness} (SSP) relaxes this constraint by allowing workers to proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee, often configured with small values such as $s=2$--$5$, provides a middle ground between BSP's strong consistency and fully asynchronous approaches.
 
-Asynchronous SGD\index{Asynchronous SGD!staleness penalty} eliminates synchronization barriers entirely as workers update parameters independently. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. When a worker computes gradients on parameters that are already $\tau_{\text{stale}}$ steps stale, the effective learning rate decreases. Compensation techniques include learning rate scaling with $\eta' = \eta / \sqrt{\tau_{\text{stale}}}$ or momentum correction.
+Asynchronous SGD\index{Asynchronous SGD!staleness penalty} eliminates synchronization barriers entirely as workers update parameters independently. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. This section establishes what each model guarantees operationally; @sec-distributed-training-systems-systems-staleness-impact-bsp-vs.-ssp-vs.-asp-e153 develops the convergence rates, the staleness penalty, and the compensation techniques each model requires.
 
 The key trade-offs across synchronization models are summarized in @tbl-sync-models, and @fig-sync-model-timeline illustrates how each strategy schedules work across workers over time.
 
@@ -1151,43 +1147,7 @@ Hierarchy-aware systems recover much of that lost efficiency by combining data p
 
 #### Parallelism-infrastructure interaction {#sec-distributed-training-parallelism-infrastructure}
 
-The scaling efficiency analysis reveals a deeper insight: the effective parallelism strategy is not determined by the *model architecture alone* but by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy. Each combination of parallelism strategy and infrastructure topology produces a different scaling efficiency curve, and selecting the wrong combination can waste a significant fraction of the cluster's capacity.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierPodParallelRecap.frontier_params_b_str
-class InfraFrontierPodParallelRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-To illustrate this interaction concretely, consider three parallelism configurations for training our `{python} InfraFrontierPodParallelRecap.frontier_params_b_str` model on a 1,024-GPU cluster organized as 128 nodes of 8 GPUs each. This comparison previews the mechanics developed below: DP replicates the model across data shards, TP splits individual tensor operations across devices, PP splits layers into pipeline stages, and the pipeline bubble is the idle time introduced while microbatches fill and drain those stages.
-
-Configuration A: Pure Data Parallelism (DP-1024). All 1,024 GPUs replicate the full model (using ZeRO to shard optimizer states), and each GPU processes a different data shard. The gradient AllReduce exchanges 350 GB across the full InfiniBand fabric. As the napkin math above showed, this achieves approximately 37.5 percent efficiency because the inter-node communication dominates.
-
-Configuration B: TP-8, DP-128. Within each node, 8 GPUs use tensor parallelism over NVLink. Across nodes, 128 data-parallel groups synchronize gradients over InfiniBand. Each data-parallel group now needs to AllReduce only the gradients for its 1/8 shard of the model (43.75 GB instead of 350 GB), and the TP communication is contained within the fast NVLink domain. The inter-node AllReduce time drops from 14 seconds to approximately 1.75 seconds. If the compute time is still 2.1 seconds, the efficiency improves to $2.1 / (2.1 + 1.75) \approx 54.5$ percent, and with communication-computation overlap, practical efficiency reaches 75--85 percent.
-
-Configuration C: TP-8, PP-4, DP-32. Within each node, 8 GPUs use tensor parallelism. Across 4 nodes, pipeline parallelism divides the model into 4 stages. Across the remaining 32 data-parallel groups, gradient synchronization occurs over InfiniBand. Pipeline parallelism reduces the gradient AllReduce volume further (each stage has roughly 1/4 of the parameters), and the pipeline communication (forwarding activations between stages) has lower volume than a full AllReduce. The trade-off is the pipeline bubble: at the beginning and end of each microbatch, some pipeline stages are idle while waiting for activations from earlier stages or gradients from later stages. The bubble fraction is approximately $(p-1)/m$, so with 4 pipeline stages and 32 microbatches per training step, the bubble wastes roughly 9 percent of compute.
-
-The three-way comparison reveals a clear pattern: configurations that keep high-bandwidth communication (tensor parallelism) within the fast NVLink domain and push only low-bandwidth communication (data-parallel AllReduce of smaller gradient shards) onto the slower InfiniBand fabric achieve the highest efficiency. *The infrastructure hierarchy dictates the parallelism hierarchy.* The resulting principle is called hierarchy-aware parallelism, and it is a common approach for large-scale training systems.
-
-::: {#dfn-distributed-training-hierarchy-aware-parallelism .callout-definition title="Hierarchy-aware parallelism"}
-
-***Hierarchy-Aware Parallelism***\index{Hierarchy-Aware Parallelism!definition} is the strategy of mapping different parallel execution modes to the physical bandwidth tiers of the cluster.
-
-1.  **Significance (quantitative)**: It ensures that high-frequency synchronization (for example, Tensor Parallelism) stays on the fastest links (NVLink), while lower-frequency tasks (for example, Data Parallelism) use slower tiers (InfiniBand). This alignment maximizes scaling efficiency $(\eta_{\text{scaling}})$ by reducing exposed communication time $(T_{\text{comm}}(N))$ and latency $(L_{\text{lat}})$.
-2.  **Observation**: Unlike Uniform Parallelism\index{Uniform Parallelism}, which treats all node-to-node links as equal, Hierarchy-Aware strategies respect the Bandwidth Cliffs between die, node, and rack boundaries.
-3.  **Pitfall**: A frequent misconception is that any model can be sharded across any number of nodes. In reality, if the Hierarchy Mapping\index{Mapping!hierarchy} is wrong (for example, sharding a large tensor across a slow inter-rack link), the communication time will dwarf the compute time, making the scale-out useless.
-
-:::
-
-The interaction also flows in the reverse direction: the choice of parallelism strategy influences infrastructure design. A training system that uses TP-8, PP-4, DP-32 generates a communication pattern where the most bandwidth-intensive traffic (tensor-parallel AllReduce) is confined to within each node, the moderate-bandwidth traffic (pipeline stage communication) flows between groups of 4 neighboring nodes, and the lowest-bandwidth traffic (data-parallel AllReduce of reduced gradient shards) flows across the full cluster.
-
-The layered communication pattern favors a hierarchical network topology where nearby nodes have higher bandwidth between them (a "locality-aware" topology) over a flat topology where all node pairs have equal bandwidth (a uniform fat-tree). Rail-optimized and hierarchical fat-tree designs exploit this locality, placing the nodes that communicate most frequently on the same switch or in the same rack, minimizing the number of switch hops for the most bandwidth-intensive traffic.
-
-The practical implication for infrastructure procurement is that the network topology must be co-designed with the parallelism strategy, not selected independently. An organization that purchases a flat fat-tree fabric (optimized for any-to-any communication) but trains exclusively with hierarchy-aware parallelism (where most traffic is local) has over-provisioned the network's global bandwidth while potentially under-provisioning local bandwidth. Conversely, an organization that purchases a rail-optimized fabric (optimized for local communication) but later needs to run Mixture-of-Experts models with AllToAll communication (which requires global bandwidth) will find the fabric inadequate. The network fabric, which represents 10--15 percent of total system cost, must be matched to the anticipated workload mix, and changing the fabric after deployment is prohibitively expensive and disruptive.
+The scaling efficiency analysis reveals a deeper insight: the effective parallelism strategy is not determined by the *model architecture alone* but by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy. Each combination of parallelism strategy and infrastructure topology produces a different scaling efficiency curve, and selecting the wrong combination can waste a significant fraction of the cluster's capacity. The napkin math above already showed pure data parallelism stalling near 37.5 percent efficiency at this scale; recovering that lost capacity means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works that combination through three concrete configurations and formalizes it as hierarchy-aware parallelism, once tensor and pipeline parallelism have been developed.
 
 Selecting and combining parallelism strategies therefore leads directly to the traffic they create. @Sec-network-fabrics examined how topology is co-designed with the parallelism mapping to maximize scaling efficiency; here the next question is how the collective operations themselves shape the step time. AllReduce operations can consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs can experience communication overhead reaching a large fraction of total runtime, while GPT-3-scale models require tensor, pipeline, and data parallelism plus communication overlap to avoid data-parallel gradient synchronization dominating the step.
 
@@ -1309,9 +1269,9 @@ Where:
 
 The fleet law leads to the scaling efficiency metric for fixed global work, where $T_{\text{compute}}$ is the single-device compute time for that work:
 
-This is the scaling efficiency bound (Principle \ref{pri-scaling-efficiency}): perfect linear scaling $(\eta_{\text{scaling}} = 1.0)$ is a *theoretical limit*, not a *practical target*. Well-configured systems can achieve $\eta_{\text{scaling}} = 0.85$–$0.95$ at moderate scale and degrade further as $N$ grows. The gap between $\eta_{\text{scaling}} = 1.0$ and the achieved efficiency is the communication tax\index{Communication Tax!scaling efficiency} and coordination tax\index{Coordination Tax!scaling efficiency}: the price of distributed execution.
-
 $$ \eta_{\text{scaling}} = \frac{T_{\text{compute}}}{N \times T_{\text{step}}(N)} = \frac{1}{1 + \frac{N(T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}})}{T_{\text{compute}}}} $$
+
+This is the scaling efficiency bound (Principle \ref{pri-scaling-efficiency}): perfect linear scaling $(\eta_{\text{scaling}} = 1.0)$ is a *theoretical limit*, not a *practical target*. Well-configured systems can achieve $\eta_{\text{scaling}} = 0.85$–$0.95$ at moderate scale and degrade further as $N$ grows. The gap between $\eta_{\text{scaling}} = 1.0$ and the achieved efficiency is the communication tax\index{Communication Tax!scaling efficiency} and coordination tax\index{Coordination Tax!scaling efficiency}: the price of distributed execution.
 
 The equation reveals the **Scaling Wall**: as $N$ increases, the compute term $(T_{\text{compute}}/N)$ shrinks, but the communication and synchronization terms can remain constant or grow. Eventually, the denominator is dominated by overhead, driving efficiency toward zero. Beyond wall-clock time, this communication overhead imposes an energy tax\index{Energy Tax!communication overhead} that scales with physical distance between devices.
 
@@ -1420,7 +1380,7 @@ However, the theorem assumes perfect synchronization (BSP). When workers proceed
 
 ### Staleness impact: BSP vs. SSP vs. ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-vs.-ssp-vs.-asp-e153}
 
-Synchronization models fundamentally affect convergence behavior. The staleness parameter $\tau_{\text{stale}}$ quantifies how many iterations behind a gradient may be when applied to parameters.
+The operational guarantees of BSP, SSP, and ASP established in @sec-distributed-training-systems-systems-synchronization-models-396f have a precise convergence cost, which this section quantifies. The staleness parameter $\tau_{\text{stale}}$ quantifies how many iterations behind a gradient may be when applied to parameters, and it is the variable that ties throughput to solution quality.
 
 ::: {#dfn-distributed-training-gradient-staleness .callout-definition title="Gradient staleness"}
 
@@ -2279,9 +2239,9 @@ The practical impact of Ring Attention is measured in context length. Without it
 
 ### Parameter servers and embedding sharding {#sec-distributed-training-systems-systems-parameter-servers-embedding-sharding-8821}
 
-While AllReduce dominates dense model training, the **Parameter Server (PS)**\index{Parameter Server!architecture} architecture remains common for recommendation systems and other sparse workloads. A Parameter Server architecture separates workers (who compute gradients) from servers (who store parameters and apply updates).
+While AllReduce dominates dense model training, the **Parameter Server (PS)**\index{Parameter Server!architecture} architecture, formalized by @li2014, remains common for recommendation systems and other sparse workloads. A Parameter Server architecture separates workers (who compute gradients) from servers (who store parameters and apply updates).
 
-For dense models (like ResNet or BERT), the PS architecture creates a bottleneck: all workers send dense gradient updates to the servers simultaneously, saturating the server's network bandwidth. This "incast" problem drove the adoption of Ring AllReduce, which distributes the bandwidth load across all nodes.
+For dense models (like ResNet or BERT), the PS architecture creates a bottleneck: with $N$ workers, the server's inbound bandwidth must absorb $N$ gradient streams simultaneously, saturating the server's network bandwidth and making it the communication chokepoint. This "incast" problem drove the adoption of Ring AllReduce, where each worker sends and receives at its own link rate, achieving $N$-fold higher aggregate bandwidth by distributing the load across all nodes. For dense models beyond 4--8 GPUs, decentralized AllReduce wins decisively.
 
 However, for **Recommendation Systems**\index{Recommendation System}—specifically the Deep Learning Recommendation Model (DLRM)—the model parameters are dominated by massive Embedding Tables (often 10 TB+) that cannot fit on any single GPU. Furthermore, the updates are sparse: a batch of users interacts with only a tiny fraction (e.g., 0.001 percent) of the items.
 
@@ -2413,6 +2373,32 @@ class FrontierHybridRecap:
 Only by combining all three can we train Archetype A systems efficiently.
 
 :::
+
+To see why the combination matters, consider three parallelism configurations for training the `{python} FrontierHybridRecap.frontier_params_b_str` model on a 1,024-GPU cluster organized as 128 nodes of 8 GPUs each. The progression from pure data parallelism through tensor and pipeline parallelism makes the efficiency gain concrete.
+
+Configuration A: Pure Data Parallelism (DP-1024). All 1,024 GPUs replicate the full model (using ZeRO to shard optimizer states), and each GPU processes a different data shard. The gradient AllReduce exchanges 350 GB across the full InfiniBand fabric. As the scaling-efficiency analysis showed, this achieves approximately 37.5 percent efficiency because the inter-node communication dominates.
+
+Configuration B: TP-8, DP-128. Within each node, 8 GPUs use tensor parallelism over NVLink. Across nodes, 128 data-parallel groups synchronize gradients over InfiniBand. Each data-parallel group now needs to AllReduce only the gradients for its 1/8 shard of the model (43.75 GB instead of 350 GB), and the TP communication is contained within the fast NVLink domain. The inter-node AllReduce time drops from 14 seconds to approximately 1.75 seconds. If the compute time is still 2.1 seconds, the efficiency improves to $2.1 / (2.1 + 1.75) \approx 54.5$ percent, and with communication-computation overlap, practical efficiency reaches 75--85 percent.
+
+Configuration C: TP-8, PP-4, DP-32. Within each node, 8 GPUs use tensor parallelism. Across 4 nodes, pipeline parallelism divides the model into 4 stages. Across the remaining 32 data-parallel groups, gradient synchronization occurs over InfiniBand. Pipeline parallelism reduces the gradient AllReduce volume further (each stage has roughly 1/4 of the parameters), and the pipeline communication (forwarding activations between stages) has lower volume than a full AllReduce. The trade-off is the pipeline bubble: at the beginning and end of each microbatch, some pipeline stages are idle while waiting for activations from earlier stages or gradients from later stages. The bubble fraction is approximately $(p-1)/m$, so with 4 pipeline stages and 32 microbatches per training step, the bubble wastes roughly 9 percent of compute.
+
+The three-way comparison reveals a clear pattern: configurations that keep high-bandwidth communication (tensor parallelism) within the fast NVLink domain and push only low-bandwidth communication (data-parallel AllReduce of smaller gradient shards) onto the slower InfiniBand fabric achieve the highest efficiency. *The infrastructure hierarchy dictates the parallelism hierarchy.* The resulting principle is called hierarchy-aware parallelism, and it is a common approach for large-scale training systems.
+
+::: {#dfn-distributed-training-hierarchy-aware-parallelism .callout-definition title="Hierarchy-aware parallelism"}
+
+***Hierarchy-Aware Parallelism***\index{Hierarchy-Aware Parallelism!definition} is the strategy of mapping different parallel execution modes to the physical bandwidth tiers of the cluster.
+
+1.  **Significance (quantitative)**: It ensures that high-frequency synchronization (for example, Tensor Parallelism) stays on the fastest links (NVLink), while lower-frequency tasks (for example, Data Parallelism) use slower tiers (InfiniBand). This alignment maximizes scaling efficiency $(\eta_{\text{scaling}})$ by reducing exposed communication time $(T_{\text{comm}}(N))$ and latency $(L_{\text{lat}})$.
+2.  **Observation**: Unlike Uniform Parallelism\index{Uniform Parallelism}, which treats all node-to-node links as equal, Hierarchy-Aware strategies respect the Bandwidth Cliffs between die, node, and rack boundaries.
+3.  **Pitfall**: A frequent misconception is that any model can be sharded across any number of nodes. In reality, if the Hierarchy Mapping\index{Mapping!hierarchy} is wrong (for example, sharding a large tensor across a slow inter-rack link), the communication time will dwarf the compute time, making the scale-out useless.
+
+:::
+
+The interaction also flows in the reverse direction: the choice of parallelism strategy influences infrastructure design. A training system that uses TP-8, PP-4, DP-32 generates a communication pattern where the most bandwidth-intensive traffic (tensor-parallel AllReduce) is confined to within each node, the moderate-bandwidth traffic (pipeline stage communication) flows between groups of 4 neighboring nodes, and the lowest-bandwidth traffic (data-parallel AllReduce of reduced gradient shards) flows across the full cluster.
+
+The layered communication pattern favors a hierarchical network topology where nearby nodes have higher bandwidth between them (a "locality-aware" topology) over a flat topology where all node pairs have equal bandwidth (a uniform fat-tree). Rail-optimized and hierarchical fat-tree designs exploit this locality, placing the nodes that communicate most frequently on the same switch or in the same rack, minimizing the number of switch hops for the most bandwidth-intensive traffic.
+
+The practical implication for infrastructure procurement is that the network topology must be co-designed with the parallelism strategy, not selected independently. An organization that purchases a flat fat-tree fabric (optimized for any-to-any communication) but trains exclusively with hierarchy-aware parallelism (where most traffic is local) has over-provisioned the network's global bandwidth while potentially under-provisioning local bandwidth. Conversely, an organization that purchases a rail-optimized fabric (optimized for local communication) but later needs to run Mixture-of-Experts models with AllToAll communication (which requires global bandwidth) will find the fabric inadequate. The network fabric, which represents 10--15 percent of total system cost, must be matched to the anticipated workload mix, and changing the fabric after deployment is prohibitively expensive and disruptive.
 
 ### The 3D training loop {#sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop}
 
@@ -2578,7 +2564,7 @@ Each parallelism dimension imposes a distinct traffic profile on the network. Te
 
 The last cost is not bandwidth but scheduling: a pipelined model is only efficient when enough micro-batches are in flight to keep all stages busy.
 
-The primary efficiency penalty in pipeline parallelism is the "bubble"—the periods at the start and end of a training step where GPUs sit idle waiting for the pipeline to fill or drain. For a naive GPipe schedule, the pipeline must completely fill with micro-batches before the first backward pass begins, and completely drain at the end. The fraction of time spent in this bubble is given by the ratio $\frac{p-1}{m + p - 1}$, where $p$ is the number of pipeline stages and $m$ is the number of micro-batches per global batch. For a GPT-175B configuration with $p=16$ stages and $m=32$ micro-batches, the bubble fraction is $\frac{15}{47} \approx 31.9\%$, meaning nearly one-third of the theoretical compute capacity is wasted. To mitigate this, pipeline runtimes often use 1F1B (One-Forward-One-Backward) scheduling. 1F1B interleaves forward and backward passes once the pipeline enters the steady state, allowing memory to be freed earlier. This reduction in peak memory pressure allows practitioners to increase $m$, which drives the bubble fraction down asymptotically, improving hardware utilization.
+The remaining cost is the pipeline bubble developed in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. Applying its bubble fraction $\frac{p-1}{m + p - 1}$ to this hybrid layout, a GPT-175B configuration with $p=16$ stages and $m=32$ micro-batches wastes $\frac{15}{47} \approx 31.9\%$ of theoretical compute capacity, nearly one-third. The 1F1B scheduling that reclaims activation memory, and the larger micro-batch counts it makes practical, drive that fraction down asymptotically.
 
 ### Blackwell-class scaling example {#sec-distributed-training-systems-systems-hybrid-parallelism-blackwell}
 
@@ -3115,7 +3101,7 @@ RLHF is therefore not a detour from parallelism strategy; it is the case that sh
 
 ## Parallelism Strategy Comparison {#sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a}
 
-The final comparison is a feasibility filter, not a generic ranking. For a new 50-billion parameter model, the decisive questions are which memory state fits, how often communication occurs, where the pipeline bubble appears, and which abstraction cost the engineering team can tolerate. @Tbl-parallelism-compare turns those questions into engineering signals.
+This section completes the feasibility filter previewed by the decision tree in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344. That tree named the binding constraints; now that tensor, pipeline, and hybrid parallelism have been developed, the same filter can be stated as engineering signals rather than a generic ranking. For a new 50-billion parameter model, the decisive questions are which memory state fits, how often communication occurs, where the pipeline bubble appears, and which abstraction cost the engineering team can tolerate. @Tbl-parallelism-compare turns those questions into engineering signals.
 
 | **Strategy**             | **Binding constraint**                               | **Primary movement**                           | **Placement decision**                                     | **Validation signal**                                   |
 |:-------------------------|:-----------------------------------------------------|:-----------------------------------------------|:-----------------------------------------------------------|:--------------------------------------------------------|
@@ -3139,9 +3125,7 @@ The table and flowchart are intentionally coarse, but their purpose is precise: 
 
 The parallelism strategies examined throughout this chapter (gradient averaging, AllReduce synchronization, tensor splitting, pipeline scheduling) translate into deployed training systems through a layered abstraction hierarchy. Understanding this hierarchy matters because the abstraction level determines which constraints the engineer must manage directly and which are delegated to the runtime.
 
-At the data-parallel layer, the simplest distributed training abstraction wraps a model so that the framework automatically replicates it across available accelerators, splits each batch, and averages gradients after the backward pass. Historically, parameter-server systems[^fn-parameter-server] organized this work with server nodes that store shared parameters while workers push and pull updates [@li2014]. This abstraction requires minimal changes to a single-device training loop, but dense synchronous training often prefers decentralized collectives because they spread gradient bandwidth across workers rather than concentrating it in a server tier.
-
-[^fn-parameter-server]: **Parameter Server**\index{Parameter Server!architecture}: Formalized by @li2014 at CMU/Google, this architecture dedicates server nodes to storing parameters while workers push gradients and pull updates. The fundamental bottleneck: with $N$ workers, server inbound bandwidth must handle $N$ gradient streams simultaneously, making the server the communication chokepoint. For dense models beyond 4--8 GPUs, decentralized AllReduce (where each worker sends and receives at its own link rate) achieves $N$-fold higher aggregate bandwidth, which is why dense training systems often favor decentralized AllReduce over the parameter server design.
+At the data-parallel layer, the simplest distributed training abstraction wraps a model so that the framework automatically replicates it across available accelerators, splits each batch, and averages gradients after the backward pass. Historically, parameter-server systems organized this work with server nodes that store shared parameters while workers push and pull updates [@li2014]. As @sec-distributed-training-systems-systems-parameter-servers-embedding-sharding-8821 established, that design concentrates gradient bandwidth at the server tier, so dense synchronous training favors the decentralized collectives below.
 
 Large-scale data parallelism eliminates this bottleneck by replacing the central server with decentralized AllReduce. Each worker participates symmetrically in the reduction: every device both sends and receives gradient chunks at its own link rate, distributing the bandwidth load across all nodes rather than concentrating it. The framework initializes a process group that maps workers to the physical topology, selects an appropriate collective algorithm (ring, tree, or hierarchical) based on the detected interconnect, and inserts gradient synchronization hooks into the backward pass automatically. Gradient bucketing further improves efficiency by grouping small tensors into larger messages before transmission, and computation-communication overlap allows the AllReduce for early layers to proceed while later layers are still computing gradients. These optimizations can reach high parallel efficiency at moderate scale—not because the API is simple, but because the underlying runtime makes topology-aware decisions that a manual implementation would otherwise need to reproduce.
 
