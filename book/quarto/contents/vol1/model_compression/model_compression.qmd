@@ -92,7 +92,7 @@ class CompressionDeploymentScale:
 
 A `{python} CompressionDeploymentScale.llm_7b_str`-billion parameter language model requires `{python} CompressionDeploymentScale.llm_7b_mem_gb_str` merely to store its weights in FP16. The deployment target is a smartphone with `{python} CompressionDeploymentScale.smartphone_ram_gb_str` of RAM shared across the operating system, applications, and the model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} CompressionDeploymentScale.llm_7b_mem_gb_str` *cannot* fit in `{python} CompressionDeploymentScale.smartphone_ram_gb_str`. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The later model-serving chapter formalizes this as a latency budget, but the local idea is simple: every request has only a small time window in which to load data, run arithmetic, and return a result. The broader deployment gap also includes memory capacity, energy, and offline execution. That gap is not a minor inconvenience but a defining challenge of model compression.
 
-Recall the silicon contract (Principle \ref{pri-silicon-contract}) (@sec-introduction-iron-law-ml-systems-c32a), the implicit agreement every model makes with its hardware about which resource it will saturate. The three candidates are compute throughput, memory bandwidth, and memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-model-training-mixedprecision-training-9218, mixed precision speeds training while maintaining the ability to learn. Here, we go further, reducing precision to INT8 and beyond for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context, reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
+Recall the silicon contract (Principle \ref{pri-silicon-contract}) (@sec-introduction-iron-law-ml-systems-c32a), the implicit agreement every model makes with its hardware about which resource it will saturate. The three candidates are compute throughput, memory bandwidth, and memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-model-training-mixedprecision-training-9218, mixed precision speeds training while maintaining the ability to learn. Here, we go further, reducing precision to INT8 and beyond for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Where data selection optimized what the model learns from, compression optimizes what the trained model carries into that smaller environment. Model compression is the systematic process of renegotiating that contract for its new execution context, reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
 The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A `{python} CompressionDeploymentScale.llm_175b_str` billion parameter model consumes over `{python} CompressionDeploymentScale.llm_175b_mem_gb_str` in FP16 representation alone, yet a smartphone provides `{python} CompressionDeploymentScale.smartphone_ram_gb_str` of RAM and a microcontroller offers `{python} CompressionDeploymentScale.mcu_ram_kb_str`. Bridging six orders of magnitude requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model (redundant parameters, numerical precision, or architectural complexity), and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
@@ -286,171 +286,7 @@ These same physics apply at data center scale: distributed training systems use 
 
 : **The Energy Hierarchy**: Relative energy cost of representative arithmetic and memory operations, normalized to an 8-bit integer add. A 32-bit float add costs `{python} QuantizationEnergyPhysics.energy_float_add_ratio_mult_str` more than its 8-bit integer counterpart, but a single `{python} QuantizationEnergyPhysics.energy_dram_read_bits_value_str`-bit DRAM read costs `{python} QuantizationEnergyPhysics.energy_dram_read_ratio_mult_str` more—more than four orders of magnitude above on-chip compute. This gap is why bit-width reductions that shrink data movement dominate the energy budget of inference far more than the arithmetic savings alone would suggest. {#tbl-model-compression-energy-hierarchy tbl-colwidths="[33,33,33]"}
 
-These energy savings explain why neural networks tolerate aggressive quantization: the energy cost of higher precision exceeds the accuracy benefit for most applications. The engineering question is how much precision can be sacrificed before accuracy collapses. @Fig-quantization-free-lunch shows two distinct regimes: a "Free Lunch" zone where reducing precision has minimal impact on accuracy, and a "Cliff" where the model fails catastrophically.
-
-::: {#fig-quantization-free-lunch fig-env="figure" fig-pos="htb" fig-cap="**The Quantization Free Lunch**: Model accuracy vs. Bit-width. Most models exhibit a 'Free Lunch' plateau where reducing precision from FP32 to INT8 yields <1 percent accuracy loss. This robustness collapses at the 'Quantization Cliff' (typically 3--4 bits). Curves are illustrative and meant to show qualitative behavior." fig-alt="Line chart of accuracy vs. precision (bits). Blue line (CNN) stays flat down to 8 bits then drops. Red line (transformer) drops earlier. Green shaded area marks the “ Free Lunch Zone ” of minimal loss."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ THE QUANTIZATION FREE LUNCH (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-quantization-free-lunch in Optimization Framework section
-# │
-# │ Goal: Visualize the accuracy-vs-precision trade-off.
-# │ Show: The "Free Lunch Zone" above 4 bits and the "cliff" below it.
-# │ How: Plot model accuracy across bit-widths (FP32 to 1-bit).
-# │
-# │ Imports: numpy (np), mlsys (viz)
-# │ Exports: (figure output only)
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Visualize the accuracy-vs-precision trade-off.
-import numpy as np
-from book.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
-
-# —Data ---
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-bits = np.array([32, 16, 8, 4, 3, 2])
-acc_cnn = np.array([76.1, 76.1, 76.0, 74.5, 55.0, 10.0])
-acc_trans = np.array([84.0, 84.0, 83.5, 78.0, 40.0, 10.0])
-
-# —Plot ---
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(bits, acc_cnn, 'o-', color=COLORS['BlueLine'], label='CNN (ResNet-50)', markersize=5)
-ax.plot(bits, acc_trans, 's-', color=COLORS['RedLine'], label='Transformer (BERT)', markersize=5)
-
-ax.invert_xaxis()
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_xlabel('Precision (Bits)')
-ax.set_ylabel('Model Accuracy (%)')
-ax.set_xticks(bits)
-ax.set_xticklabels(['FP32', 'FP16', 'INT8', 'INT4', 'INT3', 'INT2'], rotation=90)
-
-ax.axvspan(33, 7, color=COLORS['GreenL'], alpha=0.3)
-ax.text(20, 50, "Free Lunch Zone\n(<1 percent Loss)", color=COLORS['GreenLine'], fontweight='bold', ha='center', fontsize=9)
-ax.axvspan(5, 1, color=COLORS['RedL'], alpha=0.3)
-ax.text(3.0, 83, "The Cliff", color=COLORS['RedLine'], fontweight='bold', ha='center', fontsize=9)
-ax.legend(loc='lower left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-These physics-level savings translate directly into deployment capabilities. A model that cannot fit on a device at full precision may run comfortably, and faster, when quantized. A concrete LLM scenario shows how reduced precision turns capacity pressure into bandwidth relief.
-
-```{python}
-#| echo: false
-#| label: quant-speedup-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ QUANTIZATION SPEEDUP CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Quantization Speedup"
-# │
-# │ Goal: Demonstrate the bandwidth-driven speedup from quantization.
-# │ Show: That INT4 yields a 4× speedup for bandwidth-bound LLM generation.
-# │ How: Calculate attainable throughput for FP16 vs. INT4 on a 7-billion-parameter model.
-# │
-# │ Imports: mlsysim.book (fmt), mlsysim.constants (BYTES_FP16, BYTES_INT4, byte)
-# │ Exports: params_b_str, params_b_value_str, bytes_fp16_value_str, bytes_int4_value_str, device_ram_gb_str,
-# │          mem_bw_gb_per_s_str, kv_cache_gb_str, fp16_size_gb_str, fp16_total_gb_str,
-# │          fp16_latency_ms_str, fp16_tokens_per_s_str, int4_size_gb_str, int4_latency_ms_str,
-# │          int4_tokens_per_s_str, speedup_mult_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, fmt_params, fmt_qty, fmt_qty_int, check, fmt_time, fmt_rate
-from mlsysim.core.units import ms
-
-# ┌── LEGO ───────────────────────────────────────────────
-class QuantizationSpeedup:
-    """
-    Namespace for Quantization Speedup calculation.
-    Scenario: Deploying a 7-billion-parameter LLM on a bandwidth-constrained device.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params_b = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
-    bytes_fp16 = BYTES_FP16.to(byte).magnitude
-    bytes_int4 = BYTES_INT4.to(byte).magnitude
-
-    device_ram_gb = 16
-    device_ram = device_ram_gb * GB
-    mem_bw = Hardware.Tech.Storage.SystemMemory.bandwidth
-    kv_cache_gb = 1.0
-    kv_cache = kv_cache_gb * GB
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Sizes
-    fp16_size = memory_from_params(params_b * Bparam, bytes_fp16 * byte / param)
-    fp16_size_gb = fp16_size.to(GB).magnitude
-    fp16_total_gb = fp16_size_gb + kv_cache_gb
-    fp16_total = fp16_total_gb * GB
-
-    int4_size = memory_from_params(params_b * Bparam, bytes_int4 * byte / param)
-    int4_size_gb = int4_size.to(GB).magnitude
-
-    # Step 2: Latency (Bandwidth Bound)
-    fp16_latency = fp16_size / mem_bw
-    int4_latency = int4_size / mem_bw
-
-    # Step 3: Throughput (tokens/s)
-    fp16_toks = token_throughput(1 * count, fp16_latency).to(count / second).magnitude
-    int4_toks = token_throughput(1 * count, int4_latency).to(count / second).magnitude
-
-    speedup = int4_toks / fp16_toks
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(3.5 <= speedup <= 4.5, f"INT4 should yield ~4x speedup vs FP16, got {speedup:.1f}x")
-    check(bytes_fp16 / bytes_int4 == 4, "FP16-to-INT4 weight traffic should fall by 4x.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    params_b_str = fmt_params(Models.Language.Llama2_7B.parameters, scale="B", precision=0, commas=False)
-    params_b_value_str = fmt(params_b, precision=0, commas=False)
-    bytes_fp16_value_str = fmt_int(bytes_fp16, commas=False)
-    bytes_int4_value_str = fmt(bytes_int4, precision=1, commas=False)
-    device_ram_gb_str = fmt_qty(device_ram, GB, precision=0, commas=False)
-    mem_bw_gb_per_s_str = fmt_qty_int(mem_bw, GB / second, commas=False)
-    kv_cache_gb_str = fmt_qty_int(kv_cache, GB, commas=False)
-
-    fp16_size_gb_str = fmt_qty_int(fp16_size, GB, commas=False)
-    fp16_total_gb_str = fmt_qty_int(fp16_total, GB, commas=False)
-    fp16_latency_ms_str = fmt_time(round(fp16_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
-    fp16_tokens_per_s_str = fmt_rate(fp16_toks, 'tokens/s', precision=1, commas=False)
-
-    int4_size_gb_str = fmt_qty(int4_size, GB, precision=1, commas=False)
-    int4_latency_ms_str = fmt_time(round(int4_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
-    int4_tokens_per_s_str = fmt_rate(round(int4_toks), 'tokens/s', precision=0, commas=False)
-    speedup_mult_str = fmt_multiple(speedup, commas=False, precision=0)
-```
-
-The result is a bandwidth-driven speedup: fewer bits moved per token means more tokens/s.
-
-::: {#nbk-model-compression-quantization-speedup .callout-notebook title="The quantization speedup"}
-
-**Problem**: A deployment scenario calls for running a `{python} QuantizationSpeedup.params_b_str`-parameter LLM on a device with `{python} QuantizationSpeedup.device_ram_gb_str` RAM. The weights are FP16 (`{python} QuantizationSpeedup.bytes_fp16_value_str` bytes).
-
-**Math**:
-
-1.  **Model size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_fp16_value_str` bytes = `{python} QuantizationSpeedup.fp16_size_gb_str`.
-2.  **KV cache**: Context window (4096 tokens) requires ≈ `{python} QuantizationSpeedup.kv_cache_gb_str`.
-3.  **Total memory**: `{python} QuantizationSpeedup.fp16_size_gb_str` + `{python} QuantizationSpeedup.kv_cache_gb_str` = `{python} QuantizationSpeedup.fp16_total_gb_str`. This barely fits, leaving no room for OS or buffers.
-4.  **Bandwidth cost**: Loading `{python} QuantizationSpeedup.fp16_size_gb_str` at `{python} QuantizationSpeedup.mem_bw_gb_per_s_str` takes `{python} QuantizationSpeedup.fp16_latency_ms_str` per token. That is `{python} QuantizationSpeedup.fp16_tokens_per_s_str`, too slow for chat.
-
-**Fix (INT4)**:
-
-1.  **Quantization**: Convert weights to INT4 (`{python} QuantizationSpeedup.bytes_int4_value_str` bytes).
-2.  **New size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_int4_value_str` bytes = `{python} QuantizationSpeedup.int4_size_gb_str`.
-3.  **New speed**: Loading `{python} QuantizationSpeedup.int4_size_gb_str` takes `{python} QuantizationSpeedup.int4_latency_ms_str`. Speed jumps to `{python} QuantizationSpeedup.int4_tokens_per_s_str`.
-
-**Systems insight**: Quantization makes the model fit and provides a `{python} QuantizationSpeedup.speedup_mult_str` linear speedup because LLM generation is bandwidth bound.
-
-:::
+These savings explain why neural networks tolerate aggressive quantization: the energy cost of higher precision exceeds the accuracy benefit for most applications, and reduced precision turns capacity pressure into bandwidth relief on the target device. How much precision a model can shed before accuracy collapses, and how large the resulting speedup proves to be, are the questions the quantization section develops in full.
 
 The relative importance of each dimension varies by deployment target. Cloud systems may tolerate larger models but demand throughput; mobile devices prioritize memory and energy; embedded systems face hard constraints on all resources simultaneously. Understanding these deployment contexts shapes which optimization dimensions to prioritize.
 
@@ -590,7 +426,7 @@ class ModelDeviceComparison:
 
 @Tbl-model-vs-device quantifies this mismatch using the Lighthouse models from @sec-network-architectures-lighthouse-roster-model-biographies-a763. The gap between model requirements and device capabilities explains *why* compression is not optional for resource-constrained deployment: without it, the models cannot run.
 
-As @tbl-model-vs-device makes concrete, even aggressively optimized models like MobileNetV2 at INT8 precision exceed TinyML device memory by about `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`. Optimization also contributes to sustainable and accessible AI deployment. Reducing a model's energy footprint is important as AI workloads scale, helping mitigate the environmental impact\index{Environmental Impact!model compression benefits} of large-scale ML training and inference [@patterson2021carbon]. At the same time, optimized models can expand the reach of machine learning, supporting applications in low-resource environments, from rural healthcare to autonomous systems operating in the field.
+As @tbl-model-vs-device makes concrete, even aggressively optimized models like MobileNetV2 at INT8 precision exceed TinyML device memory by about `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`.
 
 | **Model**              |                **Memory** **(Runtime)**                |               **Storage** **(Weights)**                | **Cloud** **(`{python} ModelDeviceComparison.cloud_cap_gb_str`)** | **Mobile** **(`{python} ModelDeviceComparison.mobile_cap_gb_str`)** | **TinyML** **(`{python} ModelDeviceComparison.tiny_cap_kb_str`)** |
 |:-----------------------|:------------------------------------------------------:|:------------------------------------------------------:|:-----------------------------------------------------------------:|:-------------------------------------------------------------------:|:-----------------------------------------------------------------:|
@@ -2961,7 +2797,7 @@ class QuantizationMemoryAnchor:
     smartphone_ram_gb_str = fmt_qty(smartphone_ram, GB, precision=0, commas=False)
 ```
 
-A `{python} QuantizationMemoryAnchor.llm_7b_str` billion parameter language model stored in FP16 consumes `{python} QuantizationMemoryAnchor.llm_7b_mem_gb_str`, yet users expect it to run on a smartphone with `{python} QuantizationMemoryAnchor.smartphone_ram_gb_str` of shared RAM. Structural optimization alone cannot bridge this gap: even aggressive pruning rarely exceeds 50--70 percent parameter reduction, leaving a model far too large for the target device. The remaining gains come from a different dimension entirely: reducing the number of bits used to represent each parameter\index{Model Compression!precision optimization}. *Quantization*, the process of reducing numerical precision, offers one of the most impactful optimizations for deployment, because it trades bits for speed and efficiency with minimal accuracy loss.
+The framework section established the gap that compression must close: a `{python} QuantizationMemoryAnchor.llm_7b_str`-billion parameter language model in FP16 needs `{python} QuantizationMemoryAnchor.llm_7b_mem_gb_str`, while the smartphone target offers only `{python} QuantizationMemoryAnchor.smartphone_ram_gb_str` of shared RAM. Structural optimization alone cannot bridge it, since even aggressive pruning rarely exceeds 50--70 percent parameter reduction. The remaining gains come from a different dimension entirely, reducing the number of bits used to represent each parameter\index{Model Compression!precision optimization}, and the open question this section answers is how far precision can be cut before accuracy collapses. *Quantization*, the process of reducing numerical precision, offers one of the most impactful optimizations for deployment, because it trades bits for speed and efficiency with minimal accuracy loss.
 
 ::: {#dfn-model-compression-quantization .callout-definition title="Quantization"}
 
@@ -2980,6 +2816,63 @@ Quantization[^fn-quantization-shannon] affects every neural network weight and a
 This choice directly impacts three system properties. Memory shrinks because an INT8 model is 4$\times$ smaller than FP32, enabling deployment on devices that could never hold the full-precision weights. Bandwidth demand drops proportionally: loading INT8 weights requires 4$\times$ less memory traffic, directly accelerating the bandwidth-bound inference that dominates LLM generation. Compute cost falls as well, since INT8 arithmetic is faster and cheaper than FP32 on most hardware with dedicated low-precision units [@gupta2015deep; @wang2019benchmarking].
 
 The accuracy cost of reduced precision varies by model and technique. CNNs typically tolerate INT8 quantization with <1 percent accuracy loss; transformers may require more care. Three approaches in increasing complexity are: **post-training quantization**\index{Post-Training Quantization!definition}\index{Quantization!post-training (PTQ)} (PTQ) for rapid deployment, **quantization-aware training**\index{Quantization-Aware Training!definition}\index{Quantization!aware training (QAT)} (QAT) for production systems requiring minimal accuracy loss, and **extreme quantization**\index{Quantization!extreme (INT4, binary)} (INT4, binary) for the most constrained environments.
+
+The viability of each approach depends on how much precision a model can shed before accuracy collapses. @Fig-quantization-free-lunch shows two distinct regimes: a "Free Lunch" zone where reducing precision has minimal impact on accuracy, and a "Cliff" where the model fails catastrophically.
+
+::: {#fig-quantization-free-lunch fig-env="figure" fig-pos="htb" fig-cap="**The Quantization Free Lunch**: Model accuracy vs. Bit-width. Most models exhibit a 'Free Lunch' plateau where reducing precision from FP32 to INT8 yields <1 percent accuracy loss. This robustness collapses at the 'Quantization Cliff' (typically 3--4 bits). Curves are illustrative and meant to show qualitative behavior." fig-alt="Line chart of accuracy vs. precision (bits). Blue line (CNN) stays flat down to 8 bits then drops. Red line (transformer) drops earlier. Green shaded area marks the “ Free Lunch Zone ” of minimal loss."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE QUANTIZATION FREE LUNCH (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-quantization-free-lunch in Quantization and Precision section
+# │
+# │ Goal: Visualize the accuracy-vs-precision trade-off.
+# │ Show: The "Free Lunch Zone" above 4 bits and the "cliff" below it.
+# │ How: Plot model accuracy across bit-widths (FP32 to 1-bit).
+# │
+# │ Imports: numpy (np), mlsys (viz)
+# │ Exports: (figure output only)
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visualize the accuracy-vs-precision trade-off.
+import numpy as np
+from book.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+
+# —Data ---
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+bits = np.array([32, 16, 8, 4, 3, 2])
+acc_cnn = np.array([76.1, 76.1, 76.0, 74.5, 55.0, 10.0])
+acc_trans = np.array([84.0, 84.0, 83.5, 78.0, 40.0, 10.0])
+
+# —Plot ---
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(bits, acc_cnn, 'o-', color=COLORS['BlueLine'], label='CNN (ResNet-50)', markersize=5)
+ax.plot(bits, acc_trans, 's-', color=COLORS['RedLine'], label='Transformer (BERT)', markersize=5)
+
+ax.invert_xaxis()
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_xlabel('Precision (Bits)')
+ax.set_ylabel('Model Accuracy (%)')
+ax.set_xticks(bits)
+ax.set_xticklabels(['FP32', 'FP16', 'INT8', 'INT4', 'INT3', 'INT2'], rotation=90)
+
+ax.axvspan(33, 7, color=COLORS['GreenL'], alpha=0.3)
+ax.text(20, 50, "Free Lunch Zone\n(<1 percent Loss)", color=COLORS['GreenLine'], fontweight='bold', ha='center', fontsize=9)
+ax.axvspan(5, 1, color=COLORS['RedL'], alpha=0.3)
+ax.text(3.0, 83, "The Cliff", color=COLORS['RedLine'], fontweight='bold', ha='center', fontsize=9)
+ax.legend(loc='lower left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+plt.show()
+plt.close()
+```
+
+:::
 
 ### Precision and energy {#sec-model-compression-precision-energy-cc8e}
 
@@ -3036,7 +2929,7 @@ class EnergyCosts:
 
 #### Energy costs {#sec-model-compression-energy-costs-d1d5}
 
-Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @Fig-quantized-energy gives representative operation-level energy costs for integer arithmetic and SRAM reads: a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_pj_value_str` pJ, while an 8-bit integer addition is just `{python} EnergyCosts.energy_add_int8_pj_value_str` pJ. Floating-point arithmetic follows the same direction: a 32-bit floating-point addition consumes approximately `{python} EnergyCosts.energy_add_fp32_pj_value_str` pJ, whereas a 16-bit floating-point addition requires `{python} EnergyCosts.energy_add_fp16_pj_value_str` pJ. DRAM access\index{DRAM!energy cost of access} is more expensive still. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
+@Tbl-model-compression-energy-hierarchy established the canonical gap between arithmetic and data movement; precision granularity extends it. @Fig-quantized-energy gives representative operation-level energy costs across more formats and across the SRAM hierarchy: a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_pj_value_str` pJ, while an 8-bit integer addition is just `{python} EnergyCosts.energy_add_int8_pj_value_str` pJ. Floating-point arithmetic follows the same direction: a 32-bit floating-point addition consumes approximately `{python} EnergyCosts.energy_add_fp32_pj_value_str` pJ, whereas a 16-bit floating-point addition requires `{python} EnergyCosts.energy_add_fp16_pj_value_str` pJ. DRAM access\index{DRAM!energy cost of access} is more expensive still. These savings compound across large-scale models operating over billions of operations. Reducing a model's energy footprint therefore contributes to sustainable and accessible AI deployment: it helps mitigate the environmental impact\index{Environmental Impact!model compression benefits} of large-scale ML training and inference as AI workloads scale [@patterson2021carbon], and it expands the reach of machine learning into low-resource environments, from rural healthcare to autonomous systems operating in the field.
 
 ::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision**: Bar chart comparing energy in picojoules for representative integer arithmetic operations (INT8 add: 0.03 pJ; INT32 multiply: 3.10 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings, while memory accesses can dominate arithmetic costs. Energy figures from [@horowitz2014]." fig-alt="Bar chart comparing energy consumption in picojoules for integer arithmetic operations and memory accesses. INT8 add uses 0.03 pJ, INT32 multiply uses 3.10 pJ, and SRAM reads range from 5 to 50 pJ depending on cache size."}
 
@@ -3178,7 +3071,7 @@ class EnergyDividend:
 
 The memory reduction of quantization is often the primary motivation, but the **Energy Dividend**\index{Energy Dividend!quantization efficiency} is the most significant systems consequence. While moving from FP32 to INT8 precision reduces the model's footprint by exactly 4$\times$, the energy required to perform the math drops much more precipitously.
 
-In the tradition of quantitative architecture, we compare the energy per operation $(E_{\text{op}})$ across numerical formats. Consider an addition operation—the backbone of the accumulators in matrix multiplication:
+The framework section's energy hierarchy already exposed this asymmetry; here it becomes the dividend. Comparing the energy per operation $(E_{\text{op}})$ for an addition, the backbone of the accumulators in matrix multiplication:
 
 *   **FP32 Addition**: Requires `{python} EnergyDividend.energy_add_fp32_pj_value_str` pJ.
 *   **INT8 Addition**: Requires `{python} EnergyDividend.energy_add_int8_pj_value_str` pJ.
@@ -3628,7 +3521,118 @@ class A100Int8Speedup:
 2. **Memory bandwidth**: INT8 weights are half the size, so loading them from memory takes half the time.
 3. **Combined effect**: For compute-bound operations, the speedup is primarily from compute throughput: ~`{python} A100Int8Speedup.a100_int8_speedup_mult_str` speedup.
 
-**Systems insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high Arithmetic Intensity $[\text{AI}]$) see ~`{python} A100Int8Speedup.a100_int8_speedup_mult_str` from faster INT8 units. The FP16-to-INT8 bandwidth-bound case achieves up to `{python} A100Int8Speedup.bandwidth_bound_speedup_mult_str` because memory traffic dominates, so halving data size nearly doubles effective throughput. Larger bandwidth-bound reductions, such as FP16 to INT4 or FP32 to INT8, can reach 4$\times$ when the bytes moved fall by 4$\times$.
+**Systems insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high Arithmetic Intensity $[\text{AI}]$) see ~`{python} A100Int8Speedup.a100_int8_speedup_mult_str` from faster INT8 units, where the gain comes from the integer matrix path rather than reduced memory traffic. The bandwidth-bound case inverts this: halving the bytes moved (FP16 to INT8) yields up to `{python} A100Int8Speedup.bandwidth_bound_speedup_mult_str`, and larger bit-width reductions scale the gain further, as the next worked example traces.
+
+:::
+
+The complementary case is bandwidth bound, where the speedup tracks the reduction in bytes moved per token rather than peak arithmetic throughput.
+
+```{python}
+#| echo: false
+#| label: quant-speedup-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTIZATION SPEEDUP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Quantization Speedup"
+# │
+# │ Goal: Demonstrate the bandwidth-driven speedup from quantization.
+# │ Show: That INT4 yields a 4× speedup for bandwidth-bound LLM generation.
+# │ How: Calculate attainable throughput for FP16 vs. INT4 on a 7-billion-parameter model.
+# │
+# │ Imports: mlsysim.book (fmt), mlsysim.constants (BYTES_FP16, BYTES_INT4, byte)
+# │ Exports: params_b_str, params_b_value_str, bytes_fp16_value_str, bytes_int4_value_str, device_ram_gb_str,
+# │          mem_bw_gb_per_s_str, kv_cache_gb_str, fp16_size_gb_str, fp16_total_gb_str,
+# │          fp16_latency_ms_str, fp16_tokens_per_s_str, int4_size_gb_str, int4_latency_ms_str,
+# │          int4_tokens_per_s_str, speedup_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.fmt import fmt_int, fmt, fmt_params, fmt_qty, fmt_qty_int, check, fmt_time, fmt_rate
+from mlsysim.core.units import ms
+from mlsysim.physics import memory_from_params
+from mlsysim.physics.quantities import token_throughput
+
+# ┌── LEGO ───────────────────────────────────────────────
+class QuantizationSpeedup:
+    """
+    Namespace for Quantization Speedup calculation.
+    Scenario: Deploying a 7-billion-parameter LLM on a bandwidth-constrained device.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    params_b = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
+    bytes_fp16 = BYTES_FP16.to(byte).magnitude
+    bytes_int4 = BYTES_INT4.to(byte).magnitude
+
+    device_ram_gb = 16
+    device_ram = device_ram_gb * GB
+    mem_bw = Hardware.Tech.Storage.SystemMemory.bandwidth
+    kv_cache_gb = 1.0
+    kv_cache = kv_cache_gb * GB
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Sizes
+    fp16_size = memory_from_params(params_b * Bparam, bytes_fp16 * byte / param)
+    fp16_size_gb = fp16_size.to(GB).magnitude
+    fp16_total_gb = fp16_size_gb + kv_cache_gb
+    fp16_total = fp16_total_gb * GB
+
+    int4_size = memory_from_params(params_b * Bparam, bytes_int4 * byte / param)
+    int4_size_gb = int4_size.to(GB).magnitude
+
+    # Step 2: Latency (Bandwidth Bound)
+    fp16_latency = fp16_size / mem_bw
+    int4_latency = int4_size / mem_bw
+
+    # Step 3: Throughput (tokens/s)
+    fp16_toks = token_throughput(1 * count, fp16_latency).to(count / second).magnitude
+    int4_toks = token_throughput(1 * count, int4_latency).to(count / second).magnitude
+
+    speedup = int4_toks / fp16_toks
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(3.5 <= speedup <= 4.5, f"INT4 should yield ~4x speedup vs FP16, got {speedup:.1f}x")
+    check(bytes_fp16 / bytes_int4 == 4, "FP16-to-INT4 weight traffic should fall by 4x.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    params_b_str = fmt_params(Models.Language.Llama2_7B.parameters, scale="B", precision=0, commas=False)
+    params_b_value_str = fmt(params_b, precision=0, commas=False)
+    bytes_fp16_value_str = fmt_int(bytes_fp16, commas=False)
+    bytes_int4_value_str = fmt(bytes_int4, precision=1, commas=False)
+    device_ram_gb_str = fmt_qty(device_ram, GB, precision=0, commas=False)
+    mem_bw_gb_per_s_str = fmt_qty_int(mem_bw, GB / second, commas=False)
+    kv_cache_gb_str = fmt_qty_int(kv_cache, GB, commas=False)
+
+    fp16_size_gb_str = fmt_qty_int(fp16_size, GB, commas=False)
+    fp16_total_gb_str = fmt_qty_int(fp16_total, GB, commas=False)
+    fp16_latency_ms_str = fmt_time(round(fp16_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
+    fp16_tokens_per_s_str = fmt_rate(fp16_toks, 'tokens/s', precision=1, commas=False)
+
+    int4_size_gb_str = fmt_qty(int4_size, GB, precision=1, commas=False)
+    int4_latency_ms_str = fmt_time(round(int4_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
+    int4_tokens_per_s_str = fmt_rate(round(int4_toks), 'tokens/s', precision=0, commas=False)
+    speedup_mult_str = fmt_multiple(speedup, commas=False, precision=0)
+```
+
+The result is a bandwidth-driven speedup: fewer bits moved per token means more tokens/s.
+
+::: {#nbk-model-compression-quantization-speedup .callout-notebook title="The quantization speedup"}
+
+**Problem**: A deployment scenario calls for running a `{python} QuantizationSpeedup.params_b_str`-parameter LLM on a device with `{python} QuantizationSpeedup.device_ram_gb_str` RAM. The weights are FP16 (`{python} QuantizationSpeedup.bytes_fp16_value_str` bytes).
+
+**Math**:
+
+1.  **Model size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_fp16_value_str` bytes = `{python} QuantizationSpeedup.fp16_size_gb_str`.
+2.  **KV cache**: Context window (4096 tokens) requires ≈ `{python} QuantizationSpeedup.kv_cache_gb_str`.
+3.  **Total memory**: `{python} QuantizationSpeedup.fp16_size_gb_str` + `{python} QuantizationSpeedup.kv_cache_gb_str` = `{python} QuantizationSpeedup.fp16_total_gb_str`. This barely fits, leaving no room for OS or buffers.
+4.  **Bandwidth cost**: Loading `{python} QuantizationSpeedup.fp16_size_gb_str` at `{python} QuantizationSpeedup.mem_bw_gb_per_s_str` takes `{python} QuantizationSpeedup.fp16_latency_ms_str` per token. That is `{python} QuantizationSpeedup.fp16_tokens_per_s_str`, too slow for chat.
+
+**Fix (INT4)**:
+
+1.  **Quantization**: Convert weights to INT4 (`{python} QuantizationSpeedup.bytes_int4_value_str` bytes).
+2.  **New size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_int4_value_str` bytes = `{python} QuantizationSpeedup.int4_size_gb_str`.
+3.  **New speed**: Loading `{python} QuantizationSpeedup.int4_size_gb_str` takes `{python} QuantizationSpeedup.int4_latency_ms_str`. Speed jumps to `{python} QuantizationSpeedup.int4_tokens_per_s_str`.
+
+**Systems insight**: Quantization makes the model fit and provides a `{python} QuantizationSpeedup.speedup_mult_str` linear speedup because LLM generation is bandwidth bound.
 
 :::
 
@@ -4693,23 +4697,13 @@ Dynamic quantization\index{Dynamic Quantization!definition} instead calculates t
 
 These timing and granularity decisions interact with the broader choice of quantization methodology. @Tbl-quantization_methods compares post-training quantization, quantization-aware training, and dynamic quantization, each offering distinct strengths and trade-offs for different deployment scenarios.
 
-| **Aspect**                    | **Post-Training Quantization** | **Quantization-Aware Training** | **Dynamic Quantization** |
-|:------------------------------|:------------------------------:|:-------------------------------:|:------------------------:|
-| **Pros**                      |                                |                                 |                          |
-| **Simplicity**                |               ✓                |                ✗                |            ✗             |
-| **Accuracy Preservation**     |               ✗                |                ✓                |            ✓             |
-| **Adaptability**              |               ✗                |                ✗                |            ✓             |
-| **Optimized Performance**     |               ✗                |                ✓                |            △             |
-| **Cons**                      |                                |                                 |                          |
-| **Accuracy Degradation**      |               ✓                |                ✗                |            △             |
-| **Computational Overhead**    |               ✗                |                ✓                |            ✓             |
-| **Implementation Complexity** |               ✗                |                ✓                |            ✓             |
-| **Trade-offs**                |                                |                                 |                          |
-| **Speed vs. Accuracy**        |               ✓                |                ✗                |            ✗             |
-| **Accuracy vs. Cost**         |               ✗                |                ✓                |            ✗             |
-| **Adaptability vs. Overhead** |               ✗                |                ✗                |            ✓             |
+| **Method**                            | **Engineering effort**                        | **Accuracy preservation**                    | **Input adaptability**  | **Reach for it when**                                                          |
+|:--------------------------------------|:----------------------------------------------|:---------------------------------------------|:------------------------|:-------------------------------------------------------------------------------|
+| **Post-training quantization (PTQ)**  | Low: no retraining, applied in minutes        | Lower: no mechanism to recover loss          | Fixed calibration range | the accuracy budget tolerates 1--2 percent loss and the deadline is tight      |
+| **Quantization-aware training (QAT)** | High: retraining with quantization simulation | Highest: weights adapt to quantization noise | Fixed calibration range | accuracy must stay within roughly 1 percent and the training budget allows     |
+| **Dynamic quantization**              | Moderate: ranges recomputed at runtime        | High: range fits each input                  | Per-input range         | activation ranges vary widely across inputs and runtime overhead is acceptable |
 
-: **Quantization Method Comparison**: Post-training quantization, quantization-aware training, and dynamic quantization represent distinct approaches to model compression. Legend: ✓ = present, ✗ = absent, △ = input-dependent. {#tbl-quantization_methods}
+: **Quantization Method Comparison**: The choice turns on three binding questions—engineering budget, accuracy threshold, and input variability—rather than a feature checklist. {#tbl-quantization_methods tbl-colwidths="[16,22,22,15,25]"}
 
 This comparison highlights the diverse strategies available for precision reduction. Before proceeding to advanced techniques, a quick checkpoint tests comprehension of these core quantization modes.
 
@@ -4935,7 +4929,7 @@ Extreme quantization is reserved for deployments where even INT8 or INT4\index{I
 
 Despite enabling ultra-low-power machine learning for embedded systems and mobile devices, binarization and ternarization face significant challenges. Performance maintenance is difficult with such drastic quantization, requiring specialized hardware capable of efficiently handling binary or ternary operations [@umuroglu2017]. Traditional processors lack optimization for these computations, necessitating custom hardware accelerators.
 
-Accuracy loss remains a critical concern. These methods suit tasks where high precision is not critical or where QAT can compensate for precision constraints. Despite challenges, the ability to drastically reduce model size while maintaining acceptable accuracy makes them attractive for edge AI and resource-constrained environments [@jacob2018]. Future advances in specialized hardware and training techniques will likely enhance their role in efficient, scalable AI.
+Accuracy loss remains a critical concern. These methods suit tasks where high precision is not critical or where QAT can compensate for precision constraints. Despite challenges, the ability to drastically reduce model size while maintaining acceptable accuracy makes them attractive for edge AI and resource-constrained environments [@jacob2018]. The operational rule follows from these constraints: reach for binary or ternary representations only when a KWS-class SRAM and energy budget leaves no other option, and only when specialized kernels exist to execute the resulting operations efficiently. Below that threshold, INT8 or INT4 retains accuracy that binary and ternary forfeit.
 
 A final checkpoint consolidates the quantization concepts before the chapter turns to architectural efficiency techniques.
 
@@ -5001,7 +4995,7 @@ The gap arises from several sources. Sparse matrices stored in dense format wast
 
 ## Architectural Efficiency {#sec-model-compression-architectural-efficiency-8dd3}
 
-Architectural efficiency starts from the execution trace. In the pruned and quantized ResNet-50 example, the paper speedup is `{python} TheoryPracticeSpeedup.theoretical_speedup_mult_str`, but measured speedup is often closer to `{python} TheoryPracticeSpeedup.measured_speedup_mult_str`. A profiler explains why: sparse tensors may still move through dense kernels, reduced-precision operators may require conversions the hardware cannot hide, and small layers may spend more time launching kernels and moving intermediates than doing arithmetic. The model has become smaller on paper, but the execution trace still asks the machine to perform an inefficient sequence of memory accesses and operations.
+Architectural efficiency starts from the execution trace. The preceding section quantified the gap between paper and measured speedup; a profiler explains where it goes: sparse tensors may still move through dense kernels, reduced-precision operators may require conversions the hardware cannot hide, and small layers may spend more time launching kernels and moving intermediates than doing arithmetic. The model has become smaller on paper, but the execution trace still asks the machine to perform an inefficient sequence of memory accesses and operations.
 
 Where representation optimization determines *what* computations to perform and precision optimization determines *how precisely* to compute them, architectural efficiency determines *how* those computations fit the machine. Measured bottlenecks determine which architectural response is useful. Hardware-aware design changes the model before training so its layers match the deployment envelope. Sparsity exploitation makes removed weights visible to kernels that can skip them. Dynamic computation lets easy inputs leave early instead of paying for the worst case. Operator fusion reduces memory traffic when adjacent operations would otherwise write and reread the same tensors.
 
@@ -6850,24 +6844,13 @@ Across all platforms, sparse operations reduce memory bandwidth requirements and
 
 #### Challenges and limitations {#sec-model-compression-challenges-limitations-975f}
 
-The same format-hardware contract explains why sparsity often disappoints in practice. @Tbl-sparsity-optimization summarizes the challenges that limit its practical effectiveness.
+The same format-hardware contract explains why sparsity often disappoints in practice.
 
 ::: {.column-margin}
 ![](images/svg/vol1_model_compression_margin_003.svg){width="100%" fig-alt="A speedup curve that stays flat and below the break-even line until a marked knee near 90 to 95 percent zeros, then climbs; the low-payoff region left of the knee is shaded red."}
 
 *Unstructured sparsity pays off only past a 90 to 95 percent zero fraction.*
 :::
-
-| **Challenge**                          | **Description**                                                                                               | **Impact**                                                                                    |
-|:---------------------------------------|:--------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------|
-| **Unstructured Sparsity Optimization** | Irregular sparse patterns make it difficult to exploit sparsity on hardware.                                  | Limited hardware acceleration and reduced computational savings.                              |
-| **Algorithmic Complexity**             | Sophisticated pruning and sparse matrix operations require complex algorithms.                                | High computational overhead and algorithmic complexity for large models.                      |
-| **Hardware Support**                   | Hardware accelerators are optimized for structured sparsity, making unstructured sparsity harder to optimize. | Suboptimal hardware utilization and lower performance for unstructured sparsity.              |
-| **Accuracy Trade-off**                 | Aggressive sparsity may degrade model accuracy if not carefully balanced.                                     | Potential loss in performance, requiring careful tuning and validation.                       |
-| **Energy Efficiency**                  | Overhead from sparse matrix storage and management can offset the energy savings from reduced computation.    | Power consumption may not improve if the overhead surpasses savings from sparse computations. |
-| **Limited Applicability**              | Sparsity may not benefit all models or tasks, especially in domains requiring dense representations.          | Not all models or hardware benefit equally from sparsity.                                     |
-
-: **Sparsity Optimization Challenges**: Unstructured sparsity, while reducing model size, hinders hardware acceleration due to irregular memory access patterns, limiting potential computational savings and requiring specialized hardware or software to realize efficiency gains. {#tbl-sparsity-optimization tbl-colwidths="[21,45,34]"}
 
 The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats add indexing overhead that can offset computational savings. @Sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0 details the Compressed Sparse Row\index{Compressed Sparse Row!storage format} layout and quantifies how its per-nonzero metadata makes the memory payoff density-dependent, which is why a rule of thumb holds that sparsity typically must exceed 90–95 percent to be worthwhile for performance.
 
@@ -7158,7 +7141,7 @@ With dozens of techniques across three optimization dimensions, rigorous measure
 
 ## Efficiency Measurement {#sec-model-compression-efficiency-measurement-2424}
 
-A model quantized to INT8 should be 4$\times$ smaller and roughly 3$\times$ faster, yet measured gains on target hardware frequently fall short. Theoretical compression ratios and measured deployment improvements often diverge, sometimes dramatically, because real speedups depend on memory hierarchy effects, kernel implementations, and hardware utilization patterns that theory alone cannot predict. Translating theoretical compression ratios into measurable deployment improvements therefore requires systematic profiling and evaluation.
+@Sec-model-compression-architectural-efficiency-8dd3 traced the gap between a compression ratio on paper and the speedup a model actually realizes. That gap now becomes a measurement obligation: a model quantized to INT8 should be 4$\times$ smaller and roughly 3$\times$ faster, but only profiling on target hardware confirms how much of that the deployment keeps. Real speedups depend on memory hierarchy effects, kernel implementations, and hardware utilization patterns that theory alone cannot predict, so translating compression ratios into measurable improvements requires systematic profiling and evaluation.
 
 Three questions structure this analysis: *where* optimization efforts should focus, *how* to measure whether optimizations achieve their intended goals, and *how* to validate that combined techniques deliver expected benefits.
 

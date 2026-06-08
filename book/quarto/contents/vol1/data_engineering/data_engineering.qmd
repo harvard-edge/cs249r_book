@@ -105,7 +105,7 @@ This compilation metaphor establishes the engineering mindset that runs through 
 ::: {.column-margin}
 ![](images/svg/data_engineering_data_gravity_entropy.svg){width="100%" fig-alt="A 2-by-2 quadrant. The horizontal axis is data gravity (movement cost), the vertical axis is information entropy (signal density). The top-left cell, low gravity and high entropy, is highlighted and labeled high gain; the other three cells are neutral gray."}
 
-*Selection gain is highest where entropy is high and data gravity low.*
+*Selection gain peaks where signal density (entropy) is high and movement cost (gravity) low.*
 :::
 
 Before any of these pipeline stages can be designed well, however, we need to understand the physical properties that constrain them. Just as a civil engineer must understand soil mechanics before designing foundations, a data engineer must understand the physics of data movement and information density before making pipeline decisions. These physics impose hard constraints that no amount of clever software can circumvent.
@@ -1180,7 +1180,7 @@ From @tbl-kws-design-space, the 64 KB memory limit eliminates:
 
 **Step 2**: Calculate budget allocation.
 
-Allocating our \$150K budget across three cost categories (using the data engineering constants summarized later in this section):
+Allocating our \$150K budget across three cost categories (using the data engineering cost constants that @sec-data-engineering-scalability-cost-optimization-b9b3 establishes):
 
 - **Labeling** (~`{python} BudgetAllocation.labeling_pct_str`): `{python} BudgetAllocation.labeling_k_usd_str` available
 - **Storage/Processing** (~`{python} BudgetAllocation.storage_pct_str`): `{python} BudgetAllocation.storage_k_usd_str`
@@ -1208,14 +1208,14 @@ Options from design space:
 
 The resulting configuration in @tbl-data-engineering-kws-configuration balances accuracy gains against fixed memory and labeling budgets to reach the target:
 
-| **Choice**            | **Selection**            | **Rationale**                                             |
-|:----------------------|:-------------------------|:----------------------------------------------------------|
-| **Sampling rate**     | 16 kHz                   | +3 percent accuracy worth 2$\times$ storage within budget |
-| **MFCC coefficients** | 13                       | Memory-constrained, nonnegotiable                         |
-| **Training examples** | 750K real + 2M synthetic | Budget-optimal mix                                        |
-| **Data diversity**    | Noisy + clean mix        | Critical for real-world deployment                        |
-| **Inference**         | Local, INT8 quantized    | Memory-constrained                                        |
-| **Augmentation**      | Heavy synthetic          | 10$\times$ cost efficiency                                |
+| **Choice**            | **Selection**            | **Rationale**                                                      |
+|:----------------------|:-------------------------|:-------------------------------------------------------------------|
+| **Sampling rate**     | 16 kHz                   | +3 percent accuracy worth 2$\times$ storage within budget          |
+| **MFCC coefficients** | 13                       | Memory-constrained, nonnegotiable                                  |
+| **Training examples** | 750K real + 2M synthetic | Budget-optimal mix                                                 |
+| **Data diversity**    | Noisy + clean mix        | Critical for real-world deployment                                 |
+| **Inference**         | Local, INT8 quantized    | 8-bit integer weights fit the 64 KB limit (@sec-model-compression) |
+| **Augmentation**      | Heavy synthetic          | 10$\times$ cost efficiency                                         |
 
 : **KWS final configuration**: Budget-optimized data engineering choices that satisfy the four-pillar constraints derived in @tbl-kws-design-space, trading higher sampling and synthetic augmentation against fixed memory and labeling budgets to reach an estimated 97--99 percent accuracy range around the `{python} KWSDesignConstraints.kws_accuracy_target_str` target. {#tbl-data-engineering-kws-configuration tbl-colwidths="[26,26,48]"}
 
@@ -1225,247 +1225,7 @@ The resulting configuration in @tbl-data-engineering-kws-configuration balances 
 
 :::
 
-With optimal parameters selected from our design space, implementation requires combining multiple data collection approaches. Our KWS system demonstrates how these approaches work together across the project lifecycle. Preexisting datasets like Google's Speech Commands\index{Speech Commands} [@warden2018speech] provide a foundation for initial development, offering carefully curated voice samples for common wake words. For multilingual coverage, the Multilingual Spoken Words Corpus\index{Multilingual Spoken Words Corpus} (MSWC) [@mazumder2021multilingual] extends this foundation to a large multilingual corpus. However, even these large-scale datasets often lack diversity in accents, environments, and recording conditions, necessitating additional strategies.
-
-To address coverage gaps, web scraping supplements baseline datasets by gathering diverse voice samples from video platforms and speech databases, capturing natural speech patterns and wake word variations. Crowdsourcing platforms like Amazon Mechanical Turk[^fn-mturk-labeling-scale] enable targeted collection of wake word samples across different demographics and environments [@sheng2019]. This approach is particularly valuable for underrepresented languages or specific acoustic conditions.
-
-[^fn-mturk-labeling-scale]: **Amazon Mechanical Turk (MTurk)**: A crowdsourcing platform that routes small tasks to distributed workers and can scale annotation beyond expert-only workflows. @snow2008 evaluate this pattern for natural-language annotation tasks, showing that non-expert annotations can be useful when task design and quality control are handled carefully. For wake-word audio collection, the same systems trade-off appears in domain-specific form: scale is attractive, but submissions still need acoustic checks such as signal-to-noise ratio, duration, and recording validity before they can safely enter the training set. \index{Mechanical Turk!labeling scale}
-
-Finally, synthetic data generation fills remaining gaps through speech synthesis [@werchniak2021] and audio augmentation, creating unlimited wake word variations across acoustic environments, speaker characteristics, and background conditions. The combination enables KWS systems that perform well across diverse real-world conditions.
-
-These complementary strategies, each with distinct trade-offs across quality, cost, and scale, require systematic evaluation rather than ad-hoc selection. The per-unit economics at each stage determine which strategy dominates. Labeling a single medical image, for example, can cost orders of magnitude more than storing it for a year, a ratio that reshapes budget allocation for any team operating under fixed funding. The following cost and time constants provide essential context for acquisition decisions.
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DATA ENGINEERING COST CONSTANTS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-data-engineering-cost-constants in the key-numbers callout
-# │
-# │ Goal: List per-unit labeling and storage costs engineers should memorize.
-# │ Show: Crowd, box, and medical labeling tiers plus S3 hot storage.
-# │ How: Format canonical cost constants from mlsysim.
-# │
-# │ Imports: mlsysim.core.units (LABELING_COST_*, Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate, dollar),
-# │          mlsysim.fmt (fmt_usd, fmt_usd_range, check)
-# │ Exports: DataEngineeringCostConstants.labeling_cost_*_range_str,
-# │          DataEngineeringCostConstants.storage_cost_s3_str,
-# │          DataEngineeringCostConstants.retrieval_cost_glacier_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_usd, fmt_usd_range
-from mlsysim.core.units import USD, TB, GB, ureg
-
-# ┌── LEGO ───────────────────────────────────────────────
-class DataEngineeringCostConstants:
-    """Per-unit labeling and storage costs for @tbl-data-engineering-cost-constants."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    labeling_cost_crowd_low = Infrastructure.Pricing.Labeling.CrowdLow.rate.to(USD).magnitude
-    labeling_cost_crowd_high = Infrastructure.Pricing.Labeling.CrowdHigh.rate.to(USD).magnitude
-    labeling_cost_box_low = Infrastructure.Pricing.Labeling.BoxLow.rate.to(USD).magnitude
-    labeling_cost_box_high = Infrastructure.Pricing.Labeling.BoxHigh.rate.to(USD).magnitude
-    labeling_cost_medical_low = Infrastructure.Pricing.Labeling.MedicalLow.rate.to(USD).magnitude
-    labeling_cost_medical_high = Infrastructure.Pricing.Labeling.MedicalHigh.rate.to(USD).magnitude
-    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.to(USD / (TB * ureg.month)).magnitude
-    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.to(USD / GB).magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(storage_cost_s3 > 0 and retrieval_cost_glacier > 0, "Storage and retrieval costs must be positive.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    labeling_cost_crowd_range_str = fmt_usd_range(
-        labeling_cost_crowd_low,
-        labeling_cost_crowd_high,
-        precision=2,
-        commas=False,
-        repeat_symbol=False,
-    )
-    labeling_cost_box_range_str = fmt_usd_range(
-        labeling_cost_box_low,
-        labeling_cost_box_high,
-        precision=2,
-        commas=False,
-        repeat_symbol=False,
-    )
-    labeling_cost_medical_range_str = fmt_usd_range(
-        labeling_cost_medical_low,
-        labeling_cost_medical_high,
-        precision=0,
-        commas=False,
-        repeat_symbol=False,
-    )
-    storage_cost_s3_str = fmt_usd(storage_cost_s3, precision=0, commas=False, per="TB/month")
-    retrieval_cost_glacier_str = fmt_usd(retrieval_cost_glacier, precision=2, commas=False, per="GB")
-```
-
-Just as systems engineers memorize latency numbers, ML engineers should internalize the data engineering constants in @tbl-data-engineering-cost-constants and @tbl-data-engineering-time-constants. The pattern that emerges is that labeling consistently dominates storage and compute costs, so teams should reason from cost ratios rather than isolated prices.
-
-| **Operation**                |                                 **Cost**                                | **Notes**              |
-|:-----------------------------|:-----------------------------------------------------------------------:|:-----------------------|
-| **Crowdsourced image label** |  `{python} DataEngineeringCostConstants.labeling_cost_crowd_range_str`  | Simple classification  |
-| **Bounding box annotation**  |   `{python} DataEngineeringCostConstants.labeling_cost_box_range_str`   | Per box, simple scenes |
-| **Expert medical label**     | `{python} DataEngineeringCostConstants.labeling_cost_medical_range_str` | Per study, radiologist |
-| **S3 storage (Standard)**    |       `{python} DataEngineeringCostConstants.storage_cost_s3_str`       | Hot storage            |
-| **S3 retrieval (Glacier)**   |    `{python} DataEngineeringCostConstants.retrieval_cost_glacier_str`   | Standard: 3-5 hours    |
-| **Cloud GPU training hour**  |                                  \$2–4                                  | Cloud spot pricing     |
-| **Human review hour**        |                                 \$15–50                                 | Depending on expertise |
-
-: **Data Engineering Cost Constants (2024)**: Per-unit costs that ML engineers should memorize in the same way systems engineers memorize latency numbers. Labeling commonly dominates storage and compute, so teams should reason from ratios rather than isolated prices. {#tbl-data-engineering-cost-constants tbl-colwidths="[43,30,37]"}
-
-@Tbl-data-engineering-time-constants extends the picture with characteristic durations for labeling, training, and serving operations:
-
-```{python}
-#| echo: false
-#| label: data-engineering-time-constants-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DATA ENGINEERING TIME CONSTANTS SPAN
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-data-engineering-time-constants caption
-# │
-# │ Goal: Compute the order-of-magnitude span shown in the table.
-# │ Show: Labeling weeks vs. feature-lookup milliseconds spans about 9 orders.
-# │ How: Compare the slowest listed labeling bound with the fastest lookup bound.
-# │
-# │ Imports: math.log10, mlsysim.book (fmt, check)
-# │ Exports: DataEngineeringTimeConstants.span_orders_str
-# └─────────────────────────────────────────────────────────────────────────────
-from math import log10
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check
-
-class DataEngineeringTimeConstants:
-    """Order-of-magnitude span for data-engineering operation durations."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fastest_lookup_s = 0.001
-    slowest_labeling_weeks = 4
-    seconds_per_week = 7 * 24 * 60 * 60
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    slowest_labeling_s = slowest_labeling_weeks * seconds_per_week
-    span_ratio = slowest_labeling_s / fastest_lookup_s
-    span_orders = log10(span_ratio)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(span_orders > 9, f"Time constants should span more than 9 orders, got {span_orders:.2f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    span_orders_str = fmt_int(span_orders, commas=False)
-```
-
-| **Operation**                      | **Duration** | **Bottleneck**                      |
-|:-----------------------------------|:------------:|:------------------------------------|
-| **Label 1M images (crowdsourced)** |  2–4 weeks   | Annotation throughput               |
-| **Train ResNet-50 on ImageNet**    |  4–6 hours   | Compute (8$\times$ A100, optimized) |
-| **Feature store lookup**           |   1–10 ms    | Network + cache                     |
-
-: **Data Engineering Time Constants**: Characteristic durations for labeling, training, and serving operations span about `{python} DataEngineeringTimeConstants.span_orders_str` orders of magnitude. Human labeling sets the wall-clock floor for new datasets, making it the dominant scheduling constraint in production ML systems. {#tbl-data-engineering-time-constants tbl-colwidths="[40,34,36]"}
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LABELING-TO-COMPUTE COST RATIO CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Labeling/Compute Rule" and "80/20 Split" prose following
-# │          @tbl-data-engineering-time-constants.
-# │
-# │ Goal: Quantify how labeling spend dwarfs a single training run's compute cost.
-# │ Show: A $100K labeling budget is roughly 1,000x the cost of one 8x A100
-# │       ResNet-50 run, motivating data-as-the-bottleneck.
-# │ How: Compare a fixed labeling budget against the cost of one 8x A100 training
-# │      run at the cloud GPU hourly rate.
-# │
-# │ Imports: mlsysim.core.units (Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate, THOUSAND, dollar,
-# │          hour), mlsysim.book (fmt, check)
-# │ Exports: LabelingComputeRatio.labeling_budget_str,
-# │          LabelingComputeRatio.train_cost_low_str,
-# │          LabelingComputeRatio.train_cost_high_str,
-# │          LabelingComputeRatio.ratio_low_mult_str,
-# │          LabelingComputeRatio.ratio_high_mult_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple, fmt_percent
-from mlsysim.core.units import USD, hour
-
-# ┌── LEGO ───────────────────────────────────────────────
-class LabelingComputeRatio:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    labeling_budget = 100_000
-    a100_count = 8
-    train_hours_low = 4
-    train_hours_high = 6
-    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
-    train_cost_high = a100_count * train_hours_high * gpu_hour_cost_high
-    ratio_low = labeling_budget / train_cost_high
-    ratio_high = labeling_budget / train_cost_low
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(train_cost_low < train_cost_high, "Reference training cost range must be ordered.")
-    check(ratio_low > 500, f"Labeling/compute ratio unexpectedly low: {ratio_low:.0f}x.")
-    check(ratio_high > 1000, f"High-end labeling/compute ratio should exceed 1000x, got {ratio_high:.0f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    labeling_budget_str = fmt_usd(labeling_budget, precision=0, commas=False, scale="K")
-    train_cost_low_str = fmt_usd(train_cost_low, precision=0, commas=False)
-    train_cost_high_str = fmt_usd(train_cost_high, precision=0, commas=False)
-    ratio_low_mult_str = fmt_multiple(ratio_low, precision=1, commas=True)
-    ratio_high_mult_str = fmt_multiple(ratio_high, precision=1, commas=True)
-    effort_majority_pct = 80
-    effort_minority_pct = 20
-    effort_majority_pct_str = fmt_percent(effort_majority_pct / 100, precision=0, commas=False, style='symbol')
-    effort_minority_pct_str = fmt_percent(effort_minority_pct / 100, precision=0, commas=False, style='symbol')
-```
-
-The contrast matters: weeks for human labeling, hours for GPU training, milliseconds for serving. Labeling is the bottleneck. It often costs hundreds to more than a thousand times more than a single optimized training run: a `{python} LabelingComputeRatio.labeling_budget_str` labeling budget compares with `{python} LabelingComputeRatio.train_cost_low_str`--`{python} LabelingComputeRatio.train_cost_high_str` for one 8$\times$ A100 ResNet-50 run, a `{python} LabelingComputeRatio.ratio_low_mult_str`--`{python} LabelingComputeRatio.ratio_high_mult_str` ratio. And within that labeling spend, the effort distribution itself is skewed: `{python} LabelingComputeRatio.effort_majority_pct_str` of the work goes to `{python} LabelingComputeRatio.effort_minority_pct_str` of features—the long tail of edge cases, rare categories, and quality exceptions.
-
-All cost figures reflect approximate 2024 cloud provider rates and are intended to convey relative magnitudes rather than exact pricing.[^fn-pricing-cost-ratios] The consistent pattern across these numbers is that human labor (labeling, annotation, expert review) dominates hardware and storage costs by one to three orders of magnitude. A team that optimizes its labeling pipeline before scaling compute or storage addresses the largest cost term first.
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GLACIER RETRIEVAL PRICING
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Pricing-ratios footnote after @tbl-data-engineering-cost-constants
-# │
-# │ Goal: Contrast standard vs. expedited Glacier retrieval paid tiers.
-# │ Show: Expedited retrieval costs 3× standard per GB.
-# │ How: Derive expedited price and ratio from canonical retrieval cost.
-# │
-# │ Imports: mlsysim.core.units (Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate, dollar), mlsysim.fmt (fmt, check)
-# │ Exports: GlacierRetrievalPricing.retrieval_cost_glacier_str,
-# │          GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str,
-# │          GlacierRetrievalPricing.retrieval_ratio_expedited_standard_mult_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple
-from mlsysim.core.units import USD, GB
-
-# ┌── LEGO ───────────────────────────────────────────────
-class GlacierRetrievalPricing:
-    """Glacier retrieval tier pricing for the cost-ratio footnote."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    retrieval_rate = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate
-    retrieval_cost_glacier = retrieval_rate.to(USD / GB).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    retrieval_cost_glacier_expedited = retrieval_cost_glacier * 3
-    retrieval_ratio_expedited_standard = retrieval_cost_glacier_expedited / retrieval_cost_glacier
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(retrieval_ratio_expedited_standard == 3, "Expedited retrieval should be 3x standard retrieval.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    retrieval_cost_glacier_str = fmt_usd(retrieval_cost_glacier, precision=2, commas=False, per="GB")
-    retrieval_cost_glacier_expedited_str = fmt_usd(retrieval_cost_glacier_expedited, precision=2, commas=False, per="GB")
-    retrieval_ratio_expedited_standard_mult_str = fmt_multiple(retrieval_ratio_expedited_standard, precision=0, commas=False)
-```
-
-[^fn-pricing-cost-ratios]: **Pricing Ratios**: The absolute dollar amounts in this chapter will shift with provider pricing, but the ratios between paid tiers are remarkably stable because they reflect physical constraints, not business decisions. S3 Glacier retrieval illustrates the pattern: standard (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_str`, 3--5 hours) and expedited (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str`, 1--5 minutes) span a `{python} GlacierRetrievalPricing.retrieval_ratio_expedited_standard_mult_str` paid-tier cost range, while bulk retrieval trades a zero retrieval charge for the slowest 5--12 hour latency. The design maps directly to the $D_{\text{vol}}/\text{BW}$ trade-off in the iron law. Engineers who memorize ratios rather than prices make storage decisions that survive the next pricing revision. \index{Cloud Pricing!cost-latency trade-off}
+With optimal parameters selected from our design space, implementation requires combining multiple data collection approaches: preexisting corpora for the baseline, web scraping and crowdsourcing for coverage gaps, and synthetic generation for scale. The combination enables KWS systems that perform well across diverse real-world conditions. @Sec-data-engineering-strategic-data-acquisition-418f develops each of these acquisition strategies, their economics, and their KWS instantiations in full.
 
 ::: {#chk-data-engineering-four-pillars-framework .callout-checkpoint title="Four pillars framework"}
 
@@ -1758,13 +1518,247 @@ E/Systemic\\ issues
 
 :::
 
-For our KWS lighthouse, the datasets introduced in @sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9 (Speech Commands, MSWC, and supplementary web-scraped and synthetic sources) provide essential starting points for rapid prototyping and baseline performance. However, evaluating these sources against quality requirements immediately reveals coverage gaps: limited accent diversity, missing acoustic environments, sparse coverage for underrepresented languages, and predominantly clean recording conditions. Quality-driven acquisition strategy recognizes these limitations and plans complementary approaches, demonstrating how framework-based thinking guides source selection beyond simply choosing available datasets.
+For our KWS lighthouse, preexisting datasets provide essential starting points for rapid prototyping and baseline performance. Google's Speech Commands\index{Speech Commands} [@warden2018speech] offers carefully curated voice samples for common wake words, and the Multilingual Spoken Words Corpus\index{Multilingual Spoken Words Corpus} (MSWC) [@mazumder2021multilingual] extends that foundation to a large multilingual corpus. However, evaluating these sources against quality requirements immediately reveals coverage gaps: limited accent diversity, missing acoustic environments, sparse coverage for underrepresented languages, and predominantly clean recording conditions. Quality-driven acquisition strategy recognizes these limitations and plans complementary approaches, demonstrating how framework-based thinking guides source selection beyond simply choosing available datasets.
 
 ### Scalability and cost optimization {#sec-data-engineering-scalability-cost-optimization-b9b3}
 
 Quality-focused data acquisition\index{Data Acquisition!scale vs. quality} approaches face inherent scaling limitations. When scale requirements dominate, needing millions or billions of examples that manual curation cannot economically provide, web scraping\index{Web Scraping!ML training data} and synthetic generation offer paths to massive datasets. Data-acquisition scalability\index{Data Acquisition!scalability} requires understanding the economic models underlying different acquisition strategies: cost per labeled example, throughput limitations, and how these scale with data volume. Cost-effectiveness inverts with scale: what works at thousands of examples becomes prohibitive at millions, while high-setup-cost approaches amortize favorably at large volumes.
 
-Web scraping enables dataset construction at scales that manual curation cannot match. Major vision datasets like ImageNet [@imagenet_website] and OpenImages [@kuznetsova2020] were built through systematic scraping, and large language models depend on web-scale text corpora [@groeneveld2024]. Targeted scraping of domain-specific sources, such as code repositories [@chen2021evaluating], further demonstrates the approach's versatility. However, production systems that rely on continuous scraping face pipeline reliability challenges: website structure changes break extractors, rate limiting throttles collection throughput, and dynamic content introduces inconsistencies that degrade model performance. Scraped data can also contain unexpected noise, such as historical images appearing in contemporary searches (@fig-traffic-light), requiring systematic validation and cleaning stages.
+The per-unit economics at each stage determine which strategy dominates. Labeling a single medical image, for example, can cost orders of magnitude more than storing it for a year, a ratio that reshapes budget allocation for any team operating under fixed funding. The following cost and time constants provide essential context for acquisition decisions.
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA ENGINEERING COST CONSTANTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-data-engineering-cost-constants in the key-numbers callout
+# │
+# │ Goal: List per-unit labeling and storage costs engineers should memorize.
+# │ Show: Crowd, box, and medical labeling tiers plus S3 hot storage.
+# │ How: Format canonical cost constants from mlsysim.
+# │
+# │ Imports: mlsysim.core.units (LABELING_COST_*, Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate, dollar),
+# │          mlsysim.fmt (fmt_usd, fmt_usd_range, check)
+# │ Exports: DataEngineeringCostConstants.labeling_cost_*_range_str,
+# │          DataEngineeringCostConstants.storage_cost_s3_str,
+# │          DataEngineeringCostConstants.retrieval_cost_glacier_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_usd, fmt_usd_range
+from mlsysim.core.units import USD, TB, GB, ureg
+
+# ┌── LEGO ───────────────────────────────────────────────
+class DataEngineeringCostConstants:
+    """Per-unit labeling and storage costs for @tbl-data-engineering-cost-constants."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    labeling_cost_crowd_low = Infrastructure.Pricing.Labeling.CrowdLow.rate.to(USD).magnitude
+    labeling_cost_crowd_high = Infrastructure.Pricing.Labeling.CrowdHigh.rate.to(USD).magnitude
+    labeling_cost_box_low = Infrastructure.Pricing.Labeling.BoxLow.rate.to(USD).magnitude
+    labeling_cost_box_high = Infrastructure.Pricing.Labeling.BoxHigh.rate.to(USD).magnitude
+    labeling_cost_medical_low = Infrastructure.Pricing.Labeling.MedicalLow.rate.to(USD).magnitude
+    labeling_cost_medical_high = Infrastructure.Pricing.Labeling.MedicalHigh.rate.to(USD).magnitude
+    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.to(USD / (TB * ureg.month)).magnitude
+    retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.to(USD / GB).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(storage_cost_s3 > 0 and retrieval_cost_glacier > 0, "Storage and retrieval costs must be positive.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    labeling_cost_crowd_range_str = fmt_usd_range(
+        labeling_cost_crowd_low,
+        labeling_cost_crowd_high,
+        precision=2,
+        commas=False,
+        repeat_symbol=False,
+    )
+    labeling_cost_box_range_str = fmt_usd_range(
+        labeling_cost_box_low,
+        labeling_cost_box_high,
+        precision=2,
+        commas=False,
+        repeat_symbol=False,
+    )
+    labeling_cost_medical_range_str = fmt_usd_range(
+        labeling_cost_medical_low,
+        labeling_cost_medical_high,
+        precision=0,
+        commas=False,
+        repeat_symbol=False,
+    )
+    storage_cost_s3_str = fmt_usd(storage_cost_s3, precision=0, commas=False, per="TB/month")
+    retrieval_cost_glacier_str = fmt_usd(retrieval_cost_glacier, precision=2, commas=False, per="GB")
+```
+
+Just as systems engineers memorize latency numbers, ML engineers should internalize the data engineering constants in @tbl-data-engineering-cost-constants and @tbl-data-engineering-time-constants. The pattern that emerges is that labeling consistently dominates storage and compute costs, so teams should reason from cost ratios rather than isolated prices.
+
+| **Operation**                |                                 **Cost**                                | **Notes**              |
+|:-----------------------------|:-----------------------------------------------------------------------:|:-----------------------|
+| **Crowdsourced image label** |  `{python} DataEngineeringCostConstants.labeling_cost_crowd_range_str`  | Simple classification  |
+| **Bounding box annotation**  |   `{python} DataEngineeringCostConstants.labeling_cost_box_range_str`   | Per box, simple scenes |
+| **Expert medical label**     | `{python} DataEngineeringCostConstants.labeling_cost_medical_range_str` | Per study, radiologist |
+| **S3 storage (Standard)**    |       `{python} DataEngineeringCostConstants.storage_cost_s3_str`       | Hot storage            |
+| **S3 retrieval (Glacier)**   |    `{python} DataEngineeringCostConstants.retrieval_cost_glacier_str`   | Standard: 3-5 hours    |
+| **Cloud GPU training hour**  |                                  \$2–4                                  | Cloud spot pricing     |
+| **Human review hour**        |                                 \$15–50                                 | Depending on expertise |
+
+: **Data Engineering Cost Constants (2024)**: Per-unit costs that ML engineers should memorize in the same way systems engineers memorize latency numbers. Labeling commonly dominates storage and compute, so teams should reason from ratios rather than isolated prices. {#tbl-data-engineering-cost-constants tbl-colwidths="[43,30,37]"}
+
+@Tbl-data-engineering-time-constants extends the picture with characteristic durations for labeling, training, and serving operations:
+
+```{python}
+#| echo: false
+#| label: data-engineering-time-constants-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA ENGINEERING TIME CONSTANTS SPAN
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-data-engineering-time-constants caption
+# │
+# │ Goal: Compute the order-of-magnitude span shown in the table.
+# │ Show: Labeling weeks vs. feature-lookup milliseconds spans about 9 orders.
+# │ How: Compare the slowest listed labeling bound with the fastest lookup bound.
+# │
+# │ Imports: math.log10, mlsysim.book (fmt, check)
+# │ Exports: DataEngineeringTimeConstants.span_orders_str
+# └─────────────────────────────────────────────────────────────────────────────
+from math import log10
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check
+
+class DataEngineeringTimeConstants:
+    """Order-of-magnitude span for data-engineering operation durations."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    fastest_lookup_s = 0.001
+    slowest_labeling_weeks = 4
+    seconds_per_week = 7 * 24 * 60 * 60
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    slowest_labeling_s = slowest_labeling_weeks * seconds_per_week
+    span_ratio = slowest_labeling_s / fastest_lookup_s
+    span_orders = log10(span_ratio)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(span_orders > 9, f"Time constants should span more than 9 orders, got {span_orders:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    span_orders_str = fmt_int(span_orders, commas=False)
+```
+
+| **Operation**                      | **Duration** | **Bottleneck**                      |
+|:-----------------------------------|:------------:|:------------------------------------|
+| **Label 1M images (crowdsourced)** |  2–4 weeks   | Annotation throughput               |
+| **Train ResNet-50 on ImageNet**    |  4–6 hours   | Compute (8$\times$ A100, optimized) |
+| **Feature store lookup**           |   1–10 ms    | Network + cache                     |
+
+: **Data Engineering Time Constants**: Characteristic durations for labeling, training, and serving operations span about `{python} DataEngineeringTimeConstants.span_orders_str` orders of magnitude. Human labeling sets the wall-clock floor for new datasets, making it the dominant scheduling constraint in production ML systems. {#tbl-data-engineering-time-constants tbl-colwidths="[40,34,36]"}
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LABELING-TO-COMPUTE COST RATIO CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Labeling/Compute Rule" and "80/20 Split" prose following
+# │          @tbl-data-engineering-time-constants.
+# │
+# │ Goal: Quantify how labeling spend dwarfs a single training run's compute cost.
+# │ Show: A $100K labeling budget is roughly 1,000x the cost of one 8x A100
+# │       ResNet-50 run, motivating data-as-the-bottleneck.
+# │ How: Compare a fixed labeling budget against the cost of one 8x A100 training
+# │      run at the cloud GPU hourly rate.
+# │
+# │ Imports: mlsysim.core.units (Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate, THOUSAND, dollar,
+# │          hour), mlsysim.book (fmt, check)
+# │ Exports: LabelingComputeRatio.labeling_budget_str,
+# │          LabelingComputeRatio.train_cost_low_str,
+# │          LabelingComputeRatio.train_cost_high_str,
+# │          LabelingComputeRatio.ratio_low_mult_str,
+# │          LabelingComputeRatio.ratio_high_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple, fmt_percent
+from mlsysim.core.units import USD, hour
+
+# ┌── LEGO ───────────────────────────────────────────────
+class LabelingComputeRatio:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    labeling_budget = 100_000
+    a100_count = 8
+    train_hours_low = 4
+    train_hours_high = 6
+    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
+    train_cost_high = a100_count * train_hours_high * gpu_hour_cost_high
+    ratio_low = labeling_budget / train_cost_high
+    ratio_high = labeling_budget / train_cost_low
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(train_cost_low < train_cost_high, "Reference training cost range must be ordered.")
+    check(ratio_low > 500, f"Labeling/compute ratio unexpectedly low: {ratio_low:.0f}x.")
+    check(ratio_high > 1000, f"High-end labeling/compute ratio should exceed 1000x, got {ratio_high:.0f}x.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    labeling_budget_str = fmt_usd(labeling_budget, precision=0, commas=False, scale="K")
+    train_cost_low_str = fmt_usd(train_cost_low, precision=0, commas=False)
+    train_cost_high_str = fmt_usd(train_cost_high, precision=0, commas=False)
+    ratio_low_mult_str = fmt_multiple(ratio_low, precision=1, commas=True)
+    ratio_high_mult_str = fmt_multiple(ratio_high, precision=1, commas=True)
+    effort_majority_pct = 80
+    effort_minority_pct = 20
+    effort_majority_pct_str = fmt_percent(effort_majority_pct / 100, precision=0, commas=False, style='symbol')
+    effort_minority_pct_str = fmt_percent(effort_minority_pct / 100, precision=0, commas=False, style='symbol')
+```
+
+The contrast matters: weeks for human labeling, hours for GPU training, milliseconds for serving. Labeling is the bottleneck. It often costs hundreds to more than a thousand times more than a single optimized training run: a `{python} LabelingComputeRatio.labeling_budget_str` labeling budget compares with `{python} LabelingComputeRatio.train_cost_low_str`--`{python} LabelingComputeRatio.train_cost_high_str` for one 8$\times$ A100 ResNet-50 run, a `{python} LabelingComputeRatio.ratio_low_mult_str`--`{python} LabelingComputeRatio.ratio_high_mult_str` ratio. And within that labeling spend, the effort distribution itself is skewed: `{python} LabelingComputeRatio.effort_majority_pct_str` of the work goes to `{python} LabelingComputeRatio.effort_minority_pct_str` of features—the long tail of edge cases, rare categories, and quality exceptions.
+
+All cost figures reflect approximate 2024 cloud provider rates and are intended to convey relative magnitudes rather than exact pricing.[^fn-pricing-cost-ratios] The consistent pattern across these numbers is that human labor (labeling, annotation, expert review) dominates hardware and storage costs by one to three orders of magnitude. A team that optimizes its labeling pipeline before scaling compute or storage addresses the largest cost term first.
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GLACIER RETRIEVAL PRICING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Pricing-ratios footnote after @tbl-data-engineering-cost-constants
+# │
+# │ Goal: Contrast standard vs. expedited Glacier retrieval paid tiers.
+# │ Show: Expedited retrieval costs 3× standard per GB.
+# │ How: Derive expedited price and ratio from canonical retrieval cost.
+# │
+# │ Imports: mlsysim.core.units (Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate, dollar), mlsysim.fmt (fmt, check)
+# │ Exports: GlacierRetrievalPricing.retrieval_cost_glacier_str,
+# │          GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str,
+# │          GlacierRetrievalPricing.retrieval_ratio_expedited_standard_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple
+from mlsysim.core.units import USD, GB
+
+# ┌── LEGO ───────────────────────────────────────────────
+class GlacierRetrievalPricing:
+    """Glacier retrieval tier pricing for the cost-ratio footnote."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    retrieval_rate = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate
+    retrieval_cost_glacier = retrieval_rate.to(USD / GB).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    retrieval_cost_glacier_expedited = retrieval_cost_glacier * 3
+    retrieval_ratio_expedited_standard = retrieval_cost_glacier_expedited / retrieval_cost_glacier
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(retrieval_ratio_expedited_standard == 3, "Expedited retrieval should be 3x standard retrieval.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    retrieval_cost_glacier_str = fmt_usd(retrieval_cost_glacier, precision=2, commas=False, per="GB")
+    retrieval_cost_glacier_expedited_str = fmt_usd(retrieval_cost_glacier_expedited, precision=2, commas=False, per="GB")
+    retrieval_ratio_expedited_standard_mult_str = fmt_multiple(retrieval_ratio_expedited_standard, precision=0, commas=False)
+```
+
+[^fn-pricing-cost-ratios]: **Pricing Ratios**: The absolute dollar amounts in this chapter will shift with provider pricing, but the ratios between paid tiers are remarkably stable because they reflect physical constraints, not business decisions. S3 Glacier retrieval illustrates the pattern: standard (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_str`, 3--5 hours) and expedited (`{python} GlacierRetrievalPricing.retrieval_cost_glacier_expedited_str`, 1--5 minutes) span a `{python} GlacierRetrievalPricing.retrieval_ratio_expedited_standard_mult_str` paid-tier cost range, while bulk retrieval trades a zero retrieval charge for the slowest 5--12 hour latency. The design maps directly to the $D_{\text{vol}}/\text{BW}$ trade-off in the iron law. Engineers who memorize ratios rather than prices make storage decisions that survive the next pricing revision. \index{Cloud Pricing!cost-latency trade-off}
+
+Web scraping is the first lever on that cost structure, enabling dataset construction at scales that manual curation cannot match. Major vision datasets like ImageNet [@imagenet_website] and OpenImages [@kuznetsova2020] were built through systematic scraping, and large language models depend on web-scale text corpora [@groeneveld2024]. Targeted scraping of domain-specific sources, such as code repositories [@chen2021evaluating], further demonstrates the approach's versatility. However, production systems that rely on continuous scraping face pipeline reliability challenges: website structure changes break extractors, rate limiting throttles collection throughput, and dynamic content introduces inconsistencies that degrade model performance. Scraped data can also contain unexpected noise, such as historical images appearing in contemporary searches (@fig-traffic-light), requiring systematic validation and cleaning stages.
 
 Consider what happens when scraping the web for "traffic light" images: search engines return not only modern LED signals but also historical photographs like the following one. A model trained on such data might learn that traffic lights are sometimes operated by uniformed officers standing in the street, a spurious correlation that would cause failures in any real-world deployment.
 
@@ -1776,7 +1770,9 @@ Consider what happens when scraping the web for "traffic light" images: search e
 
 This example reveals why the quality pillar cannot be satisfied by scale alone: no amount of additional scraped data removes the need for validation that detects and filters anachronistic or contextually inappropriate content. Beyond technical quality challenges, legal and ethical constraints further bound what scraping can achieve. Not all websites permit scraping, and ongoing litigation around training data usage illustrates the consequences of noncompliance [@harvard_law_chatgpt]. Teams must document data provenance, ensure compliance with terms of service and copyright law, and apply anonymization procedures when scraping user-generated content.
 
-Crowdsourcing\index{Crowdsourcing!data labeling}\index{Crowdsourcing!annotation} shifts the acquisition bottleneck from finding enough examples to controlling the quality of many parallel judgments. Platforms like Amazon Mechanical Turk [@mturk_website] demonstrated this at landmark scale with ImageNet, where distributed contributors categorized millions of images into thousands of classes [@imagenet_website]. Crowdsourcing offers two systems advantages: scalability through parallel microtask distribution, and diversity through the range of perspectives, cultural contexts, and linguistic variations that a global contributor pool introduces. This diversity directly improves model generalization across populations. The cost is that task design, validation, and iteration become part of the acquisition system: tasks can be adjusted dynamically based on initial results, enabling refinement of collection strategies as quality gaps emerge.
+Crowdsourcing\index{Crowdsourcing!data labeling}\index{Crowdsourcing!annotation} shifts the acquisition bottleneck from finding enough examples to controlling the quality of many parallel judgments. Platforms like Amazon Mechanical Turk [@mturk_website] demonstrated this at landmark scale with ImageNet, where distributed contributors categorized millions of images into thousands of classes [@imagenet_website]. Crowdsourcing offers two systems advantages: scalability through parallel microtask distribution, and diversity through the range of perspectives, cultural contexts, and linguistic variations that a global contributor pool introduces. This diversity directly improves model generalization across populations. The cost is that task design, validation, and iteration become part of the acquisition system: tasks can be adjusted dynamically based on initial results, enabling refinement of collection strategies as quality gaps emerge. For our KWS system, MTurk-style platforms[^fn-mturk-labeling-scale] enable targeted collection of wake word samples across different demographics and environments [@sheng2019], an approach particularly valuable for underrepresented languages or specific acoustic conditions.
+
+[^fn-mturk-labeling-scale]: **Amazon Mechanical Turk (MTurk)**: A crowdsourcing platform that routes small tasks to distributed workers and can scale annotation beyond expert-only workflows. @snow2008 evaluate this pattern for natural-language annotation tasks, showing that non-expert annotations can be useful when task design and quality control are handled carefully. For wake-word audio collection, the same systems trade-off appears in domain-specific form: scale is attractive, but submissions still need acoustic checks such as signal-to-noise ratio, duration, and recording validity before they can safely enter the training set. \index{Mechanical Turk!labeling scale}
 
 Moving beyond human-generated data entirely, synthetic data generation\index{Synthetic Data!generation}\index{Data Augmentation!synthetic data}\index{Synthetic Data!scalability} changes the scaling constraint: examples can be generated algorithmically, but their value depends on whether the generator covers the deployment conditions that real collection would miss. This approach changes the economics of data acquisition by reducing human labor while increasing the burden on validation. The pipeline in @fig-synthetic-data shows how synthetic data merges with historical datasets, producing training sets of a size and diversity that would be impractical to collect manually.
 
@@ -2113,7 +2109,7 @@ scale=0.6, every node/.append style={transform shape}]
 
 :::
 
-Synthetic data\index{Synthetic Data!rare event coverage}\index{Synthetic Data!simulation} is particularly valuable for rare event coverage and data augmentation. Simulation environments enable controlled generation of edge cases that are impractical to collect naturally [@nvidia_simulation], while augmentation techniques like AutoAugment [@cubuk2019], RandAugment [@cubuk2020], and SpecAugment\index{SpecAugment!audio augmentation} [@park2019] introduce noise, pitch shifts, and temporal variations that improve model generalization across deployment conditions [@shorten2019]. A short exercise turns these techniques into a concrete workflow.
+Synthetic data\index{Synthetic Data!rare event coverage}\index{Synthetic Data!simulation} is particularly valuable for rare event coverage and data augmentation. Simulation environments enable controlled generation of edge cases that are impractical to collect naturally [@nvidia_simulation], while augmentation techniques like AutoAugment [@cubuk2019], RandAugment [@cubuk2020], and SpecAugment\index{SpecAugment!audio augmentation} [@park2019] introduce noise, pitch shifts, and temporal variations that improve model generalization across deployment conditions [@shorten2019]. For KWS, speech synthesis [@werchniak2021] and audio augmentation fill the coverage gaps that remain after real collection, creating wake word variations across acoustic environments, speaker characteristics, and background conditions. A short exercise turns these techniques into a concrete workflow.
 
 ::: {#exmp-data-engineering-synthetic-data-generation .callout-example title="Synthetic data generation"}
 
@@ -2125,7 +2121,7 @@ Synthetic data\index{Synthetic Data!rare event coverage}\index{Synthetic Data!si
 
 :::
 
-For our KWS system, `{python} KWSAcquisitionScale.dataset_size_million_samples_str` spanning `{python} KWSAcquisitionScale.languages_count_str` demand a volume that manual collection cannot economically provide. The multi-source strategy introduced in @sec-data-engineering-framework-application-keyword-spotting-case-study-c8e9, combining curated datasets with web scraping, crowdsourcing, and synthetic generation, addresses this scale requirement while maintaining coverage across acoustic environments and speaker demographics.
+For our KWS system, `{python} KWSAcquisitionScale.dataset_size_million_samples_str` spanning `{python} KWSAcquisitionScale.languages_count_str` demand a volume that manual collection cannot economically provide. The multi-source strategy outlined in @sec-data-engineering-kws-design-space-eadd, combining curated datasets with web scraping of video platforms and speech databases, crowdsourced collection, and synthetic generation, addresses this scale requirement while maintaining coverage across acoustic environments and speaker demographics.
 
 ### Coverage and diversity requirements {#sec-data-engineering-coverage-diversity-requirements-ce87}
 
@@ -2523,7 +2519,7 @@ Retry logic, dead letter queues, and circuit breakers are the runtime error hand
 
 Continuing the compilation analogy, data ingestion\index{Data Ingestion!pipeline boundary} is the *lexer*: it reads raw source (data streams) and tokenizes them into well-formed records that the rest of the pipeline can process.
 
-A critical and often overlooked constraint in ingestion design is the **Input/Output (IO) Bottleneck**\index{I/O Bottleneck!data loading}. We invest heavily in expensive GPUs, but their utilization depends entirely on whether data arrives fast enough to keep them busy. Training speed is governed by a simple inequality: $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{io}})$.
+A critical and often overlooked constraint in ingestion design is the **Input/Output (IO) Bottleneck**\index{I/O Bottleneck!data loading}. We invest heavily in expensive GPUs, but their utilization depends entirely on whether data arrives fast enough to keep them busy. Training speed is governed by a simple inequality: $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{io}})$. The inequality restates the feeding problem from @sec-data-engineering-feeding-problem through a second resource lens: there the starved term was storage bandwidth; in ingestion it is most often CPU-side decode work.
 
 ```{python}
 #| echo: false
@@ -3813,7 +3809,7 @@ Exploratory analysis and unstructured training data add a third constraint: the 
 
 Databases\index{Database!OLTP for ML}\index{OLTP} earn their place when transactional consistency and point-lookup latency dominate. They maintain product catalogs, user profiles, or transaction histories with strong consistency guarantees and low-latency point lookups. For ML workflows, databases serve specific roles well: storing feature metadata that changes frequently, managing experiment tracking where transactional consistency matters, or maintaining model registries that require atomic updates. A PostgreSQL database handling structured user attributes (user_id, age, country, preferences) provides millisecond lookups for serving systems that need individual user features in real-time. However, databases struggle when ML training requires scanning millions of records repeatedly across multiple epochs. The row-oriented storage that optimizes transactional lookups becomes inefficient when training needs only 20 of 100 columns from each record but must read entire rows to extract those columns.
 
-Data warehouses\index{Data Warehouse!analytical queries}\index{Data Warehouse!OLAP}\index{OLAP}\index{Storage!columnar, ML training} earn their place when repeated scans over structured features dominate. Modern warehouses like Google BigQuery, Amazon Redshift, and Snowflake use columnar storage formats [@stonebraker2018] that enable reading specific features without loading entire records, essential when tables contain hundreds of columns but training needs only a subset. This columnar organization delivers five to ten times I/O reduction compared to row-based formats for typical ML workloads. Consider a fraud detection dataset with 100 columns where models typically use 20 features, so columnar storage reads only needed columns, achieving 80 percent I/O reduction before even considering compression. Many successful ML systems draw training data from warehouses because the structured environment simplifies exploratory analysis and iterative development. Data analysts can quickly compute aggregate statistics, identify correlations between features, and validate data quality using familiar SQL interfaces.
+Data warehouses\index{Data Warehouse!analytical queries}\index{Data Warehouse!OLAP}\index{OLAP}\index{Storage!columnar, ML training} earn their place when repeated scans over structured features dominate. Modern warehouses like Google BigQuery, Amazon Redshift, and Snowflake use columnar storage formats [@stonebraker2018] that enable reading specific features without loading entire records, essential when tables contain hundreds of columns but training needs only a subset. This columnar organization delivers five to ten times I/O reduction compared to row-based formats for typical ML workloads; the format-efficiency calculation in @sec-data-engineering-ml-storage-requirements-performance-1b0d quantifies the gain with a worked fraud-detection example. Many successful ML systems draw training data from warehouses because the structured environment simplifies exploratory analysis and iterative development. Data analysts can quickly compute aggregate statistics, identify correlations between features, and validate data quality using familiar SQL interfaces.
 
 However, warehouses assume relatively stable schemas and struggle with truly unstructured data (images, audio, free-form text) or rapidly evolving formats common in experimental ML pipelines. When a computer vision team wants to store raw images alongside extracted features, multiple annotation formats from different labeling vendors, intermediate model predictions, and learned representation vectors, forcing all these into rigid warehouse schemas creates more friction than value. Schema evolution becomes painful: adding new feature types requires ALTER TABLE operations that may take hours on large datasets, blocking other operations and slowing iteration velocity.
 
@@ -3992,9 +3988,9 @@ To build engineering judgment, practitioners must internalize the orders of magn
 
 : **Latency Numbers Every ML Systems Engineer Should Know**: Understanding the quantitative disparities in the storage hierarchy is essential for diagnosing bottlenecks. If a CPU cycle were one second, fetching data from local SSD would be like waiting two days, while a cross-country network request would take six years. Source: Adapted from Jeff Dean's *Numbers Every Programmer Should Know* (full hardware reference with bandwidth and energy ratios in @sec-appdx-machine-foundations-numbers-know-b531). {#tbl-ml-latencies tbl-colwidths="[30,20,20,30]"}
 
-These latency numbers originated from Jeff Dean's influential 2009 talk at Stanford,[^fn-jeff-dean-latency-numbers] which established the quantitative culture that distinguishes systems engineering from programming. Understanding them is foundational to ML systems engineering: they explain why a poorly designed storage architecture can idle a \$15,000 GPU, and why distributed training requires careful attention to data locality.
+These latency numbers originated from Jeff Dean's influential 2009 talk at Stanford,[^fn-jeff-dean-latency-numbers] which established the quantitative culture that distinguishes systems engineering from programming. Understanding them is foundational to ML systems engineering: they explain why a poorly designed storage architecture can leave an expensive accelerator idle, and why distributed training requires careful attention to data locality.
 
-[^fn-jeff-dean-latency-numbers]: **Jeff Dean**: Google Senior Fellow, architect of MapReduce, BigTable, Spanner, and TensorFlow. His 2009 Stanford talk distilled the numbers in @tbl-ml-latencies into the engineering heuristic that an L1 cache reference (0.5 ns) and a cross-data center round trip (150 ms) span a $3 \times 10^{8}$ ratio -- eight orders of magnitude that explain why a training pipeline reading features from remote storage instead of local NVMe can convert a \$15,000 accelerator into an idle heater. \index{Dean, Jeff!latency numbers}
+[^fn-jeff-dean-latency-numbers]: **Jeff Dean**: Google Senior Fellow, architect of MapReduce, BigTable, Spanner, and TensorFlow. His 2009 Stanford talk distilled the numbers in @tbl-ml-latencies into the engineering heuristic that an L1 cache reference (0.5 ns) and a cross-data center round trip (150 ms) span a $3 \times 10^{8}$ ratio -- eight orders of magnitude that explain why a training pipeline reading features from remote storage instead of local NVMe starves the accelerator it was meant to feed. \index{Dean, Jeff!latency numbers}
 
 Access pattern alone does not exhaust the storage problem. ML workloads also store artifacts that conventional databases and warehouses were not designed around, and those artifacts shape infrastructure decisions across the entire development lifecycle, from experimental notebooks to production serving systems handling millions of requests per second.
 
@@ -4056,7 +4052,7 @@ The iterative nature of ML development introduces versioning requirements\index{
 
 Large-scale training generates substantial intermediate data requiring storage systems to handle concurrent read/write operations efficiently. When training jobs use multiple accelerators, each processing unit works on different portions of data, requiring storage systems to handle many simultaneous reads and writes. The specific patterns depend on the parallelization strategy employed, which @sec-model-training examines in detail. From a storage perspective, systems must handle concurrent I/O at rates proportional to the number of processing units, with each potentially writing tens to hundreds of megabytes of intermediate results during model updates. For now, treat checkpoint files, optimizer-state snapshots, and explicit offload paths as large binary artifacts produced during training; @sec-model-training derives why those artifacts arise. Storage systems must provide low-latency access to support efficient coordination. If workers spend more time waiting for storage than performing computations, parallel processing becomes counterproductive regardless of the specific training approach used.
 
-The bandwidth hierarchy constrains ML system design at every level, creating bottlenecks that no amount of compute optimization can overcome. While RAM delivers 50 to 200 gigabytes per second bandwidth on modern servers, network storage systems typically provide only one to ten gigabytes per second, and even high-end NVMe SSDs max out at one to seven gigabytes per second sequential throughput. Modern GPUs can process data faster than storage can supply it, creating scenarios where expensive accelerators idle waiting for data. Consider training an image classification model: loading 1,000 images per second at 150 KB each requires 150 MB/s sustained throughput from storage. When the GPU can process images faster than storage delivers them, the *data pipeline*, not the *model*, becomes the bottleneck. A 10-fold mismatch between GPU processing speed and storage bandwidth means expensive accelerators sit idle 90 percent of the time waiting for data. No amount of GPU optimization can overcome this I/O constraint.
+The bandwidth hierarchy that drove the coordination tax in @sec-data-engineering-scaling-distributed-processing-cb9b constrains ML system design at every level, creating bottlenecks that no amount of compute optimization can overcome. While RAM delivers 50 to 200 gigabytes per second bandwidth on modern servers, network storage systems typically provide only one to ten gigabytes per second, and even high-end NVMe SSDs max out at one to seven gigabytes per second sequential throughput. Modern GPUs can process data faster than storage can supply it, creating scenarios where expensive accelerators idle waiting for data. Consider training an image classification model: loading 1,000 images per second at 150 KB each requires 150 MB/s sustained throughput from storage. When the GPU can process images faster than storage delivers them, the *data pipeline*, not the *model*, becomes the bottleneck. A 10-fold mismatch between GPU processing speed and storage bandwidth means expensive accelerators sit idle 90 percent of the time waiting for data. No amount of GPU optimization can overcome this I/O constraint.
 
 Understanding these quantitative relationships enables informed architectural decisions about storage system selection and data pipeline optimization, which become even more critical during distributed training as examined in @sec-model-training. The training throughput equation reveals the critical dependencies:
 
@@ -4080,6 +4076,7 @@ Understanding these quantitative relationships enables informed architectural de
 # │          StorageBandwidth.resnet_fwdbwd_gflop_str,
 # │          StorageBandwidth.image_size_kb_str,
 # │          StorageBandwidth.sata_bw_mb_per_s_str,
+# │          StorageBandwidth.sata_max_bw_mb_per_s_str,
 # │          StorageBandwidth.sata_max_img_per_s_str,
 # │          StorageBandwidth.sata_utilization_pct_str,
 # │          StorageBandwidth.s3_bw_mb_per_s_str,
@@ -4098,11 +4095,13 @@ class StorageBandwidth:
     m_resnet = Models.Vision.ResNet50
     image_size_kb = 150
     sata = Systems.Storage.SataSsdEffective
+    sata_max = Systems.Storage.SataSsd
     s3 = Systems.Storage.ObjectStoreSingleStream
     nvme_low = Systems.Storage.LocalNvmeTrainingLow
     nvme_high = Systems.Storage.LocalNvmeGen4
     image_size = image_size_kb * KB
     sata_bw = sata.bandwidth
+    sata_max_bw = sata_max.bandwidth
     s3_bw = s3.bandwidth
     nvme_bw_low = nvme_low.bandwidth
     nvme_bw_high = nvme_high.bandwidth
@@ -4129,6 +4128,7 @@ class StorageBandwidth:
     resnet_fwdbwd_gflop_str = fmt_flops(m_resnet.inference_flops * 3, unit=GFLOPs, precision=1, commas=False)
     image_size_kb_str = fmt_qty(image_size, unit=KB, precision=0, commas=False)
     sata_bw_mb_per_s_str = fmt_bandwidth(sata_bw, unit=MB / second, precision=0, commas=False)
+    sata_max_bw_mb_per_s_str = fmt_bandwidth(sata_max_bw, unit=MB / second, precision=0, commas=False)
     sata_max_img_per_s_str = fmt_rate(sata_max_img_sec, 'img/s', precision=0)
     sata_utilization_pct_str = fmt_percent(sata_utilization_pct / 100, precision=0, commas=False, style='symbol')
     s3_bw_mb_per_s_str = fmt_bandwidth(s3_bw, unit=MB / second, precision=0, commas=False)
@@ -4137,7 +4137,7 @@ class StorageBandwidth:
     nvme_bw_high_gb_per_s_str = fmt_bandwidth(nvme_bw_high, unit=GB / second, precision=0, commas=False)
 ```
 
-Designing for high-throughput training starts by matching storage throughput to accelerator demand.
+Designing for high-throughput training starts by matching storage throughput to accelerator demand. This is the chapter's starvation argument rotated to its third and final lens: @sec-data-engineering-feeding-problem priced the idle accelerator as a feeding tax, @sec-data-engineering-data-ingestion-8efc traced the same stall to CPU decode workers, and here the question becomes which storage tier can sustain the required supply rate.
 
 ::: {#nbk-data-engineering-storage-bandwidth-budget .callout-notebook title="Storage bandwidth budget"}
 
@@ -4159,7 +4159,7 @@ The storage options now have a concrete target: saturating this single A100 requ
 
 :::
 
-The `{python} StorageBandwidth.sata_bw_mb_per_s_str` figure represents SATA III sequential read throughput (the interface maximum is 600 MB/s), and real-world random read performance with small files can be significantly lower. That caveat reinforces the general principle governing data pipelines: training throughput is bounded by the lower of compute capacity and the data supply rate. The bottleneck relation in @eq-training-throughput captures this limit, with the data supply rate defined in @eq-data-supply.
+The `{python} StorageBandwidth.sata_bw_mb_per_s_str` figure represents effective SATA III sequential read throughput (the interface ceiling is `{python} StorageBandwidth.sata_max_bw_mb_per_s_str`), and real-world random read performance with small files can be significantly lower. That caveat reinforces the general principle governing data pipelines: training throughput is bounded by the lower of compute capacity and the data supply rate. The bottleneck relation in @eq-training-throughput captures this limit, with the data supply rate defined in @eq-data-supply. The min-of-rates form is the $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{io}})$ inequality from @sec-data-engineering-data-ingestion-8efc in different notation: the stage with the larger time is the stage with the smaller rate, and either way it sets the pace.
 $$\text{Training Throughput} = \min(\text{Compute Capacity}, \text{Data Supply Rate})$$ {#eq-training-throughput}\index{Throughput!training, compute vs. data}
 $$\text{Data Supply Rate} = \text{Storage Bandwidth} \times (1 - \text{Overhead})$$ {#eq-data-supply}\index{Data Supply Rate!bandwidth constraint}
 
@@ -4234,7 +4234,7 @@ $$ \text{Effective Bandwidth} = \text{Physical Bandwidth} \times \eta_{\text{for
 
 Format choice is not a software preference. It is a direct consequence of the data gravity invariant: when data is too massive to move, the system must minimize bytes read per training step, and columnar formats achieve this by reading only the columns the model requires.
 
-Columnar storage formats\index{Parquet!columnar format}\index{ORC!columnar format} like Parquet or ORC deliver this five to ten times I/O reduction compared to row-based formats like CSV or JSON for typical ML workloads. The reduction comes from two mechanisms: reading only required columns rather than entire records, and column-level compression exploiting value patterns within columns. Consider a fraud detection dataset with 100 columns where models typically use 20 features—columnar formats read only needed columns, achieving 80 percent I/O reduction before compression. Column compression proves particularly effective for categorical features with limited cardinality: a country code column with 200 unique values in 100 million records compresses 20 to 50 times through dictionary encoding, while run-length encoding compresses sorted columns by storing only value changes. The combination can achieve total I/O reduction of 20 to 100 times compared to uncompressed row formats, directly translating to faster training iterations and reduced infrastructure costs.
+Columnar storage formats\index{Parquet!columnar format}\index{ORC!columnar format} like Parquet or ORC realize this reduction, five to ten times for typical ML workloads, through two mechanisms: the column projection the format-efficiency calculation just quantified, and column-level compression exploiting value patterns within columns. Column compression proves particularly effective for categorical features with limited cardinality: a country code column with 200 unique values in 100 million records compresses 20 to 50 times through dictionary encoding, while run-length encoding compresses sorted columns by storing only value changes. The combination can achieve total I/O reduction of 20 to 100 times compared to uncompressed row formats, directly translating to faster training iterations and reduced infrastructure costs.
 
 ```{python}
 #| echo: false
@@ -4306,7 +4306,7 @@ Storage performance optimization extends beyond format and compression to data l
 
 Storage requirements\index{ML Lifecycle!storage requirements} evolve because each lifecycle stage asks the same data to serve a different access pattern. The same dataset is accessed through random sampling during exploratory analysis, sequential scanning during model training, and random access during production serving. These diverse patterns require storage architectures that accommodate all three access modes.
 
-During development, flexibility matters more than raw performance. The key challenge is managing dataset versions without overwhelming storage capacity: ten experiments on a 100 GB dataset would naively require 1 TB of copies. Tools like DVC address this by tracking versions through metadata pointers and content-addressed artifact storage, deduplicating identical content when possible. Governance considerations demand tiered access controls where synthetic or anonymized datasets are broadly available for experimentation, while production data containing sensitive information requires approval and audit trails.
+During development, flexibility matters more than raw performance. The key challenge is managing dataset versions without overwhelming storage capacity: ten experiments on a 100 GB dataset would naively require 1 TB of copies. The metadata-pointer mechanism introduced for model checkpoints in @sec-data-engineering-ml-storage-requirements-performance-1b0d applies unchanged: tools like DVC track versions through pointers and content-addressed artifact storage, deduplicating identical content when possible. Governance considerations demand tiered access controls where synthetic or anonymized datasets are broadly available for experimentation, while production data containing sensitive information requires approval and audit trails.
 
 ```{python}
 #| echo: false
@@ -4396,7 +4396,7 @@ dvc checkout  # Restores exact data from that commit
 
 :::
 
-Data versioning\index{Data Versioning!model reproducibility} is the storage analogue of source-control provenance. It connects model versions to exact training data, enabling debugging and reproducibility. Without it, teams cannot identify the exact data that trained model v47.
+Data versioning\index{Data Versioning!model reproducibility} is the storage analogue of source-control provenance. It connects model versions to exact training data, enabling debugging and reproducibility. Without it, teams cannot identify the exact data that trained the model now misbehaving in production.
 
 @Lst-dvc-workflow shows how DVC\index{DVC!git semantics} provides Git-like semantics for data versioning, while @lst-delta-time-travel\index{Delta Lake!time travel} demonstrates querying historical data states directly in SQL.
 
@@ -4412,9 +4412,7 @@ SELECT * FROM training_data VERSION AS OF 47
 
 :::
 
-Two complementary capabilities complete the versioning infrastructure. Feature store point-in-time retrieval\index{Feature Store!point-in-time retrieval} maintains historical feature values, enabling training with features "as they existed" at prediction time and preventing label leakage, the accidental use of information that would not be available when the prediction is made. Model registry integration\index{Model Registry!provenance tracking} links each model registry entry, a catalog record for a model artifact and its metadata, to its complete provenance: Git commit hash (code), data version (DVC commit or Delta version), feature store snapshot timestamp, and training configuration file. This complete lineage enables rapid debugging when production issues arise.
-
-A common failure mode illustrates the importance: Model v47 performed 3 percent worse than v46 with identical code. Without data versioning, the team spent two weeks investigating the accuracy drop. With proper versioning, they would have immediately seen that the data version was inadvertently updated mid-experiment and identified the root cause within hours.
+Two complementary capabilities complete the versioning infrastructure. Feature store point-in-time retrieval\index{Feature Store!point-in-time retrieval} maintains historical feature values, enabling training with features "as they existed" at prediction time and preventing label leakage, the accidental use of information that would not be available when the prediction is made. Model registry integration\index{Model Registry!provenance tracking} links each model registry entry, a catalog record for a model artifact and its metadata, to its complete provenance: Git commit hash (code), data version (DVC commit or Delta version), feature store snapshot timestamp, and training configuration file. This complete lineage enables rapid debugging when production issues arise: applied to the click-through-rate drop that opened this section, the two-week bisection collapses into a snapshot diff that surfaces the silent backfill within hours.
 
 Long-term maintenance introduces a final storage consideration: retaining enough data to debug issues and satisfy compliance requirements. A recommendation system serving ten million users generates terabytes of interaction logs daily, necessitating tiered retention\index{Tiered Retention!hot/warm/cold}: hot storage retains the past week for rapid analysis, warm storage keeps the past quarter for periodic review, and cold archive storage\index{Storage!cold, archival} retains years of data for compliance and rare deep investigations. Regulated industries often require immutable storage demonstrating complete data provenance (which training data and model version produced each prediction), potentially for years or decades.
 
@@ -4797,7 +4795,7 @@ class DataSerializationPitfall:
 
 **Pitfall**: *Ignoring data serialization cost.*
 
-Teams meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. Text-based formats can be at least 10$\times$ slower to decode than columnar binary formats (Parquet, Arrow), and the CPU, not the accelerator, becomes the bottleneck. The consequence is the worst-case profile of the data-throughput hierarchy: an H100, used here as a concrete high-throughput accelerator anchor, should sustain `{python} DataSerializationPitfall.h100_peak_tflop_per_s_str` on dense low-precision kernels but instead idles at single-digit utilization waiting for the next batch. The fix is structural, not algorithmic: convert the training corpus to Parquet once, version it, and let every downstream job read the columnar form. A one-time conversion pays back within hours of training time.
+Teams meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. Text-based formats can be at least 10$\times$ slower to decode than columnar binary formats (Parquet, Arrow), and the CPU, not the accelerator, becomes the bottleneck. The consequence is the worst-case profile of the data-throughput hierarchy: an H100, used here as a point-in-time accelerator anchor whose device family @sec-hardware-acceleration examines, should sustain `{python} DataSerializationPitfall.h100_peak_tflop_per_s_str` on dense low-precision kernels but instead idles at single-digit utilization waiting for the next batch. The fix is structural, not algorithmic: convert the training corpus to Parquet once, version it, and let every downstream job read the columnar form. A one-time conversion pays back within hours of training time.
 
 **Fallacy**: *High training accuracy indicates production readiness.*
 
