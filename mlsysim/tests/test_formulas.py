@@ -12,8 +12,21 @@ import pint
 from mlsysim.physics import (
     _ensure_unit,
     calc_network_latency_ms,
+    calc_alpha_beta_crossover,
+    calc_point_to_point_time,
+    calc_ring_tree_crossover_size,
+    calc_double_binary_tree_allreduce_time,
+    calc_ring_allreduce_data_factor,
+    calc_ring_collective_data_factor,
+    ring_allreduce_data_factor_latex,
+    calc_ring_allreduce_latency_steps,
+    calc_ring_allreduce_latency_time,
+    calc_oversubscription_effect,
+    calc_bisection_bandwidth,
+    calc_hop_latency,
     dTime,
     calc_amdahls_speedup,
+    calc_strong_scaling_speedup,
     calc_bottleneck,
     model_memory,
     calc_ring_allreduce_time,
@@ -35,7 +48,7 @@ from mlsysim.physics import (
     calc_monthly_egress_cost,
     calc_fleet_tco,
 )
-from mlsysim.core.constants import ureg, Q_, MB, GB
+from mlsysim.core.units import ureg, Q_, MB, GB
 
 # ======================================================================
 # _ensure_unit
@@ -198,6 +211,117 @@ class TestRingAllreduce:
         expected = 2 * 7 / 8 * (1e9 / 50e9) + 2 * 7 * 500e-9
         assert result.m_as(ureg.second) == pytest.approx(expected, rel=1e-4)
 
+
+class TestRingAllreduceFactors:
+    """Reusable ring AllReduce factors and latency helpers."""
+
+    def test_data_factor(self):
+        assert calc_ring_allreduce_data_factor(1) == 0.0
+        assert calc_ring_allreduce_data_factor(8) == pytest.approx(14 / 8)
+        assert calc_ring_collective_data_factor(8) == pytest.approx(7 / 8)
+        assert ring_allreduce_data_factor_latex() == "2 \\times (N-1)/N"
+
+    def test_latency_steps_and_time(self):
+        assert calc_ring_allreduce_latency_steps(1) == 0
+        assert calc_ring_allreduce_latency_steps(8) == 14
+        assert calc_ring_allreduce_latency_time(8, Q_("500 ns")).to(ureg.second).magnitude == pytest.approx(7e-6)
+
+
+class TestPointToPointTransfer:
+    """Point-to-point transfer with fixed latency and bandwidth: T = α + n/β."""
+
+    def test_known_answer(self):
+        payload = Q_("4 KB")
+        alpha = Q_("2 us")
+        beta = Q_("10 GB/s")
+        # pint KB is decimal (1000 bytes), matching the book's prose convention
+        expected = alpha.to(ureg.second).magnitude + (4 * 1000) / (10e9)
+        result = calc_point_to_point_time(payload, alpha, beta)
+        assert result.to(ureg.second).magnitude == pytest.approx(expected, rel=1e-6)
+
+
+class TestDoubleBinaryTreeAllreduce:
+    """Double Binary Tree approximation with empirical latency and bandwidth factors."""
+
+    def test_known_answer(self):
+        M = Q_("1e9 byte")
+        N = 256
+        beta = Q_("25e9 byte/s")
+        alpha = Q_("1 us")
+
+        # log2(256) = 8
+        # lat_term = 1.2 * 2 * 8 * alpha
+        # bw_term = 1.05 * (2 * (N - 1)/N) * M/beta
+        expected = 1.2 * (2 * 8 * 1e-6) + 1.05 * (2 * 255 / 256) * (1e9 / 25e9)
+        result = calc_double_binary_tree_allreduce_time(M, N, beta, alpha).to(ureg.second)
+        assert result.to(ureg.second).m_as(ureg.second) == pytest.approx(expected, rel=1e-4)
+
+    def test_respects_factors(self):
+        M = Q_("1e9 byte")
+        N = 8
+        beta = Q_("50e9 byte/s")
+        alpha = Q_("2 us")
+
+        expected = calc_double_binary_tree_allreduce_time(
+            M, N, beta, alpha, latency_factor=1.0, bandwidth_factor=1.0
+        ).to(ureg.second)
+        boosted = calc_double_binary_tree_allreduce_time(
+            M, N, beta, alpha, latency_factor=1.5, bandwidth_factor=2.0
+        ).to(ureg.second)
+        assert boosted > expected
+
+
+class TestRingTreeCrossoverSize:
+    """Crossover estimate M_crossover ≈ N * alpha * beta / log2(N)."""
+
+    def test_known_answer(self):
+        N = 64
+        alpha = Q_("10 us")
+        beta = Q_("10 GB/s")
+        result = calc_ring_tree_crossover_size(N, alpha, beta)
+        expected = N * 10e-6 * 10e9 / 6  # 64 * 10us * 10GB/s / log2(64)
+        assert result.to(ureg.byte).magnitude == pytest.approx(expected, rel=1e-6)
+
+
+class TestAlphaBetaCrossover:
+    """α-β crossover point n* = α·β."""
+
+    def test_known_answer(self):
+        alpha = Q_("1.5 us")
+        beta = Q_("50 GB/s")
+        expected = 1.5e-6 * 50e9
+        result = calc_alpha_beta_crossover(alpha, beta)
+        assert result.m_as(ureg.byte) == pytest.approx(expected, rel=1e-4)
+
+
+class TestOversubscriptionEffect:
+    """Throughput and loss from oversubscription."""
+
+    def test_2to1_and_30pct_comm(self):
+        rel_throughput, loss = calc_oversubscription_effect(0.30, 2)
+        assert rel_throughput == pytest.approx(1 / 1.3, rel=1e-6)
+        assert loss == pytest.approx(1 - (1 / 1.3), rel=1e-6)
+
+
+class TestBisectionBandwidth:
+    """Bisection bandwidth = N_links * link_bw / oversub_ratio."""
+
+    def test_non_oversubscribed(self):
+        result = calc_bisection_bandwidth(512, Q_("50 GB/s"), oversubscription_ratio=1.0)
+        assert result.m_as((ureg.byte / ureg.second)) == pytest.approx(512 * 50e9, rel=1e-6)
+
+    def test_oversubscribed(self):
+        result = calc_bisection_bandwidth(512, Q_("50 GB/s"), oversubscription_ratio=4.0)
+        assert result.m_as(ureg.byte / ureg.second) == pytest.approx(512 * 50e9 / 4, rel=1e-6)
+
+
+class TestHopLatency:
+    """Total path latency from identical hop latencies."""
+
+    def test_linear_scaling(self):
+        result = calc_hop_latency(3, Q_("2 us"))
+        assert result.to(ureg.microsecond).magnitude == pytest.approx(6.0, rel=1e-6)
+
 # ======================================================================
 # calc_tree_allreduce_time
 # ======================================================================
@@ -271,17 +395,36 @@ class TestTransformerTrainingFlops:
 # ======================================================================
 
 class TestActivationMemory:
-    """Activation memory with Korthikanti coefficients (34/10/2)."""
+    """Activation memory, Korthikanti et al. (2023) Sec. 4.1 exact bounds.
+
+    Constants are FP16 bytes (precision_bytes=2 is identity scale):
+    none = 34*s*b*h + 5*a*s^2*b ; selective = 34*s*b*h ; full = 2*s*b*h.
+    Re-pinned 2026-06-06 (the previous 34/10/2-times-bytes model double-
+    counted FP16 width, and its selective=10 matched no published source).
+    """
 
     def test_no_recompute(self):
-        # 1 layer, S=1024, B=1, H=768, precision_bytes=1 (default)
-        # 34 * 1024 * 1 * 768 * 1 = 26,738,688 bytes per layer
-        result = calc_activation_memory(1, 1024, 1, 768, strategy="none")
-        assert result.m_as(ureg.byte) == pytest.approx(34 * 1024 * 1 * 768, rel=1e-6)
+        # 1 layer, S=1024, B=1, H=768, a=12 heads, FP16 default
+        result = calc_activation_memory(1, 1024, 1, 768, n_heads=12, strategy="none")
+        expected = 34 * 1024 * 1 * 768 + 5 * 12 * 1024 * 1024 * 1
+        assert result.m_as(ureg.byte) == pytest.approx(expected, rel=1e-6)
+
+    def test_no_recompute_requires_heads(self):
+        with pytest.raises(ValueError, match="n_heads"):
+            calc_activation_memory(1, 1024, 1, 768, strategy="none")
+
+    def test_unknown_strategy_rejected(self):
+        with pytest.raises(ValueError, match="strategy"):
+            calc_activation_memory(1, 1024, 1, 768, strategy="checkpointing")
 
     def test_selective_recompute(self):
         result = calc_activation_memory(1, 1024, 1, 768, strategy="selective")
-        assert result.m_as(ureg.byte) == pytest.approx(10 * 1024 * 1 * 768, rel=1e-6)
+        assert result.m_as(ureg.byte) == pytest.approx(34 * 1024 * 1 * 768, rel=1e-6)
+
+    def test_precision_scales_relative_to_fp16(self):
+        fp16 = calc_activation_memory(1, 1024, 1, 768, precision_bytes=2)
+        fp32 = calc_activation_memory(1, 1024, 1, 768, precision_bytes=4)
+        assert fp32.m_as(ureg.byte) == pytest.approx(2 * fp16.m_as(ureg.byte))
 
     def test_full_recompute(self):
         result = calc_activation_memory(1, 1024, 1, 768, strategy="full")
@@ -356,6 +499,23 @@ class TestMTBFCluster:
         # With correlation_factor=0.5 => 25 hours
         result = calc_mtbf_cluster(50000, 1000, correlation_factor=0.5)
         assert result.m_as(ureg.hour) == pytest.approx(25.0, rel=1e-6)
+
+
+class TestStrongScalingSpeedup:
+    """Strong-scaling speedup for communication overhead fraction."""
+
+    def test_no_communication_overhead(self):
+        result = calc_strong_scaling_speedup(8, 0.0)
+        assert result == pytest.approx(8.0)
+
+    def test_full_communication_overhead(self):
+        result = calc_strong_scaling_speedup(8, 1.0)
+        assert result == pytest.approx(1.0)
+
+    def test_known_answer(self):
+        # N=4, r=0.1 => 4 / (1 + 3*0.1) = 3.0769
+        result = calc_strong_scaling_speedup(4, 0.1)
+        assert result == pytest.approx(4 / 1.3)
 
 # ======================================================================
 # calc_pipeline_bubble
@@ -580,3 +740,9 @@ class TestMTBFNode:
         result = calc_mtbf_node(10_000, 4, 50_000, 2, 20_000, 2)
         expected = 1 / (4/10_000 + 2/50_000 + 2/20_000)
         assert result.m_as(ureg.hour) == pytest.approx(expected, rel=1e-4)
+
+def test_calc_binomial_failure_probability():
+    from mlsysim.physics.reliability import calc_binomial_failure_probability
+    assert calc_binomial_failure_probability(1.0, 100) == 1.0
+    assert calc_binomial_failure_probability(0.0, 100) == 0.0
+    assert abs(calc_binomial_failure_probability(0.5, 2) - 0.75) < 1e-9

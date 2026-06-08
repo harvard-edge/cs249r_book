@@ -38,7 +38,20 @@ class EmpiricalAnchor:
     review_notes: str = ""
 
     def accepts(self, value: float) -> bool:
-        """Return whether a solver result remains inside the reviewed envelope."""
+        """Return whether a solver result remains inside the reviewed envelope.
+
+        An anchor is one of two mutually exclusive shapes:
+
+        - **target anchor**: ``target`` set; accepts when
+          ``|value - target| <= |target| * rel_tolerance`` (symmetric
+          relative band — ``rel_tolerance`` is then mandatory);
+        - **range anchor**: ``lower`` and ``upper`` set; accepts when
+          ``lower <= value <= upper`` (inclusive).
+
+        ``value`` must already be expressed in this anchor's ``units``.
+        Raises ``ValueError`` when the anchor's fields do not form a complete
+        shape.
+        """
         if self.target is not None:
             if self.rel_tolerance is None:
                 raise ValueError(f"{self.id} target anchor requires rel_tolerance")

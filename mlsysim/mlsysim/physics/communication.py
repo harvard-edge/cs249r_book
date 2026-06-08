@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import math
 
-from mlsysim.core.constants import ureg, Q_
-from mlsysim.core._validation import validate_positive, validate_at_least
+from mlsysim.core.units import ureg, Q_
+from mlsysim.core._validation import (
+    validate_positive,
+    validate_nonnegative,
+    validate_range,
+    validate_at_least,
+)
 
 from ._units import _ensure_unit
 
@@ -48,6 +53,124 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     return (bw_term + lat_term).to(ureg.second)
 
 
+def ring_allreduce_data_factor_latex(n_gpus_symbol="N"):
+    """LaTeX form for the Ring AllReduce data factor, e.g. ``2 \times (N-1)/N``."""
+    return f"2 \\times ({n_gpus_symbol}-1)/{n_gpus_symbol}"
+
+
+def calc_ring_allreduce_data_factor(n_gpus):
+    """Ring AllReduce bandwidth factor: 2*(N-1)/N.
+
+    This multiplier appears in the bandwidth term of the ring AllReduce
+    alpha-beta model:
+
+    ``T_ring = 2*(N-1)/N * M/beta + 2*(N-1)*alpha``
+    """
+    validate_at_least(n_gpus, 1, "n_gpus")
+    if n_gpus == 1:
+        return 0.0
+    return 2 * (n_gpus - 1) / n_gpus
+
+
+def calc_ring_collective_data_factor(n_gpus):
+    """Ring single-stage collective factor: (N-1)/N.
+
+    This multiplier appears in ring AllGather/ReduceScatter/AllToAll bandwidth terms.
+    """
+    validate_at_least(n_gpus, 1, "n_gpus")
+    if n_gpus == 1:
+        return 0.0
+    return (n_gpus - 1) / n_gpus
+
+
+def calc_ring_allreduce_latency_steps(n_gpus):
+    """Number of startup latency terms in ring AllReduce: 2(N-1)."""
+    validate_at_least(n_gpus, 1, "n_gpus")
+    return 2 * (n_gpus - 1)
+
+
+def calc_ring_allreduce_latency_time(n_gpus, latency_s):
+    """Ring AllReduce latency term only: 2(N-1) × alpha."""
+    validate_at_least(n_gpus, 1, "n_gpus")
+    alpha = _ensure_unit(latency_s, ureg.second, "latency_s")
+    validate_nonnegative(alpha, "latency_s")
+    return (calc_ring_allreduce_latency_steps(n_gpus) * alpha).to(ureg.second)
+
+
+def calc_alpha_beta_crossover(alpha_s, bandwidth_bytes_s):
+    """Crossover size for the α-β model where α = n/β."""
+
+    alpha = _ensure_unit(alpha_s, ureg.second, "alpha_s")
+    bandwidth = _ensure_unit(
+        bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s"
+    )
+    validate_nonnegative(alpha, "alpha_s")
+    validate_positive(bandwidth, "bandwidth_bytes_s")
+    return (alpha * bandwidth).to(ureg.byte)
+
+
+def calc_point_to_point_time(message_bytes, alpha_s, bandwidth_bytes_s):
+    """Point-to-point transfer time under the α-β model: α + n/β."""
+
+    alpha = _ensure_unit(alpha_s, ureg.second, "alpha_s")
+    bandwidth = _ensure_unit(
+        bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s"
+    )
+    message = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    validate_nonnegative(alpha, "alpha_s")
+    validate_positive(bandwidth, "bandwidth_bytes_s")
+    validate_nonnegative(message, "message_bytes")
+    return (alpha + message / bandwidth).to(ureg.second)
+
+
+def calc_oversubscription_effect(comm_fraction, oversubscription_ratio):
+    """Compute throughput penalty from oversubscription.
+
+    For an idealized workload, communication time scales as::
+
+        T = (1 - f) * T_compute + f * T_base * oversubscription_ratio
+
+    where:
+    - ``f`` = communication-dominant fraction of time
+    - ``oversubscription_ratio`` = N:1 oversubscription ratio (e.g., 2.0, 4.0)
+
+    Returns
+    -------
+    tuple
+        ``(relative_throughput, throughput_loss)`` where both are dimensionless
+        fractions in [0,1].
+    """
+    validate_range(comm_fraction, 0.0, 1.0, "comm_fraction")
+    validate_positive(oversubscription_ratio, "oversubscription_ratio")
+
+    relative_throughput = 1 / ((1 - comm_fraction) + (comm_fraction * oversubscription_ratio))
+    throughput_loss = 1 - relative_throughput
+    return relative_throughput, throughput_loss
+
+
+def calc_bisection_bandwidth(num_ports, link_bandwidth, oversubscription_ratio=1.0):
+    """Bisection bandwidth for a single partition cut.
+
+    Uses ``BW_bisect = num_ports * link_bw / oversubscription_ratio``.
+    """
+    validate_at_least(num_ports, 1, "num_ports")
+    validate_positive(oversubscription_ratio, "oversubscription_ratio")
+
+    link_bw = _ensure_unit(
+        link_bandwidth, ureg.byte / ureg.second, "link_bandwidth"
+    )
+    validate_positive(link_bw, "link_bandwidth")
+    return (num_ports * link_bw / oversubscription_ratio).to(ureg.byte / ureg.second)
+
+
+def calc_hop_latency(hops, hop_latency_s):
+    """Total latency across ``hops`` identical hops."""
+    validate_nonnegative(hops, "hops")
+    latency = _ensure_unit(hop_latency_s, ureg.second, "hop_latency_s")
+    validate_nonnegative(latency, "hop_latency_s")
+    return (hops * latency).to(ureg.second)
+
+
 def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     """
     Calculates communication time for a Tree AllReduce collective.
@@ -84,6 +207,86 @@ def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     return (bw_term + lat_term).to(ureg.second)
 
 
+def calc_double_binary_tree_allreduce_time(
+    message_bytes,
+    n_gpus,
+    bandwidth_bytes_s,
+    latency_s,
+    latency_factor=1.2,
+    bandwidth_factor=1.05,
+):
+    """
+    Double Binary Tree AllReduce approximation.
+
+    The model keeps logarithmic startup cost while using near-bandwidth-optimal
+    behavior. Empirical constants in this implementation match the tutorial
+    treatment where real NCCL trees are typically faster than simple tree in
+    latency and slightly more bandwidth-efficient than ideal.
+
+    Parameters
+    ----------
+    message_bytes : Quantity
+        Total message size (M) to be reduced.
+    n_gpus : int
+        Number of participating GPUs (N).
+    bandwidth_bytes_s : Quantity
+        Link bandwidth between nodes (beta).
+    latency_s : Quantity
+        Per-hop network latency (alpha).
+    latency_factor : float, optional
+        Multiplier applied to the pure logarithmic latency term (default 1.2).
+    bandwidth_factor : float, optional
+        Multiplier applied to the near-bandwidth term (default 1.05).
+
+    Returns
+    -------
+    Quantity
+        Total time for the approximate Double Binary Tree collective in seconds.
+    """
+    validate_at_least(n_gpus, 1, "n_gpus")
+    if n_gpus == 1:
+        return Q_("0 second")
+
+    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    bw = _ensure_unit(
+        bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s"
+    )
+    validate_positive(bw, "bandwidth_bytes_s")
+    lat = _ensure_unit(latency_s, ureg.second, "latency_s")
+    validate_nonnegative(lat, "latency_s")
+    if latency_factor < 0:
+        raise ValueError(f"latency_factor must be non-negative, got {latency_factor}")
+    if bandwidth_factor < 0:
+        raise ValueError(
+            f"bandwidth_factor must be non-negative, got {bandwidth_factor}"
+        )
+
+    log_n = math.log2(max(n_gpus, 2))
+    lat_term = latency_factor * (2 * log_n) * lat
+    bw_term = bandwidth_factor * (2 * (n_gpus - 1) / n_gpus) * msg / bw
+    return (lat_term + bw_term).to(ureg.second)
+
+
+def calc_ring_tree_crossover_size(n_gpus, alpha_s, bandwidth_bytes_s):
+    """
+    Crossover size where the approximate ring/tree model costs intersect.
+
+    Uses the log-aware estimate:
+      M_crossover = N * alpha * beta / log2(N)
+    """
+    validate_at_least(n_gpus, 1, "n_gpus")
+    if n_gpus == 1:
+        return Q_("0 byte")
+    alpha = _ensure_unit(alpha_s, ureg.second, "alpha_s")
+    validate_nonnegative(alpha, "alpha_s")
+    bandwidth = _ensure_unit(
+        bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s"
+    )
+    validate_positive(bandwidth, "bandwidth_bytes_s")
+    log_n = math.log2(n_gpus)
+    return (n_gpus * alpha * bandwidth / log_n).to(ureg.byte)
+
+
 def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     """
     Calculates communication time for an All-to-All collective.
@@ -94,7 +297,8 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     Parameters
     ----------
     message_bytes : Quantity
-        Total message size (M) transmitted by a single node.
+        Per-node buffer size (M) held by each participant; the ring exchanges
+        (N-1)/N of it per node.
     n_gpus : int
         Number of participating GPUs (N).
     bandwidth_bytes_s : Quantity
@@ -110,6 +314,7 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     validate_at_least(n_gpus, 1, "n_gpus")
     msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
     bw = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
+    validate_positive(bw, "bandwidth_bytes_s")
     lat = _ensure_unit(latency_s, ureg.second, "latency_s")
     n = n_gpus
     bw_term = (n - 1) / n * msg / bw
@@ -158,14 +363,28 @@ def calc_hierarchical_allreduce_time(
     Quantity
         Total time required for the hierarchical operation in seconds.
     """
-    t_reduce = calc_ring_allreduce_time(
-        message_bytes, gpus_per_node, intra_node_bw, intra_node_lat
-    )
-    reduced_message = _ensure_unit(message_bytes, ureg.byte, "message_bytes") / gpus_per_node
+    validate_at_least(gpus_per_node, 1, "gpus_per_node")
+    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    intra_bw = _ensure_unit(intra_node_bw, ureg.byte / ureg.second, "intra_node_bw")
+    validate_positive(intra_bw, "intra_node_bw")
+    intra_lat = _ensure_unit(intra_node_lat, ureg.second, "intra_node_lat")
+    g = gpus_per_node
+
+    # Phase 1 — intra-node Reduce-Scatter: each of the g ranks ends up owning a
+    # fully reduced 1/g chunk. Ring cost: (g-1)/g * M/beta + (g-1) * alpha.
+    t_reduce_scatter = (g - 1) / g * msg / intra_bw + (g - 1) * intra_lat
+
+    # Phase 2 — inter-node ring AllReduce over the M/g chunk each node owns.
     t_allreduce_inter = calc_ring_allreduce_time(
-        reduced_message, n_nodes, inter_node_bw, inter_node_lat
+        msg / g, n_nodes, inter_node_bw, inter_node_lat
     )
-    t_broadcast = calc_ring_allreduce_time(
-        reduced_message, gpus_per_node, intra_node_bw, intra_node_lat
-    )
-    return t_reduce + t_allreduce_inter + t_broadcast
+
+    # Phase 3 — intra-node AllGather: redistribute the reduced chunks so every
+    # rank holds the full result. Same ring cost as the Reduce-Scatter.
+    t_all_gather = (g - 1) / g * msg / intra_bw + (g - 1) * intra_lat
+
+    # (Audit fix 2026-06-06: the previous implementation ran a FULL intra-node
+    # AllReduce of M — already equal to RS+AG combined — plus a second intra-node
+    # AllReduce of M/g labeled "broadcast", inflating the intra-node term by
+    # (1 + 1/g) and contradicting the 3-phase algorithm documented above.)
+    return (t_reduce_scatter + t_allreduce_inter + t_all_gather).to(ureg.second)

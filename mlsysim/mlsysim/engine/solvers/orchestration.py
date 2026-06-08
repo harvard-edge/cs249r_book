@@ -1,68 +1,18 @@
 """Cluster orchestration and queueing solvers.
 
-These implementations live outside ``engine.solver`` so the public import
-module can stay small while domain logic remains easier to review.
+Domain implementations behind ``mlsysim.solvers`` (the public import
+path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
 """
 
-# ruff: noqa: F401
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, List, Optional, Type
 
-from ..engine import Engine, PerformanceProfile
 from ..results import (
-    SolverResult,
-    DistributedResult,
-    ReliabilityResult,
-    CheckpointResult,
-    SustainabilityResult,
-    ServingResult,
-    TrainingMemoryResult,
-    ServingCapacityResult,
-    MoERoutingResult,
-    ContinuousBatchingResult,
-    WeightStreamingResult,
-    TailLatencyResult,
-    EconomicsResult,
-    DataResult,
-    TopologyResult,
-    EfficiencyResult,
-    TransformationResult,
-    ScalingResult,
-    CompressionResult,
-    SynthesisResult,
     OrchestrationResult,
-    InferenceScalingResult,
-    SensitivityResult,
-    ResponsibleEngineeringResult,
-    ParallelismOptimizerResult,
-    BatchingOptimizerResult,
-    PlacementOptimizerResult,
 )
-from ...physics import (
-    calc_ring_allreduce_time,
-    calc_hierarchical_allreduce_time,
-    calc_all_to_all_time,
-    calc_bottleneck,
-    calc_mtbf_cluster,
-    calc_mtbf_node,
-    calc_young_daly_interval,
-    calc_failure_probability,
-    calc_pipeline_bubble,
-)
-from ...core.constants import ureg, Q_, resolve_precision
-from ...infrastructure.registry import Infrastructure
-from ...literature.registry import Literature
-from ...systems.reliability import Reliability
-from .. import calibration as cal
-from ...core.types import Quantity
-from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
-from ...hardware.types import HardwareNode
-from ...systems.types import Fleet, NetworkFabric, Node
-from ...infrastructure.types import Datacenter
-from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
-from .utils import _inter_node_latency, _intra_node_latency
+from ...core.units import ureg, Q_
+from ...systems.types import Fleet
+from .base import ForwardModel
 
 class OrchestrationModel(ForwardModel):
     """
@@ -100,8 +50,8 @@ class OrchestrationModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
-            Wait time, system length, and utilization metrics.
+        OrchestrationResult
+            Wait time, queue length, utilization, and stability metrics.
         """
         # ρ = λ / μ  (Utilization)
         # μ = 1 / avg_duration
@@ -112,10 +62,12 @@ class OrchestrationModel(ForwardModel):
         utilization = lambda_rate / mu_rate
 
         # M/D/1 Queue approximation for wait time (Fixed duration jobs)
-        # T_wait = ρ / (2μ(1-ρ))
+        # T_wait = ρ / (2μ(1-ρ))  — half the M/M/1 wait, because deterministic
+        # service removes the service-time variance term.
         if utilization < 1.0:
             wait_time_days = utilization / (2 * mu_rate * (1 - utilization))
         else:
+            # ρ >= 1: arrivals outpace service; the queue grows without bound.
             wait_time_days = float('inf')
 
         return OrchestrationResult(

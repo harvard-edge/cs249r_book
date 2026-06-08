@@ -9,7 +9,7 @@ Performance, Sustainability, Economics, and Reliability.
 
 from dataclasses import dataclass
 from typing import Dict, Any
-from ..core.constants import Q_
+from ..core.units import Q_
 
 @dataclass(frozen=True)
 class PerformanceMetrics:

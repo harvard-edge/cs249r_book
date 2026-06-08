@@ -37,10 +37,10 @@ from mlsysim.models.registry import (
     VisionModels,
 )
 from mlsysim.ops.monitoring import Monitoring
-from mlsysim.ops.runtime import RuntimeOverheads
+from mlsysim.ops.runtime import MemoryProtection, RuntimeOverheads
 from mlsysim.ops.training import TrainingRunOverheads
 from mlsysim.platforms.registry import Platforms
-from mlsysim.scenarios.registry import ReferenceStats
+from mlsysim.reference_stats.registry import ReferenceStats
 from mlsysim.systems.registry import (
     Clusters,
     Fabrics,
@@ -86,7 +86,7 @@ def _validate_provenance_record(path: str, prov: Provenance | None) -> list[str]
 
 
 def _check_node(path: str, node: Any) -> list[str]:
-    """Inspects an AST node to verify its provenance lineage."""
+    """Inspects a runtime registry object to verify its provenance lineage."""
     meta = getattr(node, "metadata", None)
     if meta is not None:
         return _validate_provenance_record(path, getattr(meta, "provenance", None))
@@ -97,8 +97,13 @@ def _check_node(path: str, node: Any) -> list[str]:
     if hasattr(node, "mttf_hours"):
         return _validate_provenance_record(path, getattr(node.mttf_hours, "provenance", None))
     if hasattr(node, "rate"):
-        return _check_node(path, node)
-    return []
+        # Recurse into the rate VALUE (was `node`, an infinite loop — audit fix 2026-06-06).
+        return _check_node(path, node.rate)
+    # A value that reaches here carries no provenance hook at all. Report it
+    # instead of silently passing (audit fix 2026-06-06: bare floats/Quantities
+    # previously returned [] and made the "every value is sourced" claim
+    # unenforced).
+    return [f"{path}: no provenance attached ({type(node).__name__})"]
 
 
 def audit_registries(*, scope_cloud: bool = False) -> list[str]:
@@ -258,6 +263,7 @@ def audit_ops_sourced() -> list[str]:
     for prefix, reg in (
         ("Ops.Monitoring", Monitoring),
         ("Ops.RuntimeOverheads", RuntimeOverheads),
+        ("Ops.MemoryProtection", MemoryProtection),
         ("Ops.TrainingRunOverheads", TrainingRunOverheads),
     ):
         for item in _registry_nodes(reg):
@@ -289,7 +295,14 @@ def audit_systems_reliability() -> list[str]:
         if hasattr(comp, "name"):
             issues.extend(_check_node(f"Systems.Reliability.{comp.name}", comp))
     recovery = Reliability.Recovery
-    for field in ("heartbeat_timeout_s", "reschedule_time_s", "checkpoint_write_bw_gbs"):
+    for field in (
+        "heartbeat_timeout_s",
+        "reschedule_time_s",
+        "detection_time_s",
+        "restart_time_s",
+        "warmup_time_s",
+        "checkpoint_write_bw_gbs",
+    ):
         val = getattr(recovery, field)
         if isinstance(val, Sourced):
             issues.extend(

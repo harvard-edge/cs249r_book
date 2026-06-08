@@ -150,6 +150,7 @@ class MLSysBookCLI:
         quality_table.add_row(_cmd("bib mechanical|normalize|sync"), "Bibliography management", _cmd("./binder bib sync --vol1"))
         quality_table.add_row(_cmd("render plots [--vol1|chapter]"), "Render matplotlib plots to PNG gallery", _cmd("./binder render plots --vol1"))
         quality_table.add_row(_cmd("layout check <pdf> [--threshold]"), "Flag PDF pages with excessive bottom whitespace", _cmd("./binder layout check book.pdf"))
+        quality_table.add_row(_cmd("layout tables --vol1|--vol2"), "Render table-only PDF audit/contact sheets", _cmd("./binder layout tables --vol2"))
 
         # Newsletter Commands
         nl_table = Table(show_header=True, header_style="bold magenta", box=None)

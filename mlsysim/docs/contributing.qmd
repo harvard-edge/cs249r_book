@@ -31,7 +31,7 @@ is a good starting point.
 | Add a fleet or fabric | Intermediate | Medium -- new topologies | `mlsysim/systems/` |
 | Add a grid or rack profile | Intermediate | Medium -- new infra | `mlsysim/infrastructure/` |
 | Write a tutorial | Intermediate | High -- improves learning | `docs/tutorials/` |
-| Add or improve a solver | Advanced | High -- new analysis capabilities | `engine/solver.py` |
+| Add or improve a solver | Advanced | High -- new analysis capabilities | `engine/solvers/` |
 
 ---
 
@@ -67,8 +67,9 @@ the accelerator landscape and datasheet specs that feed into MLSYSIM's hardware 
 
 ### Step 1: Add a YAML spec under `hardware/data/`
 
-Chip and board specs live in the **Silicon Zoo** — not in `core/constants.py`
-(that file is physics/units only). Add one YAML file under the right tier, for
+Chip and board specs live in the **Silicon Zoo** — there is no shared constants
+file to park them in (units live in `core/units.py`, physical constants in
+`physics/constants.py`). Add one YAML file under the right tier, for
 example `mlsysim/hardware/data/cloud/MyAccelerator.yaml`. The loader validates
 the file against `HardwareNode` at import time and exposes it through the same
 Python API (`Hardware.Cloud.MyAccelerator`).
@@ -107,10 +108,13 @@ loading. If the value is a technology-class reference, use `@tech:` rather than
 copying a shared fact into many devices, for example
 `latency: "@tech:Interconnect.NVLink.latency"`.
 
-### Step 2: Verify with registry parity tests
+### Step 2: Verify with the registry contract tests
 
-If you replace a symbol that used to live in `constants.py`, add a row to
-`mlsysim/tests/test_registry_parity.py` before deleting the flat constant.
+The loader contract and duplicate-spec gates run automatically:
+`tests/test_registry_loader_contract.py` and
+`tests/test_registry_no_duplicate_specs.py`. The legacy `core/constants.py`
+junk drawer was deleted outright; `tests/test_constants_allowlist.py` enforces
+that neither it nor a compat shim for it ever comes back.
 
 ### Step 3: Use the canonical path in downstream examples
 
@@ -137,7 +141,7 @@ Display helpers live in `mlsysim.fmt` — keep physics in `mlsysim.physics.*`:
 |:-------|:---------|
 | `fmt(q, precision=1)` | Human-readable quantities in prose |
 | `fmt_int(n)` | Integer counts without spurious decimals |
-| `check(q, label=...)` | Assert dimensional sanity in tutorials |
+| `check(condition, message)` | Assert invariants in tutorials and LEGO cells |
 | `MarkdownStr` | Inline QMD values that must not be LaTeX-escaped |
 
 Registry operands come from zoos; derived values from `mlsysim.physics.calc_*` or solvers.
@@ -329,8 +333,10 @@ deepen their understanding. Relevant slide decks for common tutorial topics:
 
 ## 6. Adding or Improving a Solver {#sec-solvers}
 
-MLSYSIM ships six analytical solvers, each grounded in peer-reviewed literature. All
-inherit from `BaseSolver` and implement `solve(**kwargs)`.
+MLSYSIM ships 32 analytical solvers (see `mlsysim.solvers`), each grounded in
+peer-reviewed literature. All inherit from the 3-Tier base classes
+(`ForwardModel`, `BaseSolver`, `BaseOptimizer`) and implement `solve(**kwargs)`.
+The six foundational ones:
 
 | Solver | What it computes | Key references |
 |:---|:---|:---|
@@ -356,7 +362,7 @@ implement.
 2. **Inherit from `BaseSolver`** and implement `solve(**kwargs) -> dict`
 3. **Use pint units throughout** -- all inputs and outputs must carry physical units
 4. **Cite the source paper** in a docstring on the solver class
-5. **Add tests in `tests/test_solvers.py`** covering at least one known-good result from the paper
+5. **Add tests** (e.g. in `tests/test_solver_invariants.py` or a new test file) covering at least one known-good result from the paper
 6. **Document the solver** by adding a page under `docs/api/`
 
 ### Example: extending a solver
@@ -384,21 +390,22 @@ Before submitting a pull request, ensure the test suite passes:
 # Install development dependencies
 pip install -e ".[dev]"
 
-# Run the full test suite
-pytest mlsysim/tests/ -v
+# Run the full test suite (from the mlsysim package root)
+pytest tests/ -v
 
 # Run a specific test file
-pytest mlsysim/tests/test_solvers.py -v
+pytest tests/test_solver_invariants.py -v
 ```
 
-The test suite covers four areas:
+Key areas of the test suite:
 
 | Test file | What it validates |
 |:---|:---|
 | `test_engine.py` | Single-node inference, OOM exceptions, precision switching |
 | `test_hardware.py` | Registry access, ridge point calculation, JSON serialization |
-| `test_solvers.py` | Distributed, reliability, and economics solvers |
+| `test_solver_invariants.py` / `test_solver_module_exports.py` | Solver behavior and the public `mlsysim.solvers` surface |
 | `test_empirical.py` | Empirical validation against published numbers |
+| `test_registry_loader_contract.py` / `test_constants_allowlist.py` | YAML loader contract and the retired-constants gate |
 
 ---
 
@@ -431,7 +438,7 @@ Understanding the module layout helps you find the right file to edit.
 ```
 mlsysim/
   core/
-    constants.py    # Physics, units, and cross-cutting laws only (CI allowlist)
+    constants.py    # Retired shim: re-exports units only (CI allowlist enforced)
     loader.py       # YAML loading, duplicate-key checks, registry generation
     provenance.py   # Sourced values and provenance helpers
     registry/       # Base Registry pattern

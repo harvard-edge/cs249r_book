@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
-from ..core.constants import ureg, BYTES_FP16
+from ..core.units import ureg, BYTES_FP16
 from ..core.types import (
     Quantity,
     Metadata,
@@ -17,7 +17,7 @@ class ComputationGraph(BaseModel):
     It strips away high-level architectural details (like "Transformer" or 
     "CNN") and reduces the workload to pure math: Operations and Bytes.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     
     name: str
     total_ops: Quantity
@@ -31,7 +31,7 @@ class ComputationGraph(BaseModel):
     @field_validator("total_ops", mode="after")
     @classmethod
     def _validate_total_ops(cls, v):
-        return require_unit_family(v, ureg.count, "total_ops", "operation")
+        return require_unit_family(v, ureg.flop, "total_ops", "operation")
 
     @field_validator("parameter_count", mode="after")
     @classmethod
@@ -46,7 +46,7 @@ class ComputationGraph(BaseModel):
     @field_validator("arithmetic_intensity", mode="after")
     @classmethod
     def _validate_arithmetic_intensity(cls, v):
-        return require_unit_families(v, ureg.count / ureg.byte, "arithmetic_intensity", ("operation", "data"))
+        return require_unit_families(v, ureg.flop / ureg.byte, "arithmetic_intensity", ("operation", "data"))
     
     def __repr__(self):
         return f"ComputationGraph({self.name}, {self.total_ops:~P})"
@@ -56,16 +56,35 @@ class Workload(BaseModel):
     Layer A (Workload Demand): Base representation of an ML model or task.
     
     A Workload defines the computational requirements of a task without any
-    knowledge of the hardware it will run on. It must implement `lower()` 
+    knowledge of the hardware it will run on. It must implement `lower()`
     to project its architectural definition down into a `ComputationGraph`.
+
+    ``inference_flops`` semantics — the unit of work DIFFERS BY MODEL FAMILY
+    (documented 2026-06-06; the field is dimensioned only as ``flop``, so the
+    family convention is the contract):
+
+    - Autoregressive LMs (``TransformerWorkload`` decoder-only,
+      ``SparseTransformerWorkload``): FLOPs **per generated token**, following
+      the 2 x params convention — 2 x TOTAL params for dense models, 2 x
+      ACTIVE params for MoE.
+    - Encoder models (BERT-family): FLOPs **per sequence** at the reference
+      sequence length recorded in the entry's provenance (BERT-Base: 22 GFLOP
+      at seq=128).
+    - Vision / CNN / recommendation models: FLOPs **per input** (one image /
+      one query forward pass).
+
+    NEVER compare ``inference_flops`` across families without normalizing —
+    the magnitudes differ by orders of magnitude purely from the work unit.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     architecture: str
     metadata: Metadata = Field(default_factory=Metadata)
     parameters: Optional[Quantity] = None
     model_size: Optional[Quantity] = None
     embedding_entries: Optional[Quantity] = None
+    # Per-token (LMs) / per-sequence (encoders) / per-input (vision) — see
+    # class docstring before comparing across model families.
     inference_flops: Optional[Quantity] = None
     inference_energy: Optional[Quantity] = None  # per-inference energy (e.g. mobile on-device)
     data_rate: Optional[Quantity] = None # e.g., TB/hour for autonomous driving
@@ -86,7 +105,7 @@ class Workload(BaseModel):
     @field_validator("inference_flops", mode="after")
     @classmethod
     def _validate_inference_flops(cls, v):
-        return require_unit_family(v, ureg.count, "inference_flops", "operation")
+        return require_unit_family(v, ureg.flop, "inference_flops", "operation")
 
     @field_validator("inference_energy", mode="after")
     @classmethod
@@ -160,7 +179,7 @@ class TransformerWorkload(Workload):
     @field_validator("training_ops", mode="after")
     @classmethod
     def _validate_training_ops(cls, v):
-        return require_unit_family(v, ureg.count, "training_ops", "operation")
+        return require_unit_family(v, ureg.flop, "training_ops", "operation")
 
     @field_validator("training_tokens", "training_accelerators_ref", mode="after")
     @classmethod
@@ -206,7 +225,7 @@ class TransformerWorkload(Workload):
         Returns:
             Quantity[byte]: Total training memory per GPU
         """
-        from ..core.constants import resolve_precision
+        from ..core.units import resolve_precision
         from ..physics import calc_activation_memory
         
         _, precision_bytes = resolve_precision(precision)
@@ -246,12 +265,14 @@ class TransformerWorkload(Workload):
         if zero_stage >= 3:
             weight_mem = weight_mem / dp_size
             
-        # 3. Activation Memory (proportional to B, S, H)
+        # 3. Activation Memory (proportional to B, S, H; quadratic attention
+        # term needs the head count when strategy='none')
         act_mem = calc_activation_memory(
             n_layers=self.layers,
             seq_len=seq_len,
             batch_size=batch_size,
             hidden_dim=self.hidden_dim or 4096,
+            n_heads=self.heads,
             precision_bytes=bpp,
             strategy=strategy
         )

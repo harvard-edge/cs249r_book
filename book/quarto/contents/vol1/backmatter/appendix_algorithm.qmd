@@ -65,13 +65,13 @@ GEMM[^fn-gemm-blas] is the computational workhorse of deep learning. For matrice
 ```{python}
 #| echo: false
 from mlsysim import *
-from mlsysim.core.constants import *
-#| label: gemm-intensity-example
+from mlsysim.core.units import *
+
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d
 # │ Goal: GEMM intensity formula and small-matrix roofline example
-# │ Exports: GemmIntensityExample.*_str, gemm_intensity_eq
-from mlsysim.fmt import fmt_int, fmt, check, fmt_math
+# │ Exports: GemmIntensityExample.*_str
+from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
 
 class GemmIntensityExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -81,8 +81,7 @@ class GemmIntensityExample:
     bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
     small_intensity = n_small / 3
     a100_ridge = int(
-        Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs/second).magnitude
-        / Hardware.Cloud.A100.memory.bandwidth.to(TB/second).magnitude
+        Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.A100.memory.bandwidth.to(TB / second).magnitude
     )
     small_efficiency_pct = small_intensity / a100_ridge * 100
 
@@ -92,24 +91,21 @@ class GemmIntensityExample:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bytes_fp16_value_str = fmt_int(bytes_fp16, commas=False)
     n_small_str = fmt(n_small, precision=0, commas=False)
-    small_intensity_str = fmt_int(small_intensity, commas=False)
-    small_efficiency_pct_str = fmt_percent(small_efficiency_pct/100, precision=1, commas=False, style='prose')
-    a100_ridge_str = fmt(a100_ridge, precision=0, commas=False)
-    gemm_intensity_eq = fmt_math(
-        rf"\text{{Intensity}} = \frac{{O}}{{D_{{\text{{vol}}}}}} = \frac{{2n^3}}{{3n^2 \times {bytes_fp16_value_str}}} = \frac{{n}}{{3}} \text{{ FLOP/byte}}"
-    )
+    small_intensity_str = fmt_arithmetic_intensity(small_intensity * flop / byte, unit=flop / byte, precision=1, commas=False)
+    small_efficiency_pct_str = fmt_percent(small_efficiency_pct / 100, precision=1, commas=False, style='prose')
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
 ```
 
 The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n{\times}n$ matrices in FP16 (`{python} GemmIntensityExample.bytes_fp16_value_str` bytes/element):
 $$
-\text{`{python} GemmIntensityExample.gemm_intensity_eq`}
+\text{Intensity} = \frac{O}{D_{\text{vol}}} = \frac{2n^3}{3n^2 \times `{python} GemmIntensityExample.bytes_fp16_value_str`} = \frac{n}{3} \text{ FLOP/byte}
 $$
 
 This explains several important phenomena:
 
 - **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
 - **Aligned dimensions help**: Hardware tensor cores are optimized for precision- and architecture-specific tile multiples. Dimensions that align with these multiples avoid padding overhead and improve kernel efficiency, but they do not need to be powers of two.
-- **Small matrices are inefficient**: A square GEMM with $n =$ `{python} GemmIntensityExample.n_small_str` has intensity `{python} GemmIntensityExample.n_small_str`/3 ≈ `{python} GemmIntensityExample.small_intensity_str` FLOP/byte, well below the ridge point (`{python} GemmIntensityExample.a100_ridge_str`), achieving only ~`{python} GemmIntensityExample.small_efficiency_pct_str` of peak throughput.
+- **Small matrices are inefficient**: A square GEMM with $n =$ `{python} GemmIntensityExample.n_small_str` has intensity `{python} GemmIntensityExample.n_small_str`/3 ≈ `{python} GemmIntensityExample.small_intensity_str`, well below the ridge point (`{python} GemmIntensityExample.a100_ridge_str`), achieving only ~`{python} GemmIntensityExample.small_efficiency_pct_str` of peak throughput.
 
 ### Sparse matrix formats {#sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0}
 
@@ -158,14 +154,14 @@ class SparseEmbeddingExample:
     sparse_mb_str = fmt_qty(sparse_bytes_q, MB, precision=0, commas=False)
     bytes_fp32_value_str = fmt_magnitude(BYTES_FP32, unit=byte, precision=0, commas=False)
     bytes_int32_value_str = fmt_magnitude(BYTES_INT32, unit=byte, precision=0, commas=False)
-    sparsity_pct_str = fmt_percent(sparsity_pct/100, precision=0, commas=False, style='prose')
+    sparsity_pct_str = fmt_percent(sparsity_pct / 100, precision=0, commas=False, style='prose')
     reduction_factor_mult_str = fmt_multiple(reduction_factor, precision=0, commas=False)
 ```
 
 To see the trade-off concretely, consider a vocabulary embedding matrix with `{python} SparseEmbeddingExample.vocab_size_str` rows and `{python} SparseEmbeddingExample.embed_dim_str` columns (`{python} SparseEmbeddingExample.total_elements_str` parameters):
 
-*   **Dense (FP32)**: `{python} SparseEmbeddingExample.total_elements_str` $\times$ $10^{9}$ $\times$ `{python} SparseEmbeddingExample.bytes_fp32_value_str` bytes = `{python} SparseEmbeddingExample.dense_gb_str`.
-*   **Sparse** (`{python} SparseEmbeddingExample.sparsity_pct_str` density): Storing only nonzeros requires roughly `{python} SparseEmbeddingExample.nonzeros_str` $\times$ $10^{6}$ $\times$ (`{python} SparseEmbeddingExample.bytes_fp32_value_str` bytes value + `{python} SparseEmbeddingExample.bytes_int32_value_str` bytes index) ≈ `{python} SparseEmbeddingExample.sparse_mb_str`.
+*   **Dense (FP32)**: `{python} SparseEmbeddingExample.total_elements_str` parameters $\times$ `{python} SparseEmbeddingExample.bytes_fp32_value_str` bytes each = `{python} SparseEmbeddingExample.dense_gb_str`.
+*   **Sparse** (`{python} SparseEmbeddingExample.sparsity_pct_str` density): Storing only nonzeros requires roughly `{python} SparseEmbeddingExample.nonzeros_str` stored values $\times$ (`{python} SparseEmbeddingExample.bytes_fp32_value_str` value + `{python} SparseEmbeddingExample.bytes_int32_value_str` index) ≈ `{python} SparseEmbeddingExample.sparse_mb_str`.
 *   *Result*: A `{python} SparseEmbeddingExample.reduction_factor_mult_str` reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
 
 Linear algebra tells us *what* to compute; the next question is *how* to express those computations in code. Tensor programming primitives—shapes, strides, and broadcasting—bridge the gap between mathematical notation and the array operations that actually execute on hardware.
@@ -338,7 +334,7 @@ To see how these components interact in practice, consider a concrete model.
 # │ Show:    Per-component GB and total for two batch sizes.
 # │ How:     Scalar arithmetic from pint constants.
 # │
-# │ Imports: mlsysim.core.constants (Models.Language.GPT2.parameters, Models.Language.GPT2.layers, Models.Language.GPT2.hidden_dim,
+# │ Imports: mlsysim.core.units (Models.Language.GPT2.parameters, Models.Language.GPT2.layers, Models.Language.GPT2.hidden_dim,
 # │                           BYTES_FP16, BYTES_FP32, GB, byte, ureg, param)
 # │          mlsysim.book (fmt, check)
 # │ Exports: gpt2_P_str, gpt2_layers_str, gpt2_d_str, gpt2_bf16_bytes_value_str,
@@ -362,9 +358,7 @@ class GPT2TrainingMem:
     batch_small = 8
     batch_large = 64
     seq_len = 1024
-    optimizer_bytes_per_param = int(
-        (BYTES_ADAM_STATE + BYTES_FP32).to(byte).magnitude
-    )  # FP32 master + momentum + variance
+    optimizer_bytes_per_param = int((BYTES_ADAM_STATE + BYTES_FP32).to(byte).magnitude)  # FP32 master + momentum + variance
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     weights_q = P * bf16 * byte
@@ -406,7 +400,7 @@ class GPT2TrainingMem:
     act_large_gb_str = fmt_qty(act_large_q, GB, precision=1, commas=False, approx=True)
     act_factor_str = fmt_ratio(act_factor, precision=0, commas=False)
     accel_class_gb_str = fmt_memory_capacity(accel_q, unit=GiB, precision=0, commas=False)
-    grad_ckpt_overhead_pct_str = fmt_percent(33/100, precision=0, commas=False, style='prose')
+    grad_ckpt_overhead_pct_str = fmt_percent(33 / 100, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-appendix-algorithm-gpt-2-training-memory .callout-notebook title="Worked example: GPT-2 (1.5B) training memory"}
@@ -485,7 +479,7 @@ class SparseBreakEvenRecap:
     coo_break_even_density_pct = BYTES_FP32.to(byte).magnitude / coo_bytes_per_nonzero * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    csr_break_even_density_pct_str = fmt_percent(csr_break_even_density_pct/100, precision=0, commas=False, style='prose')
+    csr_break_even_density_pct_str = fmt_percent(csr_break_even_density_pct / 100, precision=0, commas=False, style='prose')
 ```
 
 ## Summary {.unnumbered}

@@ -161,8 +161,20 @@ HARDCODED_HARDWARE = re.compile(
 )
 
 # Hardcoded literature/infrastructure scalars that belong in registries.
+#   2026-06-03 (Oura/MobileNetV2 source-of-truth audit): Oura case-study
+#   accuracy anchors belong in ReferenceStats.OuraSleepStudy; MobileNetV2 alpha
+#   profile parameter counts belong in Models.Vision.*.
+#   2026-06-07 (LEGO verify hardening audit): GPT-2/GPT-4 training anchors were
+#   chapter-local literals in training.qmd; they now live in
+#   Models.Language.GPT2 (training_ops, inference_flops, layers) and
+#   ReferenceStats.TrainingCostAnchors (Gpt2Cost2019, Gpt4CostEstimate).
 HARDCODED_REGISTRY = re.compile(
     r"\b(?:scaling_factor|cf_scaling_factor|training_flops_per_token_param)\s*=\s*6\b|"
+    r"\bgpt2_total_flops\s*=\s*1e\d+\b|"
+    r"\bgpt2_fwd_flops\s*=\s*3e9\b|"
+    r"\bgpt2_cost_2019\s*=\s*50_?000\b|"
+    r"\bgpt4_cost_est\s*=\s*100\s*\*\s*MILLION|"
+    r"\bckpt_layers\s*=\s*48\b|"
     r"\b(?:psi_threshold)\s*=\s*0\.2\b|"
     r"\b(?:pue)\s*=\s*1\.2\b|"
     r"\b(?:mfu|case2_mfu)\s*=\s*0\.45\b|"
@@ -181,7 +193,14 @@ HARDCODED_REGISTRY = re.compile(
     r"\bgpu_cost_per_hour\s*=\s*3\b|"
     r"\bn_gpus\s*=\s*8192\b|"
     r"\bmoe_(?:total|active)_params_b\s*=\s*(?:671|37)\b|"
-    r"\bsmartphone_ram_gb\s*=\s*8\b",
+    r"\bsmartphone_ram_gb\s*=\s*8\b|"
+    r"\bmobilenetv2_alpha10_params\s*=\s*3_?504_?872\b|"
+    r"\bmobilenetv2_alpha05_total_params\s*=\s*1_?968_?680\b|"
+    r"\bmobilenetv2_alpha05_feature_params\s*=\s*687_?680\b|"
+    r"\baccel_only_accuracy\s*=\s*0\.57\b|"
+    r"\benhanced_accuracy\s*=\s*0\.79\b|"
+    r"\bscorer_agreement_low\s*=\s*0\.82\b|"
+    r"\bscorer_agreement_high\s*=\s*0\.83\b",
     re.I,
 )
 

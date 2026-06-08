@@ -336,7 +336,7 @@ class InfoCommand:
             # Citations (rough count of unique @cite patterns, excluding cross-refs)
             for cm in citation_pat.finditer(line):
                 ref = cm.group(0)[1:]  # strip @
-                if not any(ref.startswith(p) for p in ("fig-", "tbl-", "sec-", "eq-", "lst-")):
+                if not any(ref.startswith(p) for p in ("fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "algo-", "Algo-")):
                     citations += 1
 
             # Text lines and words (prose lines only)

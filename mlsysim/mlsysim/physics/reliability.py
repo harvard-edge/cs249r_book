@@ -4,14 +4,33 @@ from __future__ import annotations
 
 import math
 
-from mlsysim.core.constants import ureg
-from mlsysim.core._validation import validate_positive
+from mlsysim.core.units import ureg
+from mlsysim.core._validation import validate_positive, validate_range, validate_at_least
 
 from ._units import _ensure_unit
 
 
 def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
-    """Optimal checkpoint interval (Young's first-order approximation)."""
+    """Optimal checkpoint interval: ``tau = sqrt(2 * delta * MTBF)``.
+
+    Young (1974) first-order approximation, popularized with the Daly (2006)
+    refinement; this implements the Young form, which balances time lost to
+    checkpointing against expected rework after a failure. Valid when
+    ``delta << MTBF`` (the usual regime; otherwise use Daly's higher-order
+    form).
+
+    Parameters
+    ----------
+    checkpoint_cost_s : Quantity or float
+        Time to write one checkpoint (delta); bare floats are seconds.
+    mtbf_s : Quantity or float
+        Mean time between failures of the system; bare floats are seconds.
+
+    Returns
+    -------
+    Quantity
+        Optimal interval between checkpoints, in seconds.
+    """
     delta = _ensure_unit(checkpoint_cost_s, ureg.second, "checkpoint_cost_s")
     mtbf = _ensure_unit(mtbf_s, ureg.second, "mtbf_s")
     seconds = math.sqrt(2 * delta.m_as(ureg.second) * mtbf.m_as(ureg.second))
@@ -34,7 +53,26 @@ def calc_mtbf_node(
     other_mtbf_h=None,
     n_other=0,
 ):
-    """Compound node MTBF from heterogeneous components."""
+    """Compound node MTBF from heterogeneous components (series system).
+
+    Assumes independent, exponentially distributed failures where any single
+    component failure fails the node, so failure *rates* add:
+    ``MTBF_node = 1 / (n_gpu/MTBF_gpu + n_nic/MTBF_nic + n_psu/MTBF_psu + ...)``.
+    Real PSUs are often redundant (N+1); model that by lowering ``n_psus`` or
+    raising its MTBF rather than by changing the formula.
+
+    Parameters
+    ----------
+    gpu_mtbf_h, nic_mtbf_h, psu_mtbf_h, other_mtbf_h : Quantity or float
+        Per-component MTBF; bare floats are hours.
+    n_gpus, n_nics, n_psus, n_other : int
+        Component counts in the node.
+
+    Returns
+    -------
+    Quantity
+        Node MTBF in hours (always below the weakest component's MTBF).
+    """
     gpu = _ensure_unit(gpu_mtbf_h, ureg.hour, "gpu_mtbf_h")
     nic = _ensure_unit(nic_mtbf_h, ureg.hour, "nic_mtbf_h")
     psu = _ensure_unit(psu_mtbf_h, ureg.hour, "psu_mtbf_h")
@@ -49,8 +87,47 @@ def calc_availability_stacked(single_availability, n_replicas):
     return 1.0 - (1.0 - single_availability) ** n_replicas
 
 
+
+def calc_binomial_failure_probability(p, n):
+    """Probability of at least one failure given n independent trials.
+
+    Parameters
+    ----------
+    p : float
+        Probability of failure in a single trial (e.g., per-device per-hour).
+    n : int
+        Number of independent trials (e.g., number of devices).
+
+    Returns
+    -------
+    float
+        Dimensionless probability in [0, 1).
+    """
+    validate_range(p, 0.0, 1.0, "p")
+    validate_at_least(n, 1, "n")
+    return 1.0 - (1.0 - p) ** n
+
 def calc_failure_probability(mtbf, job_duration):
-    """Probability of at least one failure during a job."""
+    """Probability of at least one failure during a job.
+
+    Poisson/exponential failure model: ``P = 1 - exp(-T / MTBF)``. For short
+    jobs (``T << MTBF``) this approaches ``T / MTBF``; as ``T`` grows it
+    saturates at 1.
+
+    Parameters
+    ----------
+    mtbf : Quantity or float
+        Mean time between failures (> 0).
+    job_duration : Quantity or float
+        Job length. Both arguments must be Quantities (any time units) or
+        both raw numbers in the *same* unit — mixing raises ``TypeError``
+        because the implied unit would be ambiguous.
+
+    Returns
+    -------
+    float
+        Dimensionless probability in [0, 1).
+    """
     validate_positive(mtbf, "mtbf")
     both_qty = isinstance(mtbf, ureg.Quantity) and isinstance(job_duration, ureg.Quantity)
     either_qty = isinstance(mtbf, ureg.Quantity) or isinstance(job_duration, ureg.Quantity)

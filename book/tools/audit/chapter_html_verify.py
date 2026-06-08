@@ -76,6 +76,7 @@ CHAPTERS: dict[str, list[str]] = {
         "backmatter/appendix_fleet",
         "backmatter/appendix_communication",
         "backmatter/appendix_reliability",
+        "backmatter/appendix_inference",
         "backmatter/appendix_c3",
         "backmatter/appendix_assumptions",
     ],
@@ -98,6 +99,25 @@ HTML_MATH_RENDER_PATTERNS = [
     (
         "literal dollar-times",
         re.compile(r"\$\s*\\times\s*\$"),
+    ),
+    # 2026-06-07: added after mutation testing — an unclosed `$...` in QMD
+    # renders as a literal dollar + broken math in reader-visible prose
+    # ("$() = 1 - (1 - p)^N.") and nothing below caught it. These scan
+    # _visible_text(), which excludes rendered math spans, so legitimate
+    # `\(...\)` MathJax sources never match.
+    (
+        "unrendered math delimiter",
+        re.compile(r"\\\(|\\\)|\\\[|\\\]"),
+    ),
+    (
+        # `)` deliberately excluded: "(bandwidth/$)" and "per 1M tokens ($)"
+        # are legitimate currency parentheticals.
+        "unrendered math: $ before symbol",
+        re.compile(r"\$\s*[(=\\]"),
+    ),
+    (
+        "unresolved crossref",
+        re.compile(r"\?@(?:sec|fig|tbl|eq|lst|algo)-|(?<![\w./])@(?:sec|fig|tbl|eq|lst|algo)-[\w-]+"),
     ),
 ]
 
@@ -130,11 +150,29 @@ def _qmd_path(vol: str, ch_path: str) -> Path:
     return REPO_ROOT / "book/quarto/contents" / vol / f"{ch_path}.qmd"
 
 
+def _prepare_single_chapter_build(vol: str) -> None:
+    """Drop stale chapter HTML so post-render xref scan cannot false-fail.
+
+    Fast single-chapter binder builds only re-render the target QMD; leftover
+    HTML from prior full or partial builds remains under ``html-{vol}/`` and
+    ``verify_rendered_xrefs.py`` scans the whole output tree.
+    """
+    build_dir = REPO_ROOT / "book/quarto/_build" / f"html-{vol}"
+    contents = build_dir / "contents" / vol
+    if contents.is_dir():
+        for html in contents.rglob("*.html"):
+            html.unlink()
+    search_json = build_dir / "search.json"
+    if search_json.is_file():
+        search_json.unlink()
+
+
 def _build_html(vol: str, ch_path: str) -> tuple[bool, float, str]:
     name = ch_path.split("/")[-1]
     binder_vol = f"--{vol}"
     binder_ch = f"{vol}/{name}"
     log = Path(f"/tmp/render_{vol}_{name}.log")
+    _prepare_single_chapter_build(vol)
     t0 = time.monotonic()
     proc = subprocess.run(
         ["./book/binder", "build", "html", binder_vol, binder_ch,
@@ -202,7 +240,14 @@ def _visible_text(html: Path) -> str:
     content = soup.find("main") or soup.body
     if not content:
         return ""
-    for tag in content(["script", "style", "annotation", "mjx-assistive-mml"]):
+    for tag in content(["script", "style", "annotation", "mjx-assistive-mml", "pre", "code"]):
+        tag.decompose()
+    # Rendered math spans legitimately contain raw `\(...\)` source (MathJax
+    # processes client-side), and pseudocode blocks contain raw algorithmic
+    # LaTeX (pseudocode.js renders client-side too); exclude both so the
+    # unrendered-math patterns only fire on LaTeX that leaked OUTSIDE a
+    # client-rendered container. (2026-06-07)
+    for tag in content.find_all(class_=re.compile(r"\bmath\b|pseudocode")):
         tag.decompose()
     return re.sub(r"\s+", " ", content.get_text(separator=" "))
 

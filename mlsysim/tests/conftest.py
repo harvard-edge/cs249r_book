@@ -6,8 +6,8 @@ Pytest discovers this file automatically — no imports needed in test files.
 
 import pytest
 
-from mlsysim.core.constants import Q_
-from mlsysim.engine.solver import (
+from mlsysim.core.units import Q_
+from mlsysim.engine.solvers import (
     CheckpointModel,
     ContinuousBatchingModel,
     CompressionModel,

@@ -14,6 +14,8 @@ Reach for it from the inference and operations chapters: when those chapters cit
 
 ## Serving performance analysis {#sec-appdx-appendix-inference-serving}
 
+Serving performance analysis has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. The subsections that follow derive the queueing model first, then connect that model to memory-capacity limits in the worked serving examples.
+
 ### Queuing theory for batched inference {#sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0}
 
 The batching efficiency curve provides intuition about throughput-latency tradeoffs, but production systems require rigorous analysis to determine optimal batch sizes under stochastic arrival patterns. Queuing theory provides the mathematical framework to derive these optimal operating points and to understand why certain batch sizes outperform others under specific conditions.
@@ -100,7 +102,7 @@ $$B_{\min}(\rho_{\text{target}}) = \frac{\lambda_{\text{arr}} T_{\text{fixed}}}{
 
 where $\rho_{\text{target}}$ is the target utilization (typically 0.7--0.8 for production systems to maintain latency headroom) and $\rho_{\text{target}} > \lambda_{\text{arr}} t_{\text{req}}$.
 
-::: {.callout-important title="Target-utilization batch sizing"}
+::: {#psp-appendix-inference-target-utilization-batch-sizing .callout-perspective title="Target-utilization batch sizing"}
 
 @Eq-optimal-batch-approx reveals a fundamental insight: *minimum stable batch size grows with fixed overhead and arrival rate*. This means:
 
@@ -124,13 +126,13 @@ This utilization-constrained sizing explains why LLMs (high $T_{\text{fixed}}$ f
 # │
 # │ Goal: Provide GPT-3 parameter count for the worked example.
 # │ Show: "175"B parameters.
-# │ How: pulling Models.Language.GPT3.parameters from mlsysim.core.constants.
+# │ How: pulling Models.Language.GPT3.parameters from mlsysim.core.units.
 # │
-# │ Imports: mlsysim (Models); mlsysim.core.constants (param, BILLION); mlsysim.fmt (fmt_int, fmt)
+# │ Imports: mlsysim (Models); mlsysim.core.units (param, BILLION); mlsysim.fmt (fmt_int, fmt)
 # │ Exports: Gpt3Scenario.gpt3_params_b_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.core.constants import param, BILLION
+from mlsysim.core.units import param, BILLION
 from mlsysim.fmt import fmt_int, fmt, fmt_params
 
 class Gpt3Scenario:
@@ -144,6 +146,7 @@ class Gpt3Scenario:
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import fmt_int, check
+
     check(params_b == 175, "GPT-3 should have 175B parameters")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -173,13 +176,13 @@ Rounding up gives $B=8$ as the smallest batch size that meets the target utiliza
 
 @Tbl-batch-size-comparison quantifies the tradeoffs across batch sizes from 1 to 32:
 
-| **Size $B$** | **$T_{\text{svc}}(B)$ (ms)** | **req/s** |             **$\rho$** | **E[W] (ms)** | **$B/(2\lambda_{\text{arr}})$ (ms)** | **E[T] (ms)** |
-|:-------------|-----------------------------:|----------:|-----------------------:|:--------------|-------------------------------------:|:--------------|
-| **1**        |                         50.5 |      19.8 | 505 percent (unstable) | $\infty$      |                                  5.0 | $\infty$      |
-| **4**        |                         52.0 |      76.9 | 130 percent (unstable) | $\infty$      |                                 20.0 | $\infty$      |
-| **8**        |                         54.0 |     148.1 |           67.5 percent | 56.1          |                                 40.0 | 150.1         |
-| **16**       |                         58.0 |     275.9 |           36.3 percent | 16.5          |                                 80.0 | 154.5         |
-| **32**       |                         66.0 |     484.8 |           20.6 percent | 8.6           |                                160.0 | 234.6         |
+| **Size $B$** | **$T_{\text{svc}}(B)$ (ms)** | **req/s** |       **$\rho$**       | **E[W] (ms)** | **$B/(2\lambda_{\text{arr}})$ (ms)** | **E[T] (ms)** |
+|:-------------|:----------------------------:|:---------:|:----------------------:|:-------------:|:------------------------------------:|:-------------:|
+| **1**        |             50.5             |    19.8   | 505 percent (unstable) |    $\infty$   |                 5.0                  |    $\infty$   |
+| **4**        |             52.0             |    76.9   | 130 percent (unstable) |    $\infty$   |                 20.0                 |    $\infty$   |
+| **8**        |             54.0             |   148.1   |      67.5 percent      |      56.1     |                 40.0                 |     150.1     |
+| **16**       |             58.0             |   275.9   |      36.3 percent      |      16.5     |                 80.0                 |     154.5     |
+| **32**       |             66.0             |   484.8   |      20.6 percent      |      8.6      |                160.0                 |     234.6     |
 
 : **Batch Size Impact on GPT-3 Serving Performance**: Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100 percent). After including batch-accumulation delay, the latency minimum in this simple model occurs near $B=8$; $B=16$ has nearly the same mean latency with lower utilization, while $B=32$ leaves more headroom but pays a large accumulation-delay penalty. {#tbl-batch-size-comparison}
 
@@ -226,11 +229,11 @@ class GPT3ServingResults:
     b32_total_ms = 234.6
 
     # Prose-facing canonical strings (preserve raw floats for arithmetic above)
-    b8_service_ms_str = fmt_int(b8_service_ms, commas=False)
-    b8_util_pct_str = fmt_percent(b8_util_pct/100, precision=1, commas=False, style='prose')
+    b8_service_ms_str = fmt_time(b8_service_ms, 'millisecond', precision=0, commas=False)
+    b8_util_pct_str = fmt_percent(b8_util_pct / 100, precision=1, commas=False, style='prose')
     b8_wait_ms_str = fmt_time(b8_wait_ms, 'millisecond', precision=1, commas=False)
-    b16_service_ms_str = fmt_int(b16_service_ms, commas=False)
-    b16_util_pct_str = fmt_percent(b16_util_pct/100, precision=1, commas=False, style='prose')
+    b16_service_ms_str = fmt_time(b16_service_ms, 'millisecond', precision=0, commas=False)
+    b16_util_pct_str = fmt_percent(b16_util_pct / 100, precision=1, commas=False, style='prose')
     b16_wait_ms_str = fmt_time(b16_wait_ms, 'millisecond', precision=1, commas=False)
 ```
 
@@ -263,9 +266,9 @@ We can confirm these results by applying Little's Law as an internal consistency
 # │          LittlesLawVerify.in_service_str, LittlesLawVerify.in_queue_str,
 # │          LittlesLawVerify.batch_size_str, LittlesLawVerify.utilization_str,
 # │          LittlesLawVerify.expected_total_s_str
-# │ Imports: mlsysim.core.constants (ms, second); mlsysim.fmt typed formatters
+# │ Imports: mlsysim.core.units (ms, second); mlsysim.fmt typed formatters
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import ms, second
+from mlsysim.core.units import ms, second
 from mlsysim.fmt import fmt_int, check, fmt, fmt_ratio, fmt_time
 
 class LittlesLawVerify:
@@ -312,11 +315,11 @@ This matches the response-time decomposition: roughly 6 requests are in service 
 
 Production systems must select batch size to meet Service Level Objectives (SLOs), typically specified as latency percentiles (for example, P99 latency < 200 ms). The following framework systematizes this decision:
 
-#### Step 1: Characterize service time {.unnumbered}
+##### Step 1: Characterize service time {.unnumbered}
 
 Measure $T_{\text{fixed}}$ and $t_{\text{req}}$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $T_{\text{svc}}(B) = T_{\text{fixed}} + t_{\text{req}} B$.
 
-#### Step 2: Compute stability threshold {.unnumbered}
+##### Step 2: Compute stability threshold {.unnumbered}
 
 Find minimum batch size $B_{\text{min}}$ such that $\mu_{\text{eff}}(B_{\text{min}}) > \lambda_{\text{arr}}$:
 
@@ -324,13 +327,13 @@ $$B_{\text{min}} = \frac{T_{\text{fixed}} \lambda_{\text{arr}}}{1 - t_{\text{req
 
 Any batch size below $B_{\text{min}}$ results in an unstable system.
 
-#### Step 3: Compute latency at candidate batch sizes {.unnumbered}
+##### Step 3: Compute latency at candidate batch sizes {.unnumbered}
 
 For each candidate $B \in \{B_{\text{min}}, 2B_{\text{min}}, ..., B_{\text{max}}\}$, compute:
 
 $$E[T(B)] = \frac{\lambda_{\text{arr}} \cdot T_{\text{svc}}(B)^2}{2B(1 - \lambda_{\text{arr}} T_{\text{svc}}(B)/B)} + \frac{B}{2\lambda_{\text{arr}}} + T_{\text{svc}}(B)$$
 
-#### Step 4: Account for tail latency {.unnumbered}
+##### Step 4: Account for tail latency {.unnumbered}
 
 For P99 SLO compliance, use the heavy-traffic approximation for tail latency:
 
@@ -338,7 +341,7 @@ $$T_{\text{P99}} \approx E[T] + 2.33 \cdot \sigma_T$$
 
 where $\sigma_T$ is the standard deviation of response time. For exponential-like response times, P99 is closer to $-\ln(0.01)E[T] \approx 4.6 \cdot E[T]$; use measured percentiles for production sizing.
 
-#### Step 5: Select optimal batch size {.unnumbered}
+##### Step 5: Select optimal batch size {.unnumbered}
 
 Choose the largest $B$ such that $T_{\text{P99}}(B) \leq \text{SLO}$:
 
@@ -346,12 +349,12 @@ $$B = \max\{B : T_{\text{P99}}(B) \leq \text{SLO}\}$$
 
 @Tbl-batch-decision-framework summarizes the decision process:
 
-| **Condition**                 | **Recommended Action**                  | **Rationale**             |
-|:------------------------------|:----------------------------------------|:--------------------------|
-| $B < B_{\min}$                | Increase batch size or add replicas     | System is unstable        |
-| $T_{\text{P99}} > \text{SLO}$ | Reduce batch size or add replicas       | Latency exceeds target    |
+| **Condition**                 | **Recommended Action**                  |       **Rationale**       |
+|:------------------------------|:----------------------------------------|:-------------------------:|
+| $B < B_{\min}$                | Increase batch size or add replicas     |     System is unstable    |
+| $T_{\text{P99}} > \text{SLO}$ | Reduce batch size or add replicas       |   Latency exceeds target  |
 | $\rho < 0.5$                  | Consider reducing replicas to save cost | System is overprovisioned |
-| $\rho > 0.85$                 | Add replicas for headroom               | Approaching instability   |
+| $\rho > 0.85$                 | Add replicas for headroom               |  Approaching instability  |
 
 : **Batch Size Decision Framework**: Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
 
@@ -379,15 +382,7 @@ The queuing-theoretic framework provides the mathematical foundation for the bat
 
 ### KV cache fundamentals {#sec-appdx-inference-scale-kv-cache-fundamentals-2ccd}
 
-::: {#dfn-inference-kv-cache .callout-definition title="KV cache"}
-
-***KV Cache***\index{KV Cache!definition} is a memory buffer that stores previously computed Key and Value attention vectors to avoid redundant computation during autoregressive generation.
-
-1.  **Significance (quantitative)**: It reduces per-token computation from $\mathcal{O}(t^2)$ to $\mathcal{O}(t)$, making generation feasible for long sequences. However, it grows linearly with sequence length and batch size, often exceeding the memory footprint of the model weights and becoming the primary constraint on Concurrent Capacity.
-2.  **Distinction (durable)**: Unlike a Traditional Cache (which stores data based on temporal/spatial locality), the KV Cache stores Intermediate Model State that is mandatory for the mathematical correctness of the next token prediction.
-3.  **Common pitfall**: A frequent misconception is that the KV Cache is "fixed-size." In reality, it is Dynamic and Fragmented\index{KV Cache!dynamic fragmentation}: because different requests have different lengths, the cache can cause massive memory waste (up to 60--80 percent) due to internal fragmentation if not managed by a virtual memory system.
-
-:::
+The formal definition of the KV cache appears in the main inference memory-management section (@sec-inference-scale-framework-selection-criteria-6c20). This appendix expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM.
 
 Autoregressive generation without caching requires $\mathcal{O}(t^2)$ computation per token because each transformer layer must recompute attention keys and values for all previous tokens. The KV cache stores these computed key and value vectors, reducing generation to $\mathcal{O}(t)$ per token. For serving at scale, this memory savings creates a critical management challenge since KV cache memory can exceed model weights for long contexts.
 

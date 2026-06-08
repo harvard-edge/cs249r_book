@@ -39,6 +39,11 @@ FROM_CONSTANTS_RE = re.compile(
 )
 
 def _constants_defined_names() -> set[str]:
+    # core/constants.py was deleted in the 2026-06 no-backward-compat sweep:
+    # nothing is defined there anymore, so every migrated manifest symbol is
+    # legacy and the textual import scan below covers the whole corpus.
+    if not CONSTANTS_PATH.exists():
+        return set()
     source = CONSTANTS_PATH.read_text(encoding="utf-8")
     names: set[str] = set()
     for node in ast.walk(ast.parse(source)):

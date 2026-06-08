@@ -1,6 +1,6 @@
 """Parameters for analytical solvers and the roofline engine.
 
-These values tune ``mlsysim.engine.solver`` models and ``mlsysim.engine.engine.Engine``
+These values tune ``mlsysim.engine.solvers`` models and ``mlsysim.engine.engine.Engine``
 when callers omit explicit arguments. Use ``Literature.*``, ``Systems.*``, and
 ``Infrastructure.*`` for sourced domain reference values.
 """

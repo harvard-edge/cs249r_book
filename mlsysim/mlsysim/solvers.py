@@ -1,76 +1,17 @@
 """
 mlsysim.solvers — Convenience re-export of all solver classes.
 
-Usage:
+This is the stable public import path for solvers:
+
     from mlsysim.solvers import ServingModel, TailLatencyModel, ...
+
+The export list is derived mechanically from
+``mlsysim.engine.solvers.__all__`` (the canonical list), so every name here is
+``is``-identical to the implementation in ``mlsysim.engine.solvers`` and the
+two surfaces can never drift apart.
 """
 
-from .engine.solver import (
-    BaseOptimizer,
-    BaseResolver,
-    BaseSolver,
-    ForwardModel,
-    SingleNodeModel,
-    NetworkRooflineModel,
-    DistributedModel,
-    ReliabilityModel,
-    SustainabilityModel,
-    EconomicsModel,
-    ServingModel,
-    TrainingMemoryModel,
-    ServingCapacityModel,
-    MoERoutingModel,
-    ContinuousBatchingModel,
-    WeightStreamingModel,
-    TailLatencyModel,
-    CheckpointModel,
-    DataModel,
-    ScalingModel,
-    OrchestrationModel,
-    CompressionModel,
-    EfficiencyModel,
-    TransformationModel,
-    TopologyModel,
-    InferenceScalingModel,
-    SensitivitySolver,
-    SynthesisSolver,
-    ResponsibleEngineeringModel,
-    ParallelismOptimizer,
-    BatchingOptimizer,
-    PlacementOptimizer,
-)
+from .engine.solvers import *  # noqa: F401,F403 — re-export the canonical solver set
+from .engine.solvers import __all__ as _solver_all
 
-__all__ = [
-    "BaseOptimizer",
-    "BaseResolver",
-    "BaseSolver",
-    "ForwardModel",
-    "SingleNodeModel",
-    "NetworkRooflineModel",
-    "DistributedModel",
-    "ReliabilityModel",
-    "SustainabilityModel",
-    "EconomicsModel",
-    "ServingModel",
-    "TrainingMemoryModel",
-    "ServingCapacityModel",
-    "MoERoutingModel",
-    "ContinuousBatchingModel",
-    "WeightStreamingModel",
-    "TailLatencyModel",
-    "CheckpointModel",
-    "DataModel",
-    "ScalingModel",
-    "OrchestrationModel",
-    "CompressionModel",
-    "EfficiencyModel",
-    "TransformationModel",
-    "TopologyModel",
-    "InferenceScalingModel",
-    "SensitivitySolver",
-    "SynthesisSolver",
-    "ResponsibleEngineeringModel",
-    "ParallelismOptimizer",
-    "BatchingOptimizer",
-    "PlacementOptimizer",
-]
+__all__ = list(_solver_all)
