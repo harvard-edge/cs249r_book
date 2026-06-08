@@ -269,7 +269,7 @@ As computing diversified beyond general-purpose servers, generic benchmarks prov
 
 Deployment constraints shape core metric priorities. Data center workloads optimize for throughput with kilowatt-scale power budgets, while mobile AI operates within 2–5 W thermal envelopes, and IoT devices require milliwatt-scale operation. These constraints, rooted in efficiency principles from @sec-introduction, determine whether benchmarks prioritize total throughput or energy per operation.
 
-Application requirements then impose functional and regulatory constraints beyond raw performance. Healthcare AI demands interpretability metrics alongside accuracy; financial systems require microsecond latency with audit compliance; autonomous vehicles need safety-critical reliability (ASIL-D, the highest ISO 26262 integrity level, with PMHF targets of $<10$ FIT, i.e., $<10^{-8}$/hour, for relevant hardware safety goals). These requirements extend evaluation beyond traditional performance metrics; @sec-responsible-engineering later systematizes the responsible-engineering principles behind fairness, interpretability, and compliance.
+Application requirements then impose functional and regulatory constraints beyond raw performance. Healthcare AI demands interpretability metrics alongside accuracy; financial systems require microsecond latency with audit compliance; autonomous vehicles need safety-critical reliability (ASIL-D, the highest ISO 26262 integrity level, whose probabilistic metric for random hardware failures (PMHF) targets $<10$ FIT, i.e., $<10^{-8}$ dangerous failures per hour, for relevant hardware safety goals). These requirements extend evaluation beyond traditional performance metrics; @sec-responsible-engineering later systematizes the responsible-engineering principles behind fairness, interpretability, and compliance.
 
 Operational conditions determine real-world viability. Autonomous vehicles face -40 °C to +85&nbsp;°C temperatures and degraded sensor inputs; data centers handle millions of concurrent requests with network partitions; industrial IoT endures years-long deployment without maintenance. The hardware capabilities from @sec-hardware-acceleration only deliver value when validated under these conditions.
 
@@ -488,7 +488,7 @@ class GoodhartBLEUCalc:
 
 **Math**:
 
-*   The `{python} GoodhartBLEUCalc.bleu_gain_str` BLEU gain comes from using a larger beam search (beam_size = `{python} GoodhartBLEUCalc.optimized_beam_size_str` vs. beam_size = `{python} GoodhartBLEUCalc.original_beam_size_str`).
+*   The `{python} GoodhartBLEUCalc.bleu_gain_str` BLEU gain comes from a larger beam search, which keeps the $k$ most promising partial translations at each decoding step instead of one (beam_size = `{python} GoodhartBLEUCalc.optimized_beam_size_str` vs. beam_size = `{python} GoodhartBLEUCalc.original_beam_size_str`).
 *   **Cost**: `{python} GoodhartBLEUCalc.candidate_ratio_mult_str` more candidate evaluations per step.
 *   **Result**: The optimized model wins the leaderboard while violating the deployed system's latency budget.
 
@@ -496,7 +496,7 @@ class GoodhartBLEUCalc:
 
 :::
 
-Current benchmarking paradigms measure narrow task performance on static datasets, primarily testing pattern recognition rather than the adaptability production demands. When models achieve excellent benchmark scores yet fail under slightly different conditions, the limitation is clear: comprehensive evaluation must also measure learning efficiency, continual learning, and out-of-distribution generalization.
+These measurement failures share a deeper limitation: a benchmark on a static dataset measures recognition under a fixed distribution, not the robustness to a shifting one that production demands. The data dimension of the framework developed later in this chapter confronts exactly that gap.
 
 The preceding measurement challenges motivate evaluating each dimension of the three-dimensional framework (system, model, and data) with distinct methodologies. The bulk of this chapter focuses on system benchmarking (training benchmarks, inference benchmarks, and power measurement) because these form the foundation of standardized evaluation through MLPerf. Model and data benchmarking require different methodologies and are treated in detail in @sec-benchmarking-model-data-benchmarking-e0ca after we establish system evaluation foundations.
 
@@ -506,7 +506,7 @@ System benchmarks measure the computational foundation that enables model capabi
 
 ::: {#psp-benchmarking-fallacy-peak-performance .callout-perspective title="The fallacy of peak performance"}
 
-Dave Patterson often refers to peak performance as "the performance the manufacturer guarantees you will not exceed." For ML systems, this gap between peak and achieved performance is especially wide because of the memory wall. A GPU might advertise 300 TFLOP/s, but if the model is memory bound, achieved throughput might reach only 30 TFLOP/s. Standardized benchmarks like MLPerf are essential because they force systems to run real models on real data, revealing the true "sustained performance" that engineers can actually rely on.
+Dave Patterson often refers to peak performance as "the performance the manufacturer guarantees you will not exceed." For ML systems, that gap is especially wide because of the memory wall: a memory-bound model leaves most of the advertised FLOP/s unreachable no matter how fast the arithmetic units run. Standardized benchmarks like MLPerf are essential because they force systems to run real models on real data, revealing the true "sustained performance" that engineers can actually rely on.
 
 :::
 
@@ -636,51 +636,31 @@ class RooflineExamples:
     # BERT (Memory Bound at Batch=1)
     bert_model = Models.Language.BERT_Base
     bert_weight = bert_model.size_in_bytes(BYTES_FP32)
-    bert_util_peak = 0.85
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: ResNet Performance
-    resnet_perf_tflops = peak_flops * (resnet_util_max / 100.0)
-
-    # Step 2: BERT Performance
     bert_ai_b1 = (bert_model.inference_flops / bert_weight).to(flop / byte).magnitude
-    bert_perf_b1 = (bert_ai_b1 * flop / byte * peak_bw).to(TFLOP / second)
-    bert_util_b1 = (bert_perf_b1 / peak_flops).to_base_units().magnitude * 100.0
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(resnet_ai > ridge_point, f"ResNet AI ({resnet_ai}) must be > Ridge ({ridge_point:.0f}) to be compute-bound.")
     check(bert_ai_b1 < ridge_point, f"BERT AI ({bert_ai_b1:.0f}) must be < Ridge ({ridge_point:.0f}) to be memory-bound.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    # A100 context
     a100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    a100_bw_tb_per_s_str = fmt_bandwidth(peak_bw, unit=TB / second, precision=2, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity((peak_flops / peak_bw), unit=flop / byte, precision=1, commas=False)
-
-    # ResNet
     resnet_ai_str = fmt_arithmetic_intensity(resnet_ai * flop / byte, unit=flop / byte, precision=0, commas=False)
     resnet_util_min_str = fmt_percent(resnet_util_min / 100, precision=0, commas=False, style='prose')
     resnet_util_max_str = fmt_percent(resnet_util_max / 100, precision=0, commas=False, style='prose')
-    resnet_perf_tflop_per_s_str = fmt_flop_rate(resnet_perf_tflops, unit=TFLOP / second, precision=1, commas=False)
-
-    # BERT
     bert_ai_b1_str = fmt_arithmetic_intensity((bert_model.inference_flops / bert_weight), unit=flop / byte, precision=0, commas=False)
-    bert_perf_b1_tflop_per_s_str = fmt_flop_rate(bert_perf_b1, unit=TFLOP / second, precision=1, commas=False)
-    bert_util_b1_str = fmt_percent(bert_util_b1 / 100, precision=1, commas=False, style='prose')
-    utilization_peak_pct_str = fmt_percent(bert_util_peak, precision=0, commas=False, style='prose')
 ```
 
 [^fn-flops-throughput]: **FLOP/s (Floating-Point Operations Per Second)**: The gap between advertised peak FLOP/s and achieved FLOP/s is the central tension in hardware benchmarking. The A100 advertises `{python} RooflineExamples.a100_fp16_tflop_per_s_str` FP16 Tensor Core, but real workloads achieve 30--60 percent of peak depending on arithmetic intensity and memory access patterns. Reporting peak FLOP/s without utilization context is the most common benchmarking distortion. \index{FLOP/s!peak vs. achieved}
 
-High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOP/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50\index{ResNet-50!roofline analysis} forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} RooflineExamples.resnet_ai_str`, enabling `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance (approximately `{python} RooflineExamples.resnet_perf_tflop_per_s_str` achieved vs. `{python} RooflineExamples.a100_fp16_tflop_per_s_str` theoretical) [@choquette2021]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOP/byte) become memory bandwidth limited, using only a fraction of the GPU's computational capacity. Considering only weight loading bytes, a BERT inference\index{BERT!roofline analysis at batch 1} with batch size one achieves only ~`{python} RooflineExamples.bert_ai_b1_str` arithmetic intensity, limiting performance to ~`{python} RooflineExamples.bert_perf_b1_tflop_per_s_str` (`{python} RooflineExamples.a100_bw_tb_per_s_str` $\times$ `{python} RooflineExamples.bert_ai_b1_str`), representing roughly `{python} RooflineExamples.bert_util_b1_str` of peak computational capability. Including additional data movement (KV cache and activations) would lower this further, illustrating how data movement assumptions significantly affect roofline predictions. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the same calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the intensity-to-utilization steps applied here generalize to any model-hardware pair.
+Roofline position[^fn-roofline-model] depends on the workload. High-intensity operations such as the dense matrix multiplications in a ResNet-50\index{ResNet-50!roofline analysis} forward pass at large batch sizes (256+) reach arithmetic intensities around ~`{python} RooflineExamples.resnet_ai_str`, well above the A100 ridge, and so sustain `{python} RooflineExamples.resnet_util_min_str`–`{python} RooflineExamples.resnet_util_max_str` of peak tensor performance [@choquette2021]. Low-intensity operations fall far below the ridge into the memory-bound regime: a BERT inference\index{BERT!roofline analysis at batch 1} at batch size one, counting only weight-loading traffic, reaches only ~`{python} RooflineExamples.bert_ai_b1_str` arithmetic intensity and a small fraction of peak. Increasing the batch size moves that same workload across the ridge from memory-bound to compute-bound [@pope2023efficiently]. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the intensity-to-utilization calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the steps generalize to any model-hardware pair.
 
 ::: {.column-margin}
 ![](images/svg/vol1_benchmarking_margin_002.svg){width="100%" fig-alt="BERT batch 1 dot left of ridge and batch 32 dot near compute plateau."}
 
 *Larger batches push transformer inference from memory-bound to compute-bound.*
 :::
-
-This quantitative analysis, formalized in roofline models[^fn-roofline-model], guides both algorithm design and hardware selection by identifying the dominant performance constraint for a given workload. For instance, increasing batch size\index{Roofline Model!batch size effect on utilization} from one to thirty-two for transformer inference can shift operations from memory-bound to compute bound, improving GPU utilization from `{python} RooflineExamples.bert_util_b1_str` to `{python} RooflineExamples.utilization_peak_pct_str` [@pope2023efficiently].
 
 [^fn-roofline-model]: **Roofline Model**\index{Roofline Model!etymology and origin}: @williams2009 introduced the model at UC Berkeley, and its name comes from the visual shape of its performance ceiling. The model's diagnostic power lies in a single number: the ridge point (peak FLOP/s divided by peak bandwidth). Workloads below this threshold are memory bound and *cannot* benefit from faster arithmetic; workloads above it are compute bound and *cannot* benefit from faster memory. This diagnosis determines whether optimization effort should target the Data Term or the Compute Term of the iron law. \index{Roofline Model!origin}
 
@@ -752,9 +732,12 @@ class BertRoofline:
     bert_weight = p_b1.memory_footprint
 
     ai_b1 = (m_bert.inference_flops / p_b1.memory_footprint).to(flop / byte).magnitude
-    # Realized TFLOP/s = throughput * flops_per_inference
-    perf_b1 = (p_b1.throughput * m_bert.inference_flops).to(TFLOP / second)
-    util_b1 = p_b1.mfu * 100.0
+    # Weights-only roofline prediction: perf = arithmetic intensity x bandwidth,
+    # util = perf / peak. Displayed Step 3 equations are this identity, so the
+    # displayed values must come from it (not Engine throughput, which models
+    # latency overheads the hand-shown roofline calculation excludes).
+    perf_b1 = (ai_b1 * flop / byte * h_a100.memory.bandwidth).to(TFLOP / second)
+    util_b1 = (perf_b1 / h_a100.compute.peak_flops).to_base_units().magnitude * 100.0
 
     flops_b32 = bert_flops_g * batch_32
     ai_b32 = (m_bert.inference_flops * batch_32 / p_b1.memory_footprint).to(flop / byte).magnitude
@@ -940,13 +923,7 @@ The ImageNet example demonstrates *how* hardware advances enable algorithmic bre
 
 Realistic hardware utilization patterns are essential for actionable benchmark design. As the preceding roofline analysis demonstrated, GPU utilization varies dramatically with batch size and model architecture—from `{python} BertRoofline.utilization_peak_pct_str` for compute-bound workloads to `{python} BertRoofline.bert_util_b1_str` for memory-bound single-request inference. These patterns extend to memory bandwidth: parameter-heavy transformer inference and activation-heavy convolutional workloads stress different parts of the memory hierarchy, directly impacting achievable performance across different precision levels.
 
-Performance per watt varies by three orders of magnitude across platforms, making energy efficiency a key benchmark dimension. Underutilized GPUs consume disproportionate power relative to their output, creating efficiency penalties that affect both operational costs and environmental impact.
-
-Distributed system performance introduces additional complexity beyond single-machine evaluation. Multi-node training involves communication bottlenecks, network topology effects, and coordination overhead that single-node benchmarks cannot capture. For deployments spanning multiple machines, specialized distributed benchmarking methodologies, including scaling efficiency measurement and network performance profiling, become essential. These distributed benchmarking approaches are critical for scaling ML systems across multiple machines but require dedicated treatment beyond the scope of single-node evaluation.
-
-Within the single-machine scope of this book, multi-GPU benchmarking focuses on intra-node communication patterns, memory bandwidth utilization across accelerators, and the efficiency of gradient synchronization within shared-memory systems. Modern workstations with 4-8 GPUs connected via NVLink or PCIe provide substantial parallelism while avoiding the network communication challenges that characterize multi-node deployments.
-
-Effective system benchmarks must therefore evaluate performance across realistic utilization scenarios rather than peak theoretical capabilities, ensuring results translate to practical deployment guidance.
+The consolidation across these factors is that effective system benchmarks must measure realistic utilization rather than peak theoretical capability, and several scope boundaries fall out of that requirement. Energy is one dimension: performance per watt varies by three orders of magnitude across platforms, and an underutilized accelerator consumes disproportionate power for its output, penalizing both operational cost and environmental impact. Distribution is another: multi-node training adds communication bottlenecks, network-topology effects, and coordination overhead that single-node benchmarks cannot capture and that warrant dedicated treatment beyond this book. Within the single-machine scope here, multi-GPU benchmarking instead focuses on intra-node communication, memory-bandwidth utilization across accelerators, and gradient-synchronization efficiency in shared-memory systems, where 4-8 GPUs on NVLink or PCIe deliver parallelism without the network challenges of multi-node clusters. Across all of these, a benchmark earns its value only when its operating point matches the deployment's, not the datasheet's.
 
 ### Community-driven standardization {#sec-benchmarking-communitydriven-standardization-5c56}
 
@@ -1155,15 +1132,17 @@ Tools like NVIDIA Nsight Systems and Compute\index{Kernel Profiler!hardware-leve
 
 The recommended workflow is to start with the Framework Profiler to find the slow layer (for example, "The Attention Block is slow"). Then, use the Kernel Profiler to diagnose the physics (for example, "The Softmax kernel is memory bound because it is reading too many bytes per FLOP"). This targeted approach avoids the "optimization without measurement" trap.
 
-Micro-benchmarks also examine activation functions and neural network layers in isolation. This includes measuring the performance of various activation functions like the rectified linear unit (ReLU), Sigmoid, and Tanh under controlled conditions, and evaluating the computational efficiency of distinct neural network components such as LSTM cells or transformer blocks when processing standardized inputs. These granular measurements enable precise optimization, but they cannot reveal how components interact when assembled into complete models. Macro-benchmarks address this gap.
+Micro-benchmarks also examine activation functions and neural network layers in isolation. This includes measuring the performance of various activation functions like the rectified linear unit (ReLU), Sigmoid, and Tanh under controlled conditions, and evaluating the computational efficiency of distinct neural network components such as LSTM cells or transformer blocks when processing standardized inputs.
 
 DeepBench\index{Micro-Benchmark Suite!operator-level testing} [@deepbench_github], developed by Baidu, was one of the first to demonstrate the value of comprehensive micro-benchmarking. It evaluates these core operations across different hardware platforms, providing detailed performance data that helps developers optimize their deep learning implementations. By isolating and measuring individual operations, DeepBench enables precise comparison of hardware platforms and identification of potential performance bottlenecks.
+
+These granular measurements enable precise optimization, but they cannot reveal how components interact when assembled into complete models. Macro-benchmarks address this gap.
 
 ### Macro benchmarks {#sec-benchmarking-macro-benchmarks-4283}
 
 Micro-benchmarks confirm that individual convolution kernels run fast. Macro-benchmarks reveal whether the complete model works under realistic conditions. This shift from component-level to model-level assessment reveals how architectural choices and component interactions affect overall model behavior. For instance, while micro-benchmarks might show optimal performance for individual convolutional layers, macro-benchmarks reveal how these layers work together within a complete convolutional neural network.
 
-Macro-benchmarks measure multiple performance dimensions that emerge only at the model level. These include prediction accuracy, which shows how well the model generalizes to new data; memory consumption patterns across different batch sizes and sequence lengths; throughput under varying computational loads; and latency across different hardware configurations. Understanding these metrics helps developers make informed decisions about model architecture, optimization strategies, and deployment configurations.
+Macro-benchmarks exist to serve one decision: choosing a model or architecture under standardized conditions. That decision needs the performance dimensions that emerge only at the model level: prediction accuracy, which shows how well the model generalizes to new data; memory consumption patterns across different batch sizes and sequence lengths; throughput under varying computational loads; and latency across different hardware configurations. These dimensions interact in ways a single-layer micro-benchmark cannot expose. A model that wins on accuracy may lose once its memory footprint at the target sequence length forces a smaller batch, collapsing the throughput that made it attractive, a coupling visible only when the complete model is measured as a unit.
 
 The assessment of complete models occurs under standardized conditions using established datasets and tasks. For example, computer vision models might be evaluated on ImageNet\index{ImageNet!macro benchmark reference} [@imagenet_website], measuring both computational efficiency and prediction accuracy. Natural language processing models might be assessed on translation tasks, examining how they balance quality and speed across different language pairs.
 
@@ -1738,6 +1717,8 @@ To see how these components work together in practice, walk through the anomaly 
 
 Which of these metrics matters most depends entirely on the deployment context. Energy consumption per inference is critical for battery-powered devices but irrelevant for always-on server racks. Model size constrains embedded devices with limited memory but barely registers for cloud deployments. Processing speed determines whether the system can operate in real-time or must batch inputs. These metrics also reveal inherent trade-offs: reducing model size from `{python} AnomalySpecs.anomaly_params_k_str` parameters might improve speed and energy efficiency but degrade the `{python} AnomalySpecs.anomaly_auc_str` AUC detection accuracy. Whether these measurements constitute a "passing" benchmark depends on the deployment constraints—the framework provides structure for consistent evaluation, but acceptance criteria must come from the application requirements.
 
+The components just enumerated define how to assemble any single benchmark. Two benchmark *categories* recur often enough across the optimization pipeline to warrant their own component checklists here: compression benchmarks, which a pruned or quantized model must pass before deployment, and mobile and edge benchmarks, which a power- and thermally-constrained target imposes. Each composes the task, data, model, metrics, harness, and run rules just defined while adding constraints the generic checklist does not. Both are previews of dimensions the chapter develops fully later: compression validation returns in @sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4 with the full multi-metric protocol, and sustained-power behavior returns in @sec-benchmarking-power-measurement-techniques-bcc2.
+
 ### Compression benchmarks {#sec-benchmarking-compression-benchmarks-9cf0}
 
 ```{python}
@@ -1793,7 +1774,7 @@ The most basic compression metric is raw size reduction: parameter count, memory
 
 Pruning benchmarks must distinguish between structured and unstructured approaches, because they produce qualitatively different results on real hardware. Structured pruning removes entire neurons or filters, achieving consistent speedups but typically lower compression ratios (2--4$\times$). Unstructured pruning eliminates individual weights for higher compression ratios (10--100$\times$), but realizing actual speedups requires specialized sparse computation support—meaning benchmark protocols must specify hardware platform and software implementation.
 
-Quantization benchmarks evaluate precision reduction across data types. INT8 quantization reduces memory footprint by 4$\times$ and accelerates inference by 2--4$\times$ (the precision-accuracy trade-off is analyzed in @sec-benchmarking-inference-metrics-78d4, and the energy implications in @sec-benchmarking-energy-efficiency-cost-15ca). Mixed-precision\index{Mixed-Precision!layer-wise precision assignment} approaches push further by applying different precision levels to different layers: critical layers retain FP16 while computation-heavy layers use INT8 or INT4, enabling fine-grained efficiency optimization. Knowledge distillation\index{Knowledge Distillation!benchmark evaluation} adds another dimension: successful transfer achieves 90–95 percent of the teacher model's accuracy while reducing size by 5--10$\times$, but benchmarking must verify that the student generalizes rather than merely memorizing the teacher's outputs.
+Quantization benchmarks evaluate precision reduction across data types. INT8 delivers the 4$\times$ memory reduction and 2--4$\times$ inference speedup quantified for the MobileNetV2 lighthouse in @tbl-benchmarking-mobilenet-int8-tradeoff, with the precision-accuracy trade-off analyzed in @sec-benchmarking-inference-metrics-78d4 and the energy implications in @sec-benchmarking-energy-efficiency-cost-15ca. Mixed-precision\index{Mixed-Precision!layer-wise precision assignment} approaches push further by applying different precision levels to different layers: critical layers retain FP16 while computation-heavy layers use INT8 or INT4, enabling fine-grained efficiency optimization. Knowledge distillation\index{Knowledge Distillation!benchmark evaluation} adds another dimension: successful transfer achieves 90–95 percent of the teacher model's accuracy while reducing size by 5--10$\times$, but benchmarking must verify that the student generalizes rather than merely memorizing the teacher's outputs.
 
 Critically, acceleration factors vary dramatically across hardware platforms: sparse models deliver 2--5$\times$ speedup on CPUs, reduced-precision models achieve 2--8$\times$ on mobile processors, and efficient architectures provide 5--20$\times$ on specialized edge accelerators. Current benchmark suites like MLPerf focus primarily on dense, unoptimized models that do not represent production deployments, where compressed models are ubiquitous. This gap between what benchmarks measure and what production actually runs remains one of the field's most consequential blind spots.
 
@@ -1811,7 +1792,7 @@ Edge deployment requires navigating trade-offs that cloud deployments can largel
 
 : **Edge vs. Cloud Deployment Constraints**: The same three constraints (power, latency, accuracy) carry fundamentally different meanings across deployment contexts. Cloud systems treat power as an operational cost and latency as a UX metric, leaving accuracy as the primary optimization target; edge systems must treat power and latency as hard physical limits, leaving accuracy as the residual variable to optimize. {#tbl-edge-vs-cloud-constraints}
 
-As a concrete example, a smartphone camera AI for real-time object detection must process 30 frames/second (33 ms/frame) while consuming <1 W to avoid excessive battery drain and thermal throttling\index{Thermal Throttling!sustained vs. peak performance}. A MobileNetV3 model achieving 75 percent accuracy at 15 ms/frame and 0.8 W meets these constraints; a ResNet-50 achieving 80 percent accuracy at 45 ms/frame and 2.5 W does not, despite being "better" by accuracy-only benchmarks. A sustained edge benchmark exposes these gaps between marketed specifications and operational behavior. The gap between *peak* and *sustained* performance is particularly dangerous: a vendor may report burst-mode numbers that halve under thermal throttling within minutes, making edge benchmarking a categorically different exercise than cloud benchmarking.
+As a concrete example, a smartphone camera AI for real-time object detection must process 30 frames/second (33 ms/frame) while consuming <1 W to avoid excessive battery drain and thermal throttling\index{Thermal Throttling!sustained vs. peak performance}. A MobileNetV3 model achieving 75 percent accuracy at 15 ms/frame and 0.8 W meets these constraints; a ResNet-50 achieving 80 percent accuracy at 45 ms/frame and 2.5 W does not, despite being "better" by accuracy-only benchmarks. A sustained edge benchmark exposes these gaps between marketed specifications and operational behavior. The peak-versus-sustained gap established in @sec-benchmarking-machine-learning-benchmarking-framework-70b8 turns acute at the edge for a physical reason absent in the data center: a passively cooled device cannot shed the heat of continuous inference, so burst-mode numbers halve under thermal throttling within minutes. That thermal mechanism, not measurement sloppiness, makes edge benchmarking a categorically different exercise than cloud benchmarking.
 
 ::: {#exmp-benchmarking-benchmarking-edge .callout-example title="Benchmarking the edge"}
 
@@ -1943,7 +1924,7 @@ A team purchases a \$10M GPU cluster expecting 5$\times$ the training speed of t
 
 Training benchmarks validate whether hardware acceleration delivers promised training throughput. The GPU clusters, TPU pods, and distributed training strategies examined in @sec-hardware-acceleration all claim dramatic speedups, and training benchmarks reveal which claims hold under realistic workloads. They evaluate how hardware configurations, data loading mechanisms, and distributed training strategies perform when training production-scale models.
 
-These benchmarks are vital because training represents the largest capital expenditure in ML systems. A cluster that costs \$10M should demonstrably outperform a \$2M cluster on training time-to-accuracy, but only rigorous benchmarking reveals whether the 5$\times$ cost delivers proportional value or falls victim to scaling inefficiencies, memory bottlenecks, or communication overhead.
+These benchmarks are vital because training represents the largest capital expenditure in ML systems, and only rigorous time-to-accuracy measurement reveals whether that capital delivers proportional value rather than dissipating into scaling inefficiencies, memory bottlenecks, or communication overhead.
 
 ```{python}
 #| echo: false
@@ -2184,7 +2165,7 @@ Y,Date
 
 :::
 
-Training benchmarks drive progress because the exponential improvement curve traced in @fig-mlperf-training-improve did not happen by accident: they emerged because standardized measurement created competitive pressure to optimize. What gets measured gets improved. Training benchmarks uncover inefficiencies invisible without systematic evaluation: slow data loading, underutilized accelerators, excessive memory overhead, and communication bottlenecks that erode scaling efficiency. The theoretical hardware capabilities established in @sec-hardware-acceleration (for example, GPU TFLOP/s, TPU tensor throughput) only translate to actual training speedups when benchmarks verify them under realistic conditions.
+Beyond charting that progress, training benchmarks uncover the inefficiencies that systematic evaluation makes visible: slow data loading, underutilized accelerators, excessive memory overhead, and communication bottlenecks that erode scaling efficiency. The theoretical hardware capabilities established in @sec-hardware-acceleration (for example, GPU TFLOP/s, TPU tensor throughput) only translate to actual training speedups when benchmarks verify them under realistic conditions.
 
 Training benchmarks serve four interconnected functions. First, they enable hardware and software optimization by providing vendor-neutral comparisons across accelerator architectures and frameworks (TensorFlow, PyTorch) on standardized tasks, guiding hardware selection for data centers and cloud environments. Software optimizations including mixed-precision training\index{Mixed-Precision Training!FP16 and FP32}[^fn-bench-mixed-precision] and memory-efficient data loading are similarly quantified. Second, they evaluate scalability: adding GPUs should reduce training time proportionally, but communication overhead, synchronization latency, and memory bottlenecks limit scaling efficiency in practice. Training benchmarks quantify these losses, revealing whether infrastructure investments deliver proportional returns. Third, they provide cost and energy accountability: with large-scale training runs consuming thousands of megawatt-hours, benchmarks that track cost per training run and power consumption per unit of progress help organizations balance computational power with sustainability goals. Finally, they ensure fair, reproducible comparison through standardized evaluation criteria, controlled randomness, and strict submission guidelines that guarantee performance results reflect genuine system capabilities rather than implementation-specific tuning.
 
@@ -2316,172 +2297,9 @@ I/O performance also plays a direct role in training efficiency, particularly wh
 
 #### Energy efficiency and cost {#sec-benchmarking-energy-efficiency-cost-15ca}
 
-Training large-scale machine learning models requires substantial computational resources, leading to considerable energy consumption and financial costs. Energy efficiency metrics\index{Energy Efficiency!training cost accounting} quantify the power usage of training workloads, helping identify systems that optimize computational efficiency while minimizing energy waste. The increasing focus on sustainability has led to the inclusion of energy-based benchmarks, such as those in MLPerf Training, which measure power consumption per training run. Although this subsection focuses on training-run energy, the same power accounting governs inference: the MobileNet example below shows why INT8 reduces inference energy by attacking both memory traffic and arithmetic cost.
+Training large-scale machine learning models requires substantial computational resources, leading to considerable energy consumption and financial costs. Energy efficiency metrics\index{Energy Efficiency!training cost accounting} quantify the power usage of training workloads, helping identify systems that optimize computational efficiency while minimizing energy waste. The increasing focus on sustainability has led to the inclusion of energy-based benchmarks, such as those in MLPerf Training, which measure power consumption per training run. The same power accounting governs inference, where precision becomes the dominant energy lever; @sec-benchmarking-power-measurement-techniques-bcc2 works through why INT8 quantization cuts per-inference energy by attacking both memory traffic and arithmetic cost.
 
-```{python}
-#| echo: false
-#| label: energy-per-op-constants
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ENERGY PER OPERATION AND MEMORY ACCESS CONSTANTS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Why INT8 Saves Energy" callout tables immediately below,
-# │          and GPT-3 training energy paragraph after the callout.
-# │
-# │ Goal: Provide per-operation and per-access energy values for the
-# │       precision vs. energy comparison tables, plus GPT-3 training energy.
-# │ Show: pJ per MAC at FP32/FP16/INT8, pJ per byte at register/L1/L2,
-# │       and GPT-3 total training energy in MWh.
-# │ How:  Read Horowitz 2014 energy anchors from Hardware.Tech.Op / Hardware.Tech.Memory.
-# │
-# │ Imports: mlsysim Hardware.Tech.Op (FlopFp32.energy, FlopFp16.energy, OpInt8.energy),
-# │          Hardware.Tech.Memory (Register.energy_per_access, L1.energy_per_access,
-# │          L2.energy_per_access, HBM3.energy_per_byte);
-# │          mlsysim (Models.Language.GPT3.training_energy_mwh), mlsysim.fmt (fmt)
-# │ Exports: energy_fp32_str, energy_fp16_str, energy_int8_str,
-# │          energy_reg_str, energy_l1_str, energy_l2_str,
-# │          gpt3_energy_mwh_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, fmt_qty, fmt_energy_per_flop
-from mlsysim.core.units import MWh, pJ, byte
-
-class EnergyPerOp:
-    """Energy per operation and memory access for precision comparison tables."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_FLOP_FP16_PJ = Hardware.Tech.Op.FlopFp16.energy
-    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    ENERGY_REG_PJ = Hardware.Tech.Memory.Register.energy_per_access
-    ENERGY_SRAM_L1_PJ = Hardware.Tech.Memory.L1.energy_per_access
-    ENERGY_SRAM_L2_PJ = Hardware.Tech.Memory.L2.energy_per_access
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ.to(pJ).magnitude / 1000) * THOUSAND
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_fp32_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
-    energy_fp16_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP16_PJ, precision=1, commas=False)
-    energy_int8_pj_str = fmt_energy_per_flop(ENERGY_OP_INT8_PJ, precision=1, commas=False)
-    energy_reg_pj_str = fmt_qty(ENERGY_REG_PJ, pJ, precision=2, commas=False)
-    energy_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
-    energy_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
-    gpt3_energy_mwh_str = fmt_qty(Models.Language.GPT3.training_energy_mwh, MWh, precision=0, commas=True)
-    dram_vs_reg_ratio_mult_str = fmt_multiple(dram_vs_reg_ratio_value, precision=0, commas=True)
-```
-
-```{python}
-#| echo: false
-#| label: energy-breakdown-calc
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: INT8 energy callout tables — MobileNet load vs compute breakdown
-# │ Exports: EnergyBreakdownCalc.*
-from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_flops, fmt_memory, fmt_energy
-
-class EnergyBreakdownCalc:
-    """FP32 vs INT8 MobileNet inference energy: memory load dominates; INT8 attacks both sources."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
-    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    m_fp32 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
-    m_int8 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
-    e_fp32_load = (m_fp32 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
-    e_fp32_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_FLOP_FP32_PJ).to(uJ)
-    e_int8_load = (m_int8 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
-    e_int8_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_OP_INT8_PJ).to(uJ)
-    e_fp32_total = e_fp32_load + e_fp32_compute
-    e_int8_total = e_int8_load + e_int8_compute
-    s_load = (e_fp32_load / e_int8_load).to_base_units().magnitude
-    s_compute = (e_fp32_compute / e_int8_compute).to_base_units().magnitude
-    s_total = (e_fp32_total / e_int8_total).to_base_units().magnitude
-    e_fp32_load_mj = e_fp32_load.to(mJ)
-    e_fp32_compute_mj = e_fp32_compute.to(mJ)
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(m_fp32.to(MB).magnitude) == 14, f"MobileNetV2 FP32 size should be about 14 MB, got {m_fp32.to(MB).magnitude:.1f}")
-    check(s_load == 4.0, f"Expected 4x load-energy reduction, got {s_load:.1f}x")
-    check(s_compute > 15, f"Expected INT8 compute to be much cheaper, got {s_compute:.1f}x")
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dram_energy_pj_per_byte_str = fmt_energy_per_byte(ENERGY_DRAM_PJ_PER_BYTE, precision=0, commas=False)
-    m_ops_mflop_str = fmt_flops(Models.Vision.MobileNetV2.inference_flops, unit=MFLOPs, precision=0, commas=False)
-    m_fp32_mb_str = fmt_memory(m_fp32, unit=MB, precision=1, commas=False)
-    m_int8_mb_str = fmt_memory(m_int8, unit=MB, precision=1, commas=False)
-    e_fp32_load_str = fmt_energy(round(e_fp32_load.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=False)
-    e_fp32_compute_str = fmt_energy(e_fp32_compute, unit=uJ, precision=0, commas=True)
-    e_fp32_total_str = fmt_energy(round(e_fp32_total.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=True)
-    e_int8_load_str = fmt_energy(round(e_int8_load.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=False)
-    e_int8_compute_str = fmt_energy(e_int8_compute, unit=uJ, precision=0, commas=False)
-    e_int8_total_str = fmt_energy(round(e_int8_total.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=True)
-    load_savings_factor_mult_str = fmt_multiple(s_load, precision=0, commas=False)
-    compute_savings_factor_mult_str = fmt_multiple(s_compute, precision=1, commas=False)
-    total_savings_factor_mult_str = fmt_multiple(s_total, precision=1, commas=False)
-    e_fp32_load_mj_str = fmt_energy(e_fp32_load_mj, unit=mJ, precision=1, commas=False)
-    e_fp32_compute_mj_str = fmt_energy(e_fp32_compute_mj, unit=mJ, precision=1, commas=False)
-```
-
-::: {#nbk-benchmarking-why-int8-saves-energy .callout-notebook title="Why INT8 saves energy"}
-
-Recall from @sec-hardware-acceleration that moving data costs far more energy than computing on it (the energy-movement invariant formalized in @sec-data-engineering). Understanding *why* quantization reduces energy consumption\index{Quantization!INT8 energy savings} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
-
-Because transistor count scales roughly with bit-width squared, narrower datatypes consume dramatically less energy per operation—@tbl-benchmarking-energy-per-precision reveals a 20$\times$ gap between FP32 and INT8 multiply-accumulate cost:
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25}
-```
-
-| **Precision** |           **Multiplier Energy**            | **Relative Cost** |
-|:--------------|:------------------------------------------:|:-----------------:|
-| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_pj_str` |    1.0$\times$    |
-| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_pj_str` |    0.3$\times$    |
-| **INT8**      | ~`{python} EnergyPerOp.energy_int8_pj_str` |    0.05$\times$   |
-
-: **Per-operation energy by precision**: Energy cost of a single multiply-accumulate at FP32, FP16, and INT8, with relative cost normalized to FP32, illustrating why narrower datatypes dominate compute-energy savings. {#tbl-benchmarking-energy-per-precision}
-
-```{=latex}
-\vspace*{-1.5ex}
-```
-An 8-bit multiplier uses ~20$\times$ less energy than a 32-bit floating-point multiplier because transistor count scales roughly with bit-width squared, and switching energy scales with transistor count. @Sec-appdx-machine-foundations-numbers-know-b531 catalogs the canonical per-operation energy figures behind these ratios and shows why the FP32-to-INT8 and data-movement-to-compute gaps stay stable across hardware generations.
-
-@Tbl-benchmarking-energy-memory-tier extends the picture to memory access, with energy cost per byte across each tier of the hierarchy:
-
-| **Memory Level** |                     **Energy per Byte**                     | **Relative Cost** |
-|:-----------------|:-----------------------------------------------------------:|:-----------------:|
-| **Register**     |          ~`{python} EnergyPerOp.energy_reg_pj_str`          |     1$\times$     |
-| **L1 Cache**     |           ~`{python} EnergyPerOp.energy_l1_pj_str`          |     50$\times$    |
-| **L2 Cache**     |           ~`{python} EnergyPerOp.energy_l2_pj_str`          |    200$\times$    |
-| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_per_byte_str` |   16,000$\times$  |
-
-: **Memory access energy by tier**: Per-byte energy cost across the register-to-DRAM hierarchy, with relative cost normalized to a register read, exposing why off-chip memory traffic dominates inference energy budgets. {#tbl-benchmarking-energy-memory-tier}
-
-```{=latex}
-\vspace*{-1.5ex}
-```
-Memory access dominates: reading one byte from DRAM costs over `{python} EnergyPerOp.dram_vs_reg_ratio_mult_str` more energy than a register access.
-
-@Tbl-benchmarking-mobilenet-int8-energy combines the two effects for a MobileNetV2 inference, decomposing per-inference energy into model-load and compute terms at FP32 vs. INT8:
-
-| **Component**                                                | **FP32 (`{python} EnergyBreakdownCalc.m_fp32_mb_str`)** | **INT8 (`{python} EnergyBreakdownCalc.m_int8_mb_str`)** |                           **Savings**                            |
-|:-------------------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------------:|:----------------------------------------------------------------:|
-| **Model load from DRAM**                                     |      `{python} EnergyBreakdownCalc.e_fp32_load_str`     |      `{python} EnergyBreakdownCalc.e_int8_load_str`     |   `{python} EnergyBreakdownCalc.load_savings_factor_mult_str`    |
-| **Compute (`{python} EnergyBreakdownCalc.m_ops_mflop_str`)** |    `{python} EnergyBreakdownCalc.e_fp32_compute_str`    |    `{python} EnergyBreakdownCalc.e_int8_compute_str`    |  `{python} EnergyBreakdownCalc.compute_savings_factor_mult_str`  |
-| **Total**                                                    |   **`{python} EnergyBreakdownCalc.e_fp32_total_str`**   |   **`{python} EnergyBreakdownCalc.e_int8_total_str`**   | **`{python} EnergyBreakdownCalc.total_savings_factor_mult_str`** |
-
-: **MobileNetV2 INT8 energy breakdown**: Per-inference energy decomposed into model-load and compute terms for FP32 vs. INT8, showing that INT8 quantization attacks DRAM-traffic energy as the dominant component. {#tbl-benchmarking-mobilenet-int8-energy}
-
-```{=latex}
-\endgroup
-```
-
-**Systems insight**: Memory access dominates FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` compute). INT8 quantization provides `{python} EnergyBreakdownCalc.load_savings_factor_mult_str` memory energy reduction and ~`{python} EnergyBreakdownCalc.compute_savings_factor_mult_str` compute energy reduction. The combined effect explains why quantized models on edge devices achieve dramatic battery life improvements: they attack the dominant memory bottleneck while simultaneously accelerating compute.
-
-:::
-
-Training GPT-3 was estimated to consume `{python} EnergyPerOp.gpt3_energy_mwh_str` of electricity [@patterson2021carbon]. If a system can achieve the same accuracy with fewer training iterations, it directly reduces energy consumption. Energy-aware benchmarks help guide the development of hardware and training strategies that optimize power efficiency while maintaining accuracy targets.
+Training GPT-3 was estimated to consume `{python} InferenceEnergy.gpt3_training_energy_mwh_str` of electricity [@patterson2021carbon]. If a system can achieve the same accuracy with fewer training iterations, it directly reduces energy consumption. Energy-aware benchmarks help guide the development of hardware and training strategies that optimize power efficiency while maintaining accuracy targets.
 
 Cost considerations extend beyond electricity usage to include hardware expenses, cloud computing costs, and infrastructure maintenance. Training benchmarks provide insights into the cost-effectiveness of different hardware and software configurations by measuring training time in relation to resource expenditure. Organizations can use these benchmarks to balance performance and budget constraints when selecting training infrastructure.
 
@@ -2815,7 +2633,7 @@ For example, cloud-based services handling millions of queries per second benefi
 
 Benchmarks must consider both single-instance and **batch throughput**\index{Batch Throughput!definition} to provide a comprehensive understanding of inference performance across different deployment scenarios.
 
-Speed alone is insufficient because inference optimizations can change model behavior. Reducing numerical precision often accelerates computation by 2--4$\times$ while reducing memory and energy consumption, but lower-precision calculations can introduce accuracy degradation. Inference benchmarks therefore evaluate how well models perform under different numerical settings, such as FP32, FP16, and INT8[^fn-int8]. Many modern AI accelerators support mixed-precision inference, allowing systems to dynamically adjust numerical representation based on workload requirements. Model compression techniques[^fn-model-compression-benchmarking] further improve efficiency, but their impact on model accuracy varies depending on the task and dataset. Benchmarks help determine whether these optimizations are viable for deployment, ensuring that improvements in efficiency do not come at the cost of unacceptable accuracy loss.
+Speed alone is insufficient because inference optimizations can change model behavior. Reducing numerical precision accelerates computation while cutting memory and energy, the 2--4$\times$ speedup the MobileNetV2 lighthouse measured (@tbl-benchmarking-mobilenet-int8-tradeoff), but lower-precision calculations can introduce accuracy degradation. Inference benchmarks therefore evaluate how well models perform under different numerical settings, such as FP32, FP16, and INT8[^fn-int8]. Many modern AI accelerators support mixed-precision inference, allowing systems to dynamically adjust numerical representation based on workload requirements. Model compression techniques[^fn-model-compression-benchmarking] further improve efficiency, but their impact on model accuracy varies depending on the task and dataset. Benchmarks help determine whether these optimizations are viable for deployment, ensuring that improvements in efficiency do not come at the cost of unacceptable accuracy loss.
 
 Memory footprint and model load time define whether the model can start, stay resident, and respond within the deployment envelope. Unlike training, where models can span multiple accelerators, inference often runs within strict memory budgets. Total model size determines storage requirements, RAM usage reflects working memory during execution, and memory bandwidth can bottleneck data transfer between processing units. Cold-start performance\index{Cold Start Latency!serverless AI impact} becomes critical when models are loaded on demand rather than kept resident in memory. In serverless AI environments[^fn-serverless-ai], where resources scale dynamically with incoming requests, the time from idle to active execution determines whether users experience acceptable response times.
 
@@ -2827,9 +2645,7 @@ Memory footprint and model load time define whether the model can start, stay re
 
 Model load time refers to the duration required to load a trained model into memory before it can process inputs. In some cases, particularly on resource-limited devices, models must be reloaded frequently to free up memory for other applications. The time taken for the first inference request is also an important consideration, as it reflects the total delay users experience when interacting with an AI-powered service. Benchmarks help quantify these delays, ensuring that inference systems can meet real-world responsiveness requirements.
 
-Deployment-scale metrics extend the same logic from one request to a workload. Cloud services must handle millions of concurrent users efficiently; mobile devices must manage multiple simultaneous AI models without overloading the system. Scalability measures how well inference performance improves when additional computational resources are allocated. In some cases, adding more GPUs or TPUs increases throughput proportionally, but in other scenarios, bottlenecks such as memory bandwidth limitations or network latency may limit scaling efficiency. Benchmarks also assess how well a system balances multiple concurrent models in real-world deployment, where different AI-powered features may need to run at the same time without interference.
-
-For cloud-based AI, benchmarks evaluate how efficiently a system handles fluctuating demand, ensuring that inference servers can dynamically allocate resources without compromising latency. In mobile and embedded AI, efficient multi-model execution is essential for running multiple AI-powered features simultaneously without degrading system performance.
+Deployment-scale metrics extend the same logic from one request to a workload. Cloud services must handle millions of concurrent users efficiently, allocating resources dynamically as demand fluctuates without compromising latency; mobile devices must manage multiple simultaneous AI models without overloading the system. Scalability measures how well inference performance improves when additional computational resources are allocated. In some cases, adding more GPUs or TPUs increases throughput proportionally, but in other scenarios, bottlenecks such as memory bandwidth limitations or network latency may limit scaling efficiency. Benchmarks also assess how well a system balances multiple concurrent models in real-world deployment, where different AI-powered features may need to run at the same time without interference.
 
 Energy consumption closes the loop because inference workloads run continuously in production. Mobile and edge devices face the most acute constraints, where battery life and thermal limits restrict available computational resources. Even in large-scale cloud environments, power efficiency directly impacts operational costs and sustainability goals. The energy required for a single inference is often measured in joules per inference, reflecting how efficiently a system processes inputs while minimizing power draw. In cloud-based inference, efficiency is commonly expressed as queries per second per watt (QPS/W) to quantify how well a system balances performance and energy consumption. For mobile AI applications, optimizing inference power consumption extends battery life and allows models to run efficiently on resource-constrained devices. Reducing energy use also plays a key role in making large-scale AI systems more environmentally sustainable, ensuring that computational advancements align with energy-conscious deployment strategies.
 
@@ -3177,7 +2993,7 @@ class PowerClaimGapCalc:
 
 A chip vendor advertises "`{python} PowerClaimGapCalc.datasheet_tops_str` at `{python} PowerClaimGapCalc.datasheet_w_str`," but under sustained inference load, thermal throttling drops actual throughput to `{python} PowerClaimGapCalc.sustained_tops_str` at `{python} PowerClaimGapCalc.sustained_w_str`. Without standardized power measurement, this `{python} PowerClaimGapCalc.efficiency_gap_mult_str` efficiency gap between the datasheet and reality goes undetected until deployment.
 
-This third dimension is critical because @sec-hardware-acceleration established TOPS/W\index{TOPS/W!primary design objective} as a primary design objective alongside raw TOPS. Power benchmarks validate whether efficiency-optimized accelerators deliver their promised energy savings. Power claims are particularly susceptible to gaming: a chip advertising "`{python} PowerClaimGapCalc.datasheet_tops_str` at `{python} PowerClaimGapCalc.datasheet_w_str`" might achieve that ratio only at minimal utilization; under sustained load, thermal throttling and voltage scaling may deliver `{python} PowerClaimGapCalc.sustained_tops_str` at `{python} PowerClaimGapCalc.sustained_w_str`. Power benchmarks expose these gaps.
+This third dimension is critical because @sec-hardware-acceleration established TOPS/W\index{TOPS/W!primary design objective} as a primary design objective alongside raw TOPS. Power benchmarks validate whether efficiency-optimized accelerators deliver their promised energy savings. TOPS/W is particularly susceptible to gaming precisely because it is a ratio of two separately quotable peaks: a vendor can read the numerator (operations) at the batch size and precision that maximize throughput and the denominator (watts) at a near-idle operating point, so the advertised efficiency describes a state the chip never occupies under real load. Power benchmarks close that loophole by fixing the workload and the measurement window, forcing the numerator and denominator to be read at the same operating point.
 
 ::: {.column-margin}
 ![](images/svg/benchmarking_power_ladder.svg){width="100%" fig-alt="Vertical ladder of orange bars on a log scale spanning deployment power from a neural decision processor at 150 microwatts at the bottom up through a microcontroller at 25 milliwatts, a Raspberry Pi at 3.5 watts, an edge server at 80 watts, an ML server node at 400 watts, to an ML server rack at 10 kilowatts at the top."}
@@ -3348,6 +3164,167 @@ fill=OrangeL!40](RS3)at($(BB6.east)!0.5!(BB7.west)$){Interconnection Fabrics};
 :::
 
 The diagram is organized into three categories, Tiny, Inference, and Training examples, each reflecting different measurement scopes based on system architecture and deployment environment. In TinyML systems, the entire low-power SoC, including compute, memory, and basic interconnects, typically falls within the measurement boundary. Inference nodes introduce more complexity, incorporating multiple SoCs, local storage, accelerators, and memory, while often excluding remote storage and off-chip components. Training deployments span multiple racks, where only selected elements, including compute nodes and network switches, are measured, while storage systems, cooling infrastructure, and parts of the interconnect fabric are often excluded.
+
+Where the boundary falls determines what counts as energy, but within any boundary the dominant term is rarely arithmetic. Decomposing inference energy into its physical sources shows why precision, not raw operation count, is the primary energy lever, and why a power benchmark that ignores data movement measures the wrong thing.
+
+```{python}
+#| echo: false
+#| label: energy-per-op-constants
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENERGY PER OPERATION AND MEMORY ACCESS CONSTANTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Why INT8 Saves Energy" callout tables immediately below.
+# │
+# │ Goal: Provide per-operation and per-access energy values for the
+# │       precision vs. energy comparison tables.
+# │ Show: pJ per MAC at FP32/FP16/INT8, pJ per byte at register/L1/L2.
+# │ How:  Read Horowitz 2014 energy anchors from Hardware.Tech.Op / Hardware.Tech.Memory.
+# │
+# │ Imports: mlsysim Hardware.Tech.Op (FlopFp32.energy, FlopFp16.energy, OpInt8.energy),
+# │          Hardware.Tech.Memory (Register.energy_per_access, L1.energy_per_access,
+# │          L2.energy_per_access, HBM3.energy_per_byte); mlsysim.fmt (fmt)
+# │ Exports: energy_fp32_pj_str, energy_fp16_pj_str, energy_int8_pj_str,
+# │          energy_reg_pj_str, energy_l1_pj_str, energy_l2_pj_str,
+# │          dram_vs_reg_ratio_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_multiple, fmt_qty, fmt_energy_per_flop
+from mlsysim.core.units import pJ, byte
+
+class EnergyPerOp:
+    """Energy per operation and memory access for precision comparison tables."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_FLOP_FP16_PJ = Hardware.Tech.Op.FlopFp16.energy
+    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
+    ENERGY_REG_PJ = Hardware.Tech.Memory.Register.energy_per_access
+    ENERGY_SRAM_L1_PJ = Hardware.Tech.Memory.L1.energy_per_access
+    ENERGY_SRAM_L2_PJ = Hardware.Tech.Memory.L2.energy_per_access
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
+    dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ.to(pJ).magnitude / 1000) * THOUSAND
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    energy_fp32_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
+    energy_fp16_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP16_PJ, precision=1, commas=False)
+    energy_int8_pj_str = fmt_energy_per_flop(ENERGY_OP_INT8_PJ, precision=1, commas=False)
+    energy_reg_pj_str = fmt_qty(ENERGY_REG_PJ, pJ, precision=2, commas=False)
+    energy_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
+    energy_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
+    dram_vs_reg_ratio_mult_str = fmt_multiple(dram_vs_reg_ratio_value, precision=0, commas=True)
+```
+
+```{python}
+#| echo: false
+#| label: energy-breakdown-calc
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: INT8 energy callout tables — MobileNet load vs compute breakdown
+# │ Exports: EnergyBreakdownCalc.*
+from mlsysim import Models, Hardware
+from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_flops, fmt_memory, fmt_energy
+
+class EnergyBreakdownCalc:
+    """FP32 vs INT8 MobileNet inference energy: memory load dominates; INT8 attacks both sources."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
+    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
+    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    m_fp32 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
+    m_int8 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
+    e_fp32_load = (m_fp32 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
+    e_fp32_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_FLOP_FP32_PJ).to(uJ)
+    e_int8_load = (m_int8 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
+    e_int8_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_OP_INT8_PJ).to(uJ)
+    e_fp32_total = e_fp32_load + e_fp32_compute
+    e_int8_total = e_int8_load + e_int8_compute
+    s_load = (e_fp32_load / e_int8_load).to_base_units().magnitude
+    s_compute = (e_fp32_compute / e_int8_compute).to_base_units().magnitude
+    s_total = (e_fp32_total / e_int8_total).to_base_units().magnitude
+    e_fp32_load_mj = e_fp32_load.to(mJ)
+    e_fp32_compute_mj = e_fp32_compute.to(mJ)
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(m_fp32.to(MB).magnitude) == 14, f"MobileNetV2 FP32 size should be about 14 MB, got {m_fp32.to(MB).magnitude:.1f}")
+    check(s_load == 4.0, f"Expected 4x load-energy reduction, got {s_load:.1f}x")
+    check(s_compute > 15, f"Expected INT8 compute to be much cheaper, got {s_compute:.1f}x")
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    dram_energy_pj_per_byte_str = fmt_energy_per_byte(ENERGY_DRAM_PJ_PER_BYTE, precision=0, commas=False)
+    m_ops_mflop_str = fmt_flops(Models.Vision.MobileNetV2.inference_flops, unit=MFLOPs, precision=0, commas=False)
+    m_fp32_mb_str = fmt_memory(m_fp32, unit=MB, precision=1, commas=False)
+    m_int8_mb_str = fmt_memory(m_int8, unit=MB, precision=1, commas=False)
+    e_fp32_load_str = fmt_energy(round(e_fp32_load.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=False)
+    e_fp32_compute_str = fmt_energy(e_fp32_compute, unit=uJ, precision=0, commas=True)
+    e_fp32_total_str = fmt_energy(round(e_fp32_total.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=True)
+    e_int8_load_str = fmt_energy(round(e_int8_load.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=False)
+    e_int8_compute_str = fmt_energy(e_int8_compute, unit=uJ, precision=0, commas=False)
+    e_int8_total_str = fmt_energy(round(e_int8_total.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=True)
+    load_savings_factor_mult_str = fmt_multiple(s_load, precision=0, commas=False)
+    compute_savings_factor_mult_str = fmt_multiple(s_compute, precision=1, commas=False)
+    total_savings_factor_mult_str = fmt_multiple(s_total, precision=1, commas=False)
+    e_fp32_load_mj_str = fmt_energy(e_fp32_load_mj, unit=mJ, precision=1, commas=False)
+    e_fp32_compute_mj_str = fmt_energy(e_fp32_compute_mj, unit=mJ, precision=1, commas=False)
+```
+
+::: {#nbk-benchmarking-why-int8-saves-energy .callout-notebook title="Why INT8 saves energy"}
+
+Recall from @sec-hardware-acceleration that moving data costs far more energy than computing on it (the energy-movement invariant formalized in @sec-data-engineering). Understanding *why* quantization reduces energy consumption\index{Quantization!INT8 energy savings} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
+
+Because transistor count scales roughly with bit-width squared, narrower datatypes consume dramatically less energy per operation—@tbl-benchmarking-energy-per-precision reveals a 20$\times$ gap between FP32 and INT8 multiply-accumulate cost:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
+
+| **Precision** |           **Multiplier Energy**            | **Relative Cost** |
+|:--------------|:------------------------------------------:|:-----------------:|
+| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_pj_str` |    1.0$\times$    |
+| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_pj_str` |    0.3$\times$    |
+| **INT8**      | ~`{python} EnergyPerOp.energy_int8_pj_str` |    0.05$\times$   |
+
+: **Per-operation energy by precision**: Energy cost of a single multiply-accumulate at FP32, FP16, and INT8, with relative cost normalized to FP32, illustrating why narrower datatypes dominate compute-energy savings. {#tbl-benchmarking-energy-per-precision}
+
+```{=latex}
+\vspace*{-1.5ex}
+```
+An 8-bit multiplier uses ~20$\times$ less energy than a 32-bit floating-point multiplier because transistor count scales roughly with bit-width squared, and switching energy scales with transistor count. @Sec-appdx-machine-foundations-numbers-know-b531 catalogs the canonical per-operation energy figures behind these ratios and shows why the FP32-to-INT8 and data-movement-to-compute gaps stay stable across hardware generations.
+
+@Tbl-benchmarking-energy-memory-tier extends the picture to memory access, with energy cost per byte across each tier of the hierarchy:
+
+| **Memory Level** |                     **Energy per Byte**                     | **Relative Cost** |
+|:-----------------|:-----------------------------------------------------------:|:-----------------:|
+| **Register**     |          ~`{python} EnergyPerOp.energy_reg_pj_str`          |     1$\times$     |
+| **L1 Cache**     |           ~`{python} EnergyPerOp.energy_l1_pj_str`          |     50$\times$    |
+| **L2 Cache**     |           ~`{python} EnergyPerOp.energy_l2_pj_str`          |    200$\times$    |
+| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_per_byte_str` |   16,000$\times$  |
+
+: **Memory access energy by tier**: Per-byte energy cost across the register-to-DRAM hierarchy, with relative cost normalized to a register read, exposing why off-chip memory traffic dominates inference energy budgets. {#tbl-benchmarking-energy-memory-tier}
+
+```{=latex}
+\vspace*{-1.5ex}
+```
+Memory access dominates: reading one byte from DRAM costs over `{python} EnergyPerOp.dram_vs_reg_ratio_mult_str` more energy than a register access.
+
+@Tbl-benchmarking-mobilenet-int8-energy combines the two effects for a MobileNetV2 inference, decomposing per-inference energy into model-load and compute terms at FP32 vs. INT8:
+
+| **Component**                                                | **FP32 (`{python} EnergyBreakdownCalc.m_fp32_mb_str`)** | **INT8 (`{python} EnergyBreakdownCalc.m_int8_mb_str`)** |                           **Savings**                            |
+|:-------------------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------------:|:----------------------------------------------------------------:|
+| **Model load from DRAM**                                     |      `{python} EnergyBreakdownCalc.e_fp32_load_str`     |      `{python} EnergyBreakdownCalc.e_int8_load_str`     |   `{python} EnergyBreakdownCalc.load_savings_factor_mult_str`    |
+| **Compute (`{python} EnergyBreakdownCalc.m_ops_mflop_str`)** |    `{python} EnergyBreakdownCalc.e_fp32_compute_str`    |    `{python} EnergyBreakdownCalc.e_int8_compute_str`    |  `{python} EnergyBreakdownCalc.compute_savings_factor_mult_str`  |
+| **Total**                                                    |   **`{python} EnergyBreakdownCalc.e_fp32_total_str`**   |   **`{python} EnergyBreakdownCalc.e_int8_total_str`**   | **`{python} EnergyBreakdownCalc.total_savings_factor_mult_str`** |
+
+: **MobileNetV2 INT8 energy breakdown**: Per-inference energy decomposed into model-load and compute terms for FP32 vs. INT8, showing that INT8 quantization attacks DRAM-traffic energy as the dominant component. {#tbl-benchmarking-mobilenet-int8-energy}
+
+```{=latex}
+\endgroup
+```
+
+**Systems insight**: Memory access dominates FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` compute). INT8 quantization provides `{python} EnergyBreakdownCalc.load_savings_factor_mult_str` memory energy reduction and ~`{python} EnergyBreakdownCalc.compute_savings_factor_mult_str` compute energy reduction. The combined effect explains why quantized models on edge devices achieve dramatic battery life improvements: they attack the dominant memory bottleneck while simultaneously accelerating compute.
+
+:::
 
 System-level power measurement offers a more holistic view than measuring individual components in isolation. While component-level metrics (for example, accelerator or processor power) are valuable for performance tuning, real-world ML workloads involve intricate interactions between compute units, memory systems, and supporting infrastructure. For instance, analysis of Google's TensorFlow Mobile workloads shows that data movement accounts for 57.3 percent of total inference energy consumption [@boroumand2018], highlighting how memory-bound operations can dominate system power usage.
 
@@ -4019,9 +3996,9 @@ The pressure to achieve high benchmark scores is often driven by competition, ma
 
 #### Bias and over-optimization {#sec-benchmarking-bias-overoptimization-6c65}
 
-Several strategies can ensure that benchmarks remain useful and fair. Transparency is paramount: benchmark submissions should include detailed documentation on any optimizations applied, ensuring that improvements are distinguishable from benchmark-specific tuning. Researchers and developers should report both benchmark performance and real-world deployment results to provide a complete picture of a system's capabilities. Diversifying evaluation methodologies provides additional protection. Instead of relying on a single static benchmark, AI systems should be evaluated across multiple, continuously updated benchmarks that reflect real-world complexity. This reduces the risk of models being overfitted\index{Overfitting!benchmark, over-optimization to test sets} to a single test set and encourages general-purpose improvements rather than narrow optimizations.
+The practitioner consuming a benchmark result faces one question: is this number legitimate optimization or benchmark engineering? Several practices make that distinguishable, and each catches a specific failure at a specific cost. Transparency is the first line of defense: a submission that documents every optimization applied lets a reader separate general improvement from benchmark-specific tuning, at the cost of exposing techniques a vendor may prefer to keep proprietary. Reporting both benchmark and real-world deployment results closes the same gap from the other side. Diversified evaluation across multiple, continuously updated benchmarks raises the cost of overfitting\index{Overfitting!benchmark, over-optimization to test sets} to any single test set, because a model engineered to win one cannot easily win them all; its cost is the engineering effort of maintaining many benchmarks.
 
-Standardization and third-party verification can also help mitigate bias. By establishing industry-wide benchmarking standards and requiring independent third-party audits of results, the AI community can improve the reliability and credibility of benchmarking outcomes. Third-party verification ensures that reported results are reproducible across different settings and helps prevent unintentional benchmark gaming. Complementing controlled evaluations, application-specific testing remains essential: AI models should be assessed not only on benchmark datasets but also in practical deployment environments. An autonomous driving model, for instance, should be tested in a variety of weather conditions and urban settings rather than being judged solely on controlled benchmark datasets. Finally, benchmarks should test AI models on multiple hardware configurations to ensure that performance is not being driven solely by compatibility with a specific platform, reducing the risk of the hardware lottery.
+Standardization and third-party verification raise the bar further. Independent audits catch results that fail to reproduce across settings, and the existence proof for this mechanism appears two sections later in MLPerf's reference-vs-submission validation (@sec-benchmarking-gaming), which disqualifies any submission that cannot hit the reference accuracy target. Application-specific testing catches the failure controlled benchmarks structurally cannot: an autonomous-driving model must be exercised across the weather, lighting, and urban settings it will actually meet, not judged solely on a curated dataset. Multi-hardware testing catches the last case, performance that is really hardware-lottery alignment rather than model quality, by confirming that a result does not depend on compatibility with one platform.
 
 #### Benchmark evolution {#sec-benchmarking-benchmark-evolution-b523}
 
@@ -4139,7 +4116,7 @@ Evolving benchmarks remains essential for meaningful progress measurement. Witho
 
 MLPerf synthesizes the principles discussed throughout this chapter into a single evolving framework: reference implementations and strict submission rules enforce reproducibility, deployment-specific suites (Inference, Mobile, Client, Tiny) align with the three-dimensional evaluation framework, and regular task updates (including generative AI and energy-efficient computing) prevent benchmark stagnation. This combination of standardization, deployment breadth, and adaptability has made MLPerf a central benchmark suite for comparing AI systems under shared rules.
 
-In the Hennessy & Patterson tradition of quantitative systems, we must acknowledge that benchmarks are not just measurements; they are targets. As Goodhart's Law states: "When a measure becomes a target, it ceases to be a good measure." In the high-stakes world of AI hardware, this manifests as **Benchmark Gaming**\index{Benchmark Gaming!distorting performance metrics}: the practice of optimizing hardware or compilers specifically for the benchmark's unique characteristics, rather than for real-world performance.
+In the Hennessy & Patterson tradition of quantitative systems, we must acknowledge that benchmarks are not just measurements; they are targets. The Goodhart dynamic introduced in @sec-benchmarking-machine-learning-benchmarking-framework-70b8 applies here in full force. In the high-stakes world of AI hardware, it manifests as **Benchmark Gaming**\index{Benchmark Gaming!distorting performance metrics}: the practice of optimizing hardware or compilers specifically for the benchmark's unique characteristics, rather than for real-world performance.
 
 Common submission-specific optimization techniques in ML benchmarking include:
 

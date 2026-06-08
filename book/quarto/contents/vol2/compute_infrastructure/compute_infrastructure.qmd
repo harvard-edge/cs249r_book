@@ -40,7 +40,7 @@ Machine learning systems have a physical reality that transcends code. While the
 - Quantify the memory wall by comparing HBM generations and calculating token generation latency
 - Apply the Roofline Model to diagnose whether a cluster is throttled by arithmetic units or memory bandwidth
 - Analyze the bandwidth hierarchy from HBM to NVLink to InfiniBand and its impact on parallel strategy selection
-- Evaluate Cooling Architectures (Air vs. Liquid) and calculate data center power requirements using PUE
+- Explain how power density and thermal limits drive the rack's transition from air to liquid cooling
 - Compare accelerators by cost per useful TFLOP-hour rather than cost per GPU-hour, given the efficiency gains across hardware generations
 
 :::
@@ -123,7 +123,7 @@ As @fig-three-walls-grid illustrates, this chapter begins at the silicon die and
 
 ## Accelerator Spectrum {#sec-compute-accelerator-spectrum}
 
-Every Machine Learning Fleet rests on a physical foundation, and this chapter builds that foundation from the bottom up across four levels: the accelerator that performs the arithmetic, the node that wires a handful of accelerators into one high-bandwidth unit, the rack that delivers power and removes the heat, and the pod that binds thousands of nodes into a single machine. The foundation starts with the silicon, where a specialized chip earns its place by doing one thing a general-purpose processor cannot do efficiently: run the same dense arithmetic, over and over, at maximum throughput.
+The foundation starts with the silicon, where a specialized chip earns its place by doing one thing a general-purpose processor cannot do efficiently: run the same dense arithmetic, over and over, at maximum throughput.
 
 Consider what happens when a CPU executes a matrix multiplication. The processor fetches an instruction, decodes it, checks for data hazards, routes operands through a deep pipeline, and writes the result back to a register file. For each multiply-accumulate operation, the chip expends energy on branch prediction, speculative execution, out-of-order scheduling, and cache coherence.
 
@@ -227,7 +227,7 @@ As @tbl-accelerator-comparison summarizes, for our `{python} InfraFrontierAccelR
 
 A major accelerator design pattern is the **chiplet**\index{Chiplet} architecture, exemplified by NVIDIA's Blackwell and AMD's Instinct MI300 series. Rather than fabricating a single monolithic die, chiplet-based designs partition the processor into multiple smaller dies connected by a high-bandwidth die-to-die interconnect on a common package substrate. This approach addresses two physical limitations that constrain monolithic designs.
 
-First, the maximum die size is limited by the reticle size of lithographic equipment, roughly 800 mm$^2$ for EUV scanners. A monolithic GPU cannot exceed this area, which caps the number of Tensor Cores, SMs, and HBM stacks that can be integrated. Chiplet designs bypass this limit by placing multiple dies on a single package, with the B200's dual-die design effectively creating a 1,600 mm$^2$ equivalent processor.
+First, the maximum die size is capped by the photolithographic reticle limit (the 858 mm$^2$ single-exposure ceiling examined in @sec-compute-infrastructure-evolution-gpu-architectures-566b), which limits the number of Tensor Cores, SMs, and HBM stacks a monolithic GPU can integrate. Chiplet designs bypass this limit by placing multiple dies on a single package, with the B200's dual-die design effectively creating a 1,600 mm$^2$ equivalent processor.
 
 Second, manufacturing yield decreases exponentially with die area because a single defect anywhere on the die renders the entire chip unusable. Smaller chiplets have higher individual yield, and the package-level integration allows partial yields (a defective chiplet can be replaced with a good one). This yield advantage translates directly to lower manufacturing cost per unit of compute, which is particularly important as transistor densities continue to increase and process nodes become more expensive.
 
@@ -293,7 +293,7 @@ class V100NvlinkRecap:
     nvlink_gb_per_s_str = fmt_qty(Hardware.Cloud.V100.nvlink.bandwidth, GB / second, precision=0, commas=False)
 ```
 
-The Ampere architecture (2020) expanded Tensor Core support to additional data types (TF32, BF16, INT8, INT4), reflecting the growing importance of mixed-precision training and quantized inference. The A100 also introduced Multi-Instance GPU (MIG), which partitions a single GPU into up to seven isolated instances, enabling efficient sharing of expensive hardware across multiple inference workloads. The most consequential change for infrastructure was Ampere's third-generation NVLink, which doubled bidirectional bandwidth to `{python} A100Specs.nvlink_gb_per_s_str` per GPU from Volta's `{python} V100NvlinkRecap.nvlink_gb_per_s_str`, directly addressing the communication wall for tensor parallelism.
+The Ampere architecture (2020) expanded Tensor Core support to additional data types (TF32, BF16, INT8, INT4), reflecting the growing importance of mixed-precision training and quantized inference. The A100 also introduced Multi-Instance GPU (MIG), which partitions a single GPU into up to seven isolated instances, enabling efficient sharing of expensive hardware across multiple inference workloads. The most consequential change for infrastructure was Ampere's third-generation NVLink, which doubled bidirectional bandwidth to `{python} A100Specs.nvlink_gb_per_s_str` per GPU from Volta's `{python} V100NvlinkRecap.nvlink_gb_per_s_str`, directly addressing the communication wall for tensor parallelism, which splits each layer's matrices across GPUs.
 
 ```{python}
 #| echo: false
@@ -401,7 +401,7 @@ class B200PerformanceScenario:
 
 The Blackwell architecture (2024) continued this trajectory with the B200, which pairs two GPU dies in a single package via a high-bandwidth chip-to-chip link, effectively creating a "dual-die GPU" that delivers about `{python} B200PerformanceScenario.fp8_tflop_per_s_str` of dense FP8 Tensor Core throughput at `{python} B200PerformanceScenario.tdp_w_str`. FP16/BF16 comparisons should use the lower precision-specific vendor figure rather than the FP8 peak.
 
-The dual-die approach acknowledges that single-die GPU sizes are approaching the reticle limit of lithographic equipment (roughly 800 mm$^2$), and further scaling requires chiplet-based designs. The reticle limit is a fundamental constraint of photolithography: the lens system in the EUV scanner can only project a pattern onto an area of approximately $26{\times}33$ mm (858 mm$^2$) in a single exposure. A die larger than this area would require multiple exposures with stitching, which is technically possible but dramatically increases cost and reduces yield.
+The dual-die approach acknowledges that single-die GPU sizes are approaching the reticle limit of lithographic equipment, and further scaling requires chiplet-based designs. The reticle limit is a fundamental constraint of photolithography: the lens system in the EUV scanner can only project a pattern onto an area of approximately $26{\times}33$ mm (858 mm$^2$) in a single exposure. A die larger than this area would require multiple exposures with stitching, which is technically possible but dramatically increases cost and reduces yield.
 
 ```{python}
 #| echo: false
@@ -742,19 +742,11 @@ HBM solves this problem by changing the physical topology entirely, as @fig-hbm-
 
 The vertical stacking represents a fundamental change in memory architecture: rather than increasing bandwidth by pushing signals faster through long copper traces (the DDR approach, which has diminishing returns), HBM increases bandwidth by multiplying the number of parallel signal paths through extremely short vertical connections.
 
-A single HBM stack contains 8--12 DRAM dies. Each die is thinned to approximately 30--50 micrometers (roughly the thickness of a human hair) using a chemical-mechanical polishing process. The thinning is necessary because the TSVs must pass through the full thickness of each die, and thinner dies allow shorter, lower-resistance vias. The thinned dies are then vertically aligned with sub-micrometer precision and bonded to the die below using thermocompression bonding at temperatures of 300--400 degrees Celsius.
-
-Thousands of TSVs pass through each die, providing a 1024-bit-wide interface per stack, compared to 64 bits for a DDR5 channel. This 16$\times$ wider interface, combined with higher per-pin signaling rates, is the source of HBM's bandwidth advantage. Each TSV is approximately 5--10 micrometers in diameter (invisible to the naked eye), and the pitch between adjacent TSVs is 40--50 micrometers, enabling thousands to fit within the area of a single HBM die.
-
-Because the vias travel *through* the silicon rather than *across* a PCB, the signal path is measured in tens of micrometers rather than centimeters. This represents approximately a 1000$\times$ reduction in physical distance compared to DDR5 signal paths.
+A single HBM stack bonds 8--12 DRAM dies vertically, threading thousands of TSVs through each die to form a 1024-bit-wide interface per stack, compared to 64 bits for a DDR5 channel. This 16$\times$ wider interface, combined with higher per-pin signaling rates, is the source of HBM's bandwidth advantage. Because the vias travel *through* the silicon rather than *across* a PCB, the signal path shrinks from centimeters to tens of micrometers, roughly a 1000$\times$ reduction, and the whole stack sits on the same silicon interposer as the processor die so data travels from DRAM cell to arithmetic unit in nanoseconds rather than the tens of nanoseconds required by off-package DDR.
 
 The shortened distance has three direct physical benefits. First, the energy per bit transferred\index{HBM!energy efficiency} drops by an order of magnitude (from approximately 20 pJ/bit for DDR5 to approximately 2 pJ/bit for HBM) because shorter traces have lower capacitance and require less driving current. Second, the latency decreases because electrical signals propagate through silicon at roughly two thirds the speed of light, and the shorter path means proportionally shorter propagation time. Third, the reduced capacitance allows higher signaling frequencies without the sophisticated equalization circuits required by long PCB traces, enabling the high per-pin data rates that complement the wide bus width.
 
 [^fn-tsv-stacking]: **TSV (Through-Silicon Via)**\index{TSV!3D stacking}: A vertical copper pillar, 5--10 micrometers in diameter, etched through a silicon die to connect stacked layers. Originally developed for CMOS image sensors in smartphone cameras, TSVs enabled HBM by replacing centimeters of PCB trace with tens of micrometers of vertical silicon -- a 1,000$\times$ reduction in signal path that drops energy per bit from ~20 pJ (DDR5) to ~2 pJ (HBM), making terabyte-per-second bandwidth economically feasible within an accelerator's power budget.
-
-The entire HBM assembly sits on the same silicon interposer as the processor die, connected via microbumps. This on-package placement means data travels from DRAM cell to arithmetic unit in nanoseconds rather than the tens of nanoseconds required by off-package DDR.
-
-The interposer itself is a passive silicon substrate with etched wiring layers that connect the HBM stacks to the processor, forming what is effectively a miniature PCB made of silicon rather than fiberglass. The interposer's silicon construction allows much finer trace widths and tighter pitches than a fiberglass PCB, enabling thousands of parallel connections between the HBM stacks and the processor die in a physical area of just a few hundred square millimeters.
 
 ::: {#chk-compute-infrastructure-hbm-memory-wall .callout-checkpoint title="HBM and the memory wall"}
 
@@ -1458,7 +1450,7 @@ class RooflineInferenceMath:
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────
     inf_flops = 2 * params * flop / param
-    inf_weight = memory_from_params(params, weight_bytes_per_param * byte / param)
+    inf_weight = memory_from_params(params, weight_bytes_per_param / param)
     inf_intensity_q = inf_flops / inf_weight
     inf_intensity = inf_intensity_q.to(flop / byte).magnitude
     inf_throughput = (h100_bw * inf_intensity_q).to(TFLOP / second)
@@ -1688,7 +1680,7 @@ The memory wall constrains how fast data reaches the compute units; the Roofline
 
 :::
 
-The cascade shown in @fig-power-path reveals why power delivery is an infrastructure problem, not merely an electrical one: these conversion losses, combined with cooling overhead measured by PUE (Power Usage Effectiveness), determine the facility's total power draw, and the 10--40 kW concentrated at the rack PDU-to-VRM transition dictates the cooling architecture for the entire facility.
+The cascade shown in @fig-power-path reveals why power delivery is an infrastructure problem, not merely an electrical one: these conversion losses, combined with the overhead of removing heat, determine the facility's total power draw, and the 10--40 kW concentrated at the rack PDU-to-VRM transition dictates the cooling architecture for the entire facility. That cooling overhead is captured by a single facility ratio, Power Usage Effectiveness (PUE), which @eq-pue defines and develops; here it is enough to know that some fraction of every watt drawn from the grid is spent moving heat rather than computing.
 
 ```{python}
 #| echo: false
@@ -1796,7 +1788,7 @@ For three decades, Dennard scaling allowed architects to increase transistor cou
 
 TDP is not merely a specification on a data sheet; it is a physical constraint that propagates through every level of the infrastructure stack. The power delivery chain, cooling system, rack design, and facility electrical infrastructure must all be designed to accommodate deployed accelerators and the plausible TDP range of future refresh cycles.
 
-Accelerators implement sophisticated power management to operate within their TDP envelope. When the workload does not fully use all SMs (for example, during the communication phase of a training step when the GPUs are waiting for AllReduce to complete), the GPU firmware can disable the clock signal to idle circuitry through *clock gating*\index{Clock Gating}, eliminating dynamic switching power and freeing thermal headroom for the active SMs. A separate mechanism, *dynamic voltage and frequency scaling* (DVFS), adjusts the chip's clock frequency and supply voltage to stay within power and thermal limits; during a large matrix multiplication that activates all SMs simultaneously, DVFS reduces the clock frequency to keep total power within TDP.
+Accelerators implement sophisticated power management to operate within their TDP envelope. When the workload does not fully use all SMs (for example, during the communication phase of a training step when the GPUs are waiting for AllReduce to complete), the GPU firmware can disable the clock signal to idle circuitry through *clock gating*\index{Clock Gating}, eliminating dynamic switching power and freeing thermal headroom for the active SMs. A separate mechanism, **dynamic voltage and frequency scaling (DVFS)**\index{DVFS!accelerator power management}, adjusts the chip's clock frequency and supply voltage to stay within power and thermal limits; during a large matrix multiplication that activates all SMs simultaneously, DVFS reduces the clock frequency to keep total power within TDP. When some SMs are idle, the active SMs can boost frequency because total chip power is below TDP, so the actual clock, and therefore the actual throughput, varies throughout a training step.
 
 Dynamic power management means that the actual power draw of a GPU varies continuously during training. A typical training step might see power swing from 400 W (during communication phases when most SMs are idle) to `{python} H100TdpWallRecap.tdp_w_str` (during the forward and backward pass when all Tensor Cores are active) and back, with each transition occurring in microseconds. The VRMs on the baseboard must respond to these transitions fast enough to maintain a stable supply voltage despite the rapidly changing current draw.
 
@@ -1804,7 +1796,7 @@ To appreciate the physical challenge, consider what `{python} H100TdpWallRecap.t
 
 The B200 pushes even further: at 1,000 W across a dual-die package, the average heat flux remains comparable, but the total energy that must be removed per package increases by 43 percent. Removing this heat without allowing the junction temperature to exceed 83 degrees Celsius (the typical operating maximum for HBM reliability) requires thermal solutions with extremely low thermal resistance from die to coolant.
 
-The critical component in this thermal path is the **Thermal Interface Material (TIM)**\index{Thermal Interface Material} -- the microscopic layer of phase-change material or liquid metal between the silicon die and the cold plate (for liquid cooling) or heatsink (for air cooling). Under the extreme thermal cycling of deep learning workloads, where die temperatures spike from 40 degrees C to 80 degrees C in milliseconds during matrix multiplications and drop back during communication phases, inferior TIM can pump out (migrate away from the contact surface) or crack. A mere 5 percent degradation in TIM thermal conductivity forces the GPU to thermally throttle, reducing clock frequency by hundreds of MHz to protect the silicon. This degradation is a classic gray failure: the GPU continues to function, but at reduced performance that silently degrades the entire cluster's throughput. Fleet management systems that track per-GPU junction temperatures over time can detect TIM degradation as a gradual upward trend in temperature at constant workload, enabling proactive replacement before the performance impact becomes severe.
+The critical component in this thermal path is the **Thermal Interface Material (TIM)**\index{Thermal Interface Material} -- the microscopic layer of phase-change material or liquid metal between the silicon die and the cold plate (for liquid cooling) or heatsink (for air cooling). Under the extreme thermal cycling of deep learning workloads, where die temperatures spike from 40 degrees C to 80 degrees C in milliseconds during matrix multiplications and drop back during communication phases, inferior TIM can pump out (migrate away from the contact surface) or crack. A mere 5 percent degradation in TIM thermal conductivity forces the GPU to thermally throttle, reducing clock frequency by hundreds of MHz to protect the silicon. This degradation is a *gray failure*, a fault that degrades rather than halts: the GPU continues to function, but at reduced performance that silently degrades the entire cluster's throughput, a failure class we return to in fleet monitoring. Fleet management systems that track per-GPU junction temperatures over time can detect TIM degradation as a gradual upward trend in temperature at constant workload, enabling proactive replacement before the performance impact becomes severe.
 
 ```{python}
 #| echo: false
@@ -1826,9 +1818,7 @@ The physical volume of a 10,000-GPU pod operating at this power density is surpr
 
 Physical density, however, makes power delivery and cooling exponentially harder, creating the engineering challenges that define the rack and pod levels of the hierarchy. The paradox of modern ML infrastructure is that computational efficiency demands *physical proximity*, while thermal management demands *physical separation*. Every rack design is a negotiation between these opposing forces.
 
-Modern accelerators employ **dynamic voltage and frequency scaling (DVFS)**\index{DVFS!accelerator power management} to manage the trade-off between performance and power in real time. When all Tensor Cores are active and drawing maximum current, the GPU reduces its clock frequency to stay within the TDP envelope. When some SMs are idle (during communication phases, for instance), the active SMs can boost their frequency because the total chip power is below TDP. The result is that the actual clock frequency, and therefore the actual throughput, varies throughout a training step.
-
-For ML workloads, DVFS creates a subtle interaction with software optimization. A kernel that achieves high SM occupancy (many active warps per SM) draws more power, potentially triggering a frequency reduction that partially offsets the occupancy benefit. Conversely, a kernel with moderate occupancy may run at a higher clock frequency, achieving comparable throughput at lower power. Power-normalized throughput (TFLOP/s per watt) is therefore a more robust comparison metric than raw TFLOP/s, and it explains why the same GPU can show different sustained clock frequencies depending on the workload and the cooling solution.
+This frequency variability creates a subtle interaction with software optimization. A kernel that achieves high SM occupancy (many active warps per SM) draws more power, potentially triggering a frequency reduction that partially offsets the occupancy benefit. Conversely, a kernel with moderate occupancy may run at a higher clock frequency, achieving comparable throughput at lower power. Power-normalized throughput (TFLOP/s per watt) is therefore a more robust comparison metric than raw TFLOP/s, and it explains why the same GPU can show different sustained clock frequencies depending on the workload and the cooling solution.
 
 At fleet scale, DVFS also affects power planning. The data center's power delivery must be designed for the *worst-case* power draw (all GPUs at TDP simultaneously), but the *average* power draw is typically 70--85 percent of TDP because DVFS reduces frequency during communication phases and because not all SMs are fully occupied at all times. Some operators deliberately set lower power caps on their GPUs (for example, capping an H100 at 600 W instead of `{python} H100TdpWallRecap.tdp_w_str`), accepting a 10--15 percent reduction in peak performance in exchange for 15 percent lower power consumption and the ability to fit more GPUs within a fixed power budget. Power capping is a form of the compute-efficiency trade-off at the operational level.
 
@@ -2047,13 +2037,9 @@ Moving the weights to the compute units consumes 64$\times$ more energy than the
 
 #### Benchmarking accelerator performance {#sec-compute-infrastructure-benchmarking-accelerator-performance-6920}
 
-Given the complexity of the accelerator spectrum, objective comparison requires moving beyond raw specifications. Peak TFLOP/s, memory bandwidth, and TDP are necessary but insufficient, because they describe *potential* rather than *achieved* performance. Two industry-standard benchmarks provide more meaningful comparisons.
+A procurement team comparing accelerators faces a deceptively simple question: which published number predicts the performance the organization will actually achieve? Peak TFLOP/s, memory bandwidth, and TDP describe *potential*, not *achieved* performance, so the decision turns on whose measured results to trust and under what rules they were produced. The industry-standard reference is MLPerf, maintained by MLCommons: MLPerf Training reports the time to train reference models to a target accuracy, and MLPerf Inference reports serving throughput and latency under realistic batching and streaming conditions. Both capture complete system performance, including software stack efficiency, communication overhead, and memory management, not just the raw silicon.
 
-MLPerf Training, a benchmark suite maintained by MLCommons, measures the time required to train a set of reference models to a target accuracy on a given system. The benchmark covers multiple model types (image classification, object detection, natural language processing, recommendation) and requires submissions to report both the hardware configuration and the training time. MLPerf results are particularly valuable because they capture the complete system performance, including software stack efficiency, communication overhead, and memory management, not just the raw silicon capabilities.
-
-MLPerf Inference measures the throughput and latency of serving trained models under realistic conditions, including batching, multi-stream scenarios, and offline processing. For infrastructure procurement, the inference benchmarks are especially useful because they reveal how well the accelerator's memory bandwidth supports real-world serving workloads, which is often more important than peak FLOP/s for inference-oriented hardware.
-
-A critical subtlety in interpreting MLPerf results is the distinction between *closed* and *open* divisions. The closed division requires all submissions to use the same model architecture, hyperparameters, and training recipe, isolating the hardware and system software as the only variables. This makes closed-division results directly comparable across vendors. The open division allows arbitrary model modifications, software optimizations, and custom kernels, which can demonstrate the ceiling of a platform's capability but makes cross-vendor comparison unreliable. Infrastructure teams evaluating procurement decisions should weight closed-division results more heavily, as they reflect the performance an organization will achieve with standard frameworks and configurations, not the performance achievable only by the vendor's own optimization team.
+The number that actually predicts an organization's results is the *closed*-division result, and understanding why is the core of reading MLPerf well. The closed division requires every submission to use the same model architecture, hyperparameters, and training recipe, isolating the hardware and system software as the only variables and making results directly comparable across vendors. The open division allows arbitrary model modifications, custom kernels, and software optimizations, which demonstrate a platform's ceiling but make cross-vendor comparison unreliable. Infrastructure teams should weight closed-division results more heavily, because they reflect the performance achievable with standard frameworks and configurations, not the performance achievable only by the vendor's own optimization team.
 
 ```{python}
 #| echo: false
@@ -2157,7 +2143,7 @@ class InfraFrontierTdpDecisionRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-As @tbl-accelerator-decision shows, for our `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` model, the decision depends on the phase of the model's lifecycle. During training, large batch sizes push the workload into the compute-bound regime, making peak TFLOP/s the dominant metric. The H100 or B200, with their high Tensor Core throughput and fast NVLink for tensor parallelism, are the natural choices. During inference at low batch sizes, the same model becomes deeply memory-bound, and the relevant metric shifts to bandwidth per dollar. An A100 with adequate HBM bandwidth at a lower price point may deliver better cost-per-token than an H100 whose additional TFLOP/s go unused.
+The binding constraint shifts with the lifecycle phase, as @tbl-accelerator-decision shows for the `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` running example. During training, large batch sizes push the workload into the compute-bound regime, making peak TFLOP/s the dominant metric. The H100 or B200, with their high Tensor Core throughput and fast NVLink for tensor parallelism, are the natural choices. During inference at low batch sizes, the same model becomes deeply memory-bound, and the relevant metric shifts to bandwidth per dollar. An A100 with adequate HBM bandwidth at a lower price point may deliver better cost-per-token than an H100 whose additional TFLOP/s go unused.
 
 The organizational dimension adds a further consideration. Research labs that modify model architectures weekly need the flexibility of the GPU's CUDA ecosystem, where custom kernels can be written and tested in hours. Production teams running a fixed Transformer architecture at scale for months may benefit from TPUs, where the XLA compiler's whole-program optimization can achieve higher sustained utilization than hand-tuned CUDA kernels for standard operations. Custom ASICs make economic sense only for organizations with enough scale to amortize the \$50--200 million NRE cost and enough workload stability to justify a 2--3 year design cycle. The accelerator spectrum is ultimately an economic question answered at the intersection of workload physics, organizational scale, and time horizon.
 
@@ -2201,7 +2187,7 @@ class InfraFrontierNodeMemRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Our `{python} InfraFrontierNodeMemRecap.frontier_params_b_str` model needs 350 GB for its FP16 weights alone. A single H100 provides 80 GB of HBM, so we need at least five accelerators just to place the weights. An 8-H100 dense node\index{Node} can hold those weight shards, but it cannot hold the full Adam training state in HBM: optimizer moments, gradients, activations, and communication buffers push the requirement into the 2 TB range. This arithmetic forces us beyond the single die to the next physical level: the node, and it also forces the training system to combine tensor parallelism with optimizer sharding and memory offload.
+Aggregating accelerators solves the capacity problem only if the interconnect between them is fast enough that the group behaves as one machine rather than as several machines passing messages. The `{python} InfraFrontierNodeMemRecap.frontier_params_b_str` model's weights span at least five accelerators, and the full training state spans an entire 8-H100 node\index{Node} and more, so the parameters of a single layer now live on different chips and must be reassembled on every forward and backward pass. Whether that reassembly is cheap or ruinous depends entirely on the local fabric, which is why the node is the first scale level where the accelerator's specifications matter less than the wires between accelerators. The training system must combine tensor parallelism with optimizer sharding and memory offload, and each of those strategies places a different demand on the interconnect.
 
 ```{python}
 #| echo: false
@@ -2790,36 +2776,20 @@ class InfraFrontierNodeTableRecap:
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierNodeWeightsRecap.frontier_params_b_str,
-# │          InfraFrontierNodeWeightsRecap.frontier_params_b_value_str,
-# │          InfraFrontierNodeWeightsRecap.weights_gb_str,
-# │          InfraFrontierNodeWeightsRecap.optimizer_gb_str,
-# │          InfraFrontierNodeWeightsRecap.gradients_gb_str
+# │ Exports: InfraFrontierNodeWeightsRecap.total_footprint_tb_str
 class InfraFrontierNodeWeightsRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    model = Models.Language.GPT3
-    params = model.parameters
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights = model.size_in_bytes(BYTES_FP16)
-    optimizer = params * BYTES_FP32 * 2
-    gradients = weights
-    activation_min = 100 * GB
-    activation_max = 400 * GB
     total_footprint_min = 2.2 * TB
     total_footprint_max = 2.5 * TB
 
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(total_footprint_min < total_footprint_max, "Footprint range must be ordered")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
-    frontier_params_b_value_str = fmt_magnitude(params, unit=Bparam, precision=0, commas=False)
-    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
-    optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
-    gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
-    activation_range_gb_str = fmt_qty_range(activation_min, activation_max, GB, precision=0, commas=False)
     total_footprint_tb_str = fmt_qty_range(total_footprint_min, total_footprint_max, TB, precision=1, commas=False)
 ```
 
-The model weights in FP16 occupy `{python} InfraFrontierNodeWeightsRecap.weights_gb_str` (`{python} InfraFrontierNodeWeightsRecap.frontier_params_b_value_str` $\times 10^9 \times 2$ bytes). The Adam optimizer maintains two FP32 state tensors per parameter (first moment $m$ and second moment $v$), adding `{python} InfraFrontierNodeWeightsRecap.frontier_params_b_value_str` $\times 10^9 \times 4 \times 2$ = `{python} InfraFrontierNodeWeightsRecap.optimizer_gb_str`. The gradients in FP16 add another `{python} InfraFrontierNodeWeightsRecap.gradients_gb_str`. Intermediate activations (needed for the backward pass) depend on the batch size and sequence length but typically require `{python} InfraFrontierNodeWeightsRecap.activation_range_gb_str` for practical training configurations. The total memory footprint for training is therefore `{python} InfraFrontierNodeWeightsRecap.total_footprint_tb_str`, roughly 6--7$\times$ the raw weight size.
+@Tbl-memory-breakdown makes the partitioning concrete. The same `{python} InfraFrontierNodeWeightsRecap.total_footprint_tb_str` budget established earlier reappears here, but now decomposed by component and tier: the Adam optimizer state in FP32, not the FP16 weights, is the dominant term, and the activation peak (which scales with batch size and sequence length) is the most variable. The lesson for parallelism selection is that the weights are the smallest piece of what the node must hold, so a strategy that only shards weights leaves the largest consumers, optimizer state and activations, untouched.
 
 ```{python}
 #| echo: false
@@ -3259,6 +3229,10 @@ For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, trai
 
 :::
 
+The rack opener promised that the laws of heat transfer become the dominant design force at this level, and the reason is a hard physical limit on how fast a moving fluid can carry heat away from a surface. Air is a poor coolant: it has low density and low heat capacity, so a given volume of air absorbs little energy before its temperature rises to the point where it can no longer cool the silicon. Forced-air cooling, even with hot-aisle/cold-aisle containment and high-static-pressure fans, removes heat at a rate set by how much air the facility can physically push through the rack. That rate tops out around 30 kW per rack. Below roughly 10 kW, room-temperature air through perforated floor tiles suffices, which is why traditional 42U racks were never a thermal problem. Engineered air cooling stretches the envelope toward 30 kW, but no amount of additional fan power moves past it: beyond that density the air leaving the rack is already too hot to absorb more heat, and adding fans consumes power and produces noise without removing additional watts. A rack of four DGX H100 nodes sits at 33--40 kW, already past the air ceiling, and Blackwell-class racks push toward 100 kW and beyond, the point at which air cooling fails outright. Air is not throttled at these densities; it is disqualified.
+
+This thermal ceiling is what forces the rack from air to liquid: above the air-cooling threshold the only way to remove the heat is to put a far denser coolant in direct contact with the silicon, which is why high-density AI racks are liquid-cooled by physical necessity rather than by choice. @Sec-sustainable-ai-cooling takes up the cooling architectures that meet this requirement, the efficiency comparison between air and liquid cooling, and the facility-power overhead the choice carries every hour the cluster runs.
+
 ### Rack design considerations {#sec-compute-rack-design}
 
 The physical design of an ML rack differs substantially from a traditional server rack in ways that go beyond power and cooling. In a conventional 42U rack, servers are installed as independent 1U or 2U pizza-box units, each with its own fans, power supplies, and cable connections. ML racks use a fundamentally different form factor. A DGX H100 occupies 8U and contains 8 GPUs, the NVSwitch fabric, multiple power supplies, and (in liquid-cooled configurations) coolant manifolds with quick-connect fittings. Four DGX units in a 42U rack leave only 10U for networking switches, cable management, and PDUs.
@@ -3327,100 +3301,6 @@ A team is planning to deploy 256 H100 GPUs (32 nodes) in an existing air-cooled 
 1.  Calculate the total power draw, including cooling overhead.
 2.  Identify whether power capacity or cooling capacity is the binding constraint.
 3.  Specify what modifications would be needed to support the full deployment.
-
-:::
-
-The checkpoint's PUE calculation has an economic consequence: cooling overhead is paid every hour the fleet runs.
-
-```{python}
-#| echo: false
-#| label: rack-cooling-tax
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RACK COOLING TAX (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-compute-rack—PUE and rack-level cooling economics.
-# │ Goal: Quantify the facility-power and electricity-cost effect of air vs.
-# │       liquid cooling for the 1K training-cluster reference.
-# │ Scope: chapter-anchor — rack cooling section and build/buy recap share exports.
-# │ How: rack IT power × (PUE_air - PUE_liquid), using registry-backed rack
-# │      profile, cooling profiles, and electricity-price values.
-# │ Exports: RackCoolingTax.cluster_gpus_str,
-# │          RackCoolingTax.cluster_racks_str,
-# │          RackCoolingTax.rack_it_power_kw_str,
-# │          RackCoolingTax.h100_tdp_w_str,
-# │          RackCoolingTax.air_pue_str,
-# │          RackCoolingTax.liquid_pue_str,
-# │          RackCoolingTax.air_overhead_pct_str,
-# │          RackCoolingTax.liquid_overhead_pct_str,
-# │          RackCoolingTax.it_power_kw_str,
-# │          RackCoolingTax.air_total_kw_str,
-# │          RackCoolingTax.liquid_total_kw_str,
-# │          RackCoolingTax.savings_kw_str,
-# │          RackCoolingTax.electricity_rate_usd_str,
-# │          RackCoolingTax.annual_savings_usd_str,
-# │          RackCoolingTax.three_year_savings_usd_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Infrastructure, Systems
-from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_power, fmt_usd
-
-class RackCoolingTax:
-    """Cooling overhead for the registry-backed 1K H100 training cluster."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    fleet = Systems.Clusters.Training_1K
-    rack = Systems.Racks.DGX_H100_4Node
-    n_gpus = fleet.total_accelerators
-    n_racks = fleet.count / rack.nodes_per_rack
-    gpu_tdp = Hardware.Cloud.H100.tdp
-    air_pue = Infrastructure.FacilityCooling.SimpleAir.pue
-    liquid_pue = Infrastructure.FacilityCooling.StateOfArt.pue
-    electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate
-    lifecycle_years = 3  # scenario assumption: hardware lifecycle for the TCO comparison
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    rack_it_power = rack.total_power
-    it_power = n_racks * rack_it_power
-    air_total = it_power * air_pue
-    liquid_total = it_power * liquid_pue
-    savings = air_total - liquid_total
-    annual_savings_usd = (savings * HOURS_PER_YEAR * hour * electricity_rate).to(USD)
-    three_year_savings_usd = annual_savings_usd * lifecycle_years
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(n_gpus == 1024, "Training_1K should represent the 1,024-GPU reference cluster")
-    check(n_racks == 32, "Training_1K should occupy 32 four-node racks")
-    check(air_pue > liquid_pue, "Air-cooled PUE should exceed liquid-cooled PUE")
-    check(1050 < it_power.to(kW).magnitude < 1090, "Fleet IT power should match 32 × 33.5 kW racks")
-    check(420 < savings.to(kW).magnitude < 440, "Cooling savings should scale with fleet IT power")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    cluster_gpus_str = fmt_count(n_gpus, label="GPU")
-    cluster_racks_str = fmt_count(n_racks, label="rack")
-    rack_gpus_str = fmt_count(rack.accelerator_count, label="GPU")
-    rack_it_power_kw_str = fmt_power(rack_it_power, unit=kilowatt, precision=1, commas=False)
-    h100_tdp_w_str = fmt_power(gpu_tdp, unit=watt, precision=0, commas=False)
-    air_pue_str = fmt(air_pue, precision=2, commas=False)
-    liquid_pue_str = fmt(liquid_pue, precision=2, commas=False)
-    air_overhead_pct_str = fmt_percent(air_pue - 1, precision=0, commas=False, style='prose')
-    liquid_overhead_pct_str = fmt_percent(liquid_pue - 1, precision=0, commas=False, style='prose')
-    it_power_kw_str = fmt_power(it_power, unit=kilowatt, precision=0, commas=False)
-    air_total_kw_str = fmt_power(air_total, unit=kilowatt, precision=0, commas=False)
-    liquid_total_kw_str = fmt_power(liquid_total, unit=kilowatt, precision=1, commas=False)
-    savings_kw_str = fmt_power(savings, unit=kilowatt, precision=1, commas=False)
-    electricity_rate_usd_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
-    annual_savings_usd_str = fmt_usd(annual_savings_usd, scale="K", precision=0, commas=False)
-    three_year_savings_usd_str = fmt_usd(three_year_savings_usd, scale="K", precision=0, commas=False)
-```
-
-::: {#nbk-compute-infrastructure-cooling-tax .callout-notebook title="The cooling tax"}
-
-For the chapter's `{python} RackCoolingTax.cluster_gpus_str` reference cluster, each H100 dissipates `{python} RackCoolingTax.h100_tdp_w_str`.
-
-1.  **IT power**\index{IT Power}: `{python} RackCoolingTax.cluster_racks_str` $\times$ `{python} RackCoolingTax.rack_it_power_kw_str` each (`{python} RackCoolingTax.rack_gpus_str` plus host CPUs, memory, and networking) = `{python} RackCoolingTax.it_power_kw_str`.
-2.  **Air-cooled facility**: PUE `{python} RackCoolingTax.air_pue_str` adds `{python} RackCoolingTax.air_overhead_pct_str` overhead, raising facility draw to `{python} RackCoolingTax.air_total_kw_str`.
-3.  **Liquid-cooled facility**: PUE `{python} RackCoolingTax.liquid_pue_str` adds `{python} RackCoolingTax.liquid_overhead_pct_str` overhead, raising facility draw to `{python} RackCoolingTax.liquid_total_kw_str`.
-
-**Systems insight**: The cooling choice changes continuous power by `{python} RackCoolingTax.savings_kw_str`. At `{python} RackCoolingTax.electricity_rate_usd_str`, that saves about `{python} RackCoolingTax.annual_savings_usd_str` per year, or `{python} RackCoolingTax.three_year_savings_usd_str` over a three-year hardware lifecycle. The thermodynamic requirement and the economic argument point in the same direction: high-density AI racks should be designed for liquid cooling from the start.
 
 :::
 
@@ -3642,7 +3522,7 @@ We can derive the training time for our `{python} InfraFrontierPodTimeRecap.fron
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ WSC AGGREGATE THROUGHPUT (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: WSC callout in @sec-compute-fleet-monitoring — aggregate FP16/FP8
+# │ Context: WSC definition callout in @sec-compute-pod — aggregate FP16/FP8
 # │          peak throughput for a 10,000-H100 cluster.
 # │
 # │ Goal: Compute aggregate ExaFLOP/s from canonical H100 per-GPU constants.
@@ -3705,324 +3585,17 @@ The concept was formalized by Luiz Andre Barroso and Urs Holzle at Google in the
 *Fleet-level MTBF falls inversely with GPU count.*
 :::
 
-The concept of the Warehouse-Scale Computer, articulated by Barroso and Holzle at Google, reframes the data center from a *room full of computers* to a *single computer that happens to fill a room*. This reframing has profound implications for design.
+The concept of the Warehouse-Scale Computer, articulated by Barroso and Holzle at Google, reframes the data center from a *room full of computers* to a *single computer that happens to fill a room*. This reframing has profound implications for physical design.
 
 In a traditional data center, each server is an independent unit with its own operating system, storage, and network identity. The facility simply provides power, cooling, and physical security. Servers can be added, removed, or replaced independently, and the workloads running on different servers are unrelated to each other.
 
 In a WSC, the individual server is analogous to a core in a multicore processor: it has no independent utility and exists only as part of the larger system. A DGX H100 node running in isolation cannot train a 175B model; it becomes useful only when connected to hundreds of other nodes through a carefully designed network fabric, with a distributed storage system providing training data and checkpoint storage, and a fleet orchestrator coordinating the work across all nodes.
 
-The perspective shift has practical implications for how infrastructure teams think about component failures, performance optimization, and capacity planning. Just as a chip designer does not optimize individual transistors but optimizes the overall circuit, a WSC engineer does not optimize individual servers but optimizes the overall system throughput and efficiency. Three design principles follow from this shift in perspective.
+Two physical consequences follow directly from this reframing. The first is that *the network, not the compute, sets the ceiling*: within a single node NVLink supplies enough bandwidth for tensor parallelism, but across nodes the fabric must carry gradient tensors, activation checkpoints, and pipeline stage outputs, so a building-scale machine is only as fast as the wires that bind its cores. @Sec-network-fabrics develops that fabric in full; here it is enough to note that the WSC reframing makes the interconnect a first-class architectural component rather than a peripheral.
 
-The first principle is that *the network is the bottleneck, not the compute*. Within a single node, NVLink provides enough bandwidth for tensor parallelism. Across nodes, the network fabric must carry gradient tensors, activation checkpoints, and pipeline stage outputs.
+The second consequence is that *failure is a physical certainty, not an exceptional event*. A single GPU has a mean time between failures (MTBF)\index{MTBF} of approximately 50,000 hours (the canonical GPU MTTF anchor `Systems.Reliability.Gpu.mttf_hours` used in @sec-fault-tolerance-reliability), but reliability degrades linearly with component count: a cluster of 10,000 such GPUs experiences a failure roughly once every five hours. @Sec-appdx-reliability-foundations-mtbf-cascade derives why the fleet-level rate is simply the per-component lifetime divided by the component count. This is a building-level property of the physical machine, and it is why a WSC must be designed from the start so that individual component failures degrade rather than halt the running workload, with dual-path power feeds, redundant switch fabrics, and persistent checkpoint storage at every level.
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierPodCommRecap.frontier_params_b_str
-class InfraFrontierPodCommRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-For our `{python} InfraFrontierPodCommRecap.frontier_params_b_str` model with data parallelism across 128 nodes, each training step requires an AllReduce of approximately 350 GB of gradients. If the network *cannot* overlap this communication with the next forward pass, the GPUs sit idle during synchronization.
-
-The fraction of time spent on communication (as opposed to computation) is the single largest determinant of cluster efficiency, often mattering more than the peak FLOP/s of the individual accelerators. This is a counterintuitive result for teams accustomed to thinking about hardware in terms of compute specifications. A cluster with slightly slower GPUs but a better network fabric can outperform a cluster with faster GPUs but an inadequate network, because the faster GPUs spend more of their time idle, waiting for gradient synchronization.
-
-@Sec-network-fabrics examines the network engineering in detail; here we focus on how the physical topology of the pod determines what communication patterns are efficient.
-
-The second principle is that failure is routine, not exceptional. A cluster of 10,000 GPUs, each with a mean time between failures (MTBF)\index{MTBF} of approximately 50,000 hours (the canonical GPU MTTF anchor `Systems.Reliability.Gpu.mttf_hours` used in @sec-fault-tolerance-reliability), will experience a GPU failure roughly once every five hours on average. @Sec-appdx-reliability-foundations-mtbf-cascade derives why this cluster-level rate follows from the per-component lifetimes: reliability degrades linearly with component count at each level, so a node MTBF divided by node count yields the fleet-level interval between failures.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierPodPerspectiveRecap.frontier_params_b_str
-class InfraFrontierPodPerspectiveRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-To put this in perspective: if training our `{python} InfraFrontierPodPerspectiveRecap.frontier_params_b_str` model takes 2 weeks (336 hours) on a 10,000-GPU cluster, we should expect approximately 67 individual GPU failures during the training run. Each failure potentially corrupts the training state and requires either rolling back to a checkpoint or reorganizing the cluster to work around the failed node.
-
-The checkpointing frequency determines the cost of each failure. If checkpoints are taken every 10 minutes, a failure costs at most 10 minutes of lost work plus the time to restart. If checkpoints are taken every hour, each failure costs up to an hour of lost work plus restart overhead, and with roughly 67 failures, the cumulative lost time could exceed 67 hours before restart overhead, lengthening the training run by days.
-
-The arithmetic makes checkpointing strategy a first-order performance concern, not an afterthought. Nodes fail, switches fail, power supplies fail, and cables degrade. The WSC must be designed so that individual component failures do not halt the entire training run.
-
-Fault tolerance requires redundancy at every level of the physical infrastructure. Power feeds to each rack are typically dual-path (A+B feeds from independent UPS systems), so a single UPS failure does not cause a rack outage. Network paths between nodes include redundant switch fabrics, so a single switch failure does not partition the cluster. At the application level, periodic checkpointing saves the training state to persistent storage, and automatic restart mechanisms can reassemble the training job on healthy nodes after a failure, resuming from the most recent checkpoint.
-
-The interaction between failure rate and checkpointing frequency creates an optimization problem. More frequent checkpoints reduce the amount of work lost per failure but consume GPU time (to serialize the training state) and storage bandwidth (to write the checkpoint). Less frequent checkpoints reduce overhead but increase the expected work lost per failure. @Sec-fault-tolerance-reliability examines checkpointing strategies and elastic training systems in detail.
-
-```{python}
-#| echo: false
-#| label: compute-infrastructure-checkpoint-overhead
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT OVERHEAD BUDGET (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-compute-infrastructure-warehouse-scale-computer
-# │
-# │ Goal: Keep checkpoint cadence, overhead, and write bandwidth aligned.
-# │ Show: 1.75 TB checkpoint; 10-min cadence; 2% overhead => 12 s and 146 GB/s.
-# │ How: allowed write time = cadence × target overhead; BW = checkpoint/time.
-# │
-# │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: CheckpointOverheadBudget.ckpt_model_weights_gb_str,
-# │          .ckpt_optimizer_states_gb_str, .ckpt_total_tb_str,
-# │          .ckpt_cadence_min_str, .ckpt_target_overhead_pct_str,
-# │          .ckpt_allowed_write_s_str, .ckpt_required_bw_gb_per_s_str,
-# │          .ckpt_reference_write_s_str, .ckpt_reference_bw_gb_per_s_str,
-# │          .ckpt_reference_overhead_pct_str,
-# │          .ckpt_reference_min_cadence_min_str,
-# │          .ckpt_run_count_str, .ckpt_run_total_tb_str,
-# │          .ckpt_recent_retention_tb_str, .ckpt_sustained_bw_gb_per_s_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_memory, fmt_percent, fmt_rate, fmt_time
-
-class CheckpointOverheadBudget:
-    # ┌── 1. LOAD ─────────────────────────────────────────
-    model = Models.Language.GPT3
-    cadence = 10 * minute  # scenario assumption: checkpoint cadence
-    target_overhead_pct = 2  # scenario assumption: target checkpoint overhead budget
-    reference_write = 30 * second  # scenario assumption: reference checkpoint write time
-    run_days = 14  # scenario assumption: training run duration
-    checkpoints_retained = 10  # scenario assumption: recent checkpoint retention count
-
-    # ┌── 2. EXECUTE ──────────────────────────────────────
-    checkpoint_model_weights = model.size_in_bytes(BYTES_FP16)
-    checkpoint_optimizer_states = model.parameters * BYTES_FP32 * 2
-    checkpoint = checkpoint_model_weights + checkpoint_optimizer_states
-    target_overhead_fraction_val = target_overhead_pct / 100
-    allowed_write = cadence * target_overhead_fraction_val
-    required_bw = checkpoint / allowed_write
-    reference_bw = checkpoint / reference_write
-    reference_overhead_pct = (reference_write / cadence).to_base_units().magnitude * 100
-    reference_min_cadence = reference_write / target_overhead_fraction_val
-    cadence_min_value = cadence.to(minute).magnitude
-    checkpoints_per_run = run_days * 24 * (60 // cadence_min_value)
-    run_total = checkpoints_per_run * checkpoint
-    recent_retention = checkpoints_retained * checkpoint
-    sustained_bw = checkpoint / cadence
-
-    # ┌── 3. GUARD ────────────────────────────────────────
-    check(allowed_write.to(second).magnitude == 12, "10-min cadence at 2% overhead should allow 12 s")
-    check(145 < required_bw.to(GB / second).magnitude < 146, "Required checkpoint BW should be about 146 GB/s")
-    check(reference_overhead_pct == 5, "30 s on a 10-min cadence is 5% overhead")
-    check(checkpoints_per_run == 2016, "14 days at 10-min cadence should produce 2,016 checkpoints")
-
-    # ┌── 4. OUTPUT ───────────────────────────────────────
-    ckpt_model_weights_gb_str = fmt_memory(checkpoint_model_weights, unit=GB, precision=0, commas=False)
-    ckpt_optimizer_states_gb_str = fmt_memory(checkpoint_optimizer_states, unit=GB, precision=0, commas=True)
-    ckpt_total_tb_str = fmt_memory(checkpoint, unit=TB, precision=2, commas=False)
-    ckpt_cadence_min_str = fmt_time(cadence, minute, precision=0, commas=False, style='word')
-    ckpt_target_overhead_pct_str = fmt_percent(target_overhead_pct / 100, precision=0, commas=False, style='prose')
-    ckpt_allowed_write_s_str = fmt_time(allowed_write, second, precision=0, commas=False, style='word')
-    ckpt_required_bw_gb_per_s_str = fmt_bandwidth(required_bw, unit=GB / second, precision=1, commas=False)
-    ckpt_reference_write_s_str = fmt_time(reference_write, second, precision=0, commas=False, style='word')
-    ckpt_reference_bw_gb_per_s_str = fmt_bandwidth(reference_bw, unit=GB / second, precision=1, commas=False)
-    ckpt_reference_overhead_pct_str = fmt_percent(reference_overhead_pct / 100, precision=0, commas=False, style='prose')
-    ckpt_reference_min_cadence_min_str = fmt_time(reference_min_cadence, minute, precision=0, commas=False, style='word')
-    ckpt_run_count_str = fmt(checkpoints_per_run, precision=0)
-    ckpt_run_total_tb_str = fmt_memory(run_total, unit=TB, precision=0, commas=True)
-    ckpt_recent_retention_tb_str = fmt_memory(recent_retention, unit=TB, precision=1, commas=False)
-    ckpt_sustained_bw_gb_per_s_str = fmt_bandwidth(sustained_bw, unit=GB / second, precision=1, commas=False)
-    ckpt_run_days_str = fmt_time(run_days, 'day', precision=0, commas=False, style='word')
-    ckpt_run_hours_per_day_str = fmt_time(HOURS_PER_DAY, 'hour', precision=0, commas=False, style='word', per='day')
-    ckpt_per_hour_str = fmt_rate(60 // cadence_min_value, "checkpoints/hour", precision=0, commas=False)
-```
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap11.frontier_params_b_str
-class InfraFrontierStragglerRecap11:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-Checkpointing also creates a significant *storage* requirement that demands its own dedicated infrastructure. A full checkpoint for our `{python} InfraFrontierStragglerRecap11.frontier_params_b_str` model includes `{python} CheckpointOverheadBudget.ckpt_model_weights_gb_str` of model weights, `{python} CheckpointOverheadBudget.ckpt_optimizer_states_gb_str` of optimizer state, and the random number generator state needed to resume training deterministically. The total is approximately `{python} CheckpointOverheadBudget.ckpt_total_tb_str` per checkpoint.
-
-The overhead budget turns that footprint into a bandwidth requirement. At a cadence of `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, a write that takes `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` would consume `{python} CheckpointOverheadBudget.ckpt_reference_overhead_pct_str` of training time, not `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`. To keep checkpoint overhead below `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str`, the write must complete in about `{python} CheckpointOverheadBudget.ckpt_allowed_write_s_str`, demanding a sustained aggregate write bandwidth of approximately `{python} CheckpointOverheadBudget.ckpt_required_bw_gb_per_s_str`. A write target of `{python} CheckpointOverheadBudget.ckpt_reference_write_s_str` corresponds to approximately `{python} CheckpointOverheadBudget.ckpt_reference_bw_gb_per_s_str` and only fits a `{python} CheckpointOverheadBudget.ckpt_target_overhead_pct_str` budget when checkpoints are spaced at least `{python} CheckpointOverheadBudget.ckpt_reference_min_cadence_min_str` apart. Standard NFS or object storage implementations collapse under this "thundering herd" pattern, where all GPUs transition from compute to I/O simultaneously. The solution requires a high-performance parallel file system like Lustre or IBM Spectrum Scale (GPFS), architected with hundreds of Object Storage Targets (OSTs) striping data across thousands of NVMe drives. A failure to architect for this burst bandwidth results in "I/O jitter," where training hangs unpredictably for minutes as the checkpoint write saturates the storage backend, effectively burning millions of dollars in idle GPU cycles. If checkpoints are taken every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str` during a training run of `{python} CheckpointOverheadBudget.ckpt_run_days_str`, the system must write:
-
-- **Checkpoints per run**\index{Checkpointing!checkpoints per run}: (`{python} CheckpointOverheadBudget.ckpt_run_days_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_run_hours_per_day_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_per_hour_str`) = `{python} CheckpointOverheadBudget.ckpt_run_count_str` checkpoints
-- **Total checkpoint data**\index{Checkpointing!total checkpoint data}: `{python} CheckpointOverheadBudget.ckpt_run_count_str` $\times$ `{python} CheckpointOverheadBudget.ckpt_total_tb_str` = `{python} CheckpointOverheadBudget.ckpt_run_total_tb_str`
-
-Even retaining only the most recent 10 checkpoints (`{python} CheckpointOverheadBudget.ckpt_recent_retention_tb_str`), the storage system must sustain a continuous write throughput of `{python} CheckpointOverheadBudget.ckpt_total_tb_str` every `{python} CheckpointOverheadBudget.ckpt_cadence_min_str`, or approximately `{python} CheckpointOverheadBudget.ckpt_sustained_bw_gb_per_s_str`. Organizations that undersize their checkpoint storage discover that checkpointing itself becomes a bottleneck, as the GPUs must wait for the previous checkpoint to complete writing before starting the next one. @Sec-data-storage examines the storage architectures that meet these throughput requirements.
-
-The third principle is that homogeneity enables efficiency. Unlike a general-purpose cloud that serves heterogeneous workloads (web servers, databases, batch processing) with heterogeneous hardware, an ML training pod runs a single workload (or a small number of workloads) across all its nodes simultaneously. This homogeneity allows the network topology, cooling system, and power delivery to be co-designed for the specific communication patterns of the target workload.
-
-A pod optimized for Transformer training, where the dominant communication pattern is AllReduce along well-defined parallelism groups, can use a topology with high nearest-neighbor bandwidth (like a torus). A pod optimized for recommendation models, where the dominant pattern is AllToAll for embedding shard exchange, needs high bisection bandwidth (like a fat-tree). A pod designed for mixed workloads (training during the week, inference during peak serving hours) may adopt a fat-tree for flexibility, accepting the higher switch cost in exchange for the ability to serve any communication pattern efficiently.
-
-Both specialized designs outperform a general-purpose topology for their target workload, illustrating the same generality-efficiency trade-off we observed at the accelerator level. The generality tax applies not only to silicon but to every layer of the infrastructure stack: network topologies, cooling systems, and even building designs become more efficient when optimized for a known workload pattern.
-
-This is the generality tax (Principle \ref{pri-generality-tax}): for a fixed workload, hardware efficiency generally increases as programmability narrows. The CPU-to-GPU-to-TPU-to-fixed-function ASIC trajectory is therefore a recurring specialization pattern, not a universal requirement for every workload.
-
-These principles (that the network is the bottleneck, failure is routine, and homogeneity enables efficiency) are not just qualitative observations. They can be quantified by a single metric: scaling efficiency, which determines whether adding more nodes to a pod produces proportional returns or diminishing waste.
-
-#### The homogeneity advantage {#sec-compute-infrastructure-homogeneity-advantage-dc02}
-
-The homogeneity principle deserves deeper examination because it has practical consequences that extend beyond network topology into scheduling, debugging, and fleet economics.
-
-In a homogeneous pod, every node has identical compute, memory, and network capabilities. The job scheduler can assign any subset of $N$ nodes to any training job without worrying about capability mismatches. In a heterogeneous fleet with mixed GPU generations (V100, A100, H100), the scheduler must solve a constrained bin-packing problem: a training job that requires 256 GPUs of the same generation may wait in the queue even when 256 GPUs are available across generations, because mixing generations within a single data-parallel group creates a straggler problem (the oldest GPU determines the step time for the entire group). This fragmentation can reduce effective fleet utilization by 10--20 percent, as capacity that is technically available cannot be allocated to waiting jobs.
-
-Debugging benefits equally from homogeneity. When all nodes are identical, a performance anomaly on one node can be immediately compared against the fleet baseline. If node 347 achieves 85 percent of the throughput that nodes 1--346 and 348--1024 achieve, the anomaly is hardware-related and the node can be quarantined for diagnosis. In a heterogeneous fleet, distinguishing between "this node is slow because it has older hardware" and "this node is slow because it has a failing component" requires much more sophisticated analysis, and subtle degradation can go undetected for days or weeks.
-
-Network topology optimization also benefits from homogeneity. If every node runs the same model with the same parallelism configuration, the traffic matrix is predictable: tensor-parallel AllReduce within nodes, pipeline-parallel point-to-point between specific node groups, and data-parallel AllReduce across the remaining dimension. The topology can be designed to minimize congestion for this specific pattern, using rail-optimized or hierarchical designs that exploit the known communication structure. Heterogeneous workloads produce unpredictable traffic matrices that require general-purpose topologies (fat-trees) with their higher switch cost and lower peak efficiency for any single pattern.
-
-The cost of this homogeneity is inflexibility. A pod designed for Transformer training with 8-way tensor parallelism may be poorly suited for Mixture-of-Experts models that require AllToAll communication, or for recommendation models that need large CPU memory pools for embedding tables. Organizations that run diverse workloads must either accept the generality tax of a flexible topology or maintain multiple specialized pods, each optimized for a different workload class. The choice mirrors the accelerator spectrum: specialization yields efficiency, generality yields flexibility, and the optimal point depends on workload stability.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap12.frontier_params_b_str
-class InfraFrontierStragglerRecap12:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-The software infrastructure of a WSC functions less like a collection of servers and more like a single distributed operating system, with the **job scheduler**\index{Job Scheduler} acting as the kernel. Systems like Slurm or Kubernetes do not merely assign tasks; they orchestrate the rigid resource geometry required for distributed training. The critical constraint is gang scheduling\index{Gang Scheduling}: a training job for our `{python} InfraFrontierStragglerRecap12.frontier_params_b_str` model requiring 1,024 GPUs cannot start if only 1,023 are available. The scheduler must allocate the entire cohort simultaneously, because the synchronous nature of the training algorithm means a single missing node halts the progress of the entire fleet. Beyond binary allocation, the scheduler must enforce **topology awareness**\index{Topology Awareness}, placing the job on a contiguous block of high-speed interconnects to minimize cross-sectional bandwidth bottlenecks. Allocating 1,024 GPUs scattered randomly across the data center introduces hop-count penalties that can reduce effective AllReduce bandwidth by 30--50 percent. In a multi-tenant environment, this creates complex queue management challenges where high-priority jobs may need to preempt lower-priority experiments, triggering automated checkpointing and eviction to free up the required contiguous hardware blocks. @Sec-fleet-orchestration examines the scheduling algorithms and resource management strategies for WSC-scale clusters in detail.
-
-### Fleet monitoring and observability {#sec-compute-fleet-monitoring}
-
-Because failure is routine at pod scale, the monitoring system\index{Monitoring!fleet} is not an operational convenience but a prerequisite for productive training. A 10,000-GPU cluster experiences hardware failures roughly once every five hours, and the difference between a 10-minute recovery and a multi-hour disruption depends on whether the operations team can detect degradation before it becomes failure. Observability\index{Observability} is itself a distributed system, collecting telemetry from every GPU, switch, and cooling component in the fleet.
-
-The telemetry spans three physical levels. At the GPU level, the most diagnostic signals are junction temperature (which reveals cooling degradation), ECC error counts in HBM and SRAM (where a rising rate of correctable errors often precedes a crash-inducing uncorrectable error), and SM utilization (which distinguishes hardware faults from software inefficiencies). At the network level, packet retry rates on individual ports reveal failing cables or switches. At the facility level, coolant temperature deviations trigger automated load shedding before thermal damage occurs. The challenge is not collecting these signals individually but correlating them across spatial and temporal dimensions.
-
-The most operationally valuable monitoring capability is **correlation analysis**\index{Correlation analysis!fleet telemetry} across these telemetry streams. A single GPU showing elevated temperature might indicate a failing fan or a coolant flow restriction. If 8 GPUs in the same node simultaneously show elevated temperatures, however, the cause is more likely a node-level cooling issue. If all GPUs in a rack show elevated temperatures, the cause is probably a rack-level CDU problem. If GPUs across multiple racks show coordinated temperature changes, the cause is likely a facility-level event such as a chiller failure. The monitoring system must detect and classify these patterns at the correct spatial scale to direct operators to the actual root cause, rather than generating hundreds of independent alerts for what is a single underlying problem.
-
-The scale of this telemetry is nontrivial. A 10,000-GPU cluster generates approximately 1 TB of metric data per day -- junction temperatures sampled every second across 10,000 GPUs alone produce 864 million data points daily, before accounting for ECC counters, power readings, NVLink error rates, and network port statistics. Ingesting, indexing, and querying this firehose of time-series data with sub-second latency requires its own dedicated infrastructure. Organizations typically dedicate 1--2 percent of the cluster's total compute and storage capacity to the monitoring stack itself: time-series databases (Prometheus, InfluxDB, or custom solutions), alerting engines, and dashboard systems. This operational overhead is the cost of visibility at scale; without it, the fleet is flying blind.
-
-Before a training job is allocated to a set of nodes, the scheduler employs **automated preflight checks**\index{Automated Pre-Flight Checks} to verify hardware health. The control plane runs a battery of short, intensive diagnostics: GEMM benchmarks to verify Tensor Core throughput, NCCL AllReduce tests to validate NVLink and InfiniBand bandwidth, and memory stress tests to catch weak HBM bit cells that might produce uncorrectable errors under sustained load. A node that underperforms on any diagnostic is automatically quarantined for repair, and a healthy replacement is substituted before the job launches. This validation process adds 5--10 minutes to job startup time, a negligible cost compared to the hours of wasted computation when a training run crashes mid-flight due to a degraded GPU that passed a simple power-on self-test but fails under sustained arithmetic load.
-
-::: {.column-margin}
-![](images/svg/vol2_compute_infrastructure_margin_004.svg){width="100%" fig-alt="One slow GPU at an all-reduce barrier delays peers."}
-
-*One slow accelerator stalls every peer at the barrier.*
-:::
-
-The most insidious adversary in a large fleet is not the hard failure but the **gray failure**\index{Gray Failure} -- a component that continues to function but at degraded performance. A single GPU with a partially failed HBM stack might operate at only 75 percent of its peak bandwidth. An NVLink with marginal signal integrity might force frequent link retraining, causing microsecond stalls that accumulate into seconds of lost time per training step. In a synchronous data-parallel workload, a single straggler slows the entire cluster, because every other GPU must wait for the slowest participant to complete its AllReduce contribution. These gray failures are invisible to simple "up/down" health checks and require continuous, fine-grained performance benchmarking to detect. The most effective approach is to run periodic micro-benchmarks on idle nodes (or during scheduled maintenance windows) and compare each node's performance against the fleet baseline. A node whose GEMM throughput drops below 90 percent of the fleet median, or whose NVLink bandwidth drops below 85 percent, is flagged for investigation even though it has not experienced any hard error.
-
-::: {#psp-compute-infrastructure-proactive-vs-reactive-maintenance .callout-perspective title="Proactive vs. reactive maintenance"}
-
-Fleet operators have learned, often through costly experience, that proactive maintenance can reduce the impact of hardware failures on training productivity. The three pillars of proactive maintenance are: **predictive diagnostics**\index{Predictive Diagnostics} (using models trained on historical telemetry to predict component failures before they occur), **scheduled burn-in testing**\index{Scheduled Burn-In Testing} (running benchmark workloads on newly installed nodes before assigning production work), and **rolling maintenance windows**\index{Rolling Maintenance Window} (cycling a small fraction of nodes through health checks without reducing available capacity). The systems point is not a universal utilization number; it is that proactive maintenance converts surprise outages into scheduled capacity management.
-
-:::
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap15.frontier_params_b_str
-class InfraFrontierStragglerRecap15:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-In multi-tenant clusters where multiple training jobs share the same physical infrastructure, the **noisy neighbor**\index{Noisy neighbor!fleet interference} problem introduces a performance hazard that is invisible to individual job metrics. While containerization strictly limits CPU and memory usage, the network fabric is often a shared resource susceptible to interference. If Job A initiates a massive AllReduce operation across the spine switches just as Job B attempts to fetch training data from networked storage, the resulting micro-bursts of packet contention can throttle Job B's throughput by 30--40 percent. This interference is particularly pernicious in RDMA-enabled clusters where traffic bypasses the host CPU, rendering standard OS-level packet scheduling ineffective. Cluster orchestration can mitigate this via **static rail alignment**\index{Static Rail Alignment} -- physically dedicating specific InfiniBand subnets to specific jobs -- or by deploying congestion notification protocols that throttle aggressive flows at the switch hardware level. For organizations running our `{python} InfraFrontierStragglerRecap15.frontier_params_b_str` model training alongside smaller research experiments, the safest approach is to physically partition the cluster into isolated "islands" with dedicated network fabrics, accepting the utilization penalty of fragmentation in exchange for performance predictability.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_int, fmt_time
-from mlsysim.physics import calc_mtbf_cluster, calc_young_daly_interval
-
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: CheckpointComputeTradeoff.frontier_params_b_str,
-# │          CheckpointComputeTradeoff.training_state_tb_str,
-# │          CheckpointComputeTradeoff.write_bw_gb_per_s_str,
-# │          CheckpointComputeTradeoff.t_write_s_str,
-# │          CheckpointComputeTradeoff.num_gpus_str,
-# │          CheckpointComputeTradeoff.mtbf_system_s_str,
-# │          CheckpointComputeTradeoff.tau_opt_s_str,
-# │          CheckpointComputeTradeoff.tau_opt_min_str,
-# │          CheckpointComputeTradeoff.overhead_pct_str
-class CheckpointComputeTradeoff:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    model = Models.Language.GPT3
-    params = model.parameters
-    write_bw = 100 * (GB / second)
-    num_gpus = Systems.Clusters.Training_10K.total_accelerators
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights = model.size_in_bytes(BYTES_FP16)
-    gradients = weights
-    optimizer = params * BYTES_FP32 * 2
-    training_state = weights + gradients + optimizer
-    t_write = (training_state / write_bw).to(second)
-    t_write_value = t_write.to(second).magnitude
-    mtbf_system_hr = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, num_gpus)
-    mtbf_system_s = mtbf_system_hr.to(second)
-    tau_opt_s = calc_young_daly_interval(t_write, mtbf_system_s)
-    overhead_pct = (t_write / tau_opt_s).to("").magnitude * 100
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(t_write_value - 21) < 1, "Checkpoint write time should be about 21 s")
-    check(800 < tau_opt_s.to(second).magnitude < 900, "Optimal checkpoint interval should be about 14 min")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
-    training_state_tb_str = fmt_qty_int(training_state, TB, commas=False)
-    write_bw_gb_per_s_str = fmt_bandwidth(write_bw, unit=GB / second, precision=0, commas=False)
-    t_write_s_str = fmt_time(t_write, second, precision=0, commas=False, style='word')
-    num_gpus_str = fmt(num_gpus, precision=0, commas=True)
-    mtbf_system_s_str = fmt_time(mtbf_system_s, unit=second, precision=0, commas=True)
-    mtbf_system_hr_str = fmt_time(mtbf_system_hr, 'hour', precision=0, commas=False, style='word')
-    tau_opt_s_str = fmt_time(round(tau_opt_s), second, precision=0, commas=False)
-    tau_opt_min_str = fmt_time(round(tau_opt_s.to(minute)), 'minute', precision=0, commas=False, style='word')
-    overhead_pct_str = fmt_percent(overhead_pct / 100, precision=1, commas=False, style='prose')
-```
-
-The reliability challenge is formalized by the **checkpoint-compute trade-off**\index{Checkpoint-Compute Trade-Off}, which balances the time lost to saving state against the time lost to recomputing work after a failure. The **Young/Daly formula** defines the optimal checkpoint interval $\tau_{\text{opt}}$ as $\sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$, where $T_{\text{write}}$ is the time to write a checkpoint and $\text{MTBF}_{\text{system}}$ is the system-wide Mean Time Between Failures. For our `{python} CheckpointComputeTradeoff.frontier_params_b_str` model, the full training state -- weights, optimizer moments, and gradients -- approaches `{python} CheckpointComputeTradeoff.training_state_tb_str`. Even with a high-performance parallel filesystem capable of `{python} CheckpointComputeTradeoff.write_bw_gb_per_s_str` write throughput, committing this state to persistent storage takes approximately $T_{\text{write}} \approx$ `{python} CheckpointComputeTradeoff.t_write_s_str`. In a cluster of `{python} CheckpointComputeTradeoff.num_gpus_str` GPUs, $\text{MTBF}_{\text{system}} \approx$ `{python} CheckpointComputeTradeoff.mtbf_system_s_str` (`{python} CheckpointComputeTradeoff.mtbf_system_hr_str`), the formula yields $\tau_{\text{opt}} \approx$ `{python} CheckpointComputeTradeoff.tau_opt_s_str`, an optimal checkpoint interval of roughly `{python} CheckpointComputeTradeoff.tau_opt_min_str`. This creates a steady cadence: every `{python} CheckpointComputeTradeoff.tau_opt_min_str`, the entire cluster pauses for `{python} CheckpointComputeTradeoff.t_write_s_str` to serialize its state to disk, introducing a sustained training overhead of approximately `{python} CheckpointComputeTradeoff.overhead_pct_str`. If the interval is too long, the cost of recomputing lost work after a failure exceeds the savings from fewer checkpoints; if too short, the I/O overhead dominates the training budget. @Sec-fault-tolerance-young-daly examines checkpointing strategies, including asynchronous checkpointing and incremental state saving, that reduce this overhead.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap17.frontier_params_b_str
-class InfraFrontierStragglerRecap17:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-### Fleet architecture case studies {#sec-compute-fleet-case-studies}
-
-Pod case studies are useful only when they reveal the workload decision behind the topology. The differences are not arbitrary: each reflects the organization's dominant workload, hardware supply chain, and willingness to trade flexibility for efficiency. The engineering comparison is therefore the match between workload, fabric, and operational constraint.
-
-The choice of network topology is a direct reflection of the dominant communication patterns in the distributed training workload. A fat-tree topology offers full bisection bandwidth and non-blocking any-to-any communication, making it theoretically ideal for algorithms like AllReduce and AllToAll. However, the cost of the upper-tier spine switches makes it expensive at scale. A torus or mesh topology provides excellent nearest-neighbor bandwidth at a fraction of the switch cost but suffers severe congestion penalties for global traffic patterns. A rail-optimized topology\index{Topology!rail-optimized} physically wires the network so that each GPU rank connects to a dedicated leaf switch, maximizing the efficiency of structured AllReduce within parallelism groups. For our `{python} InfraFrontierStragglerRecap17.frontier_params_b_str` model configured with TP-8, PP-4, and DP-32, the rail-optimized topology is the natural match: TP-8 means 8-way tensor parallelism inside a node, PP-4 means four pipeline stages, and DP-32 means 32 data-parallel replicas. The bandwidth-heavy tensor parallelism traffic is entirely contained within the NVLink domain of a single node, the pipeline parallelism traffic flows between adjacent nodes requiring only moderate point-to-point bandwidth, and the data-parallel gradient reduction happens across the full fleet but with reduced volume because the TP-8 $\times$ PP-4 partition leaves each data-parallel group synchronizing a 1/32 model shard. The rail-optimized design physically matches this communication structure, placing the nodes that communicate most frequently on the same switch.
-
-#### NVIDIA DGX SuperPOD {#sec-compute-infrastructure-nvidia-dgx-superpod-b9e2}
-
-The DGX SuperPOD\index{SuperPOD} is designed for organizations that run diverse workloads: large language models one week, vision models the next, and scientific simulations on weekends. Its network uses a **fat-tree**\index{Fat-Tree!DGX SuperPOD} topology[^fn-fat-tree-topology] built from InfiniBand NDR switches, providing high-bandwidth, any-to-any connectivity with low hop counts. In a fat-tree, the aggregate bandwidth at each level of the tree matches the bandwidth of the level below, so no bottleneck exists regardless of which pairs of nodes are communicating. A typical SuperPOD configuration connects 32 DGX H100 nodes (256 GPUs) through a two-tier InfiniBand fabric, with larger installations using a three-tier fat-tree to scale to thousands of GPUs.
-
-[^fn-fat-tree-topology]: **Fat-Tree**\index{Fat-Tree!topology}: Proposed by @leiserson1985 at MIT, named because links grow "fatter" (higher bandwidth) at each level of the tree hierarchy, preventing upper-tier congestion. A non-blocking fat-tree gives every node full bisection bandwidth for arbitrary traffic patterns, which makes it common in ML clusters running diverse AllReduce and AllToAll workloads. The cost constraint is switch count: $\mathcal{O}(N^{3/2})$ switches for $N$ endpoints in a three-tier design, making the network fabric 10--15 percent of total cluster cost at scale.
-
-The fat-tree's strength is its flexibility. Whether the training framework uses ring-AllReduce, tree-AllReduce, or AllToAll communication patterns, the fat-tree's any-to-any connectivity provides near-optimal bandwidth for all of them. This makes it the natural choice for research environments where the communication pattern changes with each experiment.
-
-The fat-tree also simplifies job scheduling significantly. Because any subset of nodes can communicate efficiently with any other subset, the scheduler can place jobs on whatever nodes are available without worrying about locality constraints. This scheduling flexibility improves cluster utilization because jobs do not need to wait for a specific set of contiguous nodes to become available. In a torus topology, by contrast, a training job that requires 64 nodes works most efficiently when those nodes form a compact sub-torus within the larger topology, which constrains the scheduler and can leave nodes idle even when the cluster has sufficient total capacity.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierPodSuperRecap.frontier_params_b_str
-class InfraFrontierPodSuperRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-For our `{python} InfraFrontierPodSuperRecap.frontier_params_b_str` model, a SuperPOD configuration of 128 DGX H100 nodes (1,024 GPUs) connected via a two-tier InfiniBand fat-tree provides the baseline training platform. The fat-tree's full bisection bandwidth ensures that the data-parallel AllReduce of 350 GB of gradients across 128 nodes proceeds at the full InfiniBand line rate, regardless of which specific nodes are assigned to the job. This topology flexibility is particularly valuable when nodes are periodically quarantined for maintenance: the scheduler simply substitutes healthy nodes from elsewhere in the fabric without any performance penalty, maintaining training continuity.
-
-The trade-off is cost and complexity. A fat-tree requires a large number of expensive InfiniBand switches (each costing \$15,000--30,000), and the switch count grows super-linearly with the number of endpoints. For a 1,024-GPU cluster, the switch fabric alone can cost \$10--20 million, representing 10--15 percent of total system cost. Cable management also becomes formidable: a three-tier fat-tree for 1,024 GPUs requires thousands of individual cables, each of which must be precisely routed, labeled, and tested. @Sec-network-fabrics examines the fat-tree topology and its alternatives in full quantitative detail.
-
-#### Google TPU pod {#sec-compute-infrastructure-google-tpu-pod-6d20}
-
-Google's TPU pods take a fundamentally different approach to scaling. Instead of connecting chips through external switches, each TPU chip has direct **Inter-Chip Interconnect (ICI)**\index{Inter-Chip Interconnect} links built into the silicon, connecting it to its neighbors in a 3D torus[^fn-torus-topology] topology. This eliminates the switch as a separate component, reducing cost and latency at the expense of the universal any-to-any connectivity that NVSwitch provides.
-
-[^fn-torus-topology]: **3D Torus**\index{Torus!3D torus}\index{Torus!topology}: From Latin *torus* (cushion, ring-shaped surface) -- a topology where nodes form a three-dimensional grid with wraparound edges. The torus eliminates switches entirely (each chip connects directly to its six neighbors), which is why Google chose it for TPU pods: at 8,960-chip scale, the switch savings over a fat-tree are substantial. The trade-off is that global communication patterns like AllToAll must traverse $\mathcal{O}(\sqrt[3]{N})$ hops, degrading latency for nonlocal traffic.
-
-The architectural bet is clear: Google optimizes for the predictable, nearest-neighbor communication patterns that dominate Transformer training, accepting reduced flexibility for irregular patterns like AllToAll (used by Mixture-of-Experts models). This trade-off between topology specialization and workload generality mirrors the accelerator spectrum's trade-off between efficiency and flexibility, applied at the network level rather than the silicon level.
-
-A TPU v5p pod can scale to 8,960 chips in a single torus, providing an aggregate of approximately 4.1 ExaFLOP/s of BF16 throughput (8,960 chips $\times$ ~459 TFLOP/s each). The torus topology's key advantage is constant local degree: adding more chips extends the mesh without requiring each chip to add more links or requiring expensive upper-tier switches. This property makes the torus economically attractive at scales beyond 4,000 chips, where the switch cost of a fat-tree becomes a significant fraction of total system cost. The trade-off is that aggregate bisection bandwidth grows sublinearly with pod size, and nonlocal communication patterns must traverse many hops across the torus. Google's XLA compiler therefore includes topology-aware placement algorithms that map the model's communication graph onto the physical torus to minimize hop count for the most bandwidth-intensive operations.
+The third consequence is that the building blocks combine differently depending on the workload they must carry. A pod is not assembled from a single canonical part list; the interconnect, the switching, and the memory placement are each chosen against the communication and capacity pattern the dominant workload imposes. @Tbl-pod-comparison contrasts three production pods to make the point: an NVIDIA SuperPOD wires GPUs through an InfiniBand fat-tree for any-to-any flexibility, a Google TPU pod hard-wires chips into a torus for dataflow throughput, and Meta's Grand Teton arranges the same class of accelerators around embedding memory rather than raw compute.
 
 | **System**            | **NVIDIA SuperPOD** |   **Google TPU Pod**  |    **Meta Grand Teton**   |
 |:----------------------|:-------------------:|:---------------------:|:-------------------------:|
@@ -4032,202 +3605,13 @@ A TPU v5p pod can scale to 8,960 chips in a single torus, providing an aggregate
 | **Optimization**      |     Flexibility     |  Dataflow Throughput  |      Embedding Memory     |
 | **Dominant Workload** |   Diverse Research  |      LLM Training     |       Recommendation      |
 
-: **WSC Architecture Comparison**: The choice of pod architecture is not a matter of preference but of workload economics. NVIDIA prioritizes generality because its customers run diverse workloads. Google TPU pods prioritize dataflow throughput for regular dense models. Meta's Grand Teton design prioritizes embedding capacity for recommendation and ranking workloads. {#tbl-pod-comparison}
+: **Pod Architecture by Workload**: Each pod's interconnect, switching, and memory emphasis reflects the communication and capacity pattern of its dominant workload, not a single best design. The economics that decide which workload an organization optimizes for are taken up in @sec-ops-scale-fleet-economics. {#tbl-pod-comparison}
 
-#### Meta Grand Teton {#sec-compute-infrastructure-meta-grand-teton-4d4d}
+Grand Teton\index{Grand Teton} is the clearest case of memory placement, not compute, driving the layout. Meta's recommendation and ranking models use embedding tables that can reach terabytes, far exceeding the HBM capacity of any single accelerator, while the dense neural-network layers that operate on those embeddings are comparatively small. The design splits the two across the memory hierarchy: the terabyte-scale embedding tables reside in host CPU DRAM (roughly \$3--5/GB), and the dense layers execute on GPUs, where the compute density justifies the \$10--15/GB cost of HBM. The embedding lookups are memory-capacity-bound but not bandwidth-bound: each request touches only a small slice of a vast table, so cheap, high-capacity DRAM is the right home for them, and the expensive accelerator memory is reserved for the work that saturates it. The durable lesson is that optimal infrastructure is workload-specific, not specification-maximizing: deploying compute-optimized nodes for a memory-capacity-bound workload would strand most of the accelerator's throughput on a problem its silicon was never the bottleneck for.
 
-As @tbl-pod-comparison illustrates, Meta's production ML workload differs structurally from language model training. Their recommendation and ranking models use embedding tables that can reach terabytes in size, far exceeding the HBM capacity of any GPU. The dense neural network layers that operate on the embeddings are relatively small and compute-intensive.
+How the fleet then *operates* within those physical limits, how it detects degradation, sizes its checkpoint cadence against the failure rate, schedules jobs across the fabric, and how it is sited, priced, and procured, is taken up where the fleet is operated and paid for: @sec-ops-scale-fleet-economics for siting, build-vs-buy, and capacity planning, @sec-ml-operations-scale-monitoring-scale-73c5 for fleet telemetry and gray-failure detection, @sec-fleet-orchestration for gang scheduling and topology-aware placement, and @sec-fault-tolerance-young-daly for the checkpoint-interval trade-off. The physical building blocks are now in place; the operating discipline builds on top of them.
 
-Meta addresses this with a hybrid CPU-GPU architecture called **Grand Teton**\index{Grand Teton}. Terabyte-scale embedding tables reside in host CPU DRAM, which costs \$3--5/GB, while the dense layers execute on GPUs where the compute density justifies the \$10--15/GB cost of HBM.
-
-The embedding lookups are essentially random memory accesses: each user request retrieves a different set of embeddings based on the user's features and the items being ranked. These accesses are memory-capacity-bound (the table must be large enough to hold all embeddings) but not bandwidth-bound (each lookup retrieves only a small number of embeddings, perhaps 100--1,000 entries from a table of billions). CPU DRAM, despite its lower per-socket bandwidth, is adequate for this pattern because the data volume per lookup is small.
-
-The hybrid approach can achieve substantially better cost efficiency than a GPU-only design when embedding capacity dominates. In a GPU-only design, the embedding table would consume most of the HBM capacity, leaving little room for the activations and gradients of the dense layers. The expensive Tensor Cores would sit idle during the memory-bound embedding lookup phase, which can represent a large fraction of inference time for recommendation models.
-
-By offloading the embedding table to cheap DDR, the GPUs are freed to spend 100 percent of their time on compute-intensive dense layer operations, where their Tensor Cores achieve high utilization. The design is another manifestation of the Roofline Model's insight: rather than forcing a memory-capacity-bound workload onto a compute-optimized processor, the system assigns each workload component to the hardware whose strengths match its demands.
-
-Meta's network architecture for these systems uses RoCE (RDMA over Converged Ethernet) rather than InfiniBand, reflecting a preference for supply chain diversity and cost over raw per-port performance. This can be acceptable when recommendation workloads involve less inter-node synchronization than dense LLM training. The choice also reflects Meta's scale: operating large fleets across multiple data centers, Meta benefits from the commodity economics and multi-vendor supply chain of Ethernet switches compared to InfiniBand's more concentrated ecosystem. @Sec-network-fabrics examines the RoCE vs. InfiniBand trade-off in detail, including the protocol-level differences that affect latency and congestion behavior.
-
-The Grand Teton architecture illustrates a broader principle: the optimal infrastructure is workload-specific, not hardware-specification-maximizing. An organization that deploys DGX H100 nodes (optimized for dense Transformer training) for recommendation model serving would waste the majority of the GPU's Tensor Core throughput on a workload that is fundamentally memory-capacity-bound. Meta's willingness to design custom server platforms -- rather than purchasing off-the-shelf DGX nodes -- reflects the economic reality that at sufficient scale, the engineering cost of a custom design is amortized across enough units to justify the investment.
-
-#### Tesla dojo {#sec-compute-infrastructure-tesla-dojo-0e0d}
-
-Tesla's Dojo represents the extreme end of the custom silicon approach at the pod level. Designed specifically for processing the millions of video clips collected daily from Tesla's vehicle fleet, Dojo uses a custom D1 chip with hundreds of processing nodes optimized for the spatial and temporal structure of video-based vision models.
-
-The D1 chip's architecture is radically different from both GPUs and TPUs. Instead of a small number of large matrix multiply units, each D1 processing node contains a compact compute engine suited to the fused operations common in video processing. The nodes communicate through a mesh interconnect, enabling efficient spatial partitioning where each node processes a region of the video frame and exchanges boundary data with its neighbors.
-
-Twenty-five D1 chips are assembled into a "training tile," with the chips arranged in a $5{\times}5$ grid and connected via inter-chip links that extend the 2D mesh seamlessly across chip boundaries. Multiple tiles aggregate into an ExaPOD, creating a system with many processing nodes operating as a single large mesh. The architecture is optimized for the specific communication pattern of spatially-partitioned video processing, where data locality is high and most communication occurs between neighboring tiles.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap18.frontier_params_b_str
-class InfraFrontierStragglerRecap18:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-Dojo's efficiency for its target workload is exceptional, but the system cannot run Transformer-based language models efficiently because the 2D mesh topology and small local memory per processing node are poorly matched to the all-to-all communication and large weight matrices characteristic of Transformer training. Training our `{python} InfraFrontierStragglerRecap18.frontier_params_b_str` model on Dojo would be impractical: the 350 GB weight tensor would need to be distributed across many tiles, and the all-to-all communication required for tensor parallelism would traverse many hops in the 2D mesh, creating latencies that would dominate the training step. This makes Dojo a high-stakes bet on the continued centrality of vision models to Tesla's autonomous driving stack, and it illustrates the extreme end of the generality-efficiency trade-off at the system level. If Tesla's workload mix shifted toward large language models, the Dojo architecture would need fundamental redesign -- a risk that custom silicon always carries.
-
-### Site, schedule, and ownership economics {#sec-compute-infrastructure-site-schedule-ownership-economics-9ad3}
-
-The case studies show that topology follows workload, but the infrastructure decision does not end at topology. A deployable fleet also has to price the fabric, choose a site, synchronize construction with hardware delivery, and decide whether ownership beats rental over the hardware lifecycle.
-
-The choice between fat-tree, torus, and rail-optimized topologies has quantitative implications for training throughput that can alter AllReduce time by 2--3$\times$ for the same cluster size. The key insight for infrastructure planning is that topology choice is not separable from workload selection: Transformer training with its regular AllReduce patterns favors different topologies than Mixture-of-Experts models with their AllToAll communication. The network fabric cost (10--15 percent of total system cost) is easily justified if it improves scaling efficiency by even a few percentage points, because poor scaling wastes the other 85--90 percent of the investment.
-
-```{python}
-#| echo: false
-#| label: fabric-sizing-scenario
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FAT-TREE FABRIC SIZING (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-compute-infrastructure-site-selection-physical-constraints-fba0
-# │ Goal: Size a dual-link two-tier Clos fabric for the 1,024-GPU example.
-# │ How: endpoint_links = GPUs * links_per_gpu; leaves use 32 downlinks and
-# │      32 uplinks on 64-port switches; one uplink per spine.
-# │ Exports: FabricSizingScenario.*_str
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Systems
-from mlsysim.fmt import fmt, check, fmt_count
-
-class FabricSizingScenario:
-    """Two-tier InfiniBand fabric sizing for the 1,024-GPU planning example."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    fleet = Systems.Clusters.Training_1K
-    gpus = fleet.total_accelerators
-    nodes = fleet.count
-    switch_ports = int(Systems.SwitchFabric.NdrSwitchPorts)
-    downlink_ports_per_leaf = int(Systems.SwitchFabric.NdrLeafDownlinkPorts)
-    uplink_ports_per_leaf = int(Systems.SwitchFabric.NdrLeafUplinkPorts)
-    endpoint_links_per_gpu = 2
-    spine_switches = uplink_ports_per_leaf
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    endpoint_links = gpus * endpoint_links_per_gpu
-    leaf_switches = math.ceil(endpoint_links / downlink_ports_per_leaf)
-    leaf_spine_links = leaf_switches * uplink_ports_per_leaf
-    fabric_links = endpoint_links + leaf_spine_links
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(leaf_switches == 64, "Dual-link 1,024-GPU fabric should require 64 leaf switches")
-    check(spine_switches == uplink_ports_per_leaf, "One uplink per spine switch in this Clos model")
-    check(fabric_links == 4096, "Fabric link count should be 4,096")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    gpus_str = fmt_count(gpus, label="GPU")
-    nodes_str = fmt_count(nodes, commas=False, label="node")
-    switch_ports_str = fmt(switch_ports, precision=0, commas=False)
-    leaf_switches_str = fmt(leaf_switches, precision=0, commas=False)
-    spine_switches_str = fmt(spine_switches, precision=0, commas=False)
-    fabric_links_str = fmt(fabric_links, precision=0)
-```
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: InfraFrontierStragglerRecap19.frontier_params_b_str
-class InfraFrontierStragglerRecap19:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-The cost structure of the network fabric itself warrants quantitative examination. An InfiniBand NDR switch with `{python} FabricSizingScenario.switch_ports_str` ports of 400 Gb/s costs \$15,000--30,000, with specialized active optical cables adding \$500--1,000 per link. Under a dual-link endpoint model for `{python} FabricSizingScenario.gpus_str` (`{python} FabricSizingScenario.nodes_str`), a two-tier fat-tree requires approximately `{python} FabricSizingScenario.leaf_switches_str` leaf switches and `{python} FabricSizingScenario.spine_switches_str` spine switches, plus `{python} FabricSizingScenario.fabric_links_str` fabric links, bringing the total fabric cost to \$5--15 million depending on the oversubscription ratio and optical mix. Ethernet\index{Ethernet}-based alternatives using RoCE (RDMA over Converged Ethernet) can reduce per-port cost, but introduce a latency and reliability penalty. Ethernet is inherently lossy: when switch buffers overflow under the bursty, synchronized traffic patterns of distributed training, packets are dropped and must be retransmitted. For our `{python} InfraFrontierStragglerRecap19.frontier_params_b_str` model training on `{python} FabricSizingScenario.gpus_str`, even a 1 percent packet retransmission rate on a RoCE fabric can degrade effective AllReduce throughput by 10--20 percent, because thousands of GPUs wait for the slowest participant. The cost-performance analysis asks whether Ethernet savings justify the potential throughput loss. For latency-sensitive large-model training where time-to-result is paramount and the GPU fleet represents a \$35+ million investment, the InfiniBand premium can pay for itself by making the network less likely to become the bottleneck.
-
-#### Site selection and physical constraints {#sec-compute-infrastructure-site-selection-physical-constraints-fba0}
-
-Site selection fixes several infrastructure constraints before any accelerator is purchased or any rack is populated. The location of a pod determines which power, cooling, and network trade-offs the rest of the design must absorb.
-
-Power availability is the first and often most binding constraint. A 10,000-GPU pod requires 10--15 MW of continuous power, equivalent to a medium-sized factory. Locations near hydroelectric dams (Pacific Northwest, Scandinavia, Quebec) offer abundant power at low carbon intensity, but these power-rich sites are often remote from talent pools and existing fiber optic infrastructure. The trade-off between cheap power and proximity to engineers is one of the most consequential site-selection decisions, and at megawatt scale the difference between a favorable and unfavorable electricity rate can represent tens of millions of dollars over a hardware lifecycle.
-
-The cooling environment is the second constraint. Sites in temperate or cold climates can achieve lower PUE through **free cooling**\index{Free cooling!site selection} (using outside air directly, without mechanical refrigeration) for much of the year. Meta's data center in Lulea, Sweden, where the average annual temperature is 1 degree Celsius, achieves PUE values approaching 1.03 through year-round free cooling. Sites in hot, arid regions face both higher cooling costs and potential water scarcity for evaporative cooling towers.
-
-Network connectivity is the third constraint. Training clusters that ingest data from geographically distributed sources need substantial WAN bandwidth, while serving clusters need proximity to major internet exchange points to minimize end-user latency. Some organizations separate training and serving infrastructure entirely, placing training pods in power-rich remote locations and serving pods near population centers, connected by dedicated fiber links for model checkpoint transfer.
-
-These three constraints are frequently in tension, and no single site optimizes all of them simultaneously. Organizations that anticipate building multiple facilities often diversify geographically, placing training-heavy workloads in power-rich regions and latency-sensitive serving workloads near users. The right trade-off depends on the organization's workload portfolio, financial structure, and time horizon.
-
-Regulatory and geopolitical boundaries can dictate site selection as rigidly as physics. Export controls on high-performance compute act as a hard filter: a cluster designed for 175B-parameter model training may require accelerator classes that are legally restricted from export to certain nations, rendering otherwise power-rich geographies viable only for less restricted workloads or older hardware. Data sovereignty laws like the European Union's General Data Protection Regulation (GDPR) or local residency mandates create a parallel fragmentation, compelling organizations to keep training data, model weights, or serving traffic within specific legal jurisdictions. This regulatory layer can force a suboptimal thermodynamic choice, requiring facilities in expensive, power-constrained regions to satisfy compliance rather than efficiency.
-
-The resulting **power alley**\index{Power alley!site selection} phenomenon concentrates large capacity in a few specific zones: Northern Virginia (Ashburn) for connectivity, the Pacific Northwest for cheap hydroelectric power, and the Nordic countries for free cooling and renewable energy. This geographic clustering creates its own constraint: local grids in these hubs can face multi-year waits for new substation capacity, and land prices can rise dramatically. As prime zones saturate, operators explore unconventional "brownfield" sites -- retired aluminum smelters, defunct coal plants, and industrial parks with existing high-voltage transmission -- where power capacity exists but fiber and cooling infrastructure must be built from scratch.
-
-Water scarcity is the final volatile constraint. A 10 MW training facility using standard evaporative cooling towers can consume well over 100 million liters of water annually, depending on climate and cooling design. In water-stressed regions like the American Southwest or parts of the Middle East, this consumption can place data centers in direct competition with municipal and agricultural needs, leading to permitting limits or moratoriums. Operators may adopt closed-loop liquid cooling or fully adiabatic dry cooler systems, which reduce water consumption to near zero but increase capital intensity and may impose a PUE penalty compared to evaporative systems in hot climates.
-
-#### Construction and deployment timelines {#sec-compute-infrastructure-construction-deployment-timelines-83d0}
-
-The timeline from decision to first computation is a critical planning constraint that many organizations underestimate. Building a new data center facility from scratch takes 18--30 months, with the longest-lead items being the electrical substation (18--24 months) and the building shell (12--18 months). GPU lead times during periods of high demand can reach 6--12 months and run concurrently with facility construction. The coordination challenge is ensuring that hardware arrives when the facility is ready to receive it, neither too early (requiring expensive temporary storage) nor too late (leaving a completed facility idle).
-
-The practical consequence is that infrastructure decisions must be made 18--30 months before the infrastructure is needed. Given that GPU architecture generations can span roughly two years, the infrastructure team is often selecting a facility design for hardware that does not yet exist, based on preliminary specifications from the manufacturer. To mitigate this temporal mismatch, experienced infrastructure teams design facilities with **headroom**\index{Headroom!facility design} for later generations: oversizing the electrical infrastructure by 30--50 percent, designing the cooling plant for higher heat densities than the initial deployment requires, and specifying flexible rack layouts. The additional upfront cost of this headroom (typically 10--20 percent of facility CapEx) is justified by the ability to upgrade compute hardware without reconstructing the facility.
-
-The construction timeline is governed by a **critical path**\index{Critical Path} that aligns two disparate workstreams: the facility track (site selection, power provisioning, building shell, cooling) and the hardware track (silicon allocation, server assembly, network integration). While GPU procurement often captures headlines, the true bottleneck can be the electrical substation, which may require 18--24 months for permitting and transformer delivery -- a timeline that cannot always be compressed by spending more. This creates a high-stakes synchronization problem. An organization that secures a 20,000-GPU allocation (\$500M+) before its facility is ready risks depreciating allocated silicon in a warehouse for months. Conversely, completing a \$200M data center shell only to wait 6--12 months for an accelerator allocation leaves massive capital assets idle.
-
-To mitigate these synchronization risks, experienced infrastructure teams use **phased deployment**\index{Phased deployment!data centers}. Rather than targeting a single "go-live" date for the entire cluster, the facility is commissioned in waves -- often bringing up an initial 10--20 percent of capacity (2,000 GPUs out of 10,000) while the remaining construction continues. This early phase serves a dual purpose: it allows the software team to begin validating the distributed training stack and tuning collective communication kernels on the specific hardware topology, while simultaneously stress-testing the physical infrastructure. Issues like cooling hotspots, phase imbalances in power distribution, or cabling defects are identified and remediated at small scale, preventing catastrophic failures when the full load is applied.
-
-These logistical contortions are driven by the **time value of compute**\index{Time value of compute}. For large-model development, the cost of delay can exceed the interest on capital because delayed compute postpones experiments, product launches, or downstream capabilities. If a model is projected to generate \$10 million per month in value -- whether through direct inference revenue or downstream product capabilities -- a three-month construction delay represents a \$30 million loss, often exceeding the cost of the facility's electrical infrastructure entirely. This calculus can justify aggressive expediting measures, such as paying premiums for prefabricated modular data centers or leasing temporary colocation space to bridge the gap between silicon delivery and facility readiness.
-
-#### Build-vs-buy total cost of ownership (TCO) threshold {#sec-compute-infrastructure-build-vs-buy-tco}
-
-The same timing problem shapes the build-vs-buy decision. Cloud rental converts scarce accelerators into an operating expense and is attractive when demand is bursty, uncertain, or urgent. Owning a cluster converts the same capacity into capital expense and only wins when utilization is high enough to amortize the node, power, cooling, networking, staffing, and facility risk over the hardware lifecycle.
-
-```{python}
-#| echo: false
-#| label: compute-infrastructure-build-buy-tco
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ BUILD-VS-BUY TCO THRESHOLD (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-compute-infrastructure-build-vs-buy-tco and chapter summary.
-# │ Goal: Estimate the utilization threshold where owning a DGX H100 node beats
-# │       renting equivalent cloud H100 hours under a simplified model.
-# │ Scope: chapter-anchor — TCO section and chapter summary share breakeven inputs.
-# │ How: annualized node CapEx / (cloud annual cost at 100% utilization -
-# │      on-prem electricity cost at 100% utilization).
-# │ Exports: BuildBuyTcoThreshold.node_gpus_str,
-# │          BuildBuyTcoThreshold.node_price_usd_str,
-# │          BuildBuyTcoThreshold.amortization_years_str,
-# │          BuildBuyTcoThreshold.cloud_h100_hourly_usd_str,
-# │          BuildBuyTcoThreshold.electricity_rate_usd_str,
-# │          BuildBuyTcoThreshold.breakeven_util_pct_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Infrastructure, Systems
-from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_usd
-
-class BuildBuyTcoThreshold:
-    """Simplified per-node build-vs-buy utilization threshold."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    rack = Systems.Racks.DGX_H100_4Node
-    cloud_h100_hourly = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    dgx_h100_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
-    amortization_years = 3  # scenario assumption: simplified node amortization window
-    facility_pue = Infrastructure.FacilityCooling.StateOfArt.pue
-    onprem_elec = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude
-    node_power = rack.total_power / rack.nodes_per_rack
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    annual_cloud_cost = cloud_h100_hourly * gpus_per_node * HOURS_PER_YEAR
-    annual_power_cost = node_power.to(kW).magnitude * HOURS_PER_YEAR * onprem_elec * facility_pue
-    annual_capex = dgx_h100_price / amortization_years
-    breakeven_util = annual_capex / (annual_cloud_cost - annual_power_cost)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(0 < breakeven_util < 1, "Breakeven utilization must be a fraction")
-    check(annual_cloud_cost > annual_power_cost, "Cloud cost must exceed on-prem power cost")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    node_gpus_str = fmt_count(gpus_per_node, label="GPU")
-    node_price_usd_str = fmt_usd(dgx_h100_price, scale="M", precision=1, commas=False)
-    amortization_years_str = fmt(amortization_years, precision=0, commas=False)
-    cloud_h100_hourly_usd_str = fmt_usd(cloud_h100_hourly, precision=0, commas=False, per="GPU-hour")
-    electricity_rate_usd_str = fmt_usd(onprem_elec, precision=2, commas=False, per="kWh")
-    breakeven_util_pct_str = fmt_percent(breakeven_util, precision=1, commas=False, style='prose')
-```
-
-This simplified threshold deliberately omits facility construction, network fabric, staffing, financing, and resale value so the direction of the trade-off is visible. A DGX H100 node with `{python} BuildBuyTcoThreshold.node_gpus_str`, costing about `{python} BuildBuyTcoThreshold.node_price_usd_str` and amortized over `{python} BuildBuyTcoThreshold.amortization_years_str` years, becomes cheaper than renting equivalent cloud H100 capacity at `{python} BuildBuyTcoThreshold.cloud_h100_hourly_usd_str` when sustained utilization exceeds roughly `{python} BuildBuyTcoThreshold.breakeven_util_pct_str` of full-time use. The comparison is annualized: amortized hardware plus facility electricity versus hourly cloud rental at the same utilization, before the omitted fleet-level costs are added. The engineering lesson is not that this threshold is universal; it is that utilization, power price (`{python} BuildBuyTcoThreshold.electricity_rate_usd_str` here), and facility readiness determine whether ownership turns into leverage or idle capital.
-
-These physical and logistical constraints define warehouse-scale computer design. New technologies do not remove the walls; they move them. The technologies below matter because they change where the memory, communication, or power constraint binds.
+These physical constraints define warehouse-scale computer design. New technologies do not remove the walls; they move them. The technologies below matter because they change where the memory, communication, or power constraint binds.
 
 ## Infrastructure Technologies That Move the Walls {#sec-compute-emerging}
 
@@ -4241,7 +3625,6 @@ These physical and logistical constraints define warehouse-scale computer design
 # │          EmergingInfrastructureRecap.cxl_bw_gb_per_s_str,
 # │          EmergingInfrastructureRecap.cxl_vs_hbm_gap_mult_str,
 # │          EmergingInfrastructureRecap.wse_sram_gb_str,
-# │          EmergingInfrastructureRecap.wse_sram_bw_pb_per_s_str,
 # │          EmergingInfrastructureRecap.wse_memoryx_bw_tb_per_s_str
 class EmergingInfrastructureRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
@@ -4267,7 +3650,6 @@ class EmergingInfrastructureRecap:
     cxl_bw_gb_per_s_str = fmt_bandwidth(cxl.bandwidth, unit=GB / second, precision=0, commas=False)
     cxl_vs_hbm_gap_mult_str = fmt_multiple(round(cxl_vs_hbm_gap.to_base_units().magnitude), precision=0, commas=False)
     wse_sram_gb_str = fmt_memory(wse.memory.capacity, unit=GB, precision=0, commas=False)
-    wse_sram_bw_pb_per_s_str = fmt_bandwidth(wse.memory.bandwidth, unit=PB / second, precision=0, commas=False)
     wse_memoryx_bw_tb_per_s_str = fmt_bandwidth(wse.interconnect.bandwidth, unit=TB / second, precision=1, commas=False)
 ```
 
@@ -4295,11 +3677,9 @@ The new wall is bandwidth. A representative CXL memory path over PCIe Gen5 x16 p
 
 ### Wafer-scale integration {#sec-compute-wafer-scale-integration}
 
-At the opposite extreme from CXL, **wafer-scale integration**\index{Wafer-Scale Integration!definition} tries to make the cluster look like a chip. Cerebras Systems' CS-3 system, built around the WSE-3, exposes `{python} EmergingInfrastructureRecap.wse_sram_gb_str` of on-wafer SRAM and `{python} EmergingInfrastructureRecap.wse_sram_bw_pb_per_s_str` of local memory bandwidth. When a workload's active state fits this on-wafer memory, the usual chip-to-chip communication wall largely disappears: data moves across an on-die mesh instead of crossing package traces, board links, or a data-center fabric.
+At the opposite extreme from CXL sits the wafer-scale engine introduced in @sec-compute-wafer-scale, which collapses the cluster onto a single die and makes on-chip bandwidth nearly free. The architecture and yield mechanics were covered there; what matters for infrastructure planning is the wall it moves. By putting the working set on the wafer, the chip-to-chip communication wall largely disappears, but a new wall takes its place: capacity and injection bandwidth.
 
-The new wall is capacity and injection bandwidth. Our `{python} EmergingInfrastructureRecap.frontier_params_b_str` running model needs `{python} EmergingInfrastructureRecap.frontier_weights_gb_str` for FP16 weights alone, far beyond the WSE's on-wafer SRAM. Cerebras addresses this class of workload through weight streaming, where external MemoryX units feed weights to the wafer over a `{python} EmergingInfrastructureRecap.wse_memoryx_bw_tb_per_s_str` path while the wafer executes the layer. That can be a good match for inference and for workloads whose computation can be staged cleanly, but training reintroduces harder scheduling questions because activations, gradients, and optimizer updates must be coordinated across forward and backward passes.
-
-Wafer-scale integration also faces manufacturing challenges. Because the chip spans an entire wafer, individual defective cores must be disabled and routed around using redundant interconnect paths. The yield model is fundamentally different from conventional chips: rather than discarding entire dies with defects, the WSE includes spare cores and spare interconnect links that can be activated to replace defective ones. This redundancy-based yield strategy works because neural network workloads are tolerant of slight variations in available compute (losing 1 percent of cores has negligible impact on training throughput).
+Our `{python} EmergingInfrastructureRecap.frontier_params_b_str` running model needs `{python} EmergingInfrastructureRecap.frontier_weights_gb_str` for FP16 weights alone, far beyond the `{python} EmergingInfrastructureRecap.wse_sram_gb_str` of on-wafer SRAM. Cerebras addresses this through weight streaming: external MemoryX units feed weights to the wafer over a `{python} EmergingInfrastructureRecap.wse_memoryx_bw_tb_per_s_str` path while the wafer executes each layer, decoupling model capacity from the on-wafer memory. That can be a good match for inference and for workloads whose computation stages cleanly, but training reintroduces harder scheduling questions because activations, gradients, and optimizer updates must be coordinated across forward and backward passes. The wafer trades the communication wall for a streaming-bandwidth wall.
 
 The lesson for infrastructure planners is not that wafer-scale systems replace GPU fleets. It is that memory proximity and memory capacity trade against each other. WSE-style designs buy extraordinary local bandwidth by putting the working set near the arithmetic, while CXL buys flexible capacity by moving memory farther away. HBM sits between those extremes: off-chip but on-package, smaller than host memory but fast enough for the active computation. The right architecture is the one whose memory tier matches the workload's reuse pattern.
 
@@ -4392,12 +3772,6 @@ The B200's memory bandwidth (8 TB/s) is only 2.4$\times$ higher than the H100's 
 **Fallacy**: *Air cooling is sufficient for AI workloads.*
 
 Operators of legacy facilities assume air cooling can scale to dense AI racks with enough additional fans and chiller capacity. It cannot. Air physically cannot remove heat fast enough above roughly 30 kW per rack; dense AI racks can consume 60 to 120 kW, and Blackwell-class rack designs push past 130 kW. Attempting to air-cool such a cluster leads to thermal throttling, sustained clock reductions, and ultimately component failure---not a performance penalty but a hardware liability. Liquid cooling is not an optimization for these clusters; it is a thermodynamic requirement that the rack-density choice forces independently of any TCO analysis.
-
-**Pitfall**: *Rejecting liquid cooling on budget grounds without modeling operating cost.*
-
-Organizations often reject liquid cooling based on the upfront capital cost (10--15 percent higher than air-cooled facilities) without performing a TCO analysis. The Rack section's cooling-tax calculation showed that liquid cooling saves `{python} RackCoolingTax.savings_kw_str` of continuous power for the `{python} RackCoolingTax.cluster_gpus_str` reference cluster, translating to about `{python} RackCoolingTax.annual_savings_usd_str` per year in electricity savings. Over a three-year lifecycle, the savings reach `{python} RackCoolingTax.three_year_savings_usd_str`, which can exceed the incremental capital cost of the liquid cooling infrastructure. At larger scales, the savings multiply proportionally, making liquid cooling both thermodynamically necessary and economically advantageous.
-
-Beyond the direct electricity savings, liquid cooling enables higher rack densities (120+ kW per rack vs. 20--30 kW for air), which reduces the data center floor space required. Smaller floor areas reduce building construction costs, land acquisition costs, and cabling distances. When all these secondary savings are included, liquid cooling is often cheaper on a total-cost basis even for clusters as small as 64 GPUs.
 
 **Fallacy**: *All GPU-hours are equivalent in TCO analysis.*
 
@@ -4585,7 +3959,7 @@ The practical method transfers beyond this particular model. Identify the bindin
 * **Peak vs. sustained**: Model FLOPs Utilization (MFU)\index{MFU!sustained vs. peak} of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.
 * **Facility efficiency is part of the computer**: Liquid cooling achieves PUE of 1.05--1.10, delivering 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. At pod scale, network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 * **Failure at scale**: A 10,000-GPU cluster\index{Failure!at scale} experiences roughly one GPU failure every five hours. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
-* **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing, not just the purchase price. Under the simplified per-node hardware-plus-electricity model in @sec-compute-infrastructure-build-vs-buy-tco, owning becomes favorable above approximately `{python} BuildBuyTcoThreshold.breakeven_util_pct_str` sustained utilization; adding facility, network, and staffing costs to a full fleet TCO raises that threshold further.
+* **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing, not just the purchase price, so ownership pays off only above a utilization threshold that the purchase price alone never reveals. @Sec-ops-scale-fleet-economics works the build-vs-buy breakeven and the full fleet TCO where the fleet is operated and paid for.
 
 :::
 
