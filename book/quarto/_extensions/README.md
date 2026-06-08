@@ -25,6 +25,7 @@ Before installing or updating any extension, **ALWAYS** check for:
 </thead>
 <tbody>
 <tr><td><b>`margin-video`</b></td><td>🚫 **100% Custom**</td><td>Never (MLSysBook only)</td></tr>
+<tr><td><b>`mlsysbook-ext/pseudocode`</b></td><td>🚫 **Customized** (casing, ▷ comments, EPUB)</td><td>Never</td></tr>
 <tr><td><b>`ute/custom-numbered-blocks`</b></td><td>🚫 **Heavy Customization**</td><td>Never</td></tr>
 <tr><td><b>`nmfs-opensci/titlepage`</b></td><td>🚫 **Customized**</td><td>Never</td></tr>
 <tr><td><b>`pandoc-ext/diagram`</b></td><td>✅ Standard</td><td>Yes</td></tr>

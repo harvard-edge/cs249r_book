@@ -37,6 +37,28 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 
+_ALGO_LATEX_MARKERS = (
+    "begin{algorithm}",
+    "end{algorithm}",
+    "begin{algorithmic}",
+    "end{algorithmic}",
+    "\\endfor",
+    "\\state",
+    "\\comment{",
+    "\\for{",
+    "\\ensure",
+    "\\return",
+)
+
+
+def _skip_rendered_violation(issue) -> bool:
+    """Algorithm blocks often appear as raw LaTeX in HTML text extraction — not LEGO bugs."""
+    if issue.code != "rendered_raw_latex":
+        return False
+    ctx = issue.context.lower()
+    return any(marker in ctx for marker in _ALGO_LATEX_MARKERS)
+
+
 def audit_html(file_path: Path) -> list[dict[str, str]]:
     issues = [
         {
@@ -44,6 +66,7 @@ def audit_html(file_path: Path) -> list[dict[str, str]]:
             "context": issue.context,
         }
         for issue in audit_rendered_file(file_path)
+        if not _skip_rendered_violation(issue)
     ]
 
     soup = BeautifulSoup(file_path.read_text(encoding="utf-8"), "html.parser")

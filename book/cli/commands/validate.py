@@ -136,12 +136,24 @@ LABEL_DEF_PATTERNS = {
         re.compile(r"\{#(lst-[\w-]+)"),              # {#lst-xyz ...}
         re.compile(r"#\|\s*label:\s*(lst-[\w-]+)"),  # #| label: lst-xyz
     ],
+    # `alg-` is Quarto's native algorithm float; `algo-` is the
+    # mlsysbook-ext/pseudocode extension's prefix (native @alg- collides with
+    # Quarto's algorithm theorem env and FATALs the build, so the book uses
+    # @algo-). Accept both, including the pseudocode chunk-option label form.
+    "Algorithm": [
+        re.compile(r"\{#(algo?-[\w-]+)"),              # {#alg-xyz} / {#algo-xyz}
+        re.compile(r"#\|\s*label:\s*(algo?-[\w-]+)"),  # #| label: algo-xyz (pseudocode ext)
+    ],
 }
-LABEL_REF_PATTERN = re.compile(r"@((?:[Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st)-[\w-]+)")
+LABEL_REF_PATTERN = re.compile(r"@((?:[Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lgo|[Aa]lg)-[\w-]+)")
+# Pseudocode algorithm label declared as a chunk option inside a ```pseudocode
+# fence (`#| label: algo-xyz`). Harvested even inside code fences so @algo-
+# references resolve (see _run_unreferenced_labels). Accepts alg-/algo-.
+PSEUDOCODE_LABEL_PATTERN = re.compile(r"#\|\s*label:\s*(algo?-[\w-]+)")
 
 EXCLUDED_CITATION_PREFIXES = (
-    "fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-",
-    "Fig-", "Tbl-", "Sec-", "Eq-", "Lst-",
+    "fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "algo-", "ch-", "nb-",
+    "Fig-", "Tbl-", "Sec-", "Eq-", "Lst-", "Alg-", "Algo-",
 )
 
 # Captionless float baseline: per-file counts of pre-existing violations
@@ -213,7 +225,7 @@ class ValidateCommand:
         punctuation — em-dash, slash, vs., e.g./i.e., en-dash ranges
         numbers    — units / percent / binary units / currency notation
         math       — \\times spacing, attr-leaks, render-audit (manual)
-        structure  — heading levels, parts, Purpose-unnumbered
+        structure  — heading levels, H2 landings, parts, Purpose-unnumbered
         code       — python-echo, _str/_math LaTeX leak, LEGO dead code
         tables     — grid → pipe, table content
         index      — \\index{} placement, anti-patterns, tag-placement, xrefs
@@ -267,7 +279,7 @@ class ValidateCommand:
             Scope("capitalized", "_run_mitpress_capitalized_refs",
                   note='"chapter 12" lowercase in prose (§10.3.2)'),
             Scope("xref-case", "_run_xref_sentence_start_case",
-                  note="@fig- at sentence start should be @Fig- (MIT Press lowercase prefix)"),
+                  note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
         ],
         "labels": [
             # duplicates and orphans are both curated, but each carries its
@@ -418,6 +430,8 @@ class ValidateCommand:
         "structure": [
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
+            Scope("h2-landings", "_run_h2_landings",
+                  note="## sections need prose before ### subsections"),
             Scope("parts", "_run_parts",
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
@@ -830,7 +844,7 @@ class ValidateCommand:
             "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
             "numbers": "Units + percent spacing, binary units, percent-in-captions, currency",
             "math": "\\times spacing, attr-leaks, fmt/suffix discipline (LEGO), multiplier prose, optional render audit",
-            "structure": "Heading levels, parts, Purpose-unnumbered",
+            "structure": "Heading levels, H2 landings, parts, Purpose-unnumbered",
             "code": "Python code blocks (echo: false, _str/_math export hygiene)",
             "tables": "Grid tables → pipe, table content hygiene, caption-required",
             "listings": "Code listings carry lst-cap when labeled",
@@ -2248,6 +2262,17 @@ class ValidateCommand:
                             in_html_comment = False
                         continue
 
+                # Pseudocode algorithm labels are declared as a chunk option
+                # (`#| label: algo-xyz`) INSIDE a ```pseudocode fence, so the
+                # code-block skip below would hide them and leave every
+                # @algo-/@Algo- reference unresolved. A chunk-option label is a
+                # genuine definition wherever it lives, so harvest it before the
+                # skip. (mlsysbook-ext/pseudocode; native @alg- collides with
+                # Quarto's algorithm theorem env, hence the algo- prefix.)
+                algo_def = PSEUDOCODE_LABEL_PATTERN.match(stripped)
+                if algo_def:
+                    defined.setdefault(algo_def.group(1), (file, idx, "Algorithm"))
+
                 if stripped.startswith("```"):
                     in_code_block = not in_code_block
                     continue
@@ -2521,7 +2546,9 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         fn_pat = re.compile(r"\[\^fn-[\w-]+\]")
+        fn_def_pat = re.compile(r"^\[\^(fn-[\w-]+)\]:")
         inline_fn_pat = re.compile(r"\^\[[^\]]+\]")
+        list_item_pat = re.compile(r"^(?P<indent>\s*)(?P<marker>(?:[-+*]|\d+[.)]))\s+")
         table_sep_pat = re.compile(r"^\|[\s\-:+]+\|")
         # Citation-then-footnote: visually anchors the footnote to the
         # bibliographic reference instead of the concept term. \s*
@@ -2536,6 +2563,46 @@ class ValidateCommand:
             div_depth = 0
             div_start_line = 0
 
+            def previous_list_item(line_index: int) -> Optional[Tuple[int, int]]:
+                """Return (line, indent) for the list item immediately before a block."""
+                for prev_index in range(line_index - 1, -1, -1):
+                    prev_line = lines[prev_index]
+                    prev_stripped = prev_line.strip()
+                    if not prev_stripped:
+                        continue
+                    if fn_def_pat.match(prev_stripped):
+                        return None
+                    if (
+                        prev_stripped.startswith("#")
+                        or prev_stripped.startswith(":::")
+                        or prev_stripped.startswith("```")
+                        or prev_stripped.startswith("|")
+                    ):
+                        return None
+                    marker = list_item_pat.match(prev_line)
+                    if marker:
+                        return prev_index + 1, len(marker.group("indent"))
+                    if not prev_line.startswith((" ", "\t")):
+                        return None
+                return None
+
+            def next_list_item_after_footnote(line_index: int) -> Optional[Tuple[int, int]]:
+                """Return (line, indent) when a later list item follows before prose."""
+                for next_index in range(line_index + 1, len(lines)):
+                    next_line = lines[next_index]
+                    next_stripped = next_line.strip()
+                    if not next_stripped:
+                        continue
+                    if fn_def_pat.match(next_stripped):
+                        continue
+                    marker = list_item_pat.match(next_line)
+                    if marker:
+                        return next_index + 1, len(marker.group("indent"))
+                    if next_line.startswith((" ", "\t")):
+                        continue
+                    return None
+                return None
+
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
 
@@ -2549,6 +2616,27 @@ class ValidateCommand:
                         div_depth -= 1
                         if div_depth == 0:
                             div_start_line = 0
+
+                fn_def = fn_def_pat.match(stripped)
+                if fn_def:
+                    prev_list = previous_list_item(idx - 1)
+                    next_list = next_list_item_after_footnote(idx - 1)
+                    if prev_list and next_list:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_def_interrupts_list",
+                                message=(
+                                    f"Footnote definition [^{fn_def.group(1)}]: appears between "
+                                    f"list items (previous item line {prev_list[0]}, next item "
+                                    f"line {next_list[0]}). Move the definition after the complete "
+                                    f"Markdown list so Pandoc preserves the list structure."
+                                ),
+                                severity="error",
+                                context=stripped[:80],
+                            )
+                        )
 
                 # Check inline footnotes (always forbidden)
                 for m in inline_fn_pat.finditer(line):
@@ -4279,6 +4367,121 @@ class ValidateCommand:
         return ValidationRunResult(
             name="heading-levels",
             description="Detect skipped heading levels (e.g., ## to ####)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # H2 landing prose  (detect ## followed immediately by ###)
+    # ------------------------------------------------------------------
+
+    def _run_h2_landings(self, root: Path) -> ValidationRunResult:
+        """Require H2 sections to orient readers before H3 subsections.
+
+        This catches the common source-shape problem:
+
+            ## Section
+            ### First subsection
+
+        Index markers and blank lines do not count as prose. A line that starts
+        with one or more ``\\index{...}`` markers and then continues with text
+        does count as prose, matching common chapter style.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        h2_pat = re.compile(r"^##\s+")
+        h3_pat = re.compile(r"^###\s+")
+        code_fence = re.compile(r"^```")
+        yaml_fence = re.compile(r"^---\s*$")
+        div_open_pat = re.compile(r"^(:{3,})\s*\{")
+        div_close_pat = re.compile(r"^(:{3,})\s*$")
+        index_prefix_pat = re.compile(r"^(?:\\index\{[^}]*\}\s*)+")
+
+        def visible_content(stripped: str) -> str:
+            """Return reader-visible content after ignorable leading markers."""
+            if not stripped or stripped.startswith("<!--"):
+                return ""
+            without_index = index_prefix_pat.sub("", stripped).strip()
+            return without_index
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_yaml = False
+            div_depth = 0
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                if idx == 1 and yaml_fence.match(line):
+                    in_yaml = True
+                    continue
+                if in_yaml:
+                    if yaml_fence.match(line):
+                        in_yaml = False
+                    continue
+
+                if code_fence.match(stripped):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                if div_open_pat.match(stripped):
+                    div_depth += 1
+                    continue
+                if div_close_pat.match(stripped) and div_depth > 0:
+                    div_depth -= 1
+                    continue
+                if div_depth > 0:
+                    continue
+
+                if not h2_pat.match(line) or line.startswith("###"):
+                    continue
+
+                first_line = None
+                first_text = ""
+                look = idx
+                while look < len(lines):
+                    candidate = visible_content(lines[look].strip())
+                    look += 1
+                    if not candidate:
+                        continue
+                    first_line = look
+                    first_text = candidate
+                    break
+
+                if first_line is None or not h3_pat.match(first_text):
+                    continue
+
+                heading_text = line.lstrip("#").strip()
+                if "{" in heading_text:
+                    heading_text = heading_text[: heading_text.index("{")].strip()
+                subsection_text = first_text.lstrip("#").strip()
+                if "{" in subsection_text:
+                    subsection_text = subsection_text[: subsection_text.index("{")].strip()
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="h2_missing_landing",
+                        message=(
+                            "H2 section drops directly into an H3 subsection "
+                            "without intervening prose"
+                        ),
+                        severity="error",
+                        context=(
+                            f"{heading_text[:60]} → {subsection_text[:60]}"
+                        ),
+                    )
+                )
+
+        return ValidationRunResult(
+            name="h2-landings",
+            description="Detect H2 sections that drop directly into H3 subsections",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -6059,17 +6262,130 @@ class ValidateCommand:
         )
 
     def _run_xref_sentence_start_case(self, root: Path) -> ValidationRunResult:
-        """Flag lowercase @fig-/@tbl-/@sec-/@eq-/@lst- at sentence starts.
+        """Flag crossref prefix casing that fights sentence position.
 
-        With crossref prefixes configured to lowercase, sentence-start refs
-        must use the capitalized Quarto syntax (@Fig-, @Tbl-, @Sec-, @Eq-,
-        @Lst-) so the rendered prefix is uppercase.
+        Crossref prefixes render lowercase, so the casing of the @-prefix is
+        purely a function of sentence position (.claude/rules/cross-references.md
+        -> Prefix Casing). This check enforces BOTH directions:
+
+          * Sentence start -- a lowercase @sec-/@fig-/@tbl-/@eq-/@lst-/@alg-
+            must be capitalized (@Sec-, @Fig-, ...) so the rendered prefix
+            ("Section", "Figure") leads the sentence with a capital.
+            semicolon, open paren, a lowercase word, or a plain-prose colon
+            renders a stray capital ("...as Table 2 shows") and must be
+            lowercased (@sec-, @fig-, ...). A colon is mid-sentence ONLY in
+            running prose ("...as follows: section 3 derives ..."), per MIT
+            Press house style (mit-press-editorial.md S10.4, which lowercases
+            generic section/figure/table refs in running text). A colon after
+            a bold structural label ("**Setup**: @Fig- shows ...") instead
+            begins a complete sentence (emphasis.md bold lead-in rule) and is
+            classified as a sentence start.
+          * Algorithm theorem refs -- direct @Alg-/@alg- refs follow the same
+            casing rule as other cross-refs. Bracketed [Algorithm @alg-id]
+            refs are unnecessary because the shared Quarto language file
+            renders native @alg- refs as "Algorithm N"; bare Algorithm @alg-id
+            is invalid Quarto prose.
+
+        Both halves share one is_sentence_start / is_mid_sentence computation so
+        they stay consistent by construction. Sentence position is
+        intentionally classified conservatively: clause boundaries
+        that are genuinely ambiguous (em-dash, a heading line, a preceding
+        acronym) are left unflagged in the mid-sentence direction rather than
+        risk a false positive.
+
+        Reverse (mid-sentence) direction + @alg- added 2026-06-04 to mirror the
+        documented Prefix Casing policy; algorithm bracket/bare-prefix checks
+        were added the same day. Colon handling corrected 2026-06-04: a plain-
+        prose colon is mid-sentence (lowercase) per MIT Press, not a sentence
+        start; only a bold-label lead-in colon capitalizes. Previously every
+        colon forced a capital, which matched the engineering-textbook habit the
+        book's MIT Press copyedit rejected.
         """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
-        xref_re = re.compile(r"@(fig|tbl|sec|eq|lst)-[\w-]+")
+        xref_re = re.compile(r"@([Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lg)-[\w-]+")
+        alg_bracket_re = re.compile(r"\[(Algorithm|algorithm)\s+(@[Aa]lg-[\w-]+)\]")
+        bare_alg_re = re.compile(r"(?<!\[)\b(Algorithm|algorithm)\s+@[Aa]lg-[\w-]+")
         footnote_def = re.compile(r"^\s*\[\^fn-")
+
+        def classify_position(line: str, lines: List[str], idx: int, col: int, ref_end: int) -> tuple[bool, bool]:
+            """Return (is_sentence_start, is_mid_sentence) for a reference."""
+            before = line[:col].rstrip()
+            is_sentence_start = False
+            is_mid_sentence = False
+
+            if not before:
+                # Line-start ref: classify by the preceding non-blank line.
+                # A blank line, a sentence-final prev line, a heading, or a div
+                # close => sentence start. Only call mid-sentence when the prev
+                # line genuinely ends inside a clause (lowercase word, digit,
+                # comma, semicolon) -- a symmetric-conservative test that
+                # mirrors the same-line rule and avoids treating metadata (a
+                # standalone \index{} line) as running prose.
+                prev = ""
+                prev_blank = False
+                for pi in range(idx - 2, -1, -1):
+                    ps = lines[pi].strip()
+                    if not ps:
+                        prev_blank = True
+                        break
+                    prev = ps
+                    break
+                # Strip trailing \index{...} tags -- they are metadata
+                # appended to the paragraph, not sentence content.
+                prev = re.sub(r'(\s*\\index\{[^}]*\})+\s*$', '', prev)
+                if prev_blank or not prev:
+                    is_sentence_start = True
+                elif (prev[-1] in ".?!"
+                        or prev.startswith("#")
+                        or prev.endswith(":::")):
+                    is_sentence_start = True
+                elif prev[-1].islower() or prev[-1].isdigit() or prev[-1] in ",;":
+                    is_mid_sentence = True
+            else:
+                last = before[-1]
+                if re.search(r'[.?!]\s*$', before):
+                    is_sentence_start = True
+                elif last in ",;":
+                    is_mid_sentence = True
+                elif last == "(":
+                    # Parenthetical: "(see @sec-x)" lowercases, but
+                    # "Foo. (@Sec-x ...)" opens a sentence inside parens.
+                    head = before[:-1].rstrip()
+                    if head and head[-1] in ".?!":
+                        is_sentence_start = True
+                    else:
+                        is_mid_sentence = True
+                elif last.islower() or last.isdigit():
+                    # Preceded by a lowercase word or a number -> the ref
+                    # sits inside a clause. (Uppercase/acronym before is
+                    # left unflagged on purpose -- it may end a clause.)
+                    is_mid_sentence = True
+                elif re.search(r':\s*$', before):
+                    # A colon splits two ways (MIT Press house style):
+                    #   * after a bold structural label ("**Setup**: @Fig- shows
+                    #     ...") the colon introduces a complete sentence, so the
+                    #     ref is a sentence start and takes a capital prefix
+                    #     (emphasis.md bold lead-in rule).
+                    #   * in plain running prose ("...as follows: @sec-3 derives
+                    #     ...") the colon introduces a single clause, which
+                    #     mit-press-editorial.md §10.4 lowercases ("section 3"),
+                    #     so the ref is mid-sentence and takes a lowercase prefix.
+                    # Drop any \index{} tag before testing the label shape.
+                    head = re.sub(r'\\index\{[^}]*\}', '', before[:-1]).strip()
+                    is_label_leadin = bool(
+                        re.fullmatch(r'(?:[-*+]\s+|\d+[.)]\s+)?\*\*[^*]+\*\*', head)
+                    )
+                    after_ref = line[ref_end:].strip()
+                    if after_ref and after_ref[0] not in ".,;:)]":
+                        if is_label_leadin:
+                            is_sentence_start = True
+                        else:
+                            is_mid_sentence = True
+                # otherwise (em-dash, other punctuation): neutral, no flag
+
+            return is_sentence_start, is_mid_sentence
 
         for file in files:
             lines = self._read_text(file).splitlines()
@@ -6087,58 +6403,96 @@ class ValidateCommand:
                     continue
                 if footnote_def.match(line):
                     continue
+                # Heading lines are governed by heading-case (Title Case for
+                # H1/H2, sentence case for H3+), not by sentence position; their
+                # crossref casing is out of scope for the mid-sentence rule.
+                on_heading = stripped.startswith("#")
 
                 for m in xref_re.finditer(line):
-                    col = m.start()
-                    before = line[:col].rstrip()
-                    is_sentence_start = False
+                    ref_type = m.group(1)
+                    is_capitalized = ref_type[0].isupper()
+                    type_lower = ref_type.lower()
+                    is_sentence_start, is_mid_sentence = classify_position(
+                        line, lines, idx, m.start(), m.end()
+                    )
 
-                    if not before:
-                        # Line-start ref: check preceding line
-                        prev = ""
-                        for pi in range(idx - 2, -1, -1):
-                            ps = lines[pi].strip()
-                            if not ps:
-                                is_sentence_start = True
-                                break
-                            prev = ps
-                            break
-                        if not is_sentence_start and prev:
-                            if prev[-1] in ".?!":
-                                is_sentence_start = True
-                            elif prev.startswith("#"):
-                                is_sentence_start = True
-                            elif prev.endswith(":::"):
-                                is_sentence_start = True
-                    else:
-                        if re.search(r'[.?!]\s*$', before):
-                            is_sentence_start = True
-                        elif re.search(r':\s*$', before):
-                            after_ref = line[m.end():].strip()
-                            if after_ref and after_ref[0] not in ".,;:)]":
-                                is_sentence_start = True
-
-                    if is_sentence_start:
-                        ref_type = m.group(1)
-                        cap_form = f"@{ref_type[0].upper()}{ref_type[1:]}-"
-                        context = line.strip()[:100]
+                    context = line.strip()[:100]
+                    if not is_capitalized and is_sentence_start:
+                        cap_form = f"@{type_lower[0].upper()}{type_lower[1:]}-"
                         issues.append(
                             ValidationIssue(
                                 file=self._relative_file(file),
                                 line=idx,
                                 code="xref_sentence_start_case",
                                 message=(
-                                    f"Lowercase @{ref_type}- at sentence start "
+                                    f"Lowercase @{type_lower}- at sentence start "
                                     f"-- use {cap_form} for uppercase prefix"
                                 ),
                                 severity="warning",
                                 context=context,
                             )
                         )
+                    elif is_capitalized and is_mid_sentence and not on_heading:
+                        low_form = f"@{type_lower}-"
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="xref_midsentence_case",
+                                message=(
+                                    f"Capitalized @{ref_type}- mid-sentence "
+                                    f"-- use {low_form} for lowercase prefix"
+                                ),
+                                severity="warning",
+                                context=context,
+                            )
+                        )
+
+                for m in alg_bracket_re.finditer(line):
+                    direct_ref = m.group(2)
+                    is_sentence_start, _ = classify_position(
+                        line, lines, idx, m.start(), m.end()
+                    )
+                    ref_suffix = re.sub(r"^@[Aa]lg-", "", direct_ref)
+                    replacement = (
+                        f"@Alg-{ref_suffix}"
+                        if is_sentence_start
+                        else f"@alg-{ref_suffix}"
+                    )
+                    context = line.strip()[:100]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="algorithm_ref_bracketed_prefix",
+                            message=(
+                                "Use direct algorithm references such as "
+                                f"{replacement}, not bracketed [Algorithm @alg-id]"
+                            ),
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+                for m in bare_alg_re.finditer(line):
+                    context = line.strip()[:100]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="algorithm_ref_bare_prefix",
+                            message=(
+                                "Use direct algorithm references such as @Alg-id "
+                                "or @alg-id, not bare Algorithm @alg-id"
+                            ),
+                            severity="warning",
+                            context=context,
+                        )
+                    )
 
         return ValidationRunResult(
             name="xref-sentence-start-case",
-            description="Flag lowercase crossref prefixes at sentence starts (MIT Press convention)",
+            description="Flag crossref prefix casing that fights sentence position (MIT Press convention)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -6322,16 +6676,26 @@ class ValidateCommand:
         for f in files:
             for v in mod.scan_file(f, allowlist):
                 snippet = v.raw_line if len(v.raw_line) <= 160 else v.raw_line[:157] + "..."
+                if getattr(v, "kind", "") == "term_head_case":
+                    code = "footnote_term_head_case"
+                    message = (
+                        f"Footnote term head has lowercase significant word(s): "
+                        f"{v.detail}; use Title Case or preserve only canonical "
+                        f"lowercase API/math/unit tokens"
+                    )
+                else:
+                    code = "footnote_lowercase_first_letter"
+                    message = (
+                        f"Footnote opens with lowercase {v.first_char!r}; "
+                        f"capitalize, or add the id to footnote_caps_allowlist.txt "
+                        f"if the lowercase is canonical (brand/math/SI)"
+                    )
                 issues.append(
                     ValidationIssue(
                         file=self._relative_file(f),
                         line=v.line_no,
-                        code="footnote_lowercase_first_letter",
-                        message=(
-                            f"Footnote opens with lowercase {v.first_char!r}; "
-                            f"capitalize, or add the id to footnote_caps_allowlist.txt "
-                            f"if the lowercase is canonical (brand/math/SI)"
-                        ),
+                        code=code,
+                        message=message,
                         severity="error",
                         context=snippet,
                     )

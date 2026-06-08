@@ -21,9 +21,9 @@ When training is slow on a single GPU, check utilization, data wait time, and MF
 ```{python}
 #| echo: false
 from mlsysim import *
-from mlsysim.core.constants import *
-#| label: appendix-dam-setup
-from mlsysim.fmt import fmt, fmt_frac, check
+from mlsysim.core.units import *
+
+from mlsysim.fmt import fmt, fmt_frac, check, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 # Scenarios: GPU Utilization, Iron Law Analysis, Scaling Discrepancy
@@ -63,22 +63,23 @@ class DAMTaxonomy:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Exercise 2 logic
     ex2_flops_per_pass = calc_transformer_decode_flops(ex2_params)
-    ex2_achieved_rate = (ex2_flops_per_pass / ex2_latency).to(TFLOP/second)
+    ex2_achieved_rate = (ex2_flops_per_pass / ex2_latency).to(TFLOP / second)
     ex2_util = (ex2_achieved_rate / h100_fp16_peak).to("").magnitude * 100
     ex2_model_size = ex2_params.to(param).magnitude * 2 * byte
-    h100_ridge_flop_per_byte = (h100_fp16_peak / h100_hbm_bandwidth).to(flop/byte).magnitude
+    h100_ridge_q = h100_fp16_peak / h100_hbm_bandwidth
+    h100_ridge_flop_per_byte = h100_ridge_q.to(flop / byte).magnitude
 
     # Step 2: Exercise 3 logic
     ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     from mlsysim.fmt import check
+
     check(ex2_util < 10, f"Batch-1 utilization ({ex2_util:.1f}%) unexpectedly high.")
     check(290 < h100_ridge_flop_per_byte < 300, f"H100 ridge point changed: {h100_ridge_flop_per_byte:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt
-    h100_ridge_str = fmt(h100_ridge_flop_per_byte, precision=1, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity(h100_ridge_q, precision=1, commas=False)
 ```
 
 With that usage pattern in mind, the appendix focuses on the following diagnostic habits:
@@ -102,11 +103,11 @@ The Data · Algorithm · Machine (D·A·M) taxonomy is the primary diagnostic fr
 
 The taxonomy maps directly to the iron law of ML systems, introduced in @sec-vol2-introduction-fleet-law. @Tbl-v2-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
 
-| **Axis**          | **Role**                   | **Physical Constraint**        | **High-Leverage Optimization** |
-|:------------------|:---------------------------|:-------------------------------|:-------------------------------|
-| **Data (D)**      | **Information** (The Fuel) | Bandwidth ($\text{BW}$)        | I/O Pipeline Optimization      |
-| **Algorithm (A)** | **Logic** (The Blueprint)  | Operations ($O$)               | Model Compression              |
-| **Machine (M)**   | **Physics** (The Engine)   | Throughput ($R_{\text{peak}}$) | Hardware Acceleration          |
+| **Axis**          |          **Role**          |    **Physical Constraint**     | **High-Leverage Optimization** |
+|:------------------|:--------------------------:|:------------------------------:|:------------------------------:|
+| **Data (D)**      | **Information** (The Fuel) |    Bandwidth ($\text{BW}$)     |   I/O Pipeline Optimization    |
+| **Algorithm (A)** | **Logic** (The Blueprint)  |        Operations ($O$)        |       Model Compression        |
+| **Machine (M)**   |  **Physics** (The Engine)  | Throughput ($R_{\text{peak}}$) |     Hardware Acceleration      |
 
 : **D·A·M Axis Reference**: Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint is binding, then follow the optimization lever. {#tbl-v2-dam-components-ref}
 
@@ -126,12 +127,12 @@ $$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{
 
 The systems engineer's job is to make these components run in parallel, not in series. @Tbl-v2-dam-overlap summarizes key D·A·M Coordination techniques:
 
-| **Technique**           | **D·A·M Axes Overlapped**    | **Implementation**                                                                              |
-|:------------------------|:-----------------------------|:------------------------------------------------------------------------------------------------|
-| **Prefetching**         | D overlaps M                 | DataLoader with `prefetch_factor`, `pin_memory=True`                                            |
-| **CUDA Streams**        | D overlaps M                 | Separate streams for H2D transfer and compute                                                   |
+| **Technique**           |  **D·A·M Axes Overlapped**   | **Implementation**                                                                              |
+|:------------------------|:----------------------------:|:------------------------------------------------------------------------------------------------|
+| **Prefetching**         |         D overlaps M         | DataLoader with `prefetch_factor`, `pin_memory=True`                                            |
+| **CUDA Streams**        |         D overlaps M         | Separate streams for H2D transfer and compute                                                   |
 | **Async Gradient Sync** | M (communication) overlaps A | Overlap gradient AllReduce with remaining backward computation as gradient buckets become ready |
-| **Double Buffering**    | D overlaps M                 | Fill buffer $i+1$ while computing on buffer $i$                                                 |
+| **Double Buffering**    |         D overlaps M         | Fill buffer $i+1$ while computing on buffer $i$                                                 |
 
 : **D·A·M Overlap Techniques**: Each technique allows one D·A·M axis to execute while another is in flight, converting the iron law's additive terms into overlapped terms. {#tbl-v2-dam-overlap}
 
@@ -141,20 +142,22 @@ This overlap view still leaves one practical question: whether a workload is wai
 
 [^fn-intensity-v2]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($R_{\text{peak}}/\text{BW}$).
 
+The symptoms below are different views of the same ridge-point comparison: a workload whose arithmetic intensity sits left of $R_{\text{peak}}/\text{BW}$ cannot keep the accelerator fed, so starvation appears as low utilization, batch-1 latency sensitivity, or a direct intensity measurement.
+
 *   **Low GPU utilization** ($<$ 80 percent): The workload is likely data bound (or CPU bound). The accelerator is starving.
 *   **High GPU utilization** ($>$ 95 percent): The workload is likely machine bound. The accelerator is fully saturated.
 *   **If batch size is 1**: The workload is likely latency bound (algorithm overhead dominates).
-*   **If arithmetic intensity is below the ridge point** (about `{python} DAMTaxonomy.h100_ridge_str` FLOP/byte on H100): The workload is likely memory bound (Data/Machine boundary).
+*   **If arithmetic intensity is below the ridge point** (about `{python} DAMTaxonomy.h100_ridge_str` on H100): The workload is likely memory bound (Data/Machine boundary).
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
 
 Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimizations help and which ones are wasted:
 
-| **If the workload is...** | **Dominant Term**                            | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
-|:--------------------------|:---------------------------------------------|:------------------------------------------------------------------------|:---------------------------------------------------|
-| **Memory-Bound**          | $D_{\text{vol}}/\text{BW}$                   | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
+| **If the workload is...** |              **Dominant Term**               | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
+|:--------------------------|:--------------------------------------------:|:------------------------------------------------------------------------|:---------------------------------------------------|
+| **Memory-Bound**          |          $D_{\text{vol}}/\text{BW}$          | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
 | **Compute-Bound**         | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (already saturated)          |
-| **Latency-Bound**         | $L_{\text{lat}}$                             | Batching requests, kernel fusion, async dispatch                        | Neither compute nor bandwidth (overhead dominates) |
+| **Latency-Bound**         |               $L_{\text{lat}}$               | Batching requests, kernel fusion, async dispatch                        | Neither compute nor bandwidth (overhead dominates) |
 
 : **What Works vs. What Is Wasted**: Optimizing the wrong term yields limited improvement and poor cost efficiency. A memory-bound model will not speed up from more peak FLOP/s alone; it needs higher arithmetic intensity, less data movement, or a faster memory subsystem. {#tbl-v2-bottleneck-actions}
 
@@ -162,11 +165,11 @@ Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimi
 
 After the action table narrows the likely fix, the tooling map identifies the measurements needed to verify it. Use @tbl-v2-dam-tooling to select the right profiling tool when diagnosing a bottleneck along a particular D·A·M axis:
 
-| **Axis**      | **Key Metric**                | **Primary Tool**        | **Secondary Tool**             |
-|:--------------|:------------------------------|:------------------------|:-------------------------------|
-| **Data**      | Batch Load Time               | `tqdm` (iterations/sec) | `iotop`, `dstat` (Disk I/O)    |
-| **Algorithm** | FLOPs, Model Depth            | PyTorch Profiler        | DeepSpeed Flops Profiler       |
-| **Machine**   | GPU Utilization, SM Occupancy | `nvidia-smi`            | Nsight Compute, Nsight Systems |
+| **Axis**      |         **Key Metric**        |     **Primary Tool**    |       **Secondary Tool**       |
+|:--------------|:-----------------------------:|:-----------------------:|:------------------------------:|
+| **Data**      |        Batch Load Time        | `tqdm` (iterations/sec) |  `iotop`, `dstat` (Disk I/O)   |
+| **Algorithm** |       FLOPs, Model Depth      |     PyTorch Profiler    |    DeepSpeed Flops Profiler    |
+| **Machine**   | GPU Utilization, SM Occupancy |       `nvidia-smi`      | Nsight Compute, Nsight Systems |
 
 : **D·A·M Tooling Map**: Profiling utilities for diagnosing bottlenecks along each D·A·M axis. {#tbl-v2-dam-tooling}
 
@@ -176,13 +179,13 @@ The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance agai
 
 [^fn-mfu-v2]: **MFU (Model FLOPs Utilization)**: Measures only *useful* model computation, excluding overhead like gradient synchronization and memory management.
 
-| **Axis**      | **Metric**                     | **Definition**                                                                   |  **Failing Grade** |  **Passing Grade** |
-|:--------------|:-------------------------------|:---------------------------------------------------------------------------------|-------------------:|-------------------:|
-| **Data**      | **I/O Overhead**               | $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$                           |     $>$ 10 percent |      $<$ 1 percent |
+| **Axis**      |           **Metric**           |                                  **Definition**                                  | **Failing Grade**  | **Passing Grade**  |
+|:--------------|:------------------------------:|:--------------------------------------------------------------------------------:|:------------------:|:------------------:|
+| **Data**      |        **I/O Overhead**        |              $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$              |   $>$ 10 percent   |   $<$ 1 percent    |
 | **Algorithm** | **Compression/Sparsity Ratio** | $\frac{\text{Effective or active parameters}}{\text{Dense baseline parameters}}$ | Workload-dependent | Workload-dependent |
-| **Machine**   | **MFU**                        | $\frac{\text{achieved model FLOP/s}}{\text{peak FLOP/s}}$                        |     $<$ 30 percent |     $>$ 50 percent |
+| **Machine**   |            **MFU**             |            $\frac{\text{achieved model FLOP/s}}{\text{peak FLOP/s}}$             |   $<$ 30 percent   |   $>$ 50 percent   |
 
-: **The D·A·M Efficiency Rubric**: Use these three numbers to characterize single-machine maturity. {#tbl-v2-dam-scorecard}
+: **The D·A·M Efficiency Rubric**: Use these three numbers to characterize single-machine maturity. {#tbl-v2-dam-scorecard tbl-colwidths="[13,24,33,15,15]"}
 
 ## Scaling the Taxonomy: From Node to Fleet {#sec-appdx-dam-taxonomy-scaling}
 
@@ -193,10 +196,10 @@ These single-node grades become most useful when they are carried forward into d
 @Tbl-appendix-dam-axis-node-to-fleet maps each axis from its node-level focus to its fleet-scale transformation:
 
 | **Axis**          | **Node-Level Focus (D·A·M)** | **Fleet-Scale Transformation**                                                                                                        |
-|:------------------|:-----------------------------|:--------------------------------------------------------------------------------------------------------------------------------------|
-| **Data (D)**      | I/O Bandwidth (Disk/PCIe)    | **The communication wall**: The bottleneck shifts from local storage to the **Bisection Bandwidth** of the network fabric.            |
-| **Algorithm (A)** | Model Depth/Ops Count        | **The parallelism strategy**: The logic now includes *how* we partition the math across $N$ devices (3D Parallelism).                 |
-| **Machine (M)**   | Peak TFLOP/s, HBM            | **The power and reliability wall**: The constraint is no longer just silicon speed, but **Watts per rack** and cluster-wide **MTBF**. |
+|:------------------|:----------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------|
+| **Data (D)**      |  I/O Bandwidth (Disk/PCIe)   | **The communication wall**: The bottleneck shifts from local storage to the **Bisection Bandwidth** of the network fabric.            |
+| **Algorithm (A)** |    Model Depth/Ops Count     | **The parallelism strategy**: The logic now includes *how* we partition the math across $N$ devices (3D Parallelism).                 |
+| **Machine (M)**   |      Peak TFLOP/s, HBM       | **The power and reliability wall**: The constraint is no longer just silicon speed, but **Watts per rack** and cluster-wide **MTBF**. |
 
 : **D·A·M Constraints from Node to Fleet**: How each axis of the D·A·M taxonomy shifts when scaling from a single node to a multi-node fleet. The node-level focus (left) gives way to a qualitatively different fleet-scale constraint (right)—the bottleneck migrates from local resource to global coordination cost. {#tbl-appendix-dam-axis-node-to-fleet}
 
@@ -219,6 +222,6 @@ The D·A·M taxonomy provides the diagnostic baseline for every ML systems analy
 * **Identify the dominant axis**: Decide whether Data, Algorithm, or Machine is the binding constraint before proposing any optimization.
 * **Profile arithmetic intensity**: Arithmetic intensity quantitatively distinguishes between Data-bound and Machine-bound regimes.
 * **Use the iron law**: The iron law transforms vague symptoms into specific term-based bottlenecks.
-* **Grade with the D·A·M Scorecard**: The D·A·M Scorecard standardizes "good" performance before moving to fleet scale.
+* **Grade with the D·A·M scorecard**: The D·A·M Scorecard standardizes "good" performance before moving to fleet scale.
 
 :::

@@ -29,9 +29,13 @@ Do *not* flag:
 - Significance / Distinction / Common pitfall bullets (conventions, not math)
 - Inline math dimensions (``$224×224$``), footnotes, or figure/table captions
 - Table rows (pipe-delimited lines)
-- Lines with ``<!-- lego-ok: ... -->`` suppression comments
 - Tier-3-only regions between ``<!-- lego-ok-block: ... -->`` and ``<!-- end lego-ok-block -->``
 - Lines with no ``{python}`` callout context (Tiers 2–3 require a python callout)
+
+Always flag inline LEGO suppression comments, including comments inside fenced
+code cells. They should not appear in authored chapter source; convert the value
+to a LEGO export, cite an mlsysIM source, or use a queued ``lego-ok-block``
+exception for a Tier-3 narrative region.
 """
 
 from __future__ import annotations
@@ -88,6 +92,9 @@ PEDAGOGICAL_RANGE = re.compile(
 GPU_SKU_MEMORY = re.compile(r"\b[A-Za-z]\d+(?:-\d+)?-\d+(?:\.\d+)?\s+GB\b")
 LEGO_OK_BLOCK_START = re.compile(r"<!--\s*lego-ok-block:")
 LEGO_OK_BLOCK_END = re.compile(r"<!--\s*end lego-ok-block\s*-->")
+INLINE_LEGO_OK = re.compile(
+    r"<!--\s*lego-ok\b(?!-block)|(?<![-\w])(?:#|//|/\*|%)\s*lego-ok\b|(?<!<!)--\s*lego-ok\b"
+)
 
 LITERAL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\d{1,3}(?:,\d{3})+"), "comma-formatted number"),
@@ -268,6 +275,8 @@ def _line_violations(
 ) -> list[str]:
     if _is_excluded_prose(line):
         return []
+    if INLINE_LEGO_OK.search(line):
+        return ["inline LEGO suppression"]
     if "<!-- lego-ok" in line:
         return []
 
@@ -358,6 +367,9 @@ def check_file(path: Path, *, strict: bool = False) -> list[tuple[int, str, list
     in_fence = False
     for lineno, raw in enumerate(lines, start=1):
         line = raw.rstrip()
+        if INLINE_LEGO_OK.search(line):
+            issues.append((lineno, line.strip()[:120], ["inline LEGO suppression"]))
+            continue
         if CELL_START.match(line):
             in_python = True
             continue

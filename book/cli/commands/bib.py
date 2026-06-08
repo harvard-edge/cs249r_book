@@ -199,7 +199,7 @@ class BibCommand:
         keys = {
             k.rstrip(".,;:")
             for k in keys
-            if not k.startswith(("fig-", "tbl-", "sec-", "eq-", "lst-"))
+            if not k.startswith(("fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "algo-", "Algo-"))
         }
         return keys
 

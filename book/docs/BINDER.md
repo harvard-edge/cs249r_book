@@ -58,7 +58,8 @@ Scripts under `book/tools/` are not the public API. Pre-commit and CI call Binde
 | `info` | Read-only reports and inventories. |
 | `render` | Generate derived assets such as plot galleries. |
 | `audit` | Heavier or ledgered audits that are not normal commit checks. |
-| `doctor`, `status`, `list`, `setup`, `switch`, `debug`, `layout`, `headings` | Environment, state, diagnostics, or specialized maintenance. |
+| `layout` | PDF visual/layout diagnostics: whitespace, margin overflow, header/footer collisions, and table-only PDF audits. |
+| `doctor`, `status`, `list`, `setup`, `switch`, `debug`, `headings` | Environment, state, diagnostics, or specialized maintenance. |
 
 Compatibility aliases are intentionally thin: `validate` routes to `check`, and `maintain` routes to `fix`. Prefer the canonical verbs in docs, hooks, and new automation.
 
@@ -320,6 +321,16 @@ Canonical namespace for repairs and housekeeping. `maintain` is an alias for `fi
 - `./book/binder headings check|dry-run|apply` — headline-case enforcement (also runs as `check headers --scope case`)
 - `./book/binder check epub --scope hygiene --fix` — auto-repair SVG/BibTeX EPUB source issues
 - `./book/binder bib mechanical|normalize|sync|clean|update` — bibliography tooling
+- `./book/binder layout tables --vol1|--vol2` — render a table-only PDF audit plus contact sheets under `book/.layout/tables/`
+
+### Layout diagnostics
+
+| Command | Purpose |
+|---------|---------|
+| `layout check <pdf>` | Flag pages with excessive bottom whitespace and likely next-page culprits. |
+| `layout margins <pdf>` | Gate margin figures/notes that overflow into the footer or off the page. |
+| `layout collisions <pdf>` | Find body content that invades running header/footer bands. |
+| `layout tables --vol1\|--vol2` | Render only source tables using production PDF geometry, emit JSON/CSV metrics, and create contact sheets for fast visual review. |
 
 ---
 

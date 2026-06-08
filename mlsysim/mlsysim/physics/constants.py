@@ -7,6 +7,7 @@ the project MLSysIM rules -> Canonical organization (decision step 2).
 """
 from ..core.units import ureg, second
 
-# Light in optical fiber propagates at ~2/3 c, because silica's refractive index
-# is ~1.47; the round-trip latency floor of any fiber link derives from this.
+# Light in optical fiber propagates at ~2/3 c: silica's refractive index of
+# ~1.5 gives ~200,000 km/s, the standard teaching value. The round-trip
+# latency floor of any fiber link derives from this.
 SPEED_OF_LIGHT_FIBER_KM_S = 200_000 * ureg.kilometer / second

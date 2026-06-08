@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict
-from ..core.constants import Q_, ureg
+from ..core.units import Q_, ureg
 from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 
 class ComputeCore(BaseModel):
@@ -10,7 +10,7 @@ class ComputeCore(BaseModel):
     Contains the theoretical peak throughput capabilities of the silicon,
     differentiated by numerical precision.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     peak_flops: Quantity
     precision_flops: Dict[str, Quantity] = Field(default_factory=dict)
     # Streaming-multiprocessor count. Present for GPUs; absent (None) for device
@@ -21,13 +21,13 @@ class ComputeCore(BaseModel):
     @field_validator("peak_flops", mode="after")
     @classmethod
     def _validate_peak_flops(cls, v):
-        return require_unit_family(v, ureg.count / ureg.second, "peak_flops", "operation")
+        return require_unit_family(v, ureg.flop / ureg.second, "peak_flops", "operation")
 
     @field_validator("precision_flops", mode="after")
     @classmethod
     def _validate_precision_flops(cls, v):
         return {
-            key: require_unit_family(val, ureg.count / ureg.second, f"precision_flops[{key!r}]", "operation")
+            key: require_unit_family(val, ureg.flop / ureg.second, f"precision_flops[{key!r}]", "operation")
             for key, val in v.items()
         }
 
@@ -38,7 +38,7 @@ class MemoryHierarchy(BaseModel):
     Captures capacity and bandwidth across different levels of the memory
     hierarchy, from primary HBM/DRAM down to on-chip SRAM or Flash storage.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     capacity: Quantity           # Primary memory (HBM for GPUs, SRAM for MCUs)
     bandwidth: Quantity          # Primary memory bandwidth
     # On-chip SRAM (optional — for modeling FlashAttention tiling on GPUs,
@@ -71,7 +71,7 @@ class StorageHierarchy(BaseModel):
     Crucial for analyzing checkpointing overheads and the Data Wall (data
     ingestion rates for training).
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     capacity: Quantity
     bandwidth: Quantity
     latency: Optional[Quantity] = None
@@ -98,7 +98,7 @@ class IOInterconnect(BaseModel):
     Used to model PCIe links (host to device) or NVLink/ICI connections
     (device to device within a node).
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str # e.g., "PCIe Gen4 x16"
     bandwidth: Quantity
     latency: Optional[Quantity] = None
@@ -121,7 +121,7 @@ class HardwareNode(BaseModel):
     the compute, memory, IO, and power constraints of a single physical device 
     (e.g., an NVIDIA H100 GPU or a Jetson Orin Nano).
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     release_year: int
     compute: ComputeCore

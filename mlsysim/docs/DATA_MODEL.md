@@ -1,9 +1,15 @@
 # MLSysSim Data Model
 
-Six **zoos** (typed registries) plus support layers. Book LEGO cells and
+Eight **zoos** (typed registries) plus support layers. Book LEGO cells and
 tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
-`core/constants.py` is a retired compatibility re-export for units; physics
-constants live in `physics/constants.py`, and domain values live in registries.
+Measurement units live in `core/units.py`, physical constants in
+`physics/constants.py`, and domain values in registries; the former
+`core/constants.py` shim is deleted (no-backward-compat policy).
+
+This document is the *registry-level* view. The *runtime* view — how workloads,
+hardware, infrastructure, and systems feed the solver layer — is the 5-layer
+model in [architecture.qmd](architecture.qmd): the zoos below are the registries
+that populate Layers A–D of that stack.
 
 ## Zoos
 
@@ -39,10 +45,12 @@ validated before they reach solver equations.
 - **Explicit units are required for physical quantities.** A capacity must be
   written as `80 GB` or `80 GiB`, not `80`. A model size must be bytes, a power
   value must be watts, and a latency value must be time.
-- **Dimensionless aliases are still semantically distinct.** Pint models bytes,
-  FLOPs, counts, parameters, and dollars as dimensionless units. MLSysIM adds
-  unit-family checks so `900 GB/s` cannot be accepted as compute throughput and
-  `1 TFLOP/s` cannot be accepted as memory bandwidth.
+- **Compute work carries its own dimension.** FLOPs (and integer-op rates such
+  as TOPS) live on a dedicated `[flop]` pint dimension (2026-06-06), so
+  `1 TFLOP/s` can never silently add to or convert into `900 GB/s` — pint
+  itself raises `DimensionalityError`. Bytes, counts, parameters, and dollars
+  remain dimensionless aliases, and MLSysIM's unit-family checks keep those
+  semantically distinct at every schema boundary.
 - **Precision names are closed vocabulary.** Use the precision names in
   `core.units.PRECISION_MAP`; unsupported values fail instead of silently using
   FP16 storage.

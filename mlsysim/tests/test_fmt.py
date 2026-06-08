@@ -2,7 +2,7 @@
 
 import pytest
 
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 from mlsysim.core.units import GB, TB, USD, hour, kWh
 import math
 
@@ -35,6 +35,7 @@ from mlsysim.fmt import (
     fmt_magnitude,
     fmt_flop_rate,
     fmt_flops,
+    fmt_length,
     fmt_ops_rate,
     fmt_water,
     fmt_water_rate,
@@ -50,6 +51,7 @@ from mlsysim.fmt import (
     fmt_time,
     fmt_time_range,
     fmt_tokens,
+    fmt_unit,
     fmt_usd,
     fmt_usd_range,
     fmt_val,
@@ -1020,6 +1022,7 @@ class TestDomainFormatters:
         assert fmt_rate(12, "cameras/store", precision=0, commas=False) == "12 cameras/store"
         assert fmt_rate(3, "boards/store", precision=0, commas=False) == "3 boards/store"
         assert fmt_rate(1000, "cases/day", precision=0, commas=True) == "1,000 cases/day"
+        assert fmt_rate(120, "km/h", precision=0, commas=False) == "120 km/h"
 
     def test_small_physical_label_helpers(self):
         from mlsysim.core.units import second
@@ -1127,3 +1130,144 @@ class TestDomainFormatters:
             fmt_usd_range(10_000, 30_000, scale="K", commas=False, repeat_symbol=False)
             == "\\$10K\u201330K"
         )
+
+
+class TestAuditRepairs:
+    """Focused regressions for the 2026-06 verified audit findings.
+
+    Five findings: fmt_int silent zero + banker's rounding, the auto-scale
+    1000-mantissa boundary, fmt_unit/fmt_qty label divergence, fmt_pp
+    singular grammar on negatives, and fmt_usd negative sign placement.
+    """
+
+    # --- Finding 1: fmt_int silent zero + round-half-away-from-zero --------
+
+    def test_fmt_int_rejects_nonzero_values_that_round_to_zero(self):
+        with pytest.raises(ValueError, match="rounds to '0'"):
+            fmt_int(0.4)
+        with pytest.raises(ValueError, match="rounds to '0'"):
+            fmt_int(-0.4)
+        with pytest.raises(ValueError, match="rounds to '0'"):
+            fmt_int(0.49999)
+
+    def test_fmt_int_true_zero_still_renders(self):
+        assert fmt_int(0) == "0"
+        assert fmt_int(0.0) == "0"
+
+    def test_fmt_int_rounds_half_away_from_zero(self):
+        # Python round() is banker's (2.5 -> 2, 3.5 -> 4); fmt_int must round
+        # adjacent halves consistently away from zero.
+        assert fmt_int(2.5, commas=False) == "3"
+        assert fmt_int(3.5, commas=False) == "4"
+        assert fmt_int(-2.5, commas=False) == "-3"
+        assert fmt_int(-3.5, commas=False) == "-4"
+        assert fmt_int(0.5, commas=False) == "1"
+        assert fmt_int(-0.5, commas=False) == "-1"
+
+    def test_fmt_int_still_absorbs_float_noise(self):
+        assert fmt_int(7.9999999999, commas=False) == "8"
+        assert fmt_int(362507.545, commas=True) == "362,508"
+
+    def test_fmt_int_keeps_commas_and_markers(self):
+        assert fmt_int(1500.5, commas=True) == "1,501"
+        assert fmt_int(80.2, commas=False, approx=True, suffix=" GB") == "~80 GB"
+
+    # --- Finding 2: auto-scale boundary promotion (M -> B -> T) ------------
+
+    def test_auto_scale_promotes_rounded_mantissa_at_boundary(self):
+        # 999,999,999 picks "M" from the raw value but ROUNDS to a 1000.0
+        # mantissa at display precision; it must promote to "1B".
+        assert fmt_params(999_999_999) == "1B"
+        assert fmt_params(999_999_999_999) == "1T"
+
+    def test_fmt_tokens_auto_scale_boundary(self):
+        from mlsysim.core.units import count
+
+        assert fmt_tokens(999_999_999 * count, scale="auto") == "1B"
+
+    def test_auto_scale_exact_boundaries_unchanged(self):
+        assert fmt_params(1_000_000_000) == "1B"
+        assert fmt_params(1_000_000_000_000) == "1T"
+
+    def test_auto_scale_below_boundary_does_not_promote(self):
+        assert fmt_params(999_400_000_000) == "999.4B"
+
+    def test_auto_scale_top_scale_keeps_value_with_commas(self):
+        # No scale above T: keep the T mantissa and group digits instead.
+        assert fmt_params(2_000_000_000_000_000) == "2,000T"
+
+    # --- Finding 3: fmt_unit routed through shared normalization -----------
+
+    def test_fmt_unit_normalizes_all_flops_rate_labels(self):
+        from mlsysim.core.units import Q_
+
+        assert fmt_unit(Q_(1, "EFLOPs/second")) == "EFLOP/s"
+        assert fmt_unit(Q_(1, "KFLOPs/second")) == "KFLOP/s"
+        assert fmt_unit(Q_(1, "TFLOPs/second")) == "TFLOP/s"
+
+    def test_fmt_unit_normalizes_bare_work_units(self):
+        from mlsysim.core.units import Q_
+
+        assert fmt_unit(Q_(1, "TFLOPs")) == "TFLOP"
+        assert fmt_unit(Q_(1, "EFLOPs")) == "EFLOP"
+
+    def test_fmt_unit_matches_fmt_qty_suffix_exactly(self):
+        from mlsysim.core.units import Q_
+
+        q = Q_(2, "EFLOPs/second")
+        qty_suffix = str(
+            fmt_qty(q, q.units, precision=0, commas=False)
+        ).split(" ", 1)[1]
+        assert str(fmt_unit(q)) == qty_suffix
+
+    def test_fmt_unit_default_and_plain_units(self):
+        from mlsysim.core.units import Q_
+
+        assert fmt_unit(80) == "-"
+        assert fmt_unit(Q_(1, "GB")) == "GB"
+        assert isinstance(fmt_unit(Q_(1, "GB")), MarkdownStr)
+
+    # --- Finding 4: fmt_pp singular grammar on negatives -------------------
+
+    def test_fmt_pp_negative_one_is_singular(self):
+        assert fmt_pp(-1) == "-1 percentage point"
+        assert fmt_pp(-1.0, precision=0) == "-1 percentage point"
+
+    def test_fmt_pp_singular_plural_agreement_unchanged(self):
+        assert fmt_pp(1.0, precision=0) == "1 percentage point"
+        assert fmt_pp(-2.0, precision=0) == "-2 percentage points"
+        assert fmt_pp(7.0) == "7 percentage points"
+        assert fmt_pp(0.9, precision=1) == "0.9 percentage points"
+
+    # --- Finding 5: fmt_usd negative sign-first rendering -------------------
+
+    def test_fmt_usd_negative_renders_sign_first(self):
+        assert fmt_usd(-500) == "-\\$500"
+        assert fmt_usd(-12345.6) == "-\\$12,346"
+
+    def test_fmt_usd_negative_with_approx(self):
+        assert fmt_usd(-500, approx=True) == "~-\\$500"
+
+    def test_fmt_usd_negative_with_scale_and_per(self):
+        assert fmt_usd(-4_600_000, precision=1, scale="M") == "-\\$4.6M"
+        assert fmt_usd(-0.09, precision=2, commas=False, per="GB") == "-\\$0.09/GB"
+        assert fmt_usd(-12_000, commas=False, scale="K", per="year") == "-\\$12K/year"
+
+    def test_fmt_usd_positive_unchanged(self):
+        assert fmt_usd(15000) == "\\$15,000"
+        assert fmt_usd(8000, approx=True, marker="*") == "~\\$8,000*"
+
+
+class TestFmtLength:
+    def test_fmt_length_meters_small_no_commas(self):
+        from mlsysim.core.units import meter
+
+        assert fmt_length(2.8 * meter, unit=meter, precision=1) == "2.8 m"
+
+    def test_fmt_length_kilometers_commas(self):
+        from mlsysim.core.units import kilometer
+
+        assert fmt_length(3600 * kilometer, unit=kilometer, precision=0) == "3,600 km"
+
+    def test_fmt_rate_kmh(self):
+        assert fmt_rate(120, "km/h", precision=0, commas=False) == "120 km/h"

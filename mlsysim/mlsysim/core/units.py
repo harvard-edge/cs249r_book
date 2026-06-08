@@ -125,7 +125,19 @@ def normalize_precision(precision: str) -> str:
 
 
 def resolve_precision(precision: str):
-    """Return ``(canonical_key, bytes_per_element)`` for a supported precision."""
+    """Return ``(canonical_key, bytes_per_element)`` for a supported precision.
+
+    The single entry point solvers use to turn a user-facing precision string
+    into a storage width. ``bytes_per_element`` is a Pint byte Quantity from
+    ``PRECISION_MAP`` — the *storage* width, not the compute format (so
+    'tf32' maps to 4 bytes and 'fp8' to 1 byte). Case-insensitive; raises
+    ``ValueError`` for unsupported formats, listing the supported keys.
+
+    Examples
+    --------
+    >>> resolve_precision("FP16")
+    ('fp16', <Quantity(2, 'byte')>)
+    """
     key = normalize_precision(precision)
     return key, PRECISION_MAP[key]
 

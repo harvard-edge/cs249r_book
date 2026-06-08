@@ -32,7 +32,7 @@ _mlsysim_project = os.path.join(_repo_root, "mlsysim")    # contains the package
 sys.path.insert(0, _mlsysim_project)
 sys.path.insert(0, _book_dir)
 
-from mlsysim.core.constants import *
+from mlsysim.core.units import *
 from mlsysim.physics import *
 from mlsysim.fmt import fmt, fmt_sci, fmt_unit
 from mlsysim import Hardware, Models, Systems, Literature, ReferenceStats
@@ -113,8 +113,11 @@ PCIE_GEN5_BW = _h100.interconnect.bandwidth
 INFINIBAND_HDR_BW = Systems.Fabrics.InfiniBand_HDR.bandwidth
 INFINIBAND_NDR_BW = Systems.Fabrics.InfiniBand_NDR.bandwidth
 
-GPT3_TRAINING_OPS = (
-    Literature.Chinchilla.ComputeConstant * _gpt3.parameters * _gpt3.training_tokens
+# Via the canonical helper so the result carries the [flop] dimension
+# (2026-06-06 dimension split: a bare params x tokens product is a count,
+# not compute work, and no longer divides by a FLOP rate).
+GPT3_TRAINING_OPS = calc_transformer_training_flops(
+    _gpt3.parameters, _gpt3.training_tokens
 )
 
 FAILURES = []
@@ -396,7 +399,8 @@ def test_energy_specs():
     # FP32 > FP16 > INT8 (energy ordering)
     fp32 = op.FlopFp32.energy.magnitude
     fp16 = op.FlopFp16.energy.magnitude
-    int8 = op.OpInt8.energy.m_as(ureg.picojoule / count)
+    # Per-op energies carry pJ/flop since the 2026-06-06 dimension split.
+    int8 = op.OpInt8.energy.m_as(ureg.picojoule / ureg.flop)
     if not (fp32 > fp16 > int8):
         FAILURES.append(f"  ✗ Energy ordering: FP32={fp32} > FP16={fp16} > INT8={int8}")
         ok = False
@@ -455,9 +459,11 @@ def test_formula_helpers():
             f"  ✗ fmt_unit() FLOP rate notation: got '{fmt_unit(A100_FLOPS_FP16_TENSOR)}', expected 'TFLOP/s'"
         )
         ok = False
-    if fmt_unit(1 * GFLOPs) != "GFLOPs":
+    # 2026-06-06 audit: fmt_unit now shares fmt_qty's label table, so bare
+    # FLOP work units render singular ('GFLOP'), matching prose suffixes.
+    if fmt_unit(1 * GFLOPs) != "GFLOP":
         FAILURES.append(
-            f"  ✗ fmt_unit() FLOP count notation: got '{fmt_unit(1 * GFLOPs)}', expected 'GFLOPs'"
+            f"  ✗ fmt_unit() FLOP count notation: got '{fmt_unit(1 * GFLOPs)}', expected 'GFLOP'"
         )
         ok = False
 

@@ -39,7 +39,7 @@ _REPLACEMENTS: list[tuple[str, str]] = [
     ("mlsysim.core.defaults.IB_NDR_LATENCY_US", "mlsysim.systems.registry.IB_NDR_LATENCY_US"),
     ("mlsysim.core.defaults.FrameworkOverhead.python_dispatch", "mlsysim.engine.calibration.KERNEL_LAUNCH_LATENCY_US"),
     ("mlsysim.core.defaults.DriftThresholds.psi_significant", "Ops.Monitoring.PsiWarnThreshold"),
-    ("mlsysim.core.defaults.KWSCaseStudy", "mlsysim.core.constants  # TODO: KWS case study registry"),
+    ("mlsysim.core.defaults.KWSCaseStudy", "mlsysim.core.units  # TODO: KWS case study registry"),
     ("e.g. mlsysim.core.defaults", "Infrastructure.Pricing / Systems.Orchestration"),
     ("defaults.RETRIEVAL_COST_GLACIER", "Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate"),
     ("defaults.PUE_LIQUID_COOLED", "Infrastructure.PUE_LIQUID_COOLED"),

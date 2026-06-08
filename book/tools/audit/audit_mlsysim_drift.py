@@ -5,7 +5,7 @@ come from mlsysim's canonical constants.
 
 Approach:
   1. Build a registry of (canonical_name, numeric_value, magnitude_tolerance)
-     from mlsysim.core.constants.
+     from mlsysim.core.units.
   2. Walk every chapter QMD's Python cells. For each numeric literal
      assignment, check if (a) the variable name resembles a canonical name
      fragment AND (b) the literal matches the canonical value (within
@@ -65,7 +65,7 @@ CANONICAL = [
     ("shared_per_sm",  228,   0.02, "Hardware.Cloud.H100.memory.shared_memory_per_sm (KiB)"),
     ("sm_count",       132,   0.02, "Hardware.Cloud.H100.compute.sm_count"),
 
-    # On-chip / off-chip latency + access energy (ns / pJ) — Hardware.Tech / core/constants.py
+    # On-chip / off-chip latency + access energy (ns / pJ) — Hardware.Tech / core/units.py
     ("hbm_latency",    300,   0.05, "Hardware.Tech.Memory.DRAM.latency (ns)"),
     ("hbm_energy",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
     ("hbm_access",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
@@ -90,10 +90,25 @@ CANONICAL = [
     ("llama2_70b_heads",    64, 0.05, "Models.Language.Llama2_70B.heads"),
     ("llama2_70b_kv_heads", 8,  0.05, "Models.Language.Llama2_70B.kv_heads"),
     ("gpt2_params_m",       1500, 0.05, "Models.Language.GPT2.parameters (in M)"),
+    ("mobilenetv2_alpha10_params", 3504872, 0.001, "Models.Vision.MobileNetV2.parameters"),
+    ("mobilenetv2_alpha05_total_params", 1968680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5.parameters"),
+    ("mobilenetv2_alpha05_feature_params", 687680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters"),
+
+    # Case-study reference anchors
+    ("accel_only_accuracy", 0.57, 0.001, "ReferenceStats.OuraSleepStudy.AccelOnlyAccuracy"),
+    ("enhanced_accuracy",   0.79, 0.001, "ReferenceStats.OuraSleepStudy.EnhancedAccuracy"),
+    ("scorer_agreement_low", 0.82, 0.001, "ReferenceStats.OuraSleepStudy.PsgScorerAgreementLow"),
+    ("scorer_agreement_high", 0.83, 0.001, "ReferenceStats.OuraSleepStudy.PsgScorerAgreementHigh"),
 
     # GPT-3 training (energy + ops)
     ("gpt3_train_energy_mwh", 1287, 0.05, "Models.Language.GPT3.training_energy_mwh"),
     ("gpt3_train_ops",       3.14e23, 0.05, "Models.Language.GPT3.training_ops"),
+
+    # GPT-2 training anchors (2026-06-07: moved out of training.qmd literals)
+    ("gpt2_total_flops",     1.5e21, 0.05, "Models.Language.GPT2.training_ops"),
+    ("gpt2_fwd_flops",       3e9,    0.02, "Models.Language.GPT2.inference_flops"),
+    ("gpt2_cost_2019",       50000,  0.05, "ReferenceStats.TrainingCostAnchors.Gpt2Cost2019"),
+    ("gpt4_cost_est",        100e6,  0.05, "ReferenceStats.TrainingCostAnchors.Gpt4CostEstimate"),
 
     # Interconnect bandwidth (GB/s)
     ("pcie_gen4_gb",   32,    0.05, "Hardware.Cloud.A100.interconnect.bandwidth (x16)"),

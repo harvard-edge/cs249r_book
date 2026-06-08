@@ -12,6 +12,10 @@ Scalar = Union[int, float]
 
 
 class ProvenanceKind(str, Enum):
+    """How a registry value is known. Evidence-backed kinds (datasheet,
+    literature, industry_report) require a URL; estimate/derived require
+    explanatory notes (enforced in ``Provenance``)."""
+
     DATASHEET = "datasheet"
     LITERATURE = "literature"
     INDUSTRY_REPORT = "industry_report"
@@ -65,6 +69,17 @@ class Sourced(float):
     """
     Scalar with mandatory ``Provenance``. Subclasses ``float`` so notebooks and
     generated calculations can divide and format values without extra coercion.
+
+    .. warning:: Provenance does NOT survive arithmetic.
+        Any operation on a ``Sourced`` (``x * 2``, ``x / y``, ``-x``,
+        ``round(x)`` ...) returns a **plain float** — Python numeric dunders
+        construct ``float`` results, and nothing re-attaches
+        ``.provenance``/``.name``/``.description``. (``copy.copy`` raises
+        ``TypeError`` because ``__new__`` requires a provenance argument.)
+        The audit trail therefore lives only on the registry leaf value
+        itself. Derived quantities that need their own audit trail must be
+        wrapped explicitly with
+        ``sourced(derived_value, Provenance(kind=DERIVED, ...))``.
     """
 
     def __new__(
@@ -134,7 +149,17 @@ def sourced_qty(quantity, provenance: Provenance, *, name: str = "", description
     """Attach provenance to a unit-bearing pint Quantity (the Quantity analogue of
     ``sourced``). The Quantity is returned unchanged for arithmetic/``.m_as`` use, with
     ``.provenance``/``.name``/``.description`` attached for the audit trail. Use for
-    registry reference values that carry units (e.g. data rates, latencies, energies)."""
+    registry reference values that carry units (e.g. data rates, latencies, energies).
+
+    .. warning:: The attached attributes do NOT survive ``.to()``, arithmetic,
+        or copying. They are set on this one Quantity *instance*; pint builds
+        fresh Quantity objects for every conversion and operation
+        (``q.to('ms')``, ``q * 2``, ``q + other``, ``copy.copy(q)`` ...), and
+        those results carry no ``.provenance``/``.name``/``.description``.
+        Read provenance off the registry leaf before transforming the value,
+        and re-attach explicitly (kind=DERIVED) if a derived quantity needs
+        its own audit trail.
+    """
     quantity.provenance = provenance
     quantity.name = name
     quantity.description = description
@@ -142,9 +167,14 @@ def sourced_qty(quantity, provenance: Provenance, *, name: str = "", description
 
 
 def scalar_value(x: Scalar | Sourced) -> float:
-    """Plain float for arithmetic in generated calculations."""
-    if isinstance(x, Sourced):
-        return float(x)
+    """Coerce a scalar (plain or ``Sourced``) to a plain ``float``.
+
+    ``Sourced`` already subclasses ``float``, so ``float(x)`` handles both
+    cases identically; this helper exists so call sites in generated
+    calculations can state the intent ("drop provenance, keep the number")
+    explicitly. Note that the returned float carries no ``.provenance`` —
+    see the ``Sourced`` docstring for how provenance is lost in arithmetic.
+    """
     return float(x)
 
 

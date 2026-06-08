@@ -13,11 +13,15 @@ author, optionally guided by a /layout-fix skill.
 """
 
 import argparse
+import csv
+import json
 import re
+import shutil
+import subprocess
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -39,6 +43,9 @@ LEFT_MARGIN_RIGHT_FRAC = 0.22
 RIGHT_MARGIN_LEFT_FRAC = 0.78
 # Margin material alternates sides in the bound PDF: verso pages use the left
 # band and recto pages use the right band.
+
+PDF_BODY_WIDTH_PT = 8.0 * 72.0 - (0.875 + 1.75) * 72.0
+TABLE_MARKER_RE = re.compile(r"\b(?P<idx>\d{3})\s+(?P<label>tbl-[A-Za-z0-9_-]+)\b")
 
 
 @dataclass
@@ -91,6 +98,46 @@ class CollisionFinding:
     band: str                     # "header" or "footer"
     y: float                      # top coordinate of the colliding text line
     snippet: str                  # colliding line text
+
+
+@dataclass
+class TableAuditEntry:
+    """One source table included in a table-only PDF audit."""
+    index: int
+    label: str
+    caption: str
+    source_file: str
+    source_line: int
+    qmd_path: Path
+    table_markdown: str
+    caption_markdown: str
+    columns: int
+    rows: int
+    max_cell_chars: int
+    has_colwidths: bool
+    colwidths: str = ""
+    rendered_sheet: int = 0
+    rendered_width_pt: float = 0.0
+    rendered_width_frac: float = 0.0
+    warnings: List[str] = field(default_factory=list)
+
+    def to_report_dict(self) -> Dict[str, Any]:
+        return {
+            "index": self.index,
+            "label": self.label,
+            "source_file": self.source_file,
+            "source_line": self.source_line,
+            "caption": self.caption,
+            "columns": self.columns,
+            "rows": self.rows,
+            "max_cell_chars": self.max_cell_chars,
+            "has_colwidths": self.has_colwidths,
+            "colwidths": self.colwidths,
+            "rendered_sheet": self.rendered_sheet,
+            "rendered_width_pt": round(self.rendered_width_pt, 1),
+            "rendered_width_frac": round(self.rendered_width_frac, 3),
+            "warnings": self.warnings,
+        }
 
 
 class LayoutCommand:
@@ -216,6 +263,81 @@ class LayoutCommand:
                  "section,snippet,related.",
         )
 
+        tables = sub.add_parser(
+            "tables",
+            help="Render a table-only PDF audit for a volume or chapter.",
+        )
+        vol_group = tables.add_mutually_exclusive_group(required=True)
+        vol_group.add_argument(
+            "--vol1",
+            dest="volume",
+            action="store_const",
+            const="vol1",
+            help="Audit Volume I tables.",
+        )
+        vol_group.add_argument(
+            "--vol2",
+            dest="volume",
+            action="store_const",
+            const="vol2",
+            help="Audit Volume II tables.",
+        )
+        tables.add_argument(
+            "--chapter",
+            type=str,
+            default="",
+            help="Only include these comma-separated chapter stems/slugs.",
+        )
+        tables.add_argument(
+            "--limit",
+            type=int,
+            default=0,
+            help="Only include the first N extracted tables (0 = all).",
+        )
+        tables.add_argument(
+            "--min-width",
+            type=float,
+            default=0.68,
+            help="Advisory warning threshold for rendered table width as a "
+                 "fraction of the main text block (default 0.68).",
+        )
+        tables.add_argument(
+            "--fail-under",
+            type=float,
+            default=0.0,
+            help="Exit non-zero when any measured table renders below this "
+                 "width fraction. Default 0 keeps the audit advisory.",
+        )
+        tables.add_argument(
+            "--no-render",
+            action="store_true",
+            help="Extract tables and write tables.qmd/json/csv without "
+                 "running Quarto.",
+        )
+        tables.add_argument(
+            "--no-contact-sheets",
+            action="store_true",
+            help="Skip PNG contact sheet generation after rendering.",
+        )
+        tables.add_argument(
+            "--contact-cols",
+            type=int,
+            default=3,
+            help="Contact-sheet thumbnail columns (default 3).",
+        )
+        tables.add_argument(
+            "--contact-rows",
+            type=int,
+            default=4,
+            help="Contact-sheet thumbnail rows (default 4).",
+        )
+        tables.add_argument(
+            "--dpi",
+            type=int,
+            default=110,
+            help="PDF rasterization DPI for contact sheets (default 110).",
+        )
+
         if not args:
             parser.print_help()
             return False
@@ -251,9 +373,650 @@ class LayoutCommand:
                 csv=opts.csv,
                 chapter_filter=self._parse_chapter_filter(opts.chapter),
             )
+        if opts.subcommand == "tables":
+            return self._tables(
+                opts.volume,
+                chapter_filter=self._parse_chapter_filter(opts.chapter),
+                limit=opts.limit,
+                min_width=opts.min_width,
+                fail_under=opts.fail_under,
+                render=not opts.no_render,
+                contact_sheets=not opts.no_contact_sheets,
+                contact_cols=max(1, opts.contact_cols),
+                contact_rows=max(1, opts.contact_rows),
+                dpi=max(36, opts.dpi),
+            )
 
         parser.print_help()
         return False
+
+    # ------------------------------------------------------------------
+    # tables
+    # ------------------------------------------------------------------
+
+    def _tables(
+        self,
+        volume: str,
+        chapter_filter: Optional[List[str]] = None,
+        limit: int = 0,
+        min_width: float = 0.68,
+        fail_under: float = 0.0,
+        render: bool = True,
+        contact_sheets: bool = True,
+        contact_cols: int = 3,
+        contact_rows: int = 4,
+        dpi: int = 110,
+    ) -> bool:
+        """Build a table-only PDF audit using the production PDF geometry."""
+        repo_root = self._repo_root()
+        out_dir = repo_root / "book" / ".layout" / "tables" / volume
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        qmd_files = self._table_source_files(volume, chapter_filter)
+        if not qmd_files:
+            console.print(
+                f"[red]No QMD files found for {volume}"
+                f"{' / ' + ','.join(chapter_filter or []) if chapter_filter else ''}.[/red]"
+            )
+            return False
+
+        entries: List[TableAuditEntry] = []
+        for qmd in qmd_files:
+            entries.extend(self._extract_pipe_tables(qmd))
+
+        if limit > 0:
+            entries = entries[:limit]
+        for i, entry in enumerate(entries, start=1):
+            entry.index = i
+
+        if not entries:
+            console.print("[yellow]No captioned pipe tables found.[/yellow]")
+            return False
+
+        qmd_path = out_dir / "tables.qmd"
+        pdf_path = qmd_path.with_suffix(".pdf")
+        json_path = out_dir / "tables.json"
+        csv_path = out_dir / "tables.csv"
+        render_log = out_dir / "quarto-render.log"
+
+        self._write_table_audit_qmd(qmd_path, entries, volume)
+        console.print(
+            f"[bold blue]Extracted[/bold blue] {len(entries)} table"
+            f"{'s' if len(entries) != 1 else ''} from {len(qmd_files)} file"
+            f"{'s' if len(qmd_files) != 1 else ''}."
+        )
+        console.print(f"[dim]Audit source:[/dim] {qmd_path}")
+
+        render_ok = True
+        overfull_count = 0
+        if render:
+            render_ok = self._render_table_audit_pdf(qmd_path, render_log)
+            if not render_ok:
+                console.print(f"[red]Render failed.[/red] See {render_log}")
+                return False
+            overfull_count = self._count_overfull_hboxes(qmd_path.with_suffix(".log"))
+            if pdf_path.exists():
+                self._measure_table_pdf(pdf_path, entries, min_width=min_width)
+                if contact_sheets:
+                    sheets = self._make_table_contact_sheets(
+                        pdf_path,
+                        out_dir / "contact-sheets",
+                        cols=contact_cols,
+                        rows=contact_rows,
+                        dpi=dpi,
+                    )
+                    if sheets:
+                        console.print("[dim]Contact sheets:[/dim]")
+                        for sheet in sheets:
+                            console.print(f"  {sheet}")
+            else:
+                console.print(f"[red]Expected PDF not found:[/red] {pdf_path}")
+                return False
+        else:
+            console.print("[yellow]Skipped render (--no-render).[/yellow]")
+
+        self._write_table_reports(entries, json_path, csv_path)
+        self._render_table_summary(
+            entries,
+            pdf_path if pdf_path.exists() else None,
+            json_path,
+            csv_path,
+            min_width=min_width,
+            overfull_count=overfull_count,
+            rendered=render,
+        )
+
+        if fail_under > 0:
+            offenders = [
+                e for e in entries
+                if e.rendered_width_frac and e.rendered_width_frac < fail_under
+            ]
+            if offenders:
+                console.print(
+                    f"[red]✗ {len(offenders)} table"
+                    f"{'s' if len(offenders) != 1 else ''} rendered below "
+                    f"--fail-under {fail_under:.2f}[/red]"
+                )
+                return False
+        return render_ok
+
+    def _repo_root(self) -> Path:
+        root = Path(self.config_manager.root_dir).resolve()
+        if (root / "book" / "quarto").is_dir():
+            return root
+        if (root / "quarto").is_dir():
+            return root.parent
+        return root
+
+    def _table_source_files(
+        self,
+        volume: str,
+        chapter_filter: Optional[List[str]] = None,
+    ) -> List[Path]:
+        if chapter_filter:
+            out = []
+            for raw in chapter_filter:
+                spec = raw if raw.startswith(("vol1/", "vol2/")) else f"{volume}/{raw}"
+                qmd = self.chapter_discovery.find_chapter_file(
+                    spec,
+                    allow_fuzzy=True,
+                )
+                if qmd is None:
+                    console.print(f"[yellow]Could not resolve chapter:[/yellow] {raw}")
+                    continue
+                out.append(qmd)
+            return self._dedupe_paths(out)
+
+        config_path = (
+            self.config_manager.book_dir
+            / "config"
+            / f"_quarto-pdf-{volume}.yml"
+        )
+        ordered: List[Path] = []
+        if config_path.exists():
+            try:
+                import yaml  # type: ignore
+
+                raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                book = raw.get("book", {})
+                for section in ("chapters", "appendices"):
+                    for entry in book.get(section, []) or []:
+                        path_str = entry.get("file", "") if isinstance(entry, dict) else entry
+                        if not isinstance(path_str, str) or not path_str.endswith(".qmd"):
+                            continue
+                        path = (self.config_manager.book_dir / path_str).resolve()
+                        if path.name in {"index.qmd", "references.qmd"}:
+                            continue
+                        if path.exists():
+                            ordered.append(path)
+            except Exception as exc:
+                console.print(
+                    f"[yellow]Could not parse {config_path.name}: {exc}[/yellow]"
+                )
+
+        # Include any source file under the volume that is not listed in the
+        # PDF config, so audit coverage remains complete during chapter moves.
+        volume_dir = self.config_manager.book_dir / "contents" / volume
+        if volume_dir.exists():
+            ordered.extend(sorted(volume_dir.rglob("*.qmd")))
+        return self._dedupe_paths(ordered)
+
+    @staticmethod
+    def _dedupe_paths(paths: List[Path]) -> List[Path]:
+        seen = set()
+        out = []
+        for path in paths:
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            out.append(resolved)
+        return out
+
+    def _extract_pipe_tables(self, qmd_path: Path) -> List[TableAuditEntry]:
+        try:
+            lines = qmd_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+
+        entries: List[TableAuditEntry] = []
+        rel = self._source_rel(qmd_path)
+        i = 0
+        while i < len(lines) - 1:
+            if not self._is_pipe_table_start(lines, i):
+                i += 1
+                continue
+
+            start = i
+            end = i
+            while end < len(lines) and lines[end].lstrip().startswith("|"):
+                end += 1
+
+            caption_idx = end
+            while caption_idx < len(lines) and not lines[caption_idx].strip():
+                caption_idx += 1
+            if caption_idx >= len(lines):
+                i = end
+                continue
+
+            caption_line = lines[caption_idx].strip()
+            if not caption_line.startswith(":") or "#tbl-" not in caption_line:
+                i = end
+                continue
+
+            table_lines = lines[start:end]
+            label = self._table_label_from_caption(caption_line)
+            if not label:
+                i = caption_idx + 1
+                continue
+
+            columns = self._pipe_column_count(table_lines[1])
+            rows = max(0, len(table_lines) - 2)
+            cells = self._pipe_table_cells(table_lines)
+            max_cell_chars = max((len(c) for c in cells), default=0)
+            colwidths = self._table_colwidths_from_caption(caption_line)
+            caption_text = self._caption_text(caption_line)
+
+            entries.append(TableAuditEntry(
+                index=0,
+                label=label,
+                caption=caption_text,
+                source_file=rel,
+                source_line=caption_idx + 1,
+                qmd_path=qmd_path,
+                table_markdown="\n".join(table_lines),
+                caption_markdown=caption_line,
+                columns=columns,
+                rows=rows,
+                max_cell_chars=max_cell_chars,
+                has_colwidths=bool(colwidths),
+                colwidths=colwidths,
+                warnings=self._static_table_warnings(
+                    columns,
+                    rows,
+                    max_cell_chars,
+                    bool(colwidths),
+                ),
+            ))
+            i = caption_idx + 1
+        return entries
+
+    def _source_rel(self, qmd_path: Path) -> str:
+        try:
+            return str(qmd_path.relative_to(self.config_manager.book_dir))
+        except ValueError:
+            try:
+                return str(qmd_path.relative_to(self._repo_root()))
+            except ValueError:
+                return str(qmd_path)
+
+    @classmethod
+    def _is_pipe_table_start(cls, lines: List[str], idx: int) -> bool:
+        return (
+            idx + 1 < len(lines)
+            and lines[idx].lstrip().startswith("|")
+            and cls._is_pipe_separator(lines[idx + 1])
+        )
+
+    @staticmethod
+    def _is_pipe_separator(line: str) -> bool:
+        stripped = line.strip()
+        if "|" not in stripped or "-" not in stripped:
+            return False
+        stripped = stripped.strip("|").strip()
+        if not stripped:
+            return False
+        cells = [cell.strip() for cell in stripped.split("|")]
+        return all(cell and set(cell) <= {"-", ":", " "} for cell in cells)
+
+    @staticmethod
+    def _pipe_column_count(separator_line: str) -> int:
+        return len(separator_line.strip().strip("|").split("|"))
+
+    @staticmethod
+    def _pipe_table_cells(table_lines: List[str]) -> List[str]:
+        cells: List[str] = []
+        for line in table_lines:
+            if LayoutCommand._is_pipe_separator(line):
+                continue
+            for cell in line.strip().strip("|").split("|"):
+                text = re.sub(r"\s+", " ", cell).strip()
+                text = re.sub(r"[*_`$\\{}[\]()<>&#]", "", text)
+                if text:
+                    cells.append(text)
+        return cells
+
+    @staticmethod
+    def _table_label_from_caption(caption_line: str) -> str:
+        match = re.search(r"\{[^}]*#(tbl-[A-Za-z0-9_-]+)[^}]*\}", caption_line)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _table_colwidths_from_caption(caption_line: str) -> str:
+        match = re.search(r'tbl-colwidths=(["\'])(.*?)\1', caption_line)
+        return match.group(2) if match else ""
+
+    @staticmethod
+    def _caption_text(caption_line: str) -> str:
+        text = caption_line.lstrip(":").strip()
+        text = re.sub(r"\s*\{[^}]*#tbl-[^}]*\}\s*$", "", text).strip()
+        text = re.sub(r"\s+", " ", text)
+        return text
+
+    @staticmethod
+    def _static_table_warnings(
+        columns: int,
+        rows: int,
+        max_cell_chars: int,
+        has_colwidths: bool,
+    ) -> List[str]:
+        warnings: List[str] = []
+        if columns >= 4 and rows >= 4 and max_cell_chars >= 36 and not has_colwidths:
+            warnings.append("wide-dense-table-without-colwidths")
+        if columns <= 2 and rows <= 5 and has_colwidths:
+            warnings.append("simple-table-has-colwidths-review-necessity")
+        if columns >= 5 and not has_colwidths:
+            warnings.append("many-columns-without-colwidths")
+        return warnings
+
+    def _write_table_audit_qmd(
+        self,
+        qmd_path: Path,
+        entries: List[TableAuditEntry],
+        volume: str,
+    ) -> None:
+        theme = (self.config_manager.book_dir / "tex" / f"theme-colors-{volume}.tex").resolve()
+        header = (self.config_manager.book_dir / "tex" / "header-includes.tex").resolve()
+        bib = (
+            self.config_manager.book_dir
+            / "contents"
+            / volume
+            / "backmatter"
+            / "references.bib"
+        ).resolve()
+
+        lines = [
+            "---",
+            "format:",
+            "  pdf:",
+            "    documentclass: scrbook",
+            "    classoption:",
+            "      - twoside",
+            "    pdf-engine: lualatex",
+            "    keep-tex: true",
+            "    number-sections: false",
+            "    include-in-header:",
+            f'      - file: "{theme}"',
+            f'      - file: "{header}"',
+            "execute:",
+            "  enabled: false",
+            "citation: true",
+            "suppress-bibliography: true",
+        ]
+        if bib.exists():
+            lines.extend(["bibliography:", f'  - "{bib}"'])
+        lines.extend([
+            "---",
+            "",
+            "\\pagestyle{empty}",
+            "",
+            f"`MLSysBook {volume.upper()} Table Layout Audit`",
+            "",
+        ])
+
+        for entry in entries:
+            if entry.index > 1:
+                lines.extend(["\\clearpage", ""])
+            lines.extend([
+                f"`{entry.index:03d} {entry.label}`",
+                "",
+                f"`{entry.source_file}:{entry.source_line}`",
+                "",
+                entry.table_markdown,
+                "",
+                entry.caption_markdown,
+                "",
+            ])
+
+        qmd_path.write_text("\n".join(lines), encoding="utf-8")
+
+    def _render_table_audit_pdf(self, qmd_path: Path, render_log: Path) -> bool:
+        if shutil.which("quarto") is None:
+            console.print("[red]quarto not found on PATH.[/red]")
+            return False
+        console.print("[bold blue]Rendering table-only PDF[/bold blue] ...")
+        proc = subprocess.run(
+            ["quarto", "render", str(qmd_path), "--to", "pdf"],
+            cwd=str(self._repo_root()),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        render_log.write_text(proc.stdout or "", encoding="utf-8")
+        if proc.returncode != 0:
+            tail = "\n".join((proc.stdout or "").splitlines()[-20:])
+            if tail:
+                console.print(tail)
+            return False
+        return True
+
+    @staticmethod
+    def _count_overfull_hboxes(log_path: Path) -> int:
+        if not log_path.exists():
+            return 0
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return 0
+        return len(re.findall(r"Overfull \\hbox", text))
+
+    def _measure_table_pdf(
+        self,
+        pdf_path: Path,
+        entries: List[TableAuditEntry],
+        min_width: float,
+    ) -> None:
+        try:
+            import pdfplumber  # type: ignore
+        except ImportError:
+            console.print("[yellow]pdfplumber unavailable; skipping width metrics.[/yellow]")
+            return
+
+        by_index = {entry.index: entry for entry in entries}
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            for page_idx, page in enumerate(pdf.pages, start=1):
+                text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+                marker = TABLE_MARKER_RE.search(text[:600])
+                if not marker:
+                    continue
+                entry = by_index.get(int(marker.group("idx")))
+                if entry is None:
+                    continue
+                entry.warnings = [
+                    warning for warning in entry.warnings
+                    if warning == "simple-table-has-colwidths-review-necessity"
+                ]
+                width = self._page_table_rule_width(page)
+                if width <= 0:
+                    width = self._page_table_text_width(page)
+                entry.rendered_sheet = page_idx
+                entry.rendered_width_pt = width
+                if width > 0:
+                    entry.rendered_width_frac = width / PDF_BODY_WIDTH_PT
+                    if entry.rendered_width_frac < min_width:
+                        entry.warnings.append(
+                            f"narrow-render:{entry.rendered_width_frac:.2f}"
+                        )
+                    if (
+                        entry.has_colwidths
+                        and (
+                            (entry.columns <= 2 and entry.rows <= 5)
+                            or (entry.columns <= 3 and entry.rows <= 3)
+                        )
+                    ):
+                        entry.warnings.append("colwidths-may-be-unnecessary")
+
+    @staticmethod
+    def _page_table_rule_width(page) -> float:
+        widths = []
+        for line in list(getattr(page, "lines", []) or []):
+            x0, x1 = line.get("x0", 0.0), line.get("x1", 0.0)
+            y0, y1 = line.get("y0", 0.0), line.get("y1", 0.0)
+            top = line.get("top", 0.0)
+            width = x1 - x0
+            if abs(y1 - y0) <= 0.5 and width >= 30 and top >= 95:
+                widths.append(width)
+        return max(widths, default=0.0)
+
+    @staticmethod
+    def _page_table_text_width(page) -> float:
+        chars = [
+            c for c in getattr(page, "chars", []) or []
+            if c.get("top", 0) >= 115 and c.get("bottom", 0) <= page.height * 0.94
+        ]
+        if not chars:
+            return 0.0
+        return max(c["x1"] for c in chars) - min(c["x0"] for c in chars)
+
+    def _make_table_contact_sheets(
+        self,
+        pdf_path: Path,
+        out_dir: Path,
+        cols: int = 3,
+        rows: int = 4,
+        dpi: int = 110,
+    ) -> List[Path]:
+        try:
+            import pypdfium2 as pdfium  # type: ignore
+            from PIL import Image, ImageDraw  # type: ignore
+        except ImportError:
+            console.print(
+                "[yellow]pypdfium2/Pillow unavailable; skipping contact sheets.[/yellow]"
+            )
+            return []
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for old in out_dir.glob("sheet-*.png"):
+            old.unlink()
+
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        per_sheet = cols * rows
+        cell_w, cell_h = 360, 470
+        pad = 16
+        label_h = 18
+        sheet_w = cols * cell_w + (cols + 1) * pad
+        sheet_h = rows * (cell_h + label_h) + (rows + 1) * pad
+        sheets: List[Path] = []
+        sheet_img = None
+        draw = None
+
+        for page_idx in range(len(pdf)):
+            slot = page_idx % per_sheet
+            if slot == 0:
+                sheet_img = Image.new("RGB", (sheet_w, sheet_h), "white")
+                draw = ImageDraw.Draw(sheet_img)
+
+            assert sheet_img is not None and draw is not None
+            page = pdf[page_idx]
+            bitmap = page.render(scale=dpi / 72.0)
+            thumb = bitmap.to_pil().convert("RGB")
+            thumb.thumbnail((cell_w, cell_h), Image.Resampling.LANCZOS)
+
+            col = slot % cols
+            row = slot // cols
+            x = pad + col * (cell_w + pad)
+            y = pad + row * (cell_h + label_h + pad)
+            draw.text((x, y), f"sheet {page_idx + 1}", fill=(80, 80, 80))
+            sheet_img.paste(thumb, (x, y + label_h))
+            page.close()
+
+            if slot == per_sheet - 1 or page_idx == len(pdf) - 1:
+                out = out_dir / f"sheet-{len(sheets) + 1:02d}.png"
+                sheet_img.save(out)
+                sheets.append(out)
+
+        pdf.close()
+        return sheets
+
+    def _write_table_reports(
+        self,
+        entries: List[TableAuditEntry],
+        json_path: Path,
+        csv_path: Path,
+    ) -> None:
+        rows = [entry.to_report_dict() for entry in entries]
+        json_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+        with csv_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "index",
+                    "label",
+                    "source_file",
+                    "source_line",
+                    "columns",
+                    "rows",
+                    "max_cell_chars",
+                    "has_colwidths",
+                    "colwidths",
+                    "rendered_sheet",
+                    "rendered_width_pt",
+                    "rendered_width_frac",
+                    "warnings",
+                    "caption",
+                ],
+            )
+            writer.writeheader()
+            for row in rows:
+                row = dict(row)
+                row["warnings"] = ";".join(row["warnings"])
+                writer.writerow(row)
+
+    def _render_table_summary(
+        self,
+        entries: List[TableAuditEntry],
+        pdf_path: Optional[Path],
+        json_path: Path,
+        csv_path: Path,
+        min_width: float,
+        overfull_count: int,
+        rendered: bool,
+    ) -> None:
+        warned = [e for e in entries if e.warnings]
+        narrow = [e for e in entries if any(w.startswith("narrow-render") for w in e.warnings)]
+        explicit = [e for e in entries if e.has_colwidths]
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("metric")
+        table.add_column("value", justify="right")
+        table.add_row("tables", str(len(entries)))
+        table.add_row("explicit tbl-colwidths", str(len(explicit)))
+        table.add_row(f"below min-width {min_width:.2f}", str(len(narrow)))
+        table.add_row("tables with warnings", str(len(warned)))
+        if rendered:
+            table.add_row("overfull hbox warnings", str(overfull_count))
+        console.print(Panel(table, title="Table Layout Audit", border_style="cyan"))
+        if pdf_path is not None:
+            console.print(f"[dim]PDF:[/dim] {pdf_path}")
+        console.print(f"[dim]JSON:[/dim] {json_path}")
+        console.print(f"[dim]CSV:[/dim] {csv_path}")
+
+        if warned:
+            console.print("[bold yellow]Top warning candidates:[/bold yellow]")
+            for entry in warned[:20]:
+                width = (
+                    f"{entry.rendered_width_frac:.2f}"
+                    if entry.rendered_width_frac
+                    else "?"
+                )
+                console.print(
+                    f"  {entry.index:03d} {entry.label} "
+                    f"[dim]{entry.source_file}:{entry.source_line} "
+                    f"width={width}[/dim] "
+                    f"{', '.join(entry.warnings)}"
+                )
+            if len(warned) > 20:
+                console.print(f"  [dim]...and {len(warned) - 20} more[/dim]")
 
     # ------------------------------------------------------------------
     # check

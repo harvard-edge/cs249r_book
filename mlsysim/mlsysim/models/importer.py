@@ -6,7 +6,7 @@ import warnings
 from typing import Optional
 import logging
 from .types import TransformerWorkload
-from ..core.constants import ureg
+from ..core.units import ureg
 
 logger = logging.getLogger(__name__)
 

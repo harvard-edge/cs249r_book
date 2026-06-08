@@ -58,7 +58,7 @@ WINDOW_LINES = 50
 MIN_CITES = 3
 
 # Reserved Quarto cross-reference prefixes — NOT citations.
-_XREF_PREFIXES = ("sec-", "fig-", "tbl-", "eq-", "lst-")
+_XREF_PREFIXES = ("sec-", "fig-", "tbl-", "eq-", "lst-", "alg-")
 
 # Any @<key> NOT escaped (no leading backslash), NOT preceded by an
 # identifier char (avoid email-like `user@host`), and NOT preceded by `!`.
@@ -99,7 +99,7 @@ def _should_skip_file(file_path: Path) -> bool:
 def _extract_citations(line: str) -> list[tuple[int, str]]:
     """Return (col, key) tuples for every citation on the line.
 
-    Filters out Quarto cross-references (@sec-, @fig-, @tbl-, @eq-, @lst-).
+    Filters out Quarto cross-references (@sec-, @fig-, @tbl-, @eq-, @lst-, @alg-).
     """
     out: list[tuple[int, str]] = []
     for m in _CITE_RE.finditer(line):

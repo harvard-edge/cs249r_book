@@ -17,7 +17,7 @@ project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 import mlsysim  # noqa: E402
-from mlsysim.core.constants import Q_  # noqa: E402
+from mlsysim.core.units import Q_  # noqa: E402
 from mlsysim.solvers import (  # noqa: E402
     DistributedModel,
     ScalingModel,

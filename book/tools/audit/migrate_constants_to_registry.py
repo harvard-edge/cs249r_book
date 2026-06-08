@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace legacy mlsysim.core.constants hardware symbols with registry paths in QMD cells."""
+"""Replace legacy mlsysim.core.units hardware symbols with registry paths in QMD cells."""
 
 from __future__ import annotations
 
