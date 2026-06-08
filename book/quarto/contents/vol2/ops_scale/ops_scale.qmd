@@ -84,13 +84,11 @@ The management layer is the fleet stack's control plane\index{Control Plane}: th
 
 ## From Single-Model to Platform Operations {#sec-ml-operations-scale-singlemodel-platform-operations-db8e}
 
-Consider a team of five engineers maintaining a single recommendation model. When the model drifts, they manually retrain it. When the API latency spikes, they manually scale the instances. Now, scale that same team to support five hundred models across dozens of product surfaces. Manual intervention is no longer merely inefficient; it is mathematically impossible. The transition from single-model to platform operations is fundamentally about replacing human-in-the-loop maintenance with automated, systemic governance.
+Consider a team of five engineers maintaining a single recommendation model. When the model drifts, they manually retrain it. When the API latency spikes, they manually scale the instances. Now, scale that same team to support five hundred models across dozens of product surfaces. Manual intervention is no longer merely inefficient; it is mathematically impossible. The transition from single-model to platform operations replaces human-in-the-loop maintenance with automated, systemic governance.
 
 @Sec-inference-scale established the distributed serving architectures that handle massive request volumes, and @sec-edge-intelligence pushed deployment to its physical limits: smartphones, microcontrollers, and federated fleets spanning billions of heterogeneous devices. The question now is what happens when organizations must sustain not one but hundreds of such systems across this entire spectrum. Managing individual models and operating enterprise-scale ML platforms are fundamentally different problems, separated by a phase transition in operational complexity. This chapter builds the infrastructure that absorbs that complexity: the fleet economics and total-cost models that justify the investment, the multi-model management, CI/CD, and monitoring systems that automate what teams once did by hand, and the platform-engineering and feature-store foundations that let hundreds of models share one coherent operational substrate.
 
-Single-model MLOps focuses on continuous integration, deployment pipelines, and monitoring for individual models. The distinct challenges that emerge when organizations deploy tens, hundreds, or thousands of models across distributed infrastructure are qualitatively different. The practices that enable a single team to develop, deploy, and maintain one model become unsustainable at scale because they fail to account for the interactions, dependencies, and coordination requirements that characterize multi-model environments.
-
-Every organization that successfully deploys machine learning at scale discovers this transition point through experience. The first few models can be managed with spreadsheets, manual deployments, and ad hoc monitoring. Each model team develops its own practices, optimized for their specific requirements. The approach works initially because the models operate independently: what happens to the recommendation system does not affect the fraud detection model.
+Single-model MLOps focuses on continuous integration, deployment pipelines, and monitoring for individual models, and every organization that scales discovers its limits through experience. The first few models can be managed with spreadsheets, manual deployments, and ad hoc monitoring, with each model team developing its own practices optimized for its specific requirements. The approach works initially because the models operate independently: what happens to the recommendation system does not affect the fraud detection model.
 
 Independence vanishes as model count grows. Models begin sharing data sources, and changes to upstream data pipelines cascade through multiple consumers. Infrastructure becomes contested: deployment of one model delays deployment of another. Monitoring dashboards multiply until no single team can observe the complete system state. On-call rotations expand from single-model responsibility to cross-model coordination that requires understanding interactions between systems developed by different teams with different assumptions.
 
@@ -98,7 +96,7 @@ Infrastructure efficiency compounds these coordination challenges. Production ML
 
 The organizational response is platform thinking. Rather than treating each model as an independent system with its own infrastructure, platforms provide shared services that amortize operational costs across the entire model portfolio. Feature stores[^fn-feature-store-skew] eliminate redundant feature computation. Unified deployment pipelines ensure consistent rollout practices. Centralized monitoring aggregates signals across models to detect system-wide issues and enable capacity planning. The challenge is designing, implementing, and operating these platforms so they scale with the portfolio rather than against it.
 
-[^fn-feature-store-skew]: **Feature Store**\index{Feature Store!training-serving skew}: A centralized repository that manages the computation, storage, and serving of ML features. The core systems problem feature stores solve is training-serving skew: when training and serving compute the same feature differently, model accuracy degrades silently because the model receives inputs it never trained on. At fleet scale, where hundreds of models share overlapping features, a single inconsistent computation path can cascade degradation across the entire portfolio.
+[^fn-feature-store-skew]: **Feature Store**\index{Feature Store!training-serving skew}: A centralized repository that manages the computation, storage, and serving of ML features. The core systems problem it solves is training-serving skew; this chapter develops that failure mode and the platform invariant that contains it in @sec-ml-operations-scale-feature-store-operations-2a36.
 
 ### The N-models problem {#sec-ml-operations-scale-nmodels-problem-fcff}
 
@@ -421,6 +419,8 @@ The economic gap explains why large technology companies have invested heavily i
 
 @Fig-platform-roi-threshold visualizes this threshold effect by plotting platform ROI as a function of model count for two platform cost levels. A \$2M/year platform breaks even at approximately 20 models, while a more expensive \$5M/year enterprise platform requires roughly 50 models to justify the investment. Beyond break-even, ROI grows linearly because each additional model contributes the same per-model savings to the numerator of @eq-platform-roi while platform costs remain essentially fixed. At 100 models, the \$2M platform delivers 5$\times$ return on investment. This linearity is both the economic argument for platform investment and the explanation for why organizations that defer platform building until they are "at scale" often find themselves paralyzed by accumulated operational debt: the break-even point arrives earlier than intuition suggests.
 
+The break-even count is not a universal constant; it moves with the two inputs the reader controls. The platform-dividend notebook above (a \$120K/month platform team saving 20 hours per model) and the worked example (a \$2M build amortized over three years, saving 30 hours per model) reach break-even at different model counts than this figure precisely because they assume different platform cost bases and different per-model savings. The figure's curves fix the platform cost at a round annual figure and assume \$100K of savings per model per year to isolate the threshold's shape; the notebook and worked example trade that roundness for explicit operating assumptions. All three obey the same @eq-platform-roi: change the numerator (savings per model) or the denominator (platform cost) and the break-even point slides, but the linear post-break-even slope does not.
+
 ::: {#fig-platform-roi-threshold fig-env="figure" fig-pos="htb" fig-cap="**The Platform ROI Threshold**: Platform return on investment as a function of model count, for two platform cost levels. A \$2M/year platform breaks even at approximately 20 models, while a \$5M/year enterprise platform requires roughly 50 models. Beyond break-even, ROI grows linearly—at 100 models, the \$2M platform delivers 5$\times$ return." fig-alt="Line chart showing platform ROI vs. model count with break-even points for two cost levels"}
 
 ```{python}
@@ -590,7 +590,7 @@ class TrainingCapacityCost:
     training_cost_m_str = fmt_usd(training_cost, precision=2, commas=False, scale="M")
 ```
 
-Capacity planning for large-scale ML is fundamentally an exercise in optimizing the economics of the GPU-hour. In the running example, a 30-day training run on a 256-node H100 cluster (`{python} TrainingCapacityCost.n_gpus_str`) at an illustrative market rate of `{python} TrainingCapacityCost.gpu_hour_rate_str` represents a direct investment of roughly `{python} TrainingCapacityCost.training_cost_m_str`. At this scale, the cost per training run $(C_{\text{run}})$ becomes a primary design lever that dictates the sizing of the entire fleet. Faster time-to-market pushes the planner toward more GPUs, but larger jobs also suffer diminishing parallel efficiency and a higher probability of hardware interruption. Total cost is therefore not merely a function of compute time; it must account for data staging, checkpointing, and the cost of recovery from interruptions (@sec-fault-tolerance-reliability).
+Capacity planning for large-scale ML is an exercise in optimizing the economics of the GPU-hour. Consider a concrete case: a 30-day training run on a 256-node H100 cluster (`{python} TrainingCapacityCost.n_gpus_str`) at an illustrative market rate of `{python} TrainingCapacityCost.gpu_hour_rate_str` represents a direct investment of roughly `{python} TrainingCapacityCost.training_cost_m_str`. At this scale, the cost per training run $(C_{\text{run}})$ becomes a primary design lever that dictates the sizing of the entire fleet. Faster time-to-market pushes the planner toward more GPUs, but larger jobs also suffer diminishing parallel efficiency and a higher probability of hardware interruption. Total cost is therefore not merely a function of compute time; it must account for data staging, checkpointing, and the cost of recovery from interruptions (@sec-fault-tolerance-reliability).
 
 The drive for efficiency forces capacity to behave like a dynamic resource rather than a static allocation. Organizations must decide when to buy additional permanent capacity and when to recover the same effective throughput through better orchestration or model optimization. The decision also has an energy dimension: powering thousands of GPUs for months consumes enough electricity that financial cost and carbon cost move together. Capacity planning therefore becomes a strategic lever that balances performance, budget, energy use, and responsible engineering in the same decision.
 
@@ -965,9 +965,9 @@ The qualitative case follows from the same fragmentation cost. Platform failures
 
 The decision to establish a platform team typically occurs when organizations recognize that the alternative, allowing fragmentation to continue, imposes costs exceeding the platform investment. This recognition often follows a significant production incident that revealed cross-model dependencies or operational gaps. The resulting economics show why platform operations become more valuable as the model fleet grows.
 
-::: {#psp-ops-scale-platform-superlinear-returns .callout-perspective title="Platform operations have superlinear returns"}
+::: {#psp-ops-scale-platform-superlinear-returns .callout-perspective title="Platform returns improve with every model added"}
 
-Platform operations provide superlinear returns on investment. As model count grows, the value of shared infrastructure increases faster than its cost, creating increasingly favorable economics for platform investments. Organizations that delay platform investment accumulate operational debt that becomes progressively more expensive to address.
+Platform economics improve monotonically with fleet size. Because @eq-platform-roi scales the numerator linearly with $N_{\text{models}}$ while platform cost stays roughly fixed, the ROI ratio rises with every model the platform serves: the per-model savings are recovered against a denominator that barely moves. The benefit is not a faster-than-linear payoff but a ratio that keeps climbing past break-even, which is why organizations that delay platform investment accumulate operational debt that becomes progressively more expensive to address as the fleet grows.
 
 :::
 
@@ -1013,7 +1013,7 @@ Consider a `{python} InfraFrontierTcoClusterRecap.frontier_params_b_str`-paramet
 
 ### Utilization as the economic invariant {#sec-ml-operations-scale-build-vs-buy}
 
-The most consequential economic question is whether the fleet can sustain enough useful load to amortize fixed capacity. Build-vs.-buy is one expression of that question, but the same invariant appears inside a deployed platform: reserved capacity, fallback pools, regional replicas, and canary headroom all become economical only when their reliability value justifies their idle cost. @Fig-tco-build-vs-buy makes the utilization dependency visible by plotting cumulative cost over time for owned and rented capacity.
+The most consequential economic question is whether the fleet can sustain enough useful load to amortize fixed capacity. Build-vs.-buy\index{Build vs. Buy} is one expression of that question, but the same invariant appears inside a deployed platform: reserved capacity, fallback pools, regional replicas, and canary headroom all become economical only when their reliability value justifies their idle cost. @Fig-tco-build-vs-buy makes the utilization dependency visible by plotting cumulative cost over time for owned and rented capacity.
 
 ```{python}
 #| echo: false
@@ -1973,7 +1973,7 @@ The example illustrates why multi-model management requires explicit dependency 
 
 The dependency graphs and ensemble architectures examined in multi-model management do not deploy themselves. Each model update must navigate the dependency web: an embedding model update might require re-evaluation of four transitive downstream components, including the business rules layer, before any component can safely reach production. This coordination challenge transforms CI/CD from a per-model concern into a platform orchestration problem. Where software CI/CD validates code in isolation, ML CI/CD at scale must validate models within their operational context, ensuring upstream changes do not break downstream consumers and that deployment order respects the dependency graph.
 
-@Sec-distributed-training-systems detailed how data, tensor, and pipeline parallelism enable training models too large for single machines, producing artifacts that require validation and deployment at scale. Continuous integration\index{Continuous Integration} and continuous deployment practices for machine learning differ fundamentally from traditional software CI/CD. While software CI/CD focuses on code correctness and deployment reliability, ML CI/CD must additionally validate data, verify model performance, and manage the complex interactions between code, data, and learned parameters. At platform scale, these challenges multiply as pipelines must coordinate across hundreds of models with varying requirements.
+@Sec-distributed-training-systems detailed how data, tensor, and pipeline parallelism enable training models too large for single machines, producing artifacts that require validation and deployment at scale. Continuous integration\index{Continuous Integration} and continuous deployment practices for machine learning differ from traditional software CI/CD along one axis: while software CI/CD focuses on code correctness and deployment reliability, ML CI/CD must additionally validate data, verify model performance, and manage the interactions between code, data, and learned parameters. At platform scale, these challenges multiply as pipelines must coordinate across hundreds of models with varying requirements.
 
 ### Training pipeline automation {#sec-ml-operations-scale-training-pipeline-automation-9da3}
 
@@ -3322,7 +3322,7 @@ The executive view tracks total ML infrastructure cost, month-over-month trend, 
 
 The key metrics for ongoing monitoring include:
 
-- **Cost per inference**\index{Cost Per Inference}: Total serving cost divided by prediction count. Track trends to detect efficiency regressions.
+- **Cost per inference**: The serving unit economic formalized as @eq-cost-per-inference in the FinOps treatment; track its trend here to detect efficiency regressions.
 - **Cost per active user**\index{Cost!per active user}: Infrastructure cost normalized by user base. Enables comparison across services with different scales.
 - **GPU utilization efficiency**\index{GPU Utilization!efficiency}: Revenue or value generated per GPU-hour. Connects infrastructure cost to business outcomes.
 - **Budget burn rate**\index{Budget!burn rate}: Current spending velocity relative to allocated budget. Enables proactive intervention before overruns.
@@ -3533,7 +3533,7 @@ Cost optimization requires granular visibility into spending because teams canno
 
 Attribution policy is an incentive design problem, not only an accounting problem. Direct metering charges teams exactly for resources consumed; it is the most accurate model but can encourage under-provisioning when teams optimize their bill instead of service health. Allocation-based attribution charges based on reserved capacity rather than actual usage, making budgets predictable while potentially hiding waste. Hybrid attribution combines a base charge for allocation with a variable charge for excess usage, balancing predictability with efficiency incentives.
 
-For serving workloads, cost per inference provides the key unit economic metric. @Eq-cost-per-inference expresses this as total serving cost divided by inference count, enabling direct comparison of model efficiency and capacity planning:
+For serving workloads, cost per inference\index{Cost Per Inference} provides the key unit economic metric. @Eq-cost-per-inference expresses this as total serving cost divided by inference count, enabling direct comparison of model efficiency and capacity planning:
 
 $$\text{Cost per inference} = \frac{\text{Total serving cost}}{\text{Total inferences served}}$$ {#eq-cost-per-inference}
 
@@ -3977,7 +3977,7 @@ That same payback logic generalizes into an optimization priority matrix. @Tbl-o
 
 TCO analysis should inform architectural choices alongside operational optimization:
 
-1. **Build vs. buy**\index{Build vs. Buy}: Platform services with usage-based pricing may have lower TCO than self-managed infrastructure despite higher unit costs, especially when iteration costs dominate.
+1. **Build vs. buy**: The utilization-driven build-vs.-buy analysis in @sec-ml-operations-scale-build-vs-buy applies per model: usage-based platform services may have lower TCO than self-managed infrastructure when a workload cannot sustain the utilization that amortizes owned capacity, especially where iteration costs dominate.
 
 2. **Model architecture selection**\index{Model Architecture Selection}: A model requiring 2$\times$ training cost but 0.5$\times$ inference cost may have lower TCO at scale where inference dominates.
 
@@ -4353,11 +4353,11 @@ At enterprise scale with thousands of features, monitoring must aggregate by lik
 
 Freshness monitoring applies the same aggregation rule to time. For `{python} FeatureStoreScale.freshness_feature_count_str` updated at different frequencies, continuous freshness checking generates substantial overhead, so efficient implementations reduce the number of checks without losing systemic signal. Sampling `{python} FeatureStoreScale.freshness_sample_pct_str` of representative entities rather than every feature value is usually enough to detect systemic freshness failures. Pipeline-level aggregation is even cheaper when one pipeline updates `{python} FeatureStoreScale.pipeline_feature_count_str`, because the pipeline update timestamp captures the freshness state of the group. Threshold stratification reserves per-feature monitoring for revenue-critical features and uses aggregated monitoring for features whose staleness has lower immediate impact. The resulting overhead scales with the number of distinct features, not the volume of feature values, so efficient implementations maintain $\mathcal{O}(F)$ overhead even when feature values scale to billions of entities.
 
-### Organizational patterns {#sec-ml-operations-scale-organizational-patterns-e2e8}
+## Organizational Patterns {#sec-ml-operations-scale-organizational-patterns-e2e8}
 
-Technical infrastructure alone is insufficient for ML operations at scale. Organizational structure determines whether platform capabilities become shared infrastructure or another bottleneck. The central question is where an organization places invariants: deployment safety, observability, compliance, cost control, and feature consistency can either be enforced once by a platform or rediscovered differently by every model team.
+Feature stores resolved who owns a shared feature; the broader question is who owns the shared platform itself. Technical infrastructure alone is insufficient for ML operations at scale: organizational structure determines whether platform capabilities become shared infrastructure or another bottleneck. The central question is where an organization places invariants. Deployment safety, observability, compliance, cost control, and feature consistency can either be enforced once by a platform team or rediscovered differently by every model team.
 
-#### Centralized platform team {#sec-ml-operations-scale-centralized-platform-team-16fc}
+### Centralized platform team {#sec-ml-operations-scale-centralized-platform-team-16fc}
 
 A centralized ML platform team maximizes consistency by building and maintaining shared infrastructure while model teams focus on model development. @Fig-ml-org-models places that pattern alongside embedded and hybrid alternatives, each trading off consistency against velocity.
 
@@ -4436,19 +4436,19 @@ Centralization works when the same operational mistakes would otherwise recur ac
 
 The same structure can become a queue. If every platform request routes through one team, model teams wait on prioritization decisions they do not control. Distance from product context can also produce abstractions that are technically elegant but poorly matched to the consuming team's constraints. Centralization is therefore strongest when common invariants dominate local variation, and weakest when model teams need rapid domain-specific changes.
 
-#### Embedded ML engineers {#sec-ml-operations-scale-embedded-ml-engineers-35e2}
+### Embedded ML engineers {#sec-ml-operations-scale-embedded-ml-engineers-35e2}
 
 The embedded pattern chooses proximity over uniformity by placing ML infrastructure expertise inside model teams, with coordination through communities of practice rather than a single reporting line. The benefit is responsiveness: the infrastructure engineer sees the team's data, model behavior, release pressure, and incident history directly, so local changes do not wait for cross-team scheduling.
 
 The cost appears later, when each team has solved deployment, monitoring, and feature management slightly differently. Fragmentation wastes engineering effort, complicates integration, and makes platform quality depend on the skill and bandwidth of whoever happens to be embedded with a given team. Embedded teams therefore work best when local speed matters more than cross-team consistency, and worst when every team is reimplementing the same platform substrate.
 
-#### Hybrid models {#sec-ml-operations-scale-hybrid-models-237b}
+### Hybrid models {#sec-ml-operations-scale-hybrid-models-237b}
 
 Most mature organizations adopt hybrid approaches because neither pure centralization nor pure embedding handles both shared infrastructure and domain-specific needs well. The core platform team owns compute, storage, networking, common training and serving systems, monitoring, security, compliance, and cost controls. Domain platform engineers then stay close to recommendation, language, vision, fraud, or search teams, where workload-specific requirements change faster than the shared substrate should.
 
 A federated version of the same idea distributes implementation work without giving up architectural control. Major contributing teams help maintain platform components, but standards, ownership boundaries, and prioritization are coordinated explicitly. This works only when governance has real authority: otherwise federation degenerates into embedding with more meetings.
 
-#### Organizational pattern selection {#sec-ml-operations-scale-organizational-pattern-selection-56a9}
+### Organizational pattern selection {#sec-ml-operations-scale-organizational-pattern-selection-56a9}
 
 The appropriate organizational pattern depends on where standardization creates more value than local autonomy. @Tbl-ops-scale-org-factors summarizes the organizational pattern decision factors\index{Organizational Pattern Decision Factors}: higher model counts, stricter regulatory requirements, and immature infrastructure favor centralized platforms, while heterogeneous model portfolios and smaller organizations may benefit from distributed expertise:
 
@@ -4502,7 +4502,7 @@ Google Vertex AI illustrates the managed-platform abstraction problem: the platf
 
 For the serving layer, Vertex AI addresses the "noisy neighbor" problem inherent in multi-tenant environments. When thousands of customers deploy models to the same underlying fleet of Tensor Processing Units (TPUs) and GPUs, resource contention can cause unpredictable latency spikes. Google solves this with a strict containerization strategy and a "prediction sidecar" architecture. Every model runs in an isolated container, but a shared sidecar proxy handles logging, monitoring, and request batching. This separation allows the platform to enforce strict resource quotas (CPU, RAM, Accelerator RAM) and provide auto-scaling that reacts to custom metrics like "request queue depth" alongside CPU load. The quantitative benefit is a more predictable latency tail; hard isolation boundaries reduce the chance that a heavy batch job from one tenant degrades the real-time inference performance of another.
 
-Vertex also tackles the feature store problem with a focus on consistency and compliance. Managed feature serving and point-in-time retrieval let training pipelines request only the feature values that existed at the timestamp of each training example. A common operational failure in ML is temporal data leakage---using feature values that were not available at prediction time. A related failure, training-serving skew, occurs when offline feature generation and online serving logic diverge; managed feature serving helps control that risk by standardizing feature definitions and serving paths. These design decisions add storage and lineage overhead, but they eliminate entire classes of silent bugs. Combined with cost and utilization controls around training and serving, managed platforms can help teams manage total cost of ownership rather than just providing raw compute.
+Vertex also tackles the feature store problem with a focus on consistency and compliance. Managed feature serving and point-in-time retrieval let training pipelines request only the feature values that existed at the timestamp of each training example. A common operational failure in ML is temporal data leakage---using feature values that were not available at prediction time. Managed feature serving also controls the training-serving skew developed in @sec-ml-operations-scale-feature-store-operations-2a36 by standardizing feature definitions and serving paths across both contexts. These design decisions add storage and lineage overhead, but they eliminate entire classes of silent bugs. Combined with cost and utilization controls around training and serving, managed platforms can help teams manage total cost of ownership rather than just providing raw compute.
 
 ### Spotify ML platform {#sec-ml-operations-scale-spotify-ml-platform}
 
@@ -4821,7 +4821,7 @@ The practitioner who internalizes this lesson gains a strategic advantage. Under
 
 ::: {.callout-takeaways title="Platforms, not pipelines"}
 
-* **Platform ROI is superlinear**: The value of shared ML infrastructure\index{ML Platform!superlinear ROI} grows faster than the model count. Organizations that defer platform investment until "at scale" often find themselves paralyzed by accumulated operational debt.
+* **Platform ROI climbs with fleet size**: The value of shared ML infrastructure\index{ML Platform!ROI scaling} scales linearly with the model count against a roughly fixed platform cost, so the ROI ratio keeps rising past break-even. Organizations that defer platform investment until "at scale" often find themselves paralyzed by accumulated operational debt.
 * **TCO drives strategy**: ML systems exhibit a four-component cost structure\index{TCO!ML cost components} (training, inference, data, iteration) that evolves with scale. Early-stage systems are iteration-dominated (optimize for velocity); production systems are inference-dominated (optimize for efficiency). Match optimization investments to the current cost structure using breakeven analysis.
 * **Management of the edge fleet**: MLOps\index{MLOps!edge fleet} extends beyond the data center. Managing edge intelligence requires handling extreme version skew (weeks-long rollouts) and Hardware-in-the-Loop (HIL) CI/CD to ensure models do not crash on diverse NPU/DSP architectures.
 * **Ensembles are the unit of management**: In production (especially recommendation), the atomic unit is rarely a single model but an ensemble\index{Model Ensemble!management unit} of 10–50 components. Management must be "dependency-aware" to prevent upstream updates from breaking downstream consumers.
