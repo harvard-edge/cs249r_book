@@ -1557,9 +1557,9 @@ The preceding sections optimized the same dense computation by moving fewer byte
 *Speculative decoding shifts decode toward the compute-bound ridge.*
 :::
 
-Speculative decoding\index{Speculative Decoding!bandwidth optimization} is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model.[^fn-speculative-decoding-pe] The performance-engineering relevance is arithmetic intensity: a single target-model forward pass can process $k$ candidate tokens for roughly the same weight-streaming cost as one token, shifting the decode operating point from the memory-bound slope toward the roofline ridge.
+Speculative decoding\index{Speculative Decoding!bandwidth optimization} is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model.[^fn-speculative-decoding-pe] The performance-engineering relevance is arithmetic intensity: a single target-model forward pass can process $K$ candidate tokens for roughly the same weight-streaming cost as one token, shifting the decode operating point from the memory-bound slope toward the roofline ridge.
 
-[^fn-speculative-decoding-pe]: **Speculative Decoding**: The draft model may produce tokens that the target model rejects, so the technique trades extra draft-model compute for reduced target-model memory bandwidth pressure. The target model's weights are loaded from HBM once to process $k$ candidate tokens, effectively increasing the arithmetic intensity of the decode phase by $k\times$ when enough tokens are accepted.
+[^fn-speculative-decoding-pe]: **Speculative Decoding**: The draft model may produce tokens that the target model rejects, so the technique trades extra draft-model compute for reduced target-model memory bandwidth pressure. The target model's weights are loaded from HBM once to process $K$ candidate tokens, effectively increasing the arithmetic intensity of the decode phase by $K\times$ when enough tokens are accepted.
 
 @Fig-speculative-decoding contrasts the two decode paths: standard decoding advances one token per sequential target-model pass, while speculative decoding lets the draft model propose a block of $K$ tokens that the target model verifies in a single parallel pass, emitting the accepted prefix together and resampling only at the first rejection.
 
@@ -1618,6 +1618,35 @@ The transformation is useful only when the draft model is accurate enough and ch
 ```
 
 :::
+
+@Algo-speculative-decoding makes the acceptance test precise: after the single target-model pass, each drafted token is accepted with probability $\min(1, p_\theta/q_\phi)$, and a rejection resamples from the normalized positive residual $(p_\theta - q_\phi)_+$, so the emitted sequence is distributed exactly as the target model would have produced unaided. That correctness guarantee is what lets speculative decoding trade draft-model compute for latency without shifting the output distribution.
+
+```pseudocode
+#| label: algo-speculative-decoding
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Speculative decoding}
+\begin{algorithmic}
+\Require target distribution $p_\theta(\cdot \mid \cdot)$; draft distribution $q_\phi(\cdot \mid \cdot)$; prefix $y_{1:t}$; draft length $K$
+\Ensure one or more new tokens distributed as $p_\theta$
+\For{$i = 1$ to $K$}
+    \State draft $\hat{y}_{t+i}$ from $q_\phi(\cdot \mid y_{1:t}, \hat{y}_{t+1:t+i-1})$
+\EndFor
+\State run $p_\theta$ once on the prefix plus all $K$ drafts to obtain target distributions for the drafted positions and final next-token position
+\For{$i = 1$ to $K$}
+    \State $a_i \gets \min\!\left(1,\frac{p_\theta(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}{q_\phi(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}\right)$
+    \State accept $\hat{y}_{t+i}$ with probability $a_i$
+    \If{$\hat{y}_{t+i}$ is rejected}
+        \State sample one corrected token from the normalized positive residual $(p_\theta-q_\phi)_+$
+        \State emit accepted draft tokens and the corrected token; discard the remaining draft; start a new round
+    \EndIf
+\EndFor
+\State if all $K$ drafts were accepted, emit them and sample one extra token from the target distribution
+\end{algorithmic}
+\end{algorithm}
+```
 
 ### Mixture of experts {#sec-performance-engineering-moe}
 
