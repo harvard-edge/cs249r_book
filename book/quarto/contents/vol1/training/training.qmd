@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does training a model cost millions while running it costs pennies?_
 
-Inference computes a single forward pass: data flows through the network, a prediction emerges. Training multiplies that cost at every level. Each example requires a forward pass plus a backward pass to compute gradients, plus an optimizer step that updates every parameter. The optimizer itself maintains momentum and variance estimates that can exceed the model's own memory footprint. Then repeat across billions of examples, for multiple epochs, across dozens of hyperparameter configurations. The result is a million-to-one asymmetry between the cost of learning and the cost of using what was learned. This asymmetry is the primary gatekeeper to AI innovation: training a model costs orders of magnitude more than running it, a gap so large that it governs who can participate at all. A research lab that trains in three days iterates through ideas ten times faster than one that takes a month, and the compounding effect of faster iteration dominates any single architectural insight. For the systems engineer, training is the phase where hardware decisions matter most, where parallelism strategies determine feasibility, and where the ML workflow's most expensive iteration loop either accelerates or stalls the entire project.
+Inference computes a single forward pass: data flows through the network, a prediction emerges. Training multiplies that cost at every level. Each example requires a forward pass plus a backward pass to compute gradients, plus an optimizer step that updates every parameter. The optimizer itself maintains momentum and variance estimates that can exceed the model's own memory footprint. Then repeat across billions of examples, for multiple epochs, across dozens of hyperparameter configurations. The result is a million-to-one asymmetry between the cost of learning and the cost of using what was learned. This asymmetry is the primary gatekeeper to AI innovation: training a model costs orders of magnitude more than running it, a gap so large that it governs who can participate at all. A research lab that trains in three days iterates through ideas ten times faster than one that takes a month, and the compounding effect of faster iteration dominates any single architectural insight. For the systems engineer, training is the phase where hardware decisions matter most, where parallelism strategies determine feasibility, and where the ML workflow's most expensive iteration loop either accelerates or stalls the entire project. Training is the great crucible of Algorithm-Machine co-design: the mathematics of optimization perfectly balanced against the physics of resource exhaustion.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -5623,6 +5623,7 @@ Not all workloads benefit equally from adding more GPUs. The relationship betwee
 # │ Plot effective throughput vs GPU count for compute-bound, balanced,
 import numpy as np
 from book.tools.figures import style as book_style
+from mlsysim.physics import calc_strong_scaling_speedup
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.0))
 
@@ -5640,14 +5641,14 @@ scenarios = [
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for sc in scenarios:
-    speedup = N / (1 + (N - 1) * sc['r'])
+    speedup = np.vectorize(calc_strong_scaling_speedup)(N, sc['r'])
     if sc['marker']:
         ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2.0, marker=sc['marker'], markersize=6)
     else:
         ax.plot(N, speedup, sc['style'], color=sc['color'], label=sc['name'], linewidth=2)
 
 ideal_speedup = N
-worst_speedup = N / (1 + (N - 1) * 0.40)
+worst_speedup = np.vectorize(calc_strong_scaling_speedup)(N, 0.40)
 ax.fill_between(N, ideal_speedup, worst_speedup, color=COLORS['RedL'], alpha=0.15)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
@@ -6363,13 +6364,15 @@ class NetworkWall:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient Size = 7 billion * 2 bytes = 14 GB
     gradient_size = model.size_in_bytes(BYTES_FP16)
+    from mlsysim.physics import calc_ring_allreduce_time, calc_ring_allreduce_data_factor
 
     # Ring AllReduce sends 2(N_GPU-1)/N_GPU copies of the gradient per worker.
-    allreduce_factor = 2 * (n_gpus - 1) / n_gpus
+    allreduce_factor = calc_ring_allreduce_data_factor(n_gpus)
     allreduce = allreduce_factor * gradient_size
 
-    # Time = Data/Bandwidth
-    time = (allreduce / network_bw).to(second)
+    # Time = Ring AllReduce formula (bandwidth-only here)
+    # Using the shared helper keeps the communication model consistent.
+    time = calc_ring_allreduce_time(gradient_size, n_gpus, network_bw, 0 * second)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_params_b_str = fmt_params(params, precision=0)

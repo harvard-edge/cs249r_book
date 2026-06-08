@@ -26,7 +26,7 @@ engine: jupyter
 
 _How do you systematically compare ML systems when hardware, models, data, and deployment conditions all interact?_
 
-Benchmarking brings together decisions already developed across hardware targeting, model compression, data selection, and deployment behavior. Each decision improved one dimension (latency, accuracy, throughput, or energy), but an ML system is the product of all these dimensions simultaneously. A pruned model runs faster on one accelerator but slower on another. A larger batch size improves accelerator utilization but violates a latency service-level agreement (SLA), the externally promised response-time target. An edge device advertises peak throughput that thermal throttling halves under sustained workloads. The challenge is not whether individual optimizations work in isolation (they do) but how to measure their combined effect under conditions that actually matter. Benchmarking is the discipline of making such comparisons systematic rather than anecdotal. It requires defining *what* to measure (accuracy, latency, throughput, energy), *at what granularity* (a single kernel, a full model, an end-to-end pipeline), and *under which conditions* (batch size, input distribution, thermal state, concurrent load). Without this structure, teams compare numbers that were never measured on the same terms, and decisions that looked sound in a spreadsheet collapse under production workloads. Those chapters optimized the model, selected the data, and matched the hardware; benchmarking is where those optimizations are validated: where claims meet evidence, and where the gap between what was promised and what will be delivered is either quantified honestly or discovered painfully in production.
+Benchmarking brings together decisions already developed across hardware targeting, model compression, data selection, and deployment behavior. Each decision improved one dimension (latency, accuracy, throughput, or energy), but an ML system is the product of all these dimensions simultaneously. A pruned model runs faster on one accelerator but slower on another. A larger batch size improves accelerator utilization but violates a latency service-level agreement (SLA), the externally promised response-time target. An edge device advertises peak throughput that thermal throttling halves under sustained workloads. The challenge is not whether individual optimizations work in isolation (they do) but how to measure their combined effect under conditions that actually matter. Benchmarking is the discipline of making such comparisons systematic rather than anecdotal. It requires defining *what* to measure (accuracy, latency, throughput, energy), *at what granularity* (a single kernel, a full model, an end-to-end pipeline), and *under which conditions* (batch size, input distribution, thermal state, concurrent load). Without this structure, teams compare numbers that were never measured on the same terms, and decisions that looked sound in a spreadsheet collapse under production workloads. Those chapters optimized the model, selected the data, and matched the hardware; benchmarking is where those optimizations are validated: where claims meet evidence, and where the gap between what was promised and what will be delivered is either quantified honestly or discovered painfully in production. Benchmarking is the final integration test of D·A·M co-design: the empirical proof of how perfectly the Data, Algorithm, and Machine were matched.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -162,6 +162,7 @@ Second, Goodhart's Law applies everywhere.[^fn-goodharts-law]\index{Goodhart's L
 # │          ComponentLatencyExample.component_speedup_mult_str,
 # │          ComponentLatencyExample.e2e_speedup_mult_str
 from mlsysim.fmt import fmt, fmt_qty, check
+from mlsysim.physics import calc_amdahls_speedup
 
 class ComponentLatencyExample:
     """A component-only speedup diluted by non-model pipeline work."""
@@ -172,8 +173,9 @@ class ComponentLatencyExample:
     component_speedup = 3
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    optimized_e2e_ms = e2e_latency_ms - model_latency_ms + (model_latency_ms / component_speedup)
-    e2e_speedup = e2e_latency_ms / optimized_e2e_ms
+    model_fraction = model_latency_ms / e2e_latency_ms
+    e2e_speedup = calc_amdahls_speedup(model_fraction, component_speedup)
+    optimized_e2e_ms = e2e_latency_ms / e2e_speedup
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(e2e_speedup < component_speedup, "End-to-end speedup must be bounded by non-model work.")
@@ -2567,6 +2569,7 @@ These component-level contributions explain why optimizing any single stage yiel
 # │          preprocess_pct_str, preprocess_fraction_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
+from mlsysim.physics import calc_amdahls_speedup
 
 class AmdahlBenchmarkCalc:
     """Amdahl ceiling: 5× inference speedup → only 1.8× end-to-end when preprocessing dominates."""
@@ -2577,13 +2580,15 @@ class AmdahlBenchmarkCalc:
     bench_inf_speedup = 5
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     bench_total_ms = bench_preprocess_ms + bench_inference_ms
+    preprocess_fraction = bench_preprocess_ms / bench_total_ms
     bench_opt_inference_ms = bench_inference_ms / bench_inf_speedup
     bench_opt_total_ms = bench_preprocess_ms + bench_opt_inference_ms
-    bench_e2e_improvement = bench_total_ms / bench_opt_total_ms
-    preprocess_fraction = bench_preprocess_ms / bench_total_ms
+    bench_e2e_improvement = calc_amdahls_speedup(1 - preprocess_fraction, bench_inf_speedup)
+    # The n->inf ceiling is exactly 1/f, matching the prose math.
     amdahl_ceiling = 1 / preprocess_fraction
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(bench_opt_inference_ms == 2.0, f"Expected optimized inference at 2 ms, got {bench_opt_inference_ms:.1f}")
+    check(abs(bench_total_ms / bench_opt_total_ms - bench_e2e_improvement) < 1e-9, "Amdahl helper must agree with the direct timing arithmetic.")
     check(bench_e2e_improvement < bench_inf_speedup, "End-to-end speedup must be below component speedup.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bench_preprocess_ms_str = fmt_time(bench_preprocess_ms, 'millisecond', precision=0, commas=False)

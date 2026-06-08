@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does infrastructure, not algorithms alone, determine who can participate in advancing machine learning at scale?_
 
-Machine learning systems have a physical reality that transcends code. While the algorithms for training large models may be public, the ability to execute them at scale is gated by the physics of infrastructure. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms are the primary bottleneck, progress can happen anywhere. At large scale, the constraint shifts toward who can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator**\index{Accelerator!fleet stack} (silicon physics), the **Node**\index{Node!fleet stack} (interconnect density), the **Rack**\index{Rack!fleet stack} (thermal management), and the **Pod**\index{Pod!fleet stack} (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a large GPU cluster represents staggering capital expenditure and megawatts of continuous power. Infrastructure becomes a participation boundary for organizations working at the largest scales. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps.
+Machine learning systems have a physical reality that transcends code. While the algorithms for training large models may be public, the ability to execute them at scale is gated by the physics of infrastructure. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms are the primary bottleneck, progress can happen anywhere. At large scale, the constraint shifts toward who can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator**\index{Accelerator!fleet stack} (silicon physics), the **Node**\index{Node!fleet stack} (interconnect density), the **Rack**\index{Rack!fleet stack} (thermal management), and the **Pod**\index{Pod!fleet stack} (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a large GPU cluster represents staggering capital expenditure and megawatts of continuous power. Infrastructure becomes a participation boundary for organizations working at the largest scales. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps. The infrastructure is the physical substrate that defines the absolute speed-of-light limits for all Compute and Communication in the Fleet.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -61,6 +61,7 @@ from mlsysim.core.units import *
 # │ Imports: mlsysim.registry, mlsysim.constants, mlsysim.book
 # │ Exports: (none)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import memory_from_params
 from mlsysim.fmt import (
     fmt,
     fmt_sci,
@@ -1457,7 +1458,7 @@ class RooflineInferenceMath:
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────
     inf_flops = 2 * params * flop / param
-    inf_weight = params * weight_bytes_per_param
+    inf_weight = memory_from_params(params, weight_bytes_per_param * byte / param)
     inf_intensity_q = inf_flops / inf_weight
     inf_intensity = inf_intensity_q.to(flop / byte).magnitude
     inf_throughput = (h100_bw * inf_intensity_q).to(TFLOP / second)
@@ -3923,6 +3924,7 @@ In multi-tenant clusters where multiple training jobs share the same physical in
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_int, fmt_time
+from mlsysim.physics import calc_mtbf_cluster, calc_young_daly_interval
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: CheckpointComputeTradeoff.frontier_params_b_str,
@@ -3934,8 +3936,6 @@ from mlsysim.fmt import fmt_int, fmt_time
 # │          CheckpointComputeTradeoff.tau_opt_s_str,
 # │          CheckpointComputeTradeoff.tau_opt_min_str,
 # │          CheckpointComputeTradeoff.overhead_pct_str
-import math
-
 class CheckpointComputeTradeoff:
     # ┌── 1. LOAD ──────────────────────────────────────────
     model = Models.Language.GPT3
@@ -3950,14 +3950,14 @@ class CheckpointComputeTradeoff:
     training_state = weights + gradients + optimizer
     t_write = (training_state / write_bw).to(second)
     t_write_value = t_write.to(second).magnitude
-    mtbf_system_s = Systems.Reliability.Gpu.mttf_hours * SEC_PER_HOUR / num_gpus
-    mtbf_system_hr = mtbf_system_s / SEC_PER_HOUR
-    tau_opt_s = math.sqrt(2 * t_write_value * mtbf_system_s)
-    overhead_pct = t_write_value / tau_opt_s * 100
+    mtbf_system_hr = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, num_gpus)
+    mtbf_system_s = mtbf_system_hr.to(second)
+    tau_opt_s = calc_young_daly_interval(t_write, mtbf_system_s)
+    overhead_pct = (t_write / tau_opt_s).to("").magnitude * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(t_write_value - 21) < 1, "Checkpoint write time should be about 21 s")
-    check(800 < tau_opt_s < 900, "Optimal checkpoint interval should be about 14 min")
+    check(800 < tau_opt_s.to(second).magnitude < 900, "Optimal checkpoint interval should be about 14 min")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
@@ -3968,7 +3968,7 @@ class CheckpointComputeTradeoff:
     mtbf_system_s_str = fmt_time(mtbf_system_s, unit=second, precision=0, commas=True)
     mtbf_system_hr_str = fmt_time(mtbf_system_hr, 'hour', precision=0, commas=False, style='word')
     tau_opt_s_str = fmt_time(round(tau_opt_s), second, precision=0, commas=False)
-    tau_opt_min_str = fmt_time(round(tau_opt_s / SECONDS_PER_MINUTE), 'minute', precision=0, commas=False, style='word')
+    tau_opt_min_str = fmt_time(round(tau_opt_s.to(minute)), 'minute', precision=0, commas=False, style='word')
     overhead_pct_str = fmt_percent(overhead_pct / 100, precision=1, commas=False, style='prose')
 ```
 

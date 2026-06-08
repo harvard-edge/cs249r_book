@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does moving data cost more than computing it?_
 
-The central surprise of modern computing is that *arithmetic is nearly free while memory access is expensive*. In the time it takes to fetch a single value from main memory, a processor could perform thousands of calculations. This inversion, the "memory wall," is not an engineering limitation awaiting a fix; it is a physical consequence of the speed of light and the energy cost of moving electrons across silicon. It explains why specialized accelerators exist: they are not merely faster at math but architected specifically to hide, amortize, and minimize the crushing cost of moving data through deep memory hierarchies, massive parallelism, and specialized data paths. Concretely, hardware acceleration is how many large AI workloads sustain growth when general-purpose CPU scaling alone is insufficient. It explains why some optimizations that reduce theoretical computation fail to improve actual runtime: if the operation was already memory bound, computing less changes nothing because the bottleneck was never computation. It also explains why hardware selection cannot be reduced to comparing peak FLOP/s---what matters is whether a workload's data movement patterns align with what the hardware was actually designed to accelerate. For the engineer choosing hardware, the binding question is therefore not which chip is fastest, but which chip's memory system best matches the model's access patterns. A model with large embedding tables and irregular lookups needs a very different accelerator than one performing dense matrix multiplications over compact weight tensors. Getting this match right is the difference between running at a fraction of theoretical peak and approaching the hardware's practical ceiling.
+The central surprise of modern computing is that *arithmetic is nearly free while memory access is expensive*. In the time it takes to fetch a single value from main memory, a processor could perform thousands of calculations. This inversion, the "memory wall," is not an engineering limitation awaiting a fix; it is a physical consequence of the speed of light and the energy cost of moving electrons across silicon. It explains why specialized accelerators exist: they are not merely faster at math but architected specifically to hide, amortize, and minimize the crushing cost of moving data through deep memory hierarchies, massive parallelism, and specialized data paths. Concretely, hardware acceleration is how many large AI workloads sustain growth when general-purpose CPU scaling alone is insufficient. It explains why some optimizations that reduce theoretical computation fail to improve actual runtime: if the operation was already memory bound, computing less changes nothing because the bottleneck was never computation. It also explains why hardware selection cannot be reduced to comparing peak FLOP/s---what matters is whether a workload's data movement patterns align with what the hardware was actually designed to accelerate. For the engineer choosing hardware, the binding question is therefore not which chip is fastest, but which chip's memory system best matches the model's access patterns. A model with large embedding tables and irregular lookups needs a very different accelerator than one performing dense matrix multiplications over compact weight tensors. Getting this match right is the difference between running at a fraction of theoretical peak and approaching the hardware's practical ceiling. The accelerator is not a generic math engine; it is the ultimate Machine constraint that dictates which Algorithms can survive in production.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -172,6 +172,7 @@ import matplotlib.colors as mcolors
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 sys.path.insert(0, ".")
 from book.tools.figures import style as book_style
+from mlsysim.physics import calc_amdahls_speedup
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.75))
 
@@ -181,7 +182,7 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.75))
 g_accel_vals = np.logspace(0, 3, 100)
 p_vals = np.linspace(0.8, 0.999, 100)
 g_accel_grid, p_grid = np.meshgrid(g_accel_vals, p_vals)
-overall_speedup = 1 / ((1 - p_grid) + (p_grid / g_accel_grid))
+overall_speedup = np.vectorize(calc_amdahls_speedup)(p_grid, g_accel_grid)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 levels = [1, 2, 5, 10, 20, 50, 100, 200, 500]
@@ -273,6 +274,7 @@ The serial bottleneck becomes concrete on real hardware, where the same accelera
 # │          AmdahlH100.hw_speedup_mult_str, AmdahlH100.h100_int8_tops_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_ops_rate, fmt_ratio, check
+from mlsysim.physics import calc_amdahls_speedup
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AmdahlH100:
@@ -291,16 +293,11 @@ class AmdahlH100:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Amdahl's Law: Speedup = 1 / ((1-p) + (p/G_accel))
 
-    def calc_speedup(p, g_accel):
-        serial = 1 - p
-        parallel_component = p / g_accel
-        return 1 / (serial + parallel_component)
-
-    speedup_resnet = calc_speedup(p_resnet, hw_speedup_factor)
-    speedup_gpt2 = calc_speedup(p_gpt2, hw_speedup_factor)
+    speedup_resnet = calc_amdahls_speedup(p_resnet, hw_speedup_factor)
+    speedup_gpt2 = calc_amdahls_speedup(p_gpt2, hw_speedup_factor)
 
     # Step 1: Theoretical ceiling (if accelerator gain tends to infinity)
-    ceiling_gpt2 = 1 / (1 - p_gpt2)
+    ceiling_gpt2 = calc_amdahls_speedup(p_gpt2, float("inf"))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(speedup_resnet >= speedup_gpt2 * 3, f"ResNet speedup ({speedup_resnet:.1f}x) should be much higher than GPT-2 ({speedup_gpt2:.1f}x).")

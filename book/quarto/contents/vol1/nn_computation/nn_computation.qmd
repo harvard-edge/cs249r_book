@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does understanding a neural network's math matter more than reading its code?_
 
-Neural networks reduce to a small set of mathematical operations. Matrix multiplications dominate compute. Activation functions, the nonlinear gates between layers, introduce nonlinearity. Gradient computations, the error-sensitivity calculations that drive parameter updates, enable learning. These operations are the workload that every layer of the system stack must execute, and each carries concrete physical consequences: a matrix multiplication's dimensions determine how many operations and bytes must move; an activation function's complexity determines how much extra work each layer adds; the number of parameters determines whether a model fits in memory at all. When something goes wrong, inspecting the code reveals little because it simply says "multiply these matrices." *The bug is not in the logic but in the math itself*: a misconfigured learning rate, the update step size, can make gradients explode; an activation can saturate, stop changing with its input, and silently block learning; a memory footprint can fit during development but exhaust the target machine in production. This is why the mathematical primitives come first, before architectures, frameworks, or training systems. Every subsequent chapter builds on these operations: architectures compose them into larger models, frameworks execute them efficiently, training systems repeat them billions of times, and compression techniques approximate them to fit tighter constraints. An engineer who understands the primitives can look at any new architecture and immediately reason about its compute profile, its memory demands, and its hardware compatibility, because they understand the atoms it is made of.
+Neural networks reduce to a small set of mathematical operations. Matrix multiplications dominate compute. Activation functions, the nonlinear gates between layers, introduce nonlinearity. Gradient computations, the error-sensitivity calculations that drive parameter updates, enable learning. These operations are the workload that every layer of the system stack must execute, and each carries concrete physical consequences: a matrix multiplication's dimensions determine how many operations and bytes must move; an activation function's complexity determines how much extra work each layer adds; the number of parameters determines whether a model fits in memory at all. When something goes wrong, inspecting the code reveals little because it simply says "multiply these matrices." *The bug is not in the logic but in the math itself*: a misconfigured learning rate, the update step size, can make gradients explode; an activation can saturate, stop changing with its input, and silently block learning; a memory footprint can fit during development but exhaust the target machine in production. This is why the mathematical primitives come first, before architectures, frameworks, or training systems. Every subsequent chapter builds on these operations: architectures compose them into larger models, frameworks execute them efficiently, training systems repeat them billions of times, and compression techniques approximate them to fit tighter constraints. An engineer who understands the primitives can look at any new architecture and immediately reason about its compute profile, its memory demands, and its hardware compatibility, because they understand the atoms it is made of. These mathematical primitives form the atomic interface between Algorithm and Machine, translating abstract logic into the physical constraints of memory and arithmetic.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -76,6 +76,7 @@ from mlsysim.core.units import *
 # │ Goal: Centralize imports for footnote-local calculations.
 # │ Exports: None (import-only cell)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import memory_from_params
 from mlsysim.fmt import fmt_int, fmt, fmt_qty_int, fmt_sci, check, MarkdownStr
 ```
 
@@ -749,7 +750,7 @@ Deep learning exhibits predictable scaling\index{Scalability!deep learning}: unl
 import numpy as np
 from book.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.5))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 x = np.linspace(0.1, 3.0, 200)
@@ -1411,15 +1412,6 @@ node[below,pos=0.7]{\textbf{Output}};
 
 The mapping in @fig-bio_nn2ai_nn traces a signal through four stages, each translating a biological structure into a mathematical operation. @Tbl-neuron_structure formalizes these correspondences.
 
-| **Biological Structure**           | **Artificial Component**    |    **Mathematical Operation**    | **Engineering Role**                          |
-|:-----------------------------------|:----------------------------|:--------------------------------:|:----------------------------------------------|
-| **Dendrites** (receive signals)    | **Input Vector**            | $\mathbf{x} = [x_1, \dots, x_n]$ | Data ingestion from sensors or prior layers   |
-| **Synapses** (modulate strength)   | **Weight Vector**           | $\mathbf{w} = [w_1, \dots, w_n]$ | Learnable parameters encoding importance      |
-| **Cell Body** (integrates signals) | **Linear Function** $z$     |  $z = \sum (x_i \cdot w_i) + b$  | Linear integration of feature signals         |
-| **Axon** (fires output)            | **Activation Function** $f$ |            $a = f(z)$            | Nonlinear thresholding and signal propagation |
-
-: **Neuron Structure and Function**: Each biological structure maps to a computational operation in the artificial neuron. Dendrites become input vectors, synaptic strengths become learnable weights, the cell body becomes a linear aggregation function $z$, and the axon's firing behavior becomes the nonlinear activation function $f$ that produces the output $y$. {#tbl-neuron_structure tbl-colwidths="[28,21,19,32]"}
-
 Follow the signal path through the right panel of @fig-bio_nn2ai_nn to see this pipeline in action:
 
 1. **Input Reception** (Dendrites → $x_1, x_2, \dots, x_n$): The neuron receives a vector of input features $\mathbf{x}$. In a system like MNIST digit recognition, these represent individual pixel intensities—the digital equivalent of signals arriving at a biological neuron\index{Biological Neuron!definition}'s dendrites.
@@ -1430,9 +1422,18 @@ Follow the signal path through the right panel of @fig-bio_nn2ai_nn to see this 
 
 4. **Nonlinear Activation** (Axon → Activation Function $f$)\index{Activation Function!nonlinear transformation}: The aggregated signal passes through an activation function $f(z)$, producing the output $y$. This mirrors the axon's all-or-nothing firing decision: the nonlinearity determines whether the neuron "fires" a signal to the next layer. Unlike the biological case, $f$ can produce graded outputs (for example, ReLU passes positive values through, zeroes negatives), but the principle is the same—thresholding followed by propagation.
 
+| **Biological Structure**           | **Artificial Component**    |    **Mathematical Operation**    | **Engineering Role**                          |
+|:-----------------------------------|:----------------------------|:--------------------------------:|:----------------------------------------------|
+| **Dendrites** (receive signals)    | **Input Vector**            | $\mathbf{x} = [x_1, \dots, x_n]$ | Data ingestion from sensors or prior layers   |
+| **Synapses** (modulate strength)   | **Weight Vector**           | $\mathbf{w} = [w_1, \dots, w_n]$ | Learnable parameters encoding importance      |
+| **Cell Body** (integrates signals) | **Linear Function** $z$     |  $z = \sum (x_i \cdot w_i) + b$  | Linear integration of feature signals         |
+| **Axon** (fires output)            | **Activation Function** $f$ |            $a = f(z)$            | Nonlinear thresholding and signal propagation |
+
+: **Neuron Structure and Function**: Each biological structure maps to a computational operation in the artificial neuron. Dendrites become input vectors, synaptic strengths become learnable weights, the cell body becomes a linear aggregation function $z$, and the axon's firing behavior becomes the nonlinear activation function $f$ that produces the output $y$. {#tbl-neuron_structure tbl-colwidths="[28,21,19,32]"}
+
 From a systems engineering perspective, this translation reveals *why* neural networks have such demanding computational requirements. Each "simple" neuron requires $N$ multiply-accumulate (MAC)[^fn-multiply-accumulate]\index{MAC Operations!neuron computation} operations and $2N+2$ memory accesses (loading $N$ inputs and $N$ weights, plus the bias and output). When replicated millions of times across a network, these primitives create the massive arithmetic and bandwidth demands that define modern AI infrastructure.
 
-[^fn-multiply-accumulate]: **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Hardware data sheets often report fused multiply-add throughput in FLOPs because one multiply and one add count as two floating-point operations. On that convention, the reported FLOP/s rate is twice the MAC/s rate when a MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
+[^fn-multiply-accumulate]: [offset=-47mm] **MAC (Multiply-Accumulate)**: The atomic operation of neural computation: $a \leftarrow a + (b \times c)$. Hardware data sheets often report fused multiply-add throughput in FLOPs because one multiply and one add count as two floating-point operations. On that convention, the reported FLOP/s rate is twice the MAC/s rate when a MAC is counted as one multiply-accumulate. Every layer size and batch size decision ultimately reduces to how many MACs fit within the latency and power budget. \index{MAC!multiply-accumulate operation}
 
 The transition from individual neurons to integrated systems requires navigating the central trade-off\index{Neural Network!capacity vs. cost trade-off} between representational capacity and computational cost. While silicon transistors operate at gigahertz frequencies, millions of times faster than biological chemical signaling, the sheer volume of operations in deep networks creates unique bottlenecks.
 
@@ -1461,6 +1462,8 @@ The historical trajectory demonstrates a recurring systems engineering lesson: a
 [^fn-algorithm-hardware-lag]: **Algorithm-Hardware Adoption Lag**: Backpropagation was mathematically complete by 1974 (Werbos) but not widely adopted until 1986, a 12-year gap explained by insufficient compute: training a meaningful network required hardware that did not exist. The pattern recurs more softly with attention, a later sequence-modeling mechanism that scores how strongly one element should use information from another: attention mechanisms were introduced for neural machine translation in 2014, and transformers made them central in 2017; GPUs were sufficient for the original Transformer experiments, while later TPU- and GPU-scale infrastructure enabled much larger deployments. The implication is that apparently "failed" algorithms may simply be hardware-premature. When evaluating today's computationally intractable techniques, the right diagnostic is not whether the algorithm works on current hardware but what hardware regime would make it work. \index{Algorithm-Hardware Adoption Lag}
 
 [^fn-backprop-credit-assignment]: **Backpropagation**: Short for "backward propagation of errors," the algorithm solves the credit assignment problem by determining which of millions of weights caused a given error, using the chain rule. Werbos applied it to neural networks in 1974, but the 1986 Rumelhart, Hinton, and Williams publication demonstrated practical effectiveness. The systems cost: backprop requires storing forward-pass activations and additional training state, creating the several-times-higher memory footprint quantified later in the chapter. \index{Backpropagation!memory cost}
+
+While the preceding sections established the technical foundations of deep learning, the term itself gained prominence in the 2010s, coinciding with advances in computational power and data accessibility. The scale of this computational explosion is difficult to grasp without visualization. @Fig-trends plots seven decades of AI training compute on a logarithmic scale, revealing two fitted regimes: total training compute, measured in floating-point operations (FLOPs), followed a comparatively slow pre-2010 trend, then the post-2012 deep-learning frontier accelerated sharply. Large-scale models after 2015 sit orders of magnitude above the pre-2010 trajectory, showing that modern progress reinvests hardware and algorithmic gains into much larger training runs.
 
 ::: {#fig-trends fig-env="figure" fig-pos="htb" fig-cap="**Computational Growth**: Log-scale scatter plot showing total training compute in FLOPs across seven decades of AI models. Fitted trend lines show a slower pre-2010 regime followed by a much faster deep-learning frontier after 2012. Large-scale models after 2015 sit orders of magnitude above the pre-2010 trend, addressing the historical bottleneck of training complex neural networks." fig-alt="Log-scale scatter plot showing total training compute in FLOPs from early AI systems through recent frontier models. Points represent AI models, with different colors for pre-deep-learning era and deep learning era. Trend lines show the acceleration of compute usage over time."}
 
@@ -1788,9 +1791,13 @@ class TrainingEnergyScale:
     household_mwh_per_year_str = fmt_qty(household_energy_per_year, MWh, precision=1, commas=False, per="year")
 ```
 
-While the preceding sections established the technical foundations of deep learning, the term itself gained prominence in the 2010s, coinciding with advances in computational power and data accessibility. The scale of this computational explosion is difficult to grasp without visualization. @Fig-trends plots seven decades of AI training compute on a logarithmic scale, revealing two fitted regimes: total training compute, measured in floating-point operations (FLOPs), followed a comparatively slow pre-2010 trend, then the post-2012 deep-learning frontier accelerated sharply. Large-scale models after 2015 sit orders of magnitude above the pre-2010 trajectory, showing that modern progress reinvests hardware and algorithmic gains into much larger training runs.
+Beyond raw compute, this exponential growth carries an energy cost that systems engineers cannot ignore. Training LeNet-1 in 1989 consumed roughly `{python} TrainingEnergyScale.lenet_kwh_str`, about a few days of household electricity. A GPT-4-scale training run, using public GPU-day estimates and a datacenter-overhead factor, lands around `{python} TrainingEnergyScale.gpt4_energy_mwh_str`—enough to power roughly `{python} TrainingEnergyScale.us_homes_str` US homes for a year[^fn-energy-scale-training]. The energy cost of AI has moved from negligible to industrial, forcing engineers to treat energy efficiency (J per operation) as a primary design constraint alongside achieved FLOP/s. The quantitative energy analysis, including Horowitz's data-movement-dominates-compute numbers and the full energy hierarchy, appears in @sec-hardware-acceleration where it can be connected to concrete hardware architectures.
+
+[^fn-energy-scale-training]: **Training Energy Scale**: This estimate uses `{python} TrainingEnergyScale.household_mwh_per_year_str` as a representative US household electricity budget and treats GPT-4's public GPU-day estimate as A100-equivalent accelerator time with datacenter overhead. The point is order of magnitude, not an audited utility bill: a single frontier training run now rivals a small industrial facility's energy budget, making J-per-operation a first-order design constraint alongside achieved FLOP/s. \index{Energy!training scale}
 
 @Tbl-historical-performance grounds these trends in concrete systems, showing how parameters, compute, and hardware co-evolved across four decades of neural network development.
+
+Three quantitative patterns emerge from this historical data. The plotted post-2012 training-compute frontier doubles on the order of months, while broader summaries that smooth across model families and account for reporting uncertainty show similarly rapid annual growth. Separately, the compute required to achieve a fixed benchmark has improved substantially due to algorithmic and systems advances. Training *costs* grow more slowly than *raw compute* because hardware utilization, reduced precision, and software efficiency also improve. Frontier model training costs have nonetheless moved from workstation-scale budgets into industrial-scale investments. These patterns have direct implications for systems engineering: compute scaling determines infrastructure investment timelines, algorithmic efficiency justifies continuous architecture research, and the cost-compute gap shapes build-vs.-buy decisions for ML teams.
 
 | **Year** | **System** |                         **Params**                        |       **Train FLOPs**        |              **Hardware** | **Train Time** | **Error/Task**          |
 |:---------|:-----------|:---------------------------------------------------------:|:----------------------------:|--------------------------:|:--------------:|:------------------------|
@@ -1803,17 +1810,11 @@ While the preceding sections established the technical foundations of deep learn
 
 : **Historical Performance**: Four decades of neural network evolution showing the co-scaling of model parameters, training compute, and hardware infrastructure. Training FLOPs increased by approximately $10^{13}\times$ from LeNet-1 to GPT-4, while parameters grew by $10^{8}\times$. Uncertainty notes: Earlier systems (LeNet, AlexNet) have well-documented specifications; recent closed models (GPT-4) have only external estimates (OpenAI has not officially confirmed GPT-4's architecture or parameter count; the ~1.8T MoE estimate is based on public reporting and analysis). "OoM" = order of magnitude uncertainty. {#tbl-historical-performance tbl-colwidths="[6,11,17,18,19,12,17]"}
 
-Beyond raw compute, this exponential growth carries an energy cost that systems engineers cannot ignore. Training LeNet-1 in 1989 consumed roughly `{python} TrainingEnergyScale.lenet_kwh_str`, about a few days of household electricity. A GPT-4-scale training run, using public GPU-day estimates and a datacenter-overhead factor, lands around `{python} TrainingEnergyScale.gpt4_energy_mwh_str`—enough to power roughly `{python} TrainingEnergyScale.us_homes_str` US homes for a year[^fn-energy-scale-training]. The energy cost of AI has moved from negligible to industrial, forcing engineers to treat energy efficiency (J per operation) as a primary design constraint alongside achieved FLOP/s. The quantitative energy analysis, including Horowitz's data-movement-dominates-compute numbers and the full energy hierarchy, appears in @sec-hardware-acceleration where it can be connected to concrete hardware architectures.
-
 ::: {.column-margin}
 ![](images/svg/vol1_nn_computation_margin_002.svg){width="100%" fig-alt="Vertical log-scale ladder of orange bars, smallest at bottom: LeNet-scale training energy at the base rising to GPT-4-scale training energy at the top, spanning many orders of magnitude."}
 
 *Neural-network history is a scale explosion in training energy.*
 :::
-
-[^fn-energy-scale-training]: **Training Energy Scale**: This estimate uses `{python} TrainingEnergyScale.household_mwh_per_year_str` as a representative US household electricity budget and treats GPT-4's public GPU-day estimate as A100-equivalent accelerator time with datacenter overhead. The point is order of magnitude, not an audited utility bill: a single frontier training run now rivals a small industrial facility's energy budget, making J-per-operation a first-order design constraint alongside achieved FLOP/s. \index{Energy!training scale}
-
-Three quantitative patterns emerge from this historical data. The plotted post-2012 training-compute frontier doubles on the order of months, while broader summaries that smooth across model families and account for reporting uncertainty show similarly rapid annual growth. Separately, the compute required to achieve a fixed benchmark has improved substantially due to algorithmic and systems advances. Training *costs* grow more slowly than *raw compute* because hardware utilization, reduced precision, and software efficiency also improve. Frontier model training costs have nonetheless moved from workstation-scale budgets into industrial-scale investments. These patterns have direct implications for systems engineering: compute scaling determines infrastructure investment timelines, algorithmic efficiency justifies continuous architecture research, and the cost-compute gap shapes build-vs.-buy decisions for ML teams.
 
 Parallel advances across three dimensions drove these evolutionary trends: data availability, algorithmic innovations, and computing infrastructure. Follow the arrows in @fig-virtuous-cycle to see this reinforcing cycle in motion: faster computing infrastructure enabled processing larger datasets, larger datasets drove algorithmic innovations, and better algorithms demanded more sophisticated computing systems. This reinforcing cycle continues to drive progress today.
 
@@ -2555,7 +2556,7 @@ This nonlinearity is what makes deep networks expressive. Without it, stacking m
 ::: {#fig-nonlinear fig-env="figure" fig-pos="htb" fig-cap="**Linear vs. Nonlinear Decision Boundaries**: Two scatter plots compare classification with and without activation functions. Without activation, a straight line fails to separate the two classes. With a nonlinear activation function applied, the network produces a curved decision boundary that correctly separates the points." fig-alt="Two scatter plots side by side. Left plot shows cyan and green points with straight red line failing to separate them, labeled NN without activation function. Right plot shows same points with curved red decision boundary successfully separating classes, labeled NN with activation function."}
 
 ```{.tikz}
-\scalebox{0.75}{
+\scalebox{0.85}{
  \begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
 \newcounter{point}
 \tikzset{
@@ -2751,7 +2752,7 @@ In the simplest and most common case, each neuron in a layer is connected to eve
 ::: {#fig-connections fig-env="figure" fig-pos="htb" fig-cap="**Fully-Connected Layers**: A three-layer network with dense connections between layers, where each neuron integrates information from all neurons in the preceding layer. Weight matrices between layers determine connection strengths, with labeled values shown on each edge alongside computed activation values at each node." fig-alt="Three-layer network with three green input nodes, four blue hidden nodes, and two red output nodes. Labeled arrows show weight values on each connection. Input layer shows values 1.0, 5.0, 9.0. Hidden nodes show activation values. Bias values labeled at each layer."}
 
 ```{.tikz}
-\scalebox{0.8}{\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\scalebox{0.88}{\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \definecolor{Blue}{RGB}{0,195,240}
   \tikzstyle{neuron}=[rectangle,draw=none,fill=BlueFill,minimum size=10mm,inner sep=0pt]
   \tikzstyle{input neuron}=[neuron, fill=GreenFill];  \tikzstyle{output neuron}=[neuron, fill=red!50];
@@ -3323,7 +3324,7 @@ class MnistTrainingMemoryCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_params = 109_386
-    param_mem = total_params * bytes_per_param * byte
+    param_mem = memory_from_params(total_params * param, bytes_per_param * byte / param)
     grad_mem = param_mem
     opt_mem = param_mem * 2
     param_mem_kb = param_mem.to(KB).magnitude
@@ -3575,7 +3576,7 @@ class MentalMathCalc:
     mm_gpu = 16 * GB  # scenario assumption: target GPU memory
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mm_model = mm_params.to(param).magnitude * mm_bytes * mm_overhead
+    mm_model = memory_from_params(mm_params, mm_bytes * byte / param) * mm_overhead
     mm_remaining = mm_gpu - mm_model
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -3611,6 +3612,10 @@ Mental math: `{python} MentalMathCalc.mm_params_m_str` $\times$ 4 bytes $\times$
 
 :::
 
+Feasibility math tells the engineer whether a model *fits*; it says nothing about whether it will *learn*. That depends on how the parameters those bytes hold are first set. Parameter initialization\index{Initialization!Xavier/Glorot}\index{Initialization!He initialization} is critical to network behavior. Setting all parameters to zero would cause neurons in a layer to behave identically, preventing diverse feature learning. Instead, weights are typically initialized randomly, often using specific strategies like Xavier/Glorot initialization[^fn-glorot-init-variance] [@glorot2010xavier] or He initialization [@he2015], while biases often start at small constant values or zeros. The scale of these initial values matters: values that are too large or too small lead to poor learning dynamics.
+
+[^fn-glorot-init-variance]: **Xavier/Glorot Initialization**: Weight variance must scale as $1/n$ (where $n$ is layer width) to prevent activations from vanishing or exploding across layers [@glorot2010xavier]. Before this insight, training failures from poor initialization were routinely misdiagnosed as hardware bugs or insufficient compute. The fix costs zero additional FLOPs; it is purely a matter of setting the right random distribution at startup. \index{Initialization!glorot, variance scaling}
+
 | **Question**                                 | **Quick Estimate**                                                                 |
 |:---------------------------------------------|:-----------------------------------------------------------------------------------|
 | **"Will this model fit in GPU memory?"**     | $\text{Parameters} \times 4\text{ bytes} \times 4\text{ (training)} < \text{VRAM}$ |
@@ -3618,10 +3623,6 @@ Mental math: `{python} MentalMathCalc.mm_params_m_str` $\times$ 4 bytes $\times$
 | **"Is this compute bound or memory bound?"** | If $B \times d_{\text{layer}} < 1000$, likely memory bound                         |
 
 : **Napkin-Math Feasibility Checks**: Three rapid mental-estimation rules for GPU fit, epoch time, and bound regime, distilled into one-line formulas an engineer can apply before running a profiler. {#tbl-nn-computation-napkin-math-checks tbl-colwidths="[50,50]"}
-
-Feasibility math tells the engineer whether a model *fits*; it says nothing about whether it will *learn*. That depends on how the parameters those bytes hold are first set. Parameter initialization\index{Initialization!Xavier/Glorot}\index{Initialization!He initialization} is critical to network behavior. Setting all parameters to zero would cause neurons in a layer to behave identically, preventing diverse feature learning. Instead, weights are typically initialized randomly, often using specific strategies like Xavier/Glorot initialization[^fn-glorot-init-variance] [@glorot2010xavier] or He initialization [@he2015], while biases often start at small constant values or zeros. The scale of these initial values matters: values that are too large or too small lead to poor learning dynamics.
-
-[^fn-glorot-init-variance]: **Xavier/Glorot Initialization**: Weight variance must scale as $1/n$ (where $n$ is layer width) to prevent activations from vanishing or exploding across layers [@glorot2010xavier]. Before this insight, training failures from poor initialization were routinely misdiagnosed as hardware bugs or insufficient compute. The fix costs zero additional FLOPs; it is purely a matter of setting the right random distribution at startup. \index{Initialization!glorot, variance scaling}
 
 The distribution of parameters affects information flow through layers. In digit recognition, if weights are too small, important input details might not propagate to later layers. If too large, the network might amplify noise. Biases help adjust the activation threshold of each neuron, enabling the network to learn optimal decision boundaries.
 
@@ -3687,7 +3688,7 @@ Forward propagation\index{Forward Propagation!computation process} is the core c
 ::: {#fig-forward-propagation fig-env="figure" fig-pos="htb" fig-cap="**Training Loop Architecture**: Complete neural network training flow showing forward propagation through layers to generate prediction, comparison with true value via loss function, and backward propagation of gradients through optimizer to update weights and biases." fig-alt="Neural network training diagram. Left side shows input X flowing through blue, red, and green node layers via forward propagation (red arrow). Right side shows prediction and true value boxes feeding into loss function, which outputs loss score to optimizer, which updates weights and biases. Orange arrow shows backward propagation path."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
+\scalebox{0.8}{\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
 \definecolor{Red}{RGB}{227,48,103}
 \definecolor{Green}{RGB}{102,187,120}
 \tikzset{%
@@ -3771,12 +3772,14 @@ Line2/.style={line width=0.85pt,black!60,text=black}
 (A)--node[above,text=black]{Forward Propagation}(B);
 \draw[OrangeLine, -{Triangle[width = 12pt, length = 5pt]}, line width = 5pt]
 (D)--node[below,text=black]{Backpropagation}(C);
-\end{tikzpicture}
+\end{tikzpicture}}
 ```
 
 :::
 
 The bidirectional flow of data moving forward through the layers (the red arrow in @fig-forward-propagation) and gradients flowing backward to update weights (the orange arrow) is the heartbeat of neural network training. The figure reveals a critical asymmetry: forward propagation produces a single output, but backward propagation must compute gradients for every weight in the network. *This asymmetry explains why training requires storing all intermediate activations—each layer's gradient computation depends on what that layer received during the forward pass.* Before the mathematical details, pause to consolidate this core mechanism.
+
+When an image of a handwritten digit enters our network, it undergoes a series of transformations through the layers. Each transformation combines the weighted inputs with learned patterns to progressively extract relevant features. For the 784-128-64-10 digit classifier, a $28{\times}28$ pixel image is processed through multiple layers to ultimately produce probabilities for each possible digit (0--9).
 
 ::: {#chk-nn-computation-gradient-flow .callout-checkpoint title="Gradient flow"}
 
@@ -3835,8 +3838,6 @@ class MnistForwardIntroLocal:
     first_layer_macs_str = fmt_count(first_layer_macs, precision=0, commas=True, label="MAC")
 ```
 
-When an image of a handwritten digit enters our network, it undergoes a series of transformations through the layers. Each transformation combines the weighted inputs with learned patterns to progressively extract relevant features. For the 784-128-64-10 digit classifier, a $28{\times}28$ pixel image is processed through multiple layers to ultimately produce probabilities for each possible digit (0--9).
-
 The process begins with the input layer, where each pixel's grayscale value becomes an input feature. For MNIST, this means `{python} MnistForwardIntroLocal.input_values_str` input values ($28{\times}28$ = `{python} MnistForwardIntroLocal.input_values_str`), each normalized between 0 and 1. These values then propagate forward through the hidden layers, where each neuron combines its inputs according to its learned weights and applies a nonlinear activation function.
 
 Each forward pass through our MNIST network (784-128-64-10) requires substantial matrix operations. The first layer alone performs `{python} MnistForwardIntroLocal.first_layer_macs_str` per sample. When processing multiple samples in a batch, these operations multiply accordingly, requiring careful management of memory bandwidth and computational resources. Specialized hardware like GPUs executes these operations efficiently through parallel processing.
@@ -3884,6 +3885,9 @@ Not all operations are created equal. Systems engineers distinguish between *com
 
 : **Arithmetic intensity of matrix multiply vs. element-wise ReLU**: Dense $N{\times}N$ matrix multiplication performs $2N^3$ operations while moving about $3N^2s$ bytes for $s$ bytes per value, yielding intensity that grows linearly with $N$ and saturates GPU/TPU compute. Element-wise activations stay at $1/(2s)$ FLOP/byte regardless of size (0.125 FLOP/byte for FP32), leaving accelerators starved for arithmetic and explaining why GEMM-heavy layers dominate modern architectures. {#tbl-nn-computation-arith-intensity-gap tbl-colwidths="[25,19,18,22,16]"}
 
+```{=latex}
+\vspace*{-1ex}
+```
 Modern AI accelerators (GPUs) have massive compute arrays but limited memory bandwidth. They only achieve peak performance on high-intensity operations like matrix multiplication where data is reused many times. This is why "fully connected" and "convolutional" layers are preferred over complex, custom element-wise logic.
 
 The mathematical expression $\mathbf{x}\mathbf{W}$ is implemented in hardware as a **General Matrix Multiply (GEMM)**\index{Matrix Multiplication!GEMM optimization} kernel, the most optimized routine in all of computing, accounting for over 90 percent of the floating-point operations in most neural networks. To achieve peak performance, engineers use techniques like blocking and tiling to ensure data fits perfectly into L1/L2 caches and remains there as long as possible (data reuse). This hardware-software co-design principle, designing model architectures to use large, dense matrix multiplications that specialized dense-matrix hardware can execute efficiently, is what makes modern deep learning physically possible. @Sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d provides the detailed treatment of GEMM arithmetic intensity, sparse matrix formats, and the computational complexity of common layer types needed to optimize these operations in practice.
@@ -3893,20 +3897,23 @@ The mathematical expression $\mathbf{x}\mathbf{W}$ is implemented in hardware as
 While this nested expression captures the complete process, we typically compute it step by step:
 
 1. First layer:
-$$ \mathbf{Z}^{(1)} = \mathbf{X}\mathbf{W}^{(1)} + \mathbf{b}^{(1)} $$
-$$ \mathbf{A}^{(1)} = f^{(1)}(\mathbf{Z}^{(1)}) $$
+\begin{gather*}
+\mathbf{Z}^{(1)} = \mathbf{X}\mathbf{W}^{(1)} + \mathbf{b}^{(1)}
+\\[0.3ex]
+\mathbf{A}^{(1)} = f^{(1)}(\mathbf{Z}^{(1)})
+\end{gather*}
 
 2. Hidden layers $(\ell = 2,\ldots, N_L-1)$:
 \begin{gather*}
 \mathbf{Z}^{(\ell)} = \mathbf{A}^{(\ell-1)}\mathbf{W}^{(\ell)} + \mathbf{b}^{(\ell)}
-\\[1ex]
+\\[0.3ex]
 \mathbf{A}^{(\ell)} = f^{(\ell)}(\mathbf{Z}^{(\ell)})
 \end{gather*}
 
 3. Output layer:
 \begin{gather*}
 \mathbf{Z}^{(N_L)} = \mathbf{A}^{(N_L-1)}\mathbf{W}^{(N_L)} + \mathbf{b}^{(N_L)}
-\\[1ex]
+\\[0.3ex]
 \mathbf{A}^{(N_L)} = f^{(N_L)}(\mathbf{Z}^{(N_L)})
 \end{gather*}
 In our MNIST example, if we have a batch of $B$ images, the dimensions of these operations are:
@@ -3998,7 +4005,7 @@ class MnistFlopsCalc:
     total_params = sum(params_per_layer)
     total_macs = sum(weights)
     bytes_per_element = BYTES_FP32
-    param_mem = total_params * bytes_per_element
+    param_mem = memory_from_params(total_params * param, bytes_per_element * byte / param)
     param_mem_kb = param_mem.to(KB).magnitude
     inf_act_elements = in_dim + h1_dim + h2_dim + out_dim
     inf_act = inf_act_elements * bytes_per_element
@@ -4180,6 +4187,10 @@ With a batch size of 32 and 10 output classes, this means:
 
 Loss functions influence training in ways that explain key implementation decisions.
 
+```{=latex}
+\newpage
+```
+
 During each training iteration, the loss value serves multiple purposes. As a performance metric, it quantifies current network accuracy. As an optimization target, its gradients guide weight updates toward better predictions. As a convergence signal, its trend over time indicates whether training is progressing, stalling, or diverging.
 
 For our MNIST classifier, monitoring the loss during training reveals the network's learning trajectory. A typical pattern begins with high loss ($\sim 2.3$, equivalent to random guessing among ten classes), followed by rapid decrease in early iterations as the network discovers the most salient features. Progress then slows to gradual improvement as the network fine-tunes its predictions for harder cases, eventually stabilizing at a lower loss ($\sim 0.1$, indicating confident correct predictions).
@@ -4250,6 +4261,10 @@ Saving activations in the forward loop of @algo-backpropagation-training-step is
 
 In forward inference, we can discard the activations of layer $\ell$ as soon as layer $\ell+1$ is computed. Training is different. Because the gradient at layer $\ell$ depends on the activation at layer $\ell$ (via the chain rule), we must store every intermediate activation until the backward pass reaches that layer. @Eq-training-memory captures this memory decomposition:
 $$ \text{Training Memory} \approx \text{Model Weights} + \text{Optimizer States} + \text{Activations} $$ {#eq-training-memory}
+
+```{=latex}
+\tcbbreak
+```
 
 For deep networks, activations dominate. Storing a batch of high-resolution images across 100 layers can consume gigabytes of accelerator memory. This capacity wall drives the need for later systems techniques that reduce, recompute, or partition training state. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e provides the complete training memory equation and a worked analysis of weights, gradients, optimizer state, and activation costs.
 
@@ -4396,7 +4411,7 @@ class BackpropMemory:
         weights.append(layers_dims[i] * layers_dims[i + 1])
     biases = layers_dims[1:]
     total_params = sum(weights) + sum(biases)
-    grad_kb = (total_params * bytes_per_param * byte).to(KB).magnitude
+    grad_kb = memory_from_params(total_params * param, bytes_per_param * byte / param).to(KB).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_params == 535_818, f"Unexpected wider MNIST parameter count: {total_params}")
@@ -4451,7 +4466,7 @@ class AdamMemoryOverhead:
     adam_state_tensors = 2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    state = (params / param) * bytes_per_param * adam_state_tensors * byte
+    state = memory_from_params(params, bytes_per_param * byte / param) * adam_state_tensors
     state_gb = state.to(GB)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4628,8 +4643,6 @@ Learning rate selection\index{Learning Rate!selection criteria}\index{Hyperparam
 
 Convergence monitoring\index{Convergence!monitoring}\index{Validation!accuracy plateau} provides essential feedback during training and continues into production deployment, as covered in @sec-ml-operations. As training progresses, the loss value typically stabilizes around a particular value, indicating the network is approaching a local optimum. Validation accuracy often plateaus as well, suggesting the network has extracted most learnable patterns from the data. The gap between training and validation performance reveals whether the network is overfitting\index{Overfitting!training challenge} or generalizing well to new examples. The interplay between batch size, available memory, and computational resources requires careful balancing to achieve efficient training within hardware constraints, the same memory-computation trade-offs established in the preceding backpropagation section.
 
-The complete training pipeline, from forward propagation through loss computation to gradient-based weight updates, is now established. Training, however, is preparation, not the end goal. The following checkpoint consolidates that learning process before we examine what happens when a trained model must answer queries in production.
-
 ::: {#chk-nn-computation-neural-network-learning-process .callout-checkpoint title="Neural network learning process"}
 
 You have now covered the complete training cycle, the mathematical machinery that enables neural networks to learn from data. Before moving to inference and deployment, verify your understanding:
@@ -4648,6 +4661,8 @@ Use the MNIST network (784 → 128 → 64 → 10) and a batch size of 32 as the 
 If any concepts feel unclear, review the earlier sections on Forward Propagation, Loss Functions, Backward Propagation, or the Optimization Process. These mechanisms form the foundation for understanding the training-vs.-inference distinction we explore next.
 
 :::
+
+The complete training pipeline, from forward propagation through loss computation to gradient-based weight updates, is now established. Training, however, is preparation, not the end goal. The following checkpoint consolidates that learning process before we examine what happens when a trained model must answer queries in production.
 
 ## Inference Pipeline {#sec-neural-computation-inference-pipeline-5372}
 
@@ -4668,7 +4683,7 @@ Neural network operation divides into two distinct phases\index{Training vs. Inf
 ::: {#fig-training-vs-inference fig-env="figure" fig-pos="htb" fig-cap="**Inference vs. Training Flow**: During inference, neural networks use learned weights for forward pass computation only, simplifying the data flow and reducing computational cost compared to training, which requires both forward and backward passes for weight updates. This streamlined process enables efficient deployment of trained models for real-time predictions." fig-alt="Two parallel diagrams comparing inference and training. Both show stacked rectangles representing batches feeding into network layers and output nodes. Inference section shows smaller varied batch sizes with dashed outlines. Training section shows larger fixed batches with solid outlines. Network architecture identical in both with fully connected layers."}
 
 ```{.tikz}
-\scalebox{0.67}{%
+\scalebox{0.8}{%
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}]
 \tikzset{
  Line/.style={line width=0.75pt,black!50,text=black},
@@ -4900,7 +4915,7 @@ class GpuSpecsFootnote:
 
 [^fn-training-gpu-power]: **Training GPU Power Budget**: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "substantial cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`--`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a 4 W mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget. \index{GPU!training, power budget}
 
-[^fn-edge-tpu-efficiency]: **Edge Inference Accelerators**: The Edge TPU (Google Coral) operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` by hardwiring the multiply-accumulate datapath for INT8 inference. Edge servers occupy a different tier: the NVIDIA Jetson AGX Orin delivers `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` more throughput but requiring fixed power infrastructure rather than battery operation. This power-tier gap determines whether inference can run on battery-powered devices or requires wired deployment; @sec-hardware-acceleration develops the accelerator architectures behind these tiers. \index{Edge TPU!inference efficiency}\index{Edge Inference!power tiers}
+[^fn-edge-tpu-efficiency]: [offset=-65mm] **Edge Inference Accelerators**: The Edge TPU (Google Coral) operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` by hardwiring the multiply-accumulate datapath for INT8 inference. Edge servers occupy a different tier: the NVIDIA Jetson AGX Orin delivers `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` more throughput but requiring fixed power infrastructure rather than battery operation. This power-tier gap determines whether inference can run on battery-powered devices or requires wired deployment; @sec-hardware-acceleration develops the accelerator architectures behind these tiers. \index{Edge TPU!inference efficiency}\index{Edge Inference!power tiers}
 
 [^fn-inference-quantization]: **Quantization**: Reducing numerical precision from 32-bit values to INT8 yields 4$\times$ less memory per parameter and up to 4$\times$ higher throughput on hardware with INT8 datapaths. Trained models often tolerate some precision loss during inference because inference does not accumulate rounding errors across gradient updates the way training does. The trade-off is not free: overly aggressive quantization, especially below four bits, can degrade accuracy on tail-distribution inputs, requiring calibration datasets to find the precision floor for each deployment. @Sec-model-compression develops quantization techniques in detail. \index{Quantization!inference precision}
 
@@ -4961,7 +4976,7 @@ class MnistInferenceResourceLocal:
     params_per_layer = [w + b for w, b in zip(weights, biases)]
     total_params = sum(params_per_layer)
     total_macs = sum(weights)
-    param_mem = total_params * bytes_per_element
+    param_mem = memory_from_params(total_params * param, bytes_per_element * byte / param)
     inf_act_elements = sum(layers_dims)
     inf_output_act_elements = sum(layers_dims[1:])
     inf_act = inf_act_elements * bytes_per_element
@@ -5025,7 +5040,7 @@ For our canonical MNIST network (`{python} MnistInferenceResourceLocal.mnist_arc
 
 : **MNIST Inference Resources by Layer**: The persistent parameter block and multiply-add count for the canonical MNIST network. In fully connected layers, the same weights that occupy memory also determine the arithmetic work per inference. {#tbl-mnist-inference-resource-by-layer}
 
-[^fn-fp32-precision]: **FP32 (Single Precision)**: The IEEE 754 standard (1985) format using 32 bits (1 sign, 8 exponent, 23 mantissa) that became the default for neural network training because its dynamic range accommodates gradient magnitudes spanning many orders of magnitude. Halving to FP16 or BF16\index{BF16!reduced-precision format} ("brain floating point," developed at Google Brain) saves 2$\times$ memory and doubles throughput on hardware with 16-bit datapaths; further reduction to INT8 yields 4$\times$ savings but requires posttraining calibration. See @sec-appdx-machine-foundations-numerical-representations-c889 for a detailed comparison of numerical formats and their precision-throughput trade-offs. \index{FP32!numerical precision}
+[^fn-fp32-precision]: [offset=-50mm] **FP32 (Single Precision)**: The IEEE 754 standard (1985) format using 32 bits (1 sign, 8 exponent, 23 mantissa) that became the default for neural network training because its dynamic range accommodates gradient magnitudes spanning many orders of magnitude. Halving to FP16 or BF16\index{BF16!reduced-precision format} ("brain floating point," developed at Google Brain) saves 2$\times$ memory and doubles throughput on hardware with 16-bit datapaths; further reduction to INT8 yields 4$\times$ savings but requires posttraining calibration. See @sec-appdx-machine-foundations-numerical-representations-c889 for a detailed comparison of numerical formats and their precision-throughput trade-offs. \index{FP32!numerical precision}
 
 The transient side is smaller. A single image starts as 784 input values, then produces layer outputs of 128, 64, and 10 values. If counted naively, that is `{python} MnistInferenceResourceLocal.total_inf_act_str` activation values, or about `{python} MnistInferenceResourceLocal.total_infer_act_kb_str` at FP32. In a real inference engine, those values do not all need to persist at once. Once Layer 2 has consumed Layer 1's output, the Layer 1 buffer can be reused; once the output layer has consumed Layer 2's activations, that buffer can be reused as well. Training cannot discard those intermediates because backpropagation needs them later. That is why gradient storage and backpropagation overhead multiply training resource demands by `{python} MnistInferenceResourceLocal.training_ratio_mult_str` or more for this worked example (see @sec-neural-computation-model-size-computational-complexity-1f0f).
 
@@ -5570,6 +5585,11 @@ The same neural network computation that required industrial-scale infrastructur
 
 :::
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.35}
+```
+
 | **Aspect**            |                                    **1990s USPS System**                                     |                     **Modern Equivalent**                     |                       **Improvement**                       |
 |:----------------------|:--------------------------------------------------------------------------------------------:|:-------------------------------------------------------------:|:-----------------------------------------------------------:|
 | **Hardware cost**     |                    about `{python} UspsLenetSpecs.old_hardware_cost_str`                     |    about `{python} UspsLenetSpecs.modern_hardware_cost_str`   |        `{python} UspsLenetSpecs.cost_ratio_mult_str`        |
@@ -5581,6 +5601,10 @@ The same neural network computation that required industrial-scale infrastructur
 | **Cost/inference**    |                     `{python} UspsLenetSpecs.old_cost_per_inference_str`                     |    `{python} UspsLenetSpecs.modern_cost_per_inference_str`    | `{python} UspsLenetSpecs.cost_per_inference_ratio_mult_str` |
 
 : **Hardware Progress for Neural Network Computation**: The same LeNet computation that required a workstation-class system in 1990 can now run on inexpensive embedded hardware—about `{python} UspsLenetSpecs.cost_ratio_mult_str` cheaper, `{python} UspsLenetSpecs.latency_ratio_mult_str` faster, and `{python} UspsLenetSpecs.energy_ratio_mult_str` more energy-efficient under the illustrative assumptions in the table. Crucially, the algorithm is unchanged; the main improvement came from hardware and systems implementation. This validates the systems principle that algorithm-hardware co-design multiplies gains across both dimensions. {#tbl-then-vs-now tbl-colwidths="[25,30,25,20]"}
+
+```{=latex}
+\endgroup
+```
 
 While hardware efficiency improved by orders of magnitude, modern edge AI systems face even tighter constraints than the USPS deployment: milliwatt power budgets vs. watts, millisecond latency requirements vs. tens of milliseconds, and deployment on battery-powered devices vs. dedicated infrastructure. Yet the same engineering principles apply—preprocessing for real-world variation, confidence-based routing to human review, and end-to-end pipeline optimization. This historical case study provides a reusable template for reasoning about ML systems deployment across the entire spectrum from cloud to edge to tiny devices. The operational considerations demonstrated here are formalized in @sec-ml-operations.
 
@@ -5662,7 +5686,7 @@ class FallacyQuantExamples:
     mnist_biases = mnist_dims[1:]
     mnist_total_params = sum(w + b for w, b in zip(mnist_weights, mnist_biases))
     mnist_total_flops = (2 * sum(mnist_weights) * mnist_batch_size) + (sum(mnist_biases) * mnist_batch_size)
-    mnist_param_kb = (mnist_total_params * bytes_per_element).to(KB).magnitude
+    mnist_param_kb = memory_from_params(mnist_total_params * param, bytes_per_element * byte / param).to(KB).magnitude
     mnist_inf_act_kb = (sum(mnist_dims) * bytes_per_element).to(KB).magnitude
     mnist_inference_total_kb = mnist_param_kb + mnist_inf_act_kb
     mnist_batch_act_kb = (mnist_batch_size * sum(mnist_dims) * bytes_per_element).to(KB).magnitude

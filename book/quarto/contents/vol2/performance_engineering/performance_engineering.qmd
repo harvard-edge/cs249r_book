@@ -62,6 +62,7 @@ from mlsysim.core.units import *
 # │ Imports: mlsysim.registry, mlsysim.constants, mlsysim.book
 # │ Exports: (none)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics.quantities import token_throughput
 from mlsysim.fmt import fmt_int, fmt, check
 from mlsysim.physics import calc_bottleneck, model_memory
 ```
@@ -721,7 +722,7 @@ class RooflineDiagnostic:
     weight_qty = params_per_gpu * (BYTES_FP16 / param)
     arith_intensity = (flops / weight_qty).to(flop / byte)
     decode_time = (weight_qty / h100_bw).to(ms)
-    tokens_per_sec = (1 / decode_time).to(1 / second)
+    tokens_per_sec = token_throughput(1 * count, decode_time)
     achieved_flop_rate = (flops / decode_time).to(TFLOP / second)
     achieved_fp16_util = (achieved_flop_rate / h100_fp16_peak).to("").magnitude
 
@@ -1649,7 +1650,10 @@ class OverlapCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim import Models, Hardware
-    from mlsysim.physics import calc_ring_allreduce_time
+    from mlsysim.physics import (
+        calc_ring_allreduce_time,
+        calc_ring_allreduce_data_factor,
+    )
 
     m = Models.Language.Llama3_8B  # 7-8B scale
     h = Hardware.Cloud.H100
@@ -1668,14 +1672,14 @@ class OverlapCalc:
     gradient_qty = m.parameters.to(param).magnitude * 2 * byte
 
     # Step 2: AllReduce time (ring)
-    t_comm = calc_ring_allreduce_time(
+    allreduce_time = calc_ring_allreduce_time(
         gradient_qty,
         num_gpus,
         nvlink_bw,
         0 * second,
     )
-    allreduce_time = t_comm.to(second)
-    ring_allreduce_factor = 2 * (num_gpus - 1) / num_gpus
+    allreduce_time = allreduce_time.to(second)
+    ring_allreduce_factor = calc_ring_allreduce_data_factor(num_gpus)
 
     # Step 3: Backward pass compute time
     peak_flops = h.compute.precision_flops.get('fp16', h.compute.peak_flops)

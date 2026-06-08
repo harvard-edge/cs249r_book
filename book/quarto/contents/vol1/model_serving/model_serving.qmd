@@ -27,7 +27,7 @@ engine: jupyter
 
 _Why does serving invert every optimization priority that made training successful?_
 
-Training and serving demand opposite physics. Training maximizes throughput (samples per second): large batches and long epochs where latency spikes get absorbed invisibly. Serving minimizes latency ($L_{\text{lat}}$, in milliseconds per request): individual requests answered fast enough that a single slow response is a broken product. Training amortizes hardware costs across billions of examples; serving pays a tax on every request, where small inefficiencies compound into operational debt. This inversion is why models that train beautifully often serve poorly: the batch-heavy architectures and memory-intensive optimizations designed to saturate accelerators during training are fundamentally ill-suited for the bursty, latency-critical, cost-sensitive reality of production traffic. Serving, however, is more than a latency problem. A serving system must handle traffic that varies by orders of magnitude between peak and trough, introduce new model versions without abruptly moving all users at once, degrade gracefully when upstream dependencies fail, and do all of this continuously, not for the duration of a training run but for the lifetime of the product. Every model that proved its value during training and survived compression and benchmarking eventually arrives at the serving layer—the deployment and integration stage of the ML lifecycle—where the question shifts from "does it work?" to "does it work *reliably, at scale, under production conditions, every second of every day*?" The serving infrastructure is where ML systems finally meet users, and the engineering that sustains that meeting is qualitatively different from the engineering that created the model.
+Training and serving demand opposite physics. Training maximizes throughput (samples per second): large batches and long epochs where latency spikes get absorbed invisibly. Serving minimizes latency ($L_{\text{lat}}$, in milliseconds per request): individual requests answered fast enough that a single slow response is a broken product. Training amortizes hardware costs across billions of examples; serving pays a tax on every request, where small inefficiencies compound into operational debt. This inversion is why models that train beautifully often serve poorly: the batch-heavy architectures and memory-intensive optimizations designed to saturate accelerators during training are fundamentally ill-suited for the bursty, latency-critical, cost-sensitive reality of production traffic. Serving, however, is more than a latency problem. A serving system must handle traffic that varies by orders of magnitude between peak and trough, introduce new model versions without abruptly moving all users at once, degrade gracefully when upstream dependencies fail, and do all of this continuously, not for the duration of a training run but for the lifetime of the product. Every model that proved its value during training and survived compression and benchmarking eventually arrives at the serving layer—the deployment and integration stage of the ML lifecycle—where the question shifts from "does it work?" to "does it work *reliably, at scale, under production conditions, every second of every day*?" The serving infrastructure is where ML systems finally meet users, and the engineering that sustains that meeting is qualitatively different from the engineering that created the model. The serving infrastructure is where the trained Algorithm meets the chaos of Data at the absolute limits of the Machine's latency budget.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -1616,6 +1616,7 @@ class LatencyTableCalc:
 # │          preprocess_pct_str, tensorrt_preprocess_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_time
+from mlsysim.physics import calc_amdahls_speedup
 
 class LatencyBudgetCalc:
     """Demonstrates the shifting bottleneck from inference to preprocessing after TensorRT optimization."""
@@ -1764,9 +1765,11 @@ class AmdahlServingCalc:
     total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
     non_model_ms_value = preprocess_ms_value + cpu_gpu_ms_value
     non_model_pct_value = non_model_ms_value / total_latency_ms_value * 100
-    model_10x_ms_value = resnet_inference_ms_value / 10
-    optimized_total_ms_value = non_model_ms_value + model_10x_ms_value + postprocess_ms_value
-    amdahl_speedup_value = total_latency_ms_value / optimized_total_ms_value
+    model_speedup = 10
+    model_fraction = resnet_inference_ms_value / total_latency_ms_value
+    model_10x_ms_value = resnet_inference_ms_value / model_speedup
+    amdahl_speedup_value = calc_amdahls_speedup(model_fraction, model_speedup)
+    optimized_total_ms_value = total_latency_ms_value / amdahl_speedup_value
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     non_model_pct_str = fmt_percent(non_model_pct_value / 100, precision=1, commas=False, style='symbol')

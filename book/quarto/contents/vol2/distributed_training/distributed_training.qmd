@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does the linear logic of "more hardware = faster training" collapse at the bisection bandwidth wall?_
 
-Distributed training appears simple: split the work across machines and combine the results. As the Machine Learning Fleet grows, however, a new physics emerges [@hazelwood2018]. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* a job trains on a single GPU, the design optimizes for arithmetic intensity; *when* it trains on 10,000 GPUs, the design optimizes for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the reliability gap and communication-computation ratio\index{Communication-Computation Ratio}: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **coordination tax**\index{Coordination Tax}, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
+Distributed training appears simple: split the work across machines and combine the results. As the Machine Learning Fleet grows, however, a new physics emerges [@hazelwood2018]. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* a job trains on a single GPU, the design optimizes for arithmetic intensity; *when* it trains on 10,000 GPUs, the design optimizes for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the reliability gap and communication-computation ratio\index{Communication-Computation Ratio}: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **coordination tax**\index{Coordination Tax}, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization. Distributed training is the purest expression of the C³ taxonomy: a continuous, unforgiving trade-off between parallelized Compute, network-bound Communication, and synchronizing Coordination.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -69,6 +69,7 @@ from mlsysim.fmt import fmt_int, fmt_percent, fmt, fmt_memory_capacity, fmt_qty,
 ```{python}
 #| echo: false
 from mlsysim.solvers import DistributedModel
+from mlsysim.physics import calc_strong_scaling_speedup
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DISTRIBUTED TRAINING SYSTEM CONSTANTS
@@ -604,7 +605,7 @@ class Scaling8GPU:
     """Scenario: 8-GPU scaling within a single node."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import calc_ring_allreduce_time
+    from mlsysim.physics import calc_ring_allreduce_time, calc_ring_allreduce_data_factor
 
     single_gpu_step_s = 1.8
     batch_per_gpu_val = 16
@@ -620,7 +621,7 @@ class Scaling8GPU:
     t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw, 0 * ms)
     comm_8gpu_ms_val = t_comm.to(ms).magnitude
 
-    sync_size = gradient_tensor * (2 * (gpus_per_node - 1) / gpus_per_node)
+    sync_size = gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node)
 
     total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
     # Speedup = (N * b/T_N) / (b/T_1) = N * (T_1 / T_N)
@@ -680,6 +681,8 @@ from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Scaling32GPU:
+    from mlsysim.physics import calc_ring_allreduce_data_factor, calc_ring_allreduce_time
+
     NETWORK_10G_BW = Systems.Fabrics.Ethernet_10G.bandwidth
     single_gpu_step_s = 1.8
     compute_32gpu_ms = 1800
@@ -691,14 +694,19 @@ class Scaling32GPU:
     gpus = 32
     batch_per_gpu_val = 16
     global_batch_val = batch_per_gpu_val * gpus
-    ring_factor = 2 * (gpus - 1) / gpus
+    ring_factor = calc_ring_allreduce_data_factor(gpus)
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     # Intra-node phase moves the same gradient volume over the same NVLink as
     # the 8-GPU scenario (~5.8 ms). 2026-06-07: was a hardcoded 0.35 ms,
     # contradicting the value computed two scenarios earlier.
-    intra_node_ms_val = (gradient_tensor * (2 * (gpus_per_node_val - 1) / gpus_per_node_val) / nvlink_bw).to(ms).magnitude
+    intra_node_ms_val = (gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node_val) / nvlink_bw).to(ms).magnitude
+
     sync_size = gradient_tensor * ring_factor
-    inter_node_ms_val = (sync_size / net_bw).to(ms).magnitude
+    # The helper applies the 2(N-1)/N ring factor itself, so it takes the raw
+    # gradient size; sync_size (gradient x ring factor) is kept for display.
+    inter_node_ms_val = (
+        calc_ring_allreduce_time(message_bytes=gradient_tensor, n_gpus=gpus, bandwidth_bytes_s=net_bw, latency_s=0 * ms).to(ms).magnitude
+    )
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms_val
     total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
     compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
@@ -760,10 +768,19 @@ class GradAccumScenario:
     batch_per_gpu = 16
     accum_steps = 4
     compute_8gpu_ms = 1800
+    from mlsysim.physics import calc_ring_allreduce_time
+
     # Same NVLink AllReduce as the 8-GPU scaling scenario (~5.8 ms).
     # 2026-06-07: was a hardcoded 0.35 ms contradicting that computation.
     comm_8gpu_ms = (
-        (Models.Language.GPT2.size_in_bytes(BYTES_FP16) * (2 * (n_gpus_ga - 1) / n_gpus_ga) / Hardware.Cloud.H100.nvlink.bandwidth).to(ms).magnitude
+        calc_ring_allreduce_time(
+            message_bytes=Models.Language.GPT2.size_in_bytes(BYTES_FP16),
+            n_gpus=n_gpus_ga,
+            bandwidth_bytes_s=Hardware.Cloud.H100.nvlink.bandwidth,
+            latency_s=0 * ms,
+        )
+        .to(ms)
+        .magnitude
     )
     training_hours_1gpu = 25
     hourly_rate = 128
@@ -983,6 +1000,7 @@ where $T_N$ is the training time on $N$ devices. An efficiency of 1.0 means perf
 # │          CommScalingMath.t_comm_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_magnitude, fmt_params, fmt_percent, fmt_qty, fmt_math, fmt_time, fmt_tokens
+from mlsysim.physics import ring_allreduce_data_factor_latex
 
 class CommScalingMath:
     """Formatted math strings for scaling efficiency and communication overhead analysis."""
@@ -1001,7 +1019,7 @@ class CommScalingMath:
 
     _ib_gb_per_s_value_str = fmt(_ib_bw.to(GB / second).magnitude, precision=0, commas=False)
     _gradient_size_gb_value_str = fmt(_gradient_size.to(GB).magnitude, precision=0, commas=False)
-    comm_time_formula_math = fmt_math(f"2 \\times (N-1)/N \\times {_gradient_size_gb_value_str} / {_ib_gb_per_s_value_str}")
+    comm_time_formula_math = fmt_math(f"{ring_allreduce_data_factor_latex()} \\times {_gradient_size_gb_value_str} / {_ib_gb_per_s_value_str}")
     comm_approx_math = fmt_math(f"2 \\times {_gradient_size_gb_value_str} / {_ib_gb_per_s_value_str}")
     gpt3_params_b_value_str = fmt_magnitude(Models.Language.GPT3.parameters, unit=Bparam, precision=0, commas=False)
     compute_per_step_math = fmt_math(
@@ -1239,7 +1257,7 @@ scenarios = [
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for sc in scenarios:
-    speedup = N / (1 + (N - 1) * sc['r'])
+    speedup = np.vectorize(calc_strong_scaling_speedup)(N, sc['r'])
     ax.plot(
         N,
         speedup,
@@ -2146,7 +2164,7 @@ One important variant targets the remaining bubble directly. GPUs at the beginni
 
 The scheduling freedom provided by this B/W split is substantial. In a 4-stage pipeline with 8 microbatches, the standard 1F1B schedule has a bubble fraction of approximately $(p-1)/(m+p-1)$ where $p$ is the number of stages and $m$ is the number of microbatches. For $p=4, m=8$, this is $3/11 \approx 27\%$ idle time. Zero-bubble scheduling can reduce this to near zero by filling the startup and teardown bubbles with W computations.
 
-The trade-off is memory: zero-bubble scheduling requires storing intermediate activations for longer (because the W computation is deferred), increasing peak memory usage. Some implementations address this by combining zero-bubble scheduling with activation checkpointing, selectively recomputing certain activations rather than storing them. The interaction between these techniques creates a three-way trade-off among pipeline bubble size, memory consumption, and recomputation overhead, an example of the conservation of overhead (Principle \ref{pri-conservation-overhead}).
+The trade-off is memory: zero-bubble scheduling requires storing intermediate activations for longer (because the W computation is deferred), increasing peak memory usage. Some implementations address this by combining zero-bubble scheduling with activation checkpointing, selectively recomputing certain activations rather than storing them. The interaction between these techniques creates a three-way trade-off among pipeline bubble size, memory consumption, and recomputation overhead, an example of the displacement of overhead (Principle \ref{pri-conservation-overhead}).
 
 #### Tensor parallelism {#sec-distributed-training-systems-systems-tensor-parallelism-d76e}
 
@@ -2423,6 +2441,8 @@ from mlsysim.solvers import DistributedModel
 from mlsysim.fmt import fmt, check, fmt_memory
 
 class TensorParallel3DTraffic:
+    from mlsysim.physics import calc_ring_allreduce_data_factor
+
     # ┌── 1. LOAD ─────────────────────────────────────────
     tp = 8
     pp = 16
@@ -2437,7 +2457,7 @@ class TensorParallel3DTraffic:
     # ┌── 2. EXECUTE ──────────────────────────────────────
     total_gpus = tp * pp * dp
     activation_payload = microbatch * sequence_length * hidden_dim * dtype_bytes
-    ring_factor = 2 * (tp - 1) / tp
+    ring_factor = calc_ring_allreduce_data_factor(tp)
     per_allreduce = activation_payload * ring_factor
     full_forward = per_allreduce * allreduces_per_layer * layers
     full_forward_backward = full_forward * 2
@@ -3232,6 +3252,8 @@ class YoungDaly:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    from mlsysim.physics import calc_young_daly_interval
+
     t_write_min = 5.0
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
     gpu_cost_hr = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
@@ -3242,24 +3264,22 @@ class YoungDaly:
     sparse_interval_hr_val = 8
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # T_opt = sqrt(2 * C * MTBF)
-    # Convert all to minutes
-    c_min = t_write_min
-    mtbf_min = cluster_mtbf_hr * 60
-
-    t_opt_min_val = math.sqrt(2 * c_min * mtbf_min)
-    t_opt_hr_val = t_opt_min_val / 60
+    # T_opt = sqrt(2 * C * MTBF), shared helper keeps this formula canonical.
+    t_opt = calc_young_daly_interval(t_write_min * minute, cluster_mtbf_hr * hour)
+    t_opt_min_val = t_opt.to(minute).magnitude
+    t_opt_hr_val = t_opt.to(hour).magnitude
 
     # Overhead: (C/T_opt) + (T_opt / 2 * MTBF)
     # (Simplified Young-Daly first-order approximation)
-    ckpt_overhead = c_min / t_opt_min_val
-    rework_overhead = (t_opt_min_val / 2) / mtbf_min
+    ckpt_overhead = t_write_min / t_opt_min_val
+    # Both operands in hours: T_opt/2 divided by the cluster MTBF.
+    rework_overhead = (t_opt_hr_val / 2) / cluster_mtbf_hr
     total_overhead = ckpt_overhead + rework_overhead
 
     # Daily dollar loss due to suboptimal (15 min) vs. optimal
     # (Context for the text argument)
     daily_cost = num_gpus * gpu_cost_hr * HOURS_PER_DAY
-    safe_overhead = (c_min / safe_interval_min) + (safe_interval_min / (2 * 60 * cluster_mtbf_hr))
+    safe_overhead = (t_write_min / safe_interval_min) + (safe_interval_min / (2 * 60 * cluster_mtbf_hr))
     loss_safe = safe_overhead * daily_cost
     loss_opt = total_overhead * daily_cost
     diff_daily = loss_safe - loss_opt

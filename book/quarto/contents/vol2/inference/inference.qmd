@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does inference cost eventually dwarf training cost, and what does this mean for system design?_
 
-Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, and every request consumes compute, memory, network, and energy budget. The serving cost dominance law\index{Serving Cost Dominance Law} (Principle \ref{pri-serving-cost-dominance}) captures this economic reality: for a successful production model, ongoing inference operating expense (OpEx) can exceed the one-time training capital expenditure (CapEx) by orders of magnitude. That cost structure changes the architecture: optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into substantial savings or costs. Performance engineering supplied the local toolkit -- fusion, precision, compilation, and algorithmic changes such as speculative decoding -- and this chapter applies those tools at serving scale, where batching, sharding, routing, autoscaling, and isolation must preserve strict latency budgets under live traffic. Reliability requirements intensify as well, because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. Inference at scale is where ML systems succeed or fail economically.
+Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, and every request consumes compute, memory, network, and energy budget. The serving cost dominance law\index{Serving Cost Dominance Law} (Principle \ref{pri-serving-cost-dominance}) captures this economic reality: for a successful production model, ongoing inference operating expense (OpEx) can exceed the one-time training capital expenditure (CapEx) by orders of magnitude. That cost structure changes the architecture: optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into substantial savings or costs. Performance engineering supplied the local toolkit -- fusion, precision, compilation, and algorithmic changes such as speculative decoding -- and this chapter applies those tools at serving scale, where batching, sharding, routing, autoscaling, and isolation must preserve strict latency budgets under live traffic. Reliability requirements intensify as well, because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. Inference at scale is where ML systems succeed or fail economically. Serving the Fleet is an unrelenting exercise in C³ management: batching Compute to maximize throughput while minimizing the Coordination overhead required to meet strict tail-latency budgets.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -62,6 +62,7 @@ from mlsysim.core.units import *
 # │ Imports: mlsysim.registry, mlsysim.constants, mlsysim.book
 # │ Exports: (none)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics.quantities import token_throughput
 from mlsysim.fmt import fmt, check
 ```
 
@@ -2379,15 +2380,13 @@ class PrefixCachingAnalysis:
     # Step 1: Without prefix caching: every user stores full system_prompt + response tokens
     tokens_per_user = system_prompt_tokens + avg_response_tokens  # 2500
     total_tokens_no_cache = tokens_per_user * concurrent_users
-    kv_bytes_no_cache = total_tokens_no_cache * n_kv_pairs * n_layers * hidden_dim * bytes_per_element
-    kv_no_cache = kv_bytes_no_cache * byte
+    kv_no_cache = calc_kv_cache_size(n_layers, 1, hidden_dim, total_tokens_no_cache, 1, bytes_per_element)
 
     # Step 2: With prefix caching: system prompt stored once; only response tokens per user
     shared_tokens = system_prompt_tokens  # stored once
     unique_tokens = avg_response_tokens * concurrent_users
     total_tokens_cached = shared_tokens + unique_tokens
-    kv_bytes_cached = total_tokens_cached * n_kv_pairs * n_layers * hidden_dim * bytes_per_element
-    kv_cached = kv_bytes_cached * byte
+    kv_cached = calc_kv_cache_size(n_layers, 1, hidden_dim, total_tokens_cached, 1, bytes_per_element)
 
     # Step 3: Savings
     memory_reduction_pct_val = (1 - (kv_cached / kv_no_cache).to("").magnitude) * 100
@@ -2476,8 +2475,8 @@ class KVCacheCalc:
     h100_mem = Hardware.Cloud.H100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    kv_fp16 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16
-    kv_int4 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_INT4
+    kv_fp16 = calc_kv_cache_size(kv_layers, kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_FP16)
+    kv_int4 = calc_kv_cache_size(kv_layers, kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_INT4)
     kv_savings = kv_fp16 - kv_int4
     kv_compression = (kv_fp16 / kv_int4).to("").magnitude
     batch8_kv_fp16 = kv_fp16 * 8
@@ -2557,7 +2556,7 @@ class PrecisionDividend:
     kv_heads = 64
     kv_head_dim = 128
     kv_seq_len = 4096
-    kv_fp16 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16
+    kv_fp16 = calc_kv_cache_size(kv_layers, kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_FP16)
     kv_fp16_per_gpu = kv_fp16 / tensor_parallel_degree
     kv_int8_total = kv_fp16 / 2
     kv_int8_per_gpu = kv_int8_total / tensor_parallel_degree
@@ -3334,6 +3333,7 @@ class MoEEconomics:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim.physics import memory_from_params
+from mlsysim.physics.memory import calc_kv_cache_size
 
     _moe = Models.Language.DeepSeek_V3
     dense_params = 400 * Bparam  # illustrative dense baseline
@@ -3398,7 +3398,7 @@ class MoECapacityPlan:
     read_per_gpu = active_mem / n_gpus
     t_read = (read_per_gpu / h100_bw).to(millisecond)
     total_decode = t_read + alltoall_overhead
-    decode_rate = (count / total_decode).to(count / second)
+    decode_rate = token_throughput(1 * count, total_decode)
     tokens_per_sec = round(decode_rate.magnitude, -2)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(nodes_needed == 2, f"Expected two nodes, got {nodes_needed}")
@@ -3829,6 +3829,7 @@ Both equations make clear that the achievable bandwidth $\beta$ and latency $\al
 # │          AllReduceInterconnect.eth_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_memory, fmt_percent, fmt_time
+from mlsysim.physics import calc_ring_allreduce_time, calc_ring_allreduce_data_factor
 
 class AllReduceInterconnect:
     """Raw AllReduce timing for an 8 MB activation payload."""
@@ -3843,11 +3844,10 @@ class AllReduceInterconnect:
     eth_100g_bw = NETWORK_100G_BW
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    allreduce_factor = 2 * (n_devices - 1) / n_devices
-
-    nvlink_time = (allreduce_factor * message / nvlink_bw).to(millisecond)
-    ib_time = (allreduce_factor * message / ib_hdr_bw).to(millisecond)
-    eth_time = (allreduce_factor * message / eth_100g_bw).to(millisecond)
+    allreduce_factor = calc_ring_allreduce_data_factor(n_devices)
+    nvlink_time = calc_ring_allreduce_time(message, n_devices, nvlink_bw, 0 * second).to(millisecond)
+    ib_time = calc_ring_allreduce_time(message, n_devices, ib_hdr_bw, 0 * second).to(millisecond)
+    eth_time = calc_ring_allreduce_time(message, n_devices, eth_100g_bw, 0 * second).to(millisecond)
 
     nvlink_pct = (nvlink_time / layer_budget).to("").magnitude * 100
     ib_pct = (ib_time / layer_budget).to("").magnitude * 100
@@ -5555,7 +5555,7 @@ class QuantizedServingCapacity:
     kv_heads = 64
     kv_head_dim = 128
     kv_seq_len = 4096
-    kv_fp16 = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * BYTES_FP16
+    kv_fp16 = calc_kv_cache_size(kv_layers, kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_FP16)
     kv_per_1k_sequence = kv_fp16 / (kv_seq_len / THOUSAND)
     max_1k_sequences = int((kv_headroom / kv_per_1k_sequence).to("").magnitude)
 
