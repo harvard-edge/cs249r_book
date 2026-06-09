@@ -263,6 +263,35 @@ class LayoutCommand:
                  "section,snippet,related.",
         )
 
+        overlaps = sub.add_parser(
+            "overlaps",
+            help="True-geometry margin scan (PyMuPDF): element-on-element "
+                 "overlaps and footer/header overflow from rendered bbox "
+                 "geometry, which the anchor-based 'margins' scan is blind to. "
+                 "Exits non-zero on any overlap.",
+        )
+        overlaps.add_argument("pdf", help="Path to PDF file to scan.")
+        overlaps.add_argument(
+            "--limit",
+            type=int,
+            default=0,
+            help="Only scan the first N pages (0 = all). For quick iteration.",
+        )
+        overlaps.add_argument(
+            "--json",
+            dest="json_out",
+            type=str,
+            default="",
+            help="Write findings as JSON to this path.",
+        )
+        overlaps.add_argument(
+            "--strict",
+            action="store_true",
+            help="Also exit non-zero on overflow findings, not just overlaps. "
+                 "Default treats overflow as reported-but-non-blocking (the "
+                 "known residuals are in-callout figures).",
+        )
+
         tables = sub.add_parser(
             "tables",
             help="Render a table-only PDF audit for a volume or chapter.",
@@ -357,6 +386,13 @@ class LayoutCommand:
                 csv=opts.csv,
                 chapter_filter=self._parse_chapter_filter(opts.chapter),
                 include_overlaps=opts.include_overlaps,
+            )
+        if opts.subcommand == "overlaps":
+            return self._overlaps(
+                Path(opts.pdf),
+                limit=opts.limit,
+                json_out=opts.json_out,
+                strict=opts.strict,
             )
         if opts.subcommand == "check":
             only = (
@@ -1316,6 +1352,104 @@ class LayoutCommand:
         else:
             self._render_margins(findings, scanned, pdf_path)
         return not any(f.severity == "error" for f in findings)
+
+    # ------------------------------------------------------------------
+    # overlaps (true PyMuPDF geometry)
+    # ------------------------------------------------------------------
+
+    def _load_margin_oracle(self):
+        """Import the standalone margin-geometry oracle module by path."""
+        import importlib.util
+        import sys
+
+        path = (
+            self._repo_root() / "book" / "tools" / "audit" / "margin_geometry.py"
+        )
+        spec = importlib.util.spec_from_file_location("margin_geometry", path)
+        mod = importlib.util.module_from_spec(spec)
+        # Register before exec: the oracle's @dataclass + future annotations
+        # need the module in sys.modules for dataclass type resolution.
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _overlaps(
+        self,
+        pdf_path: Path,
+        limit: int = 0,
+        json_out: str = "",
+        strict: bool = False,
+    ) -> bool:
+        """True-geometry margin scan via PyMuPDF. Detects element-on-element
+        overlaps (always bugs) and footer/header overflow from rendered bbox
+        geometry, which the anchor-based ``margins`` scan cannot see.
+
+        Returns False (gate) when any overlap is found; with ``--strict`` also
+        fails on overflow. Overflow alone is reported but non-blocking by
+        default, since the known residuals are in-callout figures.
+        """
+        if not pdf_path.exists():
+            console.print(f"[red]PDF not found:[/red] {pdf_path}")
+            return False
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            console.print(
+                "[red]PyMuPDF not installed.[/red] "
+                "Run: [cyan]pip install pymupdf[/cyan]"
+            )
+            return False
+
+        oracle = self._load_margin_oracle()
+        doc = fitz.open(str(pdf_path))
+        last = doc.page_count if limit <= 0 else min(limit, doc.page_count)
+        findings: List[Any] = []
+        for i in range(last):
+            findings.extend(oracle.scan_page(doc[i], i + 1))
+
+        by_issue = Counter(f.issue for f in findings)
+        overlaps = by_issue.get("overlap", 0)
+        ob = by_issue.get("overflow-bottom", 0)
+        ot = by_issue.get("overflow-top", 0)
+
+        console.print(
+            f"[bold blue]Margin geometry[/bold blue] {pdf_path.name} "
+            f"[dim]({last} pages, PyMuPDF bbox)[/dim]"
+        )
+        if findings:
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("page", justify="right")
+            table.add_column("issue")
+            table.add_column("side")
+            table.add_column("detail")
+            for f in findings:
+                colour = "red" if f.issue == "overlap" else "yellow"
+                table.add_row(
+                    str(f.page),
+                    f"[{colour}]{f.issue}[/{colour}]",
+                    f.side,
+                    f.detail,
+                )
+            console.print(table)
+        console.print(
+            f"overlaps [red]{overlaps}[/red]  "
+            f"overflow-bottom [yellow]{ob}[/yellow]  "
+            f"overflow-top [yellow]{ot}[/yellow]  "
+            f"[dim](total {len(findings)})[/dim]"
+        )
+        if json_out:
+            from dataclasses import asdict
+
+            Path(json_out).write_text(
+                json.dumps([asdict(f) for f in findings], indent=2)
+            )
+            console.print(f"[dim]wrote {json_out}[/dim]")
+
+        if overlaps:
+            return False
+        if strict and findings:
+            return False
+        return True
 
     @staticmethod
     def _margin_side(pw, x0, x1) -> str:

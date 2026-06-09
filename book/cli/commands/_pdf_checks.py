@@ -271,6 +271,41 @@ def verify_pdf(
     return issues
 
 
+def scan_margin_geometry(pdf_path: Path):
+    """True-geometry margin scan via the PyMuPDF oracle (book/tools/audit/
+    margin_geometry.py). Returns ``(overlaps, overflows)`` or ``None`` when
+    PyMuPDF is unavailable. Mirrors ``binder layout overlaps``; used as a
+    non-blocking build-time warning so every validated build reports margin
+    geometry (element-on-element overlap + footer/header overflow) that the
+    LaTeX-log overfull checks cannot localize.
+    """
+    try:
+        import fitz  # PyMuPDF
+        import importlib.util
+        import sys
+    except ImportError:
+        return None
+    try:
+        oracle_path = (
+            Path(__file__).resolve().parents[2]
+            / "tools" / "audit" / "margin_geometry.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "margin_geometry", oracle_path
+        )
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        doc = fitz.open(str(pdf_path))
+        findings = []
+        for i in range(doc.page_count):
+            findings.extend(mod.scan_page(doc[i], i + 1))
+        overlaps = sum(1 for f in findings if f.issue == "overlap")
+        return overlaps, len(findings) - overlaps
+    except Exception:
+        return None
+
+
 def verify_volume_pdf(
     quarto_dir: Path,
     volume: str,
@@ -280,6 +315,7 @@ def verify_volume_pdf(
     """Verify the default built PDF for ``volume`` (``vol1`` or ``vol2``)."""
     pdf_path = default_pdf_path(quarto_dir, volume)
     issues = verify_pdf(pdf_path, log_path=log_path)
+    geom = scan_margin_geometry(pdf_path) if pdf_path.is_file() else None
 
     checks = [
         PdfCheckItem("artifact", "PDF artifact exists", pdf_path.is_file()),
@@ -321,6 +357,18 @@ def verify_volume_pdf(
             "No vertical/margin overflow (Overfull vbox >= 20pt)",
             not any(i.code == "overfull-vbox" for i in issues),
             skipped=log_path is None,
+            is_warning=True,
+        ),
+        PdfCheckItem(
+            "margin-geometry",
+            (
+                f"Margin geometry: {geom[0]} overlap(s), {geom[1]} overflow "
+                "(PyMuPDF; run `binder layout overlaps` to localize)"
+                if geom is not None
+                else "Margin geometry scan (PyMuPDF unavailable)"
+            ),
+            geom is None or geom[0] == 0,
+            skipped=geom is None,
             is_warning=True,
         ),
     ]
