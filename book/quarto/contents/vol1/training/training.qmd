@@ -143,7 +143,7 @@ The frameworks examined in @sec-ml-frameworks provided the execution substrate: 
 
 Running GPT-2 once costs a fraction of a cent, while training GPT-2\index{Training!cost asymmetry}\index{Training!inference vs. training} cost approximately `{python} TrainingScenarios.gpt2_training_cost_2019_str` in 2019. A GPT-4-class model may cost only a few cents to run once, yet its training run is commonly estimated near `{python} TrainingScenarios.gpt4_training_cost_est_str`[^fn-training-cost-scaling]. This million-to-one cost asymmetry reflects the sheer volume of computation required: over a hundred billion forward passes, each followed by a backward pass, repeated across datasets measured in terabytes.
 
-[^fn-training-cost-scaling]: **Training Cost Scaling**\index{Training Cost!scaling trajectory}: The roughly 2,000$\times$ cost increase from GPT-2--scale training [@radford2019language] to GPT-4--class training (widely cited nine-figure estimates in industry reporting) over several years reflects three compounding factors: parameter counts, training-token budgets, and accelerator fleets all grew dramatically. Exact GPT-4 training details were not disclosed, but public estimates commonly place such training runs in the regime of tens of thousands of A100-class accelerators for months, not single-node clusters. This trajectory made training one of the largest capital expenditures for organizations building models at that scale, exceeding the annual R&D budget of most universities.
+[^fn-training-cost-scaling]: [offset=8mm] **Training Cost Scaling**\index{Training Cost!scaling trajectory}: The roughly 2,000$\times$ cost increase from GPT-2--scale training [@radford2019language] to GPT-4--class training (widely cited nine-figure estimates in industry reporting) over several years reflects three compounding factors: parameter counts, training-token budgets, and accelerator fleets all grew dramatically. Exact GPT-4 training details were not disclosed, but public estimates commonly place such training runs in the regime of tens of thousands of A100-class accelerators for months, not single-node clusters. This trajectory made training one of the largest capital expenditures for organizations building models at that scale, exceeding the annual R&D budget of most universities.
 
 A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations. Training requires over a hundred billion such passes, and each backward pass costs approximately twice as much as the forward pass, yielding a computational budget on the order of `{python} TrainingScenarios.gpt2_total_flops_str` [@radford2019language]. This asymmetry makes training systems engineering a distinct discipline and explains why access to training infrastructure increasingly determines who can participate in AI development.
 
@@ -703,7 +703,7 @@ Because activation functions execute millions of times per training step, even s
     ylabel={Execution Time (seconds)},
     ymin=0.40,
     width=100mm,
-    height=70mm,
+    height=62mm,
     axis lines=left,
     axis line style={thick,-latex},
     ytick={0.4,0.5,...,1.1},
@@ -747,7 +747,7 @@ In production environments, modern hardware accelerators alter these relative ch
 | **ReLU**     | Extremely efficient computation; avoids vanishing gradients for positive inputs. | Can suffer from "dying ReLU" (inactive neurons). | Single-instruction hardware implementation; enables sparsity-based optimizations.                    |
 | **Softmax**  | Outputs probability distribution over classes.                                   | High computational cost; nonlocal dependencies.  | Requires global normalization; memory-intensive due to dependencies across the entire input vector.  |
 
-: **Activation Function Systems Comparison**: While activation functions contribute only a fraction of total training time, their implementation characteristics (computational complexity, hardware utilization, and memory patterns) significantly impact the efficiency of modern learning pipelines. {#tbl-compare-activations tbl-colwidths="[10,28,25,37]"}
+: **Activation Function Systems Comparison**: While activation functions contribute only a fraction of total training time, their implementation characteristics (computational complexity, hardware utilization, and memory patterns) significantly impact the efficiency of modern learning pipelines. {#tbl-compare-activations tbl-colwidths="[10,28,23,39]"}
 
 In practice, ReLU is the default choice for large-scale networks due to its efficiency and scalability. Softmax remains indispensable for classification tasks requiring probabilistic outputs, despite its computational cost.
 
@@ -1487,8 +1487,6 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
 
 : **Training Operation Classifications**: Different operations in the training pipeline exhibit vastly different arithmetic intensities, determining whether they are limited by compute throughput or memory bandwidth. This classification guides optimization strategy: memory-bound operations benefit from precision reduction and operator fusion, while compute-bound operations benefit from faster hardware and increased parallelism. {#tbl-training-arithmetic-intensity tbl-colwidths="[33,33,33]"}
 
-To build intuition for these relationships, study the roofline diagram in @fig-training-roofline, the standard diagnostic tool for understanding hardware utilization. The ridge point marks the "knee" where the sloped memory-bound region meets the flat compute-bound ceiling. Operations falling left of this point, including attention softmax\index{Attention!softmax arithmetic intensity}, are starved for data: the accelerator could compute faster, but memory bandwidth cannot deliver operands quickly enough. Operations to the right are compute bound: adding more memory bandwidth would not help because the arithmetic units themselves limit throughput. Notice how GPT-2's training operations distribute across this landscape.
-
 ::: {#fig-training-roofline fig-env="figure" fig-pos="htb" fig-cap="**Training Roofline Model**: GPT-2 training operations mapped against arithmetic intensity on a log-log roofline diagram. Matrix multiplications operate in the compute-bound regime (right of the ridge point), while normalization and activation operations fall in the memory-bound region (left). FlashAttention shifts standard attention from below to above the ridge point, demonstrating how algorithmic redesign can move operations into a more efficient regime." fig-alt="Log-log plot showing roofline model with memory-bound slope and compute-bound ceiling. Points show different training operations: MatMul above ridge point, LayerNorm and Softmax below. Arrow shows FlashAttention improvement."}
 
 ```{python}
@@ -1737,6 +1735,8 @@ class AcceleratorSpecs:
     h100_fp8_speedup_vs_fp16_mult_str = fmt_multiple(round(h100_fp8_speedup_vs_fp16), commas=False, precision=0)
 ```
 
+To build intuition for these relationships, study the roofline diagram in @fig-training-roofline, the standard diagnostic tool for understanding hardware utilization. The ridge point marks the "knee" where the sloped memory-bound region meets the flat compute-bound ceiling. Operations falling left of this point, including attention softmax\index{Attention!softmax arithmetic intensity}, are starved for data: the accelerator could compute faster, but memory bandwidth cannot deliver operands quickly enough. Operations to the right are compute bound: adding more memory bandwidth would not help because the arithmetic units themselves limit throughput. Notice how GPT-2's training operations distribute across this landscape.
+
 Consider a GPT-2 attention layer\index{Arithmetic Intensity!attention layer} that materializes the $S{\times}S$ attention-score matrix. For each head, the $QK^\top$ product costs approximately $2S^2d_{\text{head}}$ FLOPs, while writing the FP16 score matrix and reading it back for softmax traffic moves about $4S^2$ bytes. The arithmetic intensity of this materialized score path is therefore $d_{\text{head}}/2$. For GPT-2 Small ($d_{\text{model}}=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $d_{\text{head}}=$ `{python} AttentionIntensity.head_dim_str`), this yields `{python} AttentionIntensity.attn_intensity_str`, below the A100's ridge point, making standard materialized attention memory bound. Scaling the hidden dimension raises projection intensity, but it does not remove the $\mathcal{O}(S^2)$ score-matrix traffic that FlashAttention targets.
 
 Accelerators have characteristic hardware ridge points where operations transition from memory-bound to compute bound. The A100 with `{python} AcceleratorSpecs.a100_fp16_tflop_per_s_str` FP16 Tensor Core and `{python} AcceleratorSpecs.a100_bw_tb_per_s_str` bandwidth has a ridge point of `{python} AcceleratorSpecs.a100_ridge_flops_per_byte_str`. The H100 SXM with `{python} AcceleratorSpecs.h100_fp16_tflop_per_s_str` FP16 Tensor Core and `{python} AcceleratorSpecs.h100_bw_tb_per_s_str` bandwidth has a ridge point of approximately `{python} AcceleratorSpecs.h100_ridge_flops_per_byte_str`. Operations below the ridge point are memory bound; above are compute bound.
@@ -1981,7 +1981,7 @@ The training loop\index{Training Loop!forward and backward passes}\index{Trainin
         arrow,
         dashed
     },
-    node distance=1.2cm and 1.1cm
+    node distance=1.4cm and 1.4cm
 ]
 
 % Row 1: Predict
@@ -1989,15 +1989,15 @@ The training loop\index{Training Loop!forward and backward passes}\index{Trainin
 \node[box_blue, right=of batch] (forward) {Forward Pass\\(Model)};
 \node[box={GreenL}{GreenLine}, right=of forward] (pred) {Predicted\\Labels};
 % Row 2: Gradients
-\node[box_lg={RedL}{RedLine}, below=1.2cm of pred] (loss) {Loss Function\\(Error Calculation)};
-\node[box_blue, below=1.2cm of forward] (grads) {Backward Pass\\(Chain Rule)};
-\node[box={GreenL}{GreenLine}, below=1.2cm of batch] (backward) {Parameter\\Gradients};
+\node[box_lg={RedL}{RedLine}, below=1.0cm of pred] (loss) {Loss Function\\(Error Calculation)};
+\node[box_blue, below=1.0cm of forward] (grads) {Backward Pass\\(Chain Rule)};
+\node[box={GreenL}{GreenLine}, below=1.0cm of batch] (backward) {Parameter\\Gradients};
 %labels
 \node[box={GreenL}{GreenLine}, right=of loss] (truth) {Ground\\Truth};
 \node[above=0.1cm of truth, font=\footnotesize\usefont{T1}{phv}{m}{it}, color=gray] {Labels};
 % Row 3: Update
-\node[box_lg={OrangeL}{OrangeLine}, below=1.2cm of backward] (optim) {Optimizer\\(Adam/SGD)};
-\node[box_blue, below=1.2cm of grads] (update) {Update\\Parameters};
+\node[box_lg={OrangeL}{OrangeLine}, below=1.0cm of backward] (optim) {Optimizer\\(Adam/SGD)};
+\node[box_blue, below=1.0cm of grads] (update) {Update\\Parameters};
 % Connections
 \draw[arrow] (batch) -- (forward);
 \draw[arrow] (forward) -- (pred);
@@ -2009,15 +2009,15 @@ The training loop\index{Training Loop!forward and backward passes}\index{Trainin
 \draw[arrow] (optim) -- (update);
 % Loop back
 \draw[dash_arrow] (update.east) -- ++(0.5,0) coordinate(a)
-    -- (a |- optim.south) -- ++(0,-0.5) coordinate(b) % down below optim
+    -- (a |- optim.south) -- ++(0,-0.35) coordinate(b) % down below optim
     node[right, font=\footnotesize\usefont{T1}{phv}{m}{it},
 color=gray, pos=0] {Next Iteration}
     -- (b -| backward.west) -- ++(-0.8,0) coordinate(c) % left of everything
     -- (c |- batch.west) -- (batch.west);
 % Step labels
-\node[above=1mm of forward, font=\small\usefont{T1}{phv}{b}{n}, color=TextBlack] {Step 1: Predict};
-\node[above=1mm of grads, font=\small\usefont{T1}{phv}{b}{n}, color=TextBlack] {Step 2: Gradients};
-\node[above=1mm of $(optim.north east)!0.5!(update.north west)$,
+\node[above=1pt of forward, font=\small\usefont{T1}{phv}{b}{n}, color=TextBlack] {Step 1: Predict};
+\node[above=1pt of grads, font=\small\usefont{T1}{phv}{b}{n}, color=TextBlack] {Step 2: Gradients};
+\node[above=1pt of $(optim.north east)!0.5!(update.north west)$,
 font=\small\usefont{T1}{phv}{b}{n}, color=TextBlack] {Step 3: Update};
 \end{tikzpicture}
 ```
@@ -2685,6 +2685,11 @@ Understanding these tail effects is the difference between a practitioner who tu
 
 :::
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 |                  **Batch Size**                 |                    **Warps Needed**                   |                **Utilization**                 |                      **Relative Time**                      |
 |:-----------------------------------------------:|:-----------------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------:|
 | `{python} TrainingDimensions.wave_batch_32_str` | `{python} TrainingDimensions.wave_warps_32_value_str` |                  100 percent                   |                          1$\times$                          |
@@ -2693,6 +2698,10 @@ Understanding these tail effects is the difference between a practitioner who tu
 | `{python} TrainingDimensions.wave_batch_65_str` | `{python} TrainingDimensions.wave_warps_65_value_str` | `{python} TrainingDimensions.wave_util_65_str` | ~`{python} TrainingDimensions.wave_time_65_factor_mult_str` |
 
 : **Wave quantization tax on NVIDIA GPUs**: Batch sizes that straddle the 32-thread warp boundary launch additional partially-filled warps, dropping utilization sharply while leaving step time nearly unchanged. A batch of 33 launches the same two warps as a batch of 64 but uses only half the hardware; the next quantum boundary repeats at 65. This is why batch sizes should be multiples of 32 or 64, not values that look "close enough." {#tbl-training-wave-quantization tbl-colwidths="[25,25,25,25]"}
+
+```{=latex}
+\endgroup
+```
 
 Libraries like cuDNN\index{cuDNN!optimized implementations} [@chetlur2014cudnn] address these challenges by providing optimized implementations for each operation type. These systems dynamically select algorithms based on input dimensions, hardware capabilities, and memory constraints. The selection process balances computational efficiency with memory usage, often requiring empirical measurement to determine optimal configurations for specific hardware setups.
 
@@ -3049,7 +3058,7 @@ The bars make the ranking concrete: BF16 Adam alone pushes past the single-GPU b
 
 The batch size--utilization relationship established in @sec-model-training-minibatch-processing-4eb0 showed that larger batches improve accelerator utilization by shifting operations into the compute-bound regime. However, batch size\index{Batch Size!convergence impact} also affects the parameter update process in ways that become critical at scale. A larger batch provides a more accurate estimate of the true gradient, allowing for larger learning steps. However, increasing the batch size without adjusting the learning rate[^fn-hyperparameter-training] leads to the **linear scaling failure**\index{Linear Scaling Failure!definition}.
 
-Doubling the batch size halves the number of updates per epoch. If the learning rate remains constant, the model effectively travels "half the distance" in weight space, causing underfitting. @Fig-linear-scaling-failure reveals this failure, which contrasts the generalization gap against the correction from the **linear scaling rule**\index{Linear Scaling Rule!large batch training} ($\eta_{\text{new}} = k \times \eta_{\text{base}}$); the loss curves are normalized for intuition.
+[^fn-hyperparameter-training]: **Hyperparameter**\index{Hyperparameter!definition}: While weights are learned during training, hyperparameters (learning rate, batch size, layer count) are set before training and control the learning process itself. Each hyperparameter choice has direct systems consequences: batch size determines memory footprint, learning rate interacts with numerical precision, and layer count multiplies activation storage. Tuning them typically requires multiple full training runs, multiplying total compute cost. \index{Hyperparameter!systems impact}
 
 ::: {#fig-linear-scaling-failure fig-env="figure" fig-pos="htb" fig-cap="**Linear Scaling Failure**: Training loss vs. epochs (arbitrary units). The blue curve (Batch 32) is the standard baseline batch size. The gray curve (Batch 256, fixed learning rate) shows what happens when batch size is increased 8$\times$ without tuning: convergence slows dramatically because weight updates are too infrequent per epoch. The green curve (Batch 256, scaled learning rate) restores convergence by scaling the learning rate linearly (8$\times$), allowing the model to take larger steps to compensate for fewer updates." fig-alt="Line chart of loss vs. epochs. Blue line (Batch 32 baseline) converges fast. Gray line (Batch 256, fixed learning rate) converges slowly. Green line (Batch 256, scaled learning rate) matches the baseline."}
 
@@ -3106,7 +3115,7 @@ plt.close()
 
 :::
 
-[^fn-hyperparameter-training]: **Hyperparameter**\index{Hyperparameter!definition}: While weights are learned during training, hyperparameters (learning rate, batch size, layer count) are set before training and control the learning process itself. Each hyperparameter choice has direct systems consequences: batch size determines memory footprint, learning rate interacts with numerical precision, and layer count multiplies activation storage. Tuning them typically requires multiple full training runs, multiplying total compute cost. \index{Hyperparameter!systems impact}
+Doubling the batch size halves the number of updates per epoch. If the learning rate remains constant, the model effectively travels "half the distance" in weight space, causing underfitting. @Fig-linear-scaling-failure reveals this failure, which contrasts the generalization gap against the correction from the **linear scaling rule**\index{Linear Scaling Rule!large batch training} ($\eta_{\text{new}} = k \times \eta_{\text{base}}$); the loss curves are normalized for intuition.
 
 Beyond the convergence effects, batch size interacts with distributed training strategies: larger batches reduce the frequency of gradient synchronization across devices (fewer optimizer steps per epoch), but each synchronization transfers more data. In distributed settings, batch size often determines the degree of data parallelism, impacting how gradient computations and parameter updates are distributed. Gradient accumulation (@sec-model-training-gradient-accumulation-checkpointing-0c47) decouples the effective batch size from memory constraints, enabling optimal batch sizes without requiring the memory to hold all samples simultaneously.
 
@@ -3938,6 +3947,9 @@ class MixedPrecisionHardwareTable:
     a100_fp16_speedup_mult_str = fmt_multiple(a100_fp16_speedup, precision=0, commas=False)
 ```
 
+The choice between formats depends on model characteristics. Models with gradient outliers, common in transformer architectures, generally benefit from BF16's wider dynamic range. Models with well-conditioned gradients may prefer FP16's greater mantissa precision. Regardless of the reduced-precision format chosen for forward and backward passes, certain operations require FP32 precision: loss accumulation, softmax denominators, normalization variance computation, and optimizer state. These requirements stem from the numerical sensitivity of these operations rather than arbitrary convention.
+
+
 | **Property**                   |  **FP32**  |                              **FP16**                             |                              **BF16**                             |
 |:-------------------------------|:----------:|:-----------------------------------------------------------------:|:-----------------------------------------------------------------:|
 | **Exponent bits**              |     8      |                                 5                                 |                                 8                                 |
@@ -3946,8 +3958,6 @@ class MixedPrecisionHardwareTable:
 | **A100 peak throughput ratio** | 1$\times$  | `{python} MixedPrecisionHardwareTable.a100_fp16_speedup_mult_str` | `{python} MixedPrecisionHardwareTable.a100_fp16_speedup_mult_str` |
 
 : **Precision Format Comparison**: The choice between FP16 and BF16 depends on whether dynamic range (BF16's strength) or precision (FP16's advantage) matters more for the specific workload. Minimum normal values shown are the practical thresholds for training, as subnormal values may flush to zero on many GPUs. On A100, FP16 and BF16 Tensor Cores reach `{python} MixedPrecisionHardwareTable.a100_fp16_speedup_mult_str` the FP32 CUDA-core peak. {#tbl-precision-comparison tbl-colwidths="[40,20,20,20]"}
-
-The choice between formats depends on model characteristics. Models with gradient outliers, common in transformer architectures, generally benefit from BF16's wider dynamic range. Models with well-conditioned gradients may prefer FP16's greater mantissa precision. Regardless of the reduced-precision format chosen for forward and backward passes, certain operations require FP32 precision: loss accumulation, softmax denominators, normalization variance computation, and optimizer state. These requirements stem from the numerical sensitivity of these operations rather than arbitrary convention.
 
 @Fig-mixed-precision traces the data flow through mixed-precision training's six-step cycle: FP32 master weights convert to FP16 for the forward pass (step 1), the forward pass computes FP16 loss (step 2), loss is scaled to prevent gradient underflow (step 3), backpropagation computes scaled FP16 gradients (step 4), gradients are copied to FP32 and unscaled (step 5), and FP32 gradients update the master weights (step 6), completing the cycle that enables Tensor Core acceleration while preserving numerical stability through strategic precision management.
 
@@ -4434,7 +4444,6 @@ class CrossGenPrecisionCalc:
     gpt2_params_b_str = fmt_count(gpt2_params_b * BILLION, scale='B', precision=1, commas=False)
 ```
 
-The performance impact across generations appears in the throughput numbers: training our lighthouse GPT-2 model (`{python} CrossGenPrecisionCalc.gpt2_params_b_str`) on a single GPU illustrates how hardware and precision co-evolve: V100 achieves `{python} CrossGenPrecisionCalc.v100_fp32_sps_str` in FP32 and `{python} CrossGenPrecisionCalc.v100_fp16_sps_str` in FP16 (`{python} CrossGenPrecisionCalc.v100_fp16_speedup_mult_str` speedup), A100 reaches `{python} CrossGenPrecisionCalc.a100_bf16_sps_str` in BF16 (`{python} CrossGenPrecisionCalc.a100_over_v100_mult_str` over V100 FP32), and H100 delivers `{python} CrossGenPrecisionCalc.h100_fp8_sps_str` in FP8 (`{python} CrossGenPrecisionCalc.h100_over_v100_mult_str` over V100 FP32). These speedups compound with reduced-precision memory savings, enabling both faster iteration and larger models. The hardware-software co-design principle is evident: algorithmic techniques like mixed precision unlock specialized hardware capabilities, while hardware features like Tensor Cores make certain algorithms practical.
 
 | **Architecture**  | **Recommended Precision**            | **Key Considerations**                                                                                                |
 |:------------------|:-------------------------------------|:----------------------------------------------------------------------------------------------------------------------|
@@ -4443,6 +4452,8 @@ The performance impact across generations appears in the throughput numbers: tra
 | **H100 (Hopper)** | FP8 via TransformerEngine            | Requires FP8-aware training recipes; `{python} MixedPrecisionHardwareDetail.h100_fp8_tflop_per_s_str` peak throughput |
 
 : **Precision Strategy by GPU Architecture**: Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy tbl-colwidths="[13,31,56]"}
+
+The performance impact across generations appears in the throughput numbers: training our lighthouse GPT-2 model (`{python} CrossGenPrecisionCalc.gpt2_params_b_str`) on a single GPU illustrates how hardware and precision co-evolve: V100 achieves `{python} CrossGenPrecisionCalc.v100_fp32_sps_str` in FP32 and `{python} CrossGenPrecisionCalc.v100_fp16_sps_str` in FP16 (`{python} CrossGenPrecisionCalc.v100_fp16_speedup_mult_str` speedup), A100 reaches `{python} CrossGenPrecisionCalc.a100_bf16_sps_str` in BF16 (`{python} CrossGenPrecisionCalc.a100_over_v100_mult_str` over V100 FP32), and H100 delivers `{python} CrossGenPrecisionCalc.h100_fp8_sps_str` in FP8 (`{python} CrossGenPrecisionCalc.h100_over_v100_mult_str` over V100 FP32). These speedups compound with reduced-precision memory savings, enabling both faster iteration and larger models. The hardware-software co-design principle is evident: algorithmic techniques like mixed precision unlock specialized hardware capabilities, while hardware features like Tensor Cores make certain algorithms practical.
 
 ### Flash attention: IO-aware attention optimization {#sec-model-training-flash-attention-ioaware-attention-optimization-3da0}
 
@@ -4939,15 +4950,16 @@ The synergy between gradient accumulation and checkpointing enables training of 
 
 For a network with $N_L$ layers, each storing $A$ bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute trade-off. Sub-linear checkpointing strategies can reduce memory consumption from $\mathcal{O}(N_L)$ to $\mathcal{O}(\sqrt{N_L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.
 
-Setting the derivative of total memory cost $(k \times A + (N_L/k) \times A)$ to zero yields $k_{\text{optimal}} = \sqrt{N_L}$. In the common $\sqrt{N_L}$ checkpointing scheme, this gives roughly one-third extra forward compute in exchange for the minimum memory footprint under this simplified model. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals $48 \times A$ (full activation storage). Optimal checkpointing ($\sqrt{48}$ approximately equals seven checkpoints) requires memory of $7 \times A + (48/7) \times A$ approximately equals $14 \times A$, achieving 71 percent memory savings with approximately 33 percent compute overhead.
 
 | **Strategy**               | **Memory Cost**               | **Recompute Cost**    |
-|:---------------------------|:------------------------------|:----------------------|
+|:---------------------------|:-----------------------------:|:----------------------|
 | **No checkpointing**       | $N_L \times A$                | 0 forward ops         |
 | **Checkpoint every layer** | $A$                           | $(N_L-1)$ forward ops |
 | **k checkpoints**          | $k\times A + (N_L/k)\times A$ | $(N_L-k)$ forward ops |
 
 : **Checkpointing Memory-Compute Trade-Offs**: Different checkpoint strategies trade memory savings against recomputation overhead. The optimal number of checkpoints balances these factors. {#tbl-checkpoint-tradeoffs}
+
+Setting the derivative of total memory cost $(k \times A + (N_L/k) \times A)$ to zero yields $k_{\text{optimal}} = \sqrt{N_L}$. In the common $\sqrt{N_L}$ checkpointing scheme, this gives roughly one-third extra forward compute in exchange for the minimum memory footprint under this simplified model. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals $48 \times A$ (full activation storage). Optimal checkpointing ($\sqrt{48}$ approximately equals seven checkpoints) requires memory of $7 \times A + (48/7) \times A$ approximately equals $14 \times A$, achieving 71 percent memory savings with approximately 33 percent compute overhead.
 
 Not all operations are equally expensive to recompute, which motivates selective checkpointing. Attention layers with QKV projections have high memory cost $(3 \times B \times S \times d_{\text{model}})$ but also high recompute cost (three matrix multiplications). Feed-forward layers have high memory cost $(2 \times B \times S \times 4d_{\text{model}})$ but lower recompute cost (two matrix multiplications). LayerNorm has low memory cost and very low recompute cost. A common practical strategy is to checkpoint before attention layers (high memory per compute ratio), skip FFN checkpoints (often fast to recompute), and avoid checkpointing normalization layers. In representative transformer workloads, selective checkpointing achieves 60--80 percent memory savings with 20--25 percent compute overhead, often outperforming uniform checkpoint placement.
 
@@ -5102,14 +5114,15 @@ With Accumulation (actual GPT-2 approach):
 - True batch 512 without accumulation: Perplexity 18.2
 - Difference: 0.5 percent (within noise margin)
 
+```{=latex}
+\tcbbreak
+```
 **Why this works**: Gradient accumulation is mathematically equivalent to larger batches because gradients are additive. Each accelerator first accumulates a local gradient over its `{python} GradientAccumulation.batch_per_gpu_str` examples:
-
 $$
 `{python} GradientAccumulation.local_grad_eqn_str`
 $$
 
 AllReduce then averages those local gradients across `{python} GradientAccumulation.gpus_accum_str` accelerators, producing the global effective batch:
-
 $$
 `{python} GradientAccumulation.global_grad_eqn_str`
 $$
@@ -5143,6 +5156,8 @@ Both techniques introduce explicit trade-offs. Activation checkpointing adds app
 
 @Tbl-optimization synthesizes three of the four core optimization strategies, contrasting their primary goals, mechanisms, and trade-offs. Flash Attention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0) complements these by addressing memory-bandwidth bottlenecks in attention layers through IO-aware tiling, achieving 2--4$\times$ speedups while reducing memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$. Selecting an appropriate strategy depends on the specific bottleneck identified through profiling.
 
+These four techniques (prefetching, mixed precision, Flash Attention, and gradient accumulation) form the core optimization toolkit for single-machine training. Each targets a specific bottleneck: prefetching addresses data starvation, mixed precision accelerates computation and reduces memory, Flash Attention eliminates attention's memory-bandwidth bottleneck, and gradient accumulation enables effective batch sizes that would otherwise exceed memory capacity. Applied systematically using the profiling methodology established earlier, they can dramatically extend the capabilities of a single device. The practical question is how a profile selects the subset that composes for a specific bottleneck trace.
+
 | **Aspect**                    | **Prefetching and Overlapping**                                    | **Mixed-Precision Training**                                | **Gradient Accumulation and Checkpointing**                              |
 |:------------------------------|:-------------------------------------------------------------------|:------------------------------------------------------------|:-------------------------------------------------------------------------|
 | **Primary Goal**              | Minimize data transfer delays and maximize accelerator utilization | Reduce memory consumption and computational overhead        | Overcome memory limitations during backpropagation and parameter updates |
@@ -5158,7 +5173,6 @@ Both techniques introduce explicit trade-offs. Activation checkpointing adds app
 
 : **Optimization Strategies**: Prefetching, mixed-precision training, and gradient accumulation address distinct bottlenecks in AI training pipelines: data transfer, memory consumption, and backpropagation. Selecting an appropriate strategy balances implementation complexity against gains in speed and resource utilization, depending on hardware and workload characteristics. {#tbl-optimization}
 
-These four techniques (prefetching, mixed precision, Flash Attention, and gradient accumulation) form the core optimization toolkit for single-machine training. Each targets a specific bottleneck: prefetching addresses data starvation, mixed precision accelerates computation and reduces memory, Flash Attention eliminates attention's memory-bandwidth bottleneck, and gradient accumulation enables effective batch sizes that would otherwise exceed memory capacity. Applied systematically using the profiling methodology established earlier, they can dramatically extend the capabilities of a single device. The practical question is how a profile selects the subset that composes for a specific bottleneck trace.
 
 ### GPT-2 optimization walkthrough {#sec-model-training-putting-together-gpt2-optimization-walkthrough-def7}
 
@@ -5318,10 +5332,6 @@ The profile moves the bottleneck from Machine capacity to the Data axis in DÂ·AÂ
 **Step 5**: Apply prefetching and data pipeline optimization.
 
 The targeted fix is to overlap input preparation with accelerator execution: configuring the data loader with eight workers, pinned memory, and a prefetch factor of 2 changes the pipeline schedule rather than the model. Data loading becomes mostly hidden behind computation, accelerator utilization rises to `{python} GPT2WalkthroughCalc.util_optim_pct_str`, and the remaining overhead is dominated by synchronization, loss scaling, memory transfers, and kernel launch latency rather than batch starvation.
-
-```{=latex}
-\tcbbreak
-```
 
 @Tbl-training-gpt2-final-profile contrasts the naive baseline against the optimized configuration:
 
