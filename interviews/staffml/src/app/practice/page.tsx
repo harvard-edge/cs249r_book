@@ -43,7 +43,7 @@ import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
-import ChapterLinks from "@/components/ChapterLinks";
+import BookRefCard from "@/components/BookRefCard";
 import QuestionVisual from "@/components/QuestionVisual";
 import { track } from "@/lib/analytics";
 
@@ -1376,7 +1376,7 @@ function PracticePage() {
                               })}
                             </div>
                             <QuestionFeedback question={current} />
-                            <ChapterLinks area={current.competency_area} />
+                            <BookRefCard refs={current.book_refs} />
                             {chainInfo && (
                               <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
                             )}
