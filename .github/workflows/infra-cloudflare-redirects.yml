@@ -1,0 +1,210 @@
+name: '🔧 Infra · 🔀 Cloudflare Redirect Rules'
+
+# =============================================================================
+# 🔀 Cloudflare Redirect Rules — Sync redirect config to Cloudflare
+# =============================================================================
+#
+# Manages URL redirects as code. The canonical redirect list lives at:
+#   shared/config/cloudflare-redirects.json
+#
+# Each entry maps a broken/legacy path to its correct destination:
+#   { "from": "/vol1/introduction.html",
+#     "to":   "https://mlsysbook.ai/vol1/contents/vol1/introduction/introduction.html" }
+#
+# Why this exists:
+#   The book was restructured so chapter HTML files live at
+#   /vol{1,2}/contents/vol{1,2}/{chapter}/{chapter}.html but many
+#   external sites, search engines, and instructor pages linked to
+#   the shorter /vol{1,2}/{chapter}.html form. This workflow syncs
+#   the full redirect table to Cloudflare so those inbound links
+#   still resolve instead of hitting the 404 page.
+#
+# How it works:
+#   Cloudflare's Redirect Rules Rulesets API (http_request_redirect phase)
+#   accepts a declarative ruleset. This workflow:
+#     1. Reads shared/config/cloudflare-redirects.json
+#     2. Generates the Cloudflare Rulesets API payload
+#     3. PUTs it to the zone's http_request_redirect entrypoint
+#   The PUT is idempotent — running it twice has no side-effects.
+#
+# Triggers:
+#   - On push to dev/main: whenever cloudflare-redirects.json changes
+#   - workflow_dispatch: manual one-shot (e.g. to verify after a Cloudflare
+#     incident or to add redirects without a full deploy)
+#
+# Required secrets / variables:
+#   secrets.CLOUDFLARE_API_TOKEN   — Must have "Zone.Redirect Rules:Edit" scope
+#                                    on the mlsysbook.ai zone. The existing
+#                                    Cache Purge token does NOT have this scope;
+#                                    create a new API token in Cloudflare
+#                                    dashboard → My Profile → API Tokens with:
+#                                      Permissions: Zone > Zone > Read
+#                                                   Zone > Config Rules > Edit
+#                                                   (or: Zone > Redirect Rules > Edit)
+#                                      Zone Resources: Include > mlsysbook.ai
+#                                    Store it as secrets.CLOUDFLARE_REDIRECTS_TOKEN
+#                                    (separate from the Cache Purge token).
+#   vars.CLOUDFLARE_ZONE_ID        — Same zone id used by infra-cloudflare-purge.yml
+#
+# =============================================================================
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - 'shared/config/cloudflare-redirects.json'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print payload without applying to Cloudflare'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-redirects
+  cancel-in-progress: false
+
+jobs:
+  sync-redirects:
+    name: '🔀 Sync redirect rules to Cloudflare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: '📥 Checkout'
+        uses: actions/checkout@v6
+
+      - name: '✅ Verify required configuration'
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_REDIRECTS_TOKEN }}
+          CF_ZONE: ${{ vars.CLOUDFLARE_ZONE_ID }}
+        run: |
+          missing=0
+          if [ -z "$CF_TOKEN" ]; then
+            echo "::error::secrets.CLOUDFLARE_REDIRECTS_TOKEN is not set."
+            echo "::error::Create a Cloudflare API token with Zone > Config Rules > Edit scope"
+            echo "::error::on the mlsysbook.ai zone and store it as CLOUDFLARE_REDIRECTS_TOKEN."
+            missing=1
+          fi
+          if [ -z "$CF_ZONE" ]; then
+            echo "::error::vars.CLOUDFLARE_ZONE_ID is not set."
+            missing=1
+          fi
+          exit $missing
+
+      - name: '🏗️ Build Cloudflare Rulesets payload'
+        id: build-payload
+        run: |
+          set -euo pipefail
+
+          python3 - << 'PYEOF'
+          import json, sys
+
+          with open("shared/config/cloudflare-redirects.json") as f:
+              redirects = json.load(f)
+
+          # Filter out entries with _comment keys
+          redirects = [r for r in redirects if "from" in r and "to" in r]
+
+          rules = []
+          for i, r in enumerate(redirects):
+            src = r["from"]
+            dst = r["to"]
+            rules.append({
+              "description": f"Redirect {src}",
+              "expression": f'(http.request.uri.path eq "{src}")',
+              "action": "redirect",
+              "action_parameters": {
+                "from_value": {
+                  "status_code": 301,
+                  "target_url": {
+                    "value": dst
+                  },
+                  "preserve_query_string": False
+                }
+              }
+            })
+
+          payload = {
+            "description": "mlsysbook.ai legacy URL redirects — managed via infra-cloudflare-redirects.yml",
+            "kind": "zone",
+            "name": "mlsysbook redirects",
+            "phase": "http_request_redirect",
+            "rules": rules
+          }
+
+          out = json.dumps(payload, indent=2)
+          print(f"Generated {len(rules)} redirect rules.")
+          with open("/tmp/cf-redirects-payload.json", "w") as f:
+            f.write(out)
+          print(out[:2000])  # preview first 2000 chars in job log
+          PYEOF
+
+      - name: '🔍 Dry-run: print payload (no API call)'
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "=== DRY RUN — payload that would be sent to Cloudflare ==="
+          cat /tmp/cf-redirects-payload.json
+          echo "=== END DRY RUN ==="
+
+      - name: '🔀 Apply redirect rules to Cloudflare'
+        if: ${{ inputs.dry_run != true }}
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_REDIRECTS_TOKEN }}
+          CF_ZONE: ${{ vars.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+
+          # PUT to the zone's http_request_redirect entrypoint ruleset.
+          # This is idempotent — it replaces the current ruleset atomically.
+          RESPONSE=$(curl --silent --show-error --fail-with-body \
+            --request PUT \
+            --url "https://api.cloudflare.com/client/v4/zones/${CF_ZONE}/rulesets/phases/http_request_redirect/entrypoint" \
+            --header "Authorization: Bearer ${CF_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data @/tmp/cf-redirects-payload.json)
+
+          echo "=== Cloudflare API response ==="
+          echo "$RESPONSE" | python3 -m json.tool
+          echo "==============================="
+
+          # Check success field
+          SUCCESS=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d.get('success',False)).lower())")
+          if [ "$SUCCESS" != "true" ]; then
+            echo "::error::Cloudflare API returned success=false. See response above."
+            exit 1
+          fi
+
+          # Count rules applied
+          RULE_COUNT=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('result',{}).get('rules',[])))")
+          echo "::notice::Successfully applied ${RULE_COUNT} redirect rules to mlsysbook.ai."
+
+      - name: '📋 Step summary'
+        if: always()
+        run: |
+          REDIRECTS=$(python3 -c "
+          import json
+          with open('shared/config/cloudflare-redirects.json') as f:
+            r = [x for x in json.load(f) if 'from' in x]
+          print(len(r))
+          ")
+          {
+            echo "## 🔀 Cloudflare Redirect Rules Sync"
+            echo ""
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "**Mode**: Dry run (no changes applied)"
+            else
+              echo "**Mode**: Live"
+            fi
+            echo "- **Redirects in config**: ${REDIRECTS}"
+            echo "- **Source**: \`shared/config/cloudflare-redirects.json\`"
+            echo ""
+            echo "To add a new redirect, edit \`shared/config/cloudflare-redirects.json\`"
+            echo "and push to \`dev\`. The workflow applies automatically."
+          } >> "$GITHUB_STEP_SUMMARY"
