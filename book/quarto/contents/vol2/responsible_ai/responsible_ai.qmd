@@ -1389,9 +1389,10 @@ class RealTimeFairnessMonitor:
     async def process_prediction(
         self, prediction, demographics, actual_label=None
     ):
+        # Slide a fixed window over the live stream, then re-check
+        # fairness.
         self.window.append((prediction, demographics, actual_label))
         self.window = self.window[-self.window_size :]
-
         metrics = self._compute_metrics()
         if (
             metrics["demographic_parity"] > self.alert_threshold
@@ -1401,66 +1402,43 @@ class RealTimeFairnessMonitor:
         return metrics
 
     def _compute_metrics(self):
+        # Bucket predictions (and labels, when present) by protected
+        # group.
         by_group = {}
         for pred, demo, label in self.window:
-            group = demo.get("ethnicity", "unknown")
             bucket = by_group.setdefault(
-                group, {"preds": [], "labels": []}
+                demo.get("ethnicity", "unknown"),
+                {"preds": [], "labels": []},
             )
             bucket["preds"].append(pred)
             if label is not None:
                 bucket["labels"].append((pred, label))
 
+        # Demographic parity: spread in positive-prediction rate
+        # across groups.
         rates = [
-            np.mean(data["preds"])
-            for data in by_group.values()
-            if data["preds"]
+            np.mean(d["preds"])
+            for d in by_group.values()
+            if d["preds"]
         ]
         parity = max(rates) - min(rates) if len(rates) > 1 else 0.0
-        odds = self._equalized_odds_gap(by_group)
-        counts = {
-            group: len(data["preds"])
-            for group, data in by_group.items()
-        }
         return {
             "demographic_parity": parity,
-            "equalized_odds": odds,
-            "groups": counts,
+            "equalized_odds": self._equalized_odds_gap(by_group),
+            "groups": {
+                g: len(d["preds"]) for g, d in by_group.items()
+            },
         }
 
     def _equalized_odds_gap(self, by_group):
-        tpr_values = []
-        fpr_values = []
+        # Largest TPR/FPR gap across groups meeting
+        # min_labeled_per_group;
+        # per-group rate computation omitted for brevity.
+        ...
 
-        for data in by_group.values():
-            labeled = data["labels"]
-            if len(labeled) < self.min_labeled_per_group:
-                continue
-
-            preds = np.array([pred for pred, _ in labeled])
-            labels = np.array([label for _, label in labeled])
-
-            positives = labels == 1
-            negatives = labels == 0
-            if positives.any():
-                tpr_values.append(np.mean(preds[positives] == 1))
-            if negatives.any():
-                fpr_values.append(np.mean(preds[negatives] == 1))
-
-        tpr_gap = (
-            max(tpr_values) - min(tpr_values)
-            if len(tpr_values) > 1
-            else 0.0
-        )
-        fpr_gap = (
-            max(fpr_values) - min(fpr_values)
-            if len(fpr_values) > 1
-            else 0.0
-        )
-        return max(tpr_gap, fpr_gap)
-
-    async def _trigger_bias_alert(self, metrics):
-        print(f"[AUDIT] bias alert: {metrics}")
+    async def _trigger_bias_alert(
+        self, metrics
+    ): ...  # page on-call and append the event to the audit log
 ```
 
 :::
