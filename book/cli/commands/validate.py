@@ -392,6 +392,8 @@ class ValidateCommand:
                   note="GB/TB not GiB/TiB"),
             Scope("percent-spacing", "_run_percent_spacing",
                   note="no space before %"),
+            Scope("percent-word-before", "_run_percent_word_before",
+                  note="digits before 'percent', not spelled-out words (5 percent not five percent)"),
             Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
                   note="spell out 'percent' in captions"),
             Scope("currency", "_run_currency_style",
@@ -4836,6 +4838,20 @@ class ValidateCommand:
 
     PERCENT_SPACING_PATTERN = re.compile(r"`[^`]*`\s+%")
 
+    # Spelled-out number words immediately before "percent" — digits required per
+    # numbers-and-math-in-prose.md §Percent ("percent" acts as a unit; always digits).
+    # Covers one–one hundred, including common compounds (twenty-five, etc.).
+    _PERCENT_WORD_NUMS = (
+        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
+        r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+        r"twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|"
+        r"twenty-six|twenty-seven|twenty-eight|twenty-nine|"
+        r"thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+        r"thirty-\w+|forty-\w+|fifty-\w+|sixty-\w+|seventy-\w+|eighty-\w+|ninety-\w+|"
+        r"one hundred)\s+percent\b"
+    )
+    PERCENT_WORD_BEFORE_PATTERN = re.compile(_PERCENT_WORD_NUMS, re.IGNORECASE)
+
     def _run_percent_spacing(self, root: Path) -> ValidationRunResult:
         """Flag space between inline expression and % (e.g. `{python} x` % → use `{python} x`%)."""
         start = time.time()
@@ -4868,6 +4884,48 @@ class ValidateCommand:
         return ValidationRunResult(
             name="percent-spacing",
             description="No space between inline value and % in QMD prose",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_percent_word_before(self, root: Path) -> ValidationRunResult:
+        """Flag spelled-out number words before 'percent' (e.g. 'five percent' → '5 percent').
+
+        MIT Press rule: 'percent' acts as a unit; always use digits with units regardless
+        of value (numbers-and-math-in-prose.md §Percent). 'five percent' is wrong;
+        '5 percent' is correct.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.PERCENT_WORD_BEFORE_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 20)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="percent_word_before",
+                            message=f"Use digit before 'percent', not spelled-out word: '{m.group().strip()}' → replace with digit form",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="percent-word-before",
+            description="Digits required before 'percent' (percent acts as a unit)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
