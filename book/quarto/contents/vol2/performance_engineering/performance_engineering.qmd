@@ -147,7 +147,7 @@ The central lesson of @fig-iron-law-flowchart is that profiling must precede opt
 
 That discipline of bounding the worst case before a global rollout is the operational complement to the throughput-vs-quality tuning the rest of this chapter pursues, and that tuning implies a trade-off space with a boundary. The **efficiency frontier**\index{Efficiency Frontier!definition} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
 
-The multi-dimensional nature of this frontier makes optimization challenging. The relevant dimensions include:
+The multi-dimensional nature of this frontier makes optimization challenging. Five dimensions span the efficiency frontier:
 
 - Throughput\index{Throughput} (tokens/second or requests/second): How much work the system completes per unit time.
 - Latency\index{Latency} (time-to-first-token, the wait before the first output token; inter-token latency, the gap between subsequent tokens): How quickly the system responds to individual requests.
@@ -159,7 +159,7 @@ These dimensions interact in nonobvious ways. Increasing batch size improves thr
 
 A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the techniques in this chapter provide the tools to reach that point.
 
-To make this concrete, consider two deployment configurations for the same 70B large language model (LLM):
+To make this concrete, consider two deployment configurations for the same 70B large language model (LLM).
 
 Configuration A is latency-optimized: FP16 weights, batch size 1, speculative decoding enabled. The model replica produces approximately 50 tokens/second with 20 ms inter-token latency while occupying 8 H100 GPUs for a single user stream. Cost: approximately \$0.12 per 1,000 output tokens.
 
@@ -791,7 +791,7 @@ Operator fusion assigns the recipe to a single chef who keeps the ingredients on
 
 Each GPU kernel launch involves overhead: the CPU must prepare launch parameters, dispatch to the GPU command queue, and the GPU must schedule thread blocks across its streaming multiprocessors (SMs). For a small element-wise operation on an accelerator such as an H100, this overhead can be 5--20 $\mu$s, a time during which a memory-bound kernel might have already completed its useful work. When a transformer layer comprises dozens of small operations (add, multiply, normalize, activate), the cumulative launch overhead becomes significant.
 
-Each unfused kernel must also materialize its output in HBM. Consider a sequence of three operations: $Y = \text{LayerNorm}(\text{GELU}(XW + b))$. Without fusion, this requires:
+Each unfused kernel must also materialize its output in HBM. Consider a sequence of three operations: $Y = \text{LayerNorm}(\text{GELU}(XW + b))$. Without fusion, this requires three passes through HBM:
 
 1. **GEMM kernel**\index{GEMM!kernel}: Read $X$ and $W$ from HBM, compute $XW + b$, write result $Z_1$ to HBM.
 2. **GELU kernel**\index{GELU!kernel}: Read $Z_1$ from HBM, compute $\text{GELU}(Z_1)$, write $Z_2$ to HBM.
@@ -974,7 +974,7 @@ The key insight behind FlashAttention is the **online softmax**\index{Online Sof
 
 [^fn-online-softmax-algo]: **Online Softmax**: *Online* here is an algorithmic term meaning the computation processes data incrementally in a single pass without storing the full input -- the same sense as in *online learning* or *online algorithms*. This property is what makes tiling possible: the algorithm never needs the complete $S{\times}S$ score matrix in memory simultaneously, reducing attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ and making long-context inference feasible on fixed-size SRAM.
 
-The online algorithm avoids this by maintaining running statistics that are updated incrementally as each tile is processed. When processing tile $t$, the algorithm:
+The online algorithm avoids this by maintaining running statistics that are updated incrementally as each tile is processed. When processing tile $t$, the algorithm executes four steps:
 
 1. Computes a local block of scores $A_t = Q_{\text{block}} K_t^T$.
 2. Updates the running maximum: $m_{\text{new}} = \max(m_{\text{old}}, \max(A_t))$.
@@ -1967,7 +1967,7 @@ While MFU is a common metric for training efficiency, it is often misleading for
 
 ### Using the roofline for diagnosis {#sec-performance-engineering-roofline-diagnosis}
 
-The roofline model from @sec-performance-engineering-roofline becomes a diagnostic tool when combined with profiling data. The process is:
+The roofline model from @sec-performance-engineering-roofline becomes a diagnostic tool when combined with profiling data. Diagnosis follows three steps:
 
 1. **Measure** the achieved FLOP/s and memory bandwidth for a kernel using Nsight Compute.
 2. **Compute** the operational arithmetic intensity from the algorithm (FLOP/byte).
@@ -2080,7 +2080,7 @@ nsys profile --trace=cuda,nvtx,osrt,cudnn,cublas \
 
 The `--trace` flags control which activities are recorded. The `cuda` flag captures kernel launches and memory operations. The `nvtx` flag captures user-annotated regions (PyTorch automatically annotates module boundaries with NVTX markers). The `cublas` and `cudnn` flags capture library-level operations, which helps identify whether a GEMM is using cuBLAS or a custom kernel. The command is useful because these rows expose whether the bottleneck is launch overhead, communication serialization, or kernel implementation.
 
-The resulting `.nsys-rep` file is opened in the Nsight Systems GUI, which presents a multi-row timeline. The most important diagnostic rows are:
+The resulting `.nsys-rep` file is opened in the Nsight Systems GUI, which presents a multi-row timeline. Four rows carry the most diagnostic weight.
 
 The CUDA HW row shows the actual kernel execution on the GPU. Each colored bar represents a kernel, with width proportional to execution time. Gaps between bars indicate GPU idle time, which represents wasted potential. For a well-optimized inference pipeline, the CUDA HW row should show nearly continuous kernel execution with minimal gaps.
 
@@ -2090,7 +2090,7 @@ The NCCL row (for distributed workloads) shows collective communication operatio
 
 The NVTX row shows user-annotated regions, which PyTorch maps to module names (`Linear`, `LayerNorm`, `Attention`). This connects low-level kernel names (often cryptic strings like `volta_fp16_s1688gemm_fp16_256x128_ldg8_f2f_nn`) to the model-level operations that produced them.
 
-The key patterns to look for in a Nsight Systems trace are:
+Four patterns reveal the most diagnostic information from a Nsight Systems trace:
 
 1. The ratio of kernel execution to idle time, which measures GPU utilization.
 2. The distribution of kernel durations, where many short kernels suggest fusion opportunities.
@@ -2391,14 +2391,14 @@ To illustrate how the diagnostic sequence and combining principles work in pract
 
 #### Baseline measurement {#sec-performance-engineering-case-baseline}
 
-The initial deployment uses FP16 weights, standard PyTorch eager execution, and tensor parallelism across `{python} KVCacheAnalysis.tensor_parallel_degree_str` GPUs. The 70B model in FP16 requires `{python} KVCacheAnalysis.weight_fp16_total_gb_str` of weight storage, distributed as approximately `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` per GPU. The baseline performance metrics are:
+The initial deployment uses FP16 weights, standard PyTorch eager execution, and tensor parallelism across `{python} KVCacheAnalysis.tensor_parallel_degree_str` GPUs. The 70B model in FP16 requires `{python} KVCacheAnalysis.weight_fp16_total_gb_str` of weight storage, distributed as approximately `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` per GPU. Four baseline measurements reveal the optimization gap:
 
 - **TTFT**: 1,200 ms (well above the 500 ms target)
 - **ITL**: 85 ms (above the 50 ms target)
 - **Throughput**: 280 tokens/second (below the 1,000 token/second target)
 - **Maximum batch size**\index{Batch Size!maximum}: `{python} KVCacheAnalysis.baseline_policy_batch_size_str` (limited by KV cache memory)
 
-A Nsight Systems trace reveals the following time breakdown for a single decode step at batch size 1:
+A Nsight Systems trace breaks down a single decode step at batch size 1 into five time categories:
 
 - GEMM kernels: 38 percent of step time
 - Attention (including KV cache reads): 24 percent of step time
@@ -2451,7 +2451,7 @@ However, speculative decoding interacts with batching. At batch size `{python} K
 
 #### Lessons from the case study {#sec-performance-engineering-case-lessons}
 
-This optimization journey illustrates several principles:
+This optimization journey illustrates several principles.
 
 The order of optimizations matters. Precision engineering (Round 1) was applied first because it yields the largest single improvement and enables subsequent optimizations by freeing memory for larger batch sizes. Fusion (Round 2) addressed the new bottleneck exposed by precision engineering. Speculative decoding (Round 3) provided latency improvement once the throughput target was met.
 
