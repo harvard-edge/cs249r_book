@@ -15,6 +15,7 @@ author, optionally guided by a /layout-fix skill.
 import argparse
 import csv
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -260,7 +261,9 @@ class LayoutCommand:
             action="store_true",
             help="Emit one CSV row per finding: chapter,sheet,label,issue,"
                  "severity,signal,over_pts,off_page,source_file,source_line,"
-                 "section,snippet,related.",
+                 "section,snippet,related,suggested_fix. The suggested_fix "
+                 "column gives a ready-to-apply \\vspace*/[offset] recipe with "
+                 "the resolved .column-margin block.",
         )
 
         tables = sub.add_parser(
@@ -1690,14 +1693,90 @@ class LayoutCommand:
         writer.writerow([
             "chapter", "sheet", "label", "issue", "severity", "signal",
             "over_pts", "off_page", "source_file", "source_line", "section",
-            "snippet", "related",
+            "snippet", "related", "suggested_fix",
         ])
         for f in findings:
             writer.writerow([
                 f.chapter, f.sheet, f.label, f.issue, f.severity, f.signal,
                 f"{f.over_pts:.1f}", int(f.off_page), f.source_file,
                 f.source_line, f.section, f.snippet, f.related,
+                self._suggest_margin_fix(f),
             ])
+
+    def _resolve_margin_block(
+        self, f: MarginFinding
+    ) -> Optional[Tuple[int, str]]:
+        """Resolve a margin finding to its source ``.column-margin`` block.
+
+        The scanner's ``source_line`` is a prose-anchor guess that can sit
+        hundreds of lines from the real figure (auto-layout.md §2.4), so scan
+        the chapter for ``.column-margin`` blocks and pick the one nearest the
+        anchor, disambiguating by the caption snippet when several sit close.
+        Returns ``(block_line, asset_basename)`` (1-indexed) or ``None`` when no
+        block is found near the anchor — a "needs eyes" case, usually a body
+        table or a mis-anchored object.
+        """
+        if not f.source_file or not f.source_line:
+            return None
+        try:
+            text = (self._repo_root() / f.source_file).read_text(
+                encoding="utf-8"
+            )
+        except OSError:
+            return None
+        lines = text.splitlines()
+        want = re.sub(r"[^a-z0-9]", "", f.snippet.lower())
+        best: Optional[Tuple[Tuple[int, int], int, str]] = None
+        for i, line in enumerate(lines):
+            if ".column-margin" not in line:
+                continue
+            dist = abs(i + 1 - f.source_line)
+            if dist > 40:
+                continue
+            asset, caption = "", ""
+            for j in range(i + 1, min(len(lines), i + 6)):
+                if lines[j].strip() == ":::":
+                    break
+                m = re.search(r"images/[\w/.-]+/([\w.-]+\.(?:svg|png|jpg))",
+                              lines[j])
+                if m and not asset:
+                    asset = m.group(1)
+                stripped = lines[j].strip()
+                if stripped.startswith("*") and stripped.endswith("*"):
+                    caption = stripped
+            cap = re.sub(r"[^a-z0-9]", "", caption.lower())
+            matched = bool(want) and bool(cap) and (
+                want in cap or cap[-12:] in want
+            )
+            key = (0 if matched else 1, dist)
+            if best is None or key < best[0]:
+                best = (key, i + 1, asset or "(no asset)")
+        if best is None:
+            return None
+        return (best[1], best[2])
+
+    def _suggest_margin_fix(self, f: MarginFinding) -> str:
+        """Actionable one-line fix recipe for a margin overflow.
+
+        Seeds the nudge as ``ceil(over_pts * 0.45) + 2`` mm — the 0.45
+        pre-absorbs the ~18% a ``\\vspace*`` loses inside a marginnote
+        (auto-layout.md §2) — then classifies figure vs footnote and resolves
+        the target block by asset rather than the scanner's line guess. Returns
+        an empty string for non-overflow rows.
+        """
+        if not f.over_pts or f.over_pts <= 0:
+            return ""
+        mm = math.ceil(f.over_pts * 0.45) + 2
+        block = self._resolve_margin_block(f)
+        if block:
+            line, asset = block
+            return (f"\\vspace*{{-{mm}mm}} in .column-margin ({asset}) "
+                    f"@ {f.source_file}:{line}")
+        if "image" in f.signal:
+            return ("needs eyes: image overflow with no .column-margin nearby "
+                    "(likely a body table or mis-anchored figure)")
+        return (f"[offset=-{mm}mm] on the footnote near "
+                f"{f.source_file}:{f.source_line}")
 
     # ------------------------------------------------------------------
     # CSV output
