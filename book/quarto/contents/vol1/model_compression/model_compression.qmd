@@ -4395,6 +4395,7 @@ class QuantizationMathCalc:
     steps_str = fmt(int_steps, precision=0, commas=False)
     scale_str = fmt(scale, precision=4, commas=False)
     zp_quotient_str = fmt(zp_quotient, precision=2, commas=False)
+    steps_math = MarkdownStr(f"$2^{bits} - 1$")
     zero_point_str = fmt_int(zero_point, commas=False)
     x_val_str = fmt_int(x_val, commas=False)
     x_q_str = fmt_int(x_q, commas=False)
@@ -4421,7 +4422,7 @@ We need a linear mapping $x \approx s(x_q - z)$, where $s$ is the **scale**\inde
 Suppose the activations range from $\alpha$ = `{python} QuantizationMathCalc.alpha_str` to $\beta$ = `{python} QuantizationMathCalc.beta_str`, and the target precision is UINT8 $(b=8)$.
 
 *   **Range**: $\beta - \alpha$ = `{python} QuantizationMathCalc.range_str`.
-*   **Steps**: $2^8 - 1$ = `{python} QuantizationMathCalc.steps_str`.
+*   **Steps**: `{python} QuantizationMathCalc.steps_math` = `{python} QuantizationMathCalc.steps_str`.
 *   **Scale**: $s$ = `{python} QuantizationMathCalc.range_str`/`{python} QuantizationMathCalc.steps_str` $\approx$ `{python} QuantizationMathCalc.scale_str`.
 *   **Zero-point**: $z = \text{round}(-(\alpha) / s)$ = round(-(`{python} QuantizationMathCalc.alpha_str`)/`{python} QuantizationMathCalc.scale_str`) = round(`{python} QuantizationMathCalc.zp_quotient_str`) = `{python} QuantizationMathCalc.zero_point_str`.
 
@@ -6976,7 +6977,46 @@ This decision framework provides starting points for individual technique select
 
 ## Optimization Strategies {#sec-model-compression-optimization-strategies-f2f6}
 
-BERT compressed from 440 MB to 28 MB, a 16$\times$ reduction, not through any single technique but through sequential application of pruning, distillation, and quantization. The largest optimization gains emerge when techniques target different resources: pruning changes the operation pattern, quantization changes numerical precision, distillation recovers behavior in a smaller dense student, and architecture search can produce designs that tolerate low-precision execution from the start.
+```{python}
+#| echo: false
+#| label: bert-compression-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BERT-BASE MOBILE COMPRESSION RATIO
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: BERT-Base compression headline (pruning + distillation + quantization)
+# │
+# │ Goal: Pin the 16x footprint reduction shared across this section.
+# │ How: ratio = round(full_mb / compressed_mb) from measured footprints.
+# │
+# │ Imports: mlsysim.fmt, mlsysim.core.units (MB)
+# │ Exports: full_mb_str, compressed_mb_str, compression_ratio_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_qty_int, fmt_multiple, check
+from mlsysim.core.units import MB
+
+class BertCompression:
+    """BERT-Base mobile compression: 440 MB to 28 MB via pruning, distillation, quantization."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    full_mb = 440  # scenario: BERT-Base FP32 footprint
+    compressed_mb = 28  # scenario: final compressed footprint
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    full_size = full_mb * MB
+    compressed_size = compressed_mb * MB
+    compression_ratio = round(full_mb / compressed_mb)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(full_mb > compressed_mb, "Compressed model must be smaller than the original.")
+    check(compression_ratio == 16, f"BERT compression should round to 16x, got {compression_ratio}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    full_mb_str = fmt_qty_int(full_size, MB, commas=False)
+    compressed_mb_str = fmt_qty_int(compressed_size, MB, commas=False)
+    compression_ratio_mult_str = fmt_multiple(compression_ratio, precision=0, commas=False)
+```
+
+BERT compressed from `{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str`, a `{python} BertCompression.compression_ratio_mult_str` reduction, not through any single technique but through sequential application of pruning, distillation, and quantization. The largest optimization gains emerge when techniques target different resources: pruning changes the operation pattern, quantization changes numerical precision, distillation recovers behavior in a smaller dense student, and architecture search can produce designs that tolerate low-precision execution from the start.
 
 Sequencing matters because these levers interact through the same weights and activations. Applying pruning first concentrates important weights into a smaller parameter set, making subsequent quantization less destructive. Distillation can then recover behavior that aggressive precision reduction or structural change would otherwise lose. The critical engineering question is therefore which sequence yields the greatest compression ratio with the least accuracy degradation. @Fig-compression-methods compares that trade-off: pruning combined with quantization (blue circles) achieves high compression ratios with minimal accuracy loss, while quantization alone (orange squares) provides a reasonable balance. In contrast, SVD (red diamonds) requires a larger model size to maintain accuracy, illustrating why complementary techniques compound while redundant ones stall.
 
@@ -7179,7 +7219,7 @@ A mobile BERT pipeline\index{BERT!mobile deployment pipeline} makes that sequenc
 
 **Mechanism**: Stage one applies structured architectural pruning: removing 30 percent of attention heads, trimming 40 percent of intermediate FFN dimensions, and reducing depth and hidden width to a compact BERT variant. The full structural recipe yields a 75 percent parameter reduction, with accuracy dropping from 76.2 percent to 75.1 percent. Stage two uses knowledge distillation from the original teacher to recover accuracy to 75.9 percent. Stage three applies quantization-aware training with INT8 quantization, achieving 4$\times$ additional memory reduction with final accuracy of 75.6 percent.
 
-**Systems insight**: The combined impact is 16$\times$ memory reduction (440 MB to 28 MB), 12$\times$ inference speedup on mobile CPU, and only 0.6 percent final accuracy loss vs. 2.1 percent if quantization had been applied before pruning. The ordering of compression techniques changes the final deployment trade-off.
+**Systems insight**: The combined impact is `{python} BertCompression.compression_ratio_mult_str` memory reduction (`{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str`), 12$\times$ inference speedup on mobile CPU, and only 0.6 percent final accuracy loss vs. 2.1 percent if quantization had been applied before pruning. The ordering of compression techniques changes the final deployment trade-off.
 
 :::
 
@@ -8150,7 +8190,7 @@ Teams sometimes convert tensors to sparse formats as soon as pruning creates vis
 
 ## Summary {#sec-model-compression-summary-8229}
 
-Model compression is not a bag of tricks but an engineering discipline built on three complementary dimensions: *structural optimization* determines what the model computes, *precision optimization* determines how precisely it computes, and *architectural optimization* determines how efficiently those computations execute on physical hardware. The most important lesson of this chapter is that these dimensions compose multiplicatively. Pruning alone might achieve 2$\times$ compression; quantization alone might achieve 4$\times$; but pruning, distillation, and quantization applied together can achieve 16$\times$—as BERT's compression from 440 MB to 28 MB demonstrates. The second lesson is equally important: theoretical compression ratios lie. A 4$\times$ reduction in parameters translates to 4$\times$ latency improvement only when the optimization aligns with the hardware's execution model. Unstructured sparsity on hardware that lacks sparse kernels achieves almost nothing; INT8 quantization on hardware without INT8 units achieves even less. Profile on target hardware, not paper metrics.
+Model compression is not a bag of tricks but an engineering discipline built on three complementary dimensions: *structural optimization* determines what the model computes, *precision optimization* determines how precisely it computes, and *architectural optimization* determines how efficiently those computations execute on physical hardware. The most important lesson of this chapter is that these dimensions compose multiplicatively. Pruning alone might achieve 2$\times$ compression; quantization alone might achieve 4$\times$; but pruning, distillation, and quantization applied together can achieve `{python} BertCompression.compression_ratio_mult_str`—as BERT's compression from `{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str` demonstrates. The second lesson is equally important: theoretical compression ratios lie. A 4$\times$ reduction in parameters translates to 4$\times$ latency improvement only when the optimization aligns with the hardware's execution model. Unstructured sparsity on hardware that lacks sparse kernels achieves almost nothing; INT8 quantization on hardware without INT8 units achieves even less. Profile on target hardware, not paper metrics.
 
 Combined with the data selection techniques from @sec-data-selection, these model-centric optimizations complete the efficiency toolkit: data selection maximizes learning from available examples, while model compression minimizes resources required for deployment.
 
