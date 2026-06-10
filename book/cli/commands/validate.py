@@ -209,6 +209,22 @@ class ValidateCommand:
         3. If the scope needs new flags, add them to the argparse block in
            `run()` and dispatch them in `_run_group`.
 
+    LLM-actionable output (REQUIRED for every ValidationIssue). The check
+    output is consumed by automated fixers via `binder check <group> --json`,
+    so each issue must be machine-fixable on its own:
+        - `file` + `line`  — exact location.
+        - `code`           — a stable snake_case identifier (never reword it;
+                             agents key on it).
+        - `suggestion`     — the EXACT fix as `"<wrong> → <right>"`. Always set
+                             it when the fix is deterministic. When it needs
+                             human judgment (e.g. a prose range), still give the
+                             best concrete form and say so in `message`; never
+                             leave the agent with only "fix this".
+        - `context`        — the surrounding text so the agent can locate the
+                             span within the line.
+    The human-readable text and `--json` both render from the same
+    ValidationIssue, so populating `suggestion` serves both.
+
     No new pre-commit hook needed. Pre-commit runs `./binder check <group>`
     and picks up the new scope automatically once it is `default=True`.
 
@@ -4972,6 +4988,7 @@ class ValidateCommand:
                         ),
                         severity="error",
                         context=hit.context,
+                        suggestion=f"{hit.match} → {hit.replacement}",
                     )
                 )
 
@@ -5006,18 +5023,29 @@ class ValidateCommand:
 
         for file in files:
             for hit in find_prose_percent(self._read_text(file)):
+                if hit.is_range:
+                    msg = (
+                        f"Spell out 'percent' in body prose: '{hit.match}' is "
+                        "part of a range — rewrite the whole range as "
+                        "'X to Y percent' (e.g. '30 to 50 percent')."
+                    )
+                    suggestion = f"{hit.match} → (range) X to Y percent"
+                else:
+                    msg = (
+                        "Spell out 'percent' in body prose, not the % symbol: "
+                        f"'{hit.match}' → '{hit.replacement}'. (% stays in "
+                        "tables, equations, code, and figures.)"
+                    )
+                    suggestion = f"{hit.match} → {hit.replacement}"
                 issues.append(
                     ValidationIssue(
                         file=self._relative_file(file),
                         line=hit.line,
                         code="percent_in_prose",
-                        message=(
-                            "Spell out 'percent' in body prose, not the % "
-                            f"symbol: '{hit.match}' → use the word. (% stays in "
-                            "tables, equations, code, and figures.)"
-                        ),
+                        message=msg,
                         severity="error",
                         context=hit.context,
+                        suggestion=suggestion,
                     )
                 )
 

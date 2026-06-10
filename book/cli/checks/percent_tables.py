@@ -179,7 +179,7 @@ def audit(paths: Iterable[Path]) -> List[Violation]:
                     "'./book/binder format percent-tables' to auto-fix."
                 ),
                 context=hit.context,
-                suggestion=hit.replacement,
+                suggestion=f"{hit.match} → {hit.replacement}",
             ))
     return violations
 

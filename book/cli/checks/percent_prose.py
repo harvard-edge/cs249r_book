@@ -56,7 +56,9 @@ _CAPTION_ATTRS = ("fig-cap=", "tbl-cap=", "fig-alt=", "tbl-alt=", "alt=", "title
 class Hit:
     line: int            # 1-based line number
     match: str           # the matched text, e.g. "98.5%"
+    replacement: str     # the exact fix, e.g. "98.5 percent" (LLM-actionable)
     context: str         # trimmed surrounding text (from the masked line)
+    is_range: bool       # True if part of a number range (needs "X to Y percent")
 
 
 def _mask_nonprose(line: str) -> str:
@@ -116,7 +118,17 @@ def find_prose_percent(text: str) -> List[Hit]:
         masked = _mask_nonprose(line)
         for m in PCT_PROSE_PAT.finditer(masked):
             ctx = masked[max(0, m.start() - 25): m.end() + 8].strip()
-            hits.append(Hit(line=idx + 1, match=m.group().strip(), context=ctx))
+            num = m.group().rstrip("%").strip()
+            # Range? a "<num> <dash>" sits immediately before this match.
+            preceding = masked[:m.start()]
+            is_range = bool(re.search(r"\d[\d.,]*\s*[–—-]\s*$", preceding))
+            hits.append(Hit(
+                line=idx + 1,
+                match=m.group().strip(),
+                replacement=f"{num} percent",
+                context=ctx,
+                is_range=is_range,
+            ))
     return hits
 
 
