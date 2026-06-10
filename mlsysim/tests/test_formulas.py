@@ -908,3 +908,71 @@ class TestReliabilityInputContracts:
                 fn(Q_("-1 GB"), 8, Q_("100 GB/s"), Q_("5 us"))
         with pytest.raises(ValueError):
             calc_all_to_all_time(Q_("-1 GB"), 8, Q_("100 GB/s"), Q_("5 us"))
+
+# ======================================================================
+# 2026-06-10 audit: pins for previously-untested decode FLOPs and
+# checkpoint size (a 2x YAML edit to DecodeConstant or a default-bytes
+# change passed the whole suite before these).
+# ======================================================================
+
+class TestTransformerDecodeFlops:
+    """2P rule: forward decode ~ 2 FLOPs/param/token (Kaplan 2020 Sec 2.1)."""
+
+    def test_known_answer_8b(self):
+        from mlsysim.physics import calc_transformer_decode_flops
+        result = calc_transformer_decode_flops(Q_("8e9 param"))
+        assert result.m_as(ureg.flop) == pytest.approx(1.6e10, rel=1e-9)
+
+    def test_scales_linearly_with_tokens(self):
+        from mlsysim.physics import calc_transformer_decode_flops
+        one = calc_transformer_decode_flops(Q_("8e9 param"), n_tokens=1)
+        hundred = calc_transformer_decode_flops(Q_("8e9 param"), n_tokens=100)
+        assert hundred.m_as(ureg.flop) == pytest.approx(100 * one.m_as(ureg.flop), rel=1e-9)
+
+    def test_decode_constant_pinned(self):
+        # Pins Literature.Chinchilla.DecodeConstant = 2.0 itself: an edit of
+        # chinchilla.yaml silently changing rendered numbers must fail here.
+        from mlsysim.literature.registry import Literature
+        assert float(Literature.Chinchilla.DecodeConstant) == 2.0
+
+
+class TestCheckpointSize:
+    """checkpoint = params * bytes_per_param; default 14 B/param is the
+    ZeRO mixed-precision convention (2 fp16 w + 4 master + 4 m + 4 v)."""
+
+    def test_default_adam_convention(self):
+        from mlsysim.physics import calc_checkpoint_size
+        result = calc_checkpoint_size(Q_("8e9 param"))
+        assert result.m_as(ureg.GB) == pytest.approx(112.0, rel=1e-9)
+
+    def test_explicit_bytes_per_param(self):
+        from mlsysim.physics import calc_checkpoint_size
+        result = calc_checkpoint_size(8e9, bytes_per_param=4)
+        assert result.m_as(ureg.GB) == pytest.approx(32.0, rel=1e-9)
+
+    def test_calibration_constants_pinned(self):
+        from mlsysim.engine import calibration as cal
+        assert cal.CHECKPOINT_BYTES_PER_PARAM_ADAM == 14
+        assert cal.CHECKPOINT_BYTES_PER_PARAM_SGD == 4
+        assert cal.TRAINING_OPTIMIZER_BYTES_ADAM == 12.0
+
+
+class TestEffectiveFlopsValidation:
+    def test_rejects_out_of_range_ratios(self):
+        peak = Q_("1e15 flop/s")
+        with pytest.raises(ValueError):
+            calc_effective_flops(peak, mfu=1.5, scaling_eff=0.9, goodput_ratio=0.95)
+        with pytest.raises(ValueError):
+            calc_effective_flops(peak, mfu=-0.5, scaling_eff=0.9, goodput_ratio=0.95)
+
+    def test_dtime_rejects_eta_above_one(self):
+        with pytest.raises(ValueError):
+            dTime(Q_("1e18 flop"), 8, Q_("312e12 flop/s"), 1.5)
+
+
+class TestKvCacheValidation:
+    def test_rejects_negative_dimensions(self):
+        with pytest.raises(ValueError):
+            calc_kv_cache_size(n_layers=-1, n_heads=8, head_dim=128, seq_len=2048, batch_size=1)
+        with pytest.raises(ValueError):
+            calc_kv_cache_size(n_layers=32, n_heads=8, head_dim=128, seq_len=-5, batch_size=1)
