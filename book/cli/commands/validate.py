@@ -314,7 +314,7 @@ class ValidateCommand:
             # ids: vol1 only (vol2 chapters are early-development; many
             # sections still missing IDs). YAML hook embeds --vol1.
             Scope("ids", "_run_headers"),
-            Scope("case", "_run_heading_case",
+            Scope("case", "_run_mitpress_heading_case",
                   note="MIT Press headline-case (§10.3.1)"),
         ],
         "bib": [
@@ -336,7 +336,7 @@ class ValidateCommand:
         ],
         "figures": [
             Scope("captions", "_run_figures"),
-            Scope("caption-heads", "_run_caption_head_style",
+            Scope("caption-heads", "_run_mitpress_caption_head_style",
                   note="fig-cap/tbl-cap/lst-cap use **Bold Title**: Explanation"),
             Scope("div-syntax", "_run_figure_div_syntax"),
             Scope("label-required", "_run_figure_label_required",
@@ -347,7 +347,7 @@ class ValidateCommand:
             # Re-enable when we own figure placement again.
             Scope("flow", "_run_float_flow", default=False),
             Scope("files", "_run_images"),
-            Scope("alt-text-style", "_run_alt_text_style",
+            Scope("alt-text-style", "_run_mitpress_alt_text_style",
                   note="alt-text follows body-prose rules (§10.12)"),
         ],
         # ------------------------------------------------------------------
@@ -367,7 +367,7 @@ class ValidateCommand:
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
-            Scope("contractions", "_run_contractions",
+            Scope("contractions", "_run_mitpress_contractions",
                   note='no "can\'t", "it\'s" in body prose'),
             Scope("duplicate-words", "_run_duplicate_words"),
             Scope("unblended-prose", "_run_unblended_prose",
@@ -2911,7 +2911,7 @@ class ValidateCommand:
         r"""^\*\*(?P<head>[^*\n]+)\*\*(?P<index>(?:\\index\{[^}\n]+\})*):\s+(?P<body>\S.*)$"""
     )
 
-    def _run_caption_head_style(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_caption_head_style(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -5259,7 +5259,7 @@ class ValidateCommand:
         re.IGNORECASE,
     )
 
-    def _run_contractions(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_contractions(self, root: Path) -> ValidationRunResult:
         """Flag contractions in prose — use full forms (cannot, do not, etc.)."""
         start = time.time()
         files = self._qmd_files(root)
@@ -7998,7 +7998,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_heading_case(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_heading_case(self, root: Path) -> ValidationRunResult:
         """Enforce H1/H2 headline case + H3+ sentence case (MIT Press §10.3.1).
 
         Native implementation: imports from cli.commands.headings directly.
@@ -8365,7 +8365,7 @@ class ValidateCommand:
     #   figures.alt-text-style          → audit.checks.alt_text_style
     #
     # These complement the existing native runners that reimplement a
-    # subset of the same rules in-tree (e.g. _run_heading_case,
+    # subset of the same rules in-tree (e.g. _run_mitpress_heading_case,
     # _run_mitpress_acknowledgements). Over time those should migrate to
     # use the audit package as the single source of truth.
     # ──────────────────────────────────────────────────────────────────────
@@ -8590,7 +8590,7 @@ class ValidateCommand:
             "latin-abbrevs", "English over Latin in running text (§10.6)",
         )
 
-    def _run_alt_text_style(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_alt_text_style(self, root: Path) -> ValidationRunResult:
         """Alt-text inside `fig-alt=\"...\"` follows body-prose rules (§10.12).
 
         Flags: capitalized concept terms, `%` symbol, bare `vs`, LaTeX
