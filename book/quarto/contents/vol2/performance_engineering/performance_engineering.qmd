@@ -669,7 +669,45 @@ Here, $P$ is parameter count, $B$ is batch size, $d_{\text{model}}$ is hidden wi
 *Larger batches raise arithmetic intensity toward the ridge.*
 :::
 
-At large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving 2 percent utilization at batch size 1 may achieve 60 percent utilization at batch size 256. The economic implication is stark: the cost per token decreases by 30$\times$ as batch size increases from 1 to 256.
+```{python}
+#| echo: false
+#| label: performance-engineering-batch-mfu-anchors
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BATCH-SIZE MFU ANCHORS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the memory-bound-to-compute-bound transition prose below.
+# │
+# │ Goal: Pin the batch-1 vs batched inference utilization claim to the
+# │       package's cited anchors (the old prose hand-typed 2%/60%/30x,
+# │       matching no registry value; canon is 5%/40% -> 8x).
+# │ Show: MFU at batch 1, MFU at large batch, and the cost-per-token multiple.
+# │ How: Literature.Training.MfuInferenceBatch1 / MfuInferenceBatched.
+# │
+# │ Imports: mlsysim Literature registry + fmt helpers
+# │ Exports: BatchMfuAnchors.mfu_b1_pct_str, .mfu_batched_pct_str,
+# │          .cost_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt_multiple, check
+
+class BatchMfuAnchors:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    mfu_b1 = float(Literature.Training.MfuInferenceBatch1)
+    mfu_batched = float(Literature.Training.MfuInferenceBatched)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cost_mult = mfu_batched / mfu_b1
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cost_mult > 5, "Batched inference should improve utilization by at least 5x over batch 1")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mfu_b1_pct_str = fmt_percent(mfu_b1, precision=0, commas=False, style="prose")
+    mfu_batched_pct_str = fmt_percent(mfu_batched, precision=0, commas=False, style="prose")
+    cost_mult_str = fmt_multiple(cost_mult, precision=0, commas=False)
+```
+
+At large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving `{python} BatchMfuAnchors.mfu_b1_pct_str` utilization at batch size 1 may achieve `{python} BatchMfuAnchors.mfu_batched_pct_str` utilization at large batch sizes. The economic implication is stark: the cost per token decreases by roughly `{python} BatchMfuAnchors.cost_mult_str` as batching carries the workload from the memory-bound to the compute-bound regime.
 
 The constraint is memory: each additional request in the batch requires its own KV cache (the per-request store of attention keys and values for every token generated so far), and the total KV cache across all requests must fit in GPU memory alongside the model weights. The 70B-model-on-8-H100 deployment introduced here is the chapter's recurring example, revisited with full quantitative detail in the precision dividend (@sec-performance-engineering-quant-strategies) and the case study (@sec-performance-engineering-case-study). A 70B model with 140 GB of weights in FP16 must be sharded across multiple GPUs; on an 8-GPU node that leaves about 62.5 GB per GPU for KV cache before overhead. The precision engineering techniques in this chapter address exactly this constraint: INT4 weight quantization reduces the per-GPU weight footprint to about 4.4 GB and frees roughly 13 GB per GPU for KV cache, enabling batch sizes that transform the economics of serving.
 
