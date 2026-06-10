@@ -34,6 +34,10 @@ class PerformanceProfile(BaseModel):
     # Offload fields — populated when model spills beyond HBM to host memory
     offload_spill_bytes: Optional[Quantity] = None
     offload_effective_bw: Optional[Quantity] = None
+    # True when dispatch + framework layer tax exceeds both the compute and
+    # memory roofline terms; the bottleneck label reports the larger roofline
+    # ceiling, so small models at low batch can be overhead-bound in practice.
+    overhead_dominated: bool = False
 
     @property
     def energy_per_inference(self) -> Quantity:
@@ -162,7 +166,12 @@ class Engine:
             
             # Calculate training memory footprint
             if hasattr(model, 'training_memory'):
-                strategy = "selective" if activation_recomputation else "none"
+                # Pair FULL recomputation memory with the 4x ops multiplier above:
+                # full recompute stores only layer inputs and re-runs the forward
+                # pass (+1 forward), which is exactly the 4/3 ops convention.
+                # Selective checkpointing would save less memory AND cost fewer
+                # extra FLOPs; mixing the two charges the worst of both.
+                strategy = "full" if activation_recomputation else "none"
                 memory_footprint = model.training_memory(
                     batch_size=batch_size, seq_len=seq_len, precision=precision, 
                     strategy=strategy, zero_stage=zero_stage, dp_size=dp_size, is_lora=is_lora
@@ -264,24 +273,35 @@ class Engine:
         else:
             throughput = Q_(0, "1/s")
 
-        # 8-9. MFU, HFU, and Energy (energy depends on MFU, so compute MFU first)
-        # MFU = achieved_flops / peak_flops = (model_flops / step_time) / peak_flops
-        # Source: Chowdhery et al. (2022), "PaLM: Scaling Language Modeling with Pathways"
+        # 8-9. MFU, HFU, and Energy (energy depends on utilization, so compute MFU/HFU first)
+        # MFU = model FLOPs / (step_time × peak): only the FLOPs the model
+        # requires (1 fwd + 2 bwd for training), EXCLUDING recomputation.
+        # HFU = hardware FLOPs / (step_time × peak): what the silicon actually
+        # executed, INCLUDING the recompute forward pass. Without activation
+        # recomputation the two are identical by definition.
+        # Source: Chowdhery et al. (2022), "PaLM", Appendix B;
+        #         Korthikanti et al. (2022), "Reducing Activation Recomputation".
         # IMPORTANT: Use Pint unit-aware division to handle TFLOPS/s vs flop correctly.
         latency_s = latency.to("s")
+        model_ops = graph.total_ops * (3 if is_training else 1) * batch_size
         if latency_s.magnitude > 0 and peak_flops.magnitude > 0:
-            achieved_flops_rate = (batch_ops / latency_s).to(peak_flops.units)
-            mfu = (achieved_flops_rate / peak_flops).to_base_units().magnitude
+            mfu = ((model_ops / latency_s).to(peak_flops.units) / peak_flops).to_base_units().magnitude
             mfu = max(0.0, min(mfu, 1.0))  # Clamp to [0, 1]
+            # batch_ops carries the 4x multiplier when recomputation is on,
+            # so hfu/mfu = 4/3 under recompute and hfu == mfu otherwise.
+            hfu = ((batch_ops / latency_s).to(peak_flops.units) / peak_flops).to_base_units().magnitude
+            hfu = max(0.0, min(hfu, 1.0))  # Clamp to [0, 1]
         else:
             mfu = 0.0
-        hfu = min(mfu * cal.HFU_MFU_RATIO, 1.0)  # Source: PaLM (Chowdhery et al. 2022)
+            hfu = 0.0
 
         # Energy estimate (energy-proportional model)
-        # Consistent with SustainabilityModel: 30% idle + 70% * utilization
+        # Consistent with SustainabilityModel: 30% idle + 70% * utilization.
+        # Utilization is HFU (the silicon's actual busy fraction, including
+        # recompute work); identical to MFU when recomputation is off.
         # Source: Barroso & Hölzle (2007), "The Case for Energy-Proportional Computing"
         if hardware.tdp is not None:
-            avg_power = hardware.tdp * (cal.ENERGY_IDLE_FRACTION + cal.ENERGY_DYNAMIC_FRACTION * mfu)
+            avg_power = hardware.tdp * (cal.ENERGY_IDLE_FRACTION + cal.ENERGY_DYNAMIC_FRACTION * hfu)
             energy = (avg_power * latency.to("s")).to("J")
         else:
             energy = Q_("0 J")
@@ -304,6 +324,10 @@ class Engine:
             constraint_trace=constraint_trace,
             offload_spill_bytes=offload_spill,
             offload_effective_bw=offload_bw,
+            overhead_dominated=(
+                (dispatch_tax + layer_tax).to("ms").magnitude
+                > max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude)
+            ),
         )
 
     @staticmethod
