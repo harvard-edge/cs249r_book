@@ -5239,10 +5239,23 @@ class ValidateCommand:
     # Contractions  (forbidden in body prose per book-prose.md)
     # ------------------------------------------------------------------
 
+    # Contraction → full form. Body prose forbids contractions as a deliberate
+    # register choice (mit-press-editorial.md §10.11), overriding the copy
+    # editor's permissive "OK unless excessive." The lone exception is quoted
+    # speech / direct dialogue, so we mask double-quoted spans before matching.
+    CONTRACTION_EXPANSIONS = {
+        "can't": "cannot", "don't": "do not", "it's": "it is", "we'll": "we will",
+        "won't": "will not", "hasn't": "has not", "haven't": "have not",
+        "isn't": "is not", "aren't": "are not", "wasn't": "was not",
+        "weren't": "were not", "doesn't": "does not", "didn't": "did not",
+        "wouldn't": "would not", "couldn't": "could not", "shouldn't": "should not",
+        "that's": "that is", "there's": "there is", "here's": "here is",
+        "what's": "what is", "you're": "you are", "we're": "we are",
+        "they're": "they are", "they've": "they have", "let's": "let us",
+        "who's": "who is",
+    }
     CONTRACTIONS_PATTERN = re.compile(
-        r"\b(can't|don't|it's|we'll|won't|hasn't|haven't|isn't|aren't|wasn't|weren't|"
-        r"doesn't|didn't|wouldn't|couldn't|shouldn't|that's|there's|here's|what's|"
-        r"you're|we're|they're|they've|let's|who's)\b",
+        r"\b(" + "|".join(re.escape(k) for k in CONTRACTION_EXPANSIONS) + r")\b",
         re.IGNORECASE,
     )
 
@@ -5264,16 +5277,29 @@ class ValidateCommand:
                     continue
                 if stripped.startswith("|") or stripped.startswith("<!--"):
                     continue
-                for m in self.CONTRACTIONS_PATTERN.finditer(line):
-                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 2)].strip()
+                # §10.11 exception: quoted speech / dialogue. Blank inline code
+                # and double-quoted spans so contractions there are not flagged.
+                masked = re.sub(r"`[^`]*`", "", line)
+                masked = re.sub(r'"[^"]*"', "", masked)
+                masked = re.sub(r"“[^”]*”", "", masked)
+                for m in self.CONTRACTIONS_PATTERN.finditer(masked):
+                    found = m.group()
+                    full = self.CONTRACTION_EXPANSIONS[found.lower()]
+                    if found[0].isupper():
+                        full = full[0].upper() + full[1:]
+                    context = masked[max(0, m.start() - 2): min(len(masked), m.end() + 2)].strip()
                     issues.append(
                         ValidationIssue(
                             file=self._relative_file(file),
                             line=idx,
                             code="contractions",
-                            message="Contractions forbidden in body prose — use full form (e.g. cannot, do not)",
+                            message=(
+                                f"Contractions forbidden in body prose (§10.11): "
+                                f"'{found}' → '{full}'."
+                            ),
                             severity="warning",
                             context=context,
+                            suggestion=f"{found} → {full}",
                         )
                     )
 
