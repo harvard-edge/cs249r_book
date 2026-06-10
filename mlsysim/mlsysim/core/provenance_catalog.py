@@ -561,6 +561,12 @@ MEGASCALE = _lit(
     url="https://arxiv.org/abs/2402.15627",
 )
 
+GENDER_SHADES = _lit(
+    "prov:buolamwini-gendershades-2018",
+    "Buolamwini & Gebru (2018), Gender Shades: Intersectional Accuracy Disparities in Commercial Gender Classification",
+    url="https://proceedings.mlr.press/v81/buolamwini18a.html",
+)
+
 GPT2_TRAINING_COST_EST = _est(
     "prov:gpt2-training-cost-estimate",
     "Community estimate of GPT-2 (1.5B) cloud training cost in 2019 (~$50K)",
