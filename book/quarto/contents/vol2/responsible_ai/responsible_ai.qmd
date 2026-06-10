@@ -1389,9 +1389,10 @@ class RealTimeFairnessMonitor:
     async def process_prediction(
         self, prediction, demographics, actual_label=None
     ):
+        # Slide a fixed window over the live stream, then re-check
+        # fairness.
         self.window.append((prediction, demographics, actual_label))
         self.window = self.window[-self.window_size :]
-
         metrics = self._compute_metrics()
         if (
             metrics["demographic_parity"] > self.alert_threshold
@@ -1401,66 +1402,39 @@ class RealTimeFairnessMonitor:
         return metrics
 
     def _compute_metrics(self):
+        # Bucket predictions and labels by protected group.
         by_group = {}
         for pred, demo, label in self.window:
-            group = demo.get("ethnicity", "unknown")
             bucket = by_group.setdefault(
-                group, {"preds": [], "labels": []}
+                demo.get("ethnicity", "unknown"),
+                {"preds": [], "labels": []},
             )
             bucket["preds"].append(pred)
             if label is not None:
                 bucket["labels"].append((pred, label))
 
+        # Demographic parity: positive-prediction-rate spread.
         rates = [
-            np.mean(data["preds"])
-            for data in by_group.values()
-            if data["preds"]
+            np.mean(d["preds"])
+            for d in by_group.values()
+            if d["preds"]
         ]
         parity = max(rates) - min(rates) if len(rates) > 1 else 0.0
-        odds = self._equalized_odds_gap(by_group)
-        counts = {
-            group: len(data["preds"])
-            for group, data in by_group.items()
-        }
         return {
             "demographic_parity": parity,
-            "equalized_odds": odds,
-            "groups": counts,
+            "equalized_odds": self._equalized_odds_gap(by_group),
+            "groups": {
+                g: len(d["preds"]) for g, d in by_group.items()
+            },
         }
 
     def _equalized_odds_gap(self, by_group):
-        tpr_values = []
-        fpr_values = []
+        # Largest TPR/FPR gap across labeled groups; detail omitted.
+        ...
 
-        for data in by_group.values():
-            labeled = data["labels"]
-            if len(labeled) < self.min_labeled_per_group:
-                continue
-
-            preds = np.array([pred for pred, _ in labeled])
-            labels = np.array([label for _, label in labeled])
-
-            positives = labels == 1
-            negatives = labels == 0
-            if positives.any():
-                tpr_values.append(np.mean(preds[positives] == 1))
-            if negatives.any():
-                fpr_values.append(np.mean(preds[negatives] == 1))
-
-        tpr_gap = (
-            max(tpr_values) - min(tpr_values)
-            if len(tpr_values) > 1
-            else 0.0
-        )
-        fpr_gap = (
-            max(fpr_values) - min(fpr_values)
-            if len(fpr_values) > 1
-            else 0.0
-        )
-        return max(tpr_gap, fpr_gap)
-
-    async def _trigger_bias_alert(self, metrics):
-        print(f"[AUDIT] bias alert: {metrics}")
+    async def _trigger_bias_alert(
+        self, metrics
+    ): ...  # page on-call and append the event to the audit log
 ```
 
 :::
@@ -1791,7 +1765,7 @@ However, this rigor comes at significant computational cost. This 3-feature exam
 
 Another posthoc approach involves **counterfactual explanations**\index{Counterfactual Explanations}[^fn-counterfactual-explanations], which describe how a model's output would change if the input were modified in specific ways.
 
-[^fn-counterfactual-explanations]: **Counterfactual Explanations**\index{Counterfactual Explanations!recourse}: Formalized for ML by @wachter2017, counterfactuals answer "what would need to change?" rather than "why did this happen?" For regulatory compliance, they provide actionable recourse: "if the applicant's income were \$5,000 higher, the loan would be approved." Generating counterfactuals requires solving a constrained optimization problem (finding the minimal feasible input change that flips the output), adding 50--500 ms per explanation depending on feature dimensionality and domain constraints like monotonicity or immutability.
+[^fn-counterfactual-explanations]: [offset=-6mm] **Counterfactual Explanations**\index{Counterfactual Explanations!recourse}: Formalized for ML by @wachter2017, counterfactuals answer "what would need to change?" rather than "why did this happen?" For regulatory compliance, they provide actionable recourse: "if the applicant's income were \$5,000 higher, the loan would be approved." Generating counterfactuals requires solving a constrained optimization problem (finding the minimal feasible input change that flips the output), adding 50--500 ms per explanation depending on feature dimensionality and domain constraints like monotonicity or immutability.
 
 These are especially relevant for decision-facing applications such as credit or hiring systems. For example, a counterfactual explanation might state that an applicant would have received a loan approval if their reported income were higher or their debt lower [@wachter2017]. Counterfactual generation requires access to domain-specific constraints and realistic data manifolds, making integration into real-time systems challenging.
 
@@ -1851,6 +1825,9 @@ Work such as Olah et al. and Geiger et al. applies **mechanistic interpretabilit
 From a systems perspective, explainability introduces a number of architectural dependencies. Explanations must be generated, stored, surfaced, and evaluated within system constraints. The required infrastructure may include explanation APIs, memory for storing attribution maps, visualization libraries, and logging mechanisms that capture intermediate model behavior. Models must often be instrumented with hooks or configured to support repeated evaluations, particularly for explanation methods that require sampling, perturbation, or backpropagation.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-5mm}
+```
 ![](images/svg/vol2_responsible_ai_margin_001.svg){width="100%" fig-alt="Exact SHAP subset evaluations explode from 3 to 20 features."}
 
 *Exact SHAP cost explodes with feature count.*
@@ -1889,6 +1866,9 @@ This requires telemetry pipelines that capture model versioning, input character
 Monitoring also supports feedback-driven improvement. For example, repeated user disagreement, correction requests, or operator overrides can signal problematic behavior. This feedback must be aggregated, validated, and translated into updates to training datasets, data labeling processes, or model architecture. However, such feedback loops carry risks: biased user responses can introduce new inequities, and excessive logging can compromise privacy. Designing these loops requires careful coordination between user experience design, system security, and ethical governance.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-5mm}
+```
 ![](images/svg/responsible_ai_monitoring_scale.svg){width="100%" fig-alt="Three compact rows showing responsible AI monitoring scale: 150 metrics, 8.64 million events per day, and 7.5 false alerts per day."}
 
 *Responsible AI monitoring becomes its own production data system.*
@@ -2257,6 +2237,9 @@ class RepresentationTax:
 2. **Representation-tax scenario**: For `{python} RepresentationTax.subgroup_count_str`, at the midpoint of the cost range, `{python} RepresentationTax.subgroup_count_str` times `{python} RepresentationTax.images_per_subgroup_count_str` per subgroup times `{python} RepresentationTax.midpoint_cost_usd_str` per image yields `{python} RepresentationTax.acquisition_total_usd_m_str` in data acquisition alone.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-22mm}
+```
 ![](images/svg/responsible_ai_representation_tax_ladder.svg){width="100%" fig-alt="Two-rung cost ladder comparing one subgroup at about 12.5 million dollars with ten subgroups at about 125 million dollars before harmonization overhead."}
 
 *Representation cost scales with subgroup coverage, not just dataset size.*
@@ -2637,6 +2620,8 @@ The impossibility theorems formalized in this chapter make explicit what practit
 * **The right to be forgotten**: Privacy preservation includes the temporal dimension. Machine unlearning can help organizations reduce or remove the influence of specific users from trained models when deletion rights apply, without always retraining from scratch.
 
 :::
+
+Every constraint in this book until now has had an optimum. Latency, memory, energy, even robustness could be measured, traded, and pushed toward a best achievable point, and the engineer's job was to find it. Fairness is the first constraint with no such point, because the chapter's impossibility result is not a gap to be closed but a fork in the road. That changes the job. The engineer can quantify each branch and hold the system to whichever is taken, but the taking is a human, normative act that no metric performs, and the most honest thing engineering can do here is refuse to disguise the choice as a calculation.
 
 ::: {.callout-chapter-connection title="From responsibility to synthesis"}
 
