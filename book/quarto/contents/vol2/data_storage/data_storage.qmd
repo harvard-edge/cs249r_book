@@ -457,23 +457,28 @@ A system architect must organize storage to serve workloads that simultaneously 
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-storage-hierarchy-merged and bandwidth cliffs
-# │ Exports: StorageHierarchyTable.h100_bw_tb_per_s_str
+# │ Exports: StorageHierarchyTable.h100_bw_tb_per_s_str,
+# │          StorageHierarchyTable.nvme_latency_us_str
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_qty, fmt_time
 
 class StorageHierarchyTable:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    nvme_latency = Hardware.Tech.Storage.NvmeGen4.latency
+
     # ┌── 4. OUTPUT ───────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
+    nvme_latency_us_str = fmt_time(nvme_latency, microsecond, precision=0, commas=False)
 ```
 
-| **Storage Tier**         | **Typical Capacity** |                     **Bandwidth**                     |   **Latency**    | **Cost (\$/GB)** |
-|:-------------------------|:--------------------:|:-----------------------------------------------------:|:----------------:|:----------------:|
-| **GPU HBM**              |        80 GB         | `{python} StorageHierarchyTable.h100_bw_tb_per_s_str` |     ~100 ns      |      ~15.00      |
-| **Host DRAM**            |     512 GB–2 TB      |                        200 GB/s                       |     ~100 ns      |      ~3.00       |
-| **Local NVMe SSD**       |       4–30 TB        |                       7–25 GB/s                       |      ~10 μs      |      ~0.10       |
-| **Parallel File System** |       100+ PB        |                   1+ TB/s aggregate                   |      ~1 ms       |      ~0.03       |
-| **Object Storage**       |   Very large pool    |                   100 GB/s aggregate                  |      ~50 ms      |      ~0.02       |
-| **Archive/Cold Storage** |   Very large pool    |                         1 GB/s                        | Minutes to hours |      ~0.004      |
+| **Storage Tier**         | **Typical Capacity** |                     **Bandwidth**                     |                      **Latency**                      | **Cost (\$/GB)** |
+|:-------------------------|:--------------------:|:-----------------------------------------------------:|:-----------------------------------------------------:|:----------------:|
+| **GPU HBM**              |        80 GB         | `{python} StorageHierarchyTable.h100_bw_tb_per_s_str` |                        ~100 ns                        |      ~15.00      |
+| **Host DRAM**            |     512 GB–2 TB      |                        200 GB/s                       |                        ~100 ns                        |      ~3.00       |
+| **Local NVMe SSD**       |       4–30 TB        |                       7–25 GB/s                       | ~`{python} StorageHierarchyTable.nvme_latency_us_str` |      ~0.10       |
+| **Parallel File System** |       100+ PB        |                   1+ TB/s aggregate                   |                         ~1 ms                         |      ~0.03       |
+| **Object Storage**       |   Very large pool    |                   100 GB/s aggregate                  |                         ~50 ms                        |      ~0.02       |
+| **Archive/Cold Storage** |   Very large pool    |                         1 GB/s                        |                    Minutes to hours                   |      ~0.004      |
 
 : **Extended Memory Hierarchy for ML Systems**: The roughly 30$\times$ aggregate-to-aggregate bandwidth gap between HBM and object storage (and a much larger per-client gap once a single inference instance pulls from a shared object endpoint) drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
 
@@ -957,7 +962,7 @@ A standard ImageNet training pipeline makes the cost of the wrong format visible
 2.  **HDD reality**: A 7200 RPM hard disk drive (HDD) delivers `{python} NVMeTierCalcs.hdd_iops_str` at random reads\index{HDD!random IOPS bottleneck}. Sustaining `{python} NVMeTierCalcs.images_per_s_str` requires `{python} NVMeTierCalcs.hdd_slowdown_factor_mult_str` more IOPS than the disk provides.
 3.  **Result**: Shuffling individual files on an HDD will starve the GPU, capping utilization at about `{python} NVMeTierCalcs.hdd_util_ceiling_pct_str` before decode, seek, and file-system overheads.
 
-**Systems insight**: The pipeline must either use NVMe (sub-10 μs random access) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
+**Systems insight**: The pipeline must either use NVMe (~`{python} StorageHierarchyTable.nvme_latency_us_str` random access, three orders of magnitude faster than object storage) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
 
 :::
 
@@ -1987,24 +1992,95 @@ The economically rational strategy often invests more in storage (local NVMe cac
 
 The cost iceberg reveals that raw storage capacity can account for less than half of the total expenditure; replication, metadata operations, API calls, and cross-region transfers can collectively dominate the bill at scale. Among those hidden line items, egress is the one that often flips the architecture decision. Unlike capacity charges, which scale with the volume of data stored, egress charges scale with the volume of data *read*, and ML training reads the full dataset on every epoch.
 
+```{python}
+#| echo: false
+#| label: data-storage-stream-vs-stage-economics
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STREAM-VS-STAGE ECONOMICS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-data-storage-egress-tax — the egress-tax worked example
+# │          comparing streaming from S3 against staging to local NVMe.
+# │
+# │ Goal: Compute the full cost chain from registry rates (the old callout
+# │       hand-typed every number and claimed the savings fund '3 additional
+# │       H100 GPUs' — at the registry's $30K H100 price it is 9).
+# │ Show: Both options' annual totals, the savings, the H100 equivalence,
+# │       and the break-even epoch count.
+# │ How: 50 TB / 20 epochs / 4 runs/yr are scenario assumptions; all rates
+# │      come from Infrastructure.Pricing (S3StandardPerTbMonth,
+# │      NvmeLowPerTbMonth, EgressPerGB, Capital.H100GpuPurchaseUsd).
+# │
+# │ Imports: mlsysim registries (Infrastructure.Pricing) + fmt helpers
+# │ Exports: StreamVsStageEconomics.* (_str exports listed in OUTPUT)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_qty, fmt_usd, fmt_int, check
+
+class StreamVsStageEconomics:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dataset = 50 * TB  # scenario assumption: vision training corpus
+    epochs = 20  # scenario assumption: epochs per training run
+    runs_per_year = 4  # scenario assumption: training runs per year
+    s3_rate = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
+    nvme_rate = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate
+    egress_rate = Infrastructure.Pricing.Cloud.EgressPerGB.rate
+    h100_price = Infrastructure.Pricing.Capital.H100GpuPurchaseUsd.rate
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    s3_annual = (dataset * s3_rate * (12 * ureg.month)).to(USD)
+    egress_per_run = (dataset * epochs * egress_rate).to(USD)
+    stream_total = s3_annual + runs_per_year * egress_per_run
+    nvme_annual = (dataset * nvme_rate * (12 * ureg.month)).to(USD)
+    stage_egress_annual = (dataset * runs_per_year * egress_rate).to(USD)
+    stage_total = s3_annual + nvme_annual + stage_egress_annual
+    savings = stream_total - stage_total
+    h100_equiv = (savings / h100_price).to("").magnitude
+    # Break-even: staging's extra annual cost (NVMe + one staging pass per
+    # run) equals streaming egress at E epochs per run.
+    breakeven_epochs = ((nvme_annual + stage_egress_annual) / (runs_per_year * (dataset * egress_rate).to(USD))).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(savings.magnitude - 282_000) < 1, f"Savings should be $282,000/year, got {savings}")
+    check(8 <= h100_equiv <= 10, f"Savings should fund roughly 9 H100s at the registry price, got {h100_equiv:.1f}")
+    check(4 < breakeven_epochs < 5, f"Break-even should land just over 4 epochs, got {breakeven_epochs:.2f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dataset_tb_str = fmt_qty(dataset, TB, precision=0, commas=False)
+    epochs_str = fmt(epochs, precision=0, commas=False)
+    runs_str = fmt(runs_per_year, precision=0, commas=False)
+    months_per_year_str = fmt(12, precision=0, commas=False)
+    s3_rate_gb_mo_str = fmt_usd((s3_rate * (1 * GB) * (1 * ureg.month)).to(USD).magnitude, precision=3, commas=False, suffix="/GB/month")
+    nvme_rate_gb_mo_str = fmt_usd((nvme_rate * (1 * GB) * (1 * ureg.month)).to(USD).magnitude, precision=2, commas=False, suffix="/GB/month")
+    egress_rate_gb_str = fmt_usd(egress_rate.to(USD / GB).magnitude, precision=2, commas=False, suffix="/GB")
+    s3_annual_str = fmt_usd(s3_annual.magnitude, precision=0, commas=True)
+    egress_per_run_str = fmt_usd(egress_per_run.magnitude, precision=0, commas=True)
+    stream_egress_annual_str = fmt_usd((runs_per_year * egress_per_run).magnitude, precision=0, commas=True)
+    stream_total_str = fmt_usd(stream_total.magnitude, precision=0, commas=True)
+    nvme_annual_str = fmt_usd(nvme_annual.magnitude, precision=0, commas=True)
+    stage_egress_annual_str = fmt_usd(stage_egress_annual.magnitude, precision=0, commas=True)
+    stage_total_str = fmt_usd(stage_total.magnitude, precision=0, commas=True)
+    savings_str = fmt_usd(savings.magnitude, precision=0, commas=True)
+    h100_equiv_str = fmt_int(int(h100_equiv))
+```
+
 ::: {#nbk-data-storage-egress-tax .callout-notebook title="The egress tax"}
 
-**Problem**: A team trains a vision model on a 50 TB image dataset stored in S3. Training runs for 20 epochs. The decision is whether to stream from S3 each epoch or stage to local NVMe.
+**Problem**: A team trains a vision model on a `{python} StreamVsStageEconomics.dataset_tb_str` image dataset stored in S3. Training runs for `{python} StreamVsStageEconomics.epochs_str` epochs. The decision is whether to stream from S3 each epoch or stage to local NVMe.
 
 **Option A: Stream from S3**
 
-- Storage: 50 TB $\times$ \$0.023/GB/month $\times$ 12 months = \$13,800/year
-- Egress: 50 TB $\times$ 20 epochs $\times$ \$0.09/GB = \$90,000 per training run
-- Total for 4 training runs/year: \$13,800 + \$360,000 = \$373,800/year
+- Storage: `{python} StreamVsStageEconomics.dataset_tb_str` $\times$ `{python} StreamVsStageEconomics.s3_rate_gb_mo_str` $\times$ `{python} StreamVsStageEconomics.months_per_year_str` months = `{python} StreamVsStageEconomics.s3_annual_str`/year
+- Egress: `{python} StreamVsStageEconomics.dataset_tb_str` $\times$ `{python} StreamVsStageEconomics.epochs_str` epochs $\times$ `{python} StreamVsStageEconomics.egress_rate_gb_str` = `{python} StreamVsStageEconomics.egress_per_run_str` per training run
+- Total for `{python} StreamVsStageEconomics.runs_str` training runs/year: `{python} StreamVsStageEconomics.s3_annual_str` + `{python} StreamVsStageEconomics.stream_egress_annual_str` = `{python} StreamVsStageEconomics.stream_total_str`/year
 
 **Option B: Stage to local NVMe**
 
-- Storage (S3 source of truth): \$13,800/year
-- NVMe capacity (50 TB across cluster): 50 TB $\times$ \$0.10/GB/month $\times$ 12 = \$60,000/year
-- Egress (stage once per training run): 50 TB $\times$ 4 runs $\times$ \$0.09/GB = \$18,000/year
-- Total: \$13,800 + \$60,000 + \$18,000 = \$91,800/year
+- Storage (S3 source of truth): `{python} StreamVsStageEconomics.s3_annual_str`/year
+- NVMe capacity (`{python} StreamVsStageEconomics.dataset_tb_str` across cluster): `{python} StreamVsStageEconomics.dataset_tb_str` $\times$ `{python} StreamVsStageEconomics.nvme_rate_gb_mo_str` $\times$ `{python} StreamVsStageEconomics.months_per_year_str` = `{python} StreamVsStageEconomics.nvme_annual_str`/year
+- Egress (stage once per training run): `{python} StreamVsStageEconomics.dataset_tb_str` $\times$ `{python} StreamVsStageEconomics.runs_str` runs $\times$ `{python} StreamVsStageEconomics.egress_rate_gb_str` = `{python} StreamVsStageEconomics.stage_egress_annual_str`/year
+- Total: `{python} StreamVsStageEconomics.s3_annual_str` + `{python} StreamVsStageEconomics.nvme_annual_str` + `{python} StreamVsStageEconomics.stage_egress_annual_str` = `{python} StreamVsStageEconomics.stage_total_str`/year
 
-**Systems insight**: Local NVMe caching saves \$282,000/year at 20 epochs per run, enough to fund 3 additional H100 GPUs. Including the \$60,000/year provisioned NVMe cost and the once-per-run staging egress, the break-even point is just over 4 epochs per run; by the fifth epoch, local caching is cheaper than streaming from S3 every epoch.
+**Systems insight**: Local NVMe caching saves `{python} StreamVsStageEconomics.savings_str`/year at `{python} StreamVsStageEconomics.epochs_str` epochs per run, enough to fund `{python} StreamVsStageEconomics.h100_equiv_str` additional H100 GPUs at list price. Including the `{python} StreamVsStageEconomics.nvme_annual_str`/year provisioned NVMe cost and the once-per-run staging egress, the break-even point is just over 4 epochs per run; by the fifth epoch, local caching is cheaper than streaming from S3 every epoch.
 
 :::
 

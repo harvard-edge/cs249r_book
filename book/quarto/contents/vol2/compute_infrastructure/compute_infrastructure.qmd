@@ -574,15 +574,54 @@ Google's TPU\index{TPU} trajectory follows a different path, focusing on distrib
 
 The generation sequence shows how that pod-first design moved from inference to training. The TPU v1 (2015) was a dedicated inference chip with a $256{\times}256$ systolic array, delivering 92 TOPS (INT8) for the matrix operations that dominated Google's production inference workloads. TPU v2 (2017) and TPU v3 (2018) then shifted the architecture toward training by adding bfloat16 (BF16), avoiding the dynamic range problems of standard FP16, and scaling the pod concept to 1,024 chips and 100+ PFLOP/s of aggregate compute. TPU v4 (2021) extended the same logic into the network itself, adding an optical circuit switch (OCS) so the physical topology could be reconfigured for different workloads while raising per-chip BF16 throughput to 275 TFLOP/s.
 
-The TPU v5p\index{TPU!v5p} (2023) continued this pod-scale design for high-end training. It features 459 TFLOP/s of BF16 compute, 95 GB of HBM2e with 2,765 GB/s memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
+```{python}
+#| echo: false
+#| label: compute-infrastructure-tpu-v5p-recap
 
-| **Generation** | **Year** |     **Key Innovation**     | **Peak BF16** | **HBM** | **ICI BW** |
-|:---------------|:--------:|:--------------------------:|:-------------:|:-------:|:----------:|
-| **TPU v1**     |   2015   | systolic array (Inference) |    92 TOPS*   |    —    |     —      |
-| **TPU v2**     |   2017   |   High-Bandwidth Memory    |   45 TFLOP/s  |  16 GB  |  600 GB/s  |
-| **TPU v3**     |   2018   | Liquid Cooling, Pod Scale  |  105 TFLOP/s  |  32 GB  |  650 GB/s  |
-| **TPU v4**     |   2021   | Optical Circuit Switching  |  275 TFLOP/s  |  32 GB  | 1,200 GB/s |
-| **TPU v5p**    |   2023   |     SparseCore, HBM2e      |  459 TFLOP/s  |  95 GB  | 1,200 GB/s |
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TPU V5P SPEC RECAP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: TPU-evolution prose and the v5p row of the generation table in
+# │          @sec-compute-tpu-evolution.
+# │
+# │ Goal: Pin the TPU v5p compute/memory specs to the registry (the old prose
+# │       hand-typed 2,765 GB/s where the registry holds 2.76 TB/s).
+# │ Show: BF16 peak, HBM capacity (branded 95 GB label of a 95 GiB part),
+# │       and HBM bandwidth for the pod-scale training discussion.
+# │ How: Read Hardware.Cloud.TPUv5p compute and memory specs.
+# │      ICI bandwidth stays a table literal — no registry field yet
+# │      (registry gap noted in the 2026-06 audit).
+# │
+# │ Imports: mlsysim registries (Hardware.Cloud.TPUv5p) + fmt helpers
+# │ Exports: TpuV5pRecap.peak_bf16_str, .hbm_gb_str, .hbm_bw_gb_per_s_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_memory_capacity, fmt_bandwidth, fmt_flop_rate
+
+class TpuV5pRecap:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    v5p = Hardware.Cloud.TPUv5p
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # (spec recap — values read straight from the registry)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(v5p.memory.bandwidth > Hardware.Cloud.A100.memory.bandwidth, "TPU v5p HBM bandwidth should exceed A100-class HBM2e")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    peak_bf16_str = fmt_flop_rate(v5p.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    hbm_gb_str = fmt_memory_capacity(v5p.memory.capacity, unit=GiB, precision=0, commas=False)
+    hbm_bw_gb_per_s_str = fmt_bandwidth(v5p.memory.bandwidth, unit=GB / second, precision=0, commas=True)
+```
+
+The TPU v5p\index{TPU!v5p} (2023) continued this pod-scale design for high-end training. It features `{python} TpuV5pRecap.peak_bf16_str` of BF16 compute, `{python} TpuV5pRecap.hbm_gb_str` of HBM2e with `{python} TpuV5pRecap.hbm_bw_gb_per_s_str` memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
+
+| **Generation** | **Year** |     **Key Innovation**     |            **Peak BF16**             |              **HBM**              | **ICI BW** |
+|:---------------|:--------:|:--------------------------:|:------------------------------------:|:---------------------------------:|:----------:|
+| **TPU v1**     |   2015   | systolic array (Inference) |               92 TOPS*               |                 —                 |     —      |
+| **TPU v2**     |   2017   |   High-Bandwidth Memory    |              45 TFLOP/s              |               16 GB               |  600 GB/s  |
+| **TPU v3**     |   2018   | Liquid Cooling, Pod Scale  |             105 TFLOP/s              |               32 GB               |  650 GB/s  |
+| **TPU v4**     |   2021   | Optical Circuit Switching  |             275 TFLOP/s              |               32 GB               | 1,200 GB/s |
+| **TPU v5p**    |   2023   |     SparseCore, HBM2e      | `{python} TpuV5pRecap.peak_bf16_str` | `{python} TpuV5pRecap.hbm_gb_str` | 1,200 GB/s |
 
 : **Google TPU Architecture Evolution**: The TPU's development highlights a "Pod-first" design philosophy where inter-chip interconnect bandwidth and compiler-level optimization (XLA) are as important as peak per-chip arithmetic. Note: TPU v1 was INT8 only. {#tbl-tpu-evolution}
 
@@ -2890,18 +2929,34 @@ The capacity-bandwidth trade-off across these tiers determines which data a trai
 from mlsysim.fmt import fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str
+# │ Exports: MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str,
+# │          .hbm_per_gpu_gb_str, .node_hbm_gb_str, .host_dram_tb_str,
+# │          .nvme_bw_gb_per_s_str, .nvme_latency_us_str
 class MemoryBandwidthNodeTableRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    hbm_per_gpu = Hardware.Cloud.H100.memory.capacity
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    host_dram = Systems.Nodes.DGX_H100.host_memory
+    nvme = Hardware.Tech.Storage.NvmeGen4
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    node_hbm = hbm_per_gpu * gpus_per_node
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
+    hbm_per_gpu_gb_str = fmt_memory_capacity(hbm_per_gpu, unit=GiB, precision=0, commas=False)
+    gpus_per_node_str = fmt(gpus_per_node, precision=0, commas=False)
+    node_hbm_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
+    host_dram_tb_str = fmt_qty(host_dram, TB, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_qty(nvme.bandwidth, GB / second, precision=0, commas=False)
+    nvme_latency_us_str = fmt_time(nvme.latency, microsecond, precision=0, commas=False)
 ```
 
-| **Memory Tier** |        **Capacity**       |                             **Bandwidth**                             | **Latency** |        **Role**       |
-|:----------------|:-------------------------:|:---------------------------------------------------------------------:|:-----------:|:---------------------:|
-| **GPU HBM3**    | 80 GB $\times$ 8 = 640 GB | `{python} MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str` per GPU |    <1 μs    |   Active computation  |
-| **Host DDR5**   |            2 TB           |                       hundreds of GB/s aggregate                      |   ~100 ns   |    Optimizer state    |
-| **NVMe SSD**    |          8--30 TB         |                               5--7 GB/s                               |    ~10 μs   | Overflow, checkpoints |
+| **Memory Tier** |                                                                                        **Capacity**                                                                                        |                                 **Bandwidth**                                 |                          **Latency**                          |        **Role**       |
+|:----------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------------------------------:|:-------------------------------------------------------------:|:---------------------:|
+| **GPU HBM3**    | `{python} MemoryBandwidthNodeTableRecap.hbm_per_gpu_gb_str` $\times$ `{python} MemoryBandwidthNodeTableRecap.gpus_per_node_str` = `{python} MemoryBandwidthNodeTableRecap.node_hbm_gb_str` |     `{python} MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str` per GPU     |                             <1 μs                             |   Active computation  |
+| **Host DDR5**   |                                                                 `{python} MemoryBandwidthNodeTableRecap.host_dram_tb_str`                                                                  |                           hundreds of GB/s aggregate                          |                            ~100 ns                            |    Optimizer state    |
+| **NVMe SSD**    |                                                                                          8--30 TB                                                                                          | up to `{python} MemoryBandwidthNodeTableRecap.nvme_bw_gb_per_s_str` per drive | ~`{python} MemoryBandwidthNodeTableRecap.nvme_latency_us_str` | Overflow, checkpoints |
 
 : **Node Memory Hierarchy**: Each tier trades capacity for bandwidth. The training framework's memory manager must orchestrate data flow across these tiers to fit models whose total state exceeds the aggregate HBM capacity. {#tbl-node-memory}
 
@@ -3156,13 +3211,27 @@ For our `{python} InfraFrontierNodeCapacityRecap.frontier_params_b_str` model, a
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: RackPowerRackRecap.rack_power_kw_str
+# │ Exports: RackPowerRackRecap.rack_power_kw_str, .node_power_kw_str,
+# │          .racks_for_1k_str, .cluster_power_mw_str
 class RackPowerRackRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
     rack = Systems.Racks.DGX_H100_4Node
+    cluster_gpus = Systems.Clusters.Training_1K.total_accelerators
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    node_power = rack.total_power / rack.nodes_per_rack
+    racks_for_cluster = cluster_gpus / rack.accelerator_count
+    cluster_power = racks_for_cluster * rack.total_power
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(7 * kW < node_power < 11 * kW, "DGX H100 node envelope should land between 7 and 11 kW")
+    check(racks_for_cluster == 32, "1,024 GPUs at 32 GPUs/rack should need exactly 32 racks")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
+    node_power_kw_str = fmt_power(node_power, unit=kilowatt, precision=1, commas=False)
+    racks_for_1k_str = fmt(racks_for_cluster, precision=0, commas=False)
+    cluster_power_mw_str = fmt_power(cluster_power, unit=MW, precision=1, commas=False)
 ```
 
 ```{python}
@@ -3220,7 +3289,7 @@ class InfraFrontierRackPowerRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across 1,024 GPUs requires approximately 32 racks (4 nodes of 8 GPUs each per rack). Each rack dissipates `{python} RackPowerRackRecap.rack_power_kw_str` as heat, the thermal output of a small industrial furnace. The aggregate facility-relevant power draw of the training cluster is approximately 1.1 MW, enough to power several hundred homes. Delivering this power reliably, converting it efficiently, and removing the resulting heat without allowing any component to exceed its thermal limit is a multi-disciplinary engineering challenge that spans electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
+For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across 1,024 GPUs requires `{python} RackPowerRackRecap.racks_for_1k_str` racks (4 nodes of 8 GPUs each per rack). Each rack dissipates `{python} RackPowerRackRecap.rack_power_kw_str` as heat, the thermal output of a small industrial furnace. The aggregate facility-relevant power draw of the training cluster is approximately `{python} RackPowerRackRecap.cluster_power_mw_str`, enough to power several hundred homes. Delivering this power reliably, converting it efficiently, and removing the resulting heat without allowing any component to exceed its thermal limit is a multi-disciplinary engineering challenge that spans electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
 
 ::: {#dfn-compute-infrastructure-rack .callout-definition title="Rack"}
 
@@ -3240,7 +3309,7 @@ This thermal ceiling is what forces the rack from air to liquid: above the air-c
 
 The physical design of an ML rack differs substantially from a traditional server rack in ways that go beyond power and cooling. In a conventional 42U rack, servers are installed as independent 1U or 2U pizza-box units, each with its own fans, power supplies, and cable connections. ML racks use a fundamentally different form factor. A DGX H100 occupies 8U and contains 8 GPUs, the NVSwitch fabric, multiple power supplies, and (in liquid-cooled configurations) coolant manifolds with quick-connect fittings. Four DGX units in a 42U rack leave only 10U for networking switches, cable management, and PDUs.
 
-The transition from traditional server form factors to ML-optimized designs is driven by the same power density challenge that forced the transition from air cooling to liquid cooling. A traditional 1U server dissipates 300--500 W and requires only modest airflow for cooling. A DGX H100 node dissipates approximately 10 kW across its 8 GPUs, NVSwitches, and supporting components, requiring either massive airflow (in air-cooled configurations) or liquid cooling plumbing (in liquid-cooled configurations). The form factor must accommodate both the compute hardware and the thermal management infrastructure, which is why ML nodes are substantially taller (8U vs. 1U) than traditional servers.
+The transition from traditional server form factors to ML-optimized designs is driven by the same power density challenge that forced the transition from air cooling to liquid cooling. A traditional 1U server dissipates 300--500 W and requires only modest airflow for cooling. A DGX H100 node dissipates approximately `{python} RackPowerRackRecap.node_power_kw_str` across its 8 GPUs, NVSwitches, and supporting components, requiring either massive airflow (in air-cooled configurations) or liquid cooling plumbing (in liquid-cooled configurations). The form factor must accommodate both the compute hardware and the thermal management infrastructure, which is why ML nodes are substantially taller (8U vs. 1U) than traditional servers.
 
 Cable management is a nontrivial engineering challenge. Each DGX H100 node has 8 InfiniBand cables (one per GPU), 2 Ethernet management cables, power cables, and (for liquid-cooled units) coolant hoses. A fully populated rack has over 40 high-speed cables, each of which must be routed carefully.
 
