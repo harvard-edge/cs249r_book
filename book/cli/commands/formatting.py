@@ -39,7 +39,7 @@ _SCRIPT_PATHS = {
 class FormatCommand:
     """Auto-format QMD content."""
 
-    TARGETS = ["blanks", "python", "lists", "divs", "tables", "prettify", "all"]
+    TARGETS = ["blanks", "python", "lists", "divs", "percent-tables", "tables", "prettify", "all"]
 
     def __init__(self, config_manager, chapter_discovery):
         self.config_manager = config_manager
@@ -69,6 +69,7 @@ class FormatCommand:
             "python": self._run_python,
             "lists": self._run_lists,
             "divs": self._run_divs,
+            "percent-tables": self._run_percent_tables,
             "tables": self._run_tables,
             "prettify": self._run_prettify,
         }
@@ -121,6 +122,7 @@ class FormatCommand:
         table.add_row("python", "Format Python via Black (display 70, LEGO cells 150)")
         table.add_row("lists", "Fix bullet list spacing (blank line before lists)")
         table.add_row("divs", "Fix div/callout spacing (paragraph ↔ list gaps)")
+        table.add_row("percent-tables", "Rewrite 'percent' → % inside pipe tables (native)")
         table.add_row("tables", "Prettify grid tables (align columns, bold headers)")
         table.add_row("prettify", "Prettify pipe tables (align columns)")
         table.add_row("all", "Run all formatters")
@@ -142,12 +144,13 @@ class FormatCommand:
 
     def _run_all(self, files: List[str], check_only: bool) -> bool:
         results = []
-        for target in ("blanks", "lists", "divs", "python", "tables", "prettify"):
+        for target in ("blanks", "lists", "divs", "python", "percent-tables", "tables", "prettify"):
             dispatch = {
                 "blanks": self._run_blanks,
                 "python": self._run_python,
                 "lists": self._run_lists,
                 "divs": self._run_divs,
+                "percent-tables": self._run_percent_tables,
                 "tables": self._run_tables,
                 "prettify": self._run_prettify,
             }
@@ -167,6 +170,39 @@ class FormatCommand:
     # ------------------------------------------------------------------
     # Blanks  (native — ported from format_blank_lines.py)
     # ------------------------------------------------------------------
+
+    def _run_percent_tables(self, file_args: List[str], check_only: bool) -> bool:
+        """Rewrite the word 'percent' to the % symbol inside pipe tables.
+
+        Tables invert the prose convention: dense cells use the % symbol
+        ('86.4%') where body prose spells out 'percent'. Shares its detection
+        and rewrite with the ``percent-in-tables`` validator scope via
+        ``cli.checks.percent_tables`` so the fixer fixes exactly what the
+        check flags. Must run BEFORE ``prettify`` so columns realign after the
+        substitution shortens cells.
+        """
+        from cli.checks.percent_tables import fix_text
+
+        qmd_files = self._resolve_files(file_args)
+        modified = []
+        for path in qmd_files:
+            content = path.read_text(encoding="utf-8")
+            new_content, n = fix_text(content)
+            if n:
+                if not check_only:
+                    path.write_text(new_content, encoding="utf-8")
+                modified.append(path)
+
+        if modified:
+            label = "Would modify" if check_only else "Modified"
+            console.print(f"[yellow]percent-tables: {label} {len(modified)} file(s)[/yellow]")
+            for p in modified[:10]:
+                console.print(f"  {self._rel(p)}")
+            if len(modified) > 10:
+                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
+            return False  # pre-commit convention: modified = exit 1
+        console.print("[green]percent-tables: All files clean[/green]")
+        return True
 
     def _run_blanks(self, file_args: List[str], check_only: bool) -> bool:
         """Collapse multiple consecutive blank lines into single blank lines."""

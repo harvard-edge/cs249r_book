@@ -396,6 +396,8 @@ class ValidateCommand:
                   note="digits before 'percent', not spelled-out words (5 percent not five percent)"),
             Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
                   note="spell out 'percent' in captions"),
+            Scope("percent-in-tables", "_run_percent_in_tables",
+                  note="use % symbol inside tables, not the word 'percent'"),
             Scope("currency", "_run_currency_style",
                   note="use $ in content; USD defined once in notation"),
             Scope("rendered-currency", "_run_rendered_currency_style",
@@ -4926,6 +4928,54 @@ class ValidateCommand:
         return ValidationRunResult(
             name="percent-word-before",
             description="Digits required before 'percent' (percent acts as a unit)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_percent_in_tables(self, root: Path) -> ValidationRunResult:
+        """Flag the spelled-out word 'percent' used as a unit inside pipe tables.
+
+        House style inverts between prose and tables. In prose and captions,
+        'percent' is spelled out (the % symbol is banned — see
+        `_run_mitpress_percent_in_captions`). In TABLES, cells are dense
+        tabular data and the conventional form is the % symbol: '86.4%', not
+        '86.4 percent'.
+
+        Detection lives in ``cli.checks.percent_tables`` — the same module the
+        ``format percent-tables`` auto-fixer imports — so the check and the
+        fixer cannot drift. Header labels with no leading number and
+        'percentage points / pp' are never flagged; captions (prose) keep the
+        spelled-out word.
+
+        Auto-fixable: ``./book/binder format percent-tables``.
+        """
+        from cli.checks.percent_tables import find_in_text
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            for hit in find_in_text(self._read_text(file)):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="percent_in_table",
+                        message=(
+                            "Use the % symbol, not the word 'percent', inside "
+                            f"tables: '{hit.match}' → '{hit.replacement}'. Run "
+                            "'./book/binder format percent-tables' to auto-fix."
+                        ),
+                        severity="error",
+                        context=hit.context,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="percent-in-tables",
+            description="Tables use the % symbol, not the word 'percent' (prose keeps the word)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
