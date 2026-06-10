@@ -369,6 +369,8 @@ class ValidateCommand:
         "prose": [
             Scope("contractions", "_run_mitpress_contractions",
                   note='no "can\'t", "it\'s" in body prose'),
+            Scope("spelling-dict", "_run_mitpress_spelling_dict",
+                  note="canonical spellings (§10.7): trade-off, dataset, data center, Wi-Fi, …"),
             Scope("duplicate-words", "_run_duplicate_words"),
             Scope("unblended-prose", "_run_unblended_prose",
                   note="space after period"),
@@ -5306,6 +5308,51 @@ class ValidateCommand:
         return ValidationRunResult(
             name="contractions",
             description="No contractions in body prose (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_spelling_dict(self, root: Path) -> ValidationRunResult:
+        """Enforce the MIT Press canonical spelling dictionary (§10.7).
+
+        Flags the unambiguous spelling/hyphenation errors and proper-noun
+        miscapitalizations (trade-off, dataset, data center, Wi-Fi, GPUDirect,
+        TinyML, …). Detection lives in ``cli.checks.mitpress_terms`` — shared
+        with the ``mitpress-terms`` format auto-fixer — and masks code, math,
+        cross-references, footnotes, and attributes, and skips glossary files
+        (their keys follow the §10.14 lowercase convention). Context-sensitive
+        adj/predicate pairs (compute-bound, open-source, real-time) are out of
+        scope. Auto-fix: ``./book/binder format mitpress-terms``.
+        """
+        from cli.checks.mitpress_terms import find_in_text, should_skip_file
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        for file in files:
+            if should_skip_file(file):
+                continue
+            for hit in find_in_text(self._read_text(file)):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="mitpress_spelling",
+                        message=(
+                            f"Canonical spelling (§10.7): '{hit.match}' → "
+                            f"'{hit.replacement}'. Auto-fix with "
+                            "'./book/binder format mitpress-terms'."
+                        ),
+                        severity="error",
+                        context=hit.context,
+                        suggestion=f"{hit.match} → {hit.replacement}",
+                    )
+                )
+
+        return ValidationRunResult(
+            name="spelling-dict",
+            description="MIT Press canonical spellings §10.7 (trade-off, dataset, Wi-Fi, …)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

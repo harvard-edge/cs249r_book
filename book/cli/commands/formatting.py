@@ -39,7 +39,7 @@ _SCRIPT_PATHS = {
 class FormatCommand:
     """Auto-format QMD content."""
 
-    TARGETS = ["blanks", "python", "lists", "divs", "percent-tables", "tables", "prettify", "all"]
+    TARGETS = ["blanks", "python", "lists", "divs", "percent-tables", "mitpress-terms", "tables", "prettify", "all"]
 
     def __init__(self, config_manager, chapter_discovery):
         self.config_manager = config_manager
@@ -70,6 +70,7 @@ class FormatCommand:
             "lists": self._run_lists,
             "divs": self._run_divs,
             "percent-tables": self._run_percent_tables,
+            "mitpress-terms": self._run_mitpress_terms,
             "tables": self._run_tables,
             "prettify": self._run_prettify,
         }
@@ -123,6 +124,7 @@ class FormatCommand:
         table.add_row("lists", "Fix bullet list spacing (blank line before lists)")
         table.add_row("divs", "Fix div/callout spacing (paragraph ↔ list gaps)")
         table.add_row("percent-tables", "Rewrite 'percent' → % inside pipe tables (native)")
+        table.add_row("mitpress-terms", "Apply §10.7 canonical spellings (trade-off, Wi-Fi, …)")
         table.add_row("tables", "Prettify grid tables (align columns, bold headers)")
         table.add_row("prettify", "Prettify pipe tables (align columns)")
         table.add_row("all", "Run all formatters")
@@ -144,13 +146,14 @@ class FormatCommand:
 
     def _run_all(self, files: List[str], check_only: bool) -> bool:
         results = []
-        for target in ("blanks", "lists", "divs", "python", "percent-tables", "tables", "prettify"):
+        for target in ("blanks", "lists", "divs", "python", "percent-tables", "mitpress-terms", "tables", "prettify"):
             dispatch = {
                 "blanks": self._run_blanks,
                 "python": self._run_python,
                 "lists": self._run_lists,
                 "divs": self._run_divs,
                 "percent-tables": self._run_percent_tables,
+                "mitpress-terms": self._run_mitpress_terms,
                 "tables": self._run_tables,
                 "prettify": self._run_prettify,
             }
@@ -170,6 +173,40 @@ class FormatCommand:
     # ------------------------------------------------------------------
     # Blanks  (native — ported from format_blank_lines.py)
     # ------------------------------------------------------------------
+
+    def _run_mitpress_terms(self, file_args: List[str], check_only: bool) -> bool:
+        """Apply the MIT Press canonical spelling dictionary (§10.7).
+
+        Rewrites unambiguous spelling/hyphenation errors and proper-noun
+        miscapitalizations (tradeoff → trade-off, datacenter → data center,
+        WiFi → Wi-Fi, …). Shares its detection/rewrite with the
+        ``spelling-dict`` validator scope via ``cli.checks.mitpress_terms`` so
+        the fixer fixes exactly what the check flags; skips glossary files.
+        """
+        from cli.checks.mitpress_terms import fix_text, should_skip_file
+
+        qmd_files = self._resolve_files(file_args)
+        modified = []
+        for path in qmd_files:
+            if should_skip_file(path):
+                continue
+            content = path.read_text(encoding="utf-8")
+            new_content, n = fix_text(content)
+            if n:
+                if not check_only:
+                    path.write_text(new_content, encoding="utf-8")
+                modified.append(path)
+
+        if modified:
+            label = "Would modify" if check_only else "Modified"
+            console.print(f"[yellow]mitpress-terms: {label} {len(modified)} file(s)[/yellow]")
+            for p in modified[:10]:
+                console.print(f"  {self._rel(p)}")
+            if len(modified) > 10:
+                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
+            return False
+        console.print("[green]mitpress-terms: All files clean[/green]")
+        return True
 
     def _run_percent_tables(self, file_args: List[str], check_only: bool) -> bool:
         """Rewrite the word 'percent' to the % symbol inside pipe tables.
