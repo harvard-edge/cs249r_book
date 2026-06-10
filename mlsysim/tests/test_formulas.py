@@ -467,6 +467,30 @@ class TestHierarchicalAllreduce:
         # and inter-node sends the full message. Should be slower.
         assert result.m_as(ureg.second) < slow_result.m_as(ureg.second)
 
+    def test_known_answer_pins_all_constant_factors(self):
+        """2026-06-10 audit: pin the closed form so a constant-factor
+        regression cannot pass. The pre-2026-06-06 implementation inflated
+        the intra term by (1 + 1/g) and would have passed the qualitative
+        assertions above.
+
+        T = 2*(g-1)/g * M/b_intra + 2*(g-1)*a_intra            (RS + AG)
+          + 2*(n-1)/n * (M/g)/b_inter + 2*(n-1)*a_inter        (inter ring AR)
+        """
+        M = 8e9            # bytes
+        n, g = 4, 8
+        b_intra, b_inter = 300e9, 25e9   # byte/s
+        a_intra, a_inter = 500e-9, 5e-6  # s
+
+        expected = (
+            2 * (g - 1) / g * M / b_intra + 2 * (g - 1) * a_intra
+            + 2 * (n - 1) / n * (M / g) / b_inter + 2 * (n - 1) * a_inter
+        )
+        result = calc_hierarchical_allreduce_time(
+            Q_(M, "byte"), n, g, Q_(b_intra, "byte/s"), Q_(b_inter, "byte/s"),
+            Q_(a_intra, "s"), Q_(a_inter, "s"),
+        )
+        assert result.m_as(ureg.second) == pytest.approx(expected, rel=1e-6)
+
 # ======================================================================
 # calc_young_daly_interval
 # ======================================================================
