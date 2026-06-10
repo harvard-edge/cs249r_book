@@ -44,7 +44,7 @@ class Nodes(Registry):
         name="DGX H100",
         accelerator=Hardware.Cloud.H100,
         accelerators_per_node=8,
-        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
         host_memory=2 * TB,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
@@ -53,7 +53,7 @@ class Nodes(Registry):
         name="DGX A100",
         accelerator=Hardware.Cloud.A100,
         accelerators_per_node=8,
-        intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
@@ -61,7 +61,7 @@ class Nodes(Registry):
         name="DGX B200",
         accelerator=Hardware.Cloud.B200,
         accelerators_per_node=8,
-        intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth_per_direction,
         nics_per_node=8,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
@@ -69,7 +69,7 @@ class Nodes(Registry):
         name="Kempner H100 4-GPU Server",
         accelerator=Hardware.Cloud.H100,
         accelerators_per_node=4,
-        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=4,
         metadata=Metadata(
             provenance=pc.KEMPNER_AI_CLUSTER_H100,

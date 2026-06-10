@@ -113,8 +113,13 @@ CANONICAL = [
     # Interconnect bandwidth (GB/s)
     ("pcie_gen4_gb",   32,    0.05, "Hardware.Cloud.A100.interconnect.bandwidth (x16)"),
     ("pcie_gen5_gb",   64,    0.05, "Hardware.Cloud.H100.interconnect.bandwidth (x16)"),
-    ("nvlink_h100",    900,   0.02, "Hardware.Cloud.H100.nvlink.bandwidth"),
-    ("nvlink_a100",    600,   0.02, "Hardware.Cloud.A100.nvlink.bandwidth"),
+    ("nvlink_h100",    900,   0.02, "Hardware.Cloud.H100.nvlink.bandwidth (BIDIRECTIONAL total; per-direction is 450)"),
+    ("nvlink_a100",    600,   0.02, "Hardware.Cloud.A100.nvlink.bandwidth (BIDIRECTIONAL total; per-direction is 300)"),
+    # 2026-06-10 direction-convention fix: per-direction NVLink rates are the
+    # beta for one-way collective math (bandwidth_per_direction accessor).
+    ("nvlink_per_dir_h100", 450, 0.02, "Hardware.Cloud.H100.nvlink.bandwidth_per_direction"),
+    ("nvlink_per_dir_a100", 300, 0.02, "Hardware.Cloud.A100.nvlink.bandwidth_per_direction"),
+    ("intra_node_bw",  450,   0.02, "Systems.Nodes.DGX_H100.intra_node_bw (per-direction since 2026-06-10)"),
 
     # 2026-06-10 overnight audit — every entry below is a class of literal the
     # audit actually caught in a chapter, contradicting (or shadowing) the

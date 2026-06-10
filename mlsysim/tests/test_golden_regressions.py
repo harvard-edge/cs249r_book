@@ -102,13 +102,18 @@ def test_golden_distributed_llama3_8b_research_cluster():
     )
 
     assert result.parallelism == {"dp": 8, "tp": 8, "pp": 4, "ep": 1}
-    assert result.step_latency_total.m_as("ms") == pytest.approx(4282.2171449090065)
-    assert result.communication_latency.m_as("ms") == pytest.approx(271.3768817511111)
-    assert result.dp_communication_latency.m_as("ms") == pytest.approx(3.9104722222222223)
-    assert result.tp_communication_latency.m_as("ms") == pytest.approx(267.4664095288889)
+    # 2026-06-10 audit: re-pinned after the interconnect direction-convention
+    # fix. Nodes now feed NVLink's PER-DIRECTION rate (450 GB/s on H100) into
+    # the collective beta terms instead of the 900 GB/s bidirectional total,
+    # so intra-node-bound communication latencies roughly doubled (they were
+    # ~2x optimistic before). findings_provenance.md M1.
+    assert result.step_latency_total.m_as("ms") == pytest.approx(4553.363026660118)
+    assert result.communication_latency.m_as("ms") == pytest.approx(542.5227635022222)
+    assert result.dp_communication_latency.m_as("ms") == pytest.approx(7.813944444444444)
+    assert result.tp_communication_latency.m_as("ms") == pytest.approx(534.7088190577778)
     assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(546.9327631578948)
-    assert result.effective_throughput.m_as("1/s") == pytest.approx(7652.110785403969)
-    assert result.scaling_efficiency == pytest.approx(0.8089051495480867)
+    assert result.effective_throughput.m_as("1/s") == pytest.approx(7196.439161152336)
+    assert result.scaling_efficiency == pytest.approx(0.760736071277139)
     assert result.bubble_fraction == pytest.approx(0.15789473684210525)
 
 
