@@ -774,16 +774,18 @@ class MLPvsCNN:
     mlp_out = Datasets.MNIST.num_classes
 
     # CNN: Conv(32) -> Pool -> Conv(64) -> Pool -> FC(128) -> 10
+    c1_in_ch = 1  # MNIST grayscale input channel
     c1_k, c1_out = 3, 32
     c2_k, c2_out = 3, 64
-    fc1_in, fc1_out = 64 * 7 * 7, 128
+    fc1_spatial = 7  # feature-map side after two 2x2 pools (28 -> 14 -> 7)
+    fc1_in, fc1_out = c2_out * fc1_spatial * fc1_spatial, 128
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: MLP Params
     mlp_p = (mlp_in * mlp_h) + (mlp_h * mlp_h) + (mlp_h * mlp_out)
 
     # Step 2: CNN Params
-    cnn_p = (c1_k * c1_k * 1 * c1_out) + (c2_k * c2_k * c1_out * c2_out) + (fc1_in * fc1_out) + (fc1_out * 10)
+    cnn_p = (c1_k * c1_k * c1_in_ch * c1_out) + (c2_k * c2_k * c1_out * c2_out) + (fc1_in * fc1_out) + (fc1_out * mlp_out)
 
     ratio = mlp_p // cnn_p
 
@@ -797,6 +799,11 @@ class MLPvsCNN:
     param_ratio_mult_str = fmt_multiple(ratio, precision=0, commas=False)
     mnist_train_examples_str = fmt(mnist_train_examples, precision=0)
     cnn_test_acc_pct_str = fmt_percent(cnn_test_acc_pct / 100, precision=0, commas=False, style='prose')
+    # Calc-line LHS param breakdowns pinned to architecture constants.
+    mlp_params_breakdown_math = MarkdownStr(f"$({mlp_in}{{\\times}}{mlp_h}) + ({mlp_h}{{\\times}}{mlp_h}) + ({mlp_h}{{\\times}}{mlp_out})$")
+    cnn_params_breakdown_math = MarkdownStr(
+        f"$({c1_k}{{\\times}}{c1_k}{{\\times}}{c1_in_ch}{{\\times}}{c1_out}) + ({c2_k}{{\\times}}{c2_k}{{\\times}}{c1_out}{{\\times}}{c2_out}) + ({c2_out}{{\\times}}{fc1_spatial}{{\\times}}{fc1_spatial}{{\\times}}{fc1_out}) + ({fc1_out}{{\\times}}{mlp_out})$"
+    )
 ```
 
 ::: {#exmp-nn-architectures-mnist-representation-vs-learnability .callout-example title="MNIST: Representation vs. learnability"}
@@ -806,7 +813,7 @@ Consider classifying $28{\times}28$ MNIST digits (784 input pixels, 10 output cl
 **MLP approach**:
 
 - Architecture: 784 → 4096 → 4096 → 10
-- Parameters: $(784{\times}4096) + (4096{\times}4096) + (4096{\times}10)$ ≈ `{python} MLPvsCNN.mlp_params_str` parameters
+- Parameters: `{python} MLPvsCNN.mlp_params_breakdown_math` ≈ `{python} MLPvsCNN.mlp_params_str` parameters
 - Training: `{python} MLPvsCNN.mnist_train_examples_str` examples (standard MNIST training set)
 - Test Accuracy: ~97–98 percent
 - Rationale: Treats every pixel independently. Must learn all spatial correlations from data alone. No prior knowledge about spatial structure.
@@ -814,7 +821,7 @@ Consider classifying $28{\times}28$ MNIST digits (784 input pixels, 10 output cl
 **CNN approach**:
 
 - Architecture: Conv(32, $3{\times}3$) → Pool → Conv(64, $3{\times}3$) → Pool → FC(128) → 10
-- Parameters: ($3{\times}3{\times}1{\times}32$) + ($3{\times}3{\times}32{\times}64$) + ($64{\times}7{\times}7{\times}128$) + ($128{\times}10$) ≈ `{python} MLPvsCNN.cnn_params_str` parameters
+- Parameters: `{python} MLPvsCNN.cnn_params_breakdown_math` ≈ `{python} MLPvsCNN.cnn_params_str` parameters
 - Training: `{python} MLPvsCNN.mnist_train_examples_str` examples (same data)
 - Test Accuracy: ~`{python} MLPvsCNN.cnn_test_acc_pct_str`
 - Rationale: Embeds locality bias (nearby pixels are related) and translation invariance (digit patterns are meaningful regardless of position). These structural assumptions reduce parameter count and improve generalization.
@@ -2888,6 +2895,7 @@ class AttentionMemory:
     elements_str = MarkdownStr(f"{elements:.1e}".replace("+", ""))
     bytes_per_element_value_str = fmt(bytes_per_element, precision=0, commas=False)
     num_layers_str = fmt(num_layers, precision=0, commas=False)
+    num_heads_str = fmt(num_heads, precision=0, commas=False)
     single_layer_gb_str = fmt_memory(single_layer_memory, unit=GB, precision=0, commas=False)
     total_gb_str = fmt_memory(total_memory, unit=GB, precision=0, commas=True)
 ```
@@ -2898,8 +2906,8 @@ class AttentionMemory:
 
 **Math**:
 
-1.  **Matrix size**: The attention score matrix $(\mathbf{Q}\mathbf{K}^T)$ has dimensions $S{\times}S$ per head, across $N_{\text{heads}}$ heads (12 heads in this example).
-2.  **Elements**: `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.seq_len_str` $\times$ 12 heads = `{python} AttentionMemory.elements_str` elements.
+1.  **Matrix size**: The attention score matrix $(\mathbf{Q}\mathbf{K}^T)$ has dimensions $S{\times}S$ per head, across $N_{\text{heads}}$ heads (`{python} AttentionMemory.num_heads_str` heads in this example).
+2.  **Elements**: `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.num_heads_str` heads = `{python} AttentionMemory.elements_str` elements.
 3.  **Memory**: At FP16 (`{python} AttentionMemory.bytes_per_element_value_str` bytes/element): `{python} AttentionMemory.elements_str` $\times$ `{python} AttentionMemory.bytes_per_element_value_str` bytes = `{python} AttentionMemory.single_layer_gb_str`.
 
 **Systems insight**: A single layer's attention matrix consumes `{python} AttentionMemory.single_layer_gb_str` of HBM. A `{python} AttentionMemory.num_layers_str`-layer model would require `{python} AttentionMemory.total_gb_str` just for transient attention scores, far exceeding any single GPU's capacity. This memory wall motivates two broad implementation strategies developed later: avoid materializing the full matrix by tiling the computation, or reduce the number of scores computed in the first place.
@@ -3365,6 +3373,8 @@ class KVCacheSizing:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     layers_str = fmt(layers, precision=0, commas=False)
+    kv_tensors_str = fmt(kv_tensors, precision=0, commas=False)
+    bytes_per_elem_str = fmt(bytes_per_elem, precision=0, commas=False)
     heads_str = fmt(heads, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=True)
     head_dim_str = fmt(head_dim, precision=0, commas=False)
@@ -3376,7 +3386,7 @@ class KVCacheSizing:
 
 The **KV Cache**\index{KV Cache!linear growth}[^fn-kv-cache-depth] grows linearly with sequence length ($\mathcal{O}(N_L \times 2 \times N_{\text{heads}} \times S \times d_{\text{head}})$ per request, distinct from the $\mathcal{O}(S^2)$ attention score matrix during training), storing the Key and Value vectors for all previous tokens to avoid recomputing them. For long contexts, this cache becomes massive (for example, 100+ GB), forcing the system to fetch the full cache from HBM for every generated token. As the GPT-2 Lighthouse quantified earlier, the arithmetic intensity is about `{python} GPT2BandwidthProfile.intensity_fp32_str` with FP32 weights or about `{python} GPT2BandwidthProfile.intensity_fp16_str` with FP16 weights, explaining why serving LLMs requires massive HBM bandwidth (for example, H100's `{python} GPT2BandwidthProfile.h100_bw_tb_per_s_str`) rather than raw FLOP/s.
 
-[^fn-kv-cache-depth]: **KV Cache Memory Scaling**: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB. A single concurrent request's KV cache requires: `{python} KVCacheSizing.layers_str` layers $\times$ 2 (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions at `{python} KVCacheSizing.head_dim_str` dimensions per head $\times$ 2 bytes ≈ `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, KV cache alone (~`{python} KVCacheSizing.concurrent_8_gb_str`) rivals the model weights—and grows linearly with both context length and concurrent users. Scaling serving throughput therefore forces memory-systems choices such as grouped-query attention, shorter context windows, or KV offloading to slower tiers; none of these changes model quality, since the model is identical regardless of which memory strategy is chosen. \index{KV Cache!memory scaling}
+[^fn-kv-cache-depth]: **KV Cache Memory Scaling**: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB. A single concurrent request's KV cache requires: `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions at `{python} KVCacheSizing.head_dim_str` dimensions per head $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes ≈ `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, KV cache alone (~`{python} KVCacheSizing.concurrent_8_gb_str`) rivals the model weights—and grows linearly with both context length and concurrent users. Scaling serving throughput therefore forces memory-systems choices such as grouped-query attention, shorter context windows, or KV offloading to slower tiers; none of these changes model quality, since the model is identical regardless of which memory strategy is chosen. \index{KV Cache!memory scaling}
 
 This implementation reveals three key computational characteristics. Self-attention enables parallel processing across all positions in the sequence, mapping efficiently to modern hardware during training. The quadratic complexity, however, creates a training bottleneck for long sequences. The autoregressive nature of inference creates a third constraint: a bandwidth bottleneck where memory speed, not compute speed, is the primary determinant of generation latency.
 
@@ -3723,6 +3733,7 @@ class CapacityWall:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cw_num_items_str = fmt_count(num_items, scale="M", commas=False)
     cw_embed_dim_str = fmt(embed_dim, precision=0, commas=False)
+    cw_bytes_per_param_str = fmt_int(bytes_per_param.to(byte).magnitude)
     cw_table_gb_str = fmt_memory(table_memory, unit=GB, precision=1, commas=False)
     cw_utilization_pct_str = fmt_percent(utilization_pct / 100, precision=0, commas=False, style='prose')
     a100_mem_gb_str = fmt_memory(a100_capacity, unit=GB, precision=0, commas=False)
@@ -3746,8 +3757,8 @@ A quick calculation shows how fast embedding tables exceed single-GPU memory.
 
 1.  **Table entries**: `{python} CapacityWall.cw_num_items_str` items.
 2.  **Vector size**: `{python} CapacityWall.cw_embed_dim_str` elements.
-3.  **Precision**: FP32 (4 bytes per element).
-4.  **Table size**: `{python} CapacityWall.cw_num_items_str` items $\times$ `{python} CapacityWall.cw_embed_dim_str` $\times$ 4 bytes ≈ `{python} CapacityWall.cw_table_gb_str`.
+3.  **Precision**: FP32 (`{python} CapacityWall.cw_bytes_per_param_str` bytes per element).
+4.  **Table size**: `{python} CapacityWall.cw_num_items_str` items $\times$ `{python} CapacityWall.cw_embed_dim_str` $\times$ `{python} CapacityWall.cw_bytes_per_param_str` bytes ≈ `{python} CapacityWall.cw_table_gb_str`.
 
 **Systems insight**: A single embedding table for one feature (Items) already consumes `{python} CapacityWall.cw_utilization_pct_str` of an `{python} CapacityWall.a100_mem_gb_str` A100 GPU. Adding a User table of the same size means the embedding tables no longer fit on a single `{python} CapacityWall.a100_mem_gb_str`, motivating either smaller tables, off-device memory, or partitioning across memory resources. DLRM is *capacity bound*: the first question is not how many FLOPs the accelerator can deliver, but where the embedding state can physically reside.
 
