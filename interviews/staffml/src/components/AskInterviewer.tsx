@@ -562,13 +562,20 @@ Please answer each as the interviewer.`;
  * yet (404 / network error), falls back to a mailto: link prefilled
  * with the same data so no submission is ever lost.
  */
-function WaitlistModal({ onClose, endpoint }: { onClose: () => void; endpoint: string }) {
+export function WaitlistModal({ onClose, endpoint }: { onClose: () => void; endpoint: string }) {
   const [email, setEmail] = useState("");
   const [wouldPay, setWouldPay] = useState(5);
   const [need, setNeed] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "fallback" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Refs for focus management — surfaceRef bounds the focus trap, the email
+  // input gets autofocus on open, and previouslyFocused restores focus to
+  // whatever the user was on when they closed the modal.
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
 
   // Escape to close
   useEffect(() => {
@@ -578,6 +585,38 @@ function WaitlistModal({ onClose, endpoint }: { onClose: () => void; endpoint: s
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // Move focus into the modal on open so keyboard users land inside the
+  // dialog instead of behind it. Restore focus to the trigger on unmount.
+  // setTimeout(0) defers the focus past the same-tick mount, matching the
+  // pattern in CommandPalette / KeyboardShortcutsOverlay.
+  useEffect(() => {
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    const t = setTimeout(() => emailInputRef.current?.focus(), 0);
+    return () => {
+      clearTimeout(t);
+      previouslyFocused.current?.focus?.();
+    };
+  }, []);
+
+  // Focus trap: cycle Tab/Shift+Tab within the modal surface so keyboard
+  // users can't escape into background controls behind the backdrop.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "Tab" || !surfaceRef.current) return;
+    const focusables = surfaceRef.current.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
 
   const submit = async () => {
     if (!email.trim() || submitting) return;
@@ -633,7 +672,9 @@ function WaitlistModal({ onClose, endpoint }: { onClose: () => void; endpoint: s
       onClick={onClose}
     >
       <div
+        ref={surfaceRef}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
         className="w-full max-w-md bg-background border border-border rounded-xl shadow-2xl p-6"
       >
         <div className="flex items-start justify-between mb-4">
@@ -685,6 +726,7 @@ function WaitlistModal({ onClose, endpoint }: { onClose: () => void; endpoint: s
             <label className="block mb-3">
               <span className="block text-[11px] font-bold text-textSecondary mb-1">Email</span>
               <input
+                ref={emailInputRef}
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
