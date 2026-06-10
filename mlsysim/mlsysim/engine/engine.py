@@ -112,10 +112,17 @@ class Engine:
             Numerical precision ('fp32', 'fp16', 'int8', 'int4').
         efficiency : float
             Achieved compute efficiency as a fraction of peak (0.0 to 1.0).
+            Derates the COMPUTE ceiling only — memory bandwidth is used at
+            its full spec value. This asymmetry is deliberate (sustained HBM
+            bandwidth is far closer to spec than sustained FLOPs), but note
+            it shifts the effective ridge point left by the same factor.
         raise_errors : bool
             If True, raise OOMError when the model does not fit in memory.
         is_training : bool
-            Whether to model training (impacts memory and FLOPs).
+            Whether to model training (impacts memory and FLOPs). Inference
+            memory footprint counts WEIGHTS ONLY (no activations, no KV
+            cache, batch-independent) — serving-realistic memory accounting
+            including KV cache lives in ServingModel.
         seq_len : int
             Sequence length (used for training memory footprint).
         zero_stage : int
@@ -177,8 +184,18 @@ class Engine:
                     strategy=strategy, zero_stage=zero_stage, dp_size=dp_size, is_lora=is_lora
                 )
             else:
-                # Fallback for non-Transformer workloads: 3x weights + gradients + states
-                memory_footprint = graph.weight_bytes * (3 if not is_lora else 1.1)
+                # Fallback for non-Transformer workloads (no training_memory
+                # method): weights + gradients (same width) + Adam
+                # mixed-precision optimizer state (FP32 master + moments =
+                # 12 B/param, cal.TRAINING_OPTIMIZER_BYTES_ADAM). The old 3x
+                # weight-bytes heuristic understated Adam accounting ~2.7x
+                # at fp16. (Activations still excluded, as documented.)
+                if is_lora:
+                    memory_footprint = graph.weight_bytes * 1.1
+                else:
+                    n_params = (graph.weight_bytes / bpp).to_base_units()
+                    opt_state = n_params * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")
+                    memory_footprint = graph.weight_bytes * 2 + opt_state
         else:
             base_ops = graph.total_ops
             memory_footprint = graph.weight_bytes
@@ -211,9 +228,13 @@ class Engine:
         if not feasible:
             # Offload path: model spills beyond primary memory → bandwidth degrades
             offload_spill = memory_footprint - hardware.memory.capacity
+            # Whole-traffic convention: ALL memory traffic is charged at the
+            # offload-limited bandwidth, not just the spilled fraction — a
+            # deliberate pessimistic simplification of host-offload paging.
+            pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
             pcie_bw = (
-                getattr(hardware.interconnect, 'bandwidth', Q_("64 GB/s"))
-                if hardware.interconnect else Q_("64 GB/s")
+                getattr(hardware.interconnect, 'bandwidth', pcie_fallback)
+                if hardware.interconnect else pcie_fallback
             )
             effective_bw = min(hardware.memory.bandwidth, pcie_bw)
             offload_bw = effective_bw
@@ -239,19 +260,22 @@ class Engine:
         else:
             compute_time = (batch_ops / effective_flops).to("ms")
 
+        # Memory traffic for batched workloads: weights are loaded once from HBM,
+        # but activations scale with batch_size. For batch=1, traffic ≈ weight_bytes.
+        # For larger batches, activation I/O becomes significant.
+        # This captures the Roofline regime transition as batch_size grows.
+        # Computed ONCE and shared by the latency term and the bottleneck
+        # classifier so the two can never silently diverge.
+        activation_bytes = graph.weight_bytes * 0.1 * batch_size  # ~10% of weights per sample (heuristic)
+        actual_memory_traffic = graph.weight_bytes + activation_bytes
+
         if effective_bw.magnitude == 0:
             memory_time = Q_("0 ms")
         else:
-            # Memory traffic for batched workloads: weights are loaded once from HBM,
-            # but activations scale with batch_size. For batch=1, traffic ≈ weight_bytes.
-            # For larger batches, activation I/O becomes significant.
-            # This captures the Roofline regime transition as batch_size grows.
-            activation_bytes = graph.weight_bytes * 0.1 * batch_size  # ~10% of weights per sample (heuristic)
-            actual_memory_traffic = graph.weight_bytes + activation_bytes
             memory_time = (actual_memory_traffic / effective_bw).to("ms")
 
         roofline = calc_bottleneck(
-            batch_ops, graph.weight_bytes + graph.weight_bytes * 0.1 * batch_size, effective_flops, effective_bw
+            batch_ops, actual_memory_traffic, effective_flops, effective_bw
         )
         bottleneck = roofline["bottleneck"]
 

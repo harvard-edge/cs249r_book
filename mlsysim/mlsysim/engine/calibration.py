@@ -66,3 +66,7 @@ TRAINING_OPTIMIZER_BYTES_SGD = 4.0    # FP32 master
 # Fallback bandwidths for undefined hardware attributes
 FALLBACK_STORAGE_BANDWIDTH_GB_S = 1.0
 FALLBACK_INTERCONNECT_BANDWIDTH_GB_S = 100.0
+# Engine offload path: host link when hardware.interconnect is unset
+# (PCIe Gen5 x16 ~= 64 GB/s per direction). Distinct from the generic
+# interconnect fallback above, which models node-to-node links.
+FALLBACK_PCIE_BANDWIDTH_GB_S = 64.0

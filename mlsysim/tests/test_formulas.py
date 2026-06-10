@@ -753,14 +753,20 @@ class TestFleetTCO:
     """TCO = capex + opex (energy cost over N years)."""
 
     def test_known_answer(self):
+        # 2026-06-10 audit: pins the 365-day (8,760 h) year convention at
+        # rel 1e-6 — the old rel=1e-3 tolerance could not distinguish the
+        # 365-day year from Pint's Julian 365.25-day year (a $0.60 gap on
+        # this case), and the old comment overstated opex 10x ($8,760; the
+        # correct value is $876).
         # 10 units x $1000 = $10,000 capex
-        # 100W * 10 * 1yr * $0.10/kWh = 100*10*8760*0.10/1000 = $8,760 opex
-        # total = $18,760
+        # 100 W * 10 units * 8,760 h * $0.10/kWh = 876 kWh... -> $876 opex
+        # total = $10,876
         result = calc_fleet_tco(1000, 100, 10, 1, 0.10)
         capex = 10 * 1000
-        energy_kwh = 0.1 * 10 * (1 * 365.25 * 24)
+        energy_kwh = 0.1 * 10 * (1 * 365 * 24)
         opex = energy_kwh * 0.10
-        assert result == pytest.approx(capex + opex, rel=1e-3)
+        assert opex == pytest.approx(876.0, rel=1e-9)
+        assert result == pytest.approx(capex + opex, rel=1e-6)
 
     def test_zero_quantity(self):
         result = calc_fleet_tco(1000, 500, 0, 3, 0.10)

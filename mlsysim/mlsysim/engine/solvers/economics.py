@@ -200,11 +200,21 @@ class EconomicsModel(ForwardModel):
             A specific grid profile.
         mfu : float, optional
             Model FLOPs Utilization (0.0 to 1.0) impacting energy footprint.
+        amortization_years : float, optional
+            Straight-line CapEx depreciation horizon (default 3 years). The
+            period is charged ``total_capex / amortization_years *
+            duration_days / 365`` — a 365-day year, matching the book's
+            8,760 h/yr convention.
+        infrastructure_multiplier : float, optional
+            CapEx multiplier for networking/cooling/facility/staff (default
+            1.0 = hardware only; 2.0-2.5 approximates full datacenter TCO).
 
         Returns
         -------
         EconomicsResult
-            Financial metrics including CapEx, OpEx, and total TCO.
+            Financial metrics including CapEx, OpEx, and total TCO. Energy
+            OpEx is facility-level (PUE-loaded via SustainabilityModel);
+            maintenance accrues on FULL CapEx, not the amortized slice.
         """
         sust_model = SustainabilityModel()
         energy_result = sust_model.solve(fleet, duration_days, datacenter=datacenter or grid, mfu=mfu)

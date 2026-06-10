@@ -135,3 +135,35 @@ def test_golden_sustainability_and_economics_research_cluster():
     assert economics.total_opex_usd == pytest.approx(1407.541719320548)
     assert economics.tco_usd == pytest.approx(8421.240349457534)
     assert economics.carbon_footprint_kg == pytest.approx(1270.8657561600003)
+
+
+def test_golden_engine_utilization_and_energy_resnet50_a100():
+    """2026-06-10 audit (B6): absolute pins for mfu/hfu/energy — previously
+    only bounds/orderings were asserted, so a recompute-inflated MFU, a
+    phantom HFU ratio, or a double-counted energy term passed the suite."""
+    from mlsysim import Models, Hardware
+    from mlsysim.engine.engine import Engine
+
+    p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
+    assert p.mfu == pytest.approx(0.024217670095535795, rel=1e-9)
+    assert p.hfu == pytest.approx(p.mfu, rel=1e-12)  # no recompute -> identical
+    assert p.energy.m_as("J") == pytest.approx(0.06879405314319488, rel=1e-9)
+    assert p.overhead_dominated is True
+
+    # Batch-traffic heuristic (weights x (1 + 0.1 x B)) pinned at batch 32:
+    # intensity was previously pinned only implicitly at batch=1.
+    p32 = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=32)
+    assert p32.arithmetic_intensity.magnitude == pytest.approx(610.1190476190476, rel=1e-9)
+
+
+def test_golden_engine_non_transformer_training_memory():
+    """2026-06-10 audit (B3): non-Transformer training fallback = weights +
+    gradients + Adam state (12 B/param), not the old 3x-weights heuristic
+    that understated mixed-precision Adam ~2.7x. ResNet-50 fp16:
+    25.6e6 params x (2 + 2 + 12) B = 0.4096 GB."""
+    from mlsysim import Models, Hardware
+    from mlsysim.engine.engine import Engine
+
+    p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100,
+                     batch_size=8, is_training=True)
+    assert p.memory_footprint.m_as("GB") == pytest.approx(0.4096, rel=1e-6)
