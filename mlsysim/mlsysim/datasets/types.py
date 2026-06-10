@@ -9,6 +9,7 @@ class DatasetProfile(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     training_examples: Optional[Quantity] = None
+    full_examples: Optional[Quantity] = None
     test_examples: Optional[Quantity] = None
     num_classes: Optional[int] = None
     languages: Optional[int] = Field(default=None, ge=1)
@@ -19,7 +20,7 @@ class DatasetProfile(BaseModel):
     image_channels: Optional[int] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
-    @field_validator("training_examples", "test_examples", mode="after")
+    @field_validator("training_examples", "full_examples", "test_examples", mode="after")
     @classmethod
     def _validate_example_counts(cls, v, info):
         return require_unit_family(v, ureg.count, info.field_name, "count")
