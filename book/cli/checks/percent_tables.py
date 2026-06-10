@@ -10,7 +10,7 @@ House style inverts between prose and tables:
 
 This module enforces the table side. It is imported by BOTH:
 
-  - the validator scope ``_run_percent_in_tables`` in
+  - the validator scope ``_run_mitpress_percent_in_tables`` in
     ``book/cli/commands/validate.py`` (the check that blocks commits), and
   - the formatter target ``_run_percent_tables`` in
     ``book/cli/commands/formatting.py`` (``./book/binder format percent-tables``).

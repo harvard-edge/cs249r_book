@@ -364,13 +364,13 @@ class ValidateCommand:
             Scope("ascii", "_run_ascii", default=False),
             Scope("acknowledgements", "_run_mitpress_acknowledgements",
                   note="American spelling: Acknowledgments"),
-            Scope("compound-prefix", "_run_compound_prefix",
+            Scope("compound-prefix", "_run_mitpress_compound_prefix",
                   note="pre-/non- close-up (§10.8)"),
-            Scope("concept-caps", "_run_concept_term_capitalization",
+            Scope("concept-caps", "_run_mitpress_concept_term_capitalization",
                   note="iron law, memory wall lowercase (§10.3)"),
             # abbreviation-first-use currently noisy; default=False until tuned.
-            Scope("abbreviation-first-use", "_run_abbreviation_first_use", default=False),
-            Scope("latin-abbrevs", "_run_latin_running_text",
+            Scope("abbreviation-first-use", "_run_mitpress_abbreviation_first_use", default=False),
+            Scope("latin-abbrevs", "_run_mitpress_latin_running_text",
                   note="viz./e.g./etc. in running text (§10.6)"),
         ],
         "punctuation": [
@@ -396,9 +396,9 @@ class ValidateCommand:
                   note="digits before 'percent', not spelled-out words (5 percent not five percent)"),
             Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
                   note="spell out 'percent' in captions"),
-            Scope("percent-in-tables", "_run_percent_in_tables",
+            Scope("percent-in-tables", "_run_mitpress_percent_in_tables",
                   note="use % symbol inside tables, not the word 'percent'"),
-            Scope("percent-in-prose", "_run_percent_in_prose",
+            Scope("percent-in-prose", "_run_mitpress_percent_in_prose",
                   note="spell out 'percent' in body prose, not the % symbol"),
             Scope("currency", "_run_currency_style",
                   note="use $ in content; USD defined once in notation"),
@@ -4935,7 +4935,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
-    def _run_percent_in_tables(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_percent_in_tables(self, root: Path) -> ValidationRunResult:
         """Flag the spelled-out word 'percent' used as a unit inside pipe tables.
 
         House style inverts between prose and tables. In prose and captions,
@@ -4983,10 +4983,10 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
-    def _run_percent_in_prose(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_percent_in_prose(self, root: Path) -> ValidationRunResult:
         """Flag the % symbol where body prose should spell out 'percent'.
 
-        Symmetric inverse of ``_run_percent_in_tables``. Per MIT Press
+        Symmetric inverse of ``_run_mitpress_percent_in_tables``. Per MIT Press
         ``AU_QUERY_RESPONSES.md`` Category H (aligned with Chicago §9.18),
         running prose spells out 'percent'; the % symbol is reserved for
         tables, equations, code, and labels inside figures.
@@ -8426,7 +8426,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_compound_prefix(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_compound_prefix(self, root: Path) -> ValidationRunResult:
         """Close up pre-/non- compound prefixes per §10.8 (strict 6-term list).
 
         Flags: pre-training, pre-trained, pre-deployment, pre-learning,
@@ -8438,7 +8438,7 @@ class ValidateCommand:
             "compound-prefix", "pre-/non- close-up (§10.8)",
         )
 
-    def _run_concept_term_capitalization(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_concept_term_capitalization(self, root: Path) -> ValidationRunResult:
         """Lowercase concept terms in body prose per §10.3.
 
         Flags Title Case appearances of iron law, memory wall, compute
@@ -8452,7 +8452,7 @@ class ValidateCommand:
             "concept-caps", "concept-term lowercase in prose (§10.3)",
         )
 
-    def _run_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
         """Expand abbreviations on first use per chapter per §10.5.
 
         Enforces the specialized-abbreviation list (DLRM, XLA, MMLU,
@@ -8525,7 +8525,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_latin_running_text(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_latin_running_text(self, root: Path) -> ValidationRunResult:
         """Prefer English over Latin abbreviations in running prose (§10.6).
 
         Flags e.g., i.e., etc., viz. in body prose. Permitted inside
