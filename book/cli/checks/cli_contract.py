@@ -141,14 +141,18 @@ CASES: tuple[ContractCase, ...] = (
         ),
     ),
     ContractCase(
-        name="check cli help shows pre-commit contract scope",
+        name="check cli help lists its scopes",
         argv=("check", "cli", "help"),
         expected_exit=0,
+        # Assert on stable tokens only: the group header and the short scope
+        # NAMES. Notes wrap and runner names get truncated with "…" once the
+        # Rich table widens (e.g. when a group gains a scope), so asserting a
+        # multi-word note or a full _run_* name is brittle. Scope names are
+        # short and never wrap, so they are the durable contract.
         must_include=(
             "binder check cli",
             "contract",
-            "public Binder command contract",
-            "_run_cli_contract",
+            "binder-canonical",
         ),
     ),
     ContractCase(

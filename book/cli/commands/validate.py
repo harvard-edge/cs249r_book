@@ -268,6 +268,9 @@ class ValidateCommand:
         "cli": [
             Scope("contract", "_run_cli_contract",
                   note="public Binder command contract"),
+            Scope("binder-canonical", "_run_binder_canonical",
+                  note="book-content pre-commit hooks must dispatch through ./book/binder",
+                  default=True),
         ],
         "refs": [
             # python-syntax: passes on dev but never wired to pre-commit historically;
@@ -1104,6 +1107,33 @@ class ValidateCommand:
             name="cli-contract",
             description="Public Binder CLI command contract",
             files_checked=len(cli_contract.CASES),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_binder_canonical(self, root: Path) -> ValidationRunResult:
+        """Assert book-content pre-commit hooks dispatch through ./book/binder."""
+        start = time.time()
+        from cli.checks import binder_canonical
+
+        repo_root = Path(__file__).resolve().parents[3]
+        violations = binder_canonical.run_canonical(repo_root)
+        issues = [
+            ValidationIssue(
+                file=violation.file,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            )
+            for violation in violations
+        ]
+        return ValidationRunResult(
+            name="binder-canonical",
+            description="Book-content hooks must route through Binder",
+            files_checked=1,
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
