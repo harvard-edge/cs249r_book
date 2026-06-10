@@ -2366,7 +2366,7 @@ Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where th
 # │          pcie_gen3_gb_per_s_str, transfer_ms_str, n_cpu_workers_str,
 # │          parallel_tokenization_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth
+from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2DataPipeline:
@@ -2405,6 +2405,8 @@ class GPT2DataPipeline:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     tokens_per_batch_str = fmt_count(tokens_per_batch, scale="K", precision=1, commas=False, label="token")
+    b_assign_math = MarkdownStr(f"$B={batch_size}$")
+    s_assign_math = MarkdownStr(f"$S={seq_len}$")
     token_rate_tokens_per_s_str = fmt_rate(token_rate, "tokens/s", scale="K", precision=0, commas=False)
     tokenization_ms_str = fmt_time(tokenization_ms, 'millisecond', precision=1, commas=False)
     batch_kb_str = fmt_memory(batch_bytes, unit=KB, precision=1, commas=False)
@@ -2447,7 +2449,7 @@ class StorageBandwidthNvme:
 **Stage trace**:
 
 1. **Raw text storage**: The OpenWebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from an NVMe SSD can reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`, but language-model training samples across documents, so the effective random-access bandwidth falls to roughly `{python} GPT2DataPipeline.random_access_gb_per_s_str` when the effective-access factor is about `{python} GPT2DataPipeline.f_access_str`.
-2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} with a `{python} GPT2DataPipeline.bpe_vocab_str` vocabulary converts raw text into subword token IDs, so a word such as "unbreakable" becomes the sequence ["un", "break", "able"]. With batch size $B=32$ and sequence length $S=1024$, each training step needs `{python} GPT2DataPipeline.tokens_per_batch_str`; at `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core, one core spends `{python} GPT2DataPipeline.tokenization_ms_str` preparing a batch.
+2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} with a `{python} GPT2DataPipeline.bpe_vocab_str` vocabulary converts raw text into subword token IDs, so a word such as "unbreakable" becomes the sequence ["un", "break", "able"]. With batch size `{python} GPT2DataPipeline.b_assign_math` and sequence length `{python} GPT2DataPipeline.s_assign_math`, each training step needs `{python} GPT2DataPipeline.tokens_per_batch_str`; at `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core, one core spends `{python} GPT2DataPipeline.tokenization_ms_str` preparing a batch.
 3. **Batching and padding**: The pipeline pads sequences to a uniform length and packs them into a `[32, 1024]` int64 tensor of `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Moving that tensor across a Gen3 x16 link with `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` of theoretical bandwidth takes only `{python} GPT2DataPipeline.transfer_ms_str`, so optimizing the copy would not materially improve this pipeline.
 
@@ -4694,7 +4696,8 @@ The benefits of Flash Attention become concrete when measured on real hardware. 
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: flash_fwd_speedup_mult_str, flash_bwd_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_time
+from mlsysim.core.units import ms
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionSpeedup:
@@ -4704,7 +4707,8 @@ class FlashAttentionSpeedup:
     """
 
     # ┌── 1. PARAMETERS ────────────────────────────────────────────────────────
-    std_fwd_2048 = 45  # ms (from benchmark table)
+    seq_2048 = 2048  # sequence length for this benchmark row
+    std_fwd_2048 = 45  # ms (illustrative benchmark)
     flash_fwd_2048 = 15  # ms
     std_bwd_2048 = 120  # ms
     flash_bwd_2048 = 35  # ms
@@ -4720,6 +4724,12 @@ class FlashAttentionSpeedup:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     flash_fwd_speedup_mult_str = fmt_multiple(flash_fwd_speedup, precision=0, commas=False)
     flash_bwd_speedup_mult_str = fmt_multiple(flash_bwd_speedup, precision=1, commas=False)
+    # 2048-row table values (single-sourced with the speedup inputs above)
+    seq_2048_str = fmt(seq_2048, precision=0, commas=False)
+    std_fwd_2048_ms_str = fmt_time(std_fwd_2048 * ms, 'millisecond', precision=0, commas=False)
+    flash_fwd_2048_ms_str = fmt_time(flash_fwd_2048 * ms, 'millisecond', precision=0, commas=False)
+    std_bwd_2048_ms_str = fmt_time(std_bwd_2048 * ms, 'millisecond', precision=0, commas=False)
+    flash_bwd_2048_ms_str = fmt_time(flash_bwd_2048 * ms, 'millisecond', precision=0, commas=False)
 
 # Export for prose
 ```
@@ -4728,12 +4738,12 @@ In this illustrative 40 GB A100-style scenario, standard attention runs out of m
 
 ::: {tbl-colwidths="[14,14,14,15,14,15,14]"}
 
-| **Sequence Length** | **Standard Forward** | **Flash Forward** | **Standard Backward** | **Flash Backward** | **Memory (Standard)** | **Memory (Flash)** |
-|:-------------------:|:--------------------:|:-----------------:|:---------------------:|:------------------:|:---------------------:|:------------------:|
-|         512         |        12 ms         |        8 ms       |         35 ms         |       18 ms        |         4.2 GB        |       2.8 GB       |
-|         2048        |        45 ms         |       15 ms       |         120 ms        |       35 ms        |         18 GB         |        6 GB        |
-|         4096        |         OOM          |       32 ms       |          OOM          |       85 ms        |         >40 GB        |       12 GB        |
-|         8192        |         OOM          |       68 ms       |          OOM          |       180 ms       |         >80 GB        |       24 GB        |
+|              **Sequence Length**              |                 **Standard Forward**                 |                   **Flash Forward**                    |                **Standard Backward**                 |                   **Flash Backward**                   | **Memory (Standard)** | **Memory (Flash)** |
+|:---------------------------------------------:|:----------------------------------------------------:|:------------------------------------------------------:|:----------------------------------------------------:|:------------------------------------------------------:|:---------------------:|:------------------:|
+|                      512                      |                        12 ms                         |                          8 ms                          |                        35 ms                         |                         18 ms                          |         4.2 GB        |       2.8 GB       |
+| `{python} FlashAttentionSpeedup.seq_2048_str` | `{python} FlashAttentionSpeedup.std_fwd_2048_ms_str` | `{python} FlashAttentionSpeedup.flash_fwd_2048_ms_str` | `{python} FlashAttentionSpeedup.std_bwd_2048_ms_str` | `{python} FlashAttentionSpeedup.flash_bwd_2048_ms_str` |         18 GB         |        6 GB        |
+|                      4096                     |                         OOM                          |                         32 ms                          |                         OOM                          |                         85 ms                          |         >40 GB        |       12 GB        |
+|                      8192                     |                         OOM                          |                         68 ms                          |                         OOM                          |                         180 ms                         |         >80 GB        |       24 GB        |
 
 : **FlashAttention Benchmark Comparison**: Illustrative per-call timing and peak memory for standard attention vs. FlashAttention on a 40 GB A100-style configuration across sequence lengths. OOM marks configurations where standard attention exceeds the 40 GB memory budget; the 8192-token row also shows that standard attention would exceed 80 GB. {#tbl-flashattention-benchmarks}
 
@@ -6621,6 +6631,8 @@ class TrainingCarbonFootprint:
     check(cf_energy.to(kWh).magnitude > 0, "Energy consumption must be positive")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    cf_params_b_str = fmt_count(cf_params, scale='B', precision=0, commas=False, scale_style='word')
+    cf_tokens_str = fmt_count(cf_tokens, scale='T', precision=0, commas=False, scale_style='word')
     cf_num_gpus_str = fmt_count(cf_num_gpus, commas=False, label="GPU")
     cf_hosts_str = fmt_count(cf_hosts, commas=False, label="host")
     cf_cpu_tdp_per_host_w_str = fmt_power(cf_cpu_tdp_per_host, unit=watt, precision=0, commas=False)
@@ -6643,7 +6655,7 @@ class TrainingCarbonFootprint:
 
 **Scenario**: Training large models is a massive energy sink as well as a compute challenge. The physical ceiling\index{Scaling!physical ceiling} appears in the energy corollary to the iron law, which lets us quantify the environmental impact of scaling training:
 
-1.  **Workload**: Training a 7-billion-parameter model for one trillion tokens.
+1.  **Workload**: Training a `{python} TrainingCarbonFootprint.cf_params_b_str`-parameter model for `{python} TrainingCarbonFootprint.cf_tokens_str` tokens.
 2.  **Compute**: ≈ `{python} TrainingCarbonFootprint.cf_flops_eqn_str`.
 3.  **Efficiency**: `{python} TrainingCarbonFootprint.cf_sustained_tflop_per_s_str` sustained on A100 (`{python} TrainingCarbonFootprint.cf_gpu_tdp_w_str` TDP).
 4.  **Time**: ≈ `{python} TrainingCarbonFootprint.cf_time_days_str` on `{python} TrainingCarbonFootprint.cf_num_gpus_str`.
