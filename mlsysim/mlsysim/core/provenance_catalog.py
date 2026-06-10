@@ -567,6 +567,12 @@ GENDER_SHADES = _lit(
     url="https://proceedings.mlr.press/v81/buolamwini18a.html",
 )
 
+CROWDFLOWER_2016 = _lit(
+    "prov:crowdflower-data-science-report-2016",
+    "CrowdFlower (2016), Data Science Report — 'What data scientists spend the most time doing'",
+    url="https://visit.figure-eight.com/data-science-report.html",
+)
+
 GPT2_TRAINING_COST_EST = _est(
     "prov:gpt2-training-cost-estimate",
     "Community estimate of GPT-2 (1.5B) cloud training cost in 2019 (~$50K)",

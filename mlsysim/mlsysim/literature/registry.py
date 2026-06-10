@@ -23,6 +23,7 @@ Chinchilla = _load("chinchilla", "Chinchilla")
 Communication = _load("communication", "Communication")
 BatchSize = _load("batchsize", "BatchSize", "McCandlish et al. (2018) critical batch size estimates.")
 Fairness = _load("fairness", "Fairness", "Buolamwini & Gebru (2018) Gender Shades intersectional error rates.")
+Surveys = _load("surveys", "Surveys", "Industry survey figures (CrowdFlower 2016 data-science time allocation).")
 
 
 # ---------------------------------------------------------------------------
@@ -87,4 +88,5 @@ class Literature(Registry):
     Communication = Communication
     BatchSize = BatchSize
     Fairness = Fairness
+    Surveys = Surveys
     ComputeTrend = ComputeTrend
