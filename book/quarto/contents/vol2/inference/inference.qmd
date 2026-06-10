@@ -94,20 +94,25 @@ class InferenceSetup:
     bw_h_h100 = Hardware.Cloud.H100.memory.bandwidth
     bw_a100 = Hardware.Cloud.A100.memory.bandwidth
     nvlink = Hardware.Cloud.H100.nvlink.bandwidth
+    gpt4 = Models.Language.GPT4
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     h100_mem = mem_h_h100
     h100_bw = bw_h_h100
     a100_bw = bw_a100
+    gpt4_weights_fp16 = gpt4.size_in_bytes(BYTES_FP16)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(h100_bw > a100_bw, "H100 bandwidth should exceed A100 bandwidth")
+    check(gpt4_weights_fp16 > 40 * h100_mem, "GPT-4-class FP16 weights should dwarf a single H100's HBM")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
     h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     a100_mem_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=1, commas=False)
     nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
+    gpt4_params_t_str = fmt_params(gpt4.parameters, scale="T", precision=1, commas=False)
+    gpt4_weights_tb_str = fmt_qty(gpt4_weights_fp16, TB, precision=1, commas=False, approx=True)
 ```
 
 ## The Economics and Architecture of Inference {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
@@ -128,7 +133,7 @@ Building such a service requires three linked decisions: when distribution becom
 
 Three distinct signals indicate when distributed inference becomes necessary rather than merely optional. @Tbl-distribution-triggers categorizes these triggers by constraint type and corresponding strategy.
 
-The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4 class models with hundreds of billions of parameters require 200–400 GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's Deep Learning Recommendation Model (DLRM)[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
+The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4-class models dwarf that capacity: the public ~`{python} InferenceSetup.gpt4_params_t_str`-parameter mixture-of-experts estimate implies `{python} InferenceSetup.gpt4_weights_tb_str` just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's Deep Learning Recommendation Model (DLRM)[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
 
 [^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**\index{HBM3!bandwidth}: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tb_per_s_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation one major variable in inference cost-per-token.
 
@@ -138,11 +143,11 @@ Beyond memory constraints, throughput limitations\index{Distributed Inference!th
 
 Finally, strict latency requirements\index{Distributed Inference!latency constraint} drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely. A 70-billion parameter model requires approximately 140 GB of memory in FP16, exceeding a single 80 GB H100-class GPU before KV cache is considered. Even when quantization or larger-memory hardware makes a single-replica configuration possible, decode throughput is often limited by memory bandwidth. Sharding the model across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
 
-| **Constraint** | **Single-Machine Limit** | **Example Workload** |  **Distribution Strategy**  |
-|:---------------|:------------------------:|:--------------------:|:---------------------------:|
-| **Memory**     |       80 GB (H100)       |   GPT-4 (400 GB+)    | Tensor/pipeline parallelism |
-| **Throughput** |    ~10K QPS (vision)     |   100K QPS RecSys    |    Horizontal replication   |
-| **Latency**    |   Model execution time   |   500 ms LLM TTFT    |        Model sharding       |
+| **Constraint** | **Single-Machine Limit** |                    **Example Workload**                    |  **Distribution Strategy**  |
+|:---------------|:------------------------:|:----------------------------------------------------------:|:---------------------------:|
+| **Memory**     |       80 GB (H100)       | GPT-4 (`{python} InferenceSetup.gpt4_weights_tb_str` FP16) | Tensor/pipeline parallelism |
+| **Throughput** |    ~10K QPS (vision)     |                      100K QPS RecSys                       |    Horizontal replication   |
+| **Latency**    |   Model execution time   |                      500 ms LLM TTFT                       |        Model sharding       |
 
 : **Triggers for Distributed Inference**: Each constraint type indicates different distribution strategies. Memory constraints require model sharding; throughput constraints require replication; latency constraints may require either depending on whether the bottleneck is compute or memory bandwidth. {#tbl-distribution-triggers}
 
@@ -3707,13 +3712,14 @@ class AllReduceInterconnect:
     n_devices = Systems.Nodes.DGX_H100.accelerators_per_node
     message = 8 * MB  # scenario payload
     layer_budget = 30 * millisecond  # scenario layer budget
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # datasheet bidirectional total (for display)
+    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way rate for ring math
     ib_hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
     eth_100g_bw = NETWORK_100G_BW
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     allreduce_factor = calc_ring_allreduce_data_factor(n_devices)
-    nvlink_time = calc_ring_allreduce_time(message, n_devices, nvlink_bw, 0 * second).to(millisecond)
+    nvlink_time = calc_ring_allreduce_time(message, n_devices, nvlink_bw_beta, 0 * second).to(millisecond)
     ib_time = calc_ring_allreduce_time(message, n_devices, ib_hdr_bw, 0 * second).to(millisecond)
     eth_time = calc_ring_allreduce_time(message, n_devices, eth_100g_bw, 0 * second).to(millisecond)
 
@@ -3737,16 +3743,63 @@ class AllReduceInterconnect:
     hidden_dim_str = fmt_int(8192)
 ```
 
+```{python}
+#| echo: false
+#| label: inference-interconnect-specs
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTERCONNECT PHYSICAL SPECS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-inference-interconnect-specs inside
+# │          @nbk-inference-interconnect-technology-comparison.
+# │
+# │ Goal: Pin the interconnect spec table to the registry (the old table
+# │       hand-typed latencies that contradicted every registry anchor:
+# │       NVLink 1 us vs 500 ns, PCIe Gen5 5 us vs 1 us, IB HDR 2-5 us vs
+# │       7 us, Eth 100G 10 us vs 50 us).
+# │ Show: Physical bandwidth and latency for the four candidate fabrics.
+# │ How: H100.nvlink (instance link), H100.interconnect + Tech PCIeGen5
+# │      latency, Systems.Fabrics.InfiniBand_HDR / Ethernet_100G.
+# │
+# │ Imports: mlsysim registries (Hardware, Systems.Fabrics) + fmt helpers
+# │ Exports: InterconnectSpecs.* (_str per table cell)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_bandwidth, fmt_time, check
+
+class InterconnectSpecs:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    nvlink = Hardware.Cloud.H100.nvlink
+    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
+    pcie_latency = Hardware.Tech.Interconnect.PCIeGen5.latency
+    ib_hdr = Systems.Fabrics.InfiniBand_HDR
+    eth_100g = Systems.Fabrics.Ethernet_100G
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(nvlink.bandwidth > 10 * pcie_bw, "NVLink should be an order of magnitude above PCIe Gen5")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    nvlink_bw_str = fmt_bandwidth(nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    nvlink_latency_str = fmt_time(nvlink.latency, nanosecond, precision=0, commas=False)
+    pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
+    pcie_latency_str = fmt_time(pcie_latency, microsecond, precision=0, commas=False)
+    ib_hdr_gbit_str = fmt_bandwidth(ib_hdr.bandwidth, unit=Gbps, precision=0, commas=False)
+    ib_hdr_gb_str = fmt_bandwidth(ib_hdr.bandwidth, unit=GB / second, precision=0, commas=False)
+    ib_hdr_latency_str = fmt_time(ib_hdr.latency, microsecond, precision=0, commas=False)
+    eth_gbit_str = fmt_bandwidth(eth_100g.bandwidth, unit=Gbps, precision=0, commas=False)
+    eth_gb_str = fmt_bandwidth(eth_100g.bandwidth, unit=GB / second, precision=1, commas=False)
+    eth_latency_str = fmt_time(eth_100g.latency, microsecond, precision=0, commas=False)
+```
+
 ::: {#nbk-inference-interconnect-technology-comparison .callout-notebook title="Interconnect technology comparison"}
 
 Communication overhead depends heavily on the interconnect technology. @Tbl-inference-interconnect-specs records the physical bandwidth\index{Interconnect!bandwidth}, latency\index{Interconnect!latency}, and intended scope of each candidate interconnect:
 
-| **Interconnect**   |    **Bandwidth**     | **Latency** |      **Use Case**      |
-|:-------------------|:--------------------:|:-----------:|:----------------------:|
-| **NVLink (H100)**  |       900 GB/s       |     1μs     |     Intra-node TP      |
-| **PCIe Gen5**      |       64 GB/s        |     5μs     | Intra-node (no NVLink) |
-| **InfiniBand HDR** |  200 Gb/s (25 GB/s)  |    2--5μs   |       Inter-node       |
-| **Ethernet 100G**  | 100 Gb/s (12.5 GB/s) |     10μs    | Inter-node (commodity) |
+| **Interconnect**   |                                       **Bandwidth**                                       |                   **Latency**                   |      **Use Case**      |
+|:-------------------|:-----------------------------------------------------------------------------------------:|:-----------------------------------------------:|:----------------------:|
+| **NVLink (H100)**  |                         `{python} InterconnectSpecs.nvlink_bw_str`                        | `{python} InterconnectSpecs.nvlink_latency_str` |     Intra-node TP      |
+| **PCIe Gen5**      |                          `{python} InterconnectSpecs.pcie_bw_str`                         |  `{python} InterconnectSpecs.pcie_latency_str`  | Intra-node (no NVLink) |
+| **InfiniBand HDR** | `{python} InterconnectSpecs.ib_hdr_gbit_str` (`{python} InterconnectSpecs.ib_hdr_gb_str`) | `{python} InterconnectSpecs.ib_hdr_latency_str` |       Inter-node       |
+| **Ethernet 100G**  |    `{python} InterconnectSpecs.eth_gbit_str` (`{python} InterconnectSpecs.eth_gb_str`)    |   `{python} InterconnectSpecs.eth_latency_str`  | Inter-node (commodity) |
 
 : **Datacenter interconnect specs**: Bandwidth, latency, and intended scope for NVLink, PCIe Gen5, InfiniBand HDR, and 100G Ethernet, establishing the physical limits that bound achievable sharding speedups. {#tbl-inference-interconnect-specs}
 

@@ -168,11 +168,11 @@ class NetworkRooflineModel(ForwardModel):
         latency = max(compute_time.to("ms").magnitude, network_time.to("ms").magnitude) * ureg.ms
 
         # MFU follows from the binding ceiling: useful FLOPs delivered per step
-        # over fleet peak. HFU adds the recompute/kernel work the hardware does
-        # beyond model FLOPs, via the calibrated HFU:MFU ratio.
+        # over fleet peak. This model counts only model FLOPs (no recomputation
+        # is modeled), so HFU equals MFU by definition (PaLM App. B).
         achieved_rate = (training_ops / latency.to("s")).to(total_flops.units)
         mfu = min((achieved_rate / total_flops).to_base_units().magnitude, 1.0)
-        hfu = min(mfu * cal.HFU_MFU_RATIO, 1.0)
+        hfu = mfu
         throughput = (1 / latency.to("s")).to("1/s")
 
         return PerformanceProfile(
@@ -273,7 +273,7 @@ class EfficiencyModel(ForwardModel):
         # Overhead breakdown: decompose (1 - eta) into meaningful components.
         # Total overhead = 1 - eta, split into occupancy loss and memory stall.
         total_overhead = 1.0 - eta
-        occupancy_loss = 1.0 - min(efficiency * cal.HFU_MFU_RATIO, 1.0)  # SM occupancy overhead
+        occupancy_loss = 1.0 - min(efficiency * cal.SM_OCCUPANCY_HEADROOM, 1.0)  # SM occupancy overhead
         # Memory stall absorbs the remainder: time spent waiting on data movement.
         memory_stall = max(0.0, total_overhead - occupancy_loss)
 

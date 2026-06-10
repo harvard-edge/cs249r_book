@@ -34,6 +34,10 @@ class PerformanceProfile(BaseModel):
     # Offload fields — populated when model spills beyond HBM to host memory
     offload_spill_bytes: Optional[Quantity] = None
     offload_effective_bw: Optional[Quantity] = None
+    # True when dispatch + framework layer tax exceeds both the compute and
+    # memory roofline terms; the bottleneck label reports the larger roofline
+    # ceiling, so small models at low batch can be overhead-bound in practice.
+    overhead_dominated: bool = False
 
     @property
     def energy_per_inference(self) -> Quantity:
@@ -108,10 +112,17 @@ class Engine:
             Numerical precision ('fp32', 'fp16', 'int8', 'int4').
         efficiency : float
             Achieved compute efficiency as a fraction of peak (0.0 to 1.0).
+            Derates the COMPUTE ceiling only — memory bandwidth is used at
+            its full spec value. This asymmetry is deliberate (sustained HBM
+            bandwidth is far closer to spec than sustained FLOPs), but note
+            it shifts the effective ridge point left by the same factor.
         raise_errors : bool
             If True, raise OOMError when the model does not fit in memory.
         is_training : bool
-            Whether to model training (impacts memory and FLOPs).
+            Whether to model training (impacts memory and FLOPs). Inference
+            memory footprint counts WEIGHTS ONLY (no activations, no KV
+            cache, batch-independent) — serving-realistic memory accounting
+            including KV cache lives in ServingModel.
         seq_len : int
             Sequence length (used for training memory footprint).
         zero_stage : int
@@ -162,14 +173,29 @@ class Engine:
             
             # Calculate training memory footprint
             if hasattr(model, 'training_memory'):
-                strategy = "selective" if activation_recomputation else "none"
+                # Pair FULL recomputation memory with the 4x ops multiplier above:
+                # full recompute stores only layer inputs and re-runs the forward
+                # pass (+1 forward), which is exactly the 4/3 ops convention.
+                # Selective checkpointing would save less memory AND cost fewer
+                # extra FLOPs; mixing the two charges the worst of both.
+                strategy = "full" if activation_recomputation else "none"
                 memory_footprint = model.training_memory(
                     batch_size=batch_size, seq_len=seq_len, precision=precision, 
                     strategy=strategy, zero_stage=zero_stage, dp_size=dp_size, is_lora=is_lora
                 )
             else:
-                # Fallback for non-Transformer workloads: 3x weights + gradients + states
-                memory_footprint = graph.weight_bytes * (3 if not is_lora else 1.1)
+                # Fallback for non-Transformer workloads (no training_memory
+                # method): weights + gradients (same width) + Adam
+                # mixed-precision optimizer state (FP32 master + moments =
+                # 12 B/param, cal.TRAINING_OPTIMIZER_BYTES_ADAM). The old 3x
+                # weight-bytes heuristic understated Adam accounting ~2.7x
+                # at fp16. (Activations still excluded, as documented.)
+                if is_lora:
+                    memory_footprint = graph.weight_bytes * 1.1
+                else:
+                    n_params = (graph.weight_bytes / bpp).to_base_units()
+                    opt_state = n_params * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")
+                    memory_footprint = graph.weight_bytes * 2 + opt_state
         else:
             base_ops = graph.total_ops
             memory_footprint = graph.weight_bytes
@@ -202,9 +228,13 @@ class Engine:
         if not feasible:
             # Offload path: model spills beyond primary memory → bandwidth degrades
             offload_spill = memory_footprint - hardware.memory.capacity
+            # Whole-traffic convention: ALL memory traffic is charged at the
+            # offload-limited bandwidth, not just the spilled fraction — a
+            # deliberate pessimistic simplification of host-offload paging.
+            pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
             pcie_bw = (
-                getattr(hardware.interconnect, 'bandwidth', Q_("64 GB/s"))
-                if hardware.interconnect else Q_("64 GB/s")
+                getattr(hardware.interconnect, 'bandwidth', pcie_fallback)
+                if hardware.interconnect else pcie_fallback
             )
             effective_bw = min(hardware.memory.bandwidth, pcie_bw)
             offload_bw = effective_bw
@@ -230,19 +260,22 @@ class Engine:
         else:
             compute_time = (batch_ops / effective_flops).to("ms")
 
+        # Memory traffic for batched workloads: weights are loaded once from HBM,
+        # but activations scale with batch_size. For batch=1, traffic ≈ weight_bytes.
+        # For larger batches, activation I/O becomes significant.
+        # This captures the Roofline regime transition as batch_size grows.
+        # Computed ONCE and shared by the latency term and the bottleneck
+        # classifier so the two can never silently diverge.
+        activation_bytes = graph.weight_bytes * 0.1 * batch_size  # ~10% of weights per sample (heuristic)
+        actual_memory_traffic = graph.weight_bytes + activation_bytes
+
         if effective_bw.magnitude == 0:
             memory_time = Q_("0 ms")
         else:
-            # Memory traffic for batched workloads: weights are loaded once from HBM,
-            # but activations scale with batch_size. For batch=1, traffic ≈ weight_bytes.
-            # For larger batches, activation I/O becomes significant.
-            # This captures the Roofline regime transition as batch_size grows.
-            activation_bytes = graph.weight_bytes * 0.1 * batch_size  # ~10% of weights per sample (heuristic)
-            actual_memory_traffic = graph.weight_bytes + activation_bytes
             memory_time = (actual_memory_traffic / effective_bw).to("ms")
 
         roofline = calc_bottleneck(
-            batch_ops, graph.weight_bytes + graph.weight_bytes * 0.1 * batch_size, effective_flops, effective_bw
+            batch_ops, actual_memory_traffic, effective_flops, effective_bw
         )
         bottleneck = roofline["bottleneck"]
 
@@ -264,24 +297,35 @@ class Engine:
         else:
             throughput = Q_(0, "1/s")
 
-        # 8-9. MFU, HFU, and Energy (energy depends on MFU, so compute MFU first)
-        # MFU = achieved_flops / peak_flops = (model_flops / step_time) / peak_flops
-        # Source: Chowdhery et al. (2022), "PaLM: Scaling Language Modeling with Pathways"
+        # 8-9. MFU, HFU, and Energy (energy depends on utilization, so compute MFU/HFU first)
+        # MFU = model FLOPs / (step_time × peak): only the FLOPs the model
+        # requires (1 fwd + 2 bwd for training), EXCLUDING recomputation.
+        # HFU = hardware FLOPs / (step_time × peak): what the silicon actually
+        # executed, INCLUDING the recompute forward pass. Without activation
+        # recomputation the two are identical by definition.
+        # Source: Chowdhery et al. (2022), "PaLM", Appendix B;
+        #         Korthikanti et al. (2022), "Reducing Activation Recomputation".
         # IMPORTANT: Use Pint unit-aware division to handle TFLOPS/s vs flop correctly.
         latency_s = latency.to("s")
+        model_ops = graph.total_ops * (3 if is_training else 1) * batch_size
         if latency_s.magnitude > 0 and peak_flops.magnitude > 0:
-            achieved_flops_rate = (batch_ops / latency_s).to(peak_flops.units)
-            mfu = (achieved_flops_rate / peak_flops).to_base_units().magnitude
+            mfu = ((model_ops / latency_s).to(peak_flops.units) / peak_flops).to_base_units().magnitude
             mfu = max(0.0, min(mfu, 1.0))  # Clamp to [0, 1]
+            # batch_ops carries the 4x multiplier when recomputation is on,
+            # so hfu/mfu = 4/3 under recompute and hfu == mfu otherwise.
+            hfu = ((batch_ops / latency_s).to(peak_flops.units) / peak_flops).to_base_units().magnitude
+            hfu = max(0.0, min(hfu, 1.0))  # Clamp to [0, 1]
         else:
             mfu = 0.0
-        hfu = min(mfu * cal.HFU_MFU_RATIO, 1.0)  # Source: PaLM (Chowdhery et al. 2022)
+            hfu = 0.0
 
         # Energy estimate (energy-proportional model)
-        # Consistent with SustainabilityModel: 30% idle + 70% * utilization
+        # Consistent with SustainabilityModel: 30% idle + 70% * utilization.
+        # Utilization is HFU (the silicon's actual busy fraction, including
+        # recompute work); identical to MFU when recomputation is off.
         # Source: Barroso & Hölzle (2007), "The Case for Energy-Proportional Computing"
         if hardware.tdp is not None:
-            avg_power = hardware.tdp * (cal.ENERGY_IDLE_FRACTION + cal.ENERGY_DYNAMIC_FRACTION * mfu)
+            avg_power = hardware.tdp * (cal.ENERGY_IDLE_FRACTION + cal.ENERGY_DYNAMIC_FRACTION * hfu)
             energy = (avg_power * latency.to("s")).to("J")
         else:
             energy = Q_("0 J")
@@ -304,6 +348,10 @@ class Engine:
             constraint_trace=constraint_trace,
             offload_spill_bytes=offload_spill,
             offload_effective_bw=offload_bw,
+            overhead_dominated=(
+                (dispatch_tax + layer_tax).to("ms").magnitude
+                > max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude)
+            ),
         )
 
     @staticmethod

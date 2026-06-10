@@ -5,7 +5,12 @@ from __future__ import annotations
 import math
 
 from mlsysim.core.units import ureg
-from mlsysim.core._validation import validate_positive, validate_range, validate_at_least
+from mlsysim.core._validation import (
+    validate_positive,
+    validate_nonnegative,
+    validate_range,
+    validate_at_least,
+)
 
 from ._units import _ensure_unit
 
@@ -33,12 +38,33 @@ def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
     """
     delta = _ensure_unit(checkpoint_cost_s, ureg.second, "checkpoint_cost_s")
     mtbf = _ensure_unit(mtbf_s, ureg.second, "mtbf_s")
+    validate_positive(delta, "checkpoint_cost_s")
+    validate_positive(mtbf, "mtbf_s")
+    if delta.m_as(ureg.second) >= 2 * mtbf.m_as(ureg.second):
+        import warnings
+        warnings.warn(
+            "calc_young_daly_interval: checkpoint cost delta >= 2*MTBF — the "
+            "Young first-order form is out of regime here (it returns tau < "
+            "delta, which is physically impossible). Daly (2006) Sec. 5 "
+            "prescribes tau = MTBF in this regime.",
+            stacklevel=2,
+        )
     seconds = math.sqrt(2 * delta.m_as(ureg.second) * mtbf.m_as(ureg.second))
     return seconds * ureg.second
 
 
 def calc_mtbf_cluster(component_mtbf_hours, n_components, correlation_factor=1.0):
-    """Cluster MTBF from identical independent components."""
+    """Cluster MTBF from identical independent components.
+
+    ``MTBF_cluster = MTBF_component / N`` — exact when failures are
+    independent and exponentially distributed (the minimum of N i.i.d.
+    exponentials is exponential with N times the rate).
+
+    ``correlation_factor`` scales the result: values **below 1 model
+    correlated/clustered failures making the effective cluster MTBF worse**
+    (0.5 halves it); 1.0 (default) is the independent case.
+    """
+    validate_at_least(n_components, 1, "n_components")
     mtbf = _ensure_unit(component_mtbf_hours, ureg.hour, "component_mtbf_hours")
     return (mtbf / n_components * correlation_factor).to(ureg.hour)
 
@@ -129,6 +155,7 @@ def calc_failure_probability(mtbf, job_duration):
         Dimensionless probability in [0, 1).
     """
     validate_positive(mtbf, "mtbf")
+    validate_nonnegative(job_duration, "job_duration")
     both_qty = isinstance(mtbf, ureg.Quantity) and isinstance(job_duration, ureg.Quantity)
     either_qty = isinstance(mtbf, ureg.Quantity) or isinstance(job_duration, ureg.Quantity)
     if either_qty and not both_qty:

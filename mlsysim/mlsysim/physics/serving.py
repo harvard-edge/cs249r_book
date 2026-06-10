@@ -80,6 +80,8 @@ def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
     # Inverting at quantile q gives t_q = -ln(q / p_wait) / rate; when p_wait is
     # already below the tail mass q, that percentile of requests never queues.
     rate_param = c * mu * (1 - rho)
-    p50_wait = 0.0 if p_wait < 0.5 else -math.log(0.5 / p_wait) / rate_param
-    p99_wait = 0.0 if p_wait < 0.01 else -math.log(0.01 / p_wait) / rate_param
+    # max(0.0, ...) also normalizes the -0.0 produced at the exact
+    # p_wait == quantile boundary (e.g. M/M/1 at rho = 0.5).
+    p50_wait = 0.0 if p_wait < 0.5 else max(0.0, -math.log(0.5 / p_wait) / rate_param)
+    p99_wait = 0.0 if p_wait < 0.01 else max(0.0, -math.log(0.01 / p_wait) / rate_param)
     return rho, p50_wait * ureg.second, p99_wait * ureg.second

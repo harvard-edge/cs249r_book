@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional, Dict
+from typing import Optional, Dict, Literal
 from ..core.units import Q_, ureg
 from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 
@@ -94,14 +94,38 @@ class StorageHierarchy(BaseModel):
 class IOInterconnect(BaseModel):
     """
     Represents a point-to-point interconnect link.
-    
+
     Used to model PCIe links (host to device) or NVLink/ICI connections
     (device to device within a node).
+
+    Direction convention (2026-06-10 audit). ``bandwidth`` stores the figure
+    exactly as the vendor datasheet quotes it, and ``direction`` declares
+    which convention that figure uses:
+
+    - ``per_direction`` (default): the one-way deliverable rate. PCIe entries
+      (64 GB/s Gen5 x16) and Ethernet/RoCE entries use this.
+    - ``bidirectional_total``: send + receive summed. NVIDIA quotes NVLink
+      this way (H100 "900 GB/s" = 450 GB/s each direction); Google quotes
+      TPU ICI the same way.
+
+    Formulas that divide bytes by a link rate (transfer time, ring-collective
+    beta terms) need the ONE-WAY rate: always consume
+    ``bandwidth_per_direction``, never raw ``bandwidth``. Feeding the
+    bidirectional total into a beta term renders every intra-node collective
+    ~2x optimistic — the exact bug this field exists to prevent.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str # e.g., "PCIe Gen4 x16"
     bandwidth: Quantity
     latency: Optional[Quantity] = None
+    direction: Literal["per_direction", "bidirectional_total"] = "per_direction"
+
+    @property
+    def bandwidth_per_direction(self) -> Quantity:
+        """One-way deliverable bandwidth — the beta for transfer-time math."""
+        if self.direction == "bidirectional_total":
+            return self.bandwidth / 2
+        return self.bandwidth
 
     @field_validator("bandwidth", mode="after")
     @classmethod

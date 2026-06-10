@@ -669,7 +669,45 @@ Here, $P$ is parameter count, $B$ is batch size, $d_{\text{model}}$ is hidden wi
 *Larger batches raise arithmetic intensity toward the ridge.*
 :::
 
-At large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving 2 percent utilization at batch size 1 may achieve 60 percent utilization at batch size 256. The economic implication is stark: the cost per token decreases by 30$\times$ as batch size increases from 1 to 256.
+```{python}
+#| echo: false
+#| label: performance-engineering-batch-mfu-anchors
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BATCH-SIZE MFU ANCHORS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the memory-bound-to-compute-bound transition prose below.
+# │
+# │ Goal: Pin the batch-1 vs batched inference utilization claim to the
+# │       package's cited anchors (the old prose hand-typed 2%/60%/30x,
+# │       matching no registry value; canon is 5%/40% -> 8x).
+# │ Show: MFU at batch 1, MFU at large batch, and the cost-per-token multiple.
+# │ How: Literature.Training.MfuInferenceBatch1 / MfuInferenceBatched.
+# │
+# │ Imports: mlsysim Literature registry + fmt helpers
+# │ Exports: BatchMfuAnchors.mfu_b1_pct_str, .mfu_batched_pct_str,
+# │          .cost_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt_multiple, check
+
+class BatchMfuAnchors:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    mfu_b1 = float(Literature.Training.MfuInferenceBatch1)
+    mfu_batched = float(Literature.Training.MfuInferenceBatched)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cost_mult = mfu_batched / mfu_b1
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cost_mult > 5, "Batched inference should improve utilization by at least 5x over batch 1")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mfu_b1_pct_str = fmt_percent(mfu_b1, precision=0, commas=False, style="prose")
+    mfu_batched_pct_str = fmt_percent(mfu_batched, precision=0, commas=False, style="prose")
+    cost_mult_str = fmt_multiple(cost_mult, precision=0, commas=False)
+```
+
+At large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving `{python} BatchMfuAnchors.mfu_b1_pct_str` utilization at batch size 1 may achieve `{python} BatchMfuAnchors.mfu_batched_pct_str` utilization at large batch sizes. The economic implication is stark: the cost per token decreases by roughly `{python} BatchMfuAnchors.cost_mult_str` as batching carries the workload from the memory-bound to the compute-bound regime.
 
 The constraint is memory: each additional request in the batch requires its own KV cache (the per-request store of attention keys and values for every token generated so far), and the total KV cache across all requests must fit in GPU memory alongside the model weights. The 70B-model-on-8-H100 deployment introduced here is the chapter's recurring example, revisited with full quantitative detail in the precision dividend (@sec-performance-engineering-quant-strategies) and the case study (@sec-performance-engineering-case-study). A 70B model with 140 GB of weights in FP16 must be sharded across multiple GPUs; on an 8-GPU node that leaves about 62.5 GB per GPU for KV cache before overhead. The precision engineering techniques in this chapter address exactly this constraint: INT4 weight quantization reduces the per-GPU weight footprint to about 4.4 GB and frees roughly 13 GB per GPU for KV cache, enabling batch sizes that transform the economics of serving.
 
@@ -1741,7 +1779,10 @@ class OverlapCalc:
     m = Models.Language.Llama3_8B  # 7-8B scale
     h = Hardware.Cloud.H100
     num_gpus = 8
-    nvlink_bw = h.nvlink.bandwidth
+    # Per-direction NVLink rate (one-way beta for the ring AllReduce); the
+    # datasheet 900 GB/s is the bidirectional total. Used for both the timing
+    # math and the displayed rate so the worked example stays self-consistent.
+    nvlink_bw = h.nvlink.bandwidth_per_direction
 
     # Backward pass compute: ~2 * forward FLOPs (gradient computation)
     # Forward FLOPs ≈ 2 * P * tokens_per_gpu, where tokens_per_gpu = S * B_per_gpu
@@ -1803,7 +1844,7 @@ class OverlapCalc:
     nvlink_bw_gb_per_s_str = fmt_qty_int(nvlink_bw, GB / second, commas=False)
 ```
 
-Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str`. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` per direction. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
 
 Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str`, a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 

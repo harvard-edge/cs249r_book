@@ -6,7 +6,7 @@ import math
 import pint
 
 from mlsysim.core.units import ureg, MB
-from mlsysim.core._validation import validate_at_least
+from mlsysim.core._validation import validate_at_least, validate_nonnegative
 
 from ._units import _ensure_unit
 
@@ -201,6 +201,11 @@ def calc_kv_cache_size(
     Quantity
         Total KV cache size in bytes.
     """
+    validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(n_heads, 1, "n_heads")
+    validate_at_least(head_dim, 1, "head_dim")
+    validate_nonnegative(seq_len, "seq_len")
+    validate_at_least(batch_size, 1, "batch_size")
     effective_bpe = kv_precision_bytes if kv_precision_bytes is not None else bytes_per_elem
     bpe = _ensure_unit(
         effective_bpe,
@@ -251,6 +256,12 @@ def calc_paged_kv_cache_size(
         - size (Quantity): Total allocated KV cache size in bytes.
         - frag_pct (float): Internal memory fragmentation (0.0 to 1.0).
     """
+    validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(n_heads, 1, "n_heads")
+    validate_at_least(head_dim, 1, "head_dim")
+    validate_nonnegative(seq_len, "seq_len")
+    validate_at_least(batch_size, 1, "batch_size")
+    validate_at_least(page_size_tokens, 1, "page_size_tokens")
     bpe = _ensure_unit(bytes_per_elem, ureg.byte, "bytes_per_elem")
     # Allocation is page-granular: round the sequence up to whole pages. The
     # slack in the final partially-filled page is the only waste PagedAttention

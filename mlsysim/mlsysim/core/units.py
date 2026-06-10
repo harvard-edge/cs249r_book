@@ -94,6 +94,10 @@ BYTES_INT32 = 4 * byte
 BYTES_FP16 = 2 * byte
 BYTES_INT8 = 1 * byte
 BYTES_INT4 = 0.5 * byte
+# Adam FP32 first + second moments ONLY (4 + 4). EXCLUDES the FP32 master
+# copy of the weights — mixed-precision accountings that keep the master add
+# +4 B/param (engine/calibration.py: TRAINING_OPTIMIZER_BYTES_ADAM = 12,
+# CHECKPOINT_BYTES_PER_PARAM_ADAM = 14 include it). Pick deliberately.
 BYTES_ADAM_STATE = 8 * byte
 
 # Bit widths (companion to the byte widths above)

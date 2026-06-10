@@ -395,7 +395,53 @@ class FrontierTrainingContext:
 
 #### Compute phase: Forward and backward passes {#sec-distributed-training-systems-systems-compute-phase-forward-backward}
 
-The defining feature of data parallelism is that the computation phase, both forward and backward, is *embarrassingly parallel*. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. Here, micro-batch means the per-GPU local slice used for activation accounting; pipeline microbatching uses the same word for a different mechanism, subdividing a global batch to keep pipeline stages occupied. For our `{python} FrontierTrainingContext.frontier_params_b_str` parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume over 200 GB of HBM, exceeding the capacity of even an H100 GPU. Activation checkpointing\index{Activation Checkpointing!memory reduction}, which recomputes activations during the backward pass rather than storing them, becomes necessary in this scenario to suppress the footprint to a manageable ~50 GB.
+```{python}
+#| echo: false
+#| label: distributed-training-gpt3-activation-budget
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-3 ACTIVATION MEMORY BUDGET (MICRO-BATCH 4, SEQ 2048)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: compute-phase prose in
+# │          @sec-distributed-training-systems-systems-compute-phase-forward-backward.
+# │
+# │ Goal: Pin the activation-memory claims to calc_activation_memory (the old
+# │       prose hand-typed 'over 200 GB' and '~50 GB', which match no
+# │       canonical recomputation strategy at these inputs).
+# │ Show: Unoptimized activation footprint (~1.1 TB) vs full activation
+# │       checkpointing (~19 GB) for GPT-3 at micro-batch 4, seq 2048.
+# │ How: calc_activation_memory(layers=96, seq=2048, batch=4, hidden=12288,
+# │      n_heads=96) with strategy='none' vs 'full' (Korthikanti et al. 2022).
+# │
+# │ Imports: mlsysim.physics.calc_activation_memory + fmt helpers
+# │ Exports: Gpt3ActivationBudget.act_unchecked_tb_str,
+# │          Gpt3ActivationBudget.act_checkpointed_gb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import calc_activation_memory
+from mlsysim.fmt import fmt_qty, check
+
+class Gpt3ActivationBudget:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    layers = 96  # GPT-3 architecture (Models.Language.GPT3)
+    seq_len = 2048
+    micro_batch = 4  # scenario assumption: per-GPU micro-batch
+    hidden = 12_288
+    heads = 96
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    act_unchecked = calc_activation_memory(layers, seq_len, micro_batch, hidden, n_heads=heads, strategy="none")
+    act_checkpointed = calc_activation_memory(layers, seq_len, micro_batch, hidden, n_heads=heads, strategy="full")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(act_unchecked > 1000 * GB, "Unoptimized GPT-3 activations at b=4, s=2048 should exceed 1 TB")
+    check(act_checkpointed < 25 * GB, "Fully checkpointed activations should fit comfortably in one H100")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    act_unchecked_tb_str = fmt_qty(act_unchecked, TB, precision=1, commas=False)
+    act_checkpointed_gb_str = fmt_qty(act_checkpointed, GB, precision=1, commas=False, approx=True)
+```
+
+The defining feature of data parallelism is that the computation phase, both forward and backward, is *embarrassingly parallel*. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. Here, micro-batch means the per-GPU local slice used for activation accounting; pipeline microbatching uses the same word for a different mechanism, subdividing a global batch to keep pipeline stages occupied. For our `{python} FrontierTrainingContext.frontier_params_b_str` parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` of HBM, an order of magnitude beyond the capacity of even an H100 GPU. Activation checkpointing\index{Activation Checkpointing!memory reduction}, which recomputes activations during the backward pass rather than storing them, becomes necessary in this scenario to suppress the footprint to `{python} Gpt3ActivationBudget.act_checkpointed_gb_str`.
 
 The backward pass mirrors this independence but introduces the system's primary bottleneck. As the GPU traverses the computation graph in reverse, it computes gradients for the parameters held by that replica or shard. Under pure data parallelism, a full `{python} FrontierTrainingContext.frontier_params_b_str` FP16 replica would imply a 350 GB gradient tensor per worker, which exceeds single-accelerator memory budgets; large runs therefore combine data parallelism with sharding, tensor parallelism, or pipeline parallelism. The computation itself requires zero communication, yet the resulting gradients represent a fractured view of the true loss surface, valid only for the local micro-batch. Before the optimizer step can occur, the corresponding local gradients or gradient shards must be aggregated across data-parallel workers to form a valid global update. The transition from isolated, high-throughput compute to synchronization defines the rhythm of data parallel training: long periods of silent, intense arithmetic punctuated by bursts of heavy network traffic.
 
@@ -471,6 +517,7 @@ class HierarchicalAllReduceDebug:
     gpus_per_node_str = fmt_count(gpus_per_node, commas=False, label="GPU")
     total_gpus_str = fmt_count(nodes * gpus_per_node, commas=True, label="GPU")
     ib_hdr_bw_gb_per_s_str = fmt_bandwidth(ib_hdr_bw, unit=GB / second, precision=0, commas=False)
+    ib_hdr_gbit_per_s_str = fmt_bandwidth(ib_hdr_bw, unit=Gbps, precision=0, commas=False)
     ib_util_pct_str = fmt_percent(ib_util_pct / 100, precision=0, commas=False, style='prose')
 ```
 
@@ -482,7 +529,7 @@ class HierarchicalAllReduceDebug:
 
 - **Topology**: `{python} HierarchicalAllReduceDebug.nodes_str`, `{python} HierarchicalAllReduceDebug.gpus_per_node_str` per node
 - **Fast local path**: NVLink at `{python} HierarchicalAllReduceDebug.nvlink_a100_gb_per_s_str` bidirectional between GPUs
-- **Slower network path**: InfiniBand HDR at 200 Gb/s (`{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_per_s_str`) per port
+- **Slower network path**: InfiniBand HDR at `{python} HierarchicalAllReduceDebug.ib_hdr_gbit_per_s_str` (`{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_per_s_str`) per port
 - **Diagnostic bounds**: A flat all-GPU path over the network would land near `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`; a topology-aware local-then-network path predicts roughly `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` because each node sends only its share across the slower link
 
 **Analysis**:
@@ -608,13 +655,14 @@ class Scaling8GPU:
     fits_mem = 32 * GB  # scenario single-GPU fit threshold
     compute_8gpu_ms = 1800  # Matched to 1.8s baseline
     params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude  # GPT-2
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # datasheet bidirectional total (for display)
+    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way rate for collective math
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Ring All-Reduce using library formula
+    # Ring All-Reduce using library formula (beta = per-direction NVLink rate)
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
-    t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw, 0 * ms)
+    t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw_beta, 0 * ms)
     comm_8gpu_ms_val = t_comm.to(ms).magnitude
 
     sync_size = gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node)
@@ -640,7 +688,10 @@ class Scaling8GPU:
     efficiency_8gpu_str = fmt_percent(efficiency_8gpu_val / 100, precision=1, commas=False, style='prose')
     training_8gpu_hours_str = fmt_time(training_hours_8gpu_val, 'hour', precision=1, commas=False, style='word')
     gpt2_sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=1, commas=False)
-    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    # Show the per-direction rate (the beta that produced comm_8gpu_ms), so the
+    # "@ rate ~= time" line below is self-consistent; the 900 GB/s datasheet
+    # figure is the bidirectional total.
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw_beta, unit=GB / second, precision=0, commas=False)
     comm_8gpu_ms_str = fmt_time(comm_8gpu_ms_val, 'millisecond', precision=1, commas=False)
     # compute_8gpu_ms int "1800" — preserve original (no commas) via MarkdownStr
     compute_8gpu_ms_str = fmt_time(compute_8gpu_ms, 'millisecond', precision=0, commas=False)
@@ -658,7 +709,7 @@ class Scaling8GPU:
 **8 GPUs: Single Node with NVLink**
 
 - Per-GPU batch: `{python} Scaling8GPU.batch_per_gpu_str`, global batch: `{python} Scaling8GPU.global_batch_str`
-- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str` @ `{python} Scaling8GPU.nvlink_h100_gb_per_s_str` (NVLink) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`
+- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str` @ `{python} Scaling8GPU.nvlink_h100_gb_per_s_str` (NVLink, per direction) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`
 
 Performance results:
 
@@ -684,7 +735,9 @@ class Scaling32GPU:
     compute_32gpu_ms = 1800
     params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude
     net_bw = NETWORK_10G_BW
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    # Per-direction NVLink rate: the one-way beta for ring-collective math
+    # (the datasheet 900 GB/s is the bidirectional total).
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
     gpus_per_node_val = Systems.Nodes.DGX_H100.accelerators_per_node
     training_hours_1gpu = 25
     gpus = 32
@@ -693,8 +746,9 @@ class Scaling32GPU:
     ring_factor = calc_ring_allreduce_data_factor(gpus)
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     # Intra-node phase moves the same gradient volume over the same NVLink as
-    # the 8-GPU scenario (~5.8 ms). 2026-06-07: was a hardcoded 0.35 ms,
-    # contradicting the value computed two scenarios earlier.
+    # the 8-GPU scenario. 2026-06-07: was a hardcoded 0.35 ms, contradicting
+    # the value computed two scenarios earlier. 2026-06-10: now uses the
+    # per-direction NVLink rate (the prior bidirectional total understated it ~2x).
     intra_node_ms_val = (gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node_val) / nvlink_bw).to(ms).magnitude
 
     sync_size = gradient_tensor * ring_factor
@@ -1800,7 +1854,7 @@ Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and param
 ![](images/svg/model-parallel-flow.svg){width=100%}
 :::
 
-For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
+For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters generates on the order of a terabyte of intermediate activations at even a small micro-batch (roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` at micro-batch 4, as computed earlier), and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
 
 ```{python}
 #| echo: false
@@ -2162,7 +2216,8 @@ The interconnect topology dictates which form of model parallelism is viable at 
 ```{=latex}
 \vspace*{-4mm}
 ```
-![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Violet bandwidth ladder comparing NVLink at 900 GB per second with NDR InfiniBand at 50 GB per second; 18x appears as an annotation."}
+<!-- TODO(nvlink-convention 2026-06-10): regenerate SVG to show the per-direction cliff (NVLink 450 GB/s one-way versus NDR 50 GB/s per port, a factor of nine) to match the body; the baked-in annotation compares NVLink's 900 GB/s bidirectional total against a per-port rate, mixing conventions and showing a factor of eighteen. No matplotlib source in repo; flagged for regeneration. -->
+![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Violet bandwidth ladder comparing NVLink with NDR InfiniBand, illustrating the order-of-magnitude bandwidth drop from intra-node to inter-node links."}
 
 *Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.*
 :::

@@ -1,4 +1,9 @@
-"""Collective communication time models (α–β)."""
+"""Collective communication time models (α–β).
+
+All collectives here are pure communication models: the local reduction
+compute term (γ in Thakur et al. 2005) is deliberately omitted, matching the
+book's α–β pedagogical treatment.
+"""
 
 from __future__ import annotations
 
@@ -44,9 +49,11 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     if n_gpus == 1:
         return Q_("0 second")
     msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    validate_nonnegative(msg, "message_bytes")
     bw = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
     validate_positive(bw, "bandwidth_bytes_s")
     lat = _ensure_unit(latency_s, ureg.second, "latency_s")
+    validate_nonnegative(lat, "latency_s")
     n = n_gpus
     bw_term = 2 * (n - 1) / n * msg / bw
     lat_term = 2 * (n - 1) * lat
@@ -126,13 +133,15 @@ def calc_point_to_point_time(message_bytes, alpha_s, bandwidth_bytes_s):
 def calc_oversubscription_effect(comm_fraction, oversubscription_ratio):
     """Compute throughput penalty from oversubscription.
 
-    For an idealized workload, communication time scales as::
+    For an idealized workload with baseline step time T_base, oversubscribing
+    the fabric stretches only the communication fraction::
 
-        T = (1 - f) * T_compute + f * T_base * oversubscription_ratio
+        T_new = T_base * [(1 - f) + f * r]
+        relative_throughput = T_base / T_new = 1 / ((1 - f) + f * r)
 
     where:
-    - ``f`` = communication-dominant fraction of time
-    - ``oversubscription_ratio`` = N:1 oversubscription ratio (e.g., 2.0, 4.0)
+    - ``f`` = communication fraction of baseline step time
+    - ``r`` = N:1 oversubscription ratio (e.g., 2.0, 4.0)
 
     Returns
     -------
@@ -152,6 +161,10 @@ def calc_bisection_bandwidth(num_ports, link_bandwidth, oversubscription_ratio=1
     """Bisection bandwidth for a single partition cut.
 
     Uses ``BW_bisect = num_ports * link_bw / oversubscription_ratio``.
+
+    ``num_ports`` is the number of links CROSSING the bisection cut — N/2 for
+    a non-blocking fabric of N endpoints — not the total port count of the
+    fabric. Passing total ports silently overstates bisection bandwidth 2x.
     """
     validate_at_least(num_ports, 1, "num_ports")
     validate_positive(oversubscription_ratio, "oversubscription_ratio")
@@ -198,9 +211,11 @@ def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     if n_gpus == 1:
         return Q_("0 second")
     msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    validate_nonnegative(msg, "message_bytes")
     bw = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
     validate_positive(bw, "bandwidth_bytes_s")
     lat = _ensure_unit(latency_s, ureg.second, "latency_s")
+    validate_nonnegative(lat, "latency_s")
     log_n = math.ceil(math.log2(max(n_gpus, 2)))
     bw_term = 2 * log_n * msg / bw
     lat_term = 2 * log_n * lat
@@ -219,9 +234,12 @@ def calc_double_binary_tree_allreduce_time(
     Double Binary Tree AllReduce approximation.
 
     The model keeps logarithmic startup cost while using near-bandwidth-optimal
-    behavior. Empirical constants in this implementation match the tutorial
-    treatment where real NCCL trees are typically faster than simple tree in
-    latency and slightly more bandwidth-efficient than ideal.
+    behavior (NCCL 2.4 double binary trees: "full bandwidth and logarithmic
+    latency"). The default 1.2/1.05 factors are package-chosen pedagogical
+    constants, not published measurements — they encode "slightly worse than
+    ideal log latency, slightly above ring-optimal bandwidth cost." Note the
+    latency term uses fractional ``log2(N)`` (a smooth approximation), unlike
+    ``calc_tree_allreduce_time`` which counts discrete ``ceil(log2 N)`` steps.
 
     Parameters
     ----------
@@ -273,6 +291,11 @@ def calc_ring_tree_crossover_size(n_gpus, alpha_s, bandwidth_bytes_s):
 
     Uses the log-aware estimate:
       M_crossover = N * alpha * beta / log2(N)
+
+    This is a large-N estimate of the exact intersection of this package's
+    ring and tree cost models: good to ~10% for N >= 32, overestimates ~40%
+    at N = 8, and is undefined at N = 2 (where the ring model dominates for
+    every message size, so no crossover exists).
     """
     validate_at_least(n_gpus, 1, "n_gpus")
     if n_gpus == 1:
@@ -313,9 +336,11 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     """
     validate_at_least(n_gpus, 1, "n_gpus")
     msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    validate_nonnegative(msg, "message_bytes")
     bw = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
     validate_positive(bw, "bandwidth_bytes_s")
     lat = _ensure_unit(latency_s, ureg.second, "latency_s")
+    validate_nonnegative(lat, "latency_s")
     n = n_gpus
     bw_term = (n - 1) / n * msg / bw
     lat_term = (n - 1) * lat
@@ -352,7 +377,12 @@ def calc_hierarchical_allreduce_time(
     intra_node_bw : Quantity
         Bandwidth between GPUs on the same node (e.g., NVLink).
     inter_node_bw : Quantity
-        Bandwidth between nodes (e.g., InfiniBand / Ethernet).
+        PER-GPU NIC bandwidth between nodes (e.g., one InfiniBand HCA port).
+        The model assumes one NIC per GPU (DGX-style), so the g concurrent
+        inter-node rings in phase 2 do not share a link. With a single NIC
+        shared by all g local ranks, the inter phase costs
+        ``2(n-1)/n * M / beta`` — g times this model's phase-2 term — and
+        this function understates the total accordingly.
     intra_node_lat : Quantity, optional
         Latency within the node. Defaults to 500 ns.
     inter_node_lat : Quantity, optional

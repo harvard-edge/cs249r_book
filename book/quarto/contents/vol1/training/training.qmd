@@ -2419,6 +2419,7 @@ class GPT2DataPipeline:
     utilization_pct_str = fmt_percent(utilization_pct / 100, precision=0, commas=False, style='symbol')
     throughput_samples_str = fmt_int(throughput_samples, commas=False)
     n_v100_gpus_str = fmt_count(n_v100_gpus, commas=False, label="GPU")
+    gpu_forward_ms_str = fmt_time(gpu_forward_ms * millisecond, millisecond, precision=0, commas=False)
 
 # Note: Use GPT2DataPipeline.tokenization_ms_str directly.
 ```
@@ -2450,7 +2451,7 @@ class StorageBandwidthNvme:
 3. **Batching and padding**: The pipeline pads sequences to a uniform length and packs them into a `[32, 1024]` int64 tensor of `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Moving that tensor across a Gen3 x16 link with `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` of theoretical bandwidth takes only `{python} GPT2DataPipeline.transfer_ms_str`, so optimizing the copy would not materially improve this pipeline.
 
-**Systems insight**: At GPT-2 scale, storage and PCIe movement are not the binding terms; CPU tokenization is already close to the 80 ms accelerator forward pass. The useful intervention is to parallelize and overlap tokenization: `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers reduce the tokenization service time to about `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching prepares the next batch during the current accelerator step. The result is accelerator utilization above `{python} GPT2DataPipeline.utilization_pct_str` and throughput of `{python} GPT2DataPipeline.throughput_samples_str` samples per second on `{python} GPT2DataPipeline.n_v100_gpus_str` $\times$ V100.
+**Systems insight**: At GPT-2 scale, storage and PCIe movement are not the binding terms; CPU tokenization is already close to the `{python} GPT2DataPipeline.gpu_forward_ms_str` accelerator forward pass. The useful intervention is to parallelize and overlap tokenization: `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers reduce the tokenization service time to about `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching prepares the next batch during the current accelerator step. The result is accelerator utilization above `{python} GPT2DataPipeline.utilization_pct_str` and throughput of `{python} GPT2DataPipeline.throughput_samples_str` samples per second on `{python} GPT2DataPipeline.n_v100_gpus_str` $\times$ V100.
 
 :::
 
@@ -5051,6 +5052,7 @@ class GradientAccumulation:
     naive_2wk_usd_str = fmt_usd((round(naive_2wk)) * THOUSAND, commas=False, scale="K")
     comm_reduction_pct_str = fmt_percent(comm_reduction_pct / 100, precision=0, commas=False, style='symbol')
     accum_steps_str = fmt_count(accum_steps, commas=False, label="step")
+    accum_steps_count_str = fmt(accum_steps, precision=0, commas=False)
     v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
     local_grad_eqn_str = MarkdownStr(
         rf"\frac{{1}}{{{accum_steps}}}\sum_{{j=1}}^{{{accum_steps}}} "
@@ -5082,9 +5084,9 @@ Instead of `{python} GradientAccumulation.gpus_naive_str`, use `{python} Gradien
 
 Configuration:
 
-- Per-GPU micro-batch: 16
-- Accumulation steps: 4
-- Effective batch per accelerator: $16 \times 4$ = `{python} GradientAccumulation.batch_per_gpu_str`
+- Per-GPU micro-batch: `{python} GradientAccumulation.micro_batch_str`
+- Accumulation steps: `{python} GradientAccumulation.accum_steps_count_str`
+- Effective batch per accelerator: `{python} GradientAccumulation.micro_batch_str` $\times$ `{python} GradientAccumulation.accum_steps_count_str` = `{python} GradientAccumulation.batch_per_gpu_str`
 - Global effective batch: `{python} GradientAccumulation.gpus_accum_str` $\times$ `{python} GradientAccumulation.batch_per_gpu_str` = `{python} GradientAccumulation.effective_batch_str` ✓
 
 In @lst-gradient-accumulation-loop, notice that the `no_sync()` context manager suppresses AllReduce during the first three micro-batches, so the expensive gradient synchronization fires only once per effective batch rather than once per micro-batch.

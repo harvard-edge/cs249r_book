@@ -18,7 +18,9 @@ def test_nodes_intra_node_bw_matches_accelerator_nvlink() -> None:
     )
     violations: list[str] = []
     for node, accel in pairs:
-        expected = accel.nvlink.bandwidth
+        # 2026-06-10 audit: nodes feed the PER-DIRECTION rate (beta for
+        # one-way collective math), not the datasheet bidirectional total.
+        expected = accel.nvlink.bandwidth_per_direction
         actual = node.intra_node_bw
         if not _qty_equal(actual, expected):
             violations.append(

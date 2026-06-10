@@ -31,6 +31,7 @@ def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
         The calculated training duration in seconds.
     """
     validate_at_least(num_devices, 1, "num_devices")
+    validate_range(efficiency_eta, 0.0, 1.0, "efficiency_eta")
     validate_positive(efficiency_eta, "efficiency_eta")
     effective_throughput = num_devices * peak_flops_per_device * efficiency_eta
     duration = total_ops / effective_throughput
@@ -128,7 +129,9 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     # Degenerate-workload guards: a zero-FLOP workload (pure data movement) is
     # memory-bound by definition, and a zero-byte workload is compute-bound.
     # The 1e-15 epsilon catches float-rounded zeros; either case would make the
-    # ratio/intensity divisions below blow up.
+    # ratio/intensity divisions below blow up. The epsilon applies to MILLISECOND
+    # magnitudes (effective threshold 1e-18 s) — keep that basis in mind if the
+    # internal unit ever changes.
     if t_comp_ms < 1e-15:
         return {
             "compute_ms": 0.0,
@@ -148,7 +151,10 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
         }
 
     # The slower of the two independent ceilings binds; the ratio reports how
-    # dominant the bottleneck is (always >= 1 by construction).
+    # dominant the bottleneck is (always >= 1 by construction). Tie-break: at
+    # intensity exactly equal to the ridge point (t_mem == t_comp) the strict
+    # comparison reports "Compute" with ratio 1.0 — the balanced operating
+    # point is classified as (just barely) compute-bound by convention.
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
     # Normalize before extracting magnitude so scaled inputs such as
@@ -217,5 +223,9 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
     """
     from ._units import _ensure_unit
 
+    validate_range(mfu, 0.0, 1.0, "mfu")
+    validate_range(scaling_eff, 0.0, 1.0, "scaling_eff")
+    validate_range(goodput_ratio, 0.0, 1.0, "goodput_ratio")
     pf = _ensure_unit(peak_flops, ureg.flop / ureg.second, "peak_flops")
+    validate_positive(pf, "peak_flops")
     return (pf * mfu * scaling_eff * goodput_ratio).to(ureg.flop / ureg.second)
