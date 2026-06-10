@@ -1724,6 +1724,8 @@ class CloudEdgeTCO:
     electricity_usd_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
     devops_fte_str = fmt_count(devops_fte, precision=1, commas=False, label="FTE", plural_label="FTE", allow_fractional=True)
     devops_salary_usd_str = fmt_usd(devops_salary, precision=0)
+    lb_base_usd_str = fmt_usd(lb_base_per_hr, precision=3, commas=False, per="hr")
+    cooling_overhead_pct_str = fmt_percent(cooling_overhead, precision=0, commas=False, style='symbol')
 ```
 
 For the worked comparison, @tbl-ml-systems-cloud-tco itemizes the annual GPU, network, load-balancer, and observability costs of an illustrative cloud implementation under public list pricing, and @tbl-ml-systems-edge-tco itemizes the corresponding hardware, power, cooling, network, and DevOps labor costs of an on-premise NVIDIA T4 implementation.
@@ -1737,7 +1739,7 @@ For the worked comparison, @tbl-ml-systems-cloud-tco itemizes the annual GPU, ne
 |:-------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------:|
 | **GPU inference (A10G)** | `{python} CloudEdgeTCO.gpu_instances_str` instances $\times$ `{python} CloudEdgeTCO.hours_per_year_str` $\times$ `{python} CloudEdgeTCO.gpu_price_str` |       `{python} CloudEdgeTCO.c_gpu_usd_str` |
 | **Network egress**       | `{python} CloudEdgeTCO.egress_gb_str` $\times$ `{python} CloudEdgeTCO.days_per_year_str` $\times$ `{python} CloudEdgeTCO.egress_price_str`             |    `{python} CloudEdgeTCO.c_egress_usd_str` |
-| **Load balancer**        | \$0.025/hr + LCU charges                                                                                                                               |        `{python} CloudEdgeTCO.c_lb_usd_str` |
+| **Load balancer**        | `{python} CloudEdgeTCO.lb_base_usd_str` + LCU charges                                                                                                  |        `{python} CloudEdgeTCO.c_lb_usd_str` |
 | **CloudWatch/logging**   | Monitoring, alerts                                                                                                                                     |      `{python} CloudEdgeTCO.c_logs_usd_str` |
 | **Total Cloud**          |                                                                                                                                                        | **`{python} CloudEdgeTCO.c_total_usd_str`** |
 
@@ -1751,7 +1753,7 @@ For the worked comparison, @tbl-ml-systems-cloud-tco itemizes the annual GPU, ne
 |:---------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------:|
 | **Hardware CAPEX**   | `{python} CloudEdgeTCO.server_cost_str` ÷ `{python} CloudEdgeTCO.server_life_years_str` life                                                 |         `{python} CloudEdgeTCO.e_capex_str` |
 | **Power (24/7)**     | `{python} CloudEdgeTCO.power_w_str` $\times$ `{python} CloudEdgeTCO.hours_per_year_str` $\times$ `{python} CloudEdgeTCO.electricity_usd_str` |     `{python} CloudEdgeTCO.e_power_usd_str` |
-| **Cooling overhead** | ~30 percent of power                                                                                                                         |      `{python} CloudEdgeTCO.e_cool_usd_str` |
+| **Cooling overhead** | ~`{python} CloudEdgeTCO.cooling_overhead_pct_str` of power                                                                                   |      `{python} CloudEdgeTCO.e_cool_usd_str` |
 | **Network (fiber)**  | Fixed line for remote management                                                                                                             |       `{python} CloudEdgeTCO.e_net_usd_str` |
 | **DevOps labor**     | `{python} CloudEdgeTCO.devops_fte_str` $\times$ `{python} CloudEdgeTCO.devops_salary_usd_str` salary                                         |     `{python} CloudEdgeTCO.e_labor_usd_str` |
 | **Total Edge**       |                                                                                                                                              | **`{python} CloudEdgeTCO.e_total_usd_str`** |
@@ -2305,7 +2307,7 @@ The locality crossover is easiest to see by comparing a single high-rate sensor 
 # │          DataLocalityInvariant.remote_ms_str,
 # │          DataLocalityInvariant.net_bw_mbit_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr, fmt_bandwidth, fmt_qty, fmt_time
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_bandwidth, fmt_qty, fmt_time, fmt_rate
 from mlsysim.core.units import MB, byte, bit, megabit, second, millisecond
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2322,6 +2324,7 @@ class DataLocalityInvariant:
     net_bw_mbps = 100  # home broadband uplink
     cloud_lat_ms = 100
     remote_compute_ms = 10
+    fps = 60  # scenario: drone camera frame rate
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     frame_size = width * height * bpp * byte
@@ -2339,11 +2342,12 @@ class DataLocalityInvariant:
     remote_ms_str = fmt_time(remote_total_ms, millisecond, precision=0)
     net_bw_mbit_per_s_str = fmt_bandwidth(net_bw, unit=megabit / second, precision=0, commas=False)
     frame_label_str = MarkdownStr("4K")
+    fps_str = fmt_rate(fps, "FPS", precision=0, commas=False)
 ```
 
 ::: {#nbk-ml-systems-napkin-math-locality-crossover .callout-notebook title="The locality crossover"}
 
-**Problem**: Should a drone's object avoidance system (4K, 60 FPS) offload to the cloud, or does this become a locality crossover\index{Locality Crossover!worked example}?
+**Problem**: Should a drone's object avoidance system (4K, `{python} DataLocalityInvariant.fps_str`) offload to the cloud, or does this become a locality crossover\index{Locality Crossover!worked example}?
 
 **Given**:
 
@@ -3132,7 +3136,7 @@ TinyML's milliwatt-scale power consumption represents a six-order-of-magnitude r
 # │          EnergyInference.batt_cap_mah_str, EnergyInference.batt_volt_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine, ReferenceStats
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_count, fmt_qty
+from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_count, fmt_qty, fmt_multiple
 from mlsysim.core.units import joule, mJ, uJ, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3158,6 +3162,7 @@ class EnergyInference:
     e_resnet_edge_j = p_resnet_edge.energy
     e_mobilenet_j = p_mobilenet.energy
     e_kws_j = 10 * uJ  # representative always-on KWS inference anchor
+    kws_efficiency_ratio = (e_gpt4_j / e_kws_j).to("").magnitude
 
     # Queries per full battery charge
     q_gpt4 = (batt_energy_j / e_gpt4_j).to("").magnitude
@@ -3172,6 +3177,7 @@ class EnergyInference:
     e_resnet_edge_mj_str = fmt_qty(e_resnet_edge_j, mJ, precision=1)
     e_mobilenet_mj_str = fmt_qty(e_mobilenet_j, mJ, precision=2)
     e_kws_str = fmt_qty(e_kws_j, uJ, precision=0, commas=False)
+    kws_efficiency_mult_str = fmt_multiple(kws_efficiency_ratio, precision=0, commas=True)
 
     q_gpt4_str = fmt_count(round(q_gpt4), commas=True, label="query")
     q_resnet_cloud_str = fmt_count(round(q_resnet_cloud), commas=True, label="query")
@@ -3210,7 +3216,7 @@ The eight-order span of energy per inference\index{Energy per Inference!paradigm
 Energy values represent *full-system energy* (including server CPUs, memory, networking, and cooling overhead), not *isolated accelerator compute energy*. For example, the A100 GPU alone executes ResNet-50 inference in under 1 ms (~0.3 J), but the full server draws ~1 kW when amortized across queuing, preprocessing, and idle power.
 <!-- end lego-ok-block -->
 
-**Systems insight**: A TinyML wake-word detector at ten µJ/inference is 100,000,000$\times$ more energy-efficient than a cloud LLM query. This TinyML energy-efficiency gap\index{TinyML!energy efficiency} explains why always-on sensing is only practical at the TinyML tier—a smartphone running continuous cloud queries would drain in minutes.
+**Systems insight**: A TinyML wake-word detector at `{python} EnergyInference.e_kws_str`/inference is `{python} EnergyInference.kws_efficiency_mult_str` more energy-efficient than a cloud LLM query. This TinyML energy-efficiency gap\index{TinyML!energy efficiency} explains why always-on sensing is only practical at the TinyML tier—a smartphone running continuous cloud queries would drain in minutes.
 
 :::
 
@@ -3672,20 +3678,26 @@ A safety-critical braking example makes the sequencing concrete, because latency
 # │ Exports: BrakingDistance.speed_kmh_str, BrakingDistance.distance_m_str,
 # │          BrakingDistance.latency_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_time, fmt_length, fmt_rate
+from mlsysim.fmt import check, fmt, fmt_time, fmt_length, fmt_rate
 from mlsysim.core.units import ms, second, meter
 
 class BrakingDistance:
     # ┌── 1. LOAD ──────────────────────────────────────────
     speed_kmh = 100
     latency_ms = 100
+    detection_gflop = 10  # scenario: pedestrian-detection model cost per frame
+    detection_fps = 30  # scenario: required detection frame rate
     # ┌── 2. EXECUTE ───────────────────────────────────────
     speed_ms = speed_kmh / 3.6  # km/h -> m/s
     distance_m = speed_ms * (latency_ms * ms).to(second).magnitude
+    sustained_gflop_s = detection_gflop * detection_fps
     # ┌── 4. OUTPUT ────────────────────────────────────────
     speed_kmh_str = fmt_rate(speed_kmh, "km/h", precision=0, commas=False)
     distance_m_str = fmt_length(distance_m * meter, unit=meter, precision=1, commas=False)
     latency_str = fmt_time(latency_ms, ms, precision=0, commas=False)
+    detection_gflop_str = fmt(detection_gflop, precision=0, commas=False)
+    detection_fps_str = fmt_rate(detection_fps, "FPS", precision=0, commas=False)
+    sustained_gflops_str = fmt(sustained_gflop_s, precision=0, commas=False)
 ```
 
 ::: {#nbk-ml-systems-autonomous-vehicle-emergency-braking .callout-notebook title="Autonomous vehicle emergency braking"}
@@ -3700,7 +3712,7 @@ class BrakingDistance:
    - Network latency to cloud: 50–150 ms (variable) → Fails requirement
    - Edge processing: 10–30 ms → Passes
    - Decision: Cloud eliminated by physics.
-3. **Compute**: Pedestrian detection requires ~10 GFLOPs at 30 FPS = 300 GFLOP/s sustained.
+3. **Compute**: Pedestrian detection requires ~`{python} BrakingDistance.detection_gflop_str` GFLOPs at `{python} BrakingDistance.detection_fps_str` = `{python} BrakingDistance.sustained_gflops_str` GFLOP/s sustained.
    - TinyML (<1 GFLOP/s): Fails
    - Mobile NPU (~35 INT8 TOPS, ample once the model is quantized to integer precision): Possible, but thermal constraints limit sustained operation
 
@@ -4505,6 +4517,7 @@ class AmdahlCameraCalc:
     cam_ml_pct_str = fmt_percent(cam_ml_fraction, precision=0, commas=False, style="prose")
     cam_non_ml_pct_str = fmt_percent(cam_non_ml_fraction, precision=0, commas=False, style="symbol")
     cam_speedup_10x_mult_str = fmt_multiple(cam_speedup_10x, precision=2, commas=False)  # "1.37"
+    cam_ml_speedup_mult_str = fmt_multiple(cam_ml_speedup, precision=0, commas=False)
     cam_speedup_inf_mult_str = fmt_multiple(cam_speedup_inf, precision=2, commas=False)  # "1.43"
     cam_ml_opt_ms_str = fmt_time(cam_ml_optimized, millisecond, precision=0, commas=False)
     cam_total_opt_ms_str = fmt_time(cam_total_optimized, millisecond, precision=0, commas=False)
@@ -4519,7 +4532,7 @@ class AmdahlCameraCalc:
 *A faster model stage does not linearly speed up a camera pipeline.*
 :::
 
-Amdahl's Law[^fn-amdahls-law-pipeline]\index{Amdahl's Law!speedup limits}\index{Optimization!Amdahl's Law} establishes hard limits that the bottleneck principle (@sec-ml-systems-bottleneck-principle-3514) makes operational, where @sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 derives the strong-scaling form and works a speedup example at eight processors: $\text{Speedup}_{\text{overall}} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. Consider tapping the shutter on a smartphone camera. The image passes through `{python} AmdahlCameraCalc.cam_isp_ms_str` of signal processing (auto-exposure, white balance), `{python} AmdahlCameraCalc.cam_ml_ms_str` of ML scene classification, and `{python} AmdahlCameraCalc.cam_post_ms_str` of postprocessing (tone mapping, HDR merge)---`{python} AmdahlCameraCalc.cam_total_ms_str` total. Optimizing the ML classifier to run 10$\times$ faster (`{python} AmdahlCameraCalc.cam_ml_opt_ms_str` instead of `{python} AmdahlCameraCalc.cam_ml_ms_str`) drops total time from `{python} AmdahlCameraCalc.cam_total_ms_str` to `{python} AmdahlCameraCalc.cam_total_opt_ms_str`---only `{python} AmdahlCameraCalc.cam_speedup_10x_mult_str` overall, not 10$\times$. Even eliminating ML entirely $(s = \infty)$ achieves only `{python} AmdahlCameraCalc.cam_speedup_inf_mult_str` speedup, because the remaining `{python} AmdahlCameraCalc.cam_non_ml_pct_str` of the pipeline is untouched. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
+Amdahl's Law[^fn-amdahls-law-pipeline]\index{Amdahl's Law!speedup limits}\index{Optimization!Amdahl's Law} establishes hard limits that the bottleneck principle (@sec-ml-systems-bottleneck-principle-3514) makes operational, where @sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 derives the strong-scaling form and works a speedup example at eight processors: $\text{Speedup}_{\text{overall}} = \frac{1}{(1-p) + \frac{p}{s}}$ where $p$ is the fraction of work that can be improved and $s$ is the speedup of that fraction. Consider tapping the shutter on a smartphone camera. The image passes through `{python} AmdahlCameraCalc.cam_isp_ms_str` of signal processing (auto-exposure, white balance), `{python} AmdahlCameraCalc.cam_ml_ms_str` of ML scene classification, and `{python} AmdahlCameraCalc.cam_post_ms_str` of postprocessing (tone mapping, HDR merge)---`{python} AmdahlCameraCalc.cam_total_ms_str` total. Optimizing the ML classifier to run `{python} AmdahlCameraCalc.cam_ml_speedup_mult_str` faster (`{python} AmdahlCameraCalc.cam_ml_opt_ms_str` instead of `{python} AmdahlCameraCalc.cam_ml_ms_str`) drops total time from `{python} AmdahlCameraCalc.cam_total_ms_str` to `{python} AmdahlCameraCalc.cam_total_opt_ms_str`---only `{python} AmdahlCameraCalc.cam_speedup_10x_mult_str` overall, not `{python} AmdahlCameraCalc.cam_ml_speedup_mult_str`. Even eliminating ML entirely $(s = \infty)$ achieves only `{python} AmdahlCameraCalc.cam_speedup_inf_mult_str` speedup, because the remaining `{python} AmdahlCameraCalc.cam_non_ml_pct_str` of the pipeline is untouched. Effective optimization requires profiling the entire pipeline and addressing bottlenecks systematically, because system performance depends on the slowest unoptimized stage.
 
 [^fn-amdahls-law-pipeline]: [offset=45mm] **Amdahl's Law**: Formalized by @amdahl1967 for multiprocessor scaling, this principle applies directly to ML deployment pipelines where the model is only one stage among many. The camera example illustrates the general pattern: ML inference rarely exceeds 30--50 percent of total pipeline time in production systems, meaning even a 100$\times$ model speedup yields only about `{python} AmdahlCameraCalc.range_speedup_mult_str` end-to-end improvement. Teams that benchmark model latency in isolation systematically overestimate deployment gains. \index{Amdahl's Law!pipeline bottleneck}
 
