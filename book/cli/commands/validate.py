@@ -398,6 +398,8 @@ class ValidateCommand:
                   note="spell out 'percent' in captions"),
             Scope("percent-in-tables", "_run_percent_in_tables",
                   note="use % symbol inside tables, not the word 'percent'"),
+            Scope("percent-in-prose", "_run_percent_in_prose",
+                  note="spell out 'percent' in body prose, not the % symbol"),
             Scope("currency", "_run_currency_style",
                   note="use $ in content; USD defined once in notation"),
             Scope("rendered-currency", "_run_rendered_currency_style",
@@ -4976,6 +4978,52 @@ class ValidateCommand:
         return ValidationRunResult(
             name="percent-in-tables",
             description="Tables use the % symbol, not the word 'percent' (prose keeps the word)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_percent_in_prose(self, root: Path) -> ValidationRunResult:
+        """Flag the % symbol where body prose should spell out 'percent'.
+
+        Symmetric inverse of ``_run_percent_in_tables``. Per MIT Press
+        ``AU_QUERY_RESPONSES.md`` Category H (aligned with Chicago §9.18),
+        running prose spells out 'percent'; the % symbol is reserved for
+        tables, equations, code, and labels inside figures.
+
+        Detection lives in ``cli.checks.percent_prose`` and exempts every
+        legitimate non-prose context: code, math, attributes, link/image
+        targets, ``<style>`` CSS, HTML comments, caption / alt-text lines,
+        table rows, and quoted material (a `%` inside double quotes is a
+        verbatim quotation). Ranges need prose judgment ('30 to 50 percent'),
+        so there is no auto-fixer — fix flagged lines by hand.
+        """
+        from cli.checks.percent_prose import find_prose_percent
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            for hit in find_prose_percent(self._read_text(file)):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="percent_in_prose",
+                        message=(
+                            "Spell out 'percent' in body prose, not the % "
+                            f"symbol: '{hit.match}' → use the word. (% stays in "
+                            "tables, equations, code, and figures.)"
+                        ),
+                        severity="error",
+                        context=hit.context,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="percent-in-prose",
+            description="Body prose spells out 'percent'; % only in tables/equations/code/figures",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
