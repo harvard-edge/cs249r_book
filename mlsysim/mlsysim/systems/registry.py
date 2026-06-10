@@ -284,8 +284,10 @@ class NetworkEnergy(Registry):
 
     Per5gMb = sourced_qty(100 * ureg.millijoule / MB, pc.NETWORK_ENERGY_ANCHORS,
         name="5G transfer energy per MB", description="Approximate radio-access energy to move 1 MB over 5G.")
-    Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.NETWORK_ENERGY_ANCHORS,
-        name="Network energy per KB", description="Approximate energy to move 1 KB across a datacenter network (~1 µJ).")
+    # (2026-06-10 audit: Per1Kb deleted — zero consumers, and its 1,000
+    # pJ/byte contradicted Hardware.Tech.Movement.Network's canonical
+    # 10,000 pJ/byte 10x. Datacenter-network movement energy lives in
+    # Hardware.Tech.Movement; do not re-add a competing anchor here.)
     NvlinkEnergyPerBit = sourced_qty(7.5 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
         name="NVLink energy per bit", description="Representative midpoint of a 5--10 pJ/bit NVLink transfer envelope.")
     InfiniBandEnergyPerBit = sourced_qty(35 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,

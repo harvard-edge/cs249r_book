@@ -167,3 +167,16 @@ def test_golden_engine_non_transformer_training_memory():
     p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100,
                      batch_size=8, is_training=True)
     assert p.memory_footprint.m_as("GB") == pytest.approx(0.4096, rel=1e-6)
+
+
+def test_reference_hardware_tflops_matches_registry():
+    """2026-06-10 audit (discipline): cal.REFERENCE_HARDWARE_TFLOPS is a
+    convenience scalar duplicating the H100 SXM FP16 dense peak. Cross-pin it
+    to the registry so the two sources cannot drift apart silently."""
+    from mlsysim import Hardware
+    from mlsysim.engine import calibration as cal
+
+    # H100's default peak_flops IS the FP16 dense figure (989 TFLOP/s);
+    # fp16 has no explicit precision_flops entry on this device.
+    h100_fp16_tflops = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOP/s")
+    assert cal.REFERENCE_HARDWARE_TFLOPS == pytest.approx(h100_fp16_tflops, rel=1e-9)
