@@ -209,6 +209,22 @@ class ValidateCommand:
         3. If the scope needs new flags, add them to the argparse block in
            `run()` and dispatch them in `_run_group`.
 
+    LLM-actionable output (REQUIRED for every ValidationIssue). The check
+    output is consumed by automated fixers via `binder check <group> --json`,
+    so each issue must be machine-fixable on its own:
+        - `file` + `line`  — exact location.
+        - `code`           — a stable snake_case identifier (never reword it;
+                             agents key on it).
+        - `suggestion`     — the EXACT fix as `"<wrong> → <right>"`. Always set
+                             it when the fix is deterministic. When it needs
+                             human judgment (e.g. a prose range), still give the
+                             best concrete form and say so in `message`; never
+                             leave the agent with only "fix this".
+        - `context`        — the surrounding text so the agent can locate the
+                             span within the line.
+    The human-readable text and `--json` both render from the same
+    ValidationIssue, so populating `suggestion` serves both.
+
     No new pre-commit hook needed. Pre-commit runs `./binder check <group>`
     and picks up the new scope automatically once it is `default=True`.
 
@@ -298,7 +314,7 @@ class ValidateCommand:
             # ids: vol1 only (vol2 chapters are early-development; many
             # sections still missing IDs). YAML hook embeds --vol1.
             Scope("ids", "_run_headers"),
-            Scope("case", "_run_heading_case",
+            Scope("case", "_run_mitpress_heading_case",
                   note="MIT Press headline-case (§10.3.1)"),
         ],
         "bib": [
@@ -320,7 +336,7 @@ class ValidateCommand:
         ],
         "figures": [
             Scope("captions", "_run_figures"),
-            Scope("caption-heads", "_run_caption_head_style",
+            Scope("caption-heads", "_run_mitpress_caption_head_style",
                   note="fig-cap/tbl-cap/lst-cap use **Bold Title**: Explanation"),
             Scope("div-syntax", "_run_figure_div_syntax"),
             Scope("label-required", "_run_figure_label_required",
@@ -331,7 +347,7 @@ class ValidateCommand:
             # Re-enable when we own figure placement again.
             Scope("flow", "_run_float_flow", default=False),
             Scope("files", "_run_images"),
-            Scope("alt-text-style", "_run_alt_text_style",
+            Scope("alt-text-style", "_run_mitpress_alt_text_style",
                   note="alt-text follows body-prose rules (§10.12)"),
         ],
         # ------------------------------------------------------------------
@@ -351,8 +367,10 @@ class ValidateCommand:
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
-            Scope("contractions", "_run_contractions",
+            Scope("contractions", "_run_mitpress_contractions",
                   note='no "can\'t", "it\'s" in body prose'),
+            Scope("spelling-dict", "_run_mitpress_spelling_dict",
+                  note="canonical spellings (§10.7): trade-off, dataset, data center, Wi-Fi, …"),
             Scope("duplicate-words", "_run_duplicate_words"),
             Scope("unblended-prose", "_run_unblended_prose",
                   note="space after period"),
@@ -364,13 +382,13 @@ class ValidateCommand:
             Scope("ascii", "_run_ascii", default=False),
             Scope("acknowledgements", "_run_mitpress_acknowledgements",
                   note="American spelling: Acknowledgments"),
-            Scope("compound-prefix", "_run_compound_prefix",
+            Scope("compound-prefix", "_run_mitpress_compound_prefix",
                   note="pre-/non- close-up (§10.8)"),
-            Scope("concept-caps", "_run_concept_term_capitalization",
+            Scope("concept-caps", "_run_mitpress_concept_term_capitalization",
                   note="iron law, memory wall lowercase (§10.3)"),
             # abbreviation-first-use currently noisy; default=False until tuned.
-            Scope("abbreviation-first-use", "_run_abbreviation_first_use", default=False),
-            Scope("latin-abbrevs", "_run_latin_running_text",
+            Scope("abbreviation-first-use", "_run_mitpress_abbreviation_first_use", default=False),
+            Scope("latin-abbrevs", "_run_mitpress_latin_running_text",
                   note="viz./e.g./etc. in running text (§10.6)"),
         ],
         "punctuation": [
@@ -396,6 +414,10 @@ class ValidateCommand:
                   note="digits before 'percent', not spelled-out words (5 percent not five percent)"),
             Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
                   note="spell out 'percent' in captions"),
+            Scope("percent-in-tables", "_run_mitpress_percent_in_tables",
+                  note="use % symbol inside tables, not the word 'percent'"),
+            Scope("percent-in-prose", "_run_mitpress_percent_in_prose",
+                  note="spell out 'percent' in body prose, not the % symbol"),
             Scope("currency", "_run_currency_style",
                   note="use $ in content; USD defined once in notation"),
             Scope("rendered-currency", "_run_rendered_currency_style",
@@ -2891,7 +2913,7 @@ class ValidateCommand:
         r"""^\*\*(?P<head>[^*\n]+)\*\*(?P<index>(?:\\index\{[^}\n]+\})*):\s+(?P<body>\S.*)$"""
     )
 
-    def _run_caption_head_style(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_caption_head_style(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -4931,6 +4953,112 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_mitpress_percent_in_tables(self, root: Path) -> ValidationRunResult:
+        """Flag the spelled-out word 'percent' used as a unit inside pipe tables.
+
+        House style inverts between prose and tables. In prose and captions,
+        'percent' is spelled out (the % symbol is banned — see
+        `_run_mitpress_percent_in_captions`). In TABLES, cells are dense
+        tabular data and the conventional form is the % symbol: '86.4%', not
+        '86.4 percent'.
+
+        Detection lives in ``cli.checks.percent_tables`` — the same module the
+        ``format percent-tables`` auto-fixer imports — so the check and the
+        fixer cannot drift. Header labels with no leading number and
+        'percentage points / pp' are never flagged; captions (prose) keep the
+        spelled-out word.
+
+        Auto-fixable: ``./book/binder format percent-tables``.
+        """
+        from cli.checks.percent_tables import find_in_text
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            for hit in find_in_text(self._read_text(file)):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="percent_in_table",
+                        message=(
+                            "Use the % symbol, not the word 'percent', inside "
+                            f"tables: '{hit.match}' → '{hit.replacement}'. Run "
+                            "'./book/binder format percent-tables' to auto-fix."
+                        ),
+                        severity="error",
+                        context=hit.context,
+                        suggestion=f"{hit.match} → {hit.replacement}",
+                    )
+                )
+
+        return ValidationRunResult(
+            name="percent-in-tables",
+            description="Tables use the % symbol, not the word 'percent' (prose keeps the word)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_percent_in_prose(self, root: Path) -> ValidationRunResult:
+        """Flag the % symbol where body prose should spell out 'percent'.
+
+        Symmetric inverse of ``_run_mitpress_percent_in_tables``. Per MIT Press
+        ``AU_QUERY_RESPONSES.md`` Category H (aligned with Chicago §9.18),
+        running prose spells out 'percent'; the % symbol is reserved for
+        tables, equations, code, and labels inside figures.
+
+        Detection lives in ``cli.checks.percent_prose`` and exempts every
+        legitimate non-prose context: code, math, attributes, link/image
+        targets, ``<style>`` CSS, HTML comments, caption / alt-text lines,
+        table rows, and quoted material (a `%` inside double quotes is a
+        verbatim quotation). Ranges need prose judgment ('30 to 50 percent'),
+        so there is no auto-fixer — fix flagged lines by hand.
+        """
+        from cli.checks.percent_prose import find_prose_percent
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            for hit in find_prose_percent(self._read_text(file)):
+                if hit.is_range:
+                    msg = (
+                        f"Spell out 'percent' in body prose: '{hit.match}' is "
+                        "part of a range — rewrite the whole range as "
+                        "'X to Y percent' (e.g. '30 to 50 percent')."
+                    )
+                    suggestion = f"{hit.match} → (range) X to Y percent"
+                else:
+                    msg = (
+                        "Spell out 'percent' in body prose, not the % symbol: "
+                        f"'{hit.match}' → '{hit.replacement}'. (% stays in "
+                        "tables, equations, code, and figures.)"
+                    )
+                    suggestion = f"{hit.match} → {hit.replacement}"
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="percent_in_prose",
+                        message=msg,
+                        severity="error",
+                        context=hit.context,
+                        suggestion=suggestion,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="percent-in-prose",
+            description="Body prose spells out 'percent'; % only in tables/equations/code/figures",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     # ------------------------------------------------------------------
     # Unit spacing  (style: "100 ms", "4 GB" — never "100ms" or "4GB")
     # ------------------------------------------------------------------
@@ -5113,14 +5241,27 @@ class ValidateCommand:
     # Contractions  (forbidden in body prose per book-prose.md)
     # ------------------------------------------------------------------
 
+    # Contraction → full form. Body prose forbids contractions as a deliberate
+    # register choice (mit-press-editorial.md §10.11), overriding the copy
+    # editor's permissive "OK unless excessive." The lone exception is quoted
+    # speech / direct dialogue, so we mask double-quoted spans before matching.
+    CONTRACTION_EXPANSIONS = {
+        "can't": "cannot", "don't": "do not", "it's": "it is", "we'll": "we will",
+        "won't": "will not", "hasn't": "has not", "haven't": "have not",
+        "isn't": "is not", "aren't": "are not", "wasn't": "was not",
+        "weren't": "were not", "doesn't": "does not", "didn't": "did not",
+        "wouldn't": "would not", "couldn't": "could not", "shouldn't": "should not",
+        "that's": "that is", "there's": "there is", "here's": "here is",
+        "what's": "what is", "you're": "you are", "we're": "we are",
+        "they're": "they are", "they've": "they have", "let's": "let us",
+        "who's": "who is",
+    }
     CONTRACTIONS_PATTERN = re.compile(
-        r"\b(can't|don't|it's|we'll|won't|hasn't|haven't|isn't|aren't|wasn't|weren't|"
-        r"doesn't|didn't|wouldn't|couldn't|shouldn't|that's|there's|here's|what's|"
-        r"you're|we're|they're|they've|let's|who's)\b",
+        r"\b(" + "|".join(re.escape(k) for k in CONTRACTION_EXPANSIONS) + r")\b",
         re.IGNORECASE,
     )
 
-    def _run_contractions(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_contractions(self, root: Path) -> ValidationRunResult:
         """Flag contractions in prose — use full forms (cannot, do not, etc.)."""
         start = time.time()
         files = self._qmd_files(root)
@@ -5138,22 +5279,80 @@ class ValidateCommand:
                     continue
                 if stripped.startswith("|") or stripped.startswith("<!--"):
                     continue
-                for m in self.CONTRACTIONS_PATTERN.finditer(line):
-                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 2)].strip()
+                # §10.11 exception: quoted speech / dialogue. Blank inline code
+                # and double-quoted spans so contractions there are not flagged.
+                masked = re.sub(r"`[^`]*`", "", line)
+                masked = re.sub(r'"[^"]*"', "", masked)
+                masked = re.sub(r"“[^”]*”", "", masked)
+                for m in self.CONTRACTIONS_PATTERN.finditer(masked):
+                    found = m.group()
+                    full = self.CONTRACTION_EXPANSIONS[found.lower()]
+                    if found[0].isupper():
+                        full = full[0].upper() + full[1:]
+                    context = masked[max(0, m.start() - 2): min(len(masked), m.end() + 2)].strip()
                     issues.append(
                         ValidationIssue(
                             file=self._relative_file(file),
                             line=idx,
                             code="contractions",
-                            message="Contractions forbidden in body prose — use full form (e.g. cannot, do not)",
+                            message=(
+                                f"Contractions forbidden in body prose (§10.11): "
+                                f"'{found}' → '{full}'."
+                            ),
                             severity="warning",
                             context=context,
+                            suggestion=f"{found} → {full}",
                         )
                     )
 
         return ValidationRunResult(
             name="contractions",
             description="No contractions in body prose (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_spelling_dict(self, root: Path) -> ValidationRunResult:
+        """Enforce the MIT Press canonical spelling dictionary (§10.7).
+
+        Flags the unambiguous spelling/hyphenation errors and proper-noun
+        miscapitalizations (trade-off, dataset, data center, Wi-Fi, GPUDirect,
+        TinyML, …). Detection lives in ``cli.checks.mitpress_terms`` — shared
+        with the ``mitpress-terms`` format auto-fixer — and masks code, math,
+        cross-references, footnotes, and attributes, and skips glossary files
+        (their keys follow the §10.14 lowercase convention). Context-sensitive
+        adj/predicate pairs (compute-bound, open-source, real-time) are out of
+        scope. Auto-fix: ``./book/binder format mitpress-terms``.
+        """
+        from cli.checks.mitpress_terms import find_in_text, should_skip_file
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        for file in files:
+            if should_skip_file(file):
+                continue
+            for hit in find_in_text(self._read_text(file)):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="mitpress_spelling",
+                        message=(
+                            f"Canonical spelling (§10.7): '{hit.match}' → "
+                            f"'{hit.replacement}'. Auto-fix with "
+                            "'./book/binder format mitpress-terms'."
+                        ),
+                        severity="error",
+                        context=hit.context,
+                        suggestion=f"{hit.match} → {hit.replacement}",
+                    )
+                )
+
+        return ValidationRunResult(
+            name="spelling-dict",
+            description="MIT Press canonical spellings §10.7 (trade-off, dataset, Wi-Fi, …)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -7846,7 +8045,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_heading_case(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_heading_case(self, root: Path) -> ValidationRunResult:
         """Enforce H1/H2 headline case + H3+ sentence case (MIT Press §10.3.1).
 
         Native implementation: imports from cli.commands.headings directly.
@@ -8213,7 +8412,7 @@ class ValidateCommand:
     #   figures.alt-text-style          → audit.checks.alt_text_style
     #
     # These complement the existing native runners that reimplement a
-    # subset of the same rules in-tree (e.g. _run_heading_case,
+    # subset of the same rules in-tree (e.g. _run_mitpress_heading_case,
     # _run_mitpress_acknowledgements). Over time those should migrate to
     # use the audit package as the single source of truth.
     # ──────────────────────────────────────────────────────────────────────
@@ -8328,7 +8527,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_compound_prefix(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_compound_prefix(self, root: Path) -> ValidationRunResult:
         """Close up pre-/non- compound prefixes per §10.8 (strict 6-term list).
 
         Flags: pre-training, pre-trained, pre-deployment, pre-learning,
@@ -8340,7 +8539,7 @@ class ValidateCommand:
             "compound-prefix", "pre-/non- close-up (§10.8)",
         )
 
-    def _run_concept_term_capitalization(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_concept_term_capitalization(self, root: Path) -> ValidationRunResult:
         """Lowercase concept terms in body prose per §10.3.
 
         Flags Title Case appearances of iron law, memory wall, compute
@@ -8354,7 +8553,7 @@ class ValidateCommand:
             "concept-caps", "concept-term lowercase in prose (§10.3)",
         )
 
-    def _run_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
         """Expand abbreviations on first use per chapter per §10.5.
 
         Enforces the specialized-abbreviation list (DLRM, XLA, MMLU,
@@ -8427,7 +8626,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_latin_running_text(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_latin_running_text(self, root: Path) -> ValidationRunResult:
         """Prefer English over Latin abbreviations in running prose (§10.6).
 
         Flags e.g., i.e., etc., viz. in body prose. Permitted inside
@@ -8438,7 +8637,7 @@ class ValidateCommand:
             "latin-abbrevs", "English over Latin in running text (§10.6)",
         )
 
-    def _run_alt_text_style(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_alt_text_style(self, root: Path) -> ValidationRunResult:
         """Alt-text inside `fig-alt=\"...\"` follows body-prose rules (§10.12).
 
         Flags: capitalized concept terms, `%` symbol, bare `vs`, LaTeX
