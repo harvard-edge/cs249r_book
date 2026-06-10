@@ -1779,7 +1779,10 @@ class OverlapCalc:
     m = Models.Language.Llama3_8B  # 7-8B scale
     h = Hardware.Cloud.H100
     num_gpus = 8
-    nvlink_bw = h.nvlink.bandwidth
+    # Per-direction NVLink rate (one-way beta for the ring AllReduce); the
+    # datasheet 900 GB/s is the bidirectional total. Used for both the timing
+    # math and the displayed rate so the worked example stays self-consistent.
+    nvlink_bw = h.nvlink.bandwidth_per_direction
 
     # Backward pass compute: ~2 * forward FLOPs (gradient computation)
     # Forward FLOPs ≈ 2 * P * tokens_per_gpu, where tokens_per_gpu = S * B_per_gpu
@@ -1841,7 +1844,7 @@ class OverlapCalc:
     nvlink_bw_gb_per_s_str = fmt_qty_int(nvlink_bw, GB / second, commas=False)
 ```
 
-Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str`. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` per direction. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
 
 Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str`, a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 

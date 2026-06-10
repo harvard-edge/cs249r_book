@@ -655,13 +655,14 @@ class Scaling8GPU:
     fits_mem = 32 * GB  # scenario single-GPU fit threshold
     compute_8gpu_ms = 1800  # Matched to 1.8s baseline
     params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude  # GPT-2
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # datasheet bidirectional total (for display)
+    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way rate for collective math
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Ring All-Reduce using library formula
+    # Ring All-Reduce using library formula (beta = per-direction NVLink rate)
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
-    t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw, 0 * ms)
+    t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw_beta, 0 * ms)
     comm_8gpu_ms_val = t_comm.to(ms).magnitude
 
     sync_size = gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node)
@@ -687,7 +688,10 @@ class Scaling8GPU:
     efficiency_8gpu_str = fmt_percent(efficiency_8gpu_val / 100, precision=1, commas=False, style='prose')
     training_8gpu_hours_str = fmt_time(training_hours_8gpu_val, 'hour', precision=1, commas=False, style='word')
     gpt2_sync_size_gb_str = fmt_memory(sync_size, unit=GB, precision=1, commas=False)
-    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    # Show the per-direction rate (the beta that produced comm_8gpu_ms), so the
+    # "@ rate ~= time" line below is self-consistent; the 900 GB/s datasheet
+    # figure is the bidirectional total.
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw_beta, unit=GB / second, precision=0, commas=False)
     comm_8gpu_ms_str = fmt_time(comm_8gpu_ms_val, 'millisecond', precision=1, commas=False)
     # compute_8gpu_ms int "1800" — preserve original (no commas) via MarkdownStr
     compute_8gpu_ms_str = fmt_time(compute_8gpu_ms, 'millisecond', precision=0, commas=False)
@@ -705,7 +709,7 @@ class Scaling8GPU:
 **8 GPUs: Single Node with NVLink**
 
 - Per-GPU batch: `{python} Scaling8GPU.batch_per_gpu_str`, global batch: `{python} Scaling8GPU.global_batch_str`
-- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str` @ `{python} Scaling8GPU.nvlink_h100_gb_per_s_str` (NVLink) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`
+- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str` @ `{python} Scaling8GPU.nvlink_h100_gb_per_s_str` (NVLink, per direction) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`
 
 Performance results:
 
@@ -731,7 +735,9 @@ class Scaling32GPU:
     compute_32gpu_ms = 1800
     params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude
     net_bw = NETWORK_10G_BW
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    # Per-direction NVLink rate: the one-way beta for ring-collective math
+    # (the datasheet 900 GB/s is the bidirectional total).
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
     gpus_per_node_val = Systems.Nodes.DGX_H100.accelerators_per_node
     training_hours_1gpu = 25
     gpus = 32
@@ -740,8 +746,9 @@ class Scaling32GPU:
     ring_factor = calc_ring_allreduce_data_factor(gpus)
     gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
     # Intra-node phase moves the same gradient volume over the same NVLink as
-    # the 8-GPU scenario (~5.8 ms). 2026-06-07: was a hardcoded 0.35 ms,
-    # contradicting the value computed two scenarios earlier.
+    # the 8-GPU scenario. 2026-06-07: was a hardcoded 0.35 ms, contradicting
+    # the value computed two scenarios earlier. 2026-06-10: now uses the
+    # per-direction NVLink rate (the prior bidirectional total understated it ~2x).
     intra_node_ms_val = (gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node_val) / nvlink_bw).to(ms).magnitude
 
     sync_size = gradient_tensor * ring_factor
@@ -2209,7 +2216,8 @@ The interconnect topology dictates which form of model parallelism is viable at 
 ```{=latex}
 \vspace*{-4mm}
 ```
-![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Violet bandwidth ladder comparing NVLink at 900 GB per second with NDR InfiniBand at 50 GB per second; 18x appears as an annotation."}
+<!-- TODO(nvlink-convention 2026-06-10): regenerate SVG to show the per-direction cliff (NVLink 450 GB/s one-way versus NDR 50 GB/s per port, a factor of nine) to match the body; the baked-in annotation compares NVLink's 900 GB/s bidirectional total against a per-port rate, mixing conventions and showing a factor of eighteen. No matplotlib source in repo; flagged for regeneration. -->
+![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Violet bandwidth ladder comparing NVLink with NDR InfiniBand, illustrating the order-of-magnitude bandwidth drop from intra-node to inter-node links."}
 
 *Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.*
 :::

@@ -3514,7 +3514,7 @@ class InterconnectHierarchy:
 
 3. **Node-Network Interconnect (NIC)**[^fn-infiniband-rdma]\index{Network Interface Card!node interconnect}: The link to the outside world, connecting to other nodes. Bandwidth ranges from 25 to 50 GB/s (`{python} InterconnectHierarchy.ib_hdr_gbit_per_s_str` to `{python} InterconnectHierarchy.ib_ndr_gbit_per_s_str` Ethernet/InfiniBand)\index{InfiniBand!bandwidth tiers}. This interconnect limits scaling across multiple nodes. The software layer that sits on top of this hardware and exposes AllReduce to ML frameworks is NVIDIA's NCCL (NVIDIA Collective Communications Library) or MPI; PyTorch's `DistributedDataParallel` (DDP) invokes NCCL's ring-AllReduce to synchronize gradients across nodes at the end of each backward pass. The delivered bandwidth of the InfiniBand fabric therefore determines directly how long DDP's gradient synchronization step takes, and whether compute-communication overlap can hide it behind the next forward pass.
 
-[^fn-nvlink-bandwidth]: **NVLink (NVIDIA Link)**\index{NVLink!definition}: This direct GPU-to-GPU interconnect is required because gradient synchronization (AllReduce) operations must exchange the entire model's gradients on every training step. Without the 600--900 GB/s of bandwidth this provides---roughly 10--14$\times$ more than the standard PCIe bus---the communication overhead causes training to become bottlenecked, preventing scaling beyond two to four GPUs in a node. \index{NVLink!training scaling}
+[^fn-nvlink-bandwidth]: **NVLink (NVIDIA Link)**\index{NVLink!definition}: This direct GPU-to-GPU interconnect is required because gradient synchronization (AllReduce) operations must exchange the entire model's gradients on every training step. Without the 600--900 GB/s of aggregate bandwidth this provides---close to an order of magnitude more, per direction, than the standard PCIe bus---the communication overhead causes training to become bottlenecked, preventing scaling beyond two to four GPUs in a node. \index{NVLink!training scaling}
 
 [^fn-allreduce-gradient-sync]: **AllReduce**\index{AllReduce!definition}: A collective operation from MPI that aggregates values across all processes (the "reduce") and distributes the result back to every process (the "all"). In multi-GPU training, AllReduce synchronizes gradients every iteration: for a 7-billion-parameter model in FP16, each step exchanges roughly 14 GB across all GPUs. Ring AllReduce achieves optimal bandwidth utilization by having each GPU send and receive simultaneously, but the operation still imposes a serial fraction in Amdahl's Law that caps multi-GPU scaling efficiency. \index{AllReduce!gradient synchronization cost}
 
@@ -5859,13 +5859,14 @@ class FpMultigpuScalingCalc:
     """NVLink gradient-sync overhead quantifying sublinear multi-GPU scaling."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    nvlink_bw = Hardware.Cloud.A100.nvlink.bandwidth
+    nvlink_bw = Hardware.Cloud.A100.nvlink.bandwidth  # datasheet bidirectional total (for display)
+    nvlink_bw_beta = Hardware.Cloud.A100.nvlink.bandwidth_per_direction  # one-way rate for transfer math
     gradient_size = 1.0 * GB  # scenario assumption
     step_time = 50 * millisecond  # scenario assumption
     gpu_count = Systems.Nodes.DGX_A100.accelerators_per_node
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sync_time = (gradient_size / nvlink_bw).to(millisecond)
+    sync_time = (gradient_size / nvlink_bw_beta).to(millisecond)
     sync_overhead_pct = (sync_time / step_time).to_base_units().magnitude * 100
     no_overlap_speedup = (gpu_count * step_time / (step_time + sync_time)).to_base_units().magnitude
     no_overlap_efficiency_pct = no_overlap_speedup / gpu_count * 100
@@ -5880,7 +5881,7 @@ class FpMultigpuScalingCalc:
 
 **Fallacy**: *Hardware acceleration benefits scale linearly with additional accelerators.*
 
-Teams expect eight GPUs to train 8$\times$ faster than one GPU. Multi-accelerator scaling introduces communication overhead that violates linear scaling assumptions. As noted in @sec-hardware-acceleration-multichip-scaling-c649, AllReduce operations for gradient synchronization can require exchanging hundreds of gigabytes per training step for large models. With NVLink at `{python} FpMultigpuScalingCalc.fp_nvlink_bw_gb_per_s_str` bidirectional, synchronizing 1 GB of gradients requires `{python} FpMultigpuScalingCalc.fp_sync_time_ms_str`; for a 50 ms training step, this represents `{python} FpMultigpuScalingCalc.fp_sync_overhead_str` of step time. Without compute-communication overlap, eight-GPU setups achieve about `{python} FpMultigpuScalingCalc.fp_no_overlap_speedup_mult_str` speedup (`{python} FpMultigpuScalingCalc.fp_no_overlap_efficiency_str` efficiency) at best, and typical workloads see 6--7$\times$ (75--87 percent efficiency) due to load imbalance and synchronization barriers. Small models with insufficient parallel work achieve even worse scaling, sometimes seeing 3--4$\times$ speedup on eight GPUs (37--50 percent efficiency).
+Teams expect eight GPUs to train 8$\times$ faster than one GPU. Multi-accelerator scaling introduces communication overhead that violates linear scaling assumptions. As noted in @sec-hardware-acceleration-multichip-scaling-c649, AllReduce operations for gradient synchronization can require exchanging hundreds of gigabytes per training step for large models. With NVLink delivering `{python} FpMultigpuScalingCalc.fp_nvlink_bw_gb_per_s_str` bidirectional (half that, per direction, for a one-way gradient stream), synchronizing 1 GB of gradients requires `{python} FpMultigpuScalingCalc.fp_sync_time_ms_str`; for a 50 ms training step, this represents `{python} FpMultigpuScalingCalc.fp_sync_overhead_str` of step time. Without compute-communication overlap, eight-GPU setups achieve about `{python} FpMultigpuScalingCalc.fp_no_overlap_speedup_mult_str` speedup (`{python} FpMultigpuScalingCalc.fp_no_overlap_efficiency_str` efficiency) at best, and typical workloads see 6--7$\times$ (75--87 percent efficiency) due to load imbalance and synchronization barriers. Small models with insufficient parallel work achieve even worse scaling, sometimes seeing 3--4$\times$ speedup on eight GPUs (37--50 percent efficiency).
 
 ```{python}
 #| echo: false

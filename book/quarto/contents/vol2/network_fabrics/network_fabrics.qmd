@@ -124,28 +124,33 @@ class NetworkFabricsContextScenario:
     """Bandwidth hierarchy specs for the chapter-wide fabric discussion."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    ib_ndr_raw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    nvlink_h100_raw = Hardware.Cloud.H100.nvlink.bandwidth
+    ib_ndr_raw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port (per direction)
+    nvlink_h100_raw = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s datasheet bidirectional total
+    nvlink_h100_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way
     h100_flops_raw = Hardware.Cloud.H100.compute.peak_flops
     h100_mem_bw_raw = Hardware.Cloud.H100.memory.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    nvlink_to_ib_ratio_val = (nvlink_h100_raw / ib_ndr_raw).to_base_units().magnitude
+    # Honest cliff = like-with-like, both per-direction: NVLink 450 GB/s vs an
+    # NDR port's 50 GB/s = 9x. (Comparing NVLink's 900 GB/s bidirectional total
+    # against the per-direction port rate would double-count to a spurious 18x.)
+    nvlink_to_ib_ratio_val = (nvlink_h100_perdir / ib_ndr_raw).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(ib_ndr_raw > 300 * Gbps, "NDR BW should exceed 300 Gb/s")
-    check(nvlink_to_ib_ratio_val > 10, "NVLink-to-IB ratio should exceed 10x")
+    check(nvlink_to_ib_ratio_val > 8, "Per-direction NVLink-to-IB cliff should be ~9x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_ndr_gbit_per_s_str = fmt_bandwidth(ib_ndr_raw, unit=Gbps, precision=0, commas=False)
     ib_ndr_gb_per_s_str = fmt_qty(ib_ndr_raw, GB / second, precision=0, commas=False)
     nvlink_h100_gb_per_s_str = fmt_qty(nvlink_h100_raw, GB / second, precision=0, commas=False)
+    nvlink_h100_perdir_gb_per_s_str = fmt_qty(nvlink_h100_perdir, GB / second, precision=0, commas=False)
     nvlink_to_ib_ratio_mult_str = fmt_multiple(nvlink_to_ib_ratio_val, precision=0, commas=False)
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_flops_raw, unit=TFLOP / second, precision=0, commas=False)
     h100_mem_bw_tb_per_s_str = fmt_qty(h100_mem_bw_raw, TB / second, precision=2, commas=False)
 ```
 
-The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise. @Sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str`. The moment computation crosses a node boundary, however, the available bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` (NVLink) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor the figures used throughout this chapter. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
+The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise. @Sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor the figures used throughout this chapter. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
 
 @Fig-bandwidth-hierarchy makes this hierarchy concrete by plotting the bandwidth at each level across four GPU generations.
 
@@ -1456,9 +1461,11 @@ The final level of the stack is cluster design\index{Cluster Design}, where wire
 # │          nvlink_h100_gb_per_s_str, ib_ndr_gbit_per_s_str
 class NetworkFabricsClusterRecap:
     ib_ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    nvlink = Hardware.Cloud.H100.nvlink.bandwidth
+    nvlink = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s bidirectional aggregate (for display)
+    nvlink_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way for the cliff ratio
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_to_ib_ratio_mult_str = fmt_multiple((nvlink / ib_ndr).to_base_units().magnitude, precision=0, commas=False)
+    # Per-direction-vs-per-port cliff (honest 9x; 900-vs-50 would double-count to 18x)
+    nvlink_to_ib_ratio_mult_str = fmt_multiple((nvlink_perdir / ib_ndr).to_base_units().magnitude, precision=0, commas=False)
     nvlink_h100_gb_per_s_str = fmt_qty(nvlink, GB / second, precision=0, commas=False)
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
