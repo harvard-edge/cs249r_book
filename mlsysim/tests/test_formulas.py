@@ -47,6 +47,9 @@ from mlsysim.physics import (
     calc_availability_stacked,
     calc_monthly_egress_cost,
     calc_fleet_tco,
+    calc_population_stability_index,
+    calc_two_proportion_sample_size,
+    calc_constraint_propagation_factor,
 )
 from mlsysim.core.units import ureg, Q_, MB, GB
 
@@ -636,6 +639,34 @@ class TestQueueLatencyMMC:
         assert 0 < rho < 1
         assert p99.m_as(ureg.second) >= 0
 
+    def test_known_answer_erlang_c(self):
+        """2026-06-10 audit: pin Erlang-C numerics so a dropped (1-rho), a
+        factor-of-2 in the wait rate c*mu*(1-rho), or an off-by-one in the
+        series range cannot pass. Reference values from an independent
+        direct-summation Erlang-C implementation (Kleinrock Vol. 1):
+        lambda=1.5, mu=1, c=2 -> C(2, 1.5) = 0.642857, wait rate = 0.5/s,
+        p50 = -ln(0.5/C)/0.5 = 0.502629 s, p99 = -ln(0.01/C)/0.5 = 8.326675 s.
+        """
+        rho, p50, p99 = calc_queue_latency_mmc(
+            arrival_rate_hz=1.5, service_rate_hz=1.0, num_servers=2,
+        )
+        assert rho == pytest.approx(0.75, rel=1e-9)
+        assert p50.m_as(ureg.second) == pytest.approx(0.502629, rel=1e-4)
+        assert p99.m_as(ureg.second) == pytest.approx(8.326675, rel=1e-4)
+
+    def test_mm1_reduction(self):
+        """M/M/1 sanity: Erlang-C collapses to C(1, rho) = rho. At rho = 0.5,
+        p50 never queues (p_wait = 0.5 is not > 0.5... boundary -> 0) and
+        p99 = -ln(0.01/0.5)/(mu - lambda) = 7.824046 s. Also pins the -0.0
+        normalization at the exact p_wait == quantile boundary."""
+        rho, p50, p99 = calc_queue_latency_mmc(
+            arrival_rate_hz=0.5, service_rate_hz=1.0, num_servers=1,
+        )
+        assert rho == pytest.approx(0.5, rel=1e-9)
+        assert p50.m_as(ureg.second) == 0.0
+        assert not math.copysign(1.0, p50.magnitude) < 0  # no -0.0
+        assert p99.m_as(ureg.second) == pytest.approx(7.824046, rel=1e-4)
+
 # ======================================================================
 # calc_failure_probability
 # ======================================================================
@@ -770,3 +801,110 @@ def test_calc_binomial_failure_probability():
     assert calc_binomial_failure_probability(1.0, 100) == 1.0
     assert calc_binomial_failure_probability(0.0, 100) == 0.0
     assert abs(calc_binomial_failure_probability(0.5, 2) - 0.75) < 1e-9
+
+# ======================================================================
+# statistics.py — calc_population_stability_index,
+# calc_two_proportion_sample_size, calc_constraint_propagation_factor
+# (2026-06-10 audit: these previously had ZERO package tests; only book
+# render-time check() guards pinned them.)
+# ======================================================================
+
+class TestPopulationStabilityIndex:
+    """PSI = sum (a_i - e_i) * ln(a_i / e_i) — the Jeffreys divergence."""
+
+    def test_known_answer(self):
+        # Independent hand computation:
+        # (0.3-0.5)ln(0.3/0.5) + (0.7-0.5)ln(0.7/0.5) = 0.1694596
+        psi = calc_population_stability_index([0.5, 0.5], [0.3, 0.7])
+        assert psi == pytest.approx(0.16945957207744072, rel=1e-9)
+
+    def test_identical_distributions_zero(self):
+        assert calc_population_stability_index([0.25] * 4, [0.25] * 4) == pytest.approx(0.0, abs=1e-12)
+
+    def test_symmetry(self):
+        # Jeffreys divergence is symmetric in its arguments
+        a, b = [0.1, 0.4, 0.5], [0.2, 0.3, 0.5]
+        assert calc_population_stability_index(a, b) == pytest.approx(
+            calc_population_stability_index(b, a), rel=1e-12)
+
+    def test_length_mismatch_raises(self):
+        with pytest.raises(ValueError):
+            calc_population_stability_index([0.5, 0.5], [1.0])
+
+    def test_empty_bin_uses_epsilon_floor(self):
+        # Must not raise on a zero bin
+        psi = calc_population_stability_index([0.5, 0.5], [0.0, 1.0])
+        assert math.isfinite(psi) and psi > 0
+
+
+class TestTwoProportionSampleSize:
+    """n = 2 (z_a + z_b)^2 p(1-p) / delta^2 (equal-variance approximation)."""
+
+    def test_known_answer_book_scenario(self):
+        # p=0.05, delta=0.001, z=1.96/0.84 -> 744,800 exactly
+        n = calc_two_proportion_sample_size(0.05, 0.001)
+        assert n == pytest.approx(744_800, rel=1e-9)
+
+    def test_quadruples_when_lift_halves(self):
+        n1 = calc_two_proportion_sample_size(0.05, 0.002)
+        n2 = calc_two_proportion_sample_size(0.05, 0.001)
+        assert n2 == pytest.approx(4 * n1, rel=1e-9)
+
+    def test_invalid_inputs_raise(self):
+        with pytest.raises(ValueError):
+            calc_two_proportion_sample_size(0.05, 0.0)
+        with pytest.raises(ValueError):
+            calc_two_proportion_sample_size(0.0, 0.001)
+        with pytest.raises(ValueError):
+            calc_two_proportion_sample_size(1.0, 0.001)
+
+
+class TestConstraintPropagationFactor:
+    """factor = base^(stage_to - stage_from) (Boehm cost-of-delay)."""
+
+    def test_three_stage_gap(self):
+        assert calc_constraint_propagation_factor(0, 3) == 8
+
+    def test_equal_stages_is_one(self):
+        assert calc_constraint_propagation_factor(2, 2) == 1
+
+    def test_backwards_raises(self):
+        with pytest.raises(ValueError):
+            calc_constraint_propagation_factor(3, 1)
+
+
+# ======================================================================
+# 2026-06-10 audit: input-contract regressions for reliability functions
+# ======================================================================
+
+class TestReliabilityInputContracts:
+    def test_failure_probability_rejects_negative_duration(self):
+        # Pre-audit: returned -0.105 for a negative duration, violating the
+        # documented [0, 1) contract.
+        with pytest.raises(ValueError):
+            calc_failure_probability(100, -10)
+
+    def test_mtbf_cluster_rejects_zero_components(self):
+        # Pre-audit: bare ZeroDivisionError
+        with pytest.raises(ValueError):
+            calc_mtbf_cluster(50_000, 0)
+
+    def test_young_daly_warns_out_of_regime(self):
+        # delta >= 2*MTBF: Young form returns tau < delta (impossible);
+        # must warn so a LEGO cell cannot silently render it.
+        with pytest.warns(UserWarning, match="out of regime"):
+            calc_young_daly_interval(1000, 10)
+
+    def test_young_daly_no_warning_in_valid_regime(self):
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("error")
+            calc_young_daly_interval(60, 50_000 * 3600)
+
+    def test_negative_message_rejected_by_collectives(self):
+        # Parity with calc_point_to_point_time (which always validated)
+        for fn in (calc_ring_allreduce_time, calc_tree_allreduce_time):
+            with pytest.raises(ValueError):
+                fn(Q_("-1 GB"), 8, Q_("100 GB/s"), Q_("5 us"))
+        with pytest.raises(ValueError):
+            calc_all_to_all_time(Q_("-1 GB"), 8, Q_("100 GB/s"), Q_("5 us"))

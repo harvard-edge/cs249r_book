@@ -736,6 +736,14 @@ class TailLatencyModel(ForwardModel):
     Models inference servers as M/M/c queues to determine if the deployment
     can sustain the target arrival rate while meeting strict SLA latency bounds.
 
+    Approximations (deliberate, pedagogical):
+    - ``p50_latency``/``p99_latency`` add the WAIT-time quantile to the MEAN
+      service time. The true quantile of sojourn time (wait + service) is
+      generally larger, because service time has its own variance.
+    - Kingman's ``(cv^2 + 1)/2`` factor is derived for the MEAN wait (M/G/1);
+      applying it to the P50/P99 wait quantiles is a further heuristic.
+    Quote these fields as model estimates, not exact M/G/c percentiles.
+
     Literature Source:
     1. Dean & Barroso (2013), "The Tail at Scale."
     """
