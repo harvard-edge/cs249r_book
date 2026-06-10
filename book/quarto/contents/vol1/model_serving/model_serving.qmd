@@ -1916,10 +1916,14 @@ Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} Re
 # │ How: Scale registry FLOPs and a 224×224 activation footprint by (R/224)²;
 # │      divide by total traffic (fixed weights + activation reads/writes).
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: act_*_mb_str, ai_*_str, ridge_point_flops_per_byte_str
+# │ Imports: mlsysim.book (fmt), mlsysim (Hardware.Cloud.V100_PCIe / V100 SXM2),
+# │          mlsysim.core.units (TFLOP, second, GB, flop, byte)
+# │ Exports: act_*_mb_str, ai_*_str, ridge_point_flops_per_byte_str,
+# │          v100_pcie_fp32_str, v100_sxm2_fp32_str, v100_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory
+from mlsysim import Hardware
+from mlsysim.core.units import TFLOP, second, GB
+from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory, fmt_flop_rate, fmt_bandwidth
 
 class ResolutionBottleneckCalc:
     """Shows that higher resolution raises arithmetic intensity: quadratic FLOPs amortize the fixed weight traffic."""
@@ -1931,7 +1935,10 @@ class ResolutionBottleneckCalc:
     weight_bytes = resnet.size_in_bytes(BYTES_FP32)
     act_224 = 12.5 * MB  # scenario assumption: 224×224 activation footprint
     act_rw_factor = 2  # scenario assumption: each activation written once, read once
-    ridge_point_value = 16 * (flop / byte)  # scenario assumption: V100 ridge point
+    # V100 ridge point = FP32 peak / HBM2 bandwidth, derived from the registry (PCIe variant).
+    v100_pcie = Hardware.Cloud.V100_PCIe
+    v100_sxm2 = Hardware.Cloud.V100
+    ridge_point_value = (v100_pcie.compute.precision_flops["fp32"] / v100_pcie.memory.bandwidth).to(flop / byte)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # FLOPs and activation footprint both scale with (R/224)²; weight traffic
@@ -1963,7 +1970,11 @@ class ResolutionBottleneckCalc:
     ai_512_flops_per_byte_str = fmt_arithmetic_intensity(ai_512_value, commas=False)
     ai_640_flops_per_byte_str = fmt_arithmetic_intensity(ai_640_value, commas=False)
 
-    ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point_value, commas=False)
+    ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point_value, precision=0, commas=False)
+
+    v100_pcie_fp32_str = fmt_flop_rate(v100_pcie.compute.precision_flops["fp32"], unit=TFLOP / second, precision=0, commas=False)
+    v100_sxm2_fp32_str = fmt_flop_rate(v100_sxm2.compute.precision_flops["fp32"], unit=TFLOP / second, precision=1, commas=False)
+    v100_bw_str = fmt_bandwidth(v100_pcie.memory.bandwidth, unit=GB / second, precision=0, commas=False)
 ```
 
 @Tbl-resolution-bottleneck quantifies this transition for ResNet-50:
@@ -1975,7 +1986,7 @@ class ResolutionBottleneckCalc:
 | **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` | `{python} ResolutionBottleneckCalc.ai_512_flops_per_byte_str` |    Compute     |
 | **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` | `{python} ResolutionBottleneckCalc.ai_640_flops_per_byte_str` |    Compute     |
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity rises with resolution: FLOPs and activation traffic grow quadratically while the fixed weight traffic is amortized over more spatial positions. For a V100 PCIe (14 TFLOP/s FP32; the SXM2 variant runs 15.7 TFLOP/s FP32) with 900 GB/s of HBM2 memory bandwidth, the ridge point is approximately `{python} ResolutionBottleneckCalc.ridge_point_flops_per_byte_str`; every row sits above it, so higher resolution drives the workload deeper into the compute-bound regime. The serving costs of resolution are quadratic latency and activation-memory growth, not memory bandwidth. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity rises with resolution: FLOPs and activation traffic grow quadratically while the fixed weight traffic is amortized over more spatial positions. For a V100 PCIe (`{python} ResolutionBottleneckCalc.v100_pcie_fp32_str` FP32; the SXM2 variant runs `{python} ResolutionBottleneckCalc.v100_sxm2_fp32_str` FP32) with `{python} ResolutionBottleneckCalc.v100_bw_str` of HBM2 memory bandwidth, the ridge point is approximately `{python} ResolutionBottleneckCalc.ridge_point_flops_per_byte_str`; every row sits above it, so higher resolution drives the workload deeper into the compute-bound regime. The serving costs of resolution are quadratic latency and activation-memory growth, not memory bandwidth. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
 
 #### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
 
