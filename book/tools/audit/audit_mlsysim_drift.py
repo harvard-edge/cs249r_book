@@ -115,6 +115,22 @@ CANONICAL = [
     ("pcie_gen5_gb",   64,    0.05, "Hardware.Cloud.H100.interconnect.bandwidth (x16)"),
     ("nvlink_h100",    900,   0.02, "Hardware.Cloud.H100.nvlink.bandwidth"),
     ("nvlink_a100",    600,   0.02, "Hardware.Cloud.A100.nvlink.bandwidth"),
+
+    # 2026-06-10 overnight audit — every entry below is a class of literal the
+    # audit actually caught in a chapter, contradicting (or shadowing) the
+    # registry. They stay here so the pattern cannot quietly return.
+    ("nvme_latency_us", 100,  0.05, "Hardware.Tech.Storage.NvmeGen4.latency (µs; '~10 µs' device claims are Optane-class, not NVMe canon)"),
+    ("nvme_bw_gb",     7,     0.05, "Hardware.Tech.Storage.NvmeGen4.bandwidth (GB/s)"),
+    ("optics_w",       20,    0.05, "Systems.SwitchFabric.OpticsPluggable400G (W; 10 W is the CPO value)"),
+    ("optic_power",    20,    0.05, "Systems.SwitchFabric.OpticsPluggable400G (W)"),
+    ("gpu_mttf",       50000, 0.02, "Systems.Reliability.Gpu.mttf_hours (a 100,000 h figure was a competing constant)"),
+    ("mtbf_component", 50000, 0.02, "Systems.Reliability.Gpu.mttf_hours"),
+    ("gddr6x",         760,   0.02, "Hardware.Tech.Memory.GDDR6X.bandwidth (GB/s; '500-700' ranges contradicted canon)"),
+    ("tpu_v5p_bw",     2760,  0.02, "Hardware.Cloud.TPUv5p.memory.bandwidth (GB/s; chapter had 2,765)"),
+    ("ds_cnn_params",  200000, 0.02, "Models.Tiny.DS_CNN.parameters ('500 KB model' matched no precision)"),
+    ("gpt4_params_t",  1.76,  0.05, "Models.Language.GPT4.parameters (in T; 'hundreds of billions' understated it)"),
+    ("lenet_1_params", 10000, 0.02, "Models.Vision.LeNet1.parameters ('~9.8K' was a chapter-local competing value)"),
+    ("h100_gpu_price", 30000, 0.05, "Infrastructure.Pricing.Capital.H100GpuPurchaseUsd ('3 GPUs from $282K' implied ~$94K)"),
 ]
 
 # Python LEGO cells are fenced ```{python} ... ```
