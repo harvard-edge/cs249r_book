@@ -905,9 +905,51 @@ Neural networks are characterized by three unique properties that drive this shi
 
 [^fn-scratchpad-ml]: **Scratchpad Memory**: Because the dataflow for a neural network is mathematically determined, a compiler can schedule the exact data needed into this fast, software-controlled local memory. This bypasses the complex and energy-intensive hardware logic a CPU cache uses to guess at future data needs for unpredictable workloads. For example, Google's TPU v1 uses a 24 MB software-managed Unified Buffer rather than relying on CPU-style hardware caches for activations, a primary driver of its efficiency on ML workloads. \index{Scratchpad Memory!ML advantage}
 
+```{python}
+#| echo: false
+#| label: hw-acceleration-hbm-vs-gddr
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HBM VS GDDR6X BANDWIDTH GAP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: footnote fn-hbm-bandwidth-cost in the integration-bottleneck
+# │          discussion — quantifies the HBM-over-GDDR6X bandwidth advantage.
+# │
+# │ Goal: Anchor the HBM vs GDDR6X comparison to registry values instead of
+# │       hand-typed ranges (the old 500–700 GB/s GDDR6X figure contradicted
+# │       the registry's 760 GB/s).
+# │ Show: Device-level HBM range (A100 HBM2e to H100 HBM3), GDDR6X tech-class
+# │       bandwidth, and the computed advantage multiple.
+# │ How: Read Hardware.Cloud.A100/H100 memory bandwidth and
+# │      Hardware.Tech.Memory.GDDR6X.bandwidth; form range and ratio.
+# │
+# │ Imports: mlsysim registries (Hardware) + fmt helpers
+# │ Exports: HbmVsGddr.hbm_bw_range_str, .gddr6x_bw_str, .gap_mult_range_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_qty_range, fmt_bandwidth, fmt_multiple_range, check
+
+class HbmVsGddr:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    gddr6x_bw = Hardware.Tech.Memory.GDDR6X.bandwidth
+    hbm_low = Hardware.Cloud.A100.memory.bandwidth  # HBM2e device anchor
+    hbm_high = Hardware.Cloud.H100.memory.bandwidth  # HBM3 device anchor
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    gap_low = (hbm_low / gddr6x_bw).to("").magnitude
+    gap_high = (hbm_high / gddr6x_bw).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(2.0 < gap_low < gap_high < 5.0, f"HBM-over-GDDR6X advantage should span roughly 2-5x, got {gap_low:.1f}-{gap_high:.1f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    hbm_bw_range_str = fmt_qty_range(hbm_low, hbm_high, TB / second, precision=1, commas=False)
+    gddr6x_bw_str = fmt_bandwidth(gddr6x_bw, unit=GB / second, precision=0, commas=False)
+    gap_mult_range_str = fmt_multiple_range(gap_low, gap_high, precision=1, commas=False)
+```
+
 The primary engineering challenge is no longer maximizing calculation rate but keeping data close to the calculation. In modern accelerators, accessing data from external memory (DRAM)\index{DRAM!energy cost} can consume 100$\times$ more energy than the actual arithmetic operation. This disparity is precisely why modern accelerator architectures prioritize high-bandwidth memory (HBM)\index{HBM!definition}[^fn-hbm-bandwidth-cost] and large on-chip scratchpads\index{Scratchpad Memory!accelerator design} over simply adding more compute units.
 
-[^fn-hbm-bandwidth-cost]: **HBM (High Bandwidth Memory)**: Achieves 2--3 TB/s bandwidth through 3D die stacking with thousands of through-silicon vias (TSVs), compared to 500--700 GB/s for GDDR6X. This 3--5$\times$ bandwidth advantage transforms memory-bound ML workloads toward compute-bound performance, which is why high-end data center AI accelerators such as H100, A100, and TPUv4 use HBM. The trade-off is cost: HBM is a dominant cost component in data center AI accelerators, limiting it to applications where the bandwidth-per-dollar justifies the substantial premium over consumer-grade GDDR. \index{HBM!bandwidth-cost trade-off}
+[^fn-hbm-bandwidth-cost]: **HBM (High Bandwidth Memory)**: Achieves `{python} HbmVsGddr.hbm_bw_range_str` bandwidth in current datacenter accelerators (A100's HBM2e to H100's HBM3) through 3D die stacking with thousands of through-silicon vias (TSVs), compared to `{python} HbmVsGddr.gddr6x_bw_str` for GDDR6X. This `{python} HbmVsGddr.gap_mult_range_str` bandwidth advantage transforms memory-bound ML workloads toward compute-bound performance, which is why high-end data center AI accelerators such as H100, A100, and TPUv4 use HBM. The trade-off is cost: HBM is a dominant cost component in data center AI accelerators, limiting it to applications where the bandwidth-per-dollar justifies the substantial premium over consumer-grade GDDR. \index{HBM!bandwidth-cost trade-off}
 
 To see how accelerators address this integration bottleneck in practice, examine the architectural blueprint in @fig-accelerator-anatomy. Notice how every design decision, from the processing element grid to the multilevel cache hierarchy, targets data movement reduction rather than raw compute multiplication.
 

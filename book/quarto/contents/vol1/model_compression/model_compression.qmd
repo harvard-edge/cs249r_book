@@ -3099,9 +3099,52 @@ For DLRM, quantization is not about faster math; it is about storage density\ind
 
 The DLRM example shows quantization as a way to make a huge memory object placeable. The same logic reappears at the other end of the scale, where the object is small but the device is smaller still: the KWS (DS-CNN)\index{Keyword Spotting!quantization imperative} lighthouse faces a TinyML deployment where compression becomes an existential requirement.
 
+```{python}
+#| echo: false
+#| label: model-compression-kws-quant-imperative
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KWS (DS-CNN) QUANTIZATION IMPERATIVE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @lhs-model-compression-tinyml-quantization-imperative — the
+# │          TinyML lighthouse contrasting DS-CNN's FP32 vs INT8 footprint
+# │          against the tiny-tier SRAM budget.
+# │
+# │ Goal: Show that the purpose-built DS-CNN keyword spotter does NOT fit the
+# │       tiny-tier SRAM budget at FP32 and DOES fit at INT8 — the misfit IS
+# │       the quantization imperative the callout teaches.
+# │ Show: FP32 footprint (800 KB), INT8 footprint (200 KB), 512 KiB budget.
+# │ How: Models.Tiny.DS_CNN.size_in_bytes at 4 B and 1 B per parameter,
+# │      compared against Platforms.Tiny.ram.
+# │
+# │ Imports: mlsysim registries (Models.Tiny, Platforms.Tiny) + fmt helpers
+# │ Exports: KwsQuantImperative.fp32_kb_str, .int8_kb_str, .budget_kib_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_qty, check
+from mlsysim.core.units import byte, KB, KiB
+
+class KwsQuantImperative:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ds_cnn = Models.Tiny.DS_CNN
+    tiny_ram = Platforms.Tiny.ram
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fp32_size = ds_cnn.size_in_bytes(4 * byte)
+    int8_size = ds_cnn.size_in_bytes(1 * byte)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(fp32_size > tiny_ram, "FP32 DS-CNN must exceed the tiny-tier SRAM budget — that misfit is the point of this callout")
+    check(int8_size < tiny_ram, "INT8 DS-CNN must fit the tiny-tier SRAM budget")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    fp32_kb_str = fmt_qty(fp32_size, KB, precision=0, commas=False)
+    int8_kb_str = fmt_qty(int8_size, KB, precision=0, commas=False)
+    budget_kib_str = fmt_qty(tiny_ram, KiB, precision=0, commas=False)
+```
+
 ::: {#lhs-model-compression-tinyml-quantization-imperative .callout-lighthouse title="The TinyML quantization imperative"}
 
-The KWS (DS-CNN) lighthouse\index{Keyword Spotting!quantization}\index{DS-CNN!quantization} operates at the opposite extreme of the iron law from DLRM. A typical TinyML budget is roughly 512 KB, where the purpose-built 500 KB DS-CNN keyword spotter fits. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
+The KWS (DS-CNN) lighthouse\index{Keyword Spotting!quantization}\index{DS-CNN!quantization} operates at the opposite extreme of the iron law from DLRM. A typical TinyML budget is roughly `{python} KwsQuantImperative.budget_kib_str` of SRAM, and even the purpose-built DS-CNN keyword spotter overshoots it in FP32: its weights occupy `{python} KwsQuantImperative.fp32_kb_str`. Quantized to INT8, the same network shrinks to `{python} KwsQuantImperative.int8_kb_str` and fits with room for runtime buffers. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
 
 In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory bandwidth and energy per inference than in INT8. For an always-on device running on a coin cell battery, this 4$\times$ energy difference translates directly to battery life: a device that lasts one month on FP32 might last four months on INT8. Here, quantization reduces both the data-movement term and the compute term $(O / (R_{\text{peak}} \cdot \eta_{\text{hw}}))$ of the iron law.
 
