@@ -395,7 +395,53 @@ class FrontierTrainingContext:
 
 #### Compute phase: Forward and backward passes {#sec-distributed-training-systems-systems-compute-phase-forward-backward}
 
-The defining feature of data parallelism is that the computation phase, both forward and backward, is *embarrassingly parallel*. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. Here, micro-batch means the per-GPU local slice used for activation accounting; pipeline microbatching uses the same word for a different mechanism, subdividing a global batch to keep pipeline stages occupied. For our `{python} FrontierTrainingContext.frontier_params_b_str` parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume over 200 GB of HBM, exceeding the capacity of even an H100 GPU. Activation checkpointing\index{Activation Checkpointing!memory reduction}, which recomputes activations during the backward pass rather than storing them, becomes necessary in this scenario to suppress the footprint to a manageable ~50 GB.
+```{python}
+#| echo: false
+#| label: distributed-training-gpt3-activation-budget
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-3 ACTIVATION MEMORY BUDGET (MICRO-BATCH 4, SEQ 2048)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: compute-phase prose in
+# │          @sec-distributed-training-systems-systems-compute-phase-forward-backward.
+# │
+# │ Goal: Pin the activation-memory claims to calc_activation_memory (the old
+# │       prose hand-typed 'over 200 GB' and '~50 GB', which match no
+# │       canonical recomputation strategy at these inputs).
+# │ Show: Unoptimized activation footprint (~1.1 TB) vs full activation
+# │       checkpointing (~19 GB) for GPT-3 at micro-batch 4, seq 2048.
+# │ How: calc_activation_memory(layers=96, seq=2048, batch=4, hidden=12288,
+# │      n_heads=96) with strategy='none' vs 'full' (Korthikanti et al. 2022).
+# │
+# │ Imports: mlsysim.physics.calc_activation_memory + fmt helpers
+# │ Exports: Gpt3ActivationBudget.act_unchecked_tb_str,
+# │          Gpt3ActivationBudget.act_checkpointed_gb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import calc_activation_memory
+from mlsysim.fmt import fmt_qty, check
+
+class Gpt3ActivationBudget:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    layers = 96  # GPT-3 architecture (Models.Language.GPT3)
+    seq_len = 2048
+    micro_batch = 4  # scenario assumption: per-GPU micro-batch
+    hidden = 12_288
+    heads = 96
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    act_unchecked = calc_activation_memory(layers, seq_len, micro_batch, hidden, n_heads=heads, strategy="none")
+    act_checkpointed = calc_activation_memory(layers, seq_len, micro_batch, hidden, n_heads=heads, strategy="full")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(act_unchecked > 1000 * GB, "Unoptimized GPT-3 activations at b=4, s=2048 should exceed 1 TB")
+    check(act_checkpointed < 25 * GB, "Fully checkpointed activations should fit comfortably in one H100")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    act_unchecked_tb_str = fmt_qty(act_unchecked, TB, precision=1, commas=False)
+    act_checkpointed_gb_str = fmt_qty(act_checkpointed, GB, precision=1, commas=False, approx=True)
+```
+
+The defining feature of data parallelism is that the computation phase, both forward and backward, is *embarrassingly parallel*. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. Here, micro-batch means the per-GPU local slice used for activation accounting; pipeline microbatching uses the same word for a different mechanism, subdividing a global batch to keep pipeline stages occupied. For our `{python} FrontierTrainingContext.frontier_params_b_str` parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` of HBM, an order of magnitude beyond the capacity of even an H100 GPU. Activation checkpointing\index{Activation Checkpointing!memory reduction}, which recomputes activations during the backward pass rather than storing them, becomes necessary in this scenario to suppress the footprint to `{python} Gpt3ActivationBudget.act_checkpointed_gb_str`.
 
 The backward pass mirrors this independence but introduces the system's primary bottleneck. As the GPU traverses the computation graph in reverse, it computes gradients for the parameters held by that replica or shard. Under pure data parallelism, a full `{python} FrontierTrainingContext.frontier_params_b_str` FP16 replica would imply a 350 GB gradient tensor per worker, which exceeds single-accelerator memory budgets; large runs therefore combine data parallelism with sharding, tensor parallelism, or pipeline parallelism. The computation itself requires zero communication, yet the resulting gradients represent a fractured view of the true loss surface, valid only for the local micro-batch. Before the optimizer step can occur, the corresponding local gradients or gradient shards must be aggregated across data-parallel workers to form a valid global update. The transition from isolated, high-throughput compute to synchronization defines the rhythm of data parallel training: long periods of silent, intense arithmetic punctuated by bursts of heavy network traffic.
 
@@ -1800,7 +1846,7 @@ Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and param
 ![](images/svg/model-parallel-flow.svg){width=100%}
 :::
 
-For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
+For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters generates on the order of a terabyte of intermediate activations at even a small micro-batch (roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` at micro-batch 4, as computed earlier), and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
 
 ```{python}
 #| echo: false

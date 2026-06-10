@@ -247,8 +247,10 @@ for n in gpu_counts_num:
     from mlsysim.physics import calc_ring_allreduce_time
 
     grad_size = m.parameters * (2 * byte / param)
-    # Effective BW decreases at scale due to topology
-    bw = h.memory.bandwidth if n <= 8 else Systems.Fabrics.InfiniBand_NDR.bandwidth
+    # Effective BW decreases at scale due to topology. Intra-node (n <= 8)
+    # rides NVLink, not HBM (2026-06-10 audit: HBM bandwidth here understated
+    # the 8-GPU comm share ~3.7x); beyond a node, the IB fabric binds.
+    bw = h.nvlink.bandwidth if n <= 8 else Systems.Fabrics.InfiniBand_NDR.bandwidth
     t_comm = calc_ring_allreduce_time(grad_size, n, bw, 0 * ms).to(ms).magnitude
 
     total = t_comp + t_comm
@@ -379,15 +381,89 @@ The **critical message size**\index{Critical Message Size} $n^* = \alpha \cdot \
 
 @Tbl-interconnect-parameters shows typical values for data center interconnects, and the critical-size column carries the load-bearing pattern: intra-node NVLink stays latency-bound only up to roughly a megabyte, whereas the inter-node fabrics cross over near 100 KB, so a message large enough to be bandwidth-bound inside a node can still be latency-bound once it travels between nodes.
 
-| **Interconnect**             | **Latency ($\alpha$)** | **Bandwidth ($\beta$)** | **Critical Size ($n^*$)** |
-|:-----------------------------|:----------------------:|:-----------------------:|:-------------------------:|
-| **NVLink 4.0 (intra-node)**  |         1–2 μs         |         900 GB/s        |           ~1 MB           |
-| **InfiniBand NDR 400 Gbps**  |         1–3 μs         |    50 GB/s (per port)   |          ~100 KB          |
-| **InfiniBand HDR 200 Gbps**  |         2–5 μs         |         25 GB/s         |           ~75 KB          |
-| **PCIe Gen5 (GPU↔CPU)**      |         2–5 μs         |         64 GB/s         |          ~200 KB          |
-| **Ethernet 100 Gbps (RoCE)** |        5–10 μs         |         12 GB/s         |          ~100 KB          |
+```{python}
+#| echo: false
+#| label: collective-communication-interconnect-parameters
 
-: **Interconnect Performance Parameters**: Typical latency and bandwidth values for data center interconnects. The critical size shows the crossover point where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTERCONNECT ALPHA-BETA PARAMETERS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-interconnect-parameters and the crossover discussion above it.
+# │
+# │ Goal: Make the alpha-beta table internally consistent: beta comes from the
+# │       registry, and the critical-size column is COMPUTED from this table's
+# │       own alpha midpoints via calc_alpha_beta_crossover instead of being a
+# │       second set of hand-typed numbers that drifted from the rows.
+# │ Show: Effective collective-launch alpha ranges, registry bandwidths, and
+# │       the computed latency/bandwidth crossover size per interconnect.
+# │ How: Alpha ranges are EFFECTIVE collective-launch values (software stack
+# │      included) — pedagogical assumptions consistent with the chapter's
+# │      wire-vs-effective discussion; the registry holds wire latencies
+# │      (Tech.Interconnect, Fabrics) and two effective anchors
+# │      (SwitchFabric.AlphaNdr/AlphaRoce). A single alpha canon is a pending
+# │      registry ruling (2026-06 audit); until then the ranges live here as
+# │      documented LOAD assumptions.
+# │
+# │ Imports: mlsysim registries + calc_alpha_beta_crossover + fmt helpers
+# │ Exports: InterconnectAlphaBeta.* (_str per table cell)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import calc_alpha_beta_crossover
+from mlsysim.fmt import fmt_qty, fmt_qty_range, fmt_bandwidth, check
+
+class InterconnectAlphaBeta:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Effective collective-launch alpha ranges (scenario assumptions; see How)
+    nvlink_alpha_lo, nvlink_alpha_hi = 1 * microsecond, 2 * microsecond
+    ndr_alpha_lo, ndr_alpha_hi = 1 * microsecond, 3 * microsecond
+    hdr_alpha_lo, hdr_alpha_hi = 2 * microsecond, 5 * microsecond
+    pcie_alpha_lo, pcie_alpha_hi = 2 * microsecond, 5 * microsecond
+    roce_alpha_lo, roce_alpha_hi = 5 * microsecond, 10 * microsecond
+    # Registry bandwidths
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    ndr_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
+    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
+    roce_bw = Systems.Fabrics.Ethernet_100G.bandwidth
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Crossover at the alpha midpoint of each range: n* = alpha * beta
+    nvlink_nstar = calc_alpha_beta_crossover((nvlink_alpha_lo + nvlink_alpha_hi) / 2, nvlink_bw)
+    ndr_nstar = calc_alpha_beta_crossover((ndr_alpha_lo + ndr_alpha_hi) / 2, ndr_bw)
+    hdr_nstar = calc_alpha_beta_crossover((hdr_alpha_lo + hdr_alpha_hi) / 2, hdr_bw)
+    pcie_nstar = calc_alpha_beta_crossover((pcie_alpha_lo + pcie_alpha_hi) / 2, pcie_bw)
+    roce_nstar = calc_alpha_beta_crossover((roce_alpha_lo + roce_alpha_hi) / 2, roce_bw)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(nvlink_nstar > 1 * MB, "NVLink crossover should exceed 1 MB — intra-node stays latency-bound up to ~MB messages")
+    check(ndr_nstar < 200 * KB, "Inter-node fabrics should cross over near 100 KB")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    nvlink_alpha_range_str = fmt_qty_range(nvlink_alpha_lo, nvlink_alpha_hi, microsecond, precision=0, commas=False)
+    ndr_alpha_range_str = fmt_qty_range(ndr_alpha_lo, ndr_alpha_hi, microsecond, precision=0, commas=False)
+    hdr_alpha_range_str = fmt_qty_range(hdr_alpha_lo, hdr_alpha_hi, microsecond, precision=0, commas=False)
+    pcie_alpha_range_str = fmt_qty_range(pcie_alpha_lo, pcie_alpha_hi, microsecond, precision=0, commas=False)
+    roce_alpha_range_str = fmt_qty_range(roce_alpha_lo, roce_alpha_hi, microsecond, precision=0, commas=False)
+    nvlink_bw_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    ndr_bw_str = fmt_bandwidth(ndr_bw, unit=GB / second, precision=0, commas=False)
+    hdr_bw_str = fmt_bandwidth(hdr_bw, unit=GB / second, precision=0, commas=False)
+    pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
+    roce_bw_str = fmt_bandwidth(roce_bw, unit=GB / second, precision=1, commas=False)
+    nvlink_nstar_str = fmt_qty(nvlink_nstar, MB, precision=1, commas=False, approx=True)
+    ndr_nstar_str = fmt_qty(ndr_nstar, KB, precision=0, commas=False, approx=True)
+    hdr_nstar_str = fmt_qty(hdr_nstar, KB, precision=1, commas=False, approx=True)
+    pcie_nstar_str = fmt_qty(pcie_nstar, KB, precision=0, commas=False, approx=True)
+    roce_nstar_str = fmt_qty(roce_nstar, KB, precision=1, commas=False, approx=True)
+```
+
+| **Interconnect**             |                  **Latency ($\alpha$)**                 |                **Bandwidth ($\beta$)**                 |             **Critical Size ($n^*$)**             |
+|:-----------------------------|:-------------------------------------------------------:|:------------------------------------------------------:|:-------------------------------------------------:|
+| **NVLink 4.0 (intra-node)**  | `{python} InterconnectAlphaBeta.nvlink_alpha_range_str` |     `{python} InterconnectAlphaBeta.nvlink_bw_str`     | `{python} InterconnectAlphaBeta.nvlink_nstar_str` |
+| **InfiniBand NDR 400 Gbps**  |   `{python} InterconnectAlphaBeta.ndr_alpha_range_str`  | `{python} InterconnectAlphaBeta.ndr_bw_str` (per port) |   `{python} InterconnectAlphaBeta.ndr_nstar_str`  |
+| **InfiniBand HDR 200 Gbps**  |   `{python} InterconnectAlphaBeta.hdr_alpha_range_str`  |      `{python} InterconnectAlphaBeta.hdr_bw_str`       |   `{python} InterconnectAlphaBeta.hdr_nstar_str`  |
+| **PCIe Gen5 (GPU↔CPU)**      |  `{python} InterconnectAlphaBeta.pcie_alpha_range_str`  |      `{python} InterconnectAlphaBeta.pcie_bw_str`      |  `{python} InterconnectAlphaBeta.pcie_nstar_str`  |
+| **Ethernet 100 Gbps (RoCE)** |  `{python} InterconnectAlphaBeta.roce_alpha_range_str`  |      `{python} InterconnectAlphaBeta.roce_bw_str`      |  `{python} InterconnectAlphaBeta.roce_nstar_str`  |
+
+: **Interconnect Performance Parameters**: Effective per-message launch latency ($\alpha$, including the software stack), registry link bandwidth ($\beta$), and the computed crossover size $n^* = \alpha \cdot \beta$ at each row's $\alpha$ midpoint, where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
 
 Applying the critical message size formula to a concrete workload reveals which optimization strategy matters most:
 
