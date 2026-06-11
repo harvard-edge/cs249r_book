@@ -713,30 +713,43 @@ This binary allocation model creates a significant inefficiency for inference wo
 # │ How: Read each device's memory capacity from the Hardware registry and
 # │      render the branded capacity label.
 # │
-# │ Imports: mlsysim (Hardware), mlsysim.core.units (GiB), mlsysim.fmt (fmt_memory_capacity)
-# │ Exports: ClusterEconomicsMigRecap.a100_mem_gb_str, h100_mem_gb_str
+# │ Imports: mlsysim (Hardware), mlsysim.core.units (GiB, GB), mlsysim.fmt (fmt_memory_capacity)
+# │ Exports: ClusterEconomicsMigRecap.a100_mem_gb_str, h100_mem_gb_str,
+# │          and per-MIG-profile mig_<slice>_mem_str / mig_<slice>_sm_str (table cells)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import GiB
+from mlsysim.core.units import GiB, GB
 from mlsysim.fmt import fmt, fmt_memory_capacity, fmt_qty
 
 class ClusterEconomicsMigRecap:
     from mlsysim import Hardware
 
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
+    _mig = {p.name: p for p in Hardware.Cloud.A100.mig_profiles}
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.A100.memory.capacity, unit=GiB, precision=0, commas=False)
     h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+    # @tbl-fleet-orchestration-mig-profiles cells (GPU memory + SM count per profile)
+    mig_1g_mem_str = fmt_qty(_mig["1g.10gb"].gpu_memory, GB, precision=0, commas=False)
+    mig_1g_sm_str = fmt(_mig["1g.10gb"].sm_count, precision=0, commas=False)
+    mig_2g_mem_str = fmt_qty(_mig["2g.20gb"].gpu_memory, GB, precision=0, commas=False)
+    mig_2g_sm_str = fmt(_mig["2g.20gb"].sm_count, precision=0, commas=False)
+    mig_3g_mem_str = fmt_qty(_mig["3g.40gb"].gpu_memory, GB, precision=0, commas=False)
+    mig_3g_sm_str = fmt(_mig["3g.40gb"].sm_count, precision=0, commas=False)
+    mig_7g_mem_str = fmt_qty(_mig["7g.80gb"].gpu_memory, GB, precision=0, commas=False)
+    mig_7g_sm_str = fmt(_mig["7g.80gb"].sm_count, precision=0, commas=False)
 ```
 
 **Multi-Instance GPU (MIG)**[^fn-mig-isolation] technology addresses this inefficiency by partitioning A100 (`{python} ClusterEconomicsMigRecap.a100_mem_gb_str`) and H100 (`{python} ClusterEconomicsMigRecap.h100_mem_gb_str`) GPUs into hardware-isolated instances. Unlike software-based GPU sharing, MIG dedicates memory, cache, and compute resources to each instance, preventing one workload from interfering with another and eliminating the noisy neighbor[^fn-noisy-neighbor-etymology] effect. The A100 MIG profiles\index{MIG!A100 profiles} in @tbl-fleet-orchestration-mig-profiles show the scheduling consequence: a single physical A100 becomes several fixed-size resources that the device plugin can expose as independently schedulable accelerators.
 
 [^fn-mig-isolation]: **Multi-Instance GPU (MIG)**\index{MIG!GPU isolation}: Introduced with the A100 (2020), MIG partitions a single GPU into up to 7 hardware-isolated instances with dedicated memory controllers, L2 cache slices, and compute units. The isolation is enforced at the hardware level, not by time-slicing, eliminating the noisy-neighbor interference that degrades P99 latency by 10 to 20 percent under software sharing. The trade-off is rigidity: partition profiles cannot change without draining all workloads, making MIG poorly suited for clusters with rapidly shifting workload mixes.
 
-| **MIG Profile** | **GPU Memory** | **SM Count** | **Typical Workload** |
-|:----------------|:--------------:|:------------:|:--------------------:|
-| **1g.10gb**     |     10 GB      |    14 SMs    |   Small inference    |
-| **2g.20gb**     |     20 GB      |    28 SMs    |   Medium inference   |
-| **3g.40gb**     |     40 GB      |    42 SMs    |   Large inference    |
-| **7g.80gb**     |     80 GB      |    98 SMs    |       Training       |
+| **MIG Profile** |                   **GPU Memory**                   |                      **SM Count**                     | **Typical Workload** |
+|:----------------|:--------------------------------------------------:|:-----------------------------------------------------:|:--------------------:|
+| **1g.10gb**     | `{python} ClusterEconomicsMigRecap.mig_1g_mem_str` | `{python} ClusterEconomicsMigRecap.mig_1g_sm_str` SMs |   Small inference    |
+| **2g.20gb**     | `{python} ClusterEconomicsMigRecap.mig_2g_mem_str` | `{python} ClusterEconomicsMigRecap.mig_2g_sm_str` SMs |   Medium inference   |
+| **3g.40gb**     | `{python} ClusterEconomicsMigRecap.mig_3g_mem_str` | `{python} ClusterEconomicsMigRecap.mig_3g_sm_str` SMs |   Large inference    |
+| **7g.80gb**     | `{python} ClusterEconomicsMigRecap.mig_7g_mem_str` | `{python} ClusterEconomicsMigRecap.mig_7g_sm_str` SMs |       Training       |
 
 : **A100 MIG Profiles**: Multi-Instance GPU configurations trade GPU memory and compute resources for increased sharing density. Each profile provides hardware-isolated resources, making MIG suitable for multi-tenant inference clusters where workloads from different teams or customers must not interfere. The SM (Streaming Multiprocessor) count determines compute throughput within each instance. {#tbl-fleet-orchestration-mig-profiles}
 
