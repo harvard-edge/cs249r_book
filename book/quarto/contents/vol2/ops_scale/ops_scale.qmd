@@ -2737,7 +2737,34 @@ $$n_{\text{sample}} = \frac{(1.96 + 0.84)^2 \times 2 \times 0.05 \times 0.95}{0.
 
 $$n_{\text{sample}} = \frac{7.84 \times 0.095}{0.000025} = \frac{0.7448}{0.000025} = 29,792$$
 
-Each variant requires approximately 30,000 samples, totaling 60,000 observations. At 1 million requests per day, this experiment requires less than 2 hours. However, for a model with 1 percent baseline CTR detecting a 5 percent relative improvement (0.05 percentage points), the calculation yields:
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-ops-scale-ab-sample-size worked example—sample size, duration.
+# │ Exports: AbSampleSize.per_variant_str, .total_str, .duration_str
+from mlsysim.fmt import fmt_count, fmt_time, check
+
+class AbSampleSize:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    z_alpha = 1.96
+    z_beta = 0.84
+    p_baseline = 0.05
+    delta = 0.005  # 0.5 percentage-point absolute effect
+    requests_per_day = 1_000_000
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    n_exact = (z_alpha + z_beta) ** 2 * 2 * p_baseline * (1 - p_baseline) / delta**2
+    n_per_variant = round(n_exact, -3)  # ≈ 30,000 (reader-facing rounding)
+    n_total = 2 * n_per_variant
+    duration_h = n_total / requests_per_day * 24
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(n_per_variant == 30_000 and n_total == 60_000, "Sample-size drift")
+    check(duration_h < 2, f"Duration {duration_h}h exceeds 2h")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    per_variant_str = fmt_count(n_per_variant, commas=True, label="sample")
+    total_str = fmt_count(n_total, commas=True, label="observation")
+```
+
+Each variant requires approximately `{python} AbSampleSize.per_variant_str`, totaling `{python} AbSampleSize.total_str`. At 1 million requests per day, this experiment requires less than 2 hours. However, for a model with 1 percent baseline CTR detecting a 5 percent relative improvement (0.05 percentage points), the calculation yields:
 
 $$n_{\text{sample}} = \frac{7.84 \times 2 \times 0.01 \times 0.99}{0.0005^2} = \frac{0.1552}{0.00000025} = 620,800$$
 
@@ -2799,7 +2826,30 @@ Metric selection can mislead when surrogate metrics (clicks, engagement) do not 
 
 #### Worked example: Multiple testing scenario {#sec-ml-operations-scale-worked-example-multiple-testing-scenario-ce6c}
 
-A platform team runs 30 A/B tests per quarter comparing candidate models. Using $\alpha_{\text{sig}} = 0.05$ without correction, expect $30 \times 0.05 = 1.5$ false positives per quarter. Over a year, expect approximately 6 models falsely identified as improvements, wasting engineering effort on deployments that provide no actual value.
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: multiple-testing worked example—false positives per quarter/year.
+# │ Exports: MultipleTestingFp.per_quarter_eq_math, .per_year_str
+from mlsysim.fmt import fmt, fmt_math, fmt_count, check
+
+class MultipleTestingFp:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    tests_per_quarter = 30
+    alpha_sig = 0.05
+    quarters_per_year = 4
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    fp_per_quarter = tests_per_quarter * alpha_sig
+    fp_per_year = round(fp_per_quarter * quarters_per_year)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(fp_per_quarter == 1.5 and fp_per_year == 6, "False-positive drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    tests_per_quarter_str = fmt(tests_per_quarter, precision=0, commas=False)
+    per_quarter_eq_math = fmt_math(rf"{fmt(tests_per_quarter, precision=0)} \times {alpha_sig} = {fmt(fp_per_quarter, precision=1)}")
+    per_year_str = fmt_count(fp_per_year, commas=False, label="model")
+```
+
+A platform team runs `{python} MultipleTestingFp.tests_per_quarter_str` A/B tests per quarter comparing candidate models. Using $\alpha_{\text{sig}} = 0.05$ without correction, expect `{python} MultipleTestingFp.per_quarter_eq_math` false positives per quarter. Over a year, expect approximately `{python} MultipleTestingFp.per_year_str` falsely identified as improvements, wasting engineering effort on deployments that provide no actual value.
 
 Applying Bonferroni correction: $\alpha_{\text{sig}}' = \frac{0.05}{30} = 0.00167$ per test. This requires larger sample sizes. For the recommendation model example above (5 percent baseline, 0.5pp effect), original requirement was 30K samples per variant. With a two-sided Bonferroni threshold, the critical value rises to about 3.14, increasing the requirement to roughly 60K samples per variant.
 
