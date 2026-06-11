@@ -1546,11 +1546,74 @@ This mechanism becomes essential for Mixture-of-Experts (MoE) models. Unlike the
 
 Congestion control and adaptive routing manage flows that traverse the interior of the fabric. A different failure mode occurs at the edge, where the traffic pattern itself overwhelms a single port regardless of how much capacity the fabric interior provides.
 
+```{python}
+#| echo: false
+#| label: network-fabrics-incast-burst
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INCAST BURST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @dfn-network-fabrics-incast — the incast significance bullet, and
+# │          the SuperPOD scalable-unit injection bandwidth (@sec-network-fabrics-dgx-superpod).
+# │
+# │ Goal: Quantify the many-to-one incast burst onto one switch egress port.
+# │ Show: 256 senders × 50 GB/s = 12.8 TB/s offered; 400 Gb/s port; 32 MB
+# │       buffer holds 640 μs of one egress stream; net fill 12.75 TB/s after
+# │       subtracting one egress port; overflow in ~2.5 μs; 256× oversubscription.
+# │ How: offered = n_senders × beta; port = Ethernet_400G; buffer/egress and
+# │      buffer/(offered − egress) give hold and overflow times.
+# │
+# │ Imports: mlsysim registries (Systems) + fmt helpers
+# │ Exports: IncastBurst.n_senders_str, .sender_bw_gb_per_s_str, .offered_tb_per_s_str,
+# │          .port_gbit_per_s_str, .buffer_mb_str, .buffer_hold_us_str,
+# │          .oversub_mult_str, .net_fill_tb_per_s_str, .egress_gb_per_s_str,
+# │          .overflow_us_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_count, fmt_qty, fmt_bandwidth, fmt_multiple, fmt_time, check
+
+class IncastBurst:
+    """Many-to-one incast burst onto a single switch egress port."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    su_nodes = 32  # scenario assumption: SuperPOD scalable unit (32 DGX nodes)
+    gpus_per_node = Systems.Clusters.Training_1K.node.accelerators_per_node  # 8 GPUs per DGX node
+    n_senders = su_nodes * gpus_per_node  # 256 scalable-unit GPUs (one per egress)
+    sender_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port (per direction)
+    egress_port = Systems.Fabrics.Ethernet_400G.bandwidth  # 400 Gb/s (50 GB/s) egress port
+    buffer = 32 * MB  # scenario assumption: switch egress buffer
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    offered = n_senders * sender_bw
+    oversub = (offered / egress_port).to_base_units().magnitude
+    buffer_hold = buffer / egress_port  # time one egress stream takes to drain the buffer
+    net_fill = offered - egress_port  # fill rate after the single egress port drains
+    overflow = buffer / net_fill
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(offered.to(TB / second).magnitude - 12.8) < 1e-6, "256 × 50 GB/s should be 12.8 TB/s")
+    check(round(oversub) == 256, "Offered load should oversubscribe the egress port 256×")
+    check(abs(buffer_hold.to(microsecond).magnitude - 640) < 1e-3, "32 MB / 50 GB/s should be 640 μs")
+    check(overflow.to(microsecond).magnitude < 5, "Buffer should overflow in a few microseconds")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_senders_str = fmt_count(n_senders, commas=False)
+    su_nodes_str = fmt_count(su_nodes, commas=False, label="node")
+    n_senders_gpus_str = fmt_count(n_senders, commas=False, label="GPU")
+    sender_bw_gb_per_s_str = fmt_qty(sender_bw, GB / second, precision=0, commas=False)
+    offered_tb_per_s_str = fmt_qty(offered, TB / second, precision=1, commas=False)
+    port_gbit_per_s_str = fmt_bandwidth(egress_port, unit=Gbps, precision=0, commas=False)
+    egress_gb_per_s_str = fmt_qty(egress_port, GB / second, precision=0, commas=False)
+    buffer_mb_str = fmt_qty(buffer, MB, precision=0, commas=False)
+    buffer_hold_us_str = fmt_time(buffer_hold, microsecond, precision=0, commas=False)
+    oversub_mult_str = fmt_multiple(oversub, precision=0, commas=False)
+    net_fill_tb_per_s_str = fmt_qty(net_fill, TB / second, precision=2, commas=False)
+    overflow_us_str = fmt_time(overflow, microsecond, precision=1, commas=False)
+```
+
 ::: {#dfn-network-fabrics-incast .callout-definition title="Incast"}
 
 ***Incast***\index{Incast}\index{Incast!definition} is a many-to-one ML cluster traffic pattern in which a large number of senders simultaneously transmit data to a single receiver port, concentrating line-rate traffic from multiple sources into a single switch queue and causing buffer overflow even when the rest of the fabric is uncongested.
 
-1.  **Significance (quantitative)**: In the reduce phase of AllReduce, every participating GPU simultaneously sends gradients toward the same aggregation points. With 256 senders each at 50 GB/s targeting one switch port, the instantaneous incast reaches 12.8 TB/s, orders of magnitude above a 400 Gb/s port's absorption capacity. A 32 MB switch buffer holds about 640 μs of one 400 Gb/s egress stream, but under 256-to-1 incast the net fill rate is roughly 12.75 TB/s after subtracting the single 50 GB/s egress port, so overflow arrives in about 2.5 μs. That sudden overflow triggers either PFC cascade or packet drops that elevate $L_{\text{lat}}$ cluster-wide.
+1.  **Significance (quantitative)**: In the reduce phase of AllReduce, every participating GPU simultaneously sends gradients toward the same aggregation points. With `{python} IncastBurst.n_senders_str` senders each at `{python} IncastBurst.sender_bw_gb_per_s_str` targeting one switch port, the instantaneous incast reaches `{python} IncastBurst.offered_tb_per_s_str`, orders of magnitude above a `{python} IncastBurst.port_gbit_per_s_str` port's absorption capacity. A `{python} IncastBurst.buffer_mb_str` switch buffer holds about `{python} IncastBurst.buffer_hold_us_str` of one `{python} IncastBurst.port_gbit_per_s_str` egress stream, but under `{python} IncastBurst.oversub_mult_str` incast the net fill rate is roughly `{python} IncastBurst.net_fill_tb_per_s_str` after subtracting the single `{python} IncastBurst.egress_gb_per_s_str` egress port, so overflow arrives in about `{python} IncastBurst.overflow_us_str`. That sudden overflow triggers either PFC cascade or packet drops that elevate $L_{\text{lat}}$ cluster-wide.
 2.  **Observation**: Unlike general congestion (which occurs on shared internal links when aggregate traffic exceeds link capacity), incast is an endpoint bottleneck: it occurs even if every internal spine and leaf link is completely uncongested, because the bottleneck is the single destination port, not the fabric interior.
 3.  **Pitfall**: A frequent misconception is that incast is rare or unpredictable. Because ML training synchronizes all GPUs at each backward pass, incast is a deterministic event at the end of every layer's gradient computation—it occurs hundreds of times per training step and must be architecturally mitigated through layer-staggered AllReduce or tree-based collective algorithms, not treated as an edge case.
 
@@ -1603,7 +1666,7 @@ The bandwidth hierarchy plotted in @fig-bandwidth-hierarchy dictates the paralle
 
 ### Case study: NVIDIA DGX SuperPOD {#sec-network-fabrics-dgx-superpod}
 
-The NVIDIA DGX SuperPOD architecture connects DGX H100 nodes using a two-tier InfiniBand network, serving as a concrete implementation of the Gradient Bus concept. Each node acts as a dense compute island, with eight H100 GPUs connected via NVSwitch to provide `{python} NetworkFabricsClusterRecap.nvlink_h100_gb_per_s_str` of internal bandwidth. Externally, each GPU pairs with a ConnectX-7 NIC delivering `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` of injection bandwidth. Across a standard scalable unit of 32 nodes (256 GPUs), this yields an aggregate injection bandwidth of 12.8 TB/s ($256 \times 50$ GB/s), ensuring the fabric can ingest gradients as fast as the accelerators produce them.
+The NVIDIA DGX SuperPOD architecture connects DGX H100 nodes using a two-tier InfiniBand network, serving as a concrete implementation of the Gradient Bus concept. Each node acts as a dense compute island, with eight H100 GPUs connected via NVSwitch to provide `{python} NetworkFabricsClusterRecap.nvlink_h100_gb_per_s_str` of internal bandwidth. Externally, each GPU pairs with a ConnectX-7 NIC delivering `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` of injection bandwidth. Across a standard scalable unit of `{python} IncastBurst.su_nodes_str` (`{python} IncastBurst.n_senders_gpus_str`), this yields an aggregate injection bandwidth of `{python} IncastBurst.offered_tb_per_s_str` (`{python} IncastBurst.n_senders_str` $\times$ `{python} IncastBurst.sender_bw_gb_per_s_str`), ensuring the fabric can ingest gradients as fast as the accelerators produce them.
 
 This architecture explicitly instantiates the five-level model constructed in this chapter. At Level 1, it minimizes latency by using passive copper (DAC) within the rack and active optics only for spine connections. At Level 2, it relies on InfiniBand's native credit-based flow control to guarantee a lossless medium without the fragility of Ethernet PFC. Level 3 implements a rail-optimized fat-tree: all GPU 0s across the cluster connect to the same leaf switch group, ensuring that bandwidth-hungry same-rank data-parallel AllReduce traffic traverses only a single switch hop. At Level 4, hardware-based adaptive routing sprays packets across all spine links to maximize $\text{BW}_{\text{bisect}}$ for cross-rank communication. At Level 5, the design is modular: multiple SuperPODs connect via a core switching layer to form massive clusters. For our 175B-parameter model, the physical infrastructure would consist of approximately four SuperPOD units wired together, allowing 1,024 GPUs to function as a single synchronous instrument.
 
