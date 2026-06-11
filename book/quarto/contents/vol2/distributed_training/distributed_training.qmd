@@ -1596,7 +1596,9 @@ from mlsysim.solvers import DistributedModel
 # │          ScalingWorkers.speedup_ssp_mult_str, ScalingWorkers.lr_ssp_str,
 # │          ScalingWorkers.base_iters_k_str, ScalingWorkers.base_batch_str,
 # │          ScalingWorkers.n_workers_8_str, ScalingWorkers.n_workers_64_str,
-# │          ScalingWorkers.ssp_staleness_str, ScalingWorkers.critical_batch_str
+# │          ScalingWorkers.ssp_staleness_str, ScalingWorkers.critical_batch_str,
+# │          ScalingWorkers.base_factor_str, ScalingWorkers.comm_8bsp_mult_str,
+# │          ScalingWorkers.comm_64bsp_mult_str, ScalingWorkers.comm_ssp_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt_int, check, fmt, MarkdownStr, fmt_percent, fmt_count, fmt_time, fmt_usd
@@ -1683,6 +1685,13 @@ class ScalingWorkers:
     iter_s_64bsp_str = fmt_time(iter_s_64bsp, 'second', precision=2, commas=False)
     iter_s_64ssp_str = fmt_time(iter_s_64ssp, 'second', precision=2, commas=False)
 
+    # Speedup-formula operands (Tier-1 calc lines): base wall-clock factor,
+    # the (1 + comm) wall-clock multipliers, and the staleness denominator.
+    base_factor_str = MarkdownStr("1.0")
+    comm_8bsp_mult_str = fmt_multiple(1 + comm_8bsp, precision=2, commas=False)
+    comm_64bsp_mult_str = fmt_multiple(1 + comm_64bsp, precision=2, commas=False)
+    comm_ssp_mult_str = fmt_multiple(1 + comm_ssp, precision=2, commas=False)
+
     # Per-row exports for @tbl-scaling-bsp-ssp
     base_iters_tbl_str = fmt(base_iters, precision=0)
     actual_8bsp_tbl_str = fmt(actual_8bsp, precision=0)
@@ -1702,31 +1711,31 @@ class ScalingWorkers:
 
 **8 Workers (BSP)**
 
-- Effective batch size: $B = 8 \times 32 =$ `{python} ScalingWorkers.batch_8_str`
+- Effective batch size: $B =$ `{python} ScalingWorkers.n_workers_8_str` $\times$ `{python} ScalingWorkers.base_batch_str` = `{python} ScalingWorkers.batch_8_str`
 - Learning rate: $\eta =$ `{python} ScalingWorkers.n_workers_8_str` $\times \eta_{\text{base}}$ (linear scaling with warmup)
-- Expected iterations: $100K/8 =$ `{python} ScalingWorkers.exp_iter_8_str` iterations
+- Expected iterations: `{python} ScalingWorkers.base_iters_k_str` $/$ `{python} ScalingWorkers.n_workers_8_str` = `{python} ScalingWorkers.exp_iter_8_str` iterations
 - Convergence: Reaches target perplexity in `{python} ScalingWorkers.actual_8bsp_k_str` iterations (`{python} ScalingWorkers.sample_eff_8_str` efficiency)
 - Communication overhead: `{python} ScalingWorkers.comm_8bsp_pct_str` (NVLink intra-node)
-- Wall-clock speedup: $100K \times 1.0 / (12.8K \times 1.15) =$ `{python} ScalingWorkers.speedup_8_mult_str`
+- Wall-clock speedup: `{python} ScalingWorkers.base_iters_k_str` $\times$ `{python} ScalingWorkers.base_factor_str` $/$ (`{python} ScalingWorkers.actual_8bsp_k_str` $\times$ `{python} ScalingWorkers.comm_8bsp_mult_str`) = `{python} ScalingWorkers.speedup_8_mult_str`
 
 **64 Workers (BSP)**
 
-- Effective batch size: $B = 64 \times 32 =$ `{python} ScalingWorkers.batch_64_str`
+- Effective batch size: $B =$ `{python} ScalingWorkers.n_workers_64_str` $\times$ `{python} ScalingWorkers.base_batch_str` = `{python} ScalingWorkers.batch_64_str`
 - Learning rate ($N =$ `{python} ScalingWorkers.n_workers_64_str` workers): $\eta = N \times \eta_{\text{base}}$ (if $B < B^*$) or $\eta = \sqrt{N} \times \eta_{\text{base}}$ (if $B > B^*$)
 - Assuming $B^* \approx$ `{python} ScalingWorkers.critical_batch_str` (below critical): Linear scaling applies
-- Expected iterations: $100K/64 =$ `{python} ScalingWorkers.exp_iter_64_str` iterations
+- Expected iterations: `{python} ScalingWorkers.base_iters_k_str` $/$ `{python} ScalingWorkers.n_workers_64_str` = `{python} ScalingWorkers.exp_iter_64_str` iterations
 - Convergence: Reaches target perplexity in `{python} ScalingWorkers.actual_64bsp_k_str` iterations (`{python} ScalingWorkers.sample_eff_64_str` efficiency)
 - Communication overhead: `{python} ScalingWorkers.comm_64bsp_pct_str` (InfiniBand inter-node, `{python} ScalingWorkers.n_nodes_64_str`)
-- Wall-clock speedup: $100K \times 1.0 / (1.72K \times 1.45) =$ `{python} ScalingWorkers.speedup_64_mult_str`
+- Wall-clock speedup: `{python} ScalingWorkers.base_iters_k_str` $\times$ `{python} ScalingWorkers.base_factor_str` $/$ (`{python} ScalingWorkers.actual_64bsp_k_str` $\times$ `{python} ScalingWorkers.comm_64bsp_mult_str`) = `{python} ScalingWorkers.speedup_64_mult_str`
 
 **SSP workers**: `{python} ScalingWorkers.n_workers_64_str` workers ($s =$ `{python} ScalingWorkers.ssp_staleness_str`)
 
 - Same effective batch size: $B =$ `{python} ScalingWorkers.batch_64_str`
-- Learning rate: $\eta' = \eta_{\text{BSP}} / \sqrt{1 + 4} \approx$ `{python} ScalingWorkers.lr_ssp_str` $\times \eta_{\text{BSP}}$
+- Learning rate: $\eta' = \eta_{\text{BSP}} / \sqrt{1 + s}$ with $s =$ `{python} ScalingWorkers.ssp_staleness_str`, giving $\eta' \approx$ `{python} ScalingWorkers.lr_ssp_str` $\times \eta_{\text{BSP}}$
 - Expected iterations: Higher due to staleness penalty
 - Convergence: Reaches target perplexity in `{python} ScalingWorkers.actual_ssp_k_str` iterations (`{python} ScalingWorkers.sample_eff_ssp_str` efficiency)
 - Communication overhead: `{python} ScalingWorkers.comm_ssp_pct_str` (reduced synchronization)
-- Wall-clock speedup: $100K \times 1.0 / (2.1K \times 1.25) =$ `{python} ScalingWorkers.speedup_ssp_mult_str`
+- Wall-clock speedup: `{python} ScalingWorkers.base_iters_k_str` $\times$ `{python} ScalingWorkers.base_factor_str` $/$ (`{python} ScalingWorkers.actual_ssp_k_str` $\times$ `{python} ScalingWorkers.comm_ssp_mult_str`) = `{python} ScalingWorkers.speedup_ssp_mult_str`
 
 **Analysis** (@tbl-scaling-bsp-ssp)
 
