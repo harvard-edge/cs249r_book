@@ -1018,10 +1018,11 @@ The choice of optimization algorithm creates specific patterns of computation an
 # │ Imports: mlsysim (Hardware, Models), mlsysim.core.units (Bparam,
 # │          BYTES_FP32, BYTES_FP16, GB), mlsysim.book (fmt)
 # │ Exports: param_fp32_gb_str, grad_fp32_gb_str, adam_state_gb_str,
-# │          total_static_fp32_gb_str, total_static_amp_gb_str, v100_mem_gib_str
+# │          total_static_fp32_gb_str, total_static_amp_gb_str, v100_mem_gib_str,
+# │          bytes_fp32_value_str, adam_bytes_value_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import check, fmt_memory, fmt_params
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Optimizer:
@@ -1036,6 +1037,10 @@ class GPT2Optimizer:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     model_params = model.parameters
+
+    # Per-parameter byte widths (FP32 master copy; Adam keeps two FP32 states)
+    bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
+    adam_bytes = int((2 * BYTES_FP32).to(byte).magnitude)
 
     # FP32 Baseline
     param_fp32 = model.size_in_bytes(BYTES_FP32)
@@ -1053,6 +1058,8 @@ class GPT2Optimizer:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_params_b_str = fmt_params(model_params)
+    bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
+    adam_bytes_value_str = fmt(adam_bytes, precision=0, commas=False)
     param_fp32_gb_str = fmt_memory(param_fp32, unit=GB, precision=0, commas=False)
     grad_fp32_gb_str = fmt_memory(grad_fp32, unit=GB, precision=0, commas=False)
     adam_state_gb_str = fmt_memory(adam_m_fp32 + adam_v_fp32, unit=GB, precision=0, commas=False)
@@ -1075,11 +1082,11 @@ A representative GPT-2 XL training configuration uses the Adam optimizer with fi
 
 **Memory Overhead Calculation**\index{Adam Optimizer!memory overhead}
 
-For GPT-2's `{python} GPT2Optimizer.model_params_b_str` parameters in FP32 (4 bytes each), the memory breaks down across four components:
+For GPT-2's `{python} GPT2Optimizer.model_params_b_str` parameters in FP32 (`{python} GPT2Optimizer.bytes_fp32_value_str` bytes each), the memory breaks down across four components:
 
-- Parameters: `{python} GPT2Optimizer.model_params_b_str` $\times$ 4 bytes = `{python} GPT2Optimizer.param_fp32_gb_str`
-- Gradients: `{python} GPT2Optimizer.model_params_b_str` $\times$ 4 bytes = `{python} GPT2Optimizer.grad_fp32_gb_str`
-- Adam State (m, v): `{python} GPT2Optimizer.model_params_b_str` $\times$ 8 bytes = `{python} GPT2Optimizer.adam_state_gb_str`
+- Parameters: `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.bytes_fp32_value_str` bytes = `{python} GPT2Optimizer.param_fp32_gb_str`
+- Gradients: `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.bytes_fp32_value_str` bytes = `{python} GPT2Optimizer.grad_fp32_gb_str`
+- Adam State (m, v): `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.adam_bytes_value_str` bytes = `{python} GPT2Optimizer.adam_state_gb_str`
 - Total static memory: `{python} GPT2Optimizer.total_static_fp32_gb_str`
 
 This explains why GPT-2's `{python} GPT2Optimizer.total_static_fp32_gb_str` static training state alone approaches the `{python} GPT2Optimizer.v100_mem_gib_str` capacity of a V100 before activation storage is counted.
