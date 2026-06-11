@@ -2044,7 +2044,32 @@ class TensorCorePrecisionRecap:
 
 : **Precision Formats and Hardware Throughput on H100**: The table uses dense peak throughput where Tensor Core support exists; structured sparsity can roughly double several of these advertised peaks. The choice of precision affects both the training dynamics (convergence, numerical stability) and the infrastructure requirements (memory capacity, bandwidth utilization). TF32 preserves the FP32 exponent width but reduces mantissa precision so Tensor Cores can accelerate common FP32 training workloads. {#tbl-precision-throughput}
 
-The infrastructure implications are substantial. A fleet designed for BF16 training, a common baseline for large models, delivers `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` per GPU on an H100. The same fleet running FP8 training delivers `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str` per GPU, effectively doubling the compute density without additional hardware. For a 10,000-GPU cluster priced at roughly \$350,000 per 8-GPU node, the difference between BF16 and FP8 training is equivalent to adding another 10,000 GPUs, or roughly \$440 million in node hardware.
+```{python}
+#| echo: false
+from mlsysim import Infrastructure, Systems
+from mlsysim.fmt import fmt_int, fmt_usd
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: Fp8CostEquivalence.cluster_gpus_str, gpus_per_node_str,
+# │          node_price_str, total_musd_str
+class Fp8CostEquivalence:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators  # 10K reference cluster
+    gpus_per_node = 8  # DGX H100 node (8 accelerators)
+    node_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate  # $350k CapEx ref
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    nodes = cluster_gpus // gpus_per_node
+    total_usd = nodes * node_price
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    cluster_gpus_str = fmt_int(cluster_gpus)
+    gpus_per_node_str = fmt_int(gpus_per_node)
+    node_price_str = fmt_usd(node_price.magnitude, precision=0)
+    total_musd_str = fmt_usd(total_usd.magnitude / 1e6, precision=0)
+```
+
+The infrastructure implications are substantial. A fleet designed for BF16 training, a common baseline for large models, delivers `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` per GPU on an H100. The same fleet running FP8 training delivers `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str` per GPU, effectively doubling the compute density without additional hardware. For a `{python} Fp8CostEquivalence.cluster_gpus_str`-GPU cluster priced at roughly `{python} Fp8CostEquivalence.node_price_str` per `{python} Fp8CostEquivalence.gpus_per_node_str`-GPU node, the difference between BF16 and FP8 training is equivalent to adding another `{python} Fp8CostEquivalence.cluster_gpus_str` GPUs, or roughly `{python} Fp8CostEquivalence.total_musd_str` million in node hardware.
 
 However, not all workloads can use FP8 without accuracy degradation. The reduced mantissa precision (3 bits in E4M3) means that values must be scaled carefully to avoid overflow (values exceeding the representable range saturate or become nonfinite, depending on format and implementation) or underflow (small values rounded to zero). The Transformer Engine's dynamic per-tensor scaling addresses this challenge for standard Transformer architectures, but custom model architectures with unusual activation distributions may require manual precision tuning. The infrastructure team must therefore work closely with the model team to determine the lowest precision that maintains acceptable accuracy, as this decision directly affects the effective throughput and therefore the required cluster size.
 
