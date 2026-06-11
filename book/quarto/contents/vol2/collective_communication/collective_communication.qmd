@@ -135,7 +135,8 @@ class AllReduceCost:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient size (BF16 = 2 bytes/param)
-    gradient_qty = m.parameters * (2 * byte / param)
+    bf16_bytes_per_param = 2
+    gradient_qty = m.parameters * (bf16_bytes_per_param * byte / param)
 
     # Use shared library formula for Ring AllReduce time
     # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha).
@@ -160,6 +161,10 @@ class AllReduceCost:
     alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
     lat_steps_str = fmt(calc_ring_allreduce_latency_steps(n_gpus), precision=0, commas=False)
     params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
+    # Gradient-size operand span: P x 10^9 params x 2 bytes/param.
+    from mlsysim.fmt import fmt_math, sci_latex
+
+    gradient_operands_math = fmt_math(rf"{sci_latex(m.parameters.magnitude, precision=0)} \times {bf16_bytes_per_param}\ \text{{bytes}}")
 ```
 
 ::: {#nbk-collective-communication-allreduce-cost-70b-model .callout-notebook title="AllReduce cost for a 70B model"}
@@ -167,7 +172,7 @@ class AllReduceCost:
 **Problem**: A `{python} AllReduceCost.params_b_str` parameter model trains with data parallelism across `{python} AllReduceCost.n_gpus_napkin_str` connected by InfiniBand NDR (`{python} AllReduceCost.ib_bw_gb_per_s_str` per port). Each GPU computes gradients in BF16 (2 bytes per parameter, common for Llama-class training). How long does one AllReduce take?
 
 **Step 1**: Size the gradient payload.
-Each GPU produces a full gradient tensor: $70 \times 10^9 \times 2\ \text{bytes} =$ `{python} AllReduceCost.gradient_size_gb_str`.
+Each GPU produces a full gradient tensor: `{python} AllReduceCost.gradient_operands_math` $=$ `{python} AllReduceCost.gradient_size_gb_str`.
 
 **Step 2**: Apply the Ring AllReduce bandwidth formula.
 $$T_{\text{bandwidth}} = 2 \cdot \frac{N-1}{N} \cdot \frac{n}{\beta}$$
@@ -473,15 +478,16 @@ Applying the critical message size formula to a concrete workload reveals which 
 ```{python}
 #| echo: false
 #| label: critical-msg-size-calc
-from mlsysim.fmt import check, fmt_qty, fmt_time
+from mlsysim.fmt import check, fmt_math, fmt_qty, fmt_time, sci_latex
 from mlsysim.core.units import GB, KB, microsecond, second
+from mlsysim import Systems
 
 class CriticalMsgSize:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    alpha_us = 2
-    beta_gbs = 50
-    alpha = alpha_us * microsecond
-    beta = beta_gbs * GB / second
+    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
+    # effective collective-launch latency (scenario assumption).
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    alpha = 2 * microsecond
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_star = (alpha * beta).to(KB)
     n_star_kb = round(n_star.to(KB).magnitude)
@@ -491,6 +497,10 @@ class CriticalMsgSize:
     alpha_us_str = fmt_time(alpha, microsecond, precision=0, commas=False)
     beta_gb_per_s_str = fmt_qty(beta, GB / second, precision=0, commas=False)
     n_star_kb_str = fmt_qty(n_star, KB, precision=0, commas=False)
+    # Operands of n* = alpha . beta as scientific-notation math spans: alpha in
+    # seconds, beta in bytes/s (so the derivation reads off the LOAD values).
+    alpha_s_sci_math = fmt_math(sci_latex(alpha.to(second).magnitude, precision=0))
+    beta_bytes_s_sci_math = fmt_math(sci_latex(beta.to("byte/s").magnitude, precision=0))
 ```
 
 ::: {#nbk-collective-communication-critical-message-size .callout-notebook title="The critical message size"}
@@ -499,7 +509,7 @@ class CriticalMsgSize:
 
 **Math**:
 
-$n^* = \alpha \cdot \beta = 2 \times 10^{-6}$ s $\times 50 \times 10^9$ B/s $=$ `{python} CriticalMsgSize.n_star_kb_str`
+$n^* = \alpha \cdot \beta =$ `{python} CriticalMsgSize.alpha_s_sci_math` s $\times$ `{python} CriticalMsgSize.beta_bytes_s_sci_math` B/s $=$ `{python} CriticalMsgSize.n_star_kb_str`
 
 **Systems insight**: Messages under `{python} CriticalMsgSize.n_star_kb_str` (like MoE tokens, pipeline activations) are **latency-bound**\index{Latency!bound}: buy lower-latency switches and reduce software overhead. Messages over `{python} CriticalMsgSize.n_star_kb_str`, such as large language model (LLM) gradients, are **bandwidth-bound**\index{Bandwidth!bound}: buy more bandwidth and compress the data. Applying the wrong optimization wastes money without improving performance.
 
@@ -788,6 +798,7 @@ To make the AllToAll pattern concrete, consider a Mixture of Experts model with 
 #| label: moe-alltoall-calc
 from mlsysim.core.units import BYTES_FP16, GB, KB, MB, microsecond, second
 from mlsysim.fmt import check, fmt, fmt_qty, fmt_time
+from mlsysim import Systems
 
 class MoeAllToAll:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -796,10 +807,11 @@ class MoeAllToAll:
     hidden_dim = 2048
     bytes_per_elem = BYTES_FP16
     n_experts = 64
-    alpha_us = 3  # IB NDR latency
-    beta_gbs = 50  # IB NDR bandwidth
-    alpha = alpha_us * microsecond
-    beta = beta_gbs * GB / second
+    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
+    # effective collective-launch latency (scenario assumption, high end of the
+    # 1-3 us NDR range the interconnect table documents).
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    alpha = 3 * microsecond
     # ┌── 2. EXECUTE ───────────────────────────────────────
     tokens_per_gpu = total_tokens // n_gpus
     experts_per_gpu = n_experts // n_gpus
@@ -854,14 +866,14 @@ class MoeAllToAll:
 Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` that need to reach `{python} MoeAllToAll.n_experts_str` different experts across `{python} MoeAllToAll.n_gpus_str` GPUs. With uniform routing, each GPU sends `{python} MoeAllToAll.tokens_per_transfer_str` to each of the other `{python} MoeAllToAll.remote_gpus_str` GPUs (keeping `{python} MoeAllToAll.tokens_per_transfer_str` local).
 
 *   Data per GPU-to-GPU transfer: `{python} MoeAllToAll.tokens_per_transfer_str` $\times$ `{python} MoeAllToAll.kb_per_token_str`/token = `{python} MoeAllToAll.data_per_transfer_kb_str`
-*   Total data sent per GPU: 7 $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
+*   Total data sent per GPU: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
 *   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
 
 **Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_us_str`, $\beta =$ `{python} MoeAllToAll.beta_gb_per_s_str`):
 
-Each of the 7 transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
+Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
 
-If serialized: 7 $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all 7 transfers run in parallel (full-duplex, non-blocking): $\approx$ `{python} MoeAllToAll.parallel_us_str`.
+If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers run in parallel (full-duplex, non-blocking): $\approx$ `{python} MoeAllToAll.parallel_us_str`.
 
 **Systems insight**: The per-transfer sizes in this MoE example sit near the critical-message-size boundary, so startup overhead remains comparable to serialization time. This is why MoE scaling is often constrained by $\alpha$ (latency), fan-out, and contention rather than raw $\beta$ (bandwidth) alone, and why MoE systems benefit from low-latency switches, RDMA, message fusion, and topology-aware routing. The AllToAll also runs twice per layer (once for token dispatch, once for result collection), doubling the startup tax.
 
