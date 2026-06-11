@@ -1117,23 +1117,122 @@ Consider a fraud detection model serving an e-commerce platform with two key inp
 
 ##### Step 1: Categorical feature analysis {.unnumbered}
 
+```{python}
+#| echo: false
+#| label: psi-country-decomposition-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PSI COUNTRY DECOMPOSITION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-psi-country-example and the PSI sum equation + prose in
+# │          @sec-robust-ai-worked-example-production-fraud-detection-model-b25b.
+# │
+# │ Goal: Decompose the user-country PSI into per-bucket contributions.
+# │ Show: Per-country difference, log-ratio, and contribution columns, plus the
+# │       total PSI (0.065) and the "Other" bucket's share of it.
+# │ How: Scenario baseline/current shares are illustrative LOAD constants; the
+# │      difference (p-q), log-ratio ln(p/q), and contribution (p-q)*ln(p/q)
+# │      are derived per bucket and summed for the total PSI.
+# │
+# │ Imports: mlsysim.fmt (check, fmt, fmt_math)
+# │ Exports: <bucket>_base_str, <bucket>_curr_str, <bucket>_diff_str,
+# │          <bucket>_logratio_str, <bucket>_contrib_str for usa/uk/germany/
+# │          france/other; psi_total_str, psi_sum_math
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import check, fmt, fmt_math
+
+def _psi_contrib(p, q):
+    """PSI bucket contribution (p - q) * ln(p / q)."""
+    return (p - q) * math.log(p / q)
+
+class CountryPSIDecomposition:
+    # ┌── 1. LOAD (scenario distributions — illustrative, not registry specs) ──
+    # (baseline share p_i, current share q_i) per country bucket.
+    usa = (0.45, 0.38)
+    uk = (0.20, 0.18)
+    germany = (0.15, 0.14)
+    france = (0.10, 0.12)
+    other = (0.10, 0.18)
+
+    # ┌── 2. EXECUTE (per-bucket decomposition + total) ───────────────────────
+    usa_contrib = _psi_contrib(*usa)
+    uk_contrib = _psi_contrib(*uk)
+    germany_contrib = _psi_contrib(*germany)
+    france_contrib = _psi_contrib(*france)
+    other_contrib = _psi_contrib(*other)
+    psi_total = usa_contrib + uk_contrib + germany_contrib + france_contrib + other_contrib
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
+    check(all(p > 0 and q > 0 for p, q in (usa, uk, germany, france, other)), "Shares must be positive")
+    check(min(usa_contrib, uk_contrib, germany_contrib, france_contrib, other_contrib) >= 0, "PSI contributions are non-negative")
+    check(0.06 < psi_total < 0.07, "Total PSI should be near 0.065 for this scenario")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    usa_base_str = fmt(usa[0], precision=2, commas=False)
+    usa_curr_str = fmt(usa[1], precision=2, commas=False)
+    usa_diff_str = fmt(usa[0] - usa[1], precision=2, commas=False)
+    usa_logratio_str = fmt(math.log(usa[0] / usa[1]), precision=3, commas=False)
+    usa_contrib_str = fmt(usa_contrib, precision=4, commas=False)
+
+    uk_base_str = fmt(uk[0], precision=2, commas=False)
+    uk_curr_str = fmt(uk[1], precision=2, commas=False)
+    uk_diff_str = fmt(uk[0] - uk[1], precision=2, commas=False)
+    uk_logratio_str = fmt(math.log(uk[0] / uk[1]), precision=3, commas=False)
+    uk_contrib_str = fmt(uk_contrib, precision=4, commas=False)
+
+    germany_base_str = fmt(germany[0], precision=2, commas=False)
+    germany_curr_str = fmt(germany[1], precision=2, commas=False)
+    germany_diff_str = fmt(germany[0] - germany[1], precision=2, commas=False)
+    germany_logratio_str = fmt(math.log(germany[0] / germany[1]), precision=3, commas=False)
+    germany_contrib_str = fmt(germany_contrib, precision=4, commas=False)
+
+    france_base_str = fmt(france[0], precision=2, commas=False)
+    france_curr_str = fmt(france[1], precision=2, commas=False)
+    france_diff_str = fmt(france[0] - france[1], precision=2, commas=False)
+    france_logratio_str = fmt(math.log(france[0] / france[1]), precision=3, commas=False)
+    france_contrib_str = fmt(france_contrib, precision=4, commas=False)
+
+    other_base_str = fmt(other[0], precision=2, commas=False)
+    other_curr_str = fmt(other[1], precision=2, commas=False)
+    other_diff_str = fmt(other[0] - other[1], precision=2, commas=False)
+    other_logratio_str = fmt(math.log(other[0] / other[1]), precision=3, commas=False)
+    other_contrib_str = fmt(other_contrib, precision=4, commas=False)
+
+    psi_total_str = fmt(psi_total, precision=3, commas=False)
+
+    # Full PSI sum identity for the display-math line (inline {python} refs do
+    # not evaluate inside $$...$$, so the whole equation is built here as _math).
+    psi_sum_math = fmt_math(
+        r"\text{PSI}_{\text{country}} = "
+        + usa_contrib_str
+        + " + "
+        + uk_contrib_str
+        + " + "
+        + germany_contrib_str
+        + " + "
+        + france_contrib_str
+        + " + "
+        + other_contrib_str
+        + " = "
+        + psi_total_str
+    )
+```
+
 @Tbl-psi-country-example compares the baseline (training) distribution and current (production) distribution for the top 5 countries.
 
-| **Country** | **Baseline ($p_i$)** | **Current ($q_i$)** | **$p_i - q_i$** | **$\ln(p_i/q_i)$** | **Contribution** |
-|:------------|:--------------------:|:-------------------:|:---------------:|:------------------:|:----------------:|
-| USA         |         0.45         |         0.38        |       0.07      |       0.169        |      0.0118      |
-| UK          |         0.20         |         0.18        |       0.02      |       0.105        |      0.0021      |
-| Germany     |         0.15         |         0.14        |       0.01      |       0.069        |      0.0007      |
-| France      |         0.10         |         0.12        |      -0.02      |       -0.182       |      0.0036      |
-| Other       |         0.10         |         0.18        |      -0.08      |       -0.588       |      0.0470      |
+| **Country** |                 **Baseline ($p_i$)**                |                 **Current ($q_i$)**                 |                   **$p_i - q_i$**                   |                    **$\ln(p_i/q_i)$**                   |                    **Contribution**                    |
+|:------------|:---------------------------------------------------:|:---------------------------------------------------:|:---------------------------------------------------:|:-------------------------------------------------------:|:------------------------------------------------------:|
+| USA         |   `{python} CountryPSIDecomposition.usa_base_str`   |   `{python} CountryPSIDecomposition.usa_curr_str`   |   `{python} CountryPSIDecomposition.usa_diff_str`   |   `{python} CountryPSIDecomposition.usa_logratio_str`   |   `{python} CountryPSIDecomposition.usa_contrib_str`   |
+| UK          |    `{python} CountryPSIDecomposition.uk_base_str`   |    `{python} CountryPSIDecomposition.uk_curr_str`   |    `{python} CountryPSIDecomposition.uk_diff_str`   |    `{python} CountryPSIDecomposition.uk_logratio_str`   |   `{python} CountryPSIDecomposition.uk_contrib_str`    |
+| Germany     | `{python} CountryPSIDecomposition.germany_base_str` | `{python} CountryPSIDecomposition.germany_curr_str` | `{python} CountryPSIDecomposition.germany_diff_str` | `{python} CountryPSIDecomposition.germany_logratio_str` | `{python} CountryPSIDecomposition.germany_contrib_str` |
+| France      |  `{python} CountryPSIDecomposition.france_base_str` |  `{python} CountryPSIDecomposition.france_curr_str` |  `{python} CountryPSIDecomposition.france_diff_str` |  `{python} CountryPSIDecomposition.france_logratio_str` | `{python} CountryPSIDecomposition.france_contrib_str`  |
+| Other       |  `{python} CountryPSIDecomposition.other_base_str`  |  `{python} CountryPSIDecomposition.other_curr_str`  |  `{python} CountryPSIDecomposition.other_diff_str`  |  `{python} CountryPSIDecomposition.other_logratio_str`  |  `{python} CountryPSIDecomposition.other_contrib_str`  |
 
-: **Country-Feature PSI Decomposition**: Per-country contribution to the total PSI for the user country feature in a production fraud-detection model. The "Other" bucket drives most of the divergence (0.0470 of the 0.065 total), reflecting growth of non-USA/UK/Germany/France traffic over six months in production. {#tbl-psi-country-example}
+: **Country-Feature PSI Decomposition**: Per-country contribution to the total PSI for the user country feature in a production fraud-detection model. The "Other" bucket drives most of the divergence (`{python} CountryPSIDecomposition.other_contrib_str` of the `{python} CountryPSIDecomposition.psi_total_str` total), reflecting growth of non-USA/UK/Germany/France traffic over six months in production. {#tbl-psi-country-example}
 
-$$
-\text{PSI}_{\text{country}} = 0.0118 + 0.0021 + 0.0007 + 0.0036 + 0.0470 = 0.065
-$$
+Summing the per-country contributions gives `{python} CountryPSIDecomposition.psi_sum_math`.
 
-The PSI of 0.065 indicates negligible drift in user country distribution, falling well below the 0.1 threshold. No action required for this feature.
+The PSI of `{python} CountryPSIDecomposition.psi_total_str` indicates negligible drift in user country distribution, falling well below the 0.1 threshold. No action required for this feature.
 
 ##### Step 2: Continuous feature analysis {.unnumbered}
 
