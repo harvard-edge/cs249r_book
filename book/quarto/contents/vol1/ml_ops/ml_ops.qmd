@@ -82,7 +82,7 @@ Operationalizing machine learning requires coordinating three distinct system bo
 
 **Model-Infrastructure Interface**\index{Model-Infrastructure Interface!environment parity}: The transition from trained weights to scalable service. The challenge is **environment parity**\index{Environment Parity!production deployment}: a model working in a notebook may fail in production due to version mismatches. Model registries and containerization (@sec-ml-operations-model-deployment-serving-63f2) package models with their operational context.
 
-**Production-Monitoring Interface**\index{Production-Monitoring Interface!feedback loop}: The feedback loop enabling self-correction. Because ML systems fail silently through drift rather than crashes, monitoring must provide statistical telemetry\index{Statistical Telemetry!ML observability} back to training. This interface determines **retraining cadence**\index{Retraining!cadence, drift-triggered decisions}: when has the world changed enough to require a new model?
+**Production-Monitoring Interface**\index{Production-Monitoring Interface!feedback loop}: The feedback loop enabling self-correction. Because ML systems fail silently through drift rather than crashes, monitoring must provide statistical telemetry\index{Statistical Telemetry!ML observability} back to training. This interface determines **retraining cadence**\index{Retraining!cadence, drift-triggered decisions}: the point at which the world has changed enough to require a new model.
 
 The infrastructure components, production operations, and maturity frameworks that follow address these three interfaces systematically.
 
@@ -1836,12 +1836,19 @@ class LatencyBudget:
     serialization_ms_str = fmt_time(serialization, 'millisecond', precision=0, commas=False)
     non_inference_ms_str = fmt_time(non_inference, 'millisecond', precision=0, commas=False)
     inference_pct_str = fmt_percent(inference_fraction, precision=0, commas=False, style='prose')
+    # Budget-share column: each component as a fraction of the total budget
+    network_share_pct_str = fmt_percent(network / total, precision=0, commas=False, style='symbol')
+    feature_fetch_share_pct_str = fmt_percent(feature_fetch / total, precision=0, commas=False, style='symbol')
+    request_parse_share_pct_str = fmt_percent(request_parse / total, precision=0, commas=False, style='symbol')
+    inference_share_pct_str = fmt_percent(inference / total, precision=0, commas=False, style='symbol')
+    post_proc_share_pct_str = fmt_percent(post_proc / total, precision=0, commas=False, style='symbol')
+    serialization_share_pct_str = fmt_percent(serialization / total, precision=0, commas=False, style='symbol')
     model_speedup_mult_str = fmt_multiple(model_speedup, precision=0, commas=False)
     new_total_after_model_speedup_ms_str = fmt_time(new_total_after_model_speedup, 'millisecond', precision=1, commas=False)
     end_to_end_speedup_mult_str = fmt_multiple(end_to_end_speedup, precision=1, commas=False)
 ```
 
-::: {#psp-ml-ops-latency-budget .callout-perspective title="The latency budget"}
+::: {#nbk-ml-ops-latency-budget .callout-notebook title="The latency budget"}
 
 **Problem**: A service has a `{python} LatencyBudget.slo_p99_ms_str` P99 SLO, and the model inference budget is `{python} LatencyBudget.inference_ms_str`. Where must the remaining `{python} LatencyBudget.non_inference_ms_str` go? @Tbl-latency-budget-components allocates the budget across the request lifecycle.
 
@@ -1851,14 +1858,14 @@ Systems thinking demands end-to-end analysis. Apply the D·A·M taxonomy to diag
 
 :::
 
-| **Component**                                     |              **Budget Share**              |                 **P99 Budget**                | **Optimization Lever**                       |
-|:--------------------------------------------------|:------------------------------------------:|:---------------------------------------------:|:---------------------------------------------|
-| **Network RTT**\index{Network RTT!latency budget} |                    15%                     |    `{python} LatencyBudget.network_ms_str`    | Edge deployment, connection pooling          |
-| **Feature retrieval**                             |                    25%                     | `{python} LatencyBudget.feature_fetch_ms_str` | Feature caching, precomputation              |
-| **Request parsing**                               |                     5%                     | `{python} LatencyBudget.request_parse_ms_str` | Binary protocols (gRPC), schema optimization |
-| **Model inference**                               | `{python} LatencyBudget.inference_pct_str` |   `{python} LatencyBudget.inference_ms_str`   | Quantization, batching, model distillation   |
-| **Postprocessing**                                |                     5%                     |   `{python} LatencyBudget.post_proc_ms_str`   | Async processing, result caching             |
-| **Response serialization**                        |                     5%                     | `{python} LatencyBudget.serialization_ms_str` | Efficient formats (Protobuf, MessagePack)    |
+| **Component**                                     |                   **Budget Share**                   |                 **P99 Budget**                | **Optimization Lever**                       |
+|:--------------------------------------------------|:----------------------------------------------------:|:---------------------------------------------:|:---------------------------------------------|
+| **Network RTT**\index{Network RTT!latency budget} |    `{python} LatencyBudget.network_share_pct_str`    |    `{python} LatencyBudget.network_ms_str`    | Edge deployment, connection pooling          |
+| **Feature retrieval**                             | `{python} LatencyBudget.feature_fetch_share_pct_str` | `{python} LatencyBudget.feature_fetch_ms_str` | Feature caching, precomputation              |
+| **Request parsing**                               | `{python} LatencyBudget.request_parse_share_pct_str` | `{python} LatencyBudget.request_parse_ms_str` | Binary protocols (gRPC), schema optimization |
+| **Model inference**                               |   `{python} LatencyBudget.inference_share_pct_str`   |   `{python} LatencyBudget.inference_ms_str`   | Quantization, batching, model distillation   |
+| **Postprocessing**                                |   `{python} LatencyBudget.post_proc_share_pct_str`   |   `{python} LatencyBudget.post_proc_ms_str`   | Async processing, result caching             |
+| **Response serialization**                        | `{python} LatencyBudget.serialization_share_pct_str` | `{python} LatencyBudget.serialization_ms_str` | Efficient formats (Protobuf, MessagePack)    |
 
 : **Latency Budget Components**: Representative allocation of a `{python} LatencyBudget.slo_p99_ms_str` P99 SLO across the request lifecycle. Model inference accounts for `{python} LatencyBudget.inference_pct_str` of total latency, leaving the majority to network, feature retrieval, parsing, postprocessing, and serialization. The optimization-lever column shows where each component can be reduced. {#tbl-latency-budget-components tbl-colwidths="[23,17,20,40]"}
 
@@ -1962,7 +1969,7 @@ Utilization targets vary by workload characteristics, reflecting the different l
 
 ##### Memory hierarchy effects {.unnumbered}
 
-Model serving performance depends critically on memory hierarchy utilization. Data must flow through multiple memory levels with vastly different bandwidths (see @sec-appdx-machine-foundations-memory-hierarchy-2278 for a comprehensive latency hierarchy across the full storage spectrum), as @tbl-gpu-memory-hierarchy quantifies. @Sec-appdx-machine-foundations-numbers-know-b531 tabulates the current accelerator specifications and HBM bandwidths these serving numbers draw on, so the values below trace back to documented per-generation memory figures rather than illustrative estimates:
+Model serving performance depends critically on memory hierarchy utilization. Data must flow through multiple memory levels with vastly different bandwidths (@sec-appdx-machine-foundations-memory-hierarchy-2278 maps the full latency hierarchy across the storage spectrum), as @tbl-gpu-memory-hierarchy quantifies. @Sec-appdx-machine-foundations-numbers-know-b531 tabulates the current accelerator specifications and HBM bandwidths these serving numbers draw on, so the values below trace back to documented per-generation memory figures rather than illustrative estimates:
 
 | **Memory Level**             | **Bandwidth** | **Typical Contents** |
 |:-----------------------------|:-------------:|:---------------------|
@@ -2447,7 +2454,7 @@ Schema validation catches structural corruption (missing columns, wrong types, n
 \newpage
 :::
 
-Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)\index{Population Stability Index!drift quantification}[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (for the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring, see @sec-appdx-data-foundations-measuring-drift-divergence-a6dd). @Eq-psi formalizes this:
+Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)\index{Population Stability Index!drift quantification}[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (@sec-appdx-data-foundations-measuring-drift-divergence-a6dd develops the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring). @Eq-psi formalizes this:
 $$ \text{PSI} = \sum_{i=1}^{n} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right) $$ {#eq-psi}
 
 [^fn-psi-origin]: **Population Stability Index (PSI)**\index{Population Stability Index!credit risk origin} (from credit risk scoring): Banking regulators needed to detect when a loan applicant population had shifted enough to invalidate the scorecard. The standard thresholds date from this era: below 0.1 indicates no significant shift, 0.1–0.2 warrants investigation, and above 0.2 triggers model review. ML operations adopted PSI because it is symmetric (unlike KL divergence), works on binned data for both categorical and continuous features, and provides interpretable thresholds calibrated through decades of production use in finance.
@@ -2651,6 +2658,8 @@ class MonitoringBudget:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_variants_str = fmt(n_variants, precision=0, commas=False)
     metrics_per_variant_str = fmt(metrics_per_variant, precision=0, commas=False)
+    mins_per_hour_str = fmt(mins_per_hour, precision=0, commas=False)
+    hours_per_day_str = fmt(hours_per_day, precision=0, commas=False)
     samples_per_min_str = fmt_rate(samples_per_min, "samples/min", precision=0, commas=False)
     sample_interval_s_str = fmt_time(sample_interval_s, "second", precision=0, commas=False, style="word")
     days_str = fmt_time(days, "day", precision=0, commas=False, style="word")
@@ -2683,7 +2692,7 @@ class MonitoringBudget:
 
 **Metric ingestion**:
 
-- Data points per month: `{python} MonitoringBudget.n_variants_str` $\times$ `{python} MonitoringBudget.metrics_per_variant_str` $\times$ (`{python} MonitoringBudget.samples_per_min_str` $\times 60 \times 24 \times$ `{python} MonitoringBudget.days_str`) = `{python} MonitoringBudget.dp_m_str`
+- Data points per month: `{python} MonitoringBudget.n_variants_str` $\times$ `{python} MonitoringBudget.metrics_per_variant_str` $\times$ (`{python} MonitoringBudget.samples_per_min_str` $\times$ `{python} MonitoringBudget.mins_per_hour_str` $\times$ `{python} MonitoringBudget.hours_per_day_str` $\times$ `{python} MonitoringBudget.days_str`) = `{python} MonitoringBudget.dp_m_str`
 - Cost at `{python} MonitoringBudget.ingestion_cost_per_m_str`: `{python} MonitoringBudget.ingest_usd_str`
 
 **Storage**:
@@ -2909,9 +2918,7 @@ Common findings from feature attribution debugging include: stale features (feat
 
 **Context**: Long-lived production models often accumulate features whose original owners, semantics, or intended use have faded.
 
-**Failure mode**: A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns.
-
-**Consequence**: Removing such a feature is no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
+**Failure mode**: A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns. Removing such a feature is therefore no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
 
 **Systems insight**: Features in ML systems do not disappear just because code owners stop thinking about them. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that consumes resources and complicates debugging [@sculley2015hidden].
 
@@ -3426,7 +3433,7 @@ The preceding technical infrastructure and economic framework provide the founda
 
 ## Case Studies {#sec-ml-operations-case-studies-641d}
 
-A battery-powered sleep-tracking ring and AI/ML-based medical software governed by FDA lifecycle expectations [@fda2021artificial] face very different operational constraints. The principles, patterns, and infrastructure examined throughout this chapter converge differently depending on the deployment context. We examine two cases: the Oura Ring, where pipeline debt and configuration management challenge resource-constrained edge environments, and ClinAIOps, where feedback loops and governance requirements drive specialized healthcare operations. The comparison starts with the shared principles, because the domains differ most in how those principles are implemented.
+A battery-powered sleep-tracking ring and AI/ML-based medical software governed by FDA lifecycle expectations [@fda2021artificial] face different operational constraints. The principles, patterns, and infrastructure examined throughout this chapter converge differently depending on the deployment context. We examine two cases: the Oura Ring, where pipeline debt and configuration management challenge resource-constrained edge environments, and ClinAIOps, where feedback loops and governance requirements drive specialized healthcare operations. The comparison starts with the shared principles, because the domains differ most in how those principles are implemented.
 
 ::: {#exmp-ml-ops-principle-mapping-guide .callout-example title="Principle mapping guide"}
 

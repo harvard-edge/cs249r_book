@@ -90,6 +90,13 @@ CANONICAL = [
     ("llama2_70b_heads",    64, 0.05, "Models.Language.Llama2_70B.heads"),
     ("llama2_70b_kv_heads", 8,  0.05, "Models.Language.Llama2_70B.kv_heads"),
     ("gpt2_params_m",       1500, 0.05, "Models.Language.GPT2.parameters (in M)"),
+    # GPT-2 Small (2026-06-10 audit add — Radford 2019; guarded in
+    # mlsysim/tests/test_physics_bounds.py::test_transformer_curated_specs)
+    ("gpt2_small_params_m", 124, 0.02, "Models.Language.GPT2_Small.parameters (in M)"),
+    ("gpt2_small_params",   124000000, 0.001, "Models.Language.GPT2_Small.parameters"),
+    ("gpt2_small_layers",   12,  0.001, "Models.Language.GPT2_Small.layers"),
+    ("gpt2_small_hidden",   768, 0.001, "Models.Language.GPT2_Small.hidden_dim"),
+    ("gpt2_small_heads",    12,  0.001, "Models.Language.GPT2_Small.heads"),
     ("mobilenetv2_alpha10_params", 3504872, 0.001, "Models.Vision.MobileNetV2.parameters"),
     ("mobilenetv2_alpha05_total_params", 1968680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5.parameters"),
     ("mobilenetv2_alpha05_feature_params", 687680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters"),
