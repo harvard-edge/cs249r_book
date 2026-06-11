@@ -210,7 +210,7 @@ plt.close()
 
 :::
 
-@Fig-tail-latency-explosion shows that latency remains manageable until utilization crosses roughly 70 percent, then explodes; this is *why* production systems must run at relatively low utilization (40–60 percent) to guarantee stable tail latency\index{Tail Latency!utilization threshold} (p99). For a mathematical treatment of long-tailed distributions and why P99 latency dominates the user experience at scale, see @sec-appdx-data-foundations-distributions-long-tail-901f. The curve is a simple queueing approximation intended for intuition rather than a specific workload.
+@Fig-tail-latency-explosion shows that latency remains manageable until utilization crosses roughly 70 percent, then explodes; this is *why* production systems must run at relatively low utilization (40–60 percent) to guarantee stable tail latency\index{Tail Latency!utilization threshold} (p99). @Sec-appdx-data-foundations-distributions-long-tail-901f gives a mathematical treatment of long-tailed distributions and why p99 latency dominates the user experience at scale. The curve is a simple queueing approximation intended for intuition rather than a specific workload.
 
 Beyond the technical limits of latency, the economics of serving have undergone a radical transformation. As models become more efficient and hardware becomes more specialized, the cost of "intelligence" is collapsing[^fn-jevons-paradox]. Facebook's experience at fleet scale illustrates the magnitude of this serving cost problem.
 
@@ -222,7 +222,7 @@ Beyond the technical limits of latency, the economics of serving have undergone 
 
 **Failure mode**: The expensive part of ML had moved into serving. Inference ran on the order of tens of trillions of operations per day under strict tail-latency targets, where live request arrivals constrained batching and a one-hour-old ranking model measurably degraded News Feed quality---forcing aggressive retraining alongside aggressive serving.
 
-**Consequence**: Facebook treated inference as a first-class data-center infrastructure problem, co-designing models, accelerators, memory systems, and serving platforms together rather than treating serving as an afterthought to training.
+**Resolution**: Facebook treated inference as a first-class data-center infrastructure problem, co-designing models, accelerators, memory systems, and serving platforms together rather than treating serving as an afterthought to training.
 
 **Systems lesson**: Training creates the model; serving pays the recurring bill. At fleet scale, a model architecture that is cheap to train can still be too expensive, too memory-bound, or too variable in tail latency to serve.
 
@@ -1415,7 +1415,8 @@ A concrete payload comparison shows how the serialization choice changes both wi
 # │ Exports: serial_floats_str, json_size_str, json_parse_us_str, protobuf_size_str,
 # │          protobuf_parse_us_str, requests_per_sec_str, efficiency_gain_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
+from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory
+from mlsysim.core.units import byte, KB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SerializationEfficiency:
@@ -1428,20 +1429,26 @@ class SerializationEfficiency:
     floats_count = 1000
     json_parse_us = 50.0
     proto_parse_us = 5.0
+    json_bytes_per_float = 9  # scenario: ~9 ASCII chars/float incl. separators
+    protobuf_bytes_per_float = int(BYTES_FP32.to(byte).magnitude)  # FP32 binary
+    requests_per_sec = 10_000  # scenario throughput
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     efficiency_gain = json_parse_us / proto_parse_us
+    json_size = floats_count * json_bytes_per_float * byte
+    protobuf_size = floats_count * protobuf_bytes_per_float * byte
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(efficiency_gain >= 5, f"Protobuf gain ({efficiency_gain:.1f}x) is too small to justify switching.")
+    check(json_size > protobuf_size, "JSON wire size must exceed Protobuf.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     serial_floats_str = fmt(floats_count, precision=0)
-    json_size_str = MarkdownStr("9 KB")
+    json_size_str = fmt_memory(json_size, unit=KB, precision=0, commas=False)
     json_parse_us_str = fmt_time(round(json_parse_us), 'microsecond', precision=0, commas=False)
-    protobuf_size_str = MarkdownStr("4 KB")
+    protobuf_size_str = fmt_memory(protobuf_size, unit=KB, precision=0, commas=False)
     protobuf_parse_us_str = fmt_time(round(proto_parse_us), 'microsecond', precision=0, commas=False)
-    requests_per_sec_str = MarkdownStr("10,000")
+    requests_per_sec_str = fmt(requests_per_sec, precision=0)
     efficiency_gain_mult_str = fmt_multiple(efficiency_gain, precision=0, commas=False)
 ```
 
@@ -1662,9 +1669,9 @@ class LatencyBudgetCalc:
 | **Postprocessing** | Softmax + top-5            |   `{python} LatencyTableCalc.l_post_ms_str`    |  ~`{python} LatencyTableCalc.p_post_str`   |
 | **Total**          |                            | **`{python} LatencyTableCalc.l_total_ms_str`** |                  **100%**                  |
 
-: **ResNet-50 latency budget**: Per-phase breakdown of a single serving request, showing that preprocessing and data transfer together rival the cost of the ResNet-50 forward pass itself. The percentages expose where engineering effort actually pays off, which is rarely in the model. {#tbl-model-serving-resnet50-latency-budget tbl-colwidths="[28,28,22,22]"}
+: **ResNet-50 latency budget**: Per-phase breakdown of a single serving request, showing that preprocessing and data transfer together rival the cost of the ResNet-50 forward pass itself. The percentages expose where engineering effort actually pays off, which is rarely in the model. Per-phase percentages are rounded to the nearest whole number and may not sum to exactly 100. {#tbl-model-serving-resnet50-latency-budget tbl-colwidths="[28,28,22,22]"}
 
-Key insight: the ResNet-50\index{ResNet-50!latency budget} serving budget shows preprocessing consumes `{python} LatencyBudgetCalc.preprocess_pct_str` of latency despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, preprocessing would dominate at `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str`.
+**Systems insight**: the ResNet-50\index{ResNet-50!latency budget} serving budget shows preprocessing consumes `{python} LatencyBudgetCalc.preprocess_pct_str` of latency despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, preprocessing would dominate at `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str`.
 
 :::
 
@@ -1779,7 +1786,7 @@ class AmdahlServingCalc:
 
 ::: {#nbk-model-serving-quantitative-approach-serving .callout-notebook title="The quantitative approach to serving"}
 
-*Amdahl's Law at work* (see @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 for the formal derivation): preprocessing (`{python} LatencyBudgetCalc.preprocess_ms_str`) and data transfer (`{python} LatencyBudgetCalc.cpu_gpu_ms_str`) consume `{python} AmdahlServingCalc.non_model_pct_str` of total latency. Optimizing the model 10$\times$ faster (`{python} LatencyBudgetCalc.resnet_inference_ms_str` → `{python} LatencyBudgetCalc.model_10x_ms_str`) yields only `{python} AmdahlServingCalc.amdahl_speedup_mult_str` end-to-end speedup (from `{python} LatencyBudgetCalc.total_latency_ms_str` to `{python} AmdahlServingCalc.optimized_total_ms_str`). This is why focusing exclusively on model optimization (quantization, pruning) often disappoints: the bottleneck is elsewhere.
+*Amdahl's Law at work* (@sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 provides the formal derivation): preprocessing (`{python} LatencyBudgetCalc.preprocess_ms_str`) and data transfer (`{python} LatencyBudgetCalc.cpu_gpu_ms_str`) consume `{python} AmdahlServingCalc.non_model_pct_str` of total latency. Optimizing the model 10$\times$ faster (`{python} LatencyBudgetCalc.resnet_inference_ms_str` → `{python} LatencyBudgetCalc.model_10x_ms_str`) yields only `{python} AmdahlServingCalc.amdahl_speedup_mult_str` end-to-end speedup (from `{python} LatencyBudgetCalc.total_latency_ms_str` to `{python} AmdahlServingCalc.optimized_total_ms_str`). This is why focusing exclusively on model optimization (quantization, pruning) often disappoints: the bottleneck is elsewhere.
 
 *DSA efficiency*: General-purpose CPUs achieve only 1–2 percent of peak performance at batch-1 because instruction overhead dominates. DSAs like TPUs and Tensor Cores replace complex logic with dense multiply-accumulate (MAC) arrays, achieving 10--100$\times$ higher arithmetic intensity. This makes hardware acceleration an economic requirement for many high-throughput or low-latency serving workloads.
 
@@ -1916,10 +1923,14 @@ Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} Re
 # │ How: Scale registry FLOPs and a 224×224 activation footprint by (R/224)²;
 # │      divide by total traffic (fixed weights + activation reads/writes).
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: act_*_mb_str, ai_*_str, ridge_point_flops_per_byte_str
+# │ Imports: mlsysim.book (fmt), mlsysim (Hardware.Cloud.V100_PCIe / V100 SXM2),
+# │          mlsysim.core.units (TFLOP, second, GB, flop, byte)
+# │ Exports: act_*_mb_str, ai_*_str, ridge_point_flops_per_byte_str,
+# │          v100_pcie_fp32_str, v100_sxm2_fp32_str, v100_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory
+from mlsysim import Hardware
+from mlsysim.core.units import TFLOP, second, GB
+from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory, fmt_flop_rate, fmt_bandwidth
 
 class ResolutionBottleneckCalc:
     """Shows that higher resolution raises arithmetic intensity: quadratic FLOPs amortize the fixed weight traffic."""
@@ -1931,7 +1942,10 @@ class ResolutionBottleneckCalc:
     weight_bytes = resnet.size_in_bytes(BYTES_FP32)
     act_224 = 12.5 * MB  # scenario assumption: 224×224 activation footprint
     act_rw_factor = 2  # scenario assumption: each activation written once, read once
-    ridge_point_value = 16 * (flop / byte)  # scenario assumption: V100 ridge point
+    # V100 ridge point = FP32 peak / HBM2 bandwidth, derived from the registry (PCIe variant).
+    v100_pcie = Hardware.Cloud.V100_PCIe
+    v100_sxm2 = Hardware.Cloud.V100
+    ridge_point_value = (v100_pcie.compute.precision_flops["fp32"] / v100_pcie.memory.bandwidth).to(flop / byte)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # FLOPs and activation footprint both scale with (R/224)²; weight traffic
@@ -1963,7 +1977,11 @@ class ResolutionBottleneckCalc:
     ai_512_flops_per_byte_str = fmt_arithmetic_intensity(ai_512_value, commas=False)
     ai_640_flops_per_byte_str = fmt_arithmetic_intensity(ai_640_value, commas=False)
 
-    ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point_value, commas=False)
+    ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point_value, precision=1, commas=False)
+
+    v100_pcie_fp32_str = fmt_flop_rate(v100_pcie.compute.precision_flops["fp32"], unit=TFLOP / second, precision=0, commas=False)
+    v100_sxm2_fp32_str = fmt_flop_rate(v100_sxm2.compute.precision_flops["fp32"], unit=TFLOP / second, precision=1, commas=False)
+    v100_bw_str = fmt_bandwidth(v100_pcie.memory.bandwidth, unit=GB / second, precision=0, commas=False)
 ```
 
 @Tbl-resolution-bottleneck quantifies this transition for ResNet-50:
@@ -1975,7 +1993,7 @@ class ResolutionBottleneckCalc:
 | **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` | `{python} ResolutionBottleneckCalc.ai_512_flops_per_byte_str` |    Compute     |
 | **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` | `{python} ResolutionBottleneckCalc.ai_640_flops_per_byte_str` |    Compute     |
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity rises with resolution: FLOPs and activation traffic grow quadratically while the fixed weight traffic is amortized over more spatial positions. For a V100 PCIe (14 TFLOP/s FP32; the SXM2 variant runs 15.7 TFLOP/s FP32) with 900 GB/s of HBM2 memory bandwidth, the ridge point is approximately `{python} ResolutionBottleneckCalc.ridge_point_flops_per_byte_str`; every row sits above it, so higher resolution drives the workload deeper into the compute-bound regime. The serving costs of resolution are quadratic latency and activation-memory growth, not memory bandwidth. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity rises with resolution: FLOPs and activation traffic grow quadratically while the fixed weight traffic is amortized over more spatial positions. For a V100 PCIe (`{python} ResolutionBottleneckCalc.v100_pcie_fp32_str` FP32; the SXM2 variant runs `{python} ResolutionBottleneckCalc.v100_sxm2_fp32_str` FP32) with `{python} ResolutionBottleneckCalc.v100_bw_str` of HBM2 memory bandwidth, the ridge point is approximately `{python} ResolutionBottleneckCalc.ridge_point_flops_per_byte_str`; every row sits above it, so higher resolution drives the workload deeper into the compute-bound regime. The serving costs of resolution are quadratic latency and activation-memory growth, not memory bandwidth. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
 
 #### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
 
@@ -2190,7 +2208,7 @@ This relationship holds regardless of arrival distribution, service time distrib
 
 **Problem**: How much concurrent request capacity does a system need to serve `{python} CapacityPlanningAnchor.qps_display_str`?
 
-**Math**: Little's Law gives $N_{\text{req}} = \lambda T_{\text{lat}}$, so concurrency equals throughput multiplied by latency (see @sec-appdx-machine-foundations-littles-law-21a3 for the derivation).
+**Math**: Little's Law gives $N_{\text{req}} = \lambda T_{\text{lat}}$, so concurrency equals throughput multiplied by latency (@sec-appdx-machine-foundations-littles-law-21a3 derives the law).
 
 **Given**:
 ```{python}
@@ -2328,15 +2346,56 @@ This equation reveals why serving systems exhibit nonlinear behavior: small incr
 
 [^fn-queuing-divergence]: **Super-Linear Latency Divergence**\index{Queuing Theory!utilization divergence}: The 70 percent utilization threshold follows directly from M/M/1 queuing theory: mean response time $E[T] = \frac{1/\mu}{1-\rho}$, where $\rho = \lambda/\mu$ is utilization. The $(1-\rho)^{-1}$ term diverges as $\rho \to 1$: at $\rho = 0.7$, mean response time is already 3.3$\times$ the base service time; at $\rho = 0.9$ it is 10$\times$. This is not a conservative heuristic but a mathematical inevitability—there is *no* "stretching" from 80 percent to 90 percent utilization without disproportionate tail latency growth.
 
-| **Utilization $(\rho)$** | **Latency Multiple** | **Example (5 ms service)** |
-|:------------------------:|:--------------------:|:--------------------------:|
-|           50%            |     2.0$\times$      |           10 ms            |
-|           70%            |     3.3$\times$      |           17 ms            |
-|           80%            |     5.0$\times$      |           25 ms            |
-|           90%            |     10.0$\times$     |           50 ms            |
-|           95%            |     20.0$\times$     |           100 ms           |
+```{python}
+#| echo: false
+#| label: utilization-latency-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ M/M/1 UTILIZATION-LATENCY RELATIONSHIP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-utilization-latency
+# │
+# │ Goal: Show how M/M/1 time-in-system grows as utilization approaches capacity.
+# │ How: Latency multiple = 1/(1-rho); example latency = multiple x 5 ms service.
+# │
+# │ Imports: mlsysim.fmt, mlsysim.core.units (ms)
+# │ Exports: rho_str, latency_multiple_str, example_ms_str (lists), service_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt_time, MarkdownStr, check
+from mlsysim.core.units import ms
 
-: **Utilization-Latency Relationship**: Average time in system (wait + service) as a multiple of service time for an M/M/1 queue. At 50 percent utilization, time in system is 2$\times$ service time; at 90 percent, it reaches 10$\times$. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80 percent to 90 percent utilization doubles latency. {#tbl-utilization-latency}
+class UtilizationLatency:
+    """M/M/1 time-in-system = service/(1-rho); example uses a 5 ms service time."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rho_pct = [50, 70, 80, 90, 95]  # utilization points
+    service_ms_value = 5.0 * ms  # ResNet-50 service time
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    latency_multiple_value = [1.0 / (1.0 - r / 100.0) for r in rho_pct]
+    example_ms_value = []
+    for _mult in latency_multiple_value:
+        example_ms_value.append(_mult * service_ms_value)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(latency_multiple_value == sorted(latency_multiple_value), "Latency multiple must grow with utilization.")
+    check(abs(latency_multiple_value[0] - 2.0) < 1e-9, "rho=50% must yield a 2x multiple.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    rho_str = [fmt_percent(r / 100, precision=0, commas=False, style='symbol') for r in rho_pct]
+    latency_multiple_str = [MarkdownStr(f"{m:.1f}$\\times$") for m in latency_multiple_value]
+    example_ms_str = [fmt_time(round(e.to(ms).magnitude) * ms, 'millisecond', precision=0, commas=False) for e in example_ms_value]
+    service_ms_str = fmt_time(service_ms_value, 'millisecond', precision=0, commas=False)
+```
+
+|         **Utilization $(\rho)$**         |                  **Latency Multiple**                 | **Example (`{python} UtilizationLatency.service_ms_str` service)** |
+|:----------------------------------------:|:-----------------------------------------------------:|:------------------------------------------------------------------:|
+| `{python} UtilizationLatency.rho_str[0]` | `{python} UtilizationLatency.latency_multiple_str[0]` |          `{python} UtilizationLatency.example_ms_str[0]`           |
+| `{python} UtilizationLatency.rho_str[1]` | `{python} UtilizationLatency.latency_multiple_str[1]` |          `{python} UtilizationLatency.example_ms_str[1]`           |
+| `{python} UtilizationLatency.rho_str[2]` | `{python} UtilizationLatency.latency_multiple_str[2]` |          `{python} UtilizationLatency.example_ms_str[2]`           |
+| `{python} UtilizationLatency.rho_str[3]` | `{python} UtilizationLatency.latency_multiple_str[3]` |          `{python} UtilizationLatency.example_ms_str[3]`           |
+| `{python} UtilizationLatency.rho_str[4]` | `{python} UtilizationLatency.latency_multiple_str[4]` |          `{python} UtilizationLatency.example_ms_str[4]`           |
+
+: **Utilization-Latency Relationship**: Average time in system (wait + service) as a multiple of service time for an M/M/1 queue. At `{python} UtilizationLatency.rho_str[0]` utilization, time in system is `{python} UtilizationLatency.latency_multiple_str[0]` service time; at `{python} UtilizationLatency.rho_str[3]`, it reaches `{python} UtilizationLatency.latency_multiple_str[3]`. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80 percent to 90 percent utilization doubles latency. {#tbl-utilization-latency}
 
 The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1\index{M/D/1 Queue!deterministic service} (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-kendall-notation-serving]
 
@@ -2751,7 +2810,7 @@ Consider a ResNet-50 classifier running on a V100 GPU at batch size one: the GPU
 
 ***Dynamic Batching***\index{Dynamic Batching!definition} is the ML serving optimization that trades Latency for Throughput under stochastic arrival patterns.
 
-1.  **Significance (quantitative)**: By buffering requests into a Batching Window, the scheduler amortizes fixed overheads $(L_{\text{lat}})$ across multiple inputs, pushing the system away from the memory-bound regime $(\text{BW})$ toward the compute-bound regime $(R_{\text{peak}})$.
+1.  **Significance (quantitative)**: By buffering requests into a batching window, the scheduler amortizes fixed overheads $(L_{\text{lat}})$ across multiple inputs, pushing the system away from the memory-bound regime $(\text{BW})$ toward the compute-bound regime $(R_{\text{peak}})$.
 2.  **Observation**: Unlike Static Batching, which is fixed during training, Dynamic Batching adaptively adjusts the batch size at Inference Time based on real-time traffic volume.
 3.  **Pitfall**: A frequent misconception is that batching "always helps." In reality, there is a latency-throughput Pareto frontier: if the batching window is too large, the increased queuing delay may violate the system's SLO before the throughput gains are realized.
 
@@ -2781,28 +2840,41 @@ Two fixed costs dominate at small batch sizes. **Kernel launch overhead**\index{
 # │ Exports: throughput_ratio_mult_str, batch_window_ms_str, batch32_inference_ms_str,
 # │          batch32_total_ms_str, batch1_inference_total_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, fmt_qty
+from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, MarkdownStr, check
 
 class BatchThroughputCalc:
     """Quantifies the 6.4× throughput gain of batch-32 over batch-1 and its latency cost."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    batch1_throughput_value = 200 * (count / second)  # scenario assumption: batch-1 throughput
-    batch32_throughput_value = 1280 * (count / second)  # scenario assumption: batch-32 throughput
-    batch32_inference_ms_value = 25.0 * ms  # scenario assumption: batch-32 inference time
+    batch_sizes = [1, 4, 8, 16, 32]
+    inference_ms_value = [5.0, 7.2, 9.1, 14.0, 25.0]  # scenario: measured V100 latency
+    gpu_util_pct = [15, 42, 65, 85, 95]  # scenario: measured GPU utilization
     batch_window_ms_value = 10.0 * ms  # scenario assumption: batching window
-    batch1_inference_total_ms_value = 5.0 * ms  # scenario assumption: batch-1 total latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    throughput_ratio_value = batch32_throughput_value / batch1_throughput_value
-    batch32_total_ms_value = batch_window_ms_value + batch32_inference_ms_value
+    # Per-image compute = inference / batch; throughput = batch / inference_seconds
+    per_image_ms_value = [inf / b for inf, b in zip(inference_ms_value, batch_sizes)]
+    throughput_value = [b / (inf / 1000.0) for b, inf in zip(batch_sizes, inference_ms_value)]
+    throughput_ratio_value = throughput_value[-1] / throughput_value[0]
+    batch32_total_ms_value = batch_window_ms_value + inference_ms_value[-1] * ms
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(throughput_value == sorted(throughput_value), "Throughput must increase monotonically with batch size.")
+    check(abs(throughput_ratio_value - 6.4) < 0.05, f"batch-32/batch-1 throughput ratio should be ~6.4x, got {throughput_ratio_value:.2f}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    # Table columns (one entry per batch size)
+    batch_size_str = [fmt(b, precision=0, commas=False) for b in batch_sizes]
+    inference_ms_str = [MarkdownStr(f"{inf:.1f} ms") for inf in inference_ms_value]
+    per_image_ms_str = [MarkdownStr(f"{p:.1f} ms") for p in per_image_ms_value]
+    throughput_img_per_s_str = [fmt_rate(round(t), 'img/s', precision=0, commas=True) for t in throughput_value]
+    gpu_util_str = [fmt_percent(u / 100, precision=0, commas=False, style='symbol') for u in gpu_util_pct]
+    # Prose scalars (callout below)
     throughput_ratio_mult_str = fmt_multiple(throughput_ratio_value, precision=1, commas=False)
     batch_window_ms_str = fmt_time(batch_window_ms_value, 'millisecond', precision=0, commas=False)
-    batch32_inference_ms_str = fmt_time(batch32_inference_ms_value, 'millisecond', precision=0, commas=False)
+    batch32_inference_ms_str = fmt_time(inference_ms_value[-1] * ms, 'millisecond', precision=0, commas=False)
     batch32_total_ms_str = fmt_time(batch32_total_ms_value, 'millisecond', precision=0, commas=False)
-    batch1_inference_total_ms_str = fmt_time(batch1_inference_total_ms_value, 'millisecond', precision=0, commas=False)
+    batch1_inference_total_ms_str = fmt_time(inference_ms_value[0] * ms, 'millisecond', precision=0, commas=False)
 ```
 
 ::: {#nbk-model-serving-resnet-50-batching-efficiency .callout-notebook title="ResNet-50 batching efficiency"}
@@ -2814,15 +2886,15 @@ class BatchThroughputCalc:
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Batch Size** | **Inference Time*** | **Per-Image Compute** | **Throughput** | **GPU Util.** |
-|:--------------:|:-------------------:|:---------------------:|:--------------:|:-------------:|
-|       1        |        5.0 ms       |         5.0 ms        |   200 img/s    |      15%      |
-|       4        |        7.2 ms       |         1.8 ms        |   556 img/s    |      42%      |
-|       8        |        9.1 ms       |         1.1 ms        |   879 img/s    |      65%      |
-|       16       |       14.0 ms       |         0.9 ms        |  1,143 img/s   |      85%      |
-|       32       |       25.0 ms       |         0.8 ms        |  1,280 img/s   |      95%      |
+|                  **Batch Size**                  |                **Inference Time***                 |               **Per-Image Compute**                |                       **Throughput**                       |                 **GPU Util.**                  |
+|:------------------------------------------------:|:--------------------------------------------------:|:--------------------------------------------------:|:----------------------------------------------------------:|:----------------------------------------------:|
+| `{python} BatchThroughputCalc.batch_size_str[0]` | `{python} BatchThroughputCalc.inference_ms_str[0]` | `{python} BatchThroughputCalc.per_image_ms_str[0]` | `{python} BatchThroughputCalc.throughput_img_per_s_str[0]` | `{python} BatchThroughputCalc.gpu_util_str[0]` |
+| `{python} BatchThroughputCalc.batch_size_str[1]` | `{python} BatchThroughputCalc.inference_ms_str[1]` | `{python} BatchThroughputCalc.per_image_ms_str[1]` | `{python} BatchThroughputCalc.throughput_img_per_s_str[1]` | `{python} BatchThroughputCalc.gpu_util_str[1]` |
+| `{python} BatchThroughputCalc.batch_size_str[2]` | `{python} BatchThroughputCalc.inference_ms_str[2]` | `{python} BatchThroughputCalc.per_image_ms_str[2]` | `{python} BatchThroughputCalc.throughput_img_per_s_str[2]` | `{python} BatchThroughputCalc.gpu_util_str[2]` |
+| `{python} BatchThroughputCalc.batch_size_str[3]` | `{python} BatchThroughputCalc.inference_ms_str[3]` | `{python} BatchThroughputCalc.per_image_ms_str[3]` | `{python} BatchThroughputCalc.throughput_img_per_s_str[3]` | `{python} BatchThroughputCalc.gpu_util_str[3]` |
+| `{python} BatchThroughputCalc.batch_size_str[4]` | `{python} BatchThroughputCalc.inference_ms_str[4]` | `{python} BatchThroughputCalc.per_image_ms_str[4]` | `{python} BatchThroughputCalc.throughput_img_per_s_str[4]` | `{python} BatchThroughputCalc.gpu_util_str[4]` |
 
-: **ResNet-50 batching sweep**: Per-image compute, throughput, and GPU utilization across batch sizes one through thirty-two on a V100. Throughput grows 6.4$\times$ from batch one to batch thirty-two as GPU utilization climbs from 15 to 95 percent, while pure inference time stretches from 5 ms to 25 ms. {#tbl-model-serving-batching-throughput-tradeoff}
+: **ResNet-50 batching sweep**: Per-image compute, throughput, and GPU utilization across batch sizes one through thirty-two on a V100. Throughput grows `{python} BatchThroughputCalc.throughput_ratio_mult_str` from batch one to batch thirty-two as GPU utilization climbs from `{python} BatchThroughputCalc.gpu_util_str[0]` to `{python} BatchThroughputCalc.gpu_util_str[4]`, while pure inference time stretches from `{python} BatchThroughputCalc.batch1_inference_total_ms_str` to `{python} BatchThroughputCalc.batch32_inference_ms_str`. {#tbl-model-serving-batching-throughput-tradeoff}
 
 ```{=latex}
 \endgroup
@@ -2991,16 +3063,71 @@ This simple relationship has direct implications. A `{python} BatchingBudgetCalc
 The number of requests collected during window $T_{\text{window}}$ follows a Poisson distribution with mean $\lambda T_{\text{window}}$. @Eq-batch-distribution formalizes this relationship:
 $$\Pr(\text{batch size} = k) = \frac{(\lambda T_{\text{window}})^k e^{-\lambda T_{\text{window}}}}{k!}$$ {#eq-batch-distribution}
 
-@Tbl-batch-variability quantifies this variability, showing how batch size fluctuates for different traffic levels with a fixed 10 ms window:
+```{python}
+#| echo: false
+#| label: batch-variability-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ POISSON BATCH-SIZE VARIABILITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-batch-variability
+# │
+# │ Goal: Show batch-size statistics under Poisson arrivals for a fixed window.
+# │ How: mean = lambda*T; std = sqrt(mean); P(0) = e^-mean; survival P(X>=2*mean).
+# │
+# │ Imports: math, mlsysim.fmt, mlsysim.core.units (ms)
+# │ Exports: qps_str, mean_str, std_str, p0_str, p_ge_str (lists), window_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, fmt_percent, fmt_time, MarkdownStr, check
+from mlsysim.core.units import ms
 
-| **Arrival Rate** | **Mean Batch** | **Std Dev** | **$\Pr(\text{batch}=0)$** | **$\Pr(\text{batch} \ge 2 \times \text{mean})$** |
-|:----------------:|:--------------:|:-----------:|:-------------------------:|:------------------------------------------------:|
-|    **50 QPS**    |      0.5       |     0.7     |            61%            |                       39%                        |
-|   **200 QPS**    |      2.0       |     1.4     |            14%            |                       14%                        |
-|   **500 QPS**    |      5.0       |     2.2     |            0.7%           |                        3%                        |
-|   **1000 QPS**   |      10.0      |     3.2     |           0.005%          |                       0.3%                       |
+class BatchVariability:
+    """Poisson batch-size statistics for a fixed 10 ms window across traffic levels."""
 
-: **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching, and the probability of batches exceeding twice the mean size decreases as traffic grows (from 39 percent at 50 QPS to 0.3 percent at 1000 QPS), reflecting the law of large numbers. {#tbl-batch-variability tbl-colwidths="[24,18,18,20,20]"}
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    qps = [50, 200, 500, 1000]
+    window_ms_value = 10 * ms
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    window_s = window_ms_value.to('second').magnitude
+    mean_value = []
+    for _q in qps:
+        mean_value.append(_q * window_s)
+    std_value = [math.sqrt(m) for m in mean_value]
+    p0_value = [math.exp(-m) for m in mean_value]
+    p_ge_value = []
+    for _m in mean_value:
+        _k = round(2 * _m)
+        _cdf = 0.0
+        for _i in range(_k):
+            _cdf += math.exp(-_m) * _m**_i / math.factorial(_i)
+        p_ge_value.append(1.0 - _cdf)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mean_value == sorted(mean_value), "Mean batch must grow with arrival rate.")
+    check(abs(mean_value[0] - 0.5) < 1e-9, "50 QPS x 10 ms must give a mean of 0.5.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    p0_prec = [0, 0, 1, 3]  # display precision per traffic level
+    pge_prec = [0, 0, 0, 1]
+    qps_str = [fmt(q, precision=0, commas=False) for q in qps]
+    mean_str = [MarkdownStr(f"{m:.1f}") for m in mean_value]
+    std_str = [MarkdownStr(f"{s:.1f}") for s in std_value]
+    p0_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p0_value, p0_prec)]
+    p_ge_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p_ge_value, pge_prec)]
+    window_ms_str = fmt_time(window_ms_value, 'millisecond', precision=0, commas=False)
+```
+
+@Tbl-batch-variability quantifies this variability, showing how batch size fluctuates for different traffic levels with a fixed `{python} BatchVariability.window_ms_str` window:
+
+|                **Arrival Rate**                |              **Mean Batch**             |              **Std Dev**               |       **$\Pr(\text{batch}=0)$**       | **$\Pr(\text{batch} \ge 2 \times \text{mean})$** |
+|:----------------------------------------------:|:---------------------------------------:|:--------------------------------------:|:-------------------------------------:|:------------------------------------------------:|
+| **`{python} BatchVariability.qps_str[0]` QPS** | `{python} BatchVariability.mean_str[0]` | `{python} BatchVariability.std_str[0]` | `{python} BatchVariability.p0_str[0]` |     `{python} BatchVariability.p_ge_str[0]`      |
+| **`{python} BatchVariability.qps_str[1]` QPS** | `{python} BatchVariability.mean_str[1]` | `{python} BatchVariability.std_str[1]` | `{python} BatchVariability.p0_str[1]` |     `{python} BatchVariability.p_ge_str[1]`      |
+| **`{python} BatchVariability.qps_str[2]` QPS** | `{python} BatchVariability.mean_str[2]` | `{python} BatchVariability.std_str[2]` | `{python} BatchVariability.p0_str[2]` |     `{python} BatchVariability.p_ge_str[2]`      |
+| **`{python} BatchVariability.qps_str[3]` QPS** | `{python} BatchVariability.mean_str[3]` | `{python} BatchVariability.std_str[3]` | `{python} BatchVariability.p0_str[3]` |     `{python} BatchVariability.p_ge_str[3]`      |
+
+: **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching, and the probability of batches exceeding twice the mean size decreases as traffic grows (from `{python} BatchVariability.p_ge_str[0]` at `{python} BatchVariability.qps_str[0]` QPS to `{python} BatchVariability.p_ge_str[3]` at `{python} BatchVariability.qps_str[3]` QPS), reflecting the law of large numbers. {#tbl-batch-variability tbl-colwidths="[24,18,18,20,20]"}
 
 #### Throughput maximization strategy {#sec-model-serving-throughput-maximization-strategy-27f5}
 
@@ -3351,15 +3478,63 @@ def adaptive_batching_window(
 
 The batching configuration space forms a Pareto frontier\index{Pareto Frontier!throughput-latency} where improving throughput requires accepting higher latency. @Tbl-pareto-batching traces this frontier across five representative configurations:
 
-| **Window (ms)** | **Max Batch** | **Avg Latency** | **p99 Latency** | **Throughput** | **Configuration**    |
-|:---------------:|:-------------:|:---------------:|:---------------:|:--------------:|:---------------------|
-|        2        |       16      |       8 ms      |      18 ms      |   890 img/s    | Ultra-low latency    |
-|        5        |       32      |      10 ms      |      22 ms      |  1,140 img/s   | Balanced             |
-|        10       |       32      |      15 ms      |      35 ms      |  1,240 img/s   | Moderate latency     |
-|        20       |       64      |      23 ms      |      52 ms      |  1,310 img/s   | Throughput-optimized |
-|        50       |      128      |      38 ms      |      98 ms      |  1,350 img/s   | Maximum throughput   |
+```{python}
+#| echo: false
+#| label: pareto-batching-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BATCHING PARETO FRONTIER
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-pareto-batching
+# │
+# │ Goal: Tabulate the throughput-latency Pareto frontier across batching windows.
+# │ How: avg/p99/throughput are batching-simulator outputs per (window, max-batch)
+# │      config (LOAD); the caption's throughput gain and p99 ratio are derived.
+# │
+# │ Imports: mlsysim.fmt, mlsysim.core.units (ms)
+# │ Exports: window_str, max_batch_str, avg_ms_str, p99_ms_str, throughput_str
+# │          (lists), throughput_gain_str, p99_ratio_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, fmt_multiple, check
+from mlsysim.core.units import ms
 
-: **Batching Pareto Frontier**: Each configuration represents a different point on the throughput-latency trade-off curve. Moving from 2 ms to 50 ms windows improves throughput by only 52 percent while increasing p99 latency by 5.4$\times$. Diminishing returns make aggressive batching costly for latency-sensitive applications. {#tbl-pareto-batching tbl-colwidths="[13,12,13,13,15,34]"}
+class ParetoBatching:
+    """Batching Pareto frontier: five simulated window/max-batch configurations."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Batching-simulator outputs for each (window, max-batch) configuration.
+    window_ms = [2, 5, 10, 20, 50]
+    max_batch = [16, 32, 32, 64, 128]
+    avg_ms = [8, 10, 15, 23, 38]
+    p99_ms = [18, 22, 35, 52, 98]
+    throughput_value = [890, 1140, 1240, 1310, 1350]
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    throughput_gain_value = throughput_value[-1] / throughput_value[0] - 1
+    p99_ratio_value = p99_ms[-1] / p99_ms[0]
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(throughput_value == sorted(throughput_value), "Throughput must rise across the frontier.")
+    check(p99_ms == sorted(p99_ms), "p99 latency must rise across the frontier.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    window_str = [fmt(w, precision=0, commas=False) for w in window_ms]
+    max_batch_str = [fmt(b, precision=0, commas=False) for b in max_batch]
+    avg_ms_str = [fmt_time(a * ms, 'millisecond', precision=0, commas=False) for a in avg_ms]
+    p99_ms_str = [fmt_time(p * ms, 'millisecond', precision=0, commas=False) for p in p99_ms]
+    throughput_str = [fmt_rate(t, 'img/s', precision=0, commas=True) for t in throughput_value]
+    throughput_gain_str = fmt_percent(round(throughput_gain_value * 100) / 100, precision=0, commas=False, style='symbol')
+    p99_ratio_mult_str = fmt_multiple(p99_ratio_value, precision=1, commas=False)
+```
+
+|             **Window (ms)**             |               **Max Batch**                |             **Avg Latency**             |             **p99 Latency**             |                **Throughput**               | **Configuration**    |
+|:---------------------------------------:|:------------------------------------------:|:---------------------------------------:|:---------------------------------------:|:-------------------------------------------:|:---------------------|
+| `{python} ParetoBatching.window_str[0]` | `{python} ParetoBatching.max_batch_str[0]` | `{python} ParetoBatching.avg_ms_str[0]` | `{python} ParetoBatching.p99_ms_str[0]` | `{python} ParetoBatching.throughput_str[0]` | Ultra-low latency    |
+| `{python} ParetoBatching.window_str[1]` | `{python} ParetoBatching.max_batch_str[1]` | `{python} ParetoBatching.avg_ms_str[1]` | `{python} ParetoBatching.p99_ms_str[1]` | `{python} ParetoBatching.throughput_str[1]` | Balanced             |
+| `{python} ParetoBatching.window_str[2]` | `{python} ParetoBatching.max_batch_str[2]` | `{python} ParetoBatching.avg_ms_str[2]` | `{python} ParetoBatching.p99_ms_str[2]` | `{python} ParetoBatching.throughput_str[2]` | Moderate latency     |
+| `{python} ParetoBatching.window_str[3]` | `{python} ParetoBatching.max_batch_str[3]` | `{python} ParetoBatching.avg_ms_str[3]` | `{python} ParetoBatching.p99_ms_str[3]` | `{python} ParetoBatching.throughput_str[3]` | Throughput-optimized |
+| `{python} ParetoBatching.window_str[4]` | `{python} ParetoBatching.max_batch_str[4]` | `{python} ParetoBatching.avg_ms_str[4]` | `{python} ParetoBatching.p99_ms_str[4]` | `{python} ParetoBatching.throughput_str[4]` | Maximum throughput   |
+
+: **Batching Pareto Frontier**: Each configuration represents a different point on the throughput-latency trade-off curve. Moving from `{python} ParetoBatching.window_str[0]` ms to `{python} ParetoBatching.window_str[4]` ms windows improves throughput by only `{python} ParetoBatching.throughput_gain_str` while increasing p99 latency by `{python} ParetoBatching.p99_ratio_mult_str`. Diminishing returns make aggressive batching costly for latency-sensitive applications. {#tbl-pareto-batching tbl-colwidths="[13,12,13,13,15,34]"}
 
 #### Practical configuration guidelines {#sec-model-serving-practical-configuration-guidelines-9791}
 
@@ -3784,13 +3959,7 @@ class MobileServingCalc:
 
 #### Mobile serving constraints {#sec-model-serving-mobile-serving-constraints-eb68}
 
-Unlike cloud serving where cost dominates, mobile serving faces three related constraints that shape optimization strategy:
-
-1. **Energy Budget**\index{Energy!budget, mobile inference}: Each inference depletes battery. In the modeled pipeline, `{python} MobileServingCalc.m_total_mj_str` at `{python} MobileServingCalc.fps_str` FPS is about `{python} MobileServingCalc.sustained_mw_str` for the inference path alone; camera, display, ISP, and OS overhead add to that total in a full photo app. The optimization target shifts from throughput to energy-per-inference.
-
-2. **Thermal Throttling**\index{Thermal Throttling!mobile serving}: Sustained high-power operation triggers thermal management. When the SoC reaches thermal limits (typically 45 °C junction), the OS reduces NPU frequency by 30–50 percent, degrading both latency and throughput. Bursty workloads that allow cooling between bursts outperform sustained maximum throughput.
-
-3. **Memory Constraints**\index{Memory!constraints, mobile RAM}: Mobile devices share limited RAM between applications. A model consuming 500 MB may be evicted during background operation, requiring reload (cold start) that adds 200–500 ms latency. Even a 150 MB footprint becomes problematic when the model must coexist with other app components. Memory-efficient quantization directly improves user experience through faster model restoration, and memory-mapped model loading (@sec-model-serving-loading-strategies-eb38) helps further by loading pages on demand rather than requiring the full model in memory.
+Unlike cloud serving where cost dominates, mobile serving faces three related constraints that shape optimization strategy. The first is an **Energy Budget**\index{Energy!budget, mobile inference} that throughput targets ignore, because each inference depletes battery. In the modeled pipeline, `{python} MobileServingCalc.m_total_mj_str` at `{python} MobileServingCalc.fps_str` FPS draws about `{python} MobileServingCalc.sustained_mw_str` for the inference path alone, before camera, display, ISP, and OS overhead add to that total in a full photo app, so the optimization target shifts from throughput to energy-per-inference. **Thermal Throttling**\index{Thermal Throttling!mobile serving} compounds this limit, since sustained high-power operation triggers thermal management: once the SoC reaches its thermal ceiling (typically 45 °C junction), the OS reduces NPU frequency by 30–50 percent, degrading both latency and throughput, which is why bursty workloads that allow cooling between bursts outperform sustained maximum throughput. **Memory Constraints**\index{Memory!constraints, mobile RAM} close the set, because mobile devices share limited RAM across applications. A model consuming 500 MB may be evicted during background operation, forcing a reload (cold start) that adds 200–500 ms of latency, and even a 150 MB footprint becomes problematic when the model must coexist with other app components. Memory-efficient quantization improves user experience through faster model restoration, and memory-mapped model loading (@sec-model-serving-loading-strategies-eb38) helps further by loading pages on demand rather than requiring the full model in memory.
 
 These constraints make mobile serving optimization qualitatively different from cloud optimization. The goal is not maximum throughput but sustainable performance, maintaining acceptable latency without thermal throttling or excessive battery drain.
 
@@ -4177,7 +4346,7 @@ After the runtime is chosen, configuration applies the same constraint-first log
 
 ### Precision selection for serving {#sec-model-serving-precision-selection-serving-55ba}
 
-A team deploying ResNet-50 on V100 GPUs faces a concrete constraint: their 30-GPU cluster costs \$90/hour, and business growth requires 3$\times$ more throughput without expanding the fleet. Switching from FP32 to INT8 inference achieves exactly this—the same model on the same hardware serves 3$\times$ more requests per second, reducing the effective cost per inference by two-thirds, at a cost of less than 0.4 percentage points of accuracy. This example illustrates the direct connection between numerical precision and infrastructure economics. Precision selection connects to the quantization techniques covered in @sec-model-compression-quantization-precision-cd46. For the foundational comparison of numerical formats (FP32, FP16, BF16, FP8, INT8) and their precision-range trade-offs, see @sec-appdx-machine-foundations-numerical-representations-c889; for the mechanics of symmetric and asymmetric integer quantization, see @sec-appdx-machine-foundations-integer-quantization-5442. Serving adds runtime concerns such as calibration data availability, layer sensitivity under production inputs, and dynamic precision selection.
+A team deploying ResNet-50 on V100 GPUs faces a concrete constraint: their 30-GPU cluster costs \$90/hour, and business growth requires 3$\times$ more throughput without expanding the fleet. Switching from FP32 to INT8 inference achieves exactly this—the same model on the same hardware serves 3$\times$ more requests per second, reducing the effective cost per inference by two-thirds, at a cost of less than 0.4 percentage points of accuracy. This example illustrates the direct connection between numerical precision and infrastructure economics. Precision selection connects to the quantization techniques covered in @sec-model-compression-quantization-precision-cd46. @Sec-appdx-machine-foundations-numerical-representations-c889 compares the numerical formats (FP32, FP16, BF16, FP8, INT8) and their precision-range trade-offs, and @sec-appdx-machine-foundations-integer-quantization-5442 details the mechanics of symmetric and asymmetric integer quantization. Serving adds runtime concerns such as calibration data availability, layer sensitivity under production inputs, and dynamic precision selection.
 
 #### Precision-throughput relationship {#sec-model-serving-precisionthroughput-relationship-b503}
 
@@ -4620,7 +4789,8 @@ The dominant cost in serving a large language model\index{LLM Serving!production
 # │ How: Compute KV cache bytes = 2 × layers × d_model × seq × batch × bytes
 # │      ÷ gqa_ratio; convert to GB; plot per-batch-size using book.tools.figures.style palette.
 # │
-# │ Imports: numpy (np), book.tools.figures.style (book_style), mlsysim.constants (BYTES_FP16, byte, GB)
+# │ Imports: numpy (np), book.tools.figures.style (book_style), mlsysim.constants (BYTES_FP16, byte, GB),
+# │          mlsysim (Models.Language.Llama3_70B: layers, hidden_dim, heads, kv_heads)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -4636,8 +4806,11 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 seq_len = np.linspace(0, 32000, 100)
-layers, d_model, bytes_per_param = 80, 8192, BYTES_FP16.to(byte).magnitude  # 70-billion-parameter model, FP16
-gqa_ratio = 8  # Grouped Query Attention (8x reduction)
+from mlsysim import Models
+
+_m70b = Models.Language.Llama3_70B  # 70-billion-parameter class, FP16
+layers, d_model, bytes_per_param = _m70b.layers, _m70b.hidden_dim, BYTES_FP16.to(byte).magnitude
+gqa_ratio = _m70b.heads // _m70b.kv_heads  # Grouped Query Attention (query heads / KV heads)
 
 def get_kv_gb(batch, seq):
     # KV cache size = 2 * layers * d_model * seq * batch * bytes_per_param/gqa_ratio
