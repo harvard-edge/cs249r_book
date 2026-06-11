@@ -2394,6 +2394,60 @@ $$
 
 This formula reveals the three-way trade-off: achieving smaller $\epsilon$ (stronger privacy) or smaller $\delta$ (higher confidence) requires proportionally larger noise $\sigma$, which degrades model utility. The factor $\sqrt{2\ln(1.25/\delta)}$ grows slowly with $1/\delta$, so cryptographically small $\delta$ (for example, $10^{-8}$) only moderately increases the required noise compared to $\delta = 10^{-5}$. The resulting noise scale makes the accuracy cost concrete.
 
+```{python}
+#| echo: false
+#| label: gaussian-noise-scale-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GAUSSIAN-MECHANISM NOISE SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: #exmp-security-privacy-privacy-accuracy-tax + the sigma~5.72 prose.
+# │
+# │ Goal: Pin the (eps,delta)-DP Gaussian noise scale sigma >= C*sqrt(2 ln(1.25/
+# │       delta))/eps for the privacy-accuracy-tax scenario, and the typical-ML
+# │       coefficient sigma ~ 5.72 * sensitivity at delta = 1e-7.
+# │ Show: strong eps=1 -> sigma~4.8, weak eps=10 -> sigma~0.48; coef~5.72.
+# │ How: sigma = C * sqrt(2 ln(1.25/delta)) / eps.
+# │
+# │ Imports: math, mlsysim.fmt (fmt, check)
+# │ Exports: gns_* clipping/delta inputs, ln-term, strong/weak sigma, 5.72 coef.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, check
+
+class GaussianNoiseScale:
+    """Gaussian-mechanism noise scale sigma for (eps, delta)-DP."""
+
+    # ┌── 1. LOAD (scenario assumptions) ───────────────────────────────────
+    clip_norm = 1.0  # gradient clipping norm C (= sensitivity Delta_2)
+    delta_callout = 1e-5  # failure probability for the worked callout
+    eps_strong = 1.0  # strong-privacy budget
+    eps_weak = 10.0  # weak-privacy budget
+    delta_typical = 1e-7  # typical-ML failure probability for the 5.72 coef
+
+    # ┌── 2. EXECUTE (noise scale) ─────────────────────────────────────────
+    ln_term = math.log(1.25 / delta_callout)  # ~11.74
+    noise_factor = math.sqrt(2 * ln_term)  # sqrt(2 ln(1.25/delta))
+    sigma_strong = clip_norm * noise_factor / eps_strong
+    sigma_weak = clip_norm * noise_factor / eps_weak
+    sigma_signal_ratio = sigma_strong / clip_norm  # noise vs gradient norm
+    coef_typical = math.sqrt(2 * math.log(1.25 / delta_typical)) / eps_strong
+
+    # ┌── 3. GUARD (anchors) ───────────────────────────────────────────────
+    check(abs(sigma_strong - 4.8) < 0.1, f"strong sigma {sigma_strong}")
+    check(abs(sigma_weak - 0.48) < 0.01, f"weak sigma {sigma_weak}")
+    check(abs(coef_typical - 5.72) < 0.05, f"typical coef {coef_typical}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    clip_norm_str = fmt(clip_norm, precision=0, commas=False)
+    eps_strong_str = fmt(eps_strong, precision=0, commas=False)
+    eps_weak_str = fmt(eps_weak, precision=0, commas=False)
+    ln_term_str = fmt(ln_term, precision=1, commas=False)
+    sigma_strong_str = fmt(sigma_strong, precision=1, commas=False)
+    sigma_weak_str = fmt(sigma_weak, precision=2, commas=False)
+    sigma_signal_ratio_str = fmt(sigma_signal_ratio, precision=1, commas=False)
+    coef_typical_str = fmt(coef_typical, precision=2, commas=False)
+```
+
 ::: {#exmp-security-privacy-privacy-accuracy-tax .callout-example title="The privacy-accuracy tax"}
 
 **Trade-off**: Stronger privacy requires adding more noise to gradients during training. This noise acts like a "tax" on model accuracy.
@@ -2404,19 +2458,19 @@ $$ \sigma \geq \frac{C \sqrt{2 \ln(1.25/\delta)}}{\epsilon} $$
 
 **Scenario**:
 
-*   **Gradient Norm Limit** $(C)$: 1.0
+*   **Gradient Norm Limit** $(C)$: `{python} GaussianNoiseScale.clip_norm_str`
 *   **Failure Probability** $(\delta)$: $10^{-5}$
 
 **Result** $(\sigma)$:
 
-*   **Strong Privacy** $(\epsilon = 1.0)$: $\sigma \approx 1.0 \times \sqrt{2 \times 11.7} / 1.0 \approx 4.8$
-*   **Weak Privacy** $(\epsilon = 10.0)$: $\sigma \approx 1.0 \times \sqrt{2 \times 11.7} / 10.0 \approx 0.48$
+*   **Strong Privacy** $(\epsilon =$ `{python} GaussianNoiseScale.eps_strong_str` $)$: $\sigma \approx$ `{python} GaussianNoiseScale.clip_norm_str` $\times \sqrt{2 \times$ `{python} GaussianNoiseScale.ln_term_str` $} /$ `{python} GaussianNoiseScale.eps_strong_str` $\approx$ `{python} GaussianNoiseScale.sigma_strong_str`
+*   **Weak Privacy** $(\epsilon =$ `{python} GaussianNoiseScale.eps_weak_str` $)$: $\sigma \approx$ `{python} GaussianNoiseScale.clip_norm_str` $\times \sqrt{2 \times$ `{python} GaussianNoiseScale.ln_term_str` $} /$ `{python} GaussianNoiseScale.eps_weak_str` $\approx$ `{python} GaussianNoiseScale.sigma_weak_str`
 
-**Systems insight**: Achieving $\epsilon=1.0$ requires adding noise nearly 5$\times$ larger than the signal (gradient norm 1.0). This degrades accuracy by 5--10 percent unless the model trains for significantly longer or uses much larger batch sizes to average out the noise.
+**Systems insight**: Achieving $\epsilon=$ `{python} GaussianNoiseScale.eps_strong_str` requires adding noise nearly `{python} GaussianNoiseScale.sigma_signal_ratio_str`$\times$ larger than the signal (gradient norm `{python} GaussianNoiseScale.clip_norm_str`). This degrades accuracy by 5--10 percent unless the model trains for significantly longer or uses much larger batch sizes to average out the noise.
 
 :::
 
-The noise scale must satisfy $\sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln(1.25/\delta)}$ to achieve $(\epsilon, \delta)$-DP. For typical ML hyperparameters $(\epsilon = 1, \delta = 10^{-7})$, this requires $\sigma \approx 5.72 \cdot \Delta_2 f$.
+The noise scale must satisfy $\sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln(1.25/\delta)}$ to achieve $(\epsilon, \delta)$-DP. For typical ML hyperparameters $(\epsilon = 1, \delta = 10^{-7})$, this requires $\sigma \approx$ `{python} GaussianNoiseScale.coef_typical_str` $\cdot \Delta_2 f$.
 
 Gaussian noise is preferred in deep learning because gradient norms are naturally bounded in $\ell_2$ space, making sensitivity analysis tractable. The Gaussian mechanism also composes more tightly under Rényi Differential Privacy accounting.
 
