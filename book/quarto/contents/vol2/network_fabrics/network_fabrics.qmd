@@ -604,7 +604,13 @@ class NetworkAlphaBeta:
     n_cross_ib = calc_alpha_beta_crossover(alpha_ib, beta_ib)
 
     t_small_ib = calc_point_to_point_time(n_small, alpha_ib, beta_ib)
+    t_small_eth = calc_point_to_point_time(n_small, eth_alpha, eth_beta)
     small_bw_term_pct = ((n_small / beta_ib) / t_small_ib).to_base_units().magnitude * 100
+    small_speedup = (t_small_eth / t_small_ib).to_base_units().magnitude
+
+    # Small-message worked-equation terms (microseconds), for the alpha-beta callout.
+    ib_small_xfer_us = (n_small / beta_ib).to(microsecond).magnitude
+    eth_small_xfer_us = (n_small / eth_beta).to(microsecond).magnitude
 
     t_large_ib = calc_point_to_point_time(n_large, alpha_ib, beta_ib)
     t_large_eth = calc_point_to_point_time(n_large, eth_alpha, eth_beta)
@@ -613,6 +619,7 @@ class NetworkAlphaBeta:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_cross_ib < 100 * KB, f"Crossover ({n_cross_ib.to(KB).magnitude:.0f} KB) should be < 100 KB for IB")
     check(small_bw_term_pct < 10, f"Small msg should be latency-bound, got {small_bw_term_pct:.1f}% BW share")
+    check(3.0 < small_speedup < 4.0, "Small-message speedup should be about 3.4× for IB vs Ethernet")
     check(3.5 < large_speedup < 4.5, "Large-message speedup should be about 4× for IB vs 100G Ethernet")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -630,6 +637,22 @@ class NetworkAlphaBeta:
     eth_alpha_us_str = fmt_time(eth_alpha, microsecond, precision=0, commas=False)
     eth_beta_gb_per_s_str = fmt_qty(eth_beta, GB / second, precision=1, commas=False)
     doubled_beta_gb_per_s_str = fmt_qty(2 * beta_ib, GB / second, precision=0, commas=False)
+
+    # Worked small-message equations for the alpha-beta crossover callout.
+    _a_ib = alpha_ib.to(microsecond).magnitude
+    _b_ib = beta_ib.to(GB / second).magnitude
+    _a_eth = eth_alpha.to(microsecond).magnitude
+    _b_eth = eth_beta.to(GB / second).magnitude
+    _n_kb = n_small.to(KB).magnitude
+    small_ib_eq_math = fmt_math(
+        rf"{_a_ib:.1f}\,\mu\text{{s}} + {_n_kb:.0f}\,\text{{KB}}/{_b_ib:.0f}\,\text{{GB/s}} "
+        rf"= {_a_ib:.1f} + {ib_small_xfer_us:.2f} = \mathbf{{{t_small_ib.to(microsecond).magnitude:.2f}\,\mu\text{{s}}}}"
+    )
+    small_eth_eq_math = fmt_math(
+        rf"{_a_eth:.1f}\,\mu\text{{s}} + {_n_kb:.0f}\,\text{{KB}}/{_b_eth:.1f}\,\text{{GB/s}} "
+        rf"= {_a_eth:.1f} + {eth_small_xfer_us:.2f} = \mathbf{{{t_small_eth.to(microsecond).magnitude:.2f}\,\mu\text{{s}}}}"
+    )
+    small_speedup_mult_str = fmt_multiple(small_speedup, precision=1, commas=False)
 ```
 
 The model reveals two regimes:
@@ -646,10 +669,10 @@ For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_
 **Math**:
 Apply $T(n) = \alpha + n/\beta$ for a `{python} NetworkAlphaBeta.n_small_kb_str` control message and a `{python} NetworkAlphaBeta.n_large_mb_str` gradient shard.
 
-1. **Small message** (4 KB):
-   - InfiniBand: $1.5\,\mu\text{s} + 4\,\text{KB}/50\,\text{GB/s} = 1.5 + 0.08 = \mathbf{1.58\,\mu\text{s}}$
-   - Ethernet: $5.0\,\mu\text{s} + 4\,\text{KB}/12.5\,\text{GB/s} = 5.0 + 0.32 = \mathbf{5.32\,\mu\text{s}}$
-   - **Result**: InfiniBand is 3.4$\times$ faster purely due to lower $\alpha$.
+1. **Small message** (`{python} NetworkAlphaBeta.n_small_kb_str`):
+   - InfiniBand: `{python} NetworkAlphaBeta.small_ib_eq_math`
+   - Ethernet: `{python} NetworkAlphaBeta.small_eth_eq_math`
+   - **Result**: InfiniBand is `{python} NetworkAlphaBeta.small_speedup_mult_str` faster purely due to lower $\alpha$.
 
 2. **Large message** (`{python} NetworkAlphaBeta.n_large_mb_str`):
    - InfiniBand: $T = \alpha + n/\beta =$ `{python} NetworkAlphaBeta.t_large_ib_ms_str`
