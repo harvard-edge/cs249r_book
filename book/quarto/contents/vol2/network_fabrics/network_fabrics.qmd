@@ -422,7 +422,57 @@ In an ML fleet, distance is money. A 10,000-GPU cluster requires ~`{python} Spin
 
 ### SerDes, link budget, and power {#sec-network-fabrics-serdes}
 
-Every port depends on a **Serializer/Deserializer (SerDes)**\index{SerDes}\index{SerDes!definition}\index{Serializer/Deserializer} circuit that converts parallel data from the switch ASIC into a serial stream. As bandwidth scales, these circuits have become the dominant power consumer in the network fabric. Consider the energy implications for our cluster of `{python} NetworkWireClusterRecap.n_gpus_str`: maintaining full $\text{BW}_{\text{bisect}}$ for the 350 GB of gradient traffic requires roughly 3,000 high-speed links. If each `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` port consumes 25 W (combined SerDes and optical transceiver power), the interconnect alone draws 75 kW continuously—over 10 percent of the cluster's power budget dedicated merely to moving bits, not computing on them.
+```{python}
+#| echo: false
+#| label: network-fabrics-serdes-power-budget
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERDES POWER BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-serdes — the SerDes/interconnect power
+# │          paragraph below.
+# │
+# │ Goal: Quantify the interconnect power draw for the running-example cluster
+# │       and express it as a fraction of the GPU power budget.
+# │ Show: 350 GB AllReduce, ~3,000 links, 25 W/port, 75 kW interconnect,
+# │       ~10 percent of the accelerator power budget.
+# │ How: gradient = GPT3 params × 2 bytes (FP16); link count and per-port power
+# │      are scenario assumptions; GPU power budget = total_accelerators × TDP.
+# │
+# │ Imports: mlsysim registries (Models, Hardware, Systems) + fmt helpers
+# │ Exports: SerDesPowerBudget.grad_gb_str, .n_links_str, .port_power_w_str,
+# │          .interconnect_kw_str, .power_frac_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_qty, fmt_power, fmt_percent, check
+
+class SerDesPowerBudget:
+    """Interconnect SerDes/transceiver power for the 175B running-example cluster."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    n_gpus = Systems.Clusters.Training_1K.total_accelerators
+    h100_tdp = Hardware.Cloud.H100.tdp
+    gradient = Models.Language.GPT3.parameters * (2 * byte / param)  # 175B FP16 AllReduce
+    n_links = 3000  # scenario assumption: high-speed links to sustain full BW_bisect
+    port_power = 25 * watt  # scenario assumption: combined SerDes + optical transceiver per port
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    interconnect_power = n_links * port_power
+    gpu_power_budget = n_gpus * h100_tdp
+    power_fraction = (interconnect_power / gpu_power_budget).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(gradient.to(GB).magnitude - 350) < 1e-6, "175B FP16 AllReduce should be 350 GB")
+    check(interconnect_power.to(kW).magnitude == 75, "3,000 links at 25 W should draw 75 kW")
+    check(0.10 < power_fraction < 0.11, f"Interconnect should be ~10 percent of GPU power, got {power_fraction:.3f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    grad_gb_str = fmt_qty(gradient, GB, precision=0, commas=False)
+    n_links_str = fmt(n_links, precision=0, commas=True)
+    port_power_w_str = fmt_power(port_power, unit=watt, precision=0, commas=False)
+    interconnect_kw_str = fmt_power(interconnect_power, unit=kW, precision=0, commas=False)
+    power_frac_pct_str = fmt_percent(power_fraction, precision=1, commas=False, style='prose')
+```
+
+Every port depends on a **Serializer/Deserializer (SerDes)**\index{SerDes}\index{SerDes!definition}\index{Serializer/Deserializer} circuit that converts parallel data from the switch ASIC into a serial stream. As bandwidth scales, these circuits have become the dominant power consumer in the network fabric. Consider the energy implications for our cluster of `{python} NetworkWireClusterRecap.n_gpus_str`: maintaining full $\text{BW}_{\text{bisect}}$ for the `{python} SerDesPowerBudget.grad_gb_str` of gradient traffic requires roughly `{python} SerDesPowerBudget.n_links_str` high-speed links. If each `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` port consumes `{python} SerDesPowerBudget.port_power_w_str` (combined SerDes and optical transceiver power), the interconnect alone draws `{python} SerDesPowerBudget.interconnect_kw_str` continuously—`{python} SerDesPowerBudget.power_frac_pct_str` of the cluster's power budget dedicated merely to moving bits, not computing on them.
 
 The **link budget**\index{Link Budget}, a strict decibel (dB) allowance for signal attenuation, governs the reach of these links. As signals traverse copper, they lose energy to skin effect and dielectric absorption. The link budget is the difference between the transmitter's output power and the receiver's sensitivity limit. For a standard 50G PAM4 lane, the budget might be 30 dB. If a 3-meter DAC cable introduces 18 dB of loss and the connectors add another 2 dB, 10 dB of margin remains. However, as frequency doubles to support 100G lanes (for 800 Gb/s ports), the loss per meter increases sharply. The physics forces a brutal trade-off: to maintain signal integrity without exceeding the power budget, cable reach must decrease. Copper links operating at 800 Gb/s are limited to roughly 1–2 meters, physically constraining the diameter of a compute rack and forcing the use of expensive, power-hungry optics for any connection leaving the cabinet. In 1.6 Tb/s-class planning scenarios, SerDes and optical power can account for a large fraction of cluster energy, making power-per-bit a primary scaling constraint.
 
