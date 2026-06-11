@@ -687,9 +687,12 @@ ML operations span three orders of magnitude in arithmetic intensity, and the po
 # │ Imports: mlsysim.core.units (BYTES_FP16), mlsysim.book (check)
 # │ Exports: WorkloadIntensityCalc.gemm_intensity_str,
 # │          WorkloadIntensityCalc.elem_intensity_str,
-# │          WorkloadIntensityCalc.decode_intensity_str
+# │          WorkloadIntensityCalc.decode_intensity_str,
+# │          WorkloadIntensityCalc.gemm_intensity_table_str,
+# │          WorkloadIntensityCalc.gemm_flops_billion_str,
+# │          WorkloadIntensityCalc.gemm_bytes_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_arithmetic_intensity
+from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity, fmt_qty
 
 class WorkloadIntensityCalc:
     """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
@@ -730,20 +733,25 @@ class WorkloadIntensityCalc:
     gemm_intensity_str = fmt_arithmetic_intensity(gemm_flops / gemm_bytes, precision=1, commas=False)
     elem_intensity_str = fmt_arithmetic_intensity(elem_flops / elem_bytes, precision=1, commas=False)
     decode_intensity_str = fmt_arithmetic_intensity(decode_flops_val / decode_bytes_val, precision=1, commas=False)
+    # Table cell (@tbl-arithmetic-intensity): comma-grouped integer with the unit.
+    gemm_intensity_table_str = fmt_arithmetic_intensity(round(gemm_intensity) * flop / byte, unit=flop / byte, precision=0, commas=True)
+    # GEMM work and operand traffic for the prose above.
+    gemm_flops_billion_str = fmt(gemm_flops.to(flop).magnitude / 1e9, precision=1, commas=False)
+    gemm_bytes_mb_str = fmt_qty(gemm_bytes, MB, precision=0, commas=False)
 ```
 
-Large general matrix multiply (GEMM) operations are the most compute-intensive operations in ML. A square matrix multiplication of dimension $4096{\times}4096$ in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.gemm_intensity_str`. This sits well above the H100's ridge point, making large GEMMs firmly compute bound.
+Large general matrix multiply (GEMM) operations are the most compute-intensive operations in ML. A square matrix multiplication of dimension $4096{\times}4096$ in FP16 performs approximately `{python} WorkloadIntensityCalc.gemm_flops_billion_str` billion FLOPs while loading roughly `{python} WorkloadIntensityCalc.gemm_bytes_mb_str` of data, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.gemm_intensity_str`. This sits well above the H100's ridge point, making large GEMMs firmly compute bound.
 
 Element-wise operations tell the opposite story. A Gaussian Error Linear Unit (GELU) activation applied to a $4096{\times}4096$ tensor performs roughly 5 operations per element but must load and store each element, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.elem_intensity_str`. The GPU spends almost all its time waiting for data transfers rather than computing, making these operations profoundly memory-bound.
 
 Autoregressive LLM decoding at batch size one represents the extreme case. Each decoding step reads the entire weight matrix (gigabytes of data) to produce a single output token. With a hidden dimension of 4096 and batch size 1, the arithmetic intensity is approximately `{python} WorkloadIntensityCalc.decode_intensity_str`, deep in the memory-bound regime. The arithmetic intensity explains why LLM token generation achieves a tiny fraction of peak FLOP/s: the GPU spends nearly all its time reading weights, not multiplying them.
 
-| **Operation**                      | **Arithmetic Intensity** | **H100 FP16 Regime** | **Primary Bottleneck** |
-|:-----------------------------------|:------------------------:|:--------------------:|:----------------------:|
-| **GEMM ($4096{\times}4096$)**      |     ~1,365 FLOP/byte     |    Compute-bound     | Tensor core throughput |
-| **Self-Attention (seq=2048)**      |    ~50--200 FLOP/byte    |     Memory-bound     |     HBM bandwidth      |
-| **Element-wise (GELU, LayerNorm)** |     ~1--3 FLOP/byte      |     Memory-bound     |     HBM bandwidth      |
-| **LLM Decode (batch=1)**           |     ~1--2 FLOP/byte      |     Memory-bound     |     HBM bandwidth      |
+| **Operation**                      |                  **Arithmetic Intensity**                  | **H100 FP16 Regime** | **Primary Bottleneck** |
+|:-----------------------------------|:----------------------------------------------------------:|:--------------------:|:----------------------:|
+| **GEMM ($4096{\times}4096$)**      | ~`{python} WorkloadIntensityCalc.gemm_intensity_table_str` |    Compute-bound     | Tensor core throughput |
+| **Self-Attention (seq=2048)**      |                     ~50--200 FLOP/byte                     |     Memory-bound     |     HBM bandwidth      |
+| **Element-wise (GELU, LayerNorm)** |                      ~1--3 FLOP/byte                       |     Memory-bound     |     HBM bandwidth      |
+| **LLM Decode (batch=1)**           |                      ~1--2 FLOP/byte                       |     Memory-bound     |     HBM bandwidth      |
 
 : **Arithmetic Intensity of Common ML Operations**: Many transformer inference operations, aside from large batched GEMMs, fall below the H100's ridge point and are therefore memory-bound. Performance engineering focuses on reducing the memory traffic of these operations. {#tbl-arithmetic-intensity}
 
