@@ -744,7 +744,7 @@ class DefenseOverheadAnalysis:
     """Quantify the latency impact of security monitoring and output perturbation."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    class_count = 1000
+    class_count = Datasets.ImageNet.num_classes  # ResNet-50 ImageNet classifier
     daily_queries = 1 * MILLION
     daily_users = 10 * THOUSAND
     training_cost_usd = 5 * THOUSAND
@@ -2394,6 +2394,60 @@ $$
 
 This formula reveals the three-way trade-off: achieving smaller $\epsilon$ (stronger privacy) or smaller $\delta$ (higher confidence) requires proportionally larger noise $\sigma$, which degrades model utility. The factor $\sqrt{2\ln(1.25/\delta)}$ grows slowly with $1/\delta$, so cryptographically small $\delta$ (for example, $10^{-8}$) only moderately increases the required noise compared to $\delta = 10^{-5}$. The resulting noise scale makes the accuracy cost concrete.
 
+```{python}
+#| echo: false
+#| label: gaussian-noise-scale-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GAUSSIAN-MECHANISM NOISE SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: #exmp-security-privacy-privacy-accuracy-tax + the sigma~5.72 prose.
+# │
+# │ Goal: Pin the (eps,delta)-DP Gaussian noise scale sigma >= C*sqrt(2 ln(1.25/
+# │       delta))/eps for the privacy-accuracy-tax scenario, and the typical-ML
+# │       coefficient sigma ~ 5.72 * sensitivity at delta = 1e-7.
+# │ Show: strong eps=1 -> sigma~4.8, weak eps=10 -> sigma~0.48; coef~5.72.
+# │ How: sigma = C * sqrt(2 ln(1.25/delta)) / eps.
+# │
+# │ Imports: math, mlsysim.fmt (fmt, check)
+# │ Exports: gns_* clipping/delta inputs, ln-term, strong/weak sigma, 5.72 coef.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, check
+
+class GaussianNoiseScale:
+    """Gaussian-mechanism noise scale sigma for (eps, delta)-DP."""
+
+    # ┌── 1. LOAD (scenario assumptions) ───────────────────────────────────
+    clip_norm = 1.0  # gradient clipping norm C (= sensitivity Delta_2)
+    delta_callout = 1e-5  # failure probability for the worked callout
+    eps_strong = 1.0  # strong-privacy budget
+    eps_weak = 10.0  # weak-privacy budget
+    delta_typical = 1e-7  # typical-ML failure probability for the 5.72 coef
+
+    # ┌── 2. EXECUTE (noise scale) ─────────────────────────────────────────
+    ln_term = math.log(1.25 / delta_callout)  # ~11.74
+    noise_factor = math.sqrt(2 * ln_term)  # sqrt(2 ln(1.25/delta))
+    sigma_strong = clip_norm * noise_factor / eps_strong
+    sigma_weak = clip_norm * noise_factor / eps_weak
+    sigma_signal_ratio = sigma_strong / clip_norm  # noise vs gradient norm
+    coef_typical = math.sqrt(2 * math.log(1.25 / delta_typical)) / eps_strong
+
+    # ┌── 3. GUARD (anchors) ───────────────────────────────────────────────
+    check(abs(sigma_strong - 4.8) < 0.1, f"strong sigma {sigma_strong}")
+    check(abs(sigma_weak - 0.48) < 0.01, f"weak sigma {sigma_weak}")
+    check(abs(coef_typical - 5.72) < 0.05, f"typical coef {coef_typical}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    clip_norm_str = fmt(clip_norm, precision=0, commas=False)
+    eps_strong_str = fmt(eps_strong, precision=0, commas=False)
+    eps_weak_str = fmt(eps_weak, precision=0, commas=False)
+    ln_term_str = fmt(ln_term, precision=1, commas=False)
+    sigma_strong_str = fmt(sigma_strong, precision=1, commas=False)
+    sigma_weak_str = fmt(sigma_weak, precision=2, commas=False)
+    sigma_signal_ratio_str = fmt(sigma_signal_ratio, precision=1, commas=False)
+    coef_typical_str = fmt(coef_typical, precision=2, commas=False)
+```
+
 ::: {#exmp-security-privacy-privacy-accuracy-tax .callout-example title="The privacy-accuracy tax"}
 
 **Trade-off**: Stronger privacy requires adding more noise to gradients during training. This noise acts like a "tax" on model accuracy.
@@ -2404,19 +2458,19 @@ $$ \sigma \geq \frac{C \sqrt{2 \ln(1.25/\delta)}}{\epsilon} $$
 
 **Scenario**:
 
-*   **Gradient Norm Limit** $(C)$: 1.0
+*   **Gradient Norm Limit** $(C)$: `{python} GaussianNoiseScale.clip_norm_str`
 *   **Failure Probability** $(\delta)$: $10^{-5}$
 
 **Result** $(\sigma)$:
 
-*   **Strong Privacy** $(\epsilon = 1.0)$: $\sigma \approx 1.0 \times \sqrt{2 \times 11.7} / 1.0 \approx 4.8$
-*   **Weak Privacy** $(\epsilon = 10.0)$: $\sigma \approx 1.0 \times \sqrt{2 \times 11.7} / 10.0 \approx 0.48$
+*   **Strong Privacy** $(\epsilon =$ `{python} GaussianNoiseScale.eps_strong_str` $)$: $\sigma \approx$ `{python} GaussianNoiseScale.clip_norm_str` $\times \sqrt{2 \times$ `{python} GaussianNoiseScale.ln_term_str` $} /$ `{python} GaussianNoiseScale.eps_strong_str` $\approx$ `{python} GaussianNoiseScale.sigma_strong_str`
+*   **Weak Privacy** $(\epsilon =$ `{python} GaussianNoiseScale.eps_weak_str` $)$: $\sigma \approx$ `{python} GaussianNoiseScale.clip_norm_str` $\times \sqrt{2 \times$ `{python} GaussianNoiseScale.ln_term_str` $} /$ `{python} GaussianNoiseScale.eps_weak_str` $\approx$ `{python} GaussianNoiseScale.sigma_weak_str`
 
-**Systems insight**: Achieving $\epsilon=1.0$ requires adding noise nearly 5$\times$ larger than the signal (gradient norm 1.0). This degrades accuracy by 5--10 percent unless the model trains for significantly longer or uses much larger batch sizes to average out the noise.
+**Systems insight**: Achieving $\epsilon=$ `{python} GaussianNoiseScale.eps_strong_str` requires adding noise nearly `{python} GaussianNoiseScale.sigma_signal_ratio_str`$\times$ larger than the signal (gradient norm `{python} GaussianNoiseScale.clip_norm_str`). This degrades accuracy by 5--10 percent unless the model trains for significantly longer or uses much larger batch sizes to average out the noise.
 
 :::
 
-The noise scale must satisfy $\sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln(1.25/\delta)}$ to achieve $(\epsilon, \delta)$-DP. For typical ML hyperparameters $(\epsilon = 1, \delta = 10^{-7})$, this requires $\sigma \approx 5.72 \cdot \Delta_2 f$.
+The noise scale must satisfy $\sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln(1.25/\delta)}$ to achieve $(\epsilon, \delta)$-DP. For typical ML hyperparameters $(\epsilon = 1, \delta = 10^{-7})$, this requires $\sigma \approx$ `{python} GaussianNoiseScale.coef_typical_str` $\cdot \Delta_2 f$.
 
 Gaussian noise is preferred in deep learning because gradient norms are naturally bounded in $\ell_2$ space, making sensitivity analysis tractable. The Gaussian mechanism also composes more tightly under Rényi Differential Privacy accounting.
 
@@ -2441,7 +2495,45 @@ $$
 \epsilon(\delta) = \min_{\lambda_{\text{mom}}} \left[\frac{k \cdot \alpha_{\mathcal{M}}(\lambda_{\text{mom}}) + \ln(1/\delta)}{\lambda_{\text{mom}} - 1}\right]
 $$
 
-For DP-SGD training a ResNet-20 on CIFAR-10 with 100 epochs, batch size 256, and clipping norm $C=1.0$, the moments accountant yields $\epsilon \approx 2.3$ (for $\delta=10^{-5}$), compared to $\epsilon \approx 23$ under naive composition. This tighter accounting makes private deep learning practically feasible.
+```{python}
+#| echo: false
+#| label: moments-accountant-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOMENTS-ACCOUNTANT VS NAIVE COMPOSITION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: ResNet-20/CIFAR-10 DP-SGD privacy-accounting comparison prose.
+# │
+# │ Goal: Pin the published moments-accountant epsilon and the naive-composition
+# │       epsilon it improves on (the "~10x tighter" accounting result).
+# │ Show: moments accountant eps ~2.3 vs naive composition eps ~23.
+# │ How: naive = moments * tightness_factor (the reported accounting gain).
+# │
+# │ Imports: mlsysim.fmt (fmt, check)
+# │ Exports: ma_clip_norm_str, ma_eps_moments_str, ma_eps_naive_str.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class MomentsAccountant:
+    """Moments-accountant vs naive-composition privacy budget (@abadi2016deep)."""
+
+    # ┌── 1. LOAD (published result + scenario inputs) ─────────────────────
+    clip_norm = 1.0  # gradient clipping norm C
+    eps_moments = 2.3  # @abadi2016deep moments-accountant epsilon (delta=1e-5)
+    tightness_factor = 10  # accounting gain over naive composition (~10x)
+
+    # ┌── 2. EXECUTE (naive composition bound) ────────────────────────────
+    eps_naive = eps_moments * tightness_factor
+
+    # ┌── 3. GUARD (anchor) ────────────────────────────────────────────────
+    check(abs(eps_naive - 23.0) < 0.05, f"naive eps {eps_naive}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    ma_clip_norm_str = fmt(clip_norm, precision=0, commas=False)
+    ma_eps_moments_str = fmt(eps_moments, precision=1, commas=False)
+    ma_eps_naive_str = fmt(eps_naive, precision=0, commas=False)
+```
+
+For DP-SGD training a ResNet-20 on CIFAR-10 with 100 epochs, batch size 256, and clipping norm $C=$ `{python} MomentsAccountant.ma_clip_norm_str`, the moments accountant yields $\epsilon \approx$ `{python} MomentsAccountant.ma_eps_moments_str` (for $\delta=10^{-5}$), compared to $\epsilon \approx$ `{python} MomentsAccountant.ma_eps_naive_str` under naive composition. This tighter accounting makes private deep learning practically feasible.
 
 #### Renyi differential privacy and composition {#sec-security-privacy-renyi-differential-privacy-composition-f69a}
 
@@ -2471,26 +2563,113 @@ optimized over $\alpha$. For typical ML workloads, RDP provides 2--3$\times$ tig
 
 #### Practical privacy budget example: DP-SGD for image classification {#sec-security-privacy-practical-privacy-budget-example-dpsgd-image-classification-2662}
 
-Consider training a CNN on 50,000 CIFAR-10 images with $(\epsilon, \delta) = (3.0, 10^{-5})$ target privacy. Using DP-SGD with:
+```{python}
+#| echo: false
+#| label: dp-sgd-practical-budget-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRACTICAL DP-SGD PRIVACY BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Practical privacy budget example" prose worked example.
+# │
+# │ Goal: Pin the RDP accounting for CIFAR-10 DP-SGD: sampling rate, sensitivity,
+# │       step count, per-step and total RDP coefficients, and the (eps,delta)
+# │       conversion swept over the Renyi order alpha.
+# │ Show: q=0.08, Delta_2=0.0005, k=750, per-step ~0.00189, total ~1.42, eps~9.5.
+# │ How: q=B/n; eps_step = q^2/(2 sigma^2); eps(alpha)=total*alpha+ln(1/delta)/(alpha-1).
+# │
+# │ Imports: math, numpy, mlsysim (Datasets, units), mlsysim.fmt (fmt, check)
+# │ Exports: pdp_* scenario inputs, coefficients, alpha-sweep epsilons.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+import numpy as np
+from mlsysim import Datasets
+from mlsysim.core.units import count
+from mlsysim.fmt import fmt, check
 
-- Batch size $B = 4000$ (sampling rate $q = B/n_{\text{records}} = 0.08$)
-- Gradient clipping norm $C = 1.0$ (sensitivity $\Delta_2 = 2C/B = 0.0005$)
-- Noise multiplier $\sigma = 1.3$ (noise scale relative to clipping)
-- Training for $N_{\text{epochs}} = 60$ epochs ($k = N_{\text{epochs}} \cdot n_{\text{records}}/B = 750$ steps)
+class PracticalDPBudget:
+    """RDP accounting for a CIFAR-10 DP-SGD privacy budget."""
+
+    # ┌── 1. LOAD (registry + scenario assumptions) ────────────────────────
+    n_records = int(Datasets.CIFAR10.training_examples.m_as(count))  # 50,000
+    batch_size = 4000  # scenario assumption
+    clip_norm = 1.0  # gradient clipping norm C
+    sigma = 1.3  # noise multiplier
+    n_epochs = 60  # scenario assumption
+    eps_target = 3.0  # target privacy budget
+    delta = 1e-5  # failure probability
+    alpha_lo = 4  # displayed Renyi orders bracketing the optimum
+    alpha_hi = 3
+    alpha_too_high = 10
+
+    # ┌── 2. EXECUTE (RDP accounting) ──────────────────────────────────────
+    q = batch_size / n_records  # subsampling rate
+    sensitivity = 2 * clip_norm / batch_size  # Delta_2 = 2C/B
+    k_steps = int(n_epochs * n_records / batch_size)
+    eps_step_coef = q**2 / (2 * sigma**2)  # per-step RDP slope in alpha
+    eps_total_coef = k_steps * eps_step_coef  # total RDP slope in alpha
+    ln_inv_delta = math.log(1 / delta)
+    _grid = np.linspace(1.1, 20, 400_000)
+    _eps = eps_total_coef * _grid + ln_inv_delta / (_grid - 1)
+    alpha_opt = float(_grid[_eps.argmin()])
+    eps_opt = float(_eps.min())
+    eps_alpha_too_high = eps_total_coef * alpha_too_high + ln_inv_delta / (alpha_too_high - 1)
+    eps_alpha_lo = eps_total_coef * alpha_lo + ln_inv_delta / (alpha_lo - 1)
+    eps_alpha_hi = eps_total_coef * alpha_hi + ln_inv_delta / (alpha_hi - 1)
+
+    # ┌── 3. GUARD (anchors) ───────────────────────────────────────────────
+    check(abs(q - 0.08) < 1e-6, f"q {q}")
+    check(abs(sensitivity - 0.0005) < 1e-9, f"sensitivity {sensitivity}")
+    check(k_steps == 750, f"k_steps {k_steps}")
+    check(abs(eps_step_coef - 0.00189) < 1e-4, f"per-step {eps_step_coef}")
+    check(abs(eps_total_coef - 1.42) < 1e-2, f"total {eps_total_coef}")
+    check(abs(eps_opt - 9.5) < 0.2, f"eps_opt {eps_opt}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    n_records_str = fmt(n_records, precision=0)
+    batch_size_str = fmt(batch_size, precision=0)
+    clip_norm_str = fmt(clip_norm, precision=0, commas=False)
+    sigma_str = fmt(sigma, precision=1, commas=False)
+    n_epochs_str = fmt(n_epochs, precision=0, commas=False)
+    eps_target_str = fmt(eps_target, precision=0, commas=False)
+    q_str = fmt(q, precision=2, commas=False)
+    sensitivity_str = fmt(sensitivity, precision=4, commas=False)
+    k_steps_str = fmt(k_steps, precision=0, commas=False)
+    eps_step_coef_str = fmt(eps_step_coef, precision=5, commas=False)
+    eps_total_coef_str = fmt(eps_total_coef, precision=2, commas=False)
+    alpha_opt_str = fmt(alpha_opt, precision=1, commas=False)
+    eps_opt_str = fmt(eps_opt, precision=1, commas=False)
+    # alpha-sweep line components (slope, tail, total) at the three orders.
+    slope_too_high_str = fmt(eps_total_coef * alpha_too_high, precision=1, commas=False)
+    tail_too_high_str = fmt(ln_inv_delta / (alpha_too_high - 1), precision=2, commas=False)
+    eps_too_high_str = fmt(eps_alpha_too_high, precision=2, commas=False)
+    slope_lo_str = fmt(eps_total_coef * alpha_lo, precision=2, commas=False)
+    tail_lo_str = fmt(ln_inv_delta / (alpha_lo - 1), precision=2, commas=False)
+    eps_lo_str = fmt(eps_alpha_lo, precision=2, commas=False)
+    slope_hi_str = fmt(eps_total_coef * alpha_hi, precision=2, commas=False)
+    tail_hi_str = fmt(ln_inv_delta / (alpha_hi - 1), precision=2, commas=False)
+    eps_hi_str = fmt(eps_alpha_hi, precision=2, commas=False)
+```
+
+Consider training a CNN on `{python} PracticalDPBudget.n_records_str` CIFAR-10 images with $(\epsilon, \delta) = ($ `{python} PracticalDPBudget.eps_target_str` $, 10^{-5})$ target privacy. Using DP-SGD with:
+
+- Batch size $B =$ `{python} PracticalDPBudget.batch_size_str` (sampling rate $q = B/n_{\text{records}} =$ `{python} PracticalDPBudget.q_str`)
+- Gradient clipping norm $C =$ `{python} PracticalDPBudget.clip_norm_str` (sensitivity $\Delta_2 = 2C/B =$ `{python} PracticalDPBudget.sensitivity_str`)
+- Noise multiplier $\sigma =$ `{python} PracticalDPBudget.sigma_str` (noise scale relative to clipping)
+- Training for $N_{\text{epochs}} =$ `{python} PracticalDPBudget.n_epochs_str` epochs ($k = N_{\text{epochs}} \cdot n_{\text{records}}/B =$ `{python} PracticalDPBudget.k_steps_str` steps)
 
 The RDP analysis proceeds as follows:
 
-1. Per-step RDP: $\varepsilon_{\text{step}}(\alpha) \approx \frac{q^2 \alpha}{2\sigma^2} = \frac{(0.08)^2 \alpha}{2(1.3)^2} \approx 0.00189\alpha$
+1. Per-step RDP: $\varepsilon_{\text{step}}(\alpha) \approx \frac{q^2 \alpha}{2\sigma^2} = \frac{($ `{python} PracticalDPBudget.q_str` $)^2 \alpha}{2($ `{python} PracticalDPBudget.sigma_str` $)^2} \approx$ `{python} PracticalDPBudget.eps_step_coef_str` $\alpha$
 
-2. Total RDP after 750 steps: $\varepsilon_{\text{total}}(\alpha) = 750 \cdot 0.00189\alpha = 1.42\alpha$
+2. Total RDP after `{python} PracticalDPBudget.k_steps_str` steps: $\varepsilon_{\text{total}}(\alpha) =$ `{python} PracticalDPBudget.k_steps_str` $\cdot$ `{python} PracticalDPBudget.eps_step_coef_str` $\alpha =$ `{python} PracticalDPBudget.eps_total_coef_str` $\alpha$
 
 3. Converting to $(\epsilon, \delta)$-DP, we optimize over $\alpha$:
-   - For $\alpha = 10$: $\epsilon = 1.42 \times 10 + \ln(10^5)/9 = 14.2 + 1.28 = 15.48$ (too high)
-   - For $\alpha = 4$: $\epsilon = 1.42 \times 4 + \ln(10^5)/3 = 5.68 + 3.83 = 9.51$
-   - For $\alpha = 3$: $\epsilon = 1.42 \times 3 + \ln(10^5)/2 = 4.26 + 5.76 = 10.02$
-   - Optimal $\alpha \approx 3.8$ yields $\epsilon \approx 9.5$
+   - For $\alpha = 10$: $\epsilon =$ `{python} PracticalDPBudget.eps_total_coef_str` $\times 10 + \ln(10^5)/9 =$ `{python} PracticalDPBudget.slope_too_high_str` $+$ `{python} PracticalDPBudget.tail_too_high_str` $=$ `{python} PracticalDPBudget.eps_too_high_str` (too high)
+   - For $\alpha = 4$: $\epsilon =$ `{python} PracticalDPBudget.eps_total_coef_str` $\times 4 + \ln(10^5)/3 =$ `{python} PracticalDPBudget.slope_lo_str` $+$ `{python} PracticalDPBudget.tail_lo_str` $=$ `{python} PracticalDPBudget.eps_lo_str`
+   - For $\alpha = 3$: $\epsilon =$ `{python} PracticalDPBudget.eps_total_coef_str` $\times 3 + \ln(10^5)/2 =$ `{python} PracticalDPBudget.slope_hi_str` $+$ `{python} PracticalDPBudget.tail_hi_str` $=$ `{python} PracticalDPBudget.eps_hi_str`
+   - Optimal $\alpha \approx$ `{python} PracticalDPBudget.alpha_opt_str` yields $\epsilon \approx$ `{python} PracticalDPBudget.eps_opt_str`
 
-To reach the target $\epsilon = 3.0$, we must increase $\sigma$ substantially (more noise tightens privacy at the cost of roughly 5 percent accuracy drop), train for fewer epochs (e.g., $N_{\text{epochs}} = 25$) at the risk of underfitting, or reduce the sampling rate by decreasing batch size to $B = 2000$ $(q = 0.04)$ at the cost of more optimizer steps and noisier gradient estimates. These adjustments demonstrate the fundamental privacy-utility-computational resource trade-off[^fn-privacy-utility-tension] in production ML systems: differential privacy offers strong theoretical assurances, but tightening the privacy bound consumes accuracy and compute budget in measurable ways.
+To reach the target $\epsilon =$ `{python} PracticalDPBudget.eps_target_str`, we must increase $\sigma$ substantially (more noise tightens privacy at the cost of roughly 5 percent accuracy drop), train for fewer epochs (e.g., $N_{\text{epochs}} = 25$) at the risk of underfitting, or reduce the sampling rate by decreasing batch size to $B = 2000$ $(q = 0.04)$ at the cost of more optimizer steps and noisier gradient estimates. These adjustments demonstrate the fundamental privacy-utility-computational resource trade-off[^fn-privacy-utility-tension] in production ML systems: differential privacy offers strong theoretical assurances, but tightening the privacy bound consumes accuracy and compute budget in measurable ways.
 
 [^fn-privacy-utility-tension]: **Privacy-Utility Tension**\index{Privacy!utility tension}\index{Privacy!utility, trade-off}: Formalized by Dwork and McSherry, who proved that perfect privacy (infinite noise) yields zero utility, while perfect utility (zero noise) provides zero privacy. The "privacy budget" $(\epsilon)$ is a finite resource: each query or training epoch consumes a portion, and once exhausted, no further computation on that data is permitted without degrading the guarantee. This makes privacy accounting a first-class constraint in ML system design, alongside compute and memory budgets.
 
@@ -2532,12 +2711,77 @@ The theoretical framework of differential privacy translates into measurable acc
 
 @Tbl-dp-accuracy-tradeoff summarizes accuracy degradation across standard benchmarks when training with DP-SGD at various privacy levels. These results, drawn from published research and industry deployments, provide quantitative guidance for practitioners.
 
-| **Dataset**     | **Model** | **Non-Private Acc.** | **$\epsilon=8$ Acc.** | **$\epsilon=1$ Acc.** |
-|:----------------|:---------:|:--------------------:|:---------------------:|:---------------------:|
-| **MNIST**       |    CNN    |        99.2%         |    98.1% (-1.1 pp)    |    96.6% (-2.6 pp)    |
-| **CIFAR-10**    | ResNet-18 |        93.5%         |    83.0% (-10.5 pp)   |    67.0% (-26.5 pp)   |
-| **ImageNet**    | ResNet-50 |        76.1%         |    47.8% (-28.3 pp)   |   N/A (not feasible)  |
-| **IMDB (text)** | BERT-base |        93.0%         |    88.5% (-4.5 pp)    |    82.0% (-11.0 pp)   |
+```{python}
+#| echo: false
+#| label: dp-accuracy-tradeoff-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DP-SGD ACCURACY TRADE-OFF TABLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-dp-accuracy-tradeoff
+# │
+# │ Goal: Compute the accuracy-point degradation (pp) of DP-SGD at eps=8 and
+# │       eps=1 versus the non-private baseline for each benchmark row.
+# │ Show: e.g. MNIST loses 1.1 pp at eps=8 and 2.6 pp at eps=1.
+# │ How: delta = private_acc - nonprivate_acc, per cell.
+# │
+# │ Imports: mlsysim.fmt (fmt_percent, fmt_pp, check)
+# │ Exports: dpacc_<row>_{base,eps8,eps1}_str and dpacc_<row>_{eps8,eps1}_pp_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt_pp, check
+
+# ┌── 1. LOAD (published accuracies, percent) ──────────────────────────────
+# Source: @abadi2016deep, @bu2020gaussian, @de2022dp (delta = 1e-5).
+_dp_base = dict(mnist=99.2, cifar10=93.5, imagenet=76.1, imdb=93.0)
+_dp_eps8 = dict(mnist=98.1, cifar10=83.0, imagenet=47.8, imdb=88.5)
+_dp_eps1 = dict(mnist=96.6, cifar10=67.0, imagenet=None, imdb=82.0)
+
+# ┌── 2. EXECUTE (degradation in percentage points) ────────────────────────
+_dp_eps8_pp = {k: round(_dp_eps8[k] - _dp_base[k], 1) for k in _dp_base}
+_dp_eps1_pp = {k: (round(_dp_eps1[k] - _dp_base[k], 1) if _dp_eps1[k] is not None else None) for k in _dp_base}
+
+# ┌── 3. GUARD (deltas negative, MNIST/CIFAR anchors) ──────────────────────
+check(_dp_eps1_pp["mnist"] == -2.6, f"MNIST eps=1 loss {_dp_eps1_pp['mnist']} pp")
+check(_dp_eps1_pp["cifar10"] == -26.5, f"CIFAR eps=1 loss {_dp_eps1_pp['cifar10']} pp")
+check(
+    all(_dp_eps8_pp[k] < 0 for k in _dp_base) and all(v < 0 for v in _dp_eps1_pp.values() if v is not None),
+    "DP accuracy deltas must all be degradations",
+)
+
+# ┌── 4. OUTPUT (per-row strings for the table) ────────────────────────────
+# Adaptive precision: integer-like values render without a dead ".0"
+# (house style: "83%", not "83.0%"); fractional values keep one decimal.
+def _dp_prec(_x):
+    return 0 if abs(_x - round(_x)) < 1e-9 else 1
+
+dpacc_mnist_base_str = fmt_percent(_dp_base["mnist"] / 100, precision=_dp_prec(_dp_base["mnist"]), commas=False, style="symbol")
+dpacc_mnist_eps8_str = fmt_percent(_dp_eps8["mnist"] / 100, precision=_dp_prec(_dp_eps8["mnist"]), commas=False, style="symbol")
+dpacc_mnist_eps8_pp_str = fmt_pp(_dp_eps8_pp["mnist"], precision=_dp_prec(_dp_eps8_pp["mnist"]), commas=False, style="symbol")
+dpacc_mnist_eps1_str = fmt_percent(_dp_eps1["mnist"] / 100, precision=_dp_prec(_dp_eps1["mnist"]), commas=False, style="symbol")
+dpacc_mnist_eps1_pp_str = fmt_pp(_dp_eps1_pp["mnist"], precision=_dp_prec(_dp_eps1_pp["mnist"]), commas=False, style="symbol")
+
+dpacc_cifar10_base_str = fmt_percent(_dp_base["cifar10"] / 100, precision=_dp_prec(_dp_base["cifar10"]), commas=False, style="symbol")
+dpacc_cifar10_eps8_str = fmt_percent(_dp_eps8["cifar10"] / 100, precision=_dp_prec(_dp_eps8["cifar10"]), commas=False, style="symbol")
+dpacc_cifar10_eps8_pp_str = fmt_pp(_dp_eps8_pp["cifar10"], precision=_dp_prec(_dp_eps8_pp["cifar10"]), commas=False, style="symbol")
+dpacc_cifar10_eps1_str = fmt_percent(_dp_eps1["cifar10"] / 100, precision=_dp_prec(_dp_eps1["cifar10"]), commas=False, style="symbol")
+dpacc_cifar10_eps1_pp_str = fmt_pp(_dp_eps1_pp["cifar10"], precision=_dp_prec(_dp_eps1_pp["cifar10"]), commas=False, style="symbol")
+
+dpacc_imagenet_base_str = fmt_percent(_dp_base["imagenet"] / 100, precision=_dp_prec(_dp_base["imagenet"]), commas=False, style="symbol")
+dpacc_imagenet_eps8_str = fmt_percent(_dp_eps8["imagenet"] / 100, precision=_dp_prec(_dp_eps8["imagenet"]), commas=False, style="symbol")
+dpacc_imagenet_eps8_pp_str = fmt_pp(_dp_eps8_pp["imagenet"], precision=_dp_prec(_dp_eps8_pp["imagenet"]), commas=False, style="symbol")
+
+dpacc_imdb_base_str = fmt_percent(_dp_base["imdb"] / 100, precision=_dp_prec(_dp_base["imdb"]), commas=False, style="symbol")
+dpacc_imdb_eps8_str = fmt_percent(_dp_eps8["imdb"] / 100, precision=_dp_prec(_dp_eps8["imdb"]), commas=False, style="symbol")
+dpacc_imdb_eps8_pp_str = fmt_pp(_dp_eps8_pp["imdb"], precision=_dp_prec(_dp_eps8_pp["imdb"]), commas=False, style="symbol")
+dpacc_imdb_eps1_str = fmt_percent(_dp_eps1["imdb"] / 100, precision=_dp_prec(_dp_eps1["imdb"]), commas=False, style="symbol")
+dpacc_imdb_eps1_pp_str = fmt_pp(_dp_eps1_pp["imdb"], precision=_dp_prec(_dp_eps1_pp["imdb"]), commas=False, style="symbol")
+```
+
+| **Dataset**     | **Model** |        **Non-Private Acc.**        |                           **$\epsilon=8$ Acc.**                            |                          **$\epsilon=1$ Acc.**                           |
+|:----------------|:---------:|:----------------------------------:|:--------------------------------------------------------------------------:|:------------------------------------------------------------------------:|
+| **MNIST**       |    CNN    |  `{python} dpacc_mnist_base_str`   |    `{python} dpacc_mnist_eps8_str` (`{python} dpacc_mnist_eps8_pp_str`)    |   `{python} dpacc_mnist_eps1_str` (`{python} dpacc_mnist_eps1_pp_str`)   |
+| **CIFAR-10**    | ResNet-18 | `{python} dpacc_cifar10_base_str`  |  `{python} dpacc_cifar10_eps8_str` (`{python} dpacc_cifar10_eps8_pp_str`)  | `{python} dpacc_cifar10_eps1_str` (`{python} dpacc_cifar10_eps1_pp_str`) |
+| **ImageNet**    | ResNet-50 | `{python} dpacc_imagenet_base_str` | `{python} dpacc_imagenet_eps8_str` (`{python} dpacc_imagenet_eps8_pp_str`) |                            N/A (not feasible)                            |
+| **IMDB (text)** | BERT-base |   `{python} dpacc_imdb_base_str`   |     `{python} dpacc_imdb_eps8_str` (`{python} dpacc_imdb_eps8_pp_str`)     |    `{python} dpacc_imdb_eps1_str` (`{python} dpacc_imdb_eps1_pp_str`)    |
 
 : **Privacy-Accuracy Trade-Offs**: Model accuracy degradation when training with DP-SGD at different privacy budgets ($\delta = 10^{-5}$ throughout). Strong privacy $(\epsilon = 1)$ causes significant accuracy loss on complex tasks, while moderate privacy $(\epsilon = 8)$ preserves most utility for simpler datasets. {#tbl-dp-accuracy-tradeoff}
 
@@ -2585,39 +2829,136 @@ A wearable cardiac monitor classifies arrhythmias from raw ECG signals collected
 
 This framework treats DP as one tool in a privacy-preserving toolkit rather than a universal solution. The most effective deployments often combine DP with complementary techniques: federated learning for data minimization, secure aggregation for gradient protection, and access controls for deployment security. A concrete DP-SGD calculation shows how the decision criteria translate into an operational privacy budget.
 
+```{python}
+#| echo: false
+#| label: dp-sgd-budget-callout-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DP-SGD PRIVACY BUDGET WORKED EXAMPLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: #exmp-security-privacy-dp-sgd-privacy-budget-example .callout-example
+# │
+# │ Goal: Pin the RDP accounting for a sentiment-classifier DP-SGD run:
+# │       per-step RDP coefficient, total over k steps, and the (eps,delta)
+# │       conversion swept over the Renyi order alpha.
+# │ Show: per-step ~0.000312*alpha, total ~0.156*alpha, optimal eps ~3.1.
+# │ How: eps_step = q^2 / (2 sigma^2); eps(alpha) = total*alpha + ln(1/delta)/(alpha-1).
+# │
+# │ Imports: math, numpy, mlsysim.fmt (fmt, fmt_math, check)
+# │ Exports: dpsgd_* scenario inputs, coefficients, alpha-sweep, and the
+# │          per-step / total RDP _math expressions.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+import numpy as np
+from mlsysim.fmt import fmt, fmt_math, check
+
+class DPSGDBudget:
+    """RDP accounting for a DP-SGD sentiment-classifier privacy budget."""
+
+    # ┌── 1. LOAD (scenario assumptions) ───────────────────────────────────
+    n_records = 100_000  # scenario assumption: customer reviews
+    batch_size = 2_000  # scenario assumption
+    clip_norm = 1.0  # gradient clipping norm C
+    n_epochs = 10  # scenario assumption
+    sigma = 0.8  # noise multiplier (typical starting point)
+    eps_target = 8  # target privacy budget
+    delta = 1e-6  # target failure probability
+
+    # ┌── 2. EXECUTE (RDP accounting) ──────────────────────────────────────
+    q = batch_size / n_records  # subsampling rate
+    k_steps = int(n_epochs * n_records / batch_size)
+    q_sq = q**2
+    two_sigma_sq = 2 * sigma**2
+    eps_step_coef = q_sq / two_sigma_sq  # per-step RDP slope in alpha
+    eps_total_coef = k_steps * eps_step_coef  # total RDP slope in alpha
+    ln_inv_delta = math.log(1 / delta)
+    _grid = np.linspace(1.1, 40, 400_000)
+    _eps = eps_total_coef * _grid + ln_inv_delta / (_grid - 1)
+    alpha_opt = float(_grid[_eps.argmin()])
+    eps_opt = float(_eps.min())
+
+    # ┌── 3. GUARD (anchors + feasibility) ─────────────────────────────────
+    check(abs(eps_step_coef - 0.000312) < 1e-5, f"per-step {eps_step_coef}")
+    check(abs(eps_total_coef - 0.156) < 1e-3, f"total {eps_total_coef}")
+    check(eps_opt < eps_target, f"eps_opt {eps_opt} must meet target {eps_target}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    n_records_str = fmt(n_records, precision=0)
+    batch_size_str = fmt(batch_size, precision=0)
+    clip_norm_str = fmt(clip_norm, precision=0, commas=False)
+    n_epochs_str = fmt(n_epochs, precision=0, commas=False)
+    sigma_str = fmt(sigma, precision=1, commas=False)
+    eps_target_str = fmt(eps_target, precision=0, commas=False)
+    q_str = fmt(q, precision=2, commas=False)
+    k_steps_str = fmt(k_steps, precision=0, commas=False)
+    eps_step_coef_str = fmt(eps_step_coef, precision=6, commas=False)
+    eps_total_coef_str = fmt(eps_total_coef, precision=3, commas=False)
+    alpha_opt_str = fmt(alpha_opt, precision=1, commas=False)
+    eps_opt_str = fmt(eps_opt, precision=1, commas=False)
+    # Per-step RDP identity: q^2 alpha / (2 sigma^2) = num/den = coef*alpha.
+    q_sq_str = fmt(q_sq, precision=4, commas=False)
+    two_sigma_sq_str = fmt(two_sigma_sq, precision=2, commas=False)
+    eps_step_math = fmt_math(
+        rf"\varepsilon_{{\text{{step}}}}(\alpha) = \frac{{({q_str})^2 \alpha}}"
+        rf"{{2({sigma_str})^2}} = \frac{{{q_sq_str}\alpha}}{{{two_sigma_sq_str}}} "
+        rf"\approx {eps_step_coef_str}\alpha"
+    )
+    eps_total_math = fmt_math(
+        rf"\varepsilon_{{\text{{total}}}}(\alpha) = {k_steps_str} \times " rf"{eps_step_coef_str}\alpha = {eps_total_coef_str}\alpha"
+    )
+    eps_convert_math = fmt_math(
+        rf"\epsilon = \varepsilon_{{\text{{total}}}}(\alpha) + "
+        rf"\frac{{\ln(1/\delta)}}{{\alpha - 1}} = {eps_total_coef_str}\alpha + "
+        rf"\frac{{\ln(10^6)}}{{\alpha - 1}}"
+    )
+
+    # Per-alpha sweep: slope term (total_coef*alpha), tail term
+    # (ln(1/delta)/(alpha-1)), and their sum (total epsilon).
+    slope_a8_str = fmt(eps_total_coef * 8, precision=2, commas=False)
+    slope_a10_str = fmt(eps_total_coef * 10, precision=2, commas=False)
+    slope_a12_str = fmt(eps_total_coef * 12, precision=2, commas=False)
+    tail_a8_str = fmt(ln_inv_delta / 7, precision=2, commas=False)
+    tail_a10_str = fmt(ln_inv_delta / 9, precision=2, commas=False)
+    tail_a12_str = fmt(ln_inv_delta / 11, precision=2, commas=False)
+    eps_a8_str = fmt(eps_total_coef * 8 + ln_inv_delta / 7, precision=2, commas=False)
+    eps_a10_str = fmt(eps_total_coef * 10 + ln_inv_delta / 9, precision=2, commas=False)
+    eps_a12_str = fmt(eps_total_coef * 12 + ln_inv_delta / 11, precision=2, commas=False)
+```
+
 ::: {#exmp-security-privacy-dp-sgd-privacy-budget-example .callout-example title="DP-SGD privacy budget example"}
 
-**Scenario**: Train a sentiment classifier on 100,000 customer reviews with target privacy $(\epsilon, \delta) = (8, 10^{-6})$.
+**Scenario**: Train a sentiment classifier on `{python} DPSGDBudget.n_records_str` customer reviews with target privacy $(\epsilon, \delta) = ($ `{python} DPSGDBudget.eps_target_str` $, 10^{-6})$.
 
 **Step 1**: Configure DP-SGD parameters.
-- Dataset size: $n_{\text{records}} = 100,000$
-- Batch size: $B = 2,000$ (sampling rate $q = B/n_{\text{records}} = 0.02$)
-- Gradient clipping norm: $C = 1.0$
-- Training epochs: $N_{\text{epochs}} = 10$ (total steps $k = N_{\text{epochs}} \times n_{\text{records}}/B = 500$)
-- Target: $\epsilon = 8$, $\delta = 10^{-6}$
+- Dataset size: $n_{\text{records}} =$ `{python} DPSGDBudget.n_records_str`
+- Batch size: $B =$ `{python} DPSGDBudget.batch_size_str` (sampling rate $q = B/n_{\text{records}} =$ `{python} DPSGDBudget.q_str`)
+- Gradient clipping norm: $C =$ `{python} DPSGDBudget.clip_norm_str`
+- Training epochs: $N_{\text{epochs}} =$ `{python} DPSGDBudget.n_epochs_str` (total steps $k = N_{\text{epochs}} \times n_{\text{records}}/B =$ `{python} DPSGDBudget.k_steps_str`)
+- Target: $\epsilon =$ `{python} DPSGDBudget.eps_target_str`, $\delta = 10^{-6}$
 
 **Step 2**: Calculate required noise multiplier.
-Using the Gaussian mechanism formula and RDP accounting, we need noise multiplier $\sigma$ such that after $k = 500$ iterations with sampling rate $q = 0.02$, the total privacy loss is $\epsilon \leq 8$.
+Using the Gaussian mechanism formula and RDP accounting, we need noise multiplier $\sigma$ such that after $k =$ `{python} DPSGDBudget.k_steps_str` iterations with sampling rate $q =$ `{python} DPSGDBudget.q_str`, the total privacy loss is $\epsilon \leq$ `{python} DPSGDBudget.eps_target_str`.
 
 The per-step RDP guarantee for Gaussian mechanism with subsampling is approximately:
 $$\varepsilon_{\text{step}}(\alpha) \approx \frac{q^2 \alpha}{2\sigma^2}$$
 
-For $\sigma = 0.8$ (a typical starting point):
-$$\varepsilon_{\text{step}}(\alpha) = \frac{(0.02)^2 \alpha}{2(0.8)^2} = \frac{0.0004\alpha}{1.28} \approx 0.000312\alpha$$
+For $\sigma =$ `{python} DPSGDBudget.sigma_str` (a typical starting point):
 
-After 500 steps: $\varepsilon_{\text{total}}(\alpha) = 500 \times 0.000312\alpha = 0.156\alpha$
+`{python} DPSGDBudget.eps_step_math`
+
+After `{python} DPSGDBudget.k_steps_str` steps: `{python} DPSGDBudget.eps_total_math`
 
 **Step 3**: Convert RDP to DP.
 Converting to $(\epsilon, \delta)$-DP by optimizing over $\alpha$:
-$$\epsilon = \varepsilon_{\text{total}}(\alpha) + \frac{\ln(1/\delta)}{\alpha - 1} = 0.156\alpha + \frac{\ln(10^6)}{\alpha - 1}$$
+
+`{python} DPSGDBudget.eps_convert_math`
 
 We evaluate the bound at several $\alpha$ values:
 
-- $\alpha = 8$: $\epsilon = 0.156 \times 8 + 13.8/7 = 1.25 + 1.97 = 3.22$
-- $\alpha = 10$: $\epsilon = 0.156 \times 10 + 13.8/9 = 1.56 + 1.53 = 3.09$
-- $\alpha = 12$: $\epsilon = 0.156 \times 12 + 13.8/11 = 1.87 + 1.25 = 3.12$
+- $\alpha = 8$: $\epsilon =$ `{python} DPSGDBudget.slope_a8_str` $+$ `{python} DPSGDBudget.tail_a8_str` $=$ `{python} DPSGDBudget.eps_a8_str`
+- $\alpha = 10$: $\epsilon =$ `{python} DPSGDBudget.slope_a10_str` $+$ `{python} DPSGDBudget.tail_a10_str` $=$ `{python} DPSGDBudget.eps_a10_str`
+- $\alpha = 12$: $\epsilon =$ `{python} DPSGDBudget.slope_a12_str` $+$ `{python} DPSGDBudget.tail_a12_str` $=$ `{python} DPSGDBudget.eps_a12_str`
 
-Optimizing the displayed approximation gives $\alpha \approx 10.4$ and $\epsilon \approx 3.1$, which satisfies the target of $\epsilon \leq 8$ with margin.
+Optimizing the displayed approximation gives $\alpha \approx$ `{python} DPSGDBudget.alpha_opt_str` and $\epsilon \approx$ `{python} DPSGDBudget.eps_opt_str`, which satisfies the target of $\epsilon \leq$ `{python} DPSGDBudget.eps_target_str` with margin.
 
 **Step 4**: Expected accuracy impact.
 With $\sigma = 0.8$ and $\epsilon \approx 3.1$ under this simplified accountant, expect a nontrivial accuracy degradation compared to nonprivate training. For a sentiment classifier achieving 92 percent accuracy without DP, the private version might land several points lower depending on model capacity, clipping norm, optimizer, and data distribution.
