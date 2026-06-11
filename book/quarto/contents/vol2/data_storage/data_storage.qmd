@@ -820,21 +820,24 @@ From the data pipeline's perspective, Tier 0 is not a storage tier to be managed
 # │
 # │ Imports: mlsysim.core.units (Hardware.Cloud.H100.interconnect.bandwidth, Hardware.Cloud.H100.nvlink.bandwidth, GB, second);
 # │          mlsysim.fmt (fmt_bandwidth)
-# │ Exports: DRAMInterconnect.pcie5_bw_gb_per_s_str, DRAMInterconnect.nvlink_bw_gb_per_s_str
+# │ Exports: DRAMInterconnect.pcie5_bw_gb_per_s_str, DRAMInterconnect.nvlink_bw_gb_per_s_str,
+# │          DRAMInterconnect.pcie5_bidir_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_bandwidth
 
 class DRAMInterconnect:
     pcie5_bw = Hardware.Cloud.H100.interconnect.bandwidth
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    pcie5_bidir_bw = 2 * pcie5_bw  # bidirectional = both directions at once
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     pcie5_bw_gb_per_s_str = fmt_bandwidth(pcie5_bw, unit=GB / second, precision=0, commas=False)
     nvlink_bw_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    pcie5_bidir_bw_gb_per_s_str = fmt_bandwidth(pcie5_bidir_bw, unit=GB / second, precision=0, commas=False)
 ```
 ### Tier 1: Host DRAM {#sec-storage-tier1-dram}
 
-One level below HBM, host DRAM\index{DRAM!data pipeline staging} serves as the staging area for the data pipeline. Every byte of training data that reaches the accelerator passes through host DRAM first (unless GPUDirect Storage bypasses it, as described in @sec-storage-gds). A typical training node contains 512 GB to 2 TB of system memory shared across the host CPU and its peripherals. While the bandwidth between host DRAM and the accelerator is limited to what PCIe Gen 5 (about `{python} DRAMInterconnect.pcie5_bw_gb_per_s_str` per direction, 128 GB/s bidirectional) or NVLink (`{python} DRAMInterconnect.nvlink_bw_gb_per_s_str`) can provide, host DRAM plays three critical roles in the ML storage hierarchy.
+One level below HBM, host DRAM\index{DRAM!data pipeline staging} serves as the staging area for the data pipeline. Every byte of training data that reaches the accelerator passes through host DRAM first (unless GPUDirect Storage bypasses it, as described in @sec-storage-gds). A typical training node contains 512 GB to 2 TB of system memory shared across the host CPU and its peripherals. While the bandwidth between host DRAM and the accelerator is limited to what PCIe Gen 5 (about `{python} DRAMInterconnect.pcie5_bw_gb_per_s_str` per direction, `{python} DRAMInterconnect.pcie5_bidir_bw_gb_per_s_str` bidirectional) or NVLink (`{python} DRAMInterconnect.nvlink_bw_gb_per_s_str`) can provide, host DRAM plays three critical roles in the ML storage hierarchy.
 
 The data loader pipeline\index{Data Loader!pipeline architecture} that runs in host DRAM follows a multi-stage architecture. First, I/O threads read compressed data from NVMe or network storage into read buffers. Second, decode threads decompress the data (JPEG decoding for images, decompression for text). Third, augmentation threads apply transformations (random cropping, flipping, normalization for images; tokenization and sequence packing for text). Fourth, the collation stage assembles individual samples into batches and **pins the memory**\index{Pinned Memory!DMA transfer} for efficient DMA transfer to the accelerator. Pinned, or page-locked, memory (exposed in PyTorch as `pin_memory=True` on the `DataLoader`) prevents the operating system from paging out the buffer before the DMA transfer completes, allowing the NVMe controller to write directly into a physical address that the PCIe DMA engine can reach without an extra copy. Each stage runs concurrently, forming a pipeline that overlaps I/O, CPU computation, and data transfer. The efficiency of this pipeline determines whether host DRAM can keep up with the accelerator's appetite.
 
