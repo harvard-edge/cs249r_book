@@ -1181,7 +1181,8 @@ This logic extends to the temporal dimension, where the scheduler must weigh the
 # │ How: total_work = run_hours × throughput_at_scale
 # │
 # │ Imports: mlsysim.book (fmt, check)
-# │ Exports: es_s1_str, es_s2_str, es_s3p1_str, es_s3p2_str, es_s3_str,
+# │ Exports: es_s3p1_str, es_s3p2_str, es_s3_str,
+# │          es_s1_math, es_s2_math, es_s3p1_math, es_s3p2_math,
 # │          es_rescale_hours_str, es_trails_wait_pct_str, es_vs_imm_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, check, fmt_time
@@ -1213,8 +1214,6 @@ class ElasticScaling:
     check(abs(s3_work - 39.7) < 0.2, f"S3 total: expected ~39.7, got {s3_work}")
     check(elastic_trails_wait_pct_r == 38, f"trail: expected 38%, got {elastic_trails_wait_pct_r}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    es_s1_str = fmt(s1_work, precision=0, commas=False)
-    es_s2_str = fmt(s2_work, precision=0, commas=False)
     es_s3p1_str = fmt(s3_phase1, precision=0, commas=False)
     es_s3p2_str = fmt(s3_phase2, precision=1, commas=False)
     es_s3_str = fmt(s3_work, precision=1, commas=False)
@@ -1225,6 +1224,12 @@ class ElasticScaling:
     # `\(...\)` + inline-`{python}` interaction anti-pattern that drops
     # the middle of the expression in rendered HTML (math.md §2).
     es_s3p2_math = fmt_math(rf"(24 - 4 - {rescale_h:.2f}) \times 1.8 \approx {s3_phase2:.1f}")
+    # Pre-compute the worked-math products so prose carries no hand-typed
+    # operands (lego-prose-literals Tier 1): every number in the equation
+    # traces to the LOAD constants above.
+    es_s1_math = fmt_math(rf"{window_h:.0f} \times {tp_128:.1f} = {s1_work:.0f}")
+    es_s2_math = fmt_math(rf"{s2_run_h:.0f} \times {tp_512:.1f} = {s2_work:.0f}")
+    es_s3p1_math = fmt_math(rf"{wait_h:.0f} \times {tp_128:.1f} = {s3_phase1:.0f}")
     s1_gpus = 128
     s2_gpus = 512
     s3_gpus = 256
@@ -1251,11 +1256,11 @@ Consider a large language model training job with a target batch size that requi
 
 **Given**: Throughput at `{python} ElasticScaling.es_gpus_128_str` is `{python} ElasticScaling.es_tp_128_str` epoch/hour (baseline). Throughput at `{python} ElasticScaling.es_gpus_256_str` is `{python} ElasticScaling.es_tp_256_str` epochs/hour (`{python} ElasticScaling.es_eff_256_pct_str` scaling efficiency). Throughput at `{python} ElasticScaling.es_s2_gpus_str` is `{python} ElasticScaling.es_tp_512_str` epochs/hour (`{python} ElasticScaling.es_eff_512_pct_str` scaling efficiency). Re-scaling cost is `{python} ElasticScaling.es_rescale_min_str` (`{python} ElasticScaling.es_rescale_hours_str`) to checkpoint, re-shard, and restart.
 
-**Strategy 1 -- immediate start (no scaling)**: The job starts immediately with `{python} ElasticScaling.es_s1_gpus_str` and runs for the full `{python} ElasticScaling.es_window_h_str`. Total work: $24 \times 1.0 =$ `{python} ElasticScaling.es_s1_str` epochs.
+**Strategy 1 -- immediate start (no scaling)**: The job starts immediately with `{python} ElasticScaling.es_s1_gpus_str` and runs for the full `{python} ElasticScaling.es_window_h_str`. Total work: `{python} ElasticScaling.es_s1_math` epochs.
 
-**Strategy 2 -- wait for capacity (gang scheduling)**: The job waits in the queue for `{python} ElasticScaling.es_wait_h_str` until `{python} ElasticScaling.es_s2_gpus_str` become available, then runs for `{python} ElasticScaling.es_s2_run_h_str`. Total work: $20 \times 3.2 =$ `{python} ElasticScaling.es_s2_str` epochs.
+**Strategy 2 -- wait for capacity (gang scheduling)**: The job waits in the queue for `{python} ElasticScaling.es_wait_h_str` until `{python} ElasticScaling.es_s2_gpus_str` become available, then runs for `{python} ElasticScaling.es_s2_run_h_str`. Total work: `{python} ElasticScaling.es_s2_math` epochs.
 
-**Strategy 3 -- elastic scaling (step-up)**: The job starts immediately with `{python} ElasticScaling.es_gpus_128_str`. After `{python} ElasticScaling.es_wait_h_str`, `{python} ElasticScaling.es_gpus_256_str` become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.0 =$ `{python} ElasticScaling.es_s3p1_str` epochs. Phase 2: `{python} ElasticScaling.es_s3p2_math` epochs. Total work: `{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` = `{python} ElasticScaling.es_s3_str` epochs.
+**Strategy 3 -- elastic scaling (step-up)**: The job starts immediately with `{python} ElasticScaling.es_gpus_128_str`. After `{python} ElasticScaling.es_wait_h_str`, `{python} ElasticScaling.es_gpus_256_str` become available. The job pauses, scales up, and resumes. Phase 1: `{python} ElasticScaling.es_s3p1_math` epochs. Phase 2: `{python} ElasticScaling.es_s3p2_math` epochs. Total work: `{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` = `{python} ElasticScaling.es_s3_str` epochs.
 
 The elastic strategy completes nearly `{python} ElasticScaling.es_vs_imm_factor_mult_str` the epoch-equivalent work of the immediate small-scale run, but still trails gang scheduling by about `{python} ElasticScaling.es_trails_wait_pct_str`. That gap shrinks when queue waits grow or peak capacity stays scarce; re-scaling overhead is only `{python} ElasticScaling.es_rescale_min_str`, and if that tax exceeded `{python} ElasticScaling.es_rescale_break_even_h_str` (due to slow checkpoint transfer or compilation), Strategy 3 would fall further behind Strategy 2.
 
