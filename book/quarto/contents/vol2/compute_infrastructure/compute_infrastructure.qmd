@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does infrastructure, not algorithms alone, determine who can participate in advancing machine learning at scale?_
 
-Machine learning systems have a physical reality that transcends code. While the algorithms for training large models may be public, the ability to execute them at scale is gated by the physics of infrastructure. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms are the primary bottleneck, progress can happen anywhere. At large scale, the constraint shifts toward who can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator**\index{Accelerator!fleet stack} (silicon physics), the **Node**\index{Node!fleet stack} (interconnect density), the **Rack**\index{Rack!fleet stack} (thermal management), and the **Pod**\index{Pod!fleet stack} (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a large GPU cluster represents staggering capital expenditure and megawatts of continuous power. Infrastructure becomes a participation boundary for organizations working at the largest scales. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps. This substrate is where the Fleet's limits originate: every bound on Compute and Communication in the chapters that follow traces back to it.
+Machine learning systems have a physical reality that transcends code. While the algorithms for training large models may be public, the ability to execute them at scale is gated by the physics of infrastructure. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms are the primary bottleneck, progress can happen anywhere. At large scale, the constraint shifts toward who can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator**\index{Accelerator!fleet stack} (silicon physics), the **Node**\index{Node!fleet stack} (interconnect density), the **Rack**\index{Rack!fleet stack} (thermal management), and the **Pod**\index{Pod!fleet stack} (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a large accelerator cluster represents staggering capital expenditure and megawatts of continuous power. Infrastructure becomes a participation boundary for organizations working at the largest scales. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps. This substrate is where the Fleet's limits originate: every bound on Compute and Communication in the chapters that follow traces back to it.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -175,7 +175,7 @@ AWS Trainium\index{AWS Trainium} takes a different approach, targeting the broad
 
 The risk of custom silicon is equally clear: if the dominant model architecture shifts, as it did from convolutional neural networks (CNNs) to Transformers between 2017 and 2020, a custom ASIC designed for the old architecture becomes a stranded asset. The design cycle for a new ASIC is 2--3 years from conception to deployment, which means the architecture decision must anticipate workload trends several years into the future. This prediction challenge is nontrivial: in 2015, few would have predicted that attention-based Transformers would replace CNNs as the dominant architecture within five years, and organizations that committed to CNN-optimized ASICs during that period found their hardware stranded by the architectural shift.
 
-Custom silicon is therefore a bet on workload stability, and the organizations that make this bet are typically those with enough scale to justify the \$50--200 million development cost and enough workload volume to amortize the per-chip NRE (nonrecurring engineering) cost across millions of chips. Google can justify the TPU's development cost because high-volume services such as Search, YouTube recommendations, and Gmail spam filtering can amortize a shared accelerator platform. A research lab running a few hundred GPUs cannot justify the same investment.
+Custom silicon is therefore a bet on workload stability, and the organizations that make this bet are typically those with enough scale to justify the \$50--\$200 million development cost and enough workload volume to amortize the per-chip NRE (nonrecurring engineering) cost across millions of chips. Google can justify the TPU's development cost because high-volume services such as Search, YouTube recommendations, and Gmail spam filtering can amortize a shared accelerator platform. A research lab running a few hundred GPUs cannot justify the same investment.
 
 The bet pays off handsomely when workloads are stable: a purpose-built ASIC can deliver 5--10$\times$ the energy efficiency of a general-purpose GPU for its target operation. However, the consequences of a wrong bet are severe, as the chip's fixed dataflow cannot be reprogrammed to accommodate a fundamentally new computational pattern. Pushing the locality argument further leads to a deeper question of physical scale: whether a single die can be expanded to the size of the entire wafer.
 
@@ -225,9 +225,32 @@ As @tbl-accelerator-comparison summarizes, for our `{python} InfraFrontierAccelR
 
 ### Chiplet-based accelerators {#sec-compute-chiplet-accelerators}
 
+```{python}
+#| echo: false
+from mlsysim.fmt import check, fmt_area
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: ReticleLimitRecap.reticle_limit_mm2_str,
+# │          ReticleLimitRecap.b200_equivalent_area_mm2_str
+class ReticleLimitRecap:
+    """Photolithography reticle limit and B200 dual-die equivalent area."""
+
+    reticle_width = 26 * ureg.millimeter
+    reticle_height = 33 * ureg.millimeter
+    reticle_limit = reticle_width * reticle_height
+    b200_equivalent_area = 1600 * ureg.millimeter**2
+
+    check(round(reticle_limit.to(ureg.millimeter**2).magnitude) == 858, "Reticle limit should be 26 x 33 mm = 858 mm^2.")
+    check(b200_equivalent_area > reticle_limit, "B200 dual-die equivalent area should exceed a single reticle exposure.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    reticle_limit_mm2_str = fmt_area(reticle_limit, unit=ureg.millimeter**2, commas=False)
+    b200_equivalent_area_mm2_str = fmt_area(b200_equivalent_area, unit=ureg.millimeter**2, commas=True)
+```
+
 A major accelerator design pattern is the **chiplet**\index{Chiplet} architecture, exemplified by NVIDIA's Blackwell and AMD's Instinct MI300 series. Rather than fabricating a single monolithic die, chiplet-based designs partition the processor into multiple smaller dies connected by a high-bandwidth die-to-die interconnect on a common package substrate. This approach addresses two physical limitations that constrain monolithic designs.
 
-First, the maximum die size is capped by the photolithographic reticle limit (the 858 mm$^2$ single-exposure ceiling examined in @sec-compute-infrastructure-evolution-gpu-architectures-566b), which limits the number of Tensor Cores, SMs, and HBM stacks a monolithic GPU can integrate. Chiplet designs bypass this limit by placing multiple dies on a single package, with the B200's dual-die design effectively creating a 1,600 mm$^2$ equivalent processor.
+First, the maximum die size is capped by the photolithographic reticle limit (the `{python} ReticleLimitRecap.reticle_limit_mm2_str` single-exposure ceiling examined in @sec-compute-infrastructure-evolution-gpu-architectures-566b), which limits the number of Tensor Cores, SMs, and HBM stacks a monolithic GPU can integrate. Chiplet designs bypass this limit by placing multiple dies on a single package, with the B200's dual-die design effectively creating a `{python} ReticleLimitRecap.b200_equivalent_area_mm2_str` equivalent processor.
 
 Second, manufacturing yield decreases exponentially with die area because a single defect anywhere on the die renders the entire chip unusable. Smaller chiplets have higher individual yield, and the package-level integration allows partial yields (a defective chiplet can be replaced with a good one). This yield advantage translates directly to lower manufacturing cost per unit of compute, which is particularly important as transistor densities continue to increase and process nodes become more expensive.
 
@@ -401,7 +424,7 @@ class B200PerformanceScenario:
 
 The Blackwell architecture (2024) continued this trajectory with the B200, which pairs two GPU dies in a single package via a high-bandwidth chip-to-chip link, effectively creating a "dual-die GPU" that delivers about `{python} B200PerformanceScenario.fp8_tflop_per_s_str` of dense FP8 Tensor Core throughput at `{python} B200PerformanceScenario.tdp_w_str`. FP16/BF16 comparisons should use the lower precision-specific vendor figure rather than the FP8 peak.
 
-The dual-die approach acknowledges that single-die GPU sizes are approaching the reticle limit of lithographic equipment, and further scaling requires chiplet-based designs. The reticle limit is a fundamental constraint of photolithography: the lens system in the EUV scanner can only project a pattern onto an area of approximately $26{\times}33$ mm (858 mm$^2$) in a single exposure. A die larger than this area would require multiple exposures with stitching, which is technically possible but dramatically increases cost and reduces yield.
+The dual-die approach acknowledges that single-die GPU sizes are approaching the reticle limit of lithographic equipment, and further scaling requires chiplet-based designs. The reticle limit is a fundamental constraint of photolithography: the lens system in the EUV scanner can only project a pattern onto an area of approximately $26{\times}33$ mm (`{python} ReticleLimitRecap.reticle_limit_mm2_str`) in a single exposure. A die larger than this area would require multiple exposures with stitching, which is technically possible but dramatically increases cost and reduces yield.
 
 ```{python}
 #| echo: false
@@ -574,21 +597,60 @@ Google's TPU\index{TPU} trajectory follows a different path, focusing on distrib
 
 The generation sequence shows how that pod-first design moved from inference to training. The TPU v1 (2015) was a dedicated inference chip with a $256{\times}256$ systolic array, delivering 92 TOPS (INT8) for the matrix operations that dominated Google's production inference workloads. TPU v2 (2017) and TPU v3 (2018) then shifted the architecture toward training by adding bfloat16 (BF16), avoiding the dynamic range problems of standard FP16, and scaling the pod concept to 1,024 chips and 100+ PFLOP/s of aggregate compute. TPU v4 (2021) extended the same logic into the network itself, adding an optical circuit switch (OCS) so the physical topology could be reconfigured for different workloads while raising per-chip BF16 throughput to 275 TFLOP/s.
 
-The TPU v5p\index{TPU!v5p} (2023) continued this pod-scale design for high-end training. It features 459 TFLOP/s of BF16 compute, 95 GB of HBM2e with 2,765 GB/s memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
+```{python}
+#| echo: false
+#| label: compute-infrastructure-tpu-v5p-recap
 
-| **Generation** | **Year** |     **Key Innovation**     | **Peak BF16** | **HBM** | **ICI BW** |
-|:---------------|:--------:|:--------------------------:|:-------------:|:-------:|:----------:|
-| **TPU v1**     |   2015   | systolic array (Inference) |    92 TOPS*   |    —    |     —      |
-| **TPU v2**     |   2017   |   High-Bandwidth Memory    |   45 TFLOP/s  |  16 GB  |  600 GB/s  |
-| **TPU v3**     |   2018   | Liquid Cooling, Pod Scale  |  105 TFLOP/s  |  32 GB  |  650 GB/s  |
-| **TPU v4**     |   2021   | Optical Circuit Switching  |  275 TFLOP/s  |  32 GB  | 1,200 GB/s |
-| **TPU v5p**    |   2023   |     SparseCore, HBM2e      |  459 TFLOP/s  |  95 GB  | 1,200 GB/s |
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TPU V5P SPEC RECAP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: TPU-evolution prose and the v5p row of the generation table in
+# │          @sec-compute-tpu-evolution.
+# │
+# │ Goal: Pin the TPU v5p compute/memory specs to the registry (the old prose
+# │       hand-typed 2,765 GB/s where the registry holds 2.76 TB/s).
+# │ Show: BF16 peak, HBM capacity (branded 95 GB label of a 95 GiB part),
+# │       and HBM bandwidth for the pod-scale training discussion.
+# │ How: Read Hardware.Cloud.TPUv5p compute and memory specs.
+# │      ICI bandwidth stays a table literal — no registry field yet
+# │      (registry gap noted in the 2026-06 audit).
+# │
+# │ Imports: mlsysim registries (Hardware.Cloud.TPUv5p) + fmt helpers
+# │ Exports: TpuV5pRecap.peak_bf16_str, .hbm_gb_str, .hbm_bw_gb_per_s_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_memory_capacity, fmt_bandwidth, fmt_flop_rate
+
+class TpuV5pRecap:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    v5p = Hardware.Cloud.TPUv5p
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # (spec recap — values read straight from the registry)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(v5p.memory.bandwidth > Hardware.Cloud.A100.memory.bandwidth, "TPU v5p HBM bandwidth should exceed A100-class HBM2e")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    peak_bf16_str = fmt_flop_rate(v5p.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    hbm_gb_str = fmt_memory_capacity(v5p.memory.capacity, unit=GiB, precision=0, commas=False)
+    hbm_bw_gb_per_s_str = fmt_bandwidth(v5p.memory.bandwidth, unit=GB / second, precision=0, commas=True)
+```
+
+The TPU v5p\index{TPU!v5p} (2023) continued this pod-scale design for high-end training. It features `{python} TpuV5pRecap.peak_bf16_str` of BF16 compute, `{python} TpuV5pRecap.hbm_gb_str` of HBM2e with `{python} TpuV5pRecap.hbm_bw_gb_per_s_str` memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
+
+| **Generation** | **Year** |     **Key Innovation**     |            **Peak BF16**             |              **HBM**              | **ICI BW** |
+|:---------------|:--------:|:--------------------------:|:------------------------------------:|:---------------------------------:|:----------:|
+| **TPU v1**     |   2015   | systolic array (Inference) |               92 TOPS*               |                 —                 |     —      |
+| **TPU v2**     |   2017   |   High-Bandwidth Memory    |              45 TFLOP/s              |               16 GB               |  600 GB/s  |
+| **TPU v3**     |   2018   | Liquid Cooling, Pod Scale  |             105 TFLOP/s              |               32 GB               |  650 GB/s  |
+| **TPU v4**     |   2021   | Optical Circuit Switching  |             275 TFLOP/s              |               32 GB               | 1,200 GB/s |
+| **TPU v5p**    |   2023   |     SparseCore, HBM2e      | `{python} TpuV5pRecap.peak_bf16_str` | `{python} TpuV5pRecap.hbm_gb_str` | 1,200 GB/s |
 
 : **Google TPU Architecture Evolution**: The TPU's development highlights a "Pod-first" design philosophy where inter-chip interconnect bandwidth and compiler-level optimization (XLA) are as important as peak per-chip arithmetic. Note: TPU v1 was INT8 only. {#tbl-tpu-evolution}
 
 As @tbl-tpu-evolution illustrates, this comparison reveals a divergence in philosophy. GPU evolution is a race to pack more arithmetic and higher-precision Tensor Cores onto a single package, using chiplets (Blackwell) to overcome physical die-size limits. TPU evolution is a race to build more efficient warehouse-scale computers, where the individual chip's performance is secondary to the pod's collective bandwidth and reconfigurability.
 
-The accelerator's arithmetic engine is extraordinarily powerful, capable of nearly 2,000 TFLOP/s on the H100. Yet raw arithmetic throughput is meaningless if the data cannot reach the compute units fast enough. The fundamental bottleneck that limits every accelerator's effective performance is the memory wall.
+The accelerator's arithmetic engine performs nearly 2,000 TFLOP/s on the H100. Yet raw arithmetic throughput is meaningless if the data cannot reach the compute units fast enough. The fundamental bottleneck that limits every accelerator's effective performance is the memory wall.
 
 ## The Memory Wall {#sec-compute-memory-wall}
 
@@ -746,7 +808,7 @@ A single HBM stack bonds 8--12 DRAM dies vertically, threading thousands of TSVs
 
 The shortened distance has three direct physical benefits. First, the energy per bit transferred\index{HBM!energy efficiency} drops by an order of magnitude (from approximately 20 pJ/bit for DDR5 to approximately 2 pJ/bit for HBM) because shorter traces have lower capacitance and require less driving current. Second, the latency decreases because electrical signals propagate through silicon at roughly two thirds the speed of light, and the shorter path means proportionally shorter propagation time. Third, the reduced capacitance allows higher signaling frequencies without the sophisticated equalization circuits required by long PCB traces, enabling the high per-pin data rates that complement the wide bus width.
 
-[^fn-tsv-stacking]: **TSV (Through-Silicon Via)**\index{TSV!3D stacking}: A vertical copper pillar, 5--10 micrometers in diameter, etched through a silicon die to connect stacked layers. Originally developed for CMOS image sensors in smartphone cameras, TSVs enabled HBM by replacing centimeters of PCB trace with tens of micrometers of vertical silicon -- a 1,000$\times$ reduction in signal path that drops energy per bit from ~20 pJ (DDR5) to ~2 pJ (HBM), making terabyte-per-second bandwidth economically feasible within an accelerator's power budget.
+[^fn-tsv-stacking]: **TSV (Through-Silicon Via)**\index{TSV!3D stacking}: A vertical copper pillar, 5--10 micrometers in diameter, etched through a silicon die to connect stacked layers. Originally developed for CMOS image sensors in smartphone cameras, TSVs enabled HBM by replacing centimeters of PCB trace with tens of micrometers of vertical silicon---a 1,000$\times$ reduction in signal path that drops energy per bit from ~20 pJ (DDR5) to ~2 pJ (HBM), making terabyte-per-second bandwidth economically feasible within an accelerator's power budget.
 
 ::: {#chk-compute-infrastructure-hbm-memory-wall .callout-checkpoint title="HBM and the memory wall"}
 
@@ -771,7 +833,29 @@ Verify your understanding of 3D-stacked memory:
 
 As @tbl-hbm-comparison shows, this bandwidth advantage\index{HBM!bandwidth} comes at a price. HBM costs approximately \$10--15 per GB, compared to roughly \$3 per GB for DDR5 server memory. For an H100 with 80 GB of HBM3, the memory alone represents approximately \$800--1,200 of the accelerator's manufacturing cost. For a B200 with 192 GB of HBM3e, the memory cost rises to \$1,920--2,880 per accelerator, making HBM one of the most expensive components in the system.
 
-The advanced packaging process, which requires precise alignment of thousands of TSVs across multiple die layers, has lower manufacturing yields and higher complexity. Each step in the stacking process (die thinning, alignment, bonding, and TSV etching) can introduce defects. The cumulative yield across 12 stacking steps means that the overall yield for a complete HBM3e stack is substantially lower than the yield for a single DRAM die. The silicon interposer itself must be large enough to accommodate both the processor die and multiple HBM stacks (often exceeding 1,000 mm$^2$ in total area), and any defect in a TSV can render an entire stack unusable.
+```{python}
+#| echo: false
+from mlsysim.core.units import ureg
+from mlsysim.fmt import check, fmt_area
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: HbmPackagingAreaRecap.interposer_area_mm2_str,
+# │          HbmPackagingAreaRecap.hbm_stack_area_mm2_str
+class HbmPackagingAreaRecap:
+    """Approximate package-area anchors for HBM/interposer discussion."""
+
+    interposer_area = 1000 * ureg.millimeter**2
+    hbm_stack_area = 100 * ureg.millimeter**2
+
+    check(interposer_area >= 10 * hbm_stack_area, "Large interposer should cover the area of several HBM stacks.")
+    check(hbm_stack_area.to(ureg.millimeter**2).magnitude == 100, "HBM stack area anchor should stay near 100 mm^2.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    interposer_area_mm2_str = fmt_area(interposer_area, unit=ureg.millimeter**2, commas=True)
+    hbm_stack_area_mm2_str = fmt_area(hbm_stack_area, unit=ureg.millimeter**2, commas=False)
+```
+
+The advanced packaging process, which requires precise alignment of thousands of TSVs across multiple die layers, has lower manufacturing yields and higher complexity. Each step in the stacking process (die thinning, alignment, bonding, and TSV etching) can introduce defects. The cumulative yield across 12 stacking steps means that the overall yield for a complete HBM3e stack is substantially lower than the yield for a single DRAM die. The silicon interposer itself must be large enough to accommodate both the processor die and multiple HBM stacks (often exceeding `{python} HbmPackagingAreaRecap.interposer_area_mm2_str` in total area), and any defect in a TSV can render an entire stack unusable.
 
 The supply chain dynamics of HBM production further affect its cost and availability. The HBM supply chain is highly concentrated among a small number of manufacturers, and the production processes (die thinning, TSV etching, die-to-die bonding) require specialized capital equipment that is fundamentally different from standard DRAM manufacturing. Expanding HBM production capacity requires 12--18 months of equipment procurement and qualification, which means that production cannot rapidly scale in response to demand surges. When demand outpaces supply, as it did following the explosion of interest in large language models in 2023, lead times stretch to 12--18 months and prices can double.
 
@@ -870,7 +954,39 @@ A `{python} A100HbmQuantRecap.model_params_b_str` FP16 model has `{python} A100H
 
 The projected jump to HBM4 doubles the interface width from 1024 bits to 2048 bits for the first time since HBM's introduction. This signals that per-pin signaling rate increases alone cannot sustain bandwidth growth indefinitely, and the bus must widen. The doubling of interface width requires a correspondingly larger interposer area for routing, which is one reason accelerator packages have tended to grow as bandwidth targets rise.
 
-HBM4-class packages projected in the 12--16 TB/s aggregate range illustrate the planning pressure created by trillion-parameter-scale models. A 1T-parameter model requires roughly 2 TB of weight storage in FP16. At B200-class HBM3e bandwidths (about 8 TB/s), serving such a model at batch size 1 would produce tokens at 2,000 GB/8 TB/s = 250 ms per token, far too slow for interactive applications. Even at 16 TB/s, the bandwidth floor remains roughly 125 ms per token before batching, quantization, or tensor-parallel sharding. This calculation suggests that trillion-parameter models require aggressive quantization and multi-accelerator tensor parallelism even for single-request inference. The co-evolution of model scale and memory technology continues to drive infrastructure requirements.
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt, fmt_int, fmt_qty, fmt_time
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: TrillionModelFloor.weight_tb_str, weight_gb_str, b200_bw_tbs_str,
+# │          token_b200_ms_str, hbm4_bw_tbs_str, token_hbm4_ms_str,
+# │          model_params_t_str, hbm4_low_tbs_n_str, hbm4_tbs_n_str
+class TrillionModelFloor:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model_params_t = 1  # trillion-parameter model (scenario)
+    b200_bw = Hardware.Cloud.B200.memory.bandwidth  # B200-class HBM3e (~8 TB/s)
+    hbm4_low_bw = 12 * TB / second  # HBM4 projection low end (scenario)
+    hbm4_bw = 16 * TB / second  # HBM4 projection high end (scenario)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    weight = model_params_t * 1e12 * BYTES_FP16  # 1T-parameter FP16 model
+    token_b200 = (weight / b200_bw).to('millisecond')
+    token_hbm4 = (weight / hbm4_bw).to('millisecond')
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    model_params_t_str = fmt_int(model_params_t)
+    hbm4_low_tbs_n_str = fmt_int(hbm4_low_bw.to(TB / second).magnitude)
+    hbm4_tbs_n_str = fmt_int(hbm4_bw.to(TB / second).magnitude)
+    weight_tb_str = fmt_qty(weight, TB, precision=0, commas=False)
+    weight_gb_str = fmt_qty(weight, GB, precision=0, commas=False)
+    b200_bw_tbs_str = fmt_qty(b200_bw, TB / second, precision=0, commas=False)
+    token_b200_ms_str = fmt_time(token_b200, 'millisecond', precision=0, commas=False)
+    hbm4_bw_tbs_str = fmt_qty(hbm4_bw, TB / second, precision=0, commas=False)
+    token_hbm4_ms_str = fmt_time(token_hbm4, 'millisecond', precision=0, commas=False)
+```
+
+HBM4-class packages projected in the `{python} TrillionModelFloor.hbm4_low_tbs_n_str`--`{python} TrillionModelFloor.hbm4_tbs_n_str` TB/s aggregate range illustrate the planning pressure created by trillion-parameter-scale models. A `{python} TrillionModelFloor.model_params_t_str`T-parameter model requires roughly `{python} TrillionModelFloor.weight_tb_str` of weight storage in FP16. At B200-class HBM3e bandwidths (about `{python} TrillionModelFloor.b200_bw_tbs_str`), serving such a model at batch size 1 would produce tokens at `{python} TrillionModelFloor.weight_gb_str`/`{python} TrillionModelFloor.b200_bw_tbs_str` = `{python} TrillionModelFloor.token_b200_ms_str` per token, far too slow for interactive applications. Even at `{python} TrillionModelFloor.hbm4_bw_tbs_str`, the bandwidth floor remains roughly `{python} TrillionModelFloor.token_hbm4_ms_str` per token before batching, quantization, or tensor-parallel sharding. This calculation suggests that trillion-parameter models require aggressive quantization and multi-accelerator tensor parallelism even for single-request inference. The co-evolution of model scale and memory technology continues to drive infrastructure requirements.
 
 ```{python}
 #| echo: false
@@ -884,7 +1000,7 @@ class MemoryBandwidthHbmRecap:
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
 ```
 
-An important architectural consideration is the number of HBM stacks per accelerator and how they connect to the processor. The H100 has 5 HBM3 stacks, each providing approximately 670 GB/s, for a total of `{python} MemoryBandwidthHbmRecap.h100_bw_tb_per_s_str` aggregate bandwidth. A B200-class Blackwell GPU package uses 8 HBM3e stacks for an aggregate of about 8 TB/s. The number of stacks is constrained by the interposer area available for HBM placement: each HBM stack occupies approximately 100 mm$^2$ of interposer area, and the total interposer must accommodate both the processor die(s) and all HBM stacks. Larger interposers allow more HBM stacks (and therefore higher bandwidth and capacity) but are more expensive and harder to manufacture.
+An important architectural consideration is the number of HBM stacks per accelerator and how they connect to the processor. The H100 has 5 HBM3 stacks, each providing approximately 670 GB/s, for a total of `{python} MemoryBandwidthHbmRecap.h100_bw_tb_per_s_str` aggregate bandwidth. A B200-class Blackwell GPU package uses 8 HBM3e stacks for an aggregate of about 8 TB/s. The number of stacks is constrained by the interposer area available for HBM placement: each HBM stack occupies approximately `{python} HbmPackagingAreaRecap.hbm_stack_area_mm2_str` of interposer area, and the total interposer must accommodate both the processor die(s) and all HBM stacks. Larger interposers allow more HBM stacks (and therefore higher bandwidth and capacity) but are more expensive and harder to manufacture.
 
 The interposer area constraint creates a concrete design tension. Making the processor die larger (more Tensor Cores, more SMs) leaves less interposer area for HBM stacks, potentially reducing bandwidth. Making the processor die smaller (fewer Tensor Cores) frees interposer area for more HBM but reduces peak compute throughput. The optimal balance depends on the target workload's position on the Roofline plot: compute-bound workloads benefit from a larger processor die (more Tensor Cores), while bandwidth-bound workloads benefit from more HBM stacks. @Sec-appdx-fleet-foundations-roofline derives the ridge point that separates these two regimes, expressing it through @eq-fleet-arithmetic-intensity and @eq-fleet-ridge-point so that a workload's arithmetic intensity predicts which side of the balance it falls on before any silicon is committed.
 
@@ -911,7 +1027,7 @@ class TokenLatencyScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h_h100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    dominance_str = fmt_percent(dominance, precision=1, commas=False, style="symbol")
+    dominance_str = fmt_percent(dominance, precision=1, commas=False, style="prose")
     weight_gb_str = fmt_memory(weight_vol, unit=GB, precision=0, commas=False)
     t_comp_math = fmt_math(f"T_{{\\text{{compute}}}} \\approx \\mathbf{{{t_comp.to(millisecond).magnitude:.2f} \\text{{ ms}}}}")
     t_mem_math = fmt_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{t_mem.to(millisecond).magnitude:.1f} \\text{{ ms}}}}")
@@ -945,6 +1061,13 @@ Loading `{python} TokenLatencyScenario.weight_gb_str` of weights from HBM at `{p
 ```{python}
 #| echo: false
 #| label: h200-comparison
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ H100 vs. H200 MEMORY-WALL COMPARISON (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: Show that decode latency tracks the memory system, not the compute units.
+# │ How: ServingModel.solve for Llama2-70B on H100 vs. H200; compare ITL + HBM specs.
+# │ Exports: H200Comparison.bw_gain_mult_str, .cap_gain_mult_str, .speedup_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
 import mlsysim
 from mlsysim.solvers import ServingModel
 from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_params, fmt_power
@@ -994,7 +1117,7 @@ class TokenLatencyDominanceRecap:
     dominance = (t_mem / (t_mem + t_comp)).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    dominance_str = fmt_percent(dominance, precision=1, commas=False, style="symbol")
+    dominance_str = fmt_percent(dominance, precision=1, commas=False, style="prose")
 ```
 
 The fraction of token time spent waiting on memory, `{python} TokenLatencyDominanceRecap.dominance_str` in this example, is called the **memory-boundedness**\index{Memory-boundedness} of the workload. A workload that is 99 percent memory-bound will see almost no benefit from a faster processor (more TFLOP/s) but will see nearly linear speedup from faster memory (more TB/s bandwidth).
@@ -1138,7 +1261,7 @@ For an H100 (`{python} MemoryBandwidthRooflineFnRecap.h100_flops_fp16_tflop_per_
 :::
 
 ::: {.column-margin}
-![](images/svg/compute_infrastructure_decode_roofline.svg){width="100%" fig-alt="A roofline: a blue memory-bound slope rising to an orange compute-bound ceiling at the ridge point. A workload dot sits low on the blue slope, far left of the ridge, marking LLM decode as deeply memory-bound."}
+![](images/svg/compute_infrastructure_decode_roofline.svg){width="100%" fig-alt="A roofline: a blue memory-bound slope rising to an orange compute-bound ceiling at the ridge point. A workload dot sits low on the blue slope, far left of the ridge, marking LLM decode as deeply memory bound."}
 
 *Decode sits deep in the memory-bound regime, far below the ridge.*
 :::
@@ -1168,7 +1291,7 @@ Specific ML workloads occupy different regions of this plot depending on the ope
 
 Reading a Roofline plot requires understanding what each axis represents. The horizontal axis is arithmetic intensity (FLOP/byte), plotted on a log scale. The vertical axis is achievable performance (FLOP/s), also on a log scale. Two lines define the "roofline" shape: a diagonal line with slope 1 (on the log-log plot) representing the memory bandwidth limit, and a horizontal line representing the peak compute limit. These two lines meet at the ridge point.
 
-Any workload can be plotted as a single point on this chart by computing its arithmetic intensity and measuring its achieved performance. If the point lies on the diagonal line, the workload is memory-bound and would benefit from faster memory. If it lies on the horizontal line, the workload is compute-bound and would benefit from more arithmetic units.
+Any workload can be plotted as a single point on this chart by computing its arithmetic intensity and measuring its achieved performance. If the point lies on the diagonal line, the workload is memory-bound and would benefit from faster memory. If it lies on the horizontal line, the workload is compute bound and would benefit from more arithmetic units.
 
 If the point lies below either line, the workload is not fully using the available resource. This gap indicates an optimization opportunity in the software: kernel inefficiency, poor memory access patterns, or excessive synchronization. Closing this gap is the province of kernel engineering and communication optimization, topics examined in @sec-performance-engineering.
 
@@ -1369,7 +1492,7 @@ class RooflineCaptionRecap:
     h100_ridge_str = fmt_arithmetic_intensity((h_h100.compute.peak_flops / h_h100.memory.bandwidth), unit=flop / byte, precision=1, commas=False)
 ```
 
-The roofline in @fig-roofline-landscape is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the FP16 ridge point (~`{python} RooflineCaptionRecap.h100_ridge_str` for `{python} RooflineCaptionRecap.h100_fp16_tflop_per_s_str` over `{python} RooflineCaptionRecap.h100_bw_tb_per_s_str`). ML workloads span the full range: LLM decode at batch size 1 is deeply memory-bound, while LLM training at large batch sizes is compute-bound. The position of each workload determines whether faster memory or faster compute would improve performance.
+The roofline in @fig-roofline-landscape is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the FP16 ridge point (~`{python} RooflineCaptionRecap.h100_ridge_str` for `{python} RooflineCaptionRecap.h100_fp16_tflop_per_s_str` over `{python} RooflineCaptionRecap.h100_bw_tb_per_s_str`). ML workloads span the full range: LLM decode at batch size 1 is deeply memory bound, while LLM training at large batch sizes is compute bound. The position of each workload determines whether faster memory or faster compute would improve performance.
 
 The Roofline Model also reveals a subtle but important insight about the interaction between batch size and hardware utilization. Increasing the batch size for a given model raises the arithmetic intensity because the weight matrix is loaded once but multiplied against a larger activation matrix (more FLOPs for the same bytes transferred). This shifts the workload point rightward on the plot, potentially crossing the ridge point from memory-bound to compute-bound territory. The arithmetic intensity grows linearly with batch size (doubling the batch size doubles the FLOPs while keeping the weight loading unchanged), creating a simple and predictable relationship between batch size and hardware utilization.
 
@@ -1377,7 +1500,7 @@ For inference serving, batching multiple requests together dramatically increase
 
 For training, the batch size is a hyperparameter that affects both statistical convergence and hardware efficiency, creating a trade-off that practitioners must navigate carefully. Larger batch sizes improve hardware utilization (pushing the workload into the compute-bound regime) but may require learning rate adjustments and warmup schedules to maintain training quality. The optimal batch size depends on both the model architecture and the hardware's Roofline characteristics, creating a cross-disciplinary optimization problem that spans ML theory and systems engineering.
 
-The practical value of the Roofline Model is that it tells us which resource to optimize. If a workload is memory-bound, buying a faster accelerator (more TFLOP/s) yields no benefit; only higher memory bandwidth will help. Conversely, if a workload is compute-bound, upgrading HBM generations is wasted money. This diagnostic power is the reason that experienced infrastructure engineers always begin a hardware selection process by computing the arithmetic intensity of their target workload and plotting it against the candidate hardware's Roofline: the plot immediately reveals which hardware characteristic matters and which is irrelevant.
+The practical value of the Roofline Model is that it tells us which resource to optimize. If a workload is memory-bound, buying a faster accelerator (more TFLOP/s) yields no benefit; only higher memory bandwidth will help. Conversely, if a workload is compute bound, upgrading HBM generations is wasted money. This diagnostic power is the reason that experienced infrastructure engineers always begin a hardware selection process by computing the arithmetic intensity of their target workload and plotting it against the candidate hardware's Roofline: the plot immediately reveals which hardware characteristic matters and which is irrelevant.
 
 ```{python}
 #| echo: false
@@ -1389,7 +1512,7 @@ class InfraFrontierMemoryTrainRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierMemoryTrainRecap.frontier_params_b_str` model, training with large batch sizes is compute-bound (optimize for TFLOP/s), while serving individual requests is memory-bound (optimize for bandwidth). This duality explains why some organizations use different hardware generations for training and inference. An A100, with its lower cost and adequate memory bandwidth, may be more cost-effective for inference than an H100, despite the H100's higher peak FLOP/s.
+For our `{python} InfraFrontierMemoryTrainRecap.frontier_params_b_str` model, training with large batch sizes is compute bound (optimize for TFLOP/s), while serving individual requests is memory bound (optimize for bandwidth). This duality explains why some organizations use different hardware generations for training and inference. An A100, with its lower cost and adequate memory bandwidth, may be more cost-effective for inference than an H100, despite the H100's higher peak FLOP/s.
 
 The Roofline Model also provides a quantitative framework for evaluating the return on investment of different optimizations. If a workload is 10$\times$ below the compute ceiling but already touching the bandwidth ceiling, spending engineering effort on kernel optimization (moving toward the compute ceiling) yields no benefit. The effort should instead be directed toward reducing memory traffic (shifting the workload rightward on the plot) through techniques like batching, kernel fusion, or quantization.
 
@@ -1511,9 +1634,9 @@ class RooflineCalloutRecap:
 
 Consider our `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str` model on an H100 with `{python} RooflineInferenceMath.h100_fp16_tflop_per_s_str` peak compute and `{python} RooflineInferenceMath.h100_bw_tb_per_s_str` memory bandwidth. The ridge point is `{python} RooflineCalloutRecap.h100_ridge_str`.
 
-**Inference (decode, batch size 1)**: Each token loads `{python} RooflineInferenceMath.inf_weight_gb_str` of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I =$ `{python} RooflineInferenceMath.inf_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str` (the ridge point), the workload is deeply memory-bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOP/s, which is about `{python} RooflineInferenceMath.inf_peak_pct_str` of the H100's peak `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`. No amount of additional compute will help; only more memory bandwidth improves throughput.
+**Inference (decode, batch size 1)**: Each token loads `{python} RooflineInferenceMath.inf_weight_gb_str` of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I =$ `{python} RooflineInferenceMath.inf_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str` (the ridge point), the workload is deeply memory bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOP/s, which is about `{python} RooflineInferenceMath.inf_peak_pct_str` of the H100's peak `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`. No amount of additional compute will help; only more memory bandwidth improves throughput.
 
-**Training forward pass** (batch size `{python} RooflineInferenceMath.batch_size_str`): The same weight tensor is multiplied by a batch of `{python} RooflineInferenceMath.batch_size_str` activation vectors simultaneously, turning matrix-vector operations into matrix-matrix operations. The FLOPs increase by `{python} RooflineInferenceMath.batch_size_str`$\times$ while the weight loading remains constant: $I =$ `{python} RooflineInferenceMath.train_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.train_intensity_str` $\gg$ `{python} RooflineCalloutRecap.h100_ridge_str`, the workload is compute-bound. The achievable throughput is now limited by the peak compute ceiling of `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`, and the memory bandwidth is irrelevant. Adding more TFLOP/s (through a newer GPU generation) directly improves performance.
+**Training forward pass** (batch size `{python} RooflineInferenceMath.batch_size_str`): The same weight tensor is multiplied by a batch of `{python} RooflineInferenceMath.batch_size_str` activation vectors simultaneously, turning matrix-vector operations into matrix-matrix operations. The FLOPs increase by `{python} RooflineInferenceMath.batch_size_str`$\times$ while the weight loading remains constant: $I =$ `{python} RooflineInferenceMath.train_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.train_intensity_str` $\gg$ `{python} RooflineCalloutRecap.h100_ridge_str`, the workload is compute bound. The achievable throughput is now limited by the peak compute ceiling of `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`, and the memory bandwidth is irrelevant. Adding more TFLOP/s (through a newer GPU generation) directly improves performance.
 
 **Systems insight**: The contrast explains why organizations sometimes use different hardware for training and inference: *training* benefits from peak FLOP/s, while *inference* benefits from memory bandwidth per dollar.
 
@@ -1684,15 +1807,36 @@ The cascade shown in @fig-power-path reveals why power delivery is an infrastruc
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty
+from mlsysim import Hardware
+from mlsysim.core.units import TFLOP, second, ureg, watt
+from mlsysim.fmt import check, fmt_area, fmt_flop_rate, fmt_heat_flux, fmt_multiple, fmt_power
 
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: H100TdpWallRecap.tdp_w_str, H100TdpWallRecap.flops_fp16_tflop_per_s_str
+# │ Exports: H100TdpWallRecap.tdp_w_str, H100TdpWallRecap.flops_fp16_tflop_per_s_str,
+# │          H100TdpWallRecap.die_area_mm2_str, H100TdpWallRecap.h100_heat_flux_w_per_cm2_str,
+# │          H100TdpWallRecap.stove_heat_flux_w_per_cm2_str, H100TdpWallRecap.stove_ratio_mult_str
 class H100TdpWallRecap:
+    # ┌── 1. LOAD (Registry + scenario reference) ─────────────────────────────
+    h100_tdp = Hardware.Cloud.H100.tdp
+    die_area = Hardware.Cloud.H100.die_area
+    stove_heat_flux = 10 * watt / (ureg.centimeter**2)
+
+    # ┌── 2. GUARD (Registry sanity checks) ───────────────────────────────────
+    check(die_area is not None, "H100 registry entry should expose die_area.")
+    check(800 <= die_area.to(ureg.millimeter**2).magnitude <= 830, "H100 die area should stay near 814 mm^2.")
+
+    # ┌── 3. EXECUTE (The Compute) ────────────────────────────────────────────
+    h100_heat_flux = h100_tdp / die_area
+    stove_ratio = (h100_heat_flux / stove_heat_flux).to_base_units().magnitude
+    check(80 <= h100_heat_flux.to(watt / (ureg.centimeter**2)).magnitude <= 90, "H100 heat flux should stay near 86 W/cm^2.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tdp_w_str = fmt_qty(Hardware.Cloud.H100.tdp, watt, precision=0, commas=False)
-    flops_fp16_tflop_per_s_str = fmt_qty(Hardware.Cloud.H100.compute.peak_flops, TFLOP / second, precision=0, commas=False)
+    tdp_w_str = fmt_power(h100_tdp, unit=watt, precision=0, commas=False)
+    flops_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    die_area_mm2_str = fmt_area(die_area, unit=ureg.millimeter**2, commas=False)
+    h100_heat_flux_w_per_cm2_str = fmt_heat_flux(h100_heat_flux, unit=watt / (ureg.centimeter**2), commas=False)
+    stove_heat_flux_w_per_cm2_str = fmt_heat_flux(stove_heat_flux, unit=watt / (ureg.centimeter**2), commas=False)
+    stove_ratio_mult_str = fmt_multiple(stove_ratio, commas=False)
 ```
 
 Every floating-point operation dissipates energy as heat. Dense Tensor Core activity during large matrix multiplications drives heat proportional to the switching activity of billions of transistors. The Thermal Design Power (TDP)\index{TDP}[^fn-tdp-thermal] of an accelerator is the maximum sustained heat dissipation that the cooling system must handle, and it has become the single most consequential specification in fleet design. At dense fleet scale, this creates the power wall\index{Power Wall}: the point where facility power delivery and heat removal, not available arithmetic units, determine how much compute can be installed and sustained.
@@ -1776,7 +1920,32 @@ class B200PerformanceScenarioSecComputeTdpRecap:
 
 The numbers are stark: the V100 (2017) operated at `{python} V100TdpRecap.tdp_w_str` TDP, the A100 (2020) increased to `{python} A100TdpTrajectoryRecap.tdp_w_str`, the H100 (2022) reached `{python} H100TdpTrajectoryRecap.tdp_w_str`, and the B200 (2024) draws `{python} B200PerformanceScenarioSecComputeTdpRecap.tdp_w_str`. In seven years, TDP has more than tripled, growing at approximately 18 percent per year.
 
-If this growth rate continued as a planning scenario, a generation after Blackwell would approach 1,200--1,400 W per accelerator, and another step could reach 1,500--2,000 W. At 2,000 W per accelerator, a single 8-GPU node would consume 16 kW of GPU power alone, requiring liquid cooling[^fn-liquid-cooling-flow] infrastructure that can remove heat at rates approaching those of industrial process cooling equipment.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FUTURE TDP NODE-POWER SCENARIO (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: Node-level GPU power draw if per-accelerator TDP reaches a 2 kW projection.
+# │ How: hypothetical 2,000 W per-accelerator TDP x DGX-H100 accelerators per node.
+# │ Exports: FutureTdpScenario.future_tdp_w_str, .gpus_per_node_str, .node_gpu_power_kw_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_qty, fmt, check
+
+class FutureTdpScenario:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    future_tdp = 2000 * watt  # hypothetical post-Blackwell per-accelerator TDP (planning projection)
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    node_gpu_power = (future_tdp * gpus_per_node).to(kilowatt)
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(node_gpu_power.to(kilowatt).magnitude - 16) < 1e-9, "2,000 W x 8 accelerators should be 16 kW")
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    future_tdp_w_str = fmt_qty(future_tdp, watt, precision=0, commas=True)
+    gpus_per_node_str = fmt(gpus_per_node, precision=0, commas=False)
+    node_gpu_power_kw_str = fmt_qty(node_gpu_power, kilowatt, precision=0, commas=False)
+```
+
+If this growth rate continued as a planning scenario, a generation after Blackwell would approach 1,200--1,400 W per accelerator, and another step could reach 1,500--2,000 W. At `{python} FutureTdpScenario.future_tdp_w_str` per accelerator, a single `{python} FutureTdpScenario.gpus_per_node_str`-GPU node would consume `{python} FutureTdpScenario.node_gpu_power_kw_str` of GPU power alone, requiring liquid cooling[^fn-liquid-cooling-flow] infrastructure that can remove heat at rates approaching those of industrial process cooling equipment.
 
 [^fn-liquid-cooling-flow]: **Liquid Cooling Flow Rate**\index{Liquid Cooling Flow Rate}\index{Cooling!liquid flow rate}: A rack of GB200 NVL72 nodes (120 kW) requires approximately 150--200 liters per minute (LPM) of coolant flow. At these rates, the primary risk shift is from thermal throttling to mechanical failure (leaks, pump cavitation), necessitating the industrial-grade manifolds and quick-disconnect fittings common in chemical processing plants.
 
@@ -1792,7 +1961,7 @@ Accelerators implement sophisticated power management to operate within their TD
 
 Dynamic power management means that the actual power draw of a GPU varies continuously during training. A typical training step might see power swing from 400 W (during communication phases when most SMs are idle) to `{python} H100TdpWallRecap.tdp_w_str` (during the forward and backward pass when all Tensor Cores are active) and back, with each transition occurring in microseconds. The VRMs on the baseboard must respond to these transitions fast enough to maintain a stable supply voltage despite the rapidly changing current draw.
 
-To appreciate the physical challenge, consider what `{python} H100TdpWallRecap.tdp_w_str` means in terms of heat flux. An H100 die measures approximately 814 mm$^2$ (roughly $29{\times}28$ mm). Dissipating `{python} H100TdpWallRecap.tdp_w_str` from this area produces a heat flux of approximately 86 W/cm$^2$. For comparison, the surface of an electric stovetop burner at high heat produces approximately 10 W/cm$^2$. An H100 die generates 8.6$\times$ the heat flux of a stove burner, concentrated on an area the size of a large postage stamp.
+To appreciate the physical challenge, consider what `{python} H100TdpWallRecap.tdp_w_str` means in terms of heat flux. An H100 die measures approximately `{python} H100TdpWallRecap.die_area_mm2_str` (roughly $29{\times}28$ mm). Dissipating `{python} H100TdpWallRecap.tdp_w_str` from this area produces a heat flux of approximately `{python} H100TdpWallRecap.h100_heat_flux_w_per_cm2_str`. For comparison, the surface of an electric stovetop burner at high heat produces approximately `{python} H100TdpWallRecap.stove_heat_flux_w_per_cm2_str`. An H100 die generates `{python} H100TdpWallRecap.stove_ratio_mult_str` the heat flux of a stove burner, concentrated on an area the size of a large postage stamp.
 
 The B200 pushes even further: at 1,000 W across a dual-die package, the average heat flux remains comparable, but the total energy that must be removed per package increases by 43 percent. Removing this heat without allowing the junction temperature to exceed 83 degrees Celsius (the typical operating maximum for HBM reliability) requires thermal solutions with extremely low thermal resistance from die to coolant.
 
@@ -1882,7 +2051,7 @@ class RooflineTdpRecap:
 ```
 Serving the same language model changes the answer. During autoregressive decode, every generated token streams weights through memory, so the key metric becomes memory bandwidth per dollar rather than peak TFLOP/s. At batch size 1, the H100's `{python} RooflineTdpRecap.h100_bw_tb_per_s_str` bandwidth determines throughput while much of the arithmetic silicon waits. Batching raises arithmetic intensity by reusing the same weight movement across more requests, which is why serving systems work so hard to batch without violating tail-latency SLOs. The workload did not change names, but the binding term in the iron law changed, and the accelerator choice changes with it.
 
-Recommendation models\index{Recommendation Model} split the decision again. Embedding table lookup is dominated by random access and memory capacity, because each request retrieves small vectors from TB-scale tables with poor locality. The dense tower that consumes those embeddings is compute-bound. A hybrid CPU-GPU design follows from that split: CPU and DRAM capacity handle the sparse lookup path, while GPUs accelerate the dense neural network layers\index{Dense Layer}. A single headline TFLOP/s number cannot describe this workload because it has two different bottlenecks inside one request.
+Recommendation models\index{Recommendation Model} split the decision again. Embedding table lookup is dominated by random access and memory capacity, because each request retrieves small vectors from TB-scale tables with poor locality. The dense tower that consumes those embeddings is compute bound. A hybrid CPU-GPU design follows from that split: CPU and DRAM capacity handle the sparse lookup path, while GPUs accelerate the dense neural network layers\index{Dense Layer}. A single headline TFLOP/s number cannot describe this workload because it has two different bottlenecks inside one request.
 
 Vision and diffusion workloads move back toward arithmetic throughput because convolutions, attention blocks, and denoising networks reuse data heavily. Diffusion inference makes this especially clear: the Stable Diffusion v1.5 profile in MLSysIM uses `{python} InfraFrontierTdpRecap.diffusion_steps_count_str`, so the service pays for a sequence of full model evaluations rather than one decode step per token. For these workloads, TFLOP/s per dollar often dominates bandwidth per dollar once model state fits in memory.
 
@@ -1958,7 +2127,32 @@ class TensorCorePrecisionRecap:
 
 : **Precision Formats and Hardware Throughput on H100**: The table uses dense peak throughput where Tensor Core support exists; structured sparsity can roughly double several of these advertised peaks. The choice of precision affects both the training dynamics (convergence, numerical stability) and the infrastructure requirements (memory capacity, bandwidth utilization). TF32 preserves the FP32 exponent width but reduces mantissa precision so Tensor Cores can accelerate common FP32 training workloads. {#tbl-precision-throughput}
 
-The infrastructure implications are substantial. A fleet designed for BF16 training, a common baseline for large models, delivers `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` per GPU on an H100. The same fleet running FP8 training delivers `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str` per GPU, effectively doubling the compute density without additional hardware. For a 10,000-GPU cluster priced at roughly \$350,000 per 8-GPU node, the difference between BF16 and FP8 training is equivalent to adding another 10,000 GPUs, or roughly \$440 million in node hardware.
+```{python}
+#| echo: false
+from mlsysim import Infrastructure, Systems
+from mlsysim.fmt import fmt_int, fmt_usd
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: Fp8CostEquivalence.cluster_gpus_str, gpus_per_node_str,
+# │          node_price_str, total_musd_str
+class Fp8CostEquivalence:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators  # 10K reference cluster
+    gpus_per_node = 8  # DGX H100 node (8 accelerators)
+    node_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate  # $350k CapEx ref
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    nodes = cluster_gpus // gpus_per_node
+    total_usd = nodes * node_price
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    cluster_gpus_str = fmt_int(cluster_gpus)
+    gpus_per_node_str = fmt_int(gpus_per_node)
+    node_price_str = fmt_usd(node_price.magnitude, precision=0)
+    total_musd_str = fmt_usd(total_usd.magnitude / 1e6, precision=0)
+```
+
+The infrastructure implications are substantial. A fleet designed for BF16 training, a common baseline for large models, delivers `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` per GPU on an H100. The same fleet running FP8 training delivers `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str` per GPU, effectively doubling the compute density without additional hardware. For a `{python} Fp8CostEquivalence.cluster_gpus_str`-GPU cluster priced at roughly `{python} Fp8CostEquivalence.node_price_str` per `{python} Fp8CostEquivalence.gpus_per_node_str`-GPU node, the difference between BF16 and FP8 training is equivalent to adding another `{python} Fp8CostEquivalence.cluster_gpus_str` GPUs, or roughly `{python} Fp8CostEquivalence.total_musd_str` million in node hardware.
 
 However, not all workloads can use FP8 without accuracy degradation. The reduced mantissa precision (3 bits in E4M3) means that values must be scaled carefully to avoid overflow (values exceeding the representable range saturate or become nonfinite, depending on format and implementation) or underflow (small values rounded to zero). The Transformer Engine's dynamic per-tensor scaling addresses this challenge for standard Transformer architectures, but custom model architectures with unusual activation distributions may require manual precision tuning. The infrastructure team must therefore work closely with the model team to determine the lowest precision that maintains acceptable accuracy, as this decision directly affects the effective throughput and therefore the required cluster size.
 
@@ -1981,6 +2175,9 @@ For training, many workloads use **mixed-precision training**\index{Mixed-Precis
 The Roofline Model and token latency analysis demonstrate that data movement limits performance. Data movement also dominates energy consumption\index{Data Movement!energy cost}, with direct implications for fleet economics. A useful normalization is an FP16 operand: reading one 16-bit value from HBM at roughly 4 pJ/bit costs about 64 picojoules (pJ), while one FP16 multiply-accumulate (MAC) costs roughly 1 pJ. The raw operand fetch can therefore cost about 64$\times$ the arithmetic operation, before tiling and reuse amortize that movement across many MACs.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-33mm}
+```
 ![](images/svg/vol2_compute_infrastructure_margin_001.svg){width="100%" fig-alt="MAC, HBM read, and DRAM read energy costs."}
 
 *Data movement dwarfs arithmetic in energy cost.*
@@ -2051,7 +2248,7 @@ class InfraFrontierTdpBenchRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierTdpBenchRecap.frontier_params_b_str` model, no single benchmark captures the full picture. The training phase is compute-bound at large batch sizes, making peak TFLOP/s and scaling efficiency the dominant metrics. The inference phase at batch size 1 is memory-bandwidth-bound, making GB/s per dollar the relevant metric. The fine-tuning phase falls between these extremes, with moderate batch sizes placing the workload near the Roofline ridge point. A comprehensive evaluation must benchmark all three phases on the candidate hardware, using the organization's actual model and data pipeline rather than relying solely on published MLPerf numbers.
+For our `{python} InfraFrontierTdpBenchRecap.frontier_params_b_str` model, no single benchmark captures the full picture. The training phase is compute bound at large batch sizes, making peak TFLOP/s and scaling efficiency the dominant metrics. The inference phase at batch size 1 is memory-bandwidth-bound, making GB/s per dollar the relevant metric. The fine-tuning phase falls between these extremes, with moderate batch sizes placing the workload near the Roofline ridge point. A comprehensive evaluation must benchmark all three phases on the candidate hardware, using the organization's actual model and data pipeline rather than relying solely on published MLPerf numbers.
 
 ::: {#psp-compute-infrastructure-beyond-peak-specifications .callout-perspective title="Beyond peak specifications"}
 
@@ -2076,7 +2273,7 @@ Serving infrastructure is optimized for *latency* and *cost per query*: minimizi
 
 The differing requirements drive distinct hardware and architecture choices:
 
-- **GPU utilization**\index{GPU Utilization}: Training clusters achieve 30--50 percent MFU because large batch sizes push workloads into the compute-bound regime. Serving clusters at low batch sizes achieve less than 5 percent MFU because single-request inference is deeply memory-bound. Serving systems therefore aggressively batch requests to improve utilization, which introduces a trade-off between latency (requests must wait to be batched) and throughput (larger batches achieve higher utilization).
+- **GPU utilization**\index{GPU Utilization}: Training clusters achieve 30--50 percent MFU because large batch sizes push workloads into the compute-bound regime. Serving clusters at low batch sizes achieve less than 5 percent MFU because single-request inference is deeply memory bound. Serving systems therefore aggressively batch requests to improve utilization, which introduces a trade-off between latency (requests must wait to be batched) and throughput (larger batches achieve higher utilization).
 - **Model replication**\index{Model Replication}: Training distributes a single model across many GPUs using tensor and pipeline parallelism. Serving replicates the entire model (or a significant portion of it) across many GPUs, with each replica handling independent requests. This replication approach means that the total GPU memory required for serving is proportional to the number of concurrent requests the system must support, not just the model size.
 - **Network requirements**\index{Network Requirements}: Training requires high-bandwidth, low-latency inter-GPU communication for gradient synchronization. Serving requires minimal inter-GPU communication (each request is independent) but substantial client-facing network bandwidth to handle millions of API requests per second.
 - **Cost metric**\index{Serving!cost metric}: Training cost is measured in dollars per training run (a fixed, one-time cost). Serving cost is measured in dollars per 1,000 tokens generated (a variable, ongoing cost that accumulates over the model's operational lifetime). For popular models served at scale, the cumulative serving cost can exceed the training cost within weeks.
@@ -2115,7 +2312,7 @@ class InfraFrontierStragglerRecap4:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The inference workload itself bifurcates into two distinct phases with opposing bottlenecks. The **prefill**\index{Prefill!inference phase} phase processes the input prompt, performing a large matrix-matrix multiplication that is compute-bound and achieves high Tensor Core utilization. The **decode**\index{Decode!inference phase} phase generates tokens one by one, performing matrix-vector multiplications that are deeply memory-bandwidth-bound. To maximize hardware utilization, high-performance serving systems employ **continuous batching**\index{Continuous Batching}, which schedules requests at the iteration level rather than the request level. This allows the engine to inject a new prefill computation for a waiting request into the idle compute slots of an ongoing decode batch, dynamically filling the GPU's arithmetic pipelines. For our `{python} InfraFrontierStragglerRecap4.frontier_params_b_str` model, serving 10,000 requests per second with a 50 ms time-to-first-token service level agreement (SLA) requires distributing traffic across hundreds of 8-GPU replicas (each holding the full model via tensor parallelism), with a load balancer routing requests to the replica with the lowest queue depth. Unlike training, where 99.9 percent reliability can be acceptable with checkpointing, inference architectures must account for tail latency, where a single slow replica can violate the SLA for the entire request batch.
+The inference workload itself bifurcates into two distinct phases with opposing bottlenecks. The **prefill**\index{Prefill!inference phase} phase processes the input prompt, performing a large matrix-matrix multiplication that is compute bound and achieves high Tensor Core utilization. The **decode**\index{Decode!inference phase} phase generates tokens one by one, performing matrix-vector multiplications that are deeply memory-bandwidth-bound. To maximize hardware utilization, high-performance serving systems employ **continuous batching**\index{Continuous Batching}, which schedules requests at the iteration level rather than the request level. This allows the engine to inject a new prefill computation for a waiting request into the idle compute slots of an ongoing decode batch, dynamically filling the GPU's arithmetic pipelines. For our `{python} InfraFrontierStragglerRecap4.frontier_params_b_str` model, serving 10,000 requests per second with a 50 ms time-to-first-token service level agreement (SLA) requires distributing traffic across hundreds of 8-GPU replicas (each holding the full model via tensor parallelism), with a load balancer routing requests to the replica with the lowest queue depth. Unlike training, where 99.9 percent reliability can be acceptable with checkpointing, inference architectures must account for tail latency, where a single slow replica can violate the SLA for the entire request batch.
 
 #### The accelerator decision matrix {#sec-compute-infrastructure-accelerator-decision-matrix-8bba}
 
@@ -2143,9 +2340,9 @@ class InfraFrontierTdpDecisionRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-The binding constraint shifts with the lifecycle phase, as @tbl-accelerator-decision shows for the `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` running example. During training, large batch sizes push the workload into the compute-bound regime, making peak TFLOP/s the dominant metric. The H100 or B200, with their high Tensor Core throughput and fast NVLink for tensor parallelism, are the natural choices. During inference at low batch sizes, the same model becomes deeply memory-bound, and the relevant metric shifts to bandwidth per dollar. An A100 with adequate HBM bandwidth at a lower price point may deliver better cost-per-token than an H100 whose additional TFLOP/s go unused.
+The binding constraint shifts with the lifecycle phase, as @tbl-accelerator-decision shows for the `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` running example. During training, large batch sizes push the workload into the compute-bound regime, making peak TFLOP/s the dominant metric. The H100 or B200, with their high Tensor Core throughput and fast NVLink for tensor parallelism, are the natural choices. During inference at low batch sizes, the same model becomes deeply memory bound, and the relevant metric shifts to bandwidth per dollar. An A100 with adequate HBM bandwidth at a lower price point may deliver better cost-per-token than an H100 whose additional TFLOP/s go unused.
 
-The organizational dimension adds a further consideration. Research labs that modify model architectures weekly need the flexibility of the GPU's CUDA ecosystem, where custom kernels can be written and tested in hours. Production teams running a fixed Transformer architecture at scale for months may benefit from TPUs, where the XLA compiler's whole-program optimization can achieve higher sustained utilization than hand-tuned CUDA kernels for standard operations. Custom ASICs make economic sense only for organizations with enough scale to amortize the \$50--200 million NRE cost and enough workload stability to justify a 2--3 year design cycle. The accelerator spectrum is ultimately an economic question answered at the intersection of workload physics, organizational scale, and time horizon.
+The organizational dimension adds a further consideration. Research labs that modify model architectures weekly need the flexibility of the GPU's CUDA ecosystem, where custom kernels can be written and tested in hours. Production teams running a fixed Transformer architecture at scale for months may benefit from TPUs, where the XLA compiler's whole-program optimization can achieve higher sustained utilization than hand-tuned CUDA kernels for standard operations. Custom ASICs make economic sense only for organizations with enough scale to amortize the \$50--\$200 million NRE cost and enough workload stability to justify a 2--3 year design cycle. The accelerator spectrum is ultimately an economic question answered at the intersection of workload physics, organizational scale, and time horizon.
 
 ::: {#chk-compute-infrastructure-accelerator-selection .callout-checkpoint title="Accelerator selection"}
 
@@ -2306,8 +2503,11 @@ from mlsysim.fmt import fmt_int
 # │ Context: "The Physics of the Staircase" .callout-notebook
 # │
 # │ Goal: Quantify the bandwidth gaps between HBM, NVLink, and InfiniBand.
-# │ Show: nvlink_to_ib_ratio ≈ 18x—inline in notebook result.
-# │ How: Ratio = BW_fast/BW_slow.
+# │ Show: nvlink_to_ib_ratio ≈ 9x—inline in notebook result.
+# │ How: Ratio = BW_fast/BW_slow. All rates are one-way deliverable
+# │      bandwidths (NVLink uses its 450 GB/s per-direction rate, not the
+# │      900 GB/s datasheet bidirectional total) so the buffer-transfer math
+# │      and the staircase ratios use a single consistent convention.
 # │
 # │ Imports: mlsysim.core.units (Hardware.Cloud.H100.memory.bandwidth, Hardware.Cloud.H100.nvlink,
 # │          Systems.Fabrics.InfiniBand_NDR.bandwidth, GB, second), mlsysim.fmt (check)
@@ -2318,7 +2518,9 @@ from mlsysim.fmt import check, fmt, fmt_time
 class BandwidthStaircase:
     # ┌── 1. LOAD ──────────────────────────────────────────
     hbm_bw = Hardware.Cloud.H100.memory.bandwidth  # H100 HBM3
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # H100 NVLink
+    # One-way deliverable NVLink rate (450 GB/s); the datasheet 900 GB/s is the
+    # bidirectional total, and moving a buffer in one direction uses half of it.
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # H100 NVLink (per-direction)
     ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400G NDR InfiniBand
     transfer = 10 * GB  # scenario assumption: synchronized buffer size
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -2328,7 +2530,9 @@ class BandwidthStaircase:
     gap_hbm_nv = (hbm_bw / nvlink_bw).to_base_units().magnitude
     gap_nv_ib = (nvlink_bw / ib_bw).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(gap_nv_ib > 10, f"Narrative Violation: Bandwidth staircase collapsed! Ratio is only {gap_nv_ib:.1f}x (needs to be >10x)")
+    check(
+        gap_nv_ib > 8, f"Narrative Violation: Bandwidth staircase collapsed! Ratio is only {gap_nv_ib:.1f}x (per-direction NVLink/IB should be ~9x)"
+    )
     # ┌── 4. OUTPUT ────────────────────────────────────────
     transfer_gb_str = fmt_memory(transfer, unit=GB, precision=0, commas=False)
     hbm_ms_str = fmt_time(hbm_time, millisecond, precision=1, commas=False)
@@ -2505,11 +2709,53 @@ class V100NodePowerRecap:
 ```
 The NVSwitch chips themselves consume approximately 200 W each (800 W total for the NVSwitch fabric), a nontrivial power overhead that is justified by the bisection bandwidth it provides. To put this in perspective, the NVSwitch fabric alone consumes more power than an entire previous-generation GPU (the V100 drew `{python} V100NodePowerRecap.tdp_w_str`). Without NVSwitch, achieving full all-to-all connectivity would require 28 direct GPU-to-GPU links, a wiring nightmare that would also consume more total NVLink lane capacity.
 
-During a tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension 12,288 (typical for a 175B model), each of the 8 GPUs holds a $12{,}288{\times}1{,}536$ slice of the weight matrix. After each GPU computes its partial result, an AllReduce operation sums the partial results across all 8 GPUs over NVLink.
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_int, fmt_time, MarkdownStr
 
-The AllReduce for a single layer's output involves exchanging approximately $4 \times 2{,}048 \times 12{,}288 \times 2$ bytes (FP16) across the NVLink fabric. For a typical microbatch size of 4 sequences at 2,048 tokens, this is roughly 200 MB per AllReduce, which completes in about 0.2 ms at `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_gb_per_s_str`.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: TensorParallelAllReduce.hidden_str, tp_gpus_str, model_params_b_str,
+# │          shard_math, allreduce_formula_math, allreduce_mb_str,
+# │          per_allreduce_ms_str, layers_str, cumulative_ms_str
+class TensorParallelAllReduce:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model = Models.Language.GPT3  # 175B: hidden 12,288, layers 96
+    tp_gpus = 8  # GPUs per node (tensor parallel)
+    microbatch = 4  # sequences per microbatch (scenario)
+    seq_len = 2048  # tokens per sequence (scenario)
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
 
-Even with 96 layers (forward pass) and 96 layers (backward pass), the cumulative AllReduce time is about 38 ms per training step. This is possible because the NVSwitch crossbar allows all 8 GPUs to communicate simultaneously without contention, unlike a ring topology where data must traverse multiple hops sequentially.
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    hidden = model.hidden_dim
+    layers = model.layers
+    shard_cols = hidden // tp_gpus
+    bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
+    allreduce_bytes = microbatch * seq_len * hidden * bytes_fp16 * byte
+    per_allreduce = (allreduce_bytes / nvlink_bw).to("millisecond")
+    cumulative = 2 * layers * per_allreduce
+    hidden_disp = format(hidden, ",").replace(",", "{,}")
+    shard_disp = format(shard_cols, ",").replace(",", "{,}")
+    seq_disp = format(seq_len, ",").replace(",", "{,}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    hidden_str = fmt_int(hidden)
+    tp_gpus_str = fmt_int(tp_gpus)
+    microbatch_str = fmt_int(microbatch)
+    seq_str = fmt_int(seq_len)
+    model_params_b_str = fmt_int(model.parameters.to("Gparam").magnitude)
+    shard_math = fmt_math(f"{hidden_disp}{{\\times}}{shard_disp}")
+    allreduce_formula_math = fmt_math(f"{microbatch} \\times {seq_disp} \\times {hidden_disp} \\times {bytes_fp16}")
+    allreduce_mb_str = fmt_int(allreduce_bytes.to(MB).magnitude)
+    per_allreduce_ms_str = fmt_time(per_allreduce, "millisecond", precision=1, commas=False)
+    layers_str = fmt_int(layers)
+    cumulative_ms_str = fmt_time(cumulative, "millisecond", precision=1, commas=False)
+```
+
+During a tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension `{python} TensorParallelAllReduce.hidden_str` (typical for a `{python} TensorParallelAllReduce.model_params_b_str`B model), each of the `{python} TensorParallelAllReduce.tp_gpus_str` GPUs holds a `{python} TensorParallelAllReduce.shard_math` slice of the weight matrix. After each GPU computes its partial result, an AllReduce operation sums the partial results across all `{python} TensorParallelAllReduce.tp_gpus_str` GPUs over NVLink.
+
+The AllReduce for a single layer's output involves exchanging approximately `{python} TensorParallelAllReduce.allreduce_formula_math` bytes (FP16) across the NVLink fabric. For a typical microbatch size of `{python} TensorParallelAllReduce.microbatch_str` sequences at `{python} TensorParallelAllReduce.seq_str` tokens, this is roughly `{python} TensorParallelAllReduce.allreduce_mb_str` MB per AllReduce, which completes in about `{python} TensorParallelAllReduce.per_allreduce_ms_str` at `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_gb_per_s_str`.
+
+Even with `{python} TensorParallelAllReduce.layers_str` layers (forward pass) and `{python} TensorParallelAllReduce.layers_str` layers (backward pass), the cumulative AllReduce time is about `{python} TensorParallelAllReduce.cumulative_ms_str` per training step. This is possible because the NVSwitch crossbar allows all 8 GPUs to communicate simultaneously without contention, unlike a ring topology where data must traverse multiple hops sequentially.
 
 The communication overhead is small relative to the compute time per layer, which is approximately 2--5 ms depending on the sequence length and batch size. The resulting tensor-parallel scaling efficiency within the node is typically 85--95 percent, meaning that using 8 GPUs achieves 6.8--7.6$\times$ the throughput of a single GPU.
 
@@ -2532,7 +2778,7 @@ class BandwidthHierarchyPcieExampleRecap:
 <!-- lego-ok-block: PCIe-vs-NVLink tensor-parallel diagnostic narrative -->
 **Scenario**: Early users of multi-GPU nodes often attempted tensor parallelism over PCIe, expecting the `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth to suffice.
 
-**Diagnosis**: Tensor parallelism requires AllReduce after *every* Transformer layer, not just *once* per training step. A model with 96 layers generates 96 AllReduce operations per forward pass and another 96 during the backward pass, totaling 192 synchronization events per step. At PCIe bandwidth, each AllReduce for a 12,288-dimensional hidden state takes approximately 4 ms, accumulating to 768 ms of pure communication overhead per step. The compute per step is roughly 200 ms. The accelerators were spending nearly 80 percent of their time waiting for PCIe transfers. Switching to NVLink reduced each AllReduce to 0.2 ms, bringing total communication overhead to 38 ms and restoring accelerator utilization to over 80 percent.
+**Diagnosis**: Tensor parallelism requires AllReduce after *every* Transformer layer, not just *once* per training step. A model with ninety-six layers generates ninety-six AllReduce operations per forward pass and another ninety-six during the backward pass, totaling 192 synchronization events per step. At PCIe bandwidth, each AllReduce for a 12,288-dimensional hidden state takes approximately 4 ms, accumulating to 768 ms of pure communication overhead per step. The compute per step is roughly 200 ms. The accelerators were spending nearly 80 percent of their time waiting for PCIe transfers. Switching to NVLink reduced each AllReduce to 0.2 ms, bringing total communication overhead to 38 ms and restoring accelerator utilization to over 80 percent.
 
 **Systems lesson**: For tensor parallelism, the interconnect is the bottleneck, and the difference between PCIe and NVLink is not incremental; it is the difference between a functional and a nonfunctional system.
 <!-- end lego-ok-block -->
@@ -2666,8 +2912,8 @@ class NodeReliabilityScenario:
     failures_per_day = expected_failures / run_days
     gpu_only_node_mtbf_hours = canonical_gpu_mtbf_hours / gpus_per_node
     gpu_only_expected_outages = nodes * run_hours / gpu_only_node_mtbf_hours
-    restart_overhead_low_pct = expected_failures * recovery_low_min / 60 / run_hours * 100
-    restart_overhead_high_pct = expected_failures * recovery_high_min / 60 / run_hours * 100
+    restart_overhead_low_pct = expected_failures * recovery_low_min / MINUTES_PER_HOUR / run_hours * 100
+    restart_overhead_high_pct = expected_failures * recovery_high_min / MINUTES_PER_HOUR / run_hours * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(expected_failures > gpu_only_expected_outages, "Composite node MTBF should exceed GPU-only outage rate")
@@ -2887,18 +3133,34 @@ The capacity-bandwidth trade-off across these tiers determines which data a trai
 from mlsysim.fmt import fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str
+# │ Exports: MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str,
+# │          .hbm_per_gpu_gb_str, .node_hbm_gb_str, .host_dram_tb_str,
+# │          .nvme_bw_gb_per_s_str, .nvme_latency_us_str
 class MemoryBandwidthNodeTableRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    hbm_per_gpu = Hardware.Cloud.H100.memory.capacity
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    host_dram = Systems.Nodes.DGX_H100.host_memory
+    nvme = Hardware.Tech.Storage.NvmeGen4
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    node_hbm = hbm_per_gpu * gpus_per_node
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
+    hbm_per_gpu_gb_str = fmt_memory_capacity(hbm_per_gpu, unit=GiB, precision=0, commas=False)
+    gpus_per_node_str = fmt(gpus_per_node, precision=0, commas=False)
+    node_hbm_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
+    host_dram_tb_str = fmt_qty(host_dram, TB, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_qty(nvme.bandwidth, GB / second, precision=0, commas=False)
+    nvme_latency_us_str = fmt_time(nvme.latency, microsecond, precision=0, commas=False)
 ```
 
-| **Memory Tier** |        **Capacity**       |                             **Bandwidth**                             | **Latency** |        **Role**       |
-|:----------------|:-------------------------:|:---------------------------------------------------------------------:|:-----------:|:---------------------:|
-| **GPU HBM3**    | 80 GB $\times$ 8 = 640 GB | `{python} MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str` per GPU |    <1 μs    |   Active computation  |
-| **Host DDR5**   |            2 TB           |                       hundreds of GB/s aggregate                      |   ~100 ns   |    Optimizer state    |
-| **NVMe SSD**    |          8--30 TB         |                               5--7 GB/s                               |    ~10 μs   | Overflow, checkpoints |
+| **Memory Tier** |                                                                                        **Capacity**                                                                                        |                                 **Bandwidth**                                 |                          **Latency**                          |        **Role**       |
+|:----------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------------------------------:|:-------------------------------------------------------------:|:---------------------:|
+| **GPU HBM3**    | `{python} MemoryBandwidthNodeTableRecap.hbm_per_gpu_gb_str` $\times$ `{python} MemoryBandwidthNodeTableRecap.gpus_per_node_str` = `{python} MemoryBandwidthNodeTableRecap.node_hbm_gb_str` |     `{python} MemoryBandwidthNodeTableRecap.h100_bw_tb_per_s_str` per GPU     |                             <1 μs                             |   Active computation  |
+| **Host DDR5**   |                                                                 `{python} MemoryBandwidthNodeTableRecap.host_dram_tb_str`                                                                  |                           hundreds of GB/s aggregate                          |                            ~100 ns                            |    Optimizer state    |
+| **NVMe SSD**    |                                                                                          8--30 TB                                                                                          | up to `{python} MemoryBandwidthNodeTableRecap.nvme_bw_gb_per_s_str` per drive | ~`{python} MemoryBandwidthNodeTableRecap.nvme_latency_us_str` | Overflow, checkpoints |
 
 : **Node Memory Hierarchy**: Each tier trades capacity for bandwidth. The training framework's memory manager must orchestrate data flow across these tiers to fit models whose total state exceeds the aggregate HBM capacity. {#tbl-node-memory}
 
@@ -3153,13 +3415,27 @@ For our `{python} InfraFrontierNodeCapacityRecap.frontier_params_b_str` model, a
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: RackPowerRackRecap.rack_power_kw_str
+# │ Exports: RackPowerRackRecap.rack_power_kw_str, .node_power_kw_str,
+# │          .racks_for_1k_str, .cluster_power_mw_str
 class RackPowerRackRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
     rack = Systems.Racks.DGX_H100_4Node
+    cluster_gpus = Systems.Clusters.Training_1K.total_accelerators
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    node_power = rack.total_power / rack.nodes_per_rack
+    racks_for_cluster = cluster_gpus / rack.accelerator_count
+    cluster_power = racks_for_cluster * rack.total_power
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(7 * kW < node_power < 11 * kW, "DGX H100 node envelope should land between 7 and 11 kW")
+    check(racks_for_cluster == 32, "1,024 GPUs at 32 GPUs/rack should need exactly 32 racks")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
+    node_power_kw_str = fmt_power(node_power, unit=kilowatt, precision=1, commas=False)
+    racks_for_1k_str = fmt(racks_for_cluster, precision=0, commas=False)
+    cluster_power_mw_str = fmt_power(cluster_power, unit=MW, precision=1, commas=False)
 ```
 
 ```{python}
@@ -3217,7 +3493,7 @@ class InfraFrontierRackPowerRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across 1,024 GPUs requires approximately 32 racks (4 nodes of 8 GPUs each per rack). Each rack dissipates `{python} RackPowerRackRecap.rack_power_kw_str` as heat, the thermal output of a small industrial furnace. The aggregate facility-relevant power draw of the training cluster is approximately 1.1 MW, enough to power several hundred homes. Delivering this power reliably, converting it efficiently, and removing the resulting heat without allowing any component to exceed its thermal limit is a multi-disciplinary engineering challenge that spans electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
+For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across 1,024 GPUs requires `{python} RackPowerRackRecap.racks_for_1k_str` racks (4 nodes of 8 GPUs each per rack). Each rack dissipates `{python} RackPowerRackRecap.rack_power_kw_str` as heat, the thermal output of a small industrial furnace. The aggregate facility-relevant power draw of the training cluster is approximately `{python} RackPowerRackRecap.cluster_power_mw_str`, enough to power several hundred homes. Delivering this power reliably, converting it efficiently, and removing the resulting heat without allowing any component to exceed its thermal limit is a multi-disciplinary engineering challenge that spans electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
 
 ::: {#dfn-compute-infrastructure-rack .callout-definition title="Rack"}
 
@@ -3237,7 +3513,7 @@ This thermal ceiling is what forces the rack from air to liquid: above the air-c
 
 The physical design of an ML rack differs substantially from a traditional server rack in ways that go beyond power and cooling. In a conventional 42U rack, servers are installed as independent 1U or 2U pizza-box units, each with its own fans, power supplies, and cable connections. ML racks use a fundamentally different form factor. A DGX H100 occupies 8U and contains 8 GPUs, the NVSwitch fabric, multiple power supplies, and (in liquid-cooled configurations) coolant manifolds with quick-connect fittings. Four DGX units in a 42U rack leave only 10U for networking switches, cable management, and PDUs.
 
-The transition from traditional server form factors to ML-optimized designs is driven by the same power density challenge that forced the transition from air cooling to liquid cooling. A traditional 1U server dissipates 300--500 W and requires only modest airflow for cooling. A DGX H100 node dissipates approximately 10 kW across its 8 GPUs, NVSwitches, and supporting components, requiring either massive airflow (in air-cooled configurations) or liquid cooling plumbing (in liquid-cooled configurations). The form factor must accommodate both the compute hardware and the thermal management infrastructure, which is why ML nodes are substantially taller (8U vs. 1U) than traditional servers.
+The transition from traditional server form factors to ML-optimized designs is driven by the same power density challenge that forced the transition from air cooling to liquid cooling. A traditional 1U server dissipates 300--500 W and requires only modest airflow for cooling. A DGX H100 node dissipates approximately `{python} RackPowerRackRecap.node_power_kw_str` across its 8 GPUs, NVSwitches, and supporting components, requiring either massive airflow (in air-cooled configurations) or liquid cooling plumbing (in liquid-cooled configurations). The form factor must accommodate both the compute hardware and the thermal management infrastructure, which is why ML nodes are substantially taller (8U vs. 1U) than traditional servers.
 
 Cable management is a nontrivial engineering challenge. Each DGX H100 node has 8 InfiniBand cables (one per GPU), 2 Ethernet management cables, power cables, and (for liquid-cooled units) coolant hoses. A fully populated rack has over 40 high-speed cables, each of which must be routed carefully.
 
@@ -3685,7 +3961,7 @@ The lesson for infrastructure planners is not that wafer-scale systems replace G
 
 ### Advanced packaging {#sec-compute-advanced-packaging}
 
-Underpinning both directions is the evolution of **advanced packaging**\index{Advanced Packaging}. Packaging moves the boundary inside the accelerator package rather than all the way out to the rack or all the way in to a single wafer, and it matters because the reticle limit is only about 858 mm$^2$ for a single exposure. **2.5D interposers**\index{2.5D interposers}, such as TSMC's CoWoS, mount compute dies and HBM stacks on a shared silicon substrate, allowing chiplet-based accelerators to behave like a single device for most software. **3D stacking**\index{3D stacking}, with approaches such as SoIC, places SRAM caches or logic directly above one another and shortens data paths further. The H100-to-B200 transition shows the fleet consequence: the package can deliver far more local arithmetic and die-to-die bandwidth, but the rack must absorb higher power density, tighter cooling requirements, and less tolerance for power transients before the silicon advantage becomes useful infrastructure.
+Underpinning both directions is the evolution of **advanced packaging**\index{Advanced Packaging}. Packaging moves the boundary inside the accelerator package rather than all the way out to the rack or all the way in to a single wafer, and it matters because the reticle limit is only about `{python} ReticleLimitRecap.reticle_limit_mm2_str` for a single exposure. **2.5D interposers**\index{2.5D interposers}, such as TSMC's CoWoS, mount compute dies and HBM stacks on a shared silicon substrate, allowing chiplet-based accelerators to behave like a single device for most software. **3D stacking**\index{3D stacking}, with approaches such as SoIC, places SRAM caches or logic directly above one another and shortens data paths further. The H100-to-B200 transition shows the fleet consequence: the package can deliver far more local arithmetic and die-to-die bandwidth, but the rack must absorb higher power density, tighter cooling requirements, and less tolerance for power transients before the silicon advantage becomes useful infrastructure.
 
 The common theme is relocation rather than elimination. CXL moves capacity outward into a fabric and leaves bandwidth as the limiting discipline. Wafer-scale integration moves communication inward and leaves capacity and yield as the limiting disciplines. Advanced packaging compresses die-to-die distance and leaves power density as the limiting discipline. Infrastructure planning therefore still begins by identifying where the next byte moves, how quickly it must arrive, and what physical system must be built so that movement does not dominate the workload.
 
@@ -3775,11 +4051,69 @@ Operators of legacy facilities assume air cooling can scale to dense AI racks wi
 
 **Fallacy**: *All GPU-hours are equivalent in TCO analysis.*
 
-A common error in cost comparisons is to treat one GPU-hour on an H100 as interchangeable with one GPU-hour on an A100 or V100. In reality, the effective cost per unit of useful computation varies enormously across GPU generations: newer accelerators deliver far more useful throughput per dollar. An H100 GPU-hour delivers 6.3$\times$ the TFLOP/s of an A100 GPU-hour and 15.8$\times$ the TFLOP/s of a V100 GPU-hour. A training run that takes 10,000 V100 GPU-hours would require only approximately 630 H100 GPU-hours to complete the same amount of computation. The relevant metric is not cost per GPU-hour but cost per useful TFLOP-hour, which accounts for both the price per hour and the effective throughput delivered. Organizations that benchmark cloud options by GPU-hour cost alone systematically overestimate the expense of newer, more efficient hardware.
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_int, fmt_multiple
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: GpuHourEquivalence.ratio_a100_mult_str, ratio_v100_mult_str,
+# │          v100_hours_str, equiv_h100_hours_str
+class GpuHourEquivalence:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    v100_flops = Hardware.Cloud.V100.compute.peak_flops  # FP16
+    a100_flops = Hardware.Cloud.A100.compute.peak_flops  # FP16
+    h100_flops = Hardware.Cloud.H100.compute.precision_flops["fp8"]  # FP8 tensor
+    v100_gpu_hours = 10000  # scenario training run
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ratio_a100 = (h100_flops / a100_flops).to_base_units().magnitude
+    ratio_v100 = (h100_flops / v100_flops).to_base_units().magnitude
+    equiv_h100_hours = v100_gpu_hours / ratio_v100
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    ratio_a100_mult_str = fmt_multiple(ratio_a100, precision=1)
+    ratio_v100_mult_str = fmt_multiple(ratio_v100, precision=1)
+    v100_hours_str = fmt_int(v100_gpu_hours)
+    equiv_h100_hours_str = fmt_int(equiv_h100_hours)
+```
+
+A common error in cost comparisons is to treat one GPU-hour on an H100 as interchangeable with one GPU-hour on an A100 or V100. In reality, the effective cost per unit of useful computation varies enormously across GPU generations: newer accelerators deliver far more useful throughput per dollar. An H100 GPU-hour delivers `{python} GpuHourEquivalence.ratio_a100_mult_str` the TFLOP/s of an A100 GPU-hour and `{python} GpuHourEquivalence.ratio_v100_mult_str` the TFLOP/s of a V100 GPU-hour. A training run that takes `{python} GpuHourEquivalence.v100_hours_str` V100 GPU-hours would require only approximately `{python} GpuHourEquivalence.equiv_h100_hours_str` H100 GPU-hours to complete the same amount of computation. The relevant metric is not cost per GPU-hour but cost per useful TFLOP-hour, which accounts for both the price per hour and the effective throughput delivered. Organizations that benchmark cloud options by GPU-hour cost alone systematically overestimate the expense of newer, more efficient hardware.
 
 **Pitfall**: *Upgrading the network before identifying the training bottleneck.*
 
-Teams sometimes invest heavily in upgrading their network fabric (from 200 Gb/s to 400 Gb/s InfiniBand, for example) expecting a proportional improvement in training speed. The improvement depends entirely on whether the training loop is communication-bound at the current network bandwidth. If the compute time per training step is 20 seconds and the communication time is 2 seconds, the workload is compute-bound: doubling the network speed reduces total step time from 22 to 21 seconds, a mere 4.5 percent improvement. The same investment in additional GPUs (reducing compute time) or higher-MFU software optimization (reducing wasted compute) would yield far greater returns. The Roofline Model applies to the cluster as a whole, not just to individual chips: diagnose whether the bottleneck is compute or communication before investing in either.
+```{python}
+#| echo: false
+from mlsysim import Systems
+from mlsysim.fmt import fmt, fmt_int, fmt_qty
+from mlsysim.core.units import Gbps
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: NetworkUpgradeStepTime.ib_hdr_str, ib_ndr_str, compute_s_str,
+# │          comm_s_str, total_before_str, total_after_str, improvement_pct_str
+class NetworkUpgradeStepTime:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ib_hdr = Systems.Fabrics.InfiniBand_HDR.bandwidth  # 200 Gb/s
+    ib_ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400 Gb/s
+    compute_s = 20  # compute time per step (scenario)
+    comm_s = 2  # communication time at HDR (scenario)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    comm_after = comm_s * (ib_hdr / ib_ndr).to_base_units().magnitude  # halves at NDR
+    total_before = compute_s + comm_s
+    total_after = compute_s + comm_after
+    improvement_pct = (total_before - total_after) / total_before * 100
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    ib_hdr_str = fmt_qty(ib_hdr, Gbps, precision=0, commas=False)
+    ib_ndr_str = fmt_qty(ib_ndr, Gbps, precision=0, commas=False)
+    compute_s_str = fmt_int(compute_s)
+    comm_s_str = fmt_int(comm_s)
+    total_before_str = fmt_int(total_before)
+    total_after_str = fmt_int(total_after)
+    improvement_pct_str = fmt(improvement_pct, precision=1)
+```
+
+Teams sometimes invest heavily in upgrading their network fabric (from `{python} NetworkUpgradeStepTime.ib_hdr_str` to `{python} NetworkUpgradeStepTime.ib_ndr_str` InfiniBand, for example) expecting a proportional improvement in training speed. The improvement depends entirely on whether the training loop is communication-bound at the current network bandwidth. If the compute time per training step is `{python} NetworkUpgradeStepTime.compute_s_str` seconds and the communication time is `{python} NetworkUpgradeStepTime.comm_s_str` seconds, the workload is compute bound: doubling the network speed reduces total step time from `{python} NetworkUpgradeStepTime.total_before_str` to `{python} NetworkUpgradeStepTime.total_after_str` seconds, a mere `{python} NetworkUpgradeStepTime.improvement_pct_str` percent improvement. The same investment in additional GPUs (reducing compute time) or higher-MFU software optimization (reducing wasted compute) would yield far greater returns. The Roofline Model applies to the cluster as a whole, not just to individual chips: diagnose whether the bottleneck is compute or communication before investing in either.
 
 **Fallacy**: *Average power draw is sufficient for cooling design.*
 
@@ -3962,6 +4296,8 @@ The practical method transfers beyond this particular model. Identify the bindin
 * **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing, not just the purchase price, so ownership pays off only above a utilization threshold that the purchase price alone never reveals. @Sec-ops-scale-fleet-economics works the build-vs-buy breakeven and the full fleet TCO where the fleet is operated and paid for.
 
 :::
+
+For most of computing history, the computer was the chip. This chapter marks where that stops being true. Once a model no longer fits on a single accelerator, a single fact propagates upward through every layer: the chip sets the node's power, the node sets the rack's heat, the rack sets the pod's topology, and the topology sets whether the economics close. No layer can be tuned in isolation, because each inherits its limits from the one beneath it. At this scale the unit of computation is no longer the *processor* but the *building*, which is why the rest of this volume treats the data center, not the GPU, as the machine being engineered.
 
 ::: {.callout-chapter-connection title="From silicon to wires"}
 

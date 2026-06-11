@@ -483,6 +483,59 @@ MEMORY_SOFT_ERROR_RATE = _est(
     notes="Used as a teaching-scale sanity anchor rather than a device-specific FIT rate.",
 )
 
+HBM_SOFT_ERROR_FIT_PER_MBIT = _est(
+    "prov:hbm-soft-error-fit-per-mbit",
+    "Unprotected HBM soft-error rate, low end of the published 200-5000 FIT/Mbit DRAM range",
+    notes=(
+        "Teaching-scale figure (250 FIT/Mbit) at the low end of the 200-5000 FIT/Mbit "
+        "DRAM soft-error range reported in the soft-error literature (Tezzaron, 'Soft "
+        "Errors in Electronic Memory'; en.wikipedia.org/wiki/Soft_error). Motivates why "
+        "unprotected HBM at fleet scale mandates ECC; not a device-specific datasheet value."
+    ),
+    url="https://tezzaron.com/media/soft_errors_1_1_secure.pdf",
+)
+
+FHE_OVERHEAD = _lit(
+    "prov:fhe-overhead-slowdown",
+    "Fully homomorphic encryption compute overhead, 2-6 orders of magnitude vs plaintext",
+    url="https://www.math-lock.com/benchmarks.html",
+    notes=(
+        "General-purpose FHE libraries (HElib, PALISADE) run 1e4-1e6x slower than "
+        "plaintext; the book uses 1e4x (10,000x) as a conservative low-end teaching figure."
+    ),
+)
+
+TEE_HARDWARE_SPECS = _est(
+    "prov:tee-hardware-specs",
+    "Trusted-execution-environment overheads (Intel SGX, ARM TrustZone) from vendor documentation",
+    notes=(
+        "SGX enclave page cache ~128 MB with ~100x paging penalty on overflow and 15-30 us "
+        "enclave transitions; TrustZone world switch ~300-1000 cycles and 15-30% secure-mode "
+        "power; mTLS handshake 15-30 ms. Order-of-magnitude figures from Intel SGX / ARM "
+        "TrustZone documentation and security-engineering literature."
+    ),
+)
+
+HSM_GPU_CRYPTO = _est(
+    "prov:hsm-gpu-crypto-throughput",
+    "HSM vs GPU RSA-2048 throughput and unit cost from security-engineering practice",
+    notes=(
+        "Enterprise HSMs ~10,000 RSA-2048 ops/s at $20k-$100k/unit; general-purpose GPUs "
+        "~100,000 ops/s at ~$1k; the ~10x throughput gap is the tamper-resistance tax."
+    ),
+)
+
+RESPONSIBLE_AI_OVERHEAD = _est(
+    "prov:responsible-ai-overhead-benchmarks",
+    "Responsible-AI technique overheads (accuracy, training, inference, memory) across published benchmarks",
+    notes=(
+        "Synthesis of reported overheads for DP-SGD, fairness-aware training, SHAP/LIME "
+        "explainability, adversarial training, and federated learning. Ranges are "
+        "order-of-magnitude empirical findings across the responsible-AI efficiency "
+        "literature, not vendor specifications."
+    ),
+)
+
 ORCHESTRATION_ASSUMPTIONS = _est(
     "prov:mlsysim-orchestration-assumptions",
     "MLSysIM cluster orchestration defaults for utilization, queue discipline, and job duration",
@@ -559,6 +612,18 @@ MEGASCALE = _lit(
     "prov:jiang-megascale-2024",
     "Jiang et al. (2024), MegaScale: Scaling Large Language Model Training",
     url="https://arxiv.org/abs/2402.15627",
+)
+
+GENDER_SHADES = _lit(
+    "prov:buolamwini-gendershades-2018",
+    "Buolamwini & Gebru (2018), Gender Shades: Intersectional Accuracy Disparities in Commercial Gender Classification",
+    url="https://proceedings.mlr.press/v81/buolamwini18a.html",
+)
+
+CROWDFLOWER_2016 = _lit(
+    "prov:crowdflower-data-science-report-2016",
+    "CrowdFlower (2016), Data Science Report — 'What data scientists spend the most time doing'",
+    url="https://visit.figure-eight.com/data-science-report.html",
 )
 
 GPT2_TRAINING_COST_EST = _est(

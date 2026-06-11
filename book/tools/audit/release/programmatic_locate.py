@@ -32,9 +32,13 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/VJ/GitHub/MLSysBook-release-audit")
-INPUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/scripts/locator-input"
-OUTPUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/scripts/locator-output"
+try:
+    from .paths import REPO_ROOT, SCRIPT_DIR
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import REPO_ROOT, SCRIPT_DIR
+
+INPUT_DIR = SCRIPT_DIR / "locator-input"
+OUTPUT_DIR = SCRIPT_DIR / "locator-output"
 
 # Global fallback search root — annotations whose recorded chapter does
 # not contain the evidence may have been mis-attributed during PDF

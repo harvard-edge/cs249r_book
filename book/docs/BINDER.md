@@ -266,7 +266,6 @@ Every `book-check-*` hook in `.pre-commit-config.yaml` calls `./book/binder chec
 | `book-check-notation` | `check notation` |
 | `book-check-index` | `check index` |
 | `book-check-sources` | `check sources` |
-| `book-check-json` | `check json` |
 | `book-check-units` | `check units` |
 | `book-check-epub` | `check epub` (scope `hygiene`) |
 | `book-check-bib` | `check bib` |

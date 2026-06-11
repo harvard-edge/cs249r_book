@@ -29,6 +29,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import os
 import re
 import subprocess
@@ -460,8 +461,6 @@ def main(argv: list[str]) -> int:
         files = discover_files(root)
 
     if args.exclude:
-        import fnmatch
-
         kept = []
         for f in files:
             try:

@@ -621,7 +621,7 @@ Tracing a quantization proposal through four invariants is one diagnostic pass; 
 # │
 # │ Imports: mlsysim (Hardware, Models), mlsysim.core.units (BYTES_FP16, flop),
 # │          mlsysim.fmt (fmt, fmt_math, MarkdownStr, check)
-# │ Exports: llama_params_count_str, llama_params_prose_str, llama_dvol_gb_str,
+# │ Exports: llama_params_count_str, llama_params_modifier_str, llama_dvol_gb_str,
 # │          llama_compute_gflop_str,
 # │          h100_bw_tb_per_s_str, h100_peak_tflop_per_s_str, t_mem_ms_str, t_comp_ms_str,
 # │          ratio_mult_str, t_mem_eq, t_comp_eq
@@ -656,7 +656,12 @@ class ConclusionRoofline:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     llama_params_count_str = fmt_params(model.parameters, scale_style="word", precision=0)
-    llama_params_prose_str = MarkdownStr(f"{fmt_params(model.parameters, scale_style='word', precision=0, attributive=True)}-parameter")
+    llama_params_modifier_str = fmt_params(
+        model.parameters,
+        scale_style="word",
+        precision=0,
+        attributive=True,
+    )
     llama_dvol_gb_str = fmt_qty(d_vol, GB, precision=0, commas=False)
     llama_compute_gflop_str = fmt_qty(compute_req, GFLOPs, precision=0, commas=False)
 
@@ -685,7 +690,7 @@ class ConclusionRoofline:
 
 :::: {#nbk-conclusion-cost-token .callout-notebook title="The cost of a token"}
 
-We can apply the iron law (Principle \ref{pri-iron-law}) and Arithmetic Intensity (Principle \ref{pri-arithmetic-intensity}) to a real-world problem: serving one token from a `{python} ConclusionRoofline.llama_params_prose_str` model (like a 70-billion-parameter Llama 2 model\index{Llama 2!70-billion-parameter memory-bound workload}) on an NVIDIA H100. @Sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1 supplies the H100 memory bandwidth and peak FLOP specifications that anchor this calculation.
+We can apply the iron law (Principle \ref{pri-iron-law}) and Arithmetic Intensity (Principle \ref{pri-arithmetic-intensity}) to a real-world problem: serving one token from a `{python} ConclusionRoofline.llama_params_modifier_str`-parameter model (like a 70-billion-parameter Llama 2 model\index{Llama 2!70-billion-parameter memory-bound workload}) on an NVIDIA H100. @Sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1 supplies the H100 memory bandwidth and peak FLOP specifications that anchor this calculation.
 
 **Physics**:
 
@@ -703,6 +708,9 @@ We can apply the iron law (Principle \ref{pri-iron-law}) and Arithmetic Intensit
 The memory time $T_{\text{mem}}$ is `{python} ConclusionRoofline.ratio_mult_str` larger than compute time $T_{\text{comp}}$. The system is heavily memory-bound (arithmetic intensity $\approx$ 1). To honor the silicon contract, we must either increase arithmetic intensity (via batching users to reuse $D_{\text{vol}}$) or reduce data volume (via quantization to INT4). A systems engineer who optimizes compute kernels $(T_{\text{comp}})$ without addressing memory $(T_{\text{mem}})$ can improve only the `{python} ConclusionRoofline.t_comp_ms_str` compute term while leaving the `{python} ConclusionRoofline.t_mem_ms_str` memory term untouched.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-23mm}
+```
 ![](images/svg/vol1_conclusion_margin_002.svg){width="100%" fig-alt="Llama decode dot on H100 memory-bound slope."}
 
 *Decode stays memory-bound, left of the roofline ridge.*
@@ -772,6 +780,9 @@ class TailLatencyRatio:
 The transition from *training* to *inference* inverts optimization objectives: where training maximizes throughput over days, inference optimizes latency per request in milliseconds. The latency budget invariant makes P99 the governing constraint, and tracking tail latencies reveals that mean latency tells little about user experience when the 99th-percentile request can be `{python} TailLatencyRatio.conclusion_tail_ratio_mult_str` the mean latency. In ML serving, tail latency spikes have identifiable ML-specific causes: garbage collection pauses in Python-based inference frameworks, dynamic batching that forms sub-optimally under uneven traffic, and autoregressive generation where the 99th-percentile prompt triggers the model's maximum allowed output sequence length rather than a typical short response.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-32mm}
+```
 ![](images/svg/vol1_conclusion_margin_003.svg){width="100%" fig-alt="Margin illustration showing Mean latency versus P99 latency."}
 
 *Mean latency hides the tail; P99 governs user experience.*
@@ -897,7 +908,7 @@ Every frontier explored in the previous section rests on a common foundation: th
 
 ### The engineering responsibility { .unnumbered}
 
-The systems integration perspective explains why ethical considerations cannot be separated from technical ones. The same iron law (Principle \ref{pri-iron-law}) that enables efficient systems determines who can access them: a model requiring several high-end datacenter accelerators for inference excludes organizations that cannot afford that infrastructure. The same data as code invariant (Principle \ref{pri-data-as-code}) that gives models their capabilities also encodes the biases present in training data. The same energy-movement invariant that governs chip-level efficiency scales to data-center-level carbon footprints that affect the planet. Technical decisions are ethical decisions, viewed through a wider lens.
+The systems integration perspective explains why ethical considerations cannot be separated from technical ones. The same iron law (Principle \ref{pri-iron-law}) that enables efficient systems determines who can access them: a model requiring several high-end data center accelerators for inference excludes organizations that cannot afford that infrastructure. The same data as code invariant (Principle \ref{pri-data-as-code}) that gives models their capabilities also encodes the biases present in training data. The same energy-movement invariant that governs chip-level efficiency scales to data-center-level carbon footprints that affect the planet. Technical decisions are ethical decisions, viewed through a wider lens.
 
 The question confronting engineers is not only what capabilities can be built, but whether those systems can be built well. They must be efficient enough to widen access, secure enough to resist exploitation, sustainable enough to limit environmental harm, and responsible enough to serve people equitably. Systems such as planetary-scale climate monitors and personalized medical assistants require the engineering expertise this book has developed, guided by the responsibility that @sec-responsible-engineering established as a first-class design constraint.
 
@@ -951,9 +962,12 @@ class FleetFailureMath:
 
 ### A horizon note: From node to fleet { .unnumbered}
 
-Some workloads eventually exceed a single system. The same bottleneck reasoning still matters, but the resource boundary moves outward: memory bandwidth becomes network topology, local failure handling becomes fleet reliability, and training throughput becomes a coordination problem. With the book's reference datacenter GPU mean time to failure (MTTF)\index{Mean Time to Failure!component reliability} of `{python} FleetFailureMath.gpu_mtbf_years_str`, a `{python} FleetFailureMath.gpu_count_str`-GPU independent-failure pool has a mean time between failures (MTBF)\index{Mean Time Between Failures!fleet-scale reliability} of about `{python} FleetFailureMath.cluster_mtbf_hours_str` before accounting for correlated failures. For an LLM pretraining run that requires weeks or months to converge, this mathematical certainty of hardware failure means that asynchronous checkpointing, pipeline-bubble recovery, and fast restart mechanisms are not optional optimizations—they are strict requirements for convergence. The point is not that this book must become a distributed-systems catalog. The point is that the ML systems lens developed here remains useful when scale changes: identify the binding constraint, quantify the cost term, and trace where that cost propagates.
+Some workloads eventually exceed a single system. The same bottleneck reasoning still matters, but the resource boundary moves outward: memory bandwidth becomes network topology, local failure handling becomes fleet reliability, and training throughput becomes a coordination problem. With the book's reference data center GPU mean time to failure (MTTF)\index{Mean Time to Failure!component reliability} of `{python} FleetFailureMath.gpu_mtbf_years_str`, a `{python} FleetFailureMath.gpu_count_str`-GPU independent-failure pool has a mean time between failures (MTBF)\index{Mean Time Between Failures!fleet-scale reliability} of about `{python} FleetFailureMath.cluster_mtbf_hours_str` before accounting for correlated failures. For an LLM pretraining run that requires weeks or months to converge, this mathematical certainty of hardware failure means that asynchronous checkpointing, pipeline-bubble recovery, and fast restart mechanisms are not optional optimizations—they are strict requirements for convergence. The point is not that this book must become a distributed-systems catalog. The point is that the ML systems lens developed here remains useful when scale changes: identify the binding constraint, quantify the cost term, and trace where that cost propagates.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-29mm}
+```
 ![](images/svg/vol1_conclusion_fleet_mtbf_ladder.svg){width="100%" fig-alt="Margin ladder showing one GPU with about 5.7 years mean time to failure versus a 1024 GPU pool with about 48.8 hours mean time between failures."}
 
 *Fleet scale turns rare component failures into routine system events.*

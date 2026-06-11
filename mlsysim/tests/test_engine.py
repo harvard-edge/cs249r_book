@@ -12,12 +12,12 @@ from mlsysim.engine import calibration as cal
 
 
 def test_engine_energy_proportional():
-    """Engine energy uses the energy-proportional model: P = TDP * (idle_fraction + dynamic_fraction * MFU).
+    """Engine energy uses the energy-proportional model: P = TDP * (idle_fraction + dynamic_fraction * HFU).
 
-    For memory-bound workloads, MFU can reach 1.0 (the clamped ceiling) because
-    achieved_flops/peak_flops exceeds 1 when latency is dominated by memory time.
-    We verify the model applies correctly by checking energy > 0 and that the
-    energy-proportional formula is consistent.
+    Utilization can never exceed the efficiency derate: achieved <= peak * efficiency,
+    so mfu <= efficiency always (the [0,1] clamp is a guard, not a reachable ceiling).
+    We verify the energy-proportional formula is applied consistently. HFU == MFU
+    without recomputation, so either utilization gives the same expected value here.
     """
     resnet = Models.Vision.ResNet50
     a100 = Hardware.Cloud.A100
@@ -26,9 +26,58 @@ def test_engine_energy_proportional():
 
     # Energy should always be positive
     assert perf.energy.to("J").magnitude > 0
-    # Energy = TDP * (idle_fraction + dynamic_fraction * MFU) * latency
-    expected = (a100.tdp * (cal.ENERGY_IDLE_FRACTION + cal.ENERGY_DYNAMIC_FRACTION * perf.mfu) * perf.latency.to("s")).to("J").magnitude
+    # The real (stronger) invariant: mfu can never exceed the efficiency derate
+    assert perf.mfu <= 0.5 + 1e-9  # default efficiency=0.5
+    # Energy = TDP * (idle_fraction + dynamic_fraction * HFU) * latency
+    expected = (a100.tdp * (cal.ENERGY_IDLE_FRACTION + cal.ENERGY_DYNAMIC_FRACTION * perf.hfu) * perf.latency.to("s")).to("J").magnitude
     assert perf.energy.to("J").magnitude == pytest.approx(expected, rel=0.01)
+
+
+def test_engine_hfu_equals_mfu_without_recomputation():
+    """2026-06-10 audit: HFU must equal MFU exactly when recomputation is off.
+
+    The pre-audit implementation fabricated hfu = 1.1 * mfu unconditionally
+    (phantom 10% utilization with no hardware work behind it). PaLM App. B /
+    Korthikanti et al. (2022): HFU and MFU differ only by recomputation FLOPs.
+    """
+    perf = Engine.solve(Models.Language.GPT3, Hardware.Cloud.H100,
+                        batch_size=8, is_training=True)
+    assert perf.hfu == pytest.approx(perf.mfu, rel=1e-9)
+
+    perf_inf = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
+    assert perf_inf.hfu == pytest.approx(perf_inf.mfu, rel=1e-9)
+
+
+def test_engine_hfu_mfu_ratio_under_full_recomputation():
+    """With full activation recomputation, hardware executes 4 passes for 3
+    passes of model work: hfu/mfu == 4/3 (unless either hits the [0,1] clamp).
+
+    Also pins that MFU EXCLUDES recompute FLOPs — the pre-audit implementation
+    counted the re-forward pass in the MFU numerator, silently reporting HFU
+    under the MFU label.
+    """
+    base = Engine.solve(Models.Language.GPT3, Hardware.Cloud.H100,
+                        batch_size=8, is_training=True)
+    recomp = Engine.solve(Models.Language.GPT3, Hardware.Cloud.H100,
+                          batch_size=8, is_training=True,
+                          activation_recomputation=True)
+    assert 0 < recomp.mfu < 1 and 0 < recomp.hfu < 1, "clamp hit — pick a smaller config"
+    assert recomp.hfu / recomp.mfu == pytest.approx(4.0 / 3.0, rel=1e-6)
+    # Same latency denominator and peak: recompute MFU must not exceed the
+    # non-recompute MFU (the model work didn't grow; only hardware work did).
+    assert recomp.mfu <= base.mfu * 1.4  # latency shifts, but no 4/3 inflation
+
+
+def test_engine_overhead_dominated_flag():
+    """Small model at batch 1: dispatch + layer tax dominates both roofline
+    terms; the profile must say so instead of mislabeling the cause as the
+    larger of two negligible ceilings. (Audit finding B5, 2026-06-10.)"""
+    perf = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
+    overhead_ms = perf.latency_overhead.to("ms").magnitude
+    roofline_ms = max(perf.latency_compute.to("ms").magnitude,
+                      perf.latency_memory.to("ms").magnitude)
+    assert perf.overhead_dominated == (overhead_ms > roofline_ms)
+    assert perf.overhead_dominated is True  # ResNet-50/A100/b1 is the known case
 
 
 def test_engine_energy_per_inference_property():

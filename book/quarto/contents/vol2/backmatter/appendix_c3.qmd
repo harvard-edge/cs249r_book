@@ -41,11 +41,11 @@ With the mapping in place, diagnosis becomes a matter of matching symptoms to th
 
 @Tbl-c3-diagnostic-summary provides the main reference table for fleet-scale diagnosis. Each C$^3$ axis maps to a physical constraint, observable symptoms, measurable metrics, and engineering levers.
 
-| **C$^3$ Axis**            | **Physical Constraint**                                           | **Symptoms**                                                                    | **Key Metric**                                                                                                 | **High-Leverage Optimization**                                                                             |
-|:--------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
-| **Compute ($C_1$)**       | Arithmetic throughput ($R_{\text{peak}} \times \eta_{\text{hw}}$) | Low MFU, GPU utilization below 80 percent, poor per-GPU performance             | MFU (Model FLOPs Utilization)                                                                                  | Kernel optimization, mixed precision, operator fusion (@sec-performance-engineering)                       |
-| **Communication ($C_2$)** | Network bandwidth ($\text{BW}_{\text{net}}$)                      | High AllReduce time, low scaling efficiency, communication > 30 percent of step | Scaling efficiency ($\eta_{\text{scaling}}$), communication fraction ($T_{\text{comm}}(N)/T_{\text{step}}(N)$) | Gradient compression, overlap compute/communication, topology optimization (@sec-collective-communication) |
-| **Coordination ($C_3$)**  | Synchronization overhead and failure recovery                     | Low goodput ratio, frequent restarts, large pipeline bubbles, scheduler churn   | Goodput ratio ($T_{\text{useful}}/T_{\text{wall}}$)                                                            | Async checkpointing, elastic training, faster failure detection (@sec-fault-tolerance-reliability)         |
+| **C$^3$ Axis**            | **Physical Constraint**                                           | **Symptoms**                                                                  | **Key Metric**                                                                                                 | **High-Leverage Optimization**                                                                             |
+|:--------------------------|:------------------------------------------------------------------|:------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
+| **Compute ($C_1$)**       | Arithmetic throughput ($R_{\text{peak}} \times \eta_{\text{hw}}$) | Low MFU, GPU utilization below 80%, poor per-GPU performance                  | MFU (Model FLOPs Utilization)                                                                                  | Kernel optimization, mixed precision, operator fusion (@sec-performance-engineering)                       |
+| **Communication ($C_2$)** | Network bandwidth ($\text{BW}_{\text{net}}$)                      | High AllReduce time, low scaling efficiency, communication > 30% of step      | Scaling efficiency ($\eta_{\text{scaling}}$), communication fraction ($T_{\text{comm}}(N)/T_{\text{step}}(N)$) | Gradient compression, overlap compute/communication, topology optimization (@sec-collective-communication) |
+| **Coordination ($C_3$)**  | Synchronization overhead and failure recovery                     | Low goodput ratio, frequent restarts, large pipeline bubbles, scheduler churn | Goodput ratio ($T_{\text{useful}}/T_{\text{wall}}$)                                                            | Async checkpointing, elastic training, faster failure detection (@sec-fault-tolerance-reliability)         |
 
 : **C$^3$ Diagnostic Summary**: Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint binds, then follow the optimization pointer to the relevant chapter. {#tbl-c3-diagnostic-summary}
 
@@ -123,8 +123,8 @@ In the middle of a production incident, fast heuristics narrow the search space 
 | **C$^3$ Axis**    | **Green (Healthy)**                            | **Yellow (Investigate)**                                                          | **Red (Bottleneck)**                          |
 |:------------------|:-----------------------------------------------|:----------------------------------------------------------------------------------|:----------------------------------------------|
 | **Compute**       | MFU $>$ `{python} C3TrafficLight.mfu_high_str` | MFU `{python} C3TrafficLight.mfu_low_str`--`{python} C3TrafficLight.mfu_high_str` | MFU $<$ `{python} C3TrafficLight.mfu_low_str` |
-| **Communication** | Comm fraction $<$ 20 percent                   | Comm fraction 20--40 percent                                                      | Comm fraction $>$ 40 percent                  |
-| **Coordination**  | Goodput ratio $>$ 90 percent                   | Goodput ratio 75--90 percent                                                      | Goodput ratio $<$ 75 percent                  |
+| **Communication** | Comm fraction $<$ 20%                          | Comm fraction 20--40%                                                             | Comm fraction $>$ 40%                         |
+| **Coordination**  | Goodput ratio $>$ 90%                          | Goodput ratio 75--90%                                                             | Goodput ratio $<$ 75%                         |
 
 : **C$^3$ Traffic Light**: Quick triage thresholds for fleet-scale diagnosis. Green means the axis is healthy; yellow means it deserves investigation; red means it is the likely bottleneck. These thresholds assume well-optimized large-model training on current-generation hardware. {#tbl-c3-traffic-light}
 
@@ -319,7 +319,7 @@ The C$^3$ Scorecard grades fleet efficiency against known thresholds, extending 
 |:------------------|:------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------:|:---------------------------------------:|:---------------------------------------:|
 | **Compute**       |                     **MFU**                      |                           $\frac{O_{\text{step}}}{R_{\text{peak}} \times T_{\text{step}}}$                           |  $<$ `{python} C3Scorecard.mfu_low_str` | $>$ `{python} C3Scorecard.mfu_high_str` |
 | **Communication** | **Scaling Efficiency** ($\eta_{\text{scaling}}$) |                                              $\frac{T_1}{N \times T_N}$                                              | $<$ `{python} C3Scorecard.eff_8192_str` |  $>$ `{python} C3Scorecard.eff_256_str` |
-| **Coordination**  |                **Goodput Ratio**                 | $\frac{T_{\text{useful}}}{T_{\text{wall}}}$ or $\frac{\text{useful steps/sec}}{\text{ideal or allocated steps/sec}}$ |              $<$ 75 percent             |              $>$ 90 percent             |
+| **Coordination**  |                **Goodput Ratio**                 | $\frac{T_{\text{useful}}}{T_{\text{wall}}}$ or $\frac{\text{useful steps/sec}}{\text{ideal or allocated steps/sec}}$ |                 $<$ 75%                 |                 $>$ 90%                 |
 
 : **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. A fleet that passes all three thresholds has exhausted its easy optimizations; further gains require architectural changes, hardware upgrades, or larger problem sizes to improve the scaling regime. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
 
@@ -371,9 +371,9 @@ class C3EffectiveFlops:
     _mfu_fmt = fmt(Literature.Training.MfuHigh, precision=2, commas=False)
     _scaling_fmt = fmt(ReferenceStats.TrainingScaleProfiles.Eff8192Gpu, precision=2, commas=False)
     _goodput_fmt = fmt(goodput_all, precision=2, commas=False)
-    effective_eq_math = MarkdownStr(
-        f"$$\\text{{Effective}} = {peak_pflop_per_s_str} \\times {_mfu_fmt} \\times {_scaling_fmt} \\times {_goodput_fmt} "
-        f"\\approx {effective_pflop_per_s_str}$$"
+    effective_eq_math = fmt_display_math(
+        f"\\text{{Effective}} = {peak_pflop_per_s_str} \\times {_mfu_fmt} \\times {_scaling_fmt} \\times {_goodput_fmt} "
+        f"\\approx {effective_pflop_per_s_str}"
     )
 ```
 

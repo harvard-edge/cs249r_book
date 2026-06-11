@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why do the engineering principles that work on single machines break down at production scale?_
 
-Machine learning at scale has a physics of its own. On one node, performance is governed by the memory wall: data must reach the accelerator fast enough to keep the math busy. In a distributed cluster, that same problem stretches across machines. Data must move through network links between racks, and the slowest shared crossing can limit the entire job. Hardware failures also change character. When a single-GPU training job fails, it is an inconvenience; when one node in a 10,000-GPU cluster fails, it can stall the entire Machine Learning Fleet this chapter defines. This discontinuity explains why mastery of single-machine ML is no longer sufficient: scale is not more of the same, but fundamentally different engineering terrain requiring different principles, different architectures, and different ways of thinking about what makes systems work. That terrain carries a societal dimension that small models do not, because its impact is amplified by the billions of users these systems serve: when a local model exhibits bias, the harm is contained; when a foundation model exhibits bias, it propagates through digital life. The discipline this book builds is the **physics of distribution**\index{Physics of Distribution}, where algorithmic choices must account for network topology, fault tolerance, security, and governance.
+Machine learning at scale has a physics of its own. On one node, performance is governed by the memory wall: data must reach the accelerator fast enough to keep the math busy. In a distributed cluster, that same problem stretches across machines. Data must move through network links between racks, and the slowest shared crossing can limit the entire job. Hardware failures also change character. When a single-accelerator training job fails, it is an inconvenience; when one node in a 10,000-node cluster fails, it can stall the entire Machine Learning Fleet this chapter defines. This discontinuity explains why mastery of single-machine ML is no longer sufficient: scale is not more of the same, but fundamentally different engineering terrain requiring different principles, different architectures, and different ways of thinking about what makes systems work. That terrain carries a societal dimension that small models do not, because its impact is amplified by the billions of users these systems serve: when a local model exhibits bias, the harm is contained; when a foundation model exhibits bias, it propagates through digital life. The discipline this book builds is the **physics of distribution**\index{Physics of Distribution}, where algorithmic choices must account for network topology, fault tolerance, security, and governance.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -80,7 +80,7 @@ from mlsysim.core.units import *
 # │          nvlink_h100_gb_per_s_str, ib_hdr_gbit_per_s_str, ib_ndr_gbit_per_s_str,
 # │          ib_hdr_gb_per_s_str, ib_ndr_gb_per_s_str,
 # │          gpt3_params_b_str, gpt3_training_ops_str, gpt3_gradient_gb_str,
-# │          gpt4_gpus_str, gpt4_days_str, cluster_fail_day_str, mtbf_hours_str
+# │          gpt4_gpus_str, gpt4_days_str, cluster_fail_day_str, mtbf_hours_str, hours_per_day_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_sci, check
 ```
@@ -146,6 +146,7 @@ class Gpt4TrainingScenario:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt4_gpus_str = fmt_count(num_gpus, label="GPU")
     gpt4_days_str = fmt_time(gpu_days, 'day', precision=0, style='word')
+    hours_per_day_str = fmt_int(HOURS_PER_DAY)
     cluster_fail_day_str = fmt_int(cluster_failures_per_day)
     mtbf_hours_str = fmt_time(cluster_mtbf_hours, 'hour', precision=0, commas=True, style='word')
     gpu_mtbf_hours_str = fmt_time(gpu_mtbf_hours, 'hour', precision=0, commas=True, style='word')
@@ -164,12 +165,12 @@ Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4Trai
 
 ::: {#nbk-introduction-scale-reliability .callout-notebook title="Scale and reliability"}
 
-**Problem**: A training run for a GPT-4-class model uses `{python} Gpt4TrainingScenario.gpt4_gpus_str`. If each individual GPU has a mean time between failures (MTBF) of `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` (the canonical datacenter-grade figure used for fleet-scale reliability examples), how often will the training job be interrupted by hardware failure?
+**Problem**: A training run for a GPT-4-class model uses `{python} Gpt4TrainingScenario.gpt4_gpus_str`. If each individual GPU has a mean time between failures (MTBF) of `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` (the canonical data center-grade figure used for fleet-scale reliability examples), how often will the training job be interrupted by hardware failure?
 
 **Math**:
 
 1. **System MTBF**\index{MTBF!system}: For $N$ independent GPUs, $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}} / N =$ `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` divided by `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\approx$ `{python} Gpt4TrainingScenario.mtbf_hours_str`.
-2. **Daily failure rate**\index{Failure Rate!daily}: $24 \text{ hours} /$ `{python} Gpt4TrainingScenario.mtbf_hours_str` $\approx$ `{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day.
+2. **Daily failure rate**\index{Failure Rate!daily}: `{python} Gpt4TrainingScenario.hours_per_day_str` hours / `{python} Gpt4TrainingScenario.mtbf_hours_str` $\approx$ `{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day.
 3. **Total annual failures**\index{Failure Rate!annualized count}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\times$ (`{python} Gpt4TrainingScenario.hours_per_year_str` divided by `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str`) $\approx$ `{python} Gpt4TrainingScenario.annual_fails_str` failures per year.
 
 **Systems insight**: In this regime, the system is always in a state of partial failure. Traditional software recovery (manual restart) collapses; the system must be architected for fault tolerance as a first-class citizen. Hardware can no longer be treated as a reliable abstraction; it is a probabilistic resource that requires constant, automated state preservation (checkpointing).
@@ -845,7 +846,7 @@ class InfiniBandStackRecap:
 
 The stack architecture in @fig-vol2-system-scaling-regimes does not change when we scale: every ML system still has hardware, a system envelope, a workload, and a mission. *What* changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, Hardware (NVLink at `{python} InfiniBandStackRecap.nvlink_h100_gb_per_s_str` within one node) becomes Infrastructure (InfiniBand RDMA fabric spanning racks at `{python} InfiniBandStackRecap.ib_ndr_gbit_per_s_str` per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One row up, System Software (a single CUDA runtime managing PCIe DMA) becomes Distribution (NCCL and RDMA libraries coordinating thousands of processes across the fabric).
 
-The upper two layers undergo an equally profound transformation. ML Framework\index{ML Framework} (PyTorch or JAX executing a training loop on one node) becomes Serving/Ops (orchestration and CI/CD pipelines that schedule distributed jobs and manage rolling deployments). At the top, Application (a single training script or inference service) becomes Governance (responsible AI policy, security auditing, and multi-tenant access control), because fleet-scale deployment introduces organizational concerns absent from a single machine. The four layers of the fleet stack are:
+The upper two layers undergo an equally profound transformation. ML Framework\index{ML Framework} (PyTorch or JAX executing a training loop on one node) becomes Serving/Ops (orchestration and CI/CD pipelines that schedule distributed jobs and manage rolling deployments). At the top, Application (a single training script or inference service) becomes Governance (responsible AI policy, security auditing, and multi-tenant access control), because fleet-scale deployment introduces organizational concerns absent from a single machine. Four layers compose the fleet stack:
 
 1.  **Infrastructure** (Hardware, the Engine): The physical foundation. This layer defines the fleet's raw capabilities: per-node $R_{\text{peak}}$ and $\text{BW}$, interconnected by InfiniBand RDMA fabric. The recurring hardware anchor for this introduction is the NVIDIA H100, which serves as a concrete reference accelerator rather than an abstract placeholder.
 2.  **Distribution** (Systems, the Car): The communication substrate. This layer defines the cluster envelope: NCCL, the collective library that implements reductions and broadcasts on GPU fabrics; RDMA collectives that coordinate thousands of accelerators; bisection bandwidth; power usage effectiveness (PUE), the facility-energy overhead above IT load; and failure rates (MTBF).
@@ -898,6 +899,9 @@ Mastering this material requires making this mental shift: the engineer is no lo
 [^fn-wsc-barroso]: **Warehouse-Scale Computer (WSC)**\index{Warehouse-Scale Computer!Barroso}: Formalized by Barroso and Hölzle at Google in 2009, with a second edition adding Clidaras in 2013. Their key insight: at sufficient scale, the unit of computing shifts from the server to the entire facility, making power delivery, cooling topology, and optical network layout as performance-critical as chip microarchitecture. For ML fleets, this means a 100 MW data center's power ramp rate and bisection bandwidth constrain training throughput more than any single accelerator's TFLOP/s.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-46mm}
+```
 ![](images/svg/vol2_introduction_margin_001.svg){width="100%" fig-alt="GPT-3 weights, FP32 gradient payload, and ring all-reduce traffic."}
 
 *Gradient synchronization becomes the defining cost of distributed training.*
@@ -1333,9 +1337,9 @@ Scaling laws reveal performance pathways while exposing rapidly escalating resou
 
 Large models also require extensive, high-quality datasets to reach their potential. As models approach saturation of available high-quality data, particularly in natural language processing, performance gains from data scaling can become marginal. Data efficiency is therefore a necessary complement to brute-force scaling.
 
-The sharpest of these costs is environmental, and it turns on a decision the fleet operator actually makes: where to site the cluster. The same training run can differ by roughly 40$\times$ in CO$_2$ emissions depending on grid location\index{Carbon Emissions!grid intensity}, from Quebec hydropower at ~20 g CO$_2$/kWh to Poland coal at ~800 g CO$_2$/kWh.[^fn-carbon-grid] That single placement choice, together with job scheduling that shifts workloads to low-carbon hours, makes data-center siting a first-order infrastructure decision rather than an afterthought. Financial cost moves in parallel: training a large foundation model runs into the millions of dollars, which limits who can do large-scale research at all. @Sec-sustainable-ai develops the full energy and carbon accounting that turns these pressures into design constraints.
+The sharpest of these costs is environmental, and it turns on a decision the fleet operator actually makes: where to site the cluster. The same training run can differ by roughly 40$\times$ in CO~2~ emissions depending on grid location\index{Carbon Emissions!grid intensity}, from Quebec hydropower at ~20 g CO~2~/kWh to Poland coal at ~800 g CO~2~/kWh.[^fn-carbon-grid] That single placement choice, together with job scheduling that shifts workloads to low-carbon hours, makes data-center siting a first-order infrastructure decision rather than an afterthought. Financial cost moves in parallel: training a large foundation model runs into the millions of dollars, which limits who can do large-scale research at all. @Sec-sustainable-ai develops the full energy and carbon accounting that turns these pressures into design constraints.
 
-[^fn-carbon-grid]: **Carbon Intensity of Training**\index{Training!carbon intensity}: GPT-3 training emitted an estimated 552 tons of CO$_2$, and published estimates place large-language-model training in the $10^2$ to $10^3$ ton range, though figures vary widely with hardware, utilization, and electricity mix.
+[^fn-carbon-grid]: **Carbon Intensity of Training**\index{Training!carbon intensity}: GPT-3 training emitted an estimated 552 tons of CO~2~, and published estimates place large-language-model training in the $10^2$ to $10^3$ ton range, though figures vary widely with hardware, utilization, and electricity mix.
 
 Scaling laws do not guarantee unbounded improvement. Each incremental performance gain must be weighed against its resource cost. As systems approach practical scaling limits, the emphasis shifts from *scaling alone* to *efficient scaling*: balancing performance, cost, energy consumption, and environmental impact.[^fn-scaling-saturation-qualifier]
 
@@ -1509,7 +1513,7 @@ Beyond legal compliance, the Machine Learning Fleet carries ethical obligations.
 
 ## The C$^3$ Taxonomy: Foundations of Scale {#sec-vol2-introduction-c-cube}
 
-The physical, logical, and societal constraints just surveyed all manifest as wasted wall-clock time, so navigating them demands a diagnostic that says where that time actually goes. The single-machine foundation for that analysis begins with three interdependent components formalized as the **Data · Algorithm · Machine (D·A·M) taxonomy**\index{D·A·M Taxonomy} (see @sec-appdx-dam-taxonomy for the full diagnostic framework):
+The physical, logical, and societal constraints just surveyed all manifest as wasted wall-clock time, so navigating them demands a diagnostic that says where that time actually goes. The single-machine foundation for that analysis begins with three interdependent components formalized as the **Data · Algorithm · Machine (D·A·M) taxonomy**\index{D·A·M Taxonomy}, which @sec-appdx-dam-taxonomy develops as a complete diagnostic framework:
 
 1.  **Data**\index{D·A·M Taxonomy!data}: The information the system learns from. Performance is often data-bound when the I/O pipeline cannot feed the processor fast enough.
 2.  **Algorithm**\index{D·A·M Taxonomy!algorithm}\index{Algorithm!D·A·M taxonomy}: The mathematical logic being executed. Performance is compute-bound when the processor's arithmetic units are the limiting factor.
@@ -2042,6 +2046,8 @@ These principles collectively reshape *how* engineers reason about system design
 * **Governance is the control plane**\index{Governance!control plane}: Security, privacy, and fairness are not appendices; they are invariants that govern the operation of the fleet.
 
 :::
+
+Everything this introduction has argued converges on one reversal. At scale, the techniques that made a single machine fast become the very things that hold a fleet back, because the binding constraint moves outside the box. On one accelerator, computation is the cost and the memory hierarchy sets the limit; across ten thousand, computation is the easy part, and the limit is everything between the machines, the Communication that carries every gradient and the Coordination that keeps thousands of nodes agreeing on one state. That is the physics of distribution, and it answers to its own three-letter law: where a single node is governed by Data, Algorithm, and Machine, the fleet is governed by Compute, Communication, and Coordination. The rest of this book works out that shift, from the silicon upward to the governance that decides what the fleet is permitted to do.
 
 ::: {.callout-chapter-connection title="From requirements to silicon"}
 

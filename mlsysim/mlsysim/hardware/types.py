@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional, Dict
+from typing import Optional, Dict, Literal
 from ..core.units import Q_, ureg
 from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 
@@ -94,14 +94,38 @@ class StorageHierarchy(BaseModel):
 class IOInterconnect(BaseModel):
     """
     Represents a point-to-point interconnect link.
-    
+
     Used to model PCIe links (host to device) or NVLink/ICI connections
     (device to device within a node).
+
+    Direction convention (2026-06-10 audit). ``bandwidth`` stores the figure
+    exactly as the vendor datasheet quotes it, and ``direction`` declares
+    which convention that figure uses:
+
+    - ``per_direction`` (default): the one-way deliverable rate. PCIe entries
+      (64 GB/s Gen5 x16) and Ethernet/RoCE entries use this.
+    - ``bidirectional_total``: send + receive summed. NVIDIA quotes NVLink
+      this way (H100 "900 GB/s" = 450 GB/s each direction); Google quotes
+      TPU ICI the same way.
+
+    Formulas that divide bytes by a link rate (transfer time, ring-collective
+    beta terms) need the ONE-WAY rate: always consume
+    ``bandwidth_per_direction``, never raw ``bandwidth``. Feeding the
+    bidirectional total into a beta term renders every intra-node collective
+    ~2x optimistic — the exact bug this field exists to prevent.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str # e.g., "PCIe Gen4 x16"
     bandwidth: Quantity
     latency: Optional[Quantity] = None
+    direction: Literal["per_direction", "bidirectional_total"] = "per_direction"
+
+    @property
+    def bandwidth_per_direction(self) -> Quantity:
+        """One-way deliverable bandwidth — the beta for transfer-time math."""
+        if self.direction == "bidirectional_total":
+            return self.bandwidth / 2
+        return self.bandwidth
 
     @field_validator("bandwidth", mode="after")
     @classmethod
@@ -112,6 +136,25 @@ class IOInterconnect(BaseModel):
     @classmethod
     def _validate_latency(cls, v):
         return require_dimensionality(v, ureg.second, "latency")
+
+class MigProfile(BaseModel):
+    """A single NVIDIA Multi-Instance GPU partition profile (e.g. ``1g.10gb``).
+
+    MIG carves one physical GPU into hardware-isolated instances, each with a fixed
+    slice of HBM and a fixed number of streaming multiprocessors. The profiles are a
+    frozen per-product spec (NVIDIA MIG User Guide), so they live on the device node.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
+    name: str                     # NVIDIA profile name, e.g. "1g.10gb"
+    gpu_memory: Quantity          # dedicated HBM per instance
+    sm_count: int                 # streaming multiprocessors per instance
+    typical_workload: str = ""
+
+    @field_validator("gpu_memory", mode="after")
+    @classmethod
+    def _validate_gpu_memory(cls, v):
+        return require_unit_family(v, ureg.byte, "gpu_memory", "data")
+
 
 class HardwareNode(BaseModel):
     """
@@ -132,6 +175,7 @@ class HardwareNode(BaseModel):
     tdp: Optional[Quantity] = None
     tdp_min: Optional[Quantity] = None
     tdp_max: Optional[Quantity] = None
+    die_area: Optional[Quantity] = None
     battery_capacity: Optional[Quantity] = None
     unit_cost: Optional[Quantity] = None
     unit_cost_max: Optional[Quantity] = None
@@ -141,12 +185,20 @@ class HardwareNode(BaseModel):
         description="Embodied CO2e in kg from manufacturing, packaging, and transport (Gupta et al. 2022)."
     )
     dispatch_tax: Quantity = Field(default_factory=lambda: Q_("0.01 ms"))
+    # Multi-Instance GPU partition profiles, when the device supports MIG (A100+).
+    # None for devices without MIG. Frozen per-product spec (NVIDIA MIG User Guide).
+    mig_profiles: Optional[tuple[MigProfile, ...]] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("tdp", "tdp_min", "tdp_max", mode="after")
     @classmethod
     def _validate_power_fields(cls, v, info):
         return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @field_validator("die_area", mode="after")
+    @classmethod
+    def _validate_die_area(cls, v):
+        return require_dimensionality(v, ureg.meter**2, "die_area")
 
     @field_validator("battery_capacity", mode="after")
     @classmethod

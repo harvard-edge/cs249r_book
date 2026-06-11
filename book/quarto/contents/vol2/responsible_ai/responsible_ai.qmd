@@ -119,7 +119,7 @@ Once system behavior is visible, **Accountability**\index{Accountability} provid
 
 At the objective-function layer, **Value alignment**\index{Value Alignment}[^fn-value-alignment-safety] requires AI systems to pursue goals that are consistent with human intent and ethical norms. In practice, this involves technical challenges, including reward design and constraint specification, and broader questions about whose values are represented and enforced.
 
-[^fn-value-alignment-safety]: **Value Alignment**\index{Value Alignment!AI safety}: The problem of ensuring AI systems optimize for human values rather than proxy objectives. Stuart Russell formalized this in 2015, arguing that specifying objectives is harder than optimizing them. The engineering consequence: YouTube's pre-2017 recommendation algorithm optimized for click-through rate (a proxy for satisfaction), inadvertently promoting conspiracy content that maximized clicks while degrading user welfare -- a misalignment that required redesigning the entire reward pipeline.
+[^fn-value-alignment-safety]: **Value Alignment**\index{Value Alignment!AI safety}: The problem of ensuring AI systems optimize for human values rather than proxy objectives. Stuart Russell formalized this in 2015, arguing that specifying objectives is harder than optimizing them. The engineering consequence: YouTube's pre-2017 recommendation algorithm optimized for click-through rate (a proxy for satisfaction), inadvertently promoting conspiracy content that maximized clicks while degrading user welfare---a misalignment that required redesigning the entire reward pipeline.
 
 The lifecycle also needs **Human oversight**\index{Human Oversight}: the role of human judgment in supervising, correcting, or halting automated decisions. This includes humans in the loop[^fn-hitl-overhead] during operation, as well as organizational structures that ensure AI use remains accountable to societal values and real-world complexity.
 
@@ -312,7 +312,7 @@ $$
 \Pr\big(h(x) = 1 \mid A = a, Y = y\big) = \Pr\big(h(x) = 1 \mid A = b, Y = y\big), \quad \text{for } y \in \{0, 1\}.
 $$
 
-That is, for each true outcome $Y = y$, the model should produce the same prediction distribution across groups $A = a$ and $A = b$. This means the model should behave similarly across groups for individuals with the same true outcome, whether they qualify for a positive result or not. It ensures that errors (both missed and incorrect positives) are distributed equally.
+That is, for each true outcome $Y = y$, the model should produce the same prediction distribution across groups $A = a$ and $A = b$. The model should therefore behave similarly across groups for individuals with the same true outcome, whether they qualify for a positive result or not. It ensures that errors (both missed and incorrect positives) are distributed equally.
 
 Applied to the medical case, equalized odds would ensure that patients with the same actual health needs (the true label $Y$) are equally likely to be correctly or incorrectly referred, regardless of race. The original algorithm violated this by under-referring Black patients who were equally or more sick than their white counterparts, highlighting unequal true positive rates.
 
@@ -326,6 +326,67 @@ $$
 Equality of opportunity ensures that qualified individuals, who have $Y = 1$, are treated equally by the model regardless of group membership.
 
 In our running example, this measure would ensure that among patients who do require care, both Black and white individuals have an equal chance of being identified by the model. In the case of the US hospital system, the algorithm's use of healthcare expenditure as a proxy variable led to a failure in meeting this criterion: Black patients with significant health needs were less likely to receive care due to their lower historical spending. The worked example below uses the same loan decisions to calculate all three criteria, showing why a single model can fail each fairness test in a different way.
+
+```{python}
+#| echo: false
+#| label: fairness-worked-example-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CALCULATING FAIRNESS METRICS — WORKED EXAMPLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the "Calculating fairness metrics" worked-example callout below.
+# │
+# │ Goal: Derive the demographic-parity and equal-opportunity disparities and the
+# │       group error rates from the 200-applicant loan scenario.
+# │ Show: parity gap (0.30), TPR gap (0.29), TPR per group (89/60 percent), and
+# │       FPR per group (55/20 percent).
+# │ How: Load the per-group confusion counts (scenario), derive each rate and gap.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
+# │ Exports: FairnessWorkedExample.parity_gap_math, .tpr_gap_math,
+# │          .tpr_a_pct_str, .tpr_b_pct_str, .fpr_a_pct_str, .fpr_b_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class FairnessWorkedExample:
+    """All three fairness criteria on the 200-applicant loan scenario."""
+
+    # ┌── 1. LOAD (Per-group confusion counts, scenario inputs) ────────────
+    # Group A (100 applicants): approved 70 (40 repaid, 30 default);
+    #                           rejected 30 (5 would repay, 25 default)
+    a_approved, a_total = 70, 100
+    a_tp, a_fn = 40, 5  # would-repay applicants: approved vs rejected
+    a_fp, a_tn = 30, 25  # would-default applicants: approved vs rejected
+    # Group B (100 applicants): approved 40 (30 repaid, 10 default);
+    #                           rejected 60 (20 would repay, 40 default)
+    b_approved, b_total = 40, 100
+    b_tp, b_fn = 30, 20
+    b_fp, b_tn = 10, 40
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    approval_a = a_approved / a_total  # 0.70
+    approval_b = b_approved / b_total  # 0.40
+    parity_gap = approval_a - approval_b  # 0.30
+    tpr_a = a_tp / (a_tp + a_fn)  # 0.89
+    tpr_b = b_tp / (b_tp + b_fn)  # 0.60
+    tpr_gap = round(tpr_a, 2) - tpr_b  # 0.29 (from displayed TPRs)
+    fpr_a = a_fp / (a_fp + a_tn)  # 0.55
+    fpr_b = b_fp / (b_fp + b_tn)  # 0.20
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(a_total == a_approved + 30 and b_total == b_approved + 60, "Approved + rejected must equal each group's applicant total")
+    check(parity_gap > 0 and tpr_gap > 0, "Both disparities favor Group A")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    parity_gap_str = fmt(parity_gap, precision=2, commas=False)
+    tpr_gap_str = fmt(tpr_gap, precision=2, commas=False)
+    parity_gap_math = fmt_math(r"0.70 - 0.40 = " + parity_gap_str)
+    tpr_gap_math = fmt_math(r"0.89 - 0.60 = " + tpr_gap_str)
+    tpr_a_pct_str = fmt_percent(round(tpr_a, 2), precision=0, commas=False, style='prose')
+    tpr_b_pct_str = fmt_percent(tpr_b, precision=0, commas=False, style='prose')
+    fpr_a_pct_str = fmt_percent(round(fpr_a, 2), precision=0, commas=False, style='prose')
+    fpr_b_pct_str = fmt_percent(round(fpr_b, 2), precision=0, commas=False, style='prose')
+```
 
 ::: {#exmp-responsible-ai-calculating-fairness-metrics .callout-example title="Calculating fairness metrics"}
 
@@ -348,7 +409,7 @@ Consider a simplified loan approval model evaluated on 200 applicants, evenly sp
 \Pr(h(x) = 1 \mid A = b) = \frac{40}{100} = 0.40
 \end{gather*}
 
-**Disparity**: $0.70 - 0.40 = 0.30$ (30 percentage point gap)
+**Disparity**: `{python} FairnessWorkedExample.parity_gap_math` (30 percentage point gap)
 
 The model violates demographic parity by approving Group A applicants at substantially higher rates, regardless of actual repayment ability.
 
@@ -361,9 +422,9 @@ Among applicants who *would actually repay* ($Y=1$):
 \Pr(h(x) = 1 \mid A = b, Y = 1) = \frac{30}{30 + 20} = \frac{30}{50} = 0.60
 \end{gather*}
 
-**Disparity**: $0.89 - 0.60 = 0.29$ (29 percentage point gap in TPR)
+**Disparity**: `{python} FairnessWorkedExample.tpr_gap_math` (29 percentage point gap in TPR)
 
-The model violates equality of opportunity: among qualified applicants who would repay, Group A members are correctly approved 89 percent of the time while Group B members are only approved 60 percent of the time.
+The model violates equality of opportunity: among qualified applicants who would repay, Group A members are correctly approved `{python} FairnessWorkedExample.tpr_a_pct_str` of the time while Group B members are only approved `{python} FairnessWorkedExample.tpr_b_pct_str` of the time.
 
 **Calculating equalized odds (true positive rate + false positive rate)**:
 
@@ -374,7 +435,7 @@ The TPR values are calculated above. For false positive rates among applicants w
 \Pr(h(x) = 1 \mid A = b, Y = 0) = \frac{10}{10 + 40} = \frac{10}{50} = 0.20
 \end{gather*}
 
-The model also has unequal false positive rates: it incorrectly approves 55 percent of Group A applicants who will default, but only 20 percent of Group B applicants who will default. This reveals the model is more "generous" with Group A even when they will not repay.
+The model also has unequal false positive rates: it incorrectly approves `{python} FairnessWorkedExample.fpr_a_pct_str` of Group A applicants who will default, but only `{python} FairnessWorkedExample.fpr_b_pct_str` of Group B applicants who will default. This reveals the model is more "generous" with Group A even when they will not repay.
 
 **Systems insight**: This model violates all three fairness criteria. Addressing one criterion does not automatically satisfy others. In fact, the impossibility theorems prove these criteria can conflict mathematically.
 
@@ -537,16 +598,68 @@ Formal fairness criteria become operational only when practitioners can measure 
 
 Four point metrics turn the fairness criteria from @sec-responsible-ai-fairness-machine-learning-2ba4 into numbers an auditor can threshold. Each one equalizes a different quantity, so each exposes a different failure of the same classifier. @Tbl-responsible-ai-fairness-metrics defines them and scores them on the running loan example, where Group A is approved at 0.70 and Group B at 0.40, qualified-applicant true-positive rates are 0.89 and 0.60, and unqualified-applicant false-positive rates are 0.55 and 0.20.
 
+```{python}
+#| echo: false
+#| label: fairness-metrics-table-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FAIRNESS METRICS ON THE LOAN EXAMPLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-responsible-ai-fairness-metrics and the paragraph below it.
+# │
+# │ Goal: Score the four group-fairness metrics on the running loan scenario.
+# │ Show: Disparate impact ratio (0.57), statistical parity difference (0.30),
+# │       equal opportunity difference (0.29), and average odds difference (0.32).
+# │ How: Load the displayed group rates (scenario inputs), derive each metric,
+# │      and build the worked-arithmetic math spans for the "Loan value" column.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt, fmt_math
+# │ Exports: FairnessMetricsTable.di_ratio_math, .spd_math, .eod_math, .aod_math,
+# │          .di_ratio_str, .spd_str, .eod_str, .aod_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_math
+
+# ┌── LEGO ───────────────────────────────────────────────
+class FairnessMetricsTable:
+    """Score the four group-fairness metrics on the loan example."""
+
+    # ┌── 1. LOAD (Scenario rates from the worked example) ─────────────────
+    approval_a = 0.70  # Group A approval rate (70/100)
+    approval_b = 0.40  # Group B approval rate (40/100)
+    tpr_a_display = 0.89  # Group A true-positive rate (40/45, displayed)
+    tpr_b_display = 0.60  # Group B true-positive rate (30/50)
+    delta_fpr_display = 0.35  # |FPR_a - FPR_b| = |0.55 - 0.20|, displayed
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    di_ratio = approval_b / approval_a  # 0.57
+    spd = approval_a - approval_b  # 0.30
+    eod = tpr_a_display - tpr_b_display  # 0.29
+    aod = 0.5 * (eod + delta_fpr_display)  # 0.32
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(di_ratio < 0.8, "Loan example must breach the four-fifths rule")
+    check(0 < spd < 1 and 0 < eod < 1, "Additive gaps must be valid fractions")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    di_ratio_str = fmt(di_ratio, precision=2, commas=False)
+    spd_str = fmt(spd, precision=2, commas=False)
+    eod_str = fmt(eod, precision=2, commas=False)
+    aod_str = fmt(aod, precision=2, commas=False)
+    di_ratio_math = fmt_math(r"\dfrac{0.40}{0.70} = " + di_ratio_str)
+    spd_math = fmt_math(r"0.70 - 0.40 = " + spd_str)
+    eod_math = fmt_math(r"0.89 - 0.60 = " + eod_str)
+    aod_math = fmt_math(r"\tfrac{1}{2}[0.29 + 0.35] = " + aod_str)
+```
+
 : **Fairness Metrics on the Loan Example**: Four group-fairness metrics, each equalizing a different quantity, evaluated on the loan approval model. The disparate impact ratio is the legally recognized screening test; the additive differences are easier to track over time; the average odds difference is the strictest, requiring both error types to match. {#tbl-responsible-ai-fairness-metrics tbl-colwidths="[20,22,33,12,13]"}
 
-| **Metric**                                                                                                                | **Equalizes**                                  | **Formula** $(a, b)$                                                                      |           **Loan value**           | **Choose it when**                                                                                        |
-|:--------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------|:------------------------------------------------------------------------------------------|:----------------------------------:|:----------------------------------------------------------------------------------------------------------|
-| Disparate impact ratio (four-fifths rule)\index{Disparate Impact Ratio!definition}\index{Four-Fifths Rule} [@feldman2015] | ratio of approval rates                        | $\dfrac{\Pr(h=1 \mid a)}{\Pr(h=1 \mid b)}$                                                |    $\dfrac{0.40}{0.70} = 0.57$     | a legally recognized screen is needed; $\text{DI} < 0.8$ flags disparate impact                           |
-| Statistical parity difference\index{Statistical Parity Difference!definition} [@calders2010]                              | additive gap in approval rates                 | $\Pr(h=1 \mid a) - \Pr(h=1 \mid b)$                                                       |        $0.70 - 0.40 = 0.30$        | comparing across many groups or tracking drift; common audit threshold $\lvert\text{SPD}\rvert \leq 0.10$ |
-| Equal opportunity difference\index{Equal Opportunity Difference} [@hardt2016equality]                                     | true-positive rates among qualified applicants | $\Pr(h=1 \mid a, Y{=}1) - \Pr(h=1 \mid b, Y{=}1)$                                         |        $0.89 - 0.60 = 0.29$        | the harm is denying deserving individuals                                                                 |
-| Average odds difference\index{Average Odds Difference!definition} [@hardt2016equality]                                    | both true-positive and false-positive rates    | $\tfrac{1}{2}\big[\,\lvert \Delta\text{TPR}\rvert + \lvert \Delta\text{FPR}\rvert\,\big]$ | $\tfrac{1}{2}[0.29 + 0.35] = 0.32$ | both error types matter; the strictest of the four, with $\text{AOD} = 0$ at perfect equalized odds       |
+| **Metric**                                                                                                                | **Equalizes**                                  | **Formula** $(a, b)$                                                                      |                 **Loan value**                | **Choose it when**                                                                                        |
+|:--------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------|:------------------------------------------------------------------------------------------|:---------------------------------------------:|:----------------------------------------------------------------------------------------------------------|
+| Disparate impact ratio (four-fifths rule)\index{Disparate Impact Ratio!definition}\index{Four-Fifths Rule} [@feldman2015] | ratio of approval rates                        | $\dfrac{\Pr(h=1 \mid a)}{\Pr(h=1 \mid b)}$                                                | `{python} FairnessMetricsTable.di_ratio_math` | a legally recognized screen is needed; $\text{DI} < 0.8$ flags disparate impact                           |
+| Statistical parity difference\index{Statistical Parity Difference!definition} [@calders2010]                              | additive gap in approval rates                 | $\Pr(h=1 \mid a) - \Pr(h=1 \mid b)$                                                       |    `{python} FairnessMetricsTable.spd_math`   | comparing across many groups or tracking drift; common audit threshold $\lvert\text{SPD}\rvert \leq 0.10$ |
+| Equal opportunity difference\index{Equal Opportunity Difference} [@hardt2016equality]                                     | true-positive rates among qualified applicants | $\Pr(h=1 \mid a, Y{=}1) - \Pr(h=1 \mid b, Y{=}1)$                                         |    `{python} FairnessMetricsTable.eod_math`   | the harm is denying deserving individuals                                                                 |
+| Average odds difference\index{Average Odds Difference!definition} [@hardt2016equality]                                    | both true-positive and false-positive rates    | $\tfrac{1}{2}\big[\,\lvert \Delta\text{TPR}\rvert + \lvert \Delta\text{FPR}\rvert\,\big]$ |    `{python} FairnessMetricsTable.aod_math`   | both error types matter; the strictest of the four, with $\text{AOD} = 0$ at perfect equalized odds       |
 
-The four metrics disagree by construction: the disparate impact ratio of 0.57 already breaches the four-fifths rule, while the additive 0.30 gap, the 0.29 opportunity gap, and the 0.32 average odds gap each quantify a distinct dimension of the same disparity. No single number is sufficient, which is why the impossibility results above force an explicit choice about which metric a deployment will prioritize.
+The four metrics disagree by construction: the disparate impact ratio of `{python} FairnessMetricsTable.di_ratio_str` already breaches the four-fifths rule, while the additive `{python} FairnessMetricsTable.spd_str` gap, the `{python} FairnessMetricsTable.eod_str` opportunity gap, and the `{python} FairnessMetricsTable.aod_str` average odds gap each quantify a distinct dimension of the same disparity. No single number is sufficient, which is why the impossibility results above force an explicit choice about which metric a deployment will prioritize.
 
 ##### Calibration {#sec-responsible-ai-calibration-8b73}
 
@@ -566,7 +679,47 @@ From the loan example:
 \text{PPV}(b) &= \frac{30}{40} = 0.750
 \end{align*}
 
-The positive predictive value gap is $0.750 - 0.571 = 0.179$. Group B's predicted positives are actually positive 75 percent of the time, while Group A's are only 57 percent accurate. This violates predictive parity for hard decisions and reveals that the model is less reliable when predicting approval for Group A. Demonstrating score calibration itself would require comparing outcome frequencies within matched score ranges across groups.
+```{python}
+#| echo: false
+#| label: ppv-gap-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ POSITIVE PREDICTIVE VALUE GAP (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the predictive-parity paragraph immediately below.
+# │
+# │ Goal: Quantify the positive predictive value gap on the loan example.
+# │ Show: PPV gap (0.179) and each group's PPV as a percent (57 percent, 75 percent).
+# │ How: Load the predicted-positive counts (scenario), derive each PPV and the gap.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
+# │ Exports: PpvGap.gap_math, .ppv_b_pct_str, .ppv_a_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class PpvGap:
+    """Positive predictive value gap between the two loan groups."""
+
+    # ┌── 1. LOAD (Predicted-positive counts from the worked example) ──────
+    repaid_a, approved_a = 40, 70  # Group A: 40 of 70 approved actually repaid
+    repaid_b, approved_b = 30, 40  # Group B: 30 of 40 approved actually repaid
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ppv_a = repaid_a / approved_a  # 0.571
+    ppv_b = repaid_b / approved_b  # 0.750
+    ppv_gap = round(ppv_b, 3) - round(ppv_a, 3)  # 0.179 (from displayed values)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(ppv_b > ppv_a, "Group B predicted positives must be more reliable")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    gap_str = fmt(ppv_gap, precision=3, commas=False)
+    gap_math = fmt_math(r"0.750 - 0.571 = " + gap_str)
+    ppv_a_pct_str = fmt_percent(round(ppv_a, 2), precision=0, commas=False, style='prose')
+    ppv_b_pct_str = fmt_percent(round(ppv_b, 2), precision=0, commas=False, style='prose')
+```
+
+The positive predictive value gap is `{python} PpvGap.gap_math`. Group B's predicted positives are actually positive `{python} PpvGap.ppv_b_pct_str` of the time, while Group A's are only `{python} PpvGap.ppv_a_pct_str` accurate. This violates predictive parity for hard decisions and reveals that the model is less reliable when predicting approval for Group A. Demonstrating score calibration itself would require comparing outcome frequencies within matched score ranges across groups.
 
 Calibration is critical for high stakes decisions where individuals rely on predicted probabilities. A miscalibrated model systematically over or underpredicts risk for specific groups, leading to misallocated resources and eroded trust.
 
@@ -600,6 +753,53 @@ For equalized odds, both true positive and false positive rate constraints must 
 
 However, threshold adjustment has limitations. If base rates differ substantially between groups (that is, $\Pr(Y=1 \mid A=a) \neq \Pr(Y=1 \mid A=b)$), achieving one fairness criterion through thresholding will necessarily violate others due to the impossibility theorems. The resulting accuracy cost can be quantified directly.
 
+```{python}
+#| echo: false
+#| label: cost-of-fairness-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE COST OF FAIRNESS — THRESHOLD SCENARIO (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the "Engineering metric: The cost of fairness" callout below.
+# │
+# │ Goal: Quantify the accuracy cost of enforcing demographic parity by threshold.
+# │ Show: scenario approval/accuracy percents and the derived 4 pp / 4.7 percent
+# │       relative accuracy drop.
+# │ How: Load the unconstrained and parity-constrained accuracies (scenario),
+# │      derive the absolute and relative drops.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt_pp, fmt_percent
+# │ Exports: CostOfFairness.tax_pp_str, .tax_relative_pct_str,
+# │          .approval_a_pct_str, .approval_b_pct_str,
+# │          .acc_unconstrained_pct_str, .acc_constrained_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_pp, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CostOfFairness:
+    """Accuracy cost of enforcing demographic parity via group thresholds."""
+
+    # ┌── 1. LOAD (Scenario inputs) ───────────────────────────────────────
+    approval_a = 0.80  # majority approval at threshold 60
+    approval_b = 0.60  # minority approval at threshold 60 (unconstrained)
+    acc_unconstrained = 0.85  # max-profit accuracy
+    acc_constrained = 0.81  # parity-constrained accuracy
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    tax = acc_unconstrained - acc_constrained  # 0.04
+    tax_relative = tax / acc_unconstrained  # 0.047
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(tax > 0, "Parity constraint reduces overall accuracy")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tax_pp_str = fmt_pp(tax * 100, precision=0, commas=False)
+    tax_relative_pct_str = fmt_percent(tax_relative, precision=1, commas=False, style='prose')
+    approval_a_pct_str = fmt_percent(approval_a, precision=0, commas=False, style='prose')
+    approval_b_pct_str = fmt_percent(approval_b, precision=0, commas=False, style='prose')
+    acc_unconstrained_pct_str = fmt_percent(acc_unconstrained, precision=0, commas=False, style='prose')
+    acc_constrained_pct_str = fmt_percent(acc_constrained, precision=0, commas=False, style='prose')
+```
+
 ::: {#exmp-responsible-ai-engineering-metric-cost-fairness .callout-example title="Engineering metric: The cost of fairness"}
 
 **Trade-off**: Satisfying a fairness constraint often requires deviating from the optimal accuracy threshold. This deviation is the "fairness tax."
@@ -612,16 +812,16 @@ However, threshold adjustment has limitations. If base rates differ substantiall
 **Unconstrained optimization (max profit)**:
 
 *   $\text{Threshold} = 60$ for everyone.
-*   $\text{Approval}_A = 80\%$, $\text{Approval}_B = 60\%$.
-*   $\text{Accuracy} = 85\%$.
+*   $\text{Approval}_A =$ `{python} CostOfFairness.approval_a_pct_str`, $\text{Approval}_B =$ `{python} CostOfFairness.approval_b_pct_str`.
+*   $\text{Accuracy} =$ `{python} CostOfFairness.acc_unconstrained_pct_str`.
 
 **Fairness constrained (demographic parity)**:
 
-*   Constraint: Group B Approval must equal Group A (80 percent).
+*   Constraint: Group B Approval must equal Group A (`{python} CostOfFairness.approval_a_pct_str`).
 *   New $\text{Threshold}_B = 50$.
-*   **Result**: Group B false positives increase. Overall accuracy drops to 81 percent.
+*   **Result**: Group B false positives increase. Overall accuracy drops to `{python} CostOfFairness.acc_constrained_pct_str`.
 
-**Systems insight**: The "Cost of Fairness" is 4 percentage points of accuracy, about a 4.7 percent relative accuracy drop in this scenario. The engineering decision requires weighing this measured accuracy trade-off against social equity gains.
+**Systems insight**: The "Cost of Fairness" is `{python} CostOfFairness.tax_pp_str` of accuracy, about a `{python} CostOfFairness.tax_relative_pct_str` relative accuracy drop in this scenario. The engineering decision requires weighing this measured accuracy trade-off against social equity gains.
 
 :::
 
@@ -668,11 +868,110 @@ For the loan example with $n_a = n_b = 100$, $\hat{p}_a = 0.70$, $\hat{p}_b = 0.
 z &= \frac{0.70 - 0.40}{\sqrt{0.55(0.45)(0.02)}} = \frac{0.30}{0.0704} = 4.26
 \end{align*}
 
-With $z = 4.26$ (far exceeding critical value $z_{0.05/2} = 1.96$), we reject $H_0$ and conclude the demographic parity violation is statistically significant at $p < 0.001$.
+```{python}
+#| echo: false
+#| label: fairness-ztest-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TWO-PROPORTION Z-TEST ON THE LOAN EXAMPLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the significance-conclusion sentence immediately below.
+# │
+# │ Goal: Compute the demographic-parity z-statistic for the loan example.
+# │ Show: z = 4.26, exceeding the two-sided critical value 1.96.
+# │ How: Load the sample sizes and approval rates (scenario inputs); compute the
+# │      pooled proportion and the two-proportion z statistic.
+# │
+# │ Imports: math; from mlsysim.fmt import check, fmt, fmt_math
+# │ Exports: FairnessZTest.z_math
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import check, fmt, fmt_math
+
+# ┌── LEGO ───────────────────────────────────────────────
+class FairnessZTest:
+    """Two-proportion z-test for the loan-example approval-rate gap."""
+
+    # ┌── 1. LOAD (Scenario inputs from the worked example) ────────────────
+    n_a = n_b = 100
+    p_a = 0.70
+    p_b = 0.40
+    z_critical = 1.96  # two-sided 5 percent critical value
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    p_pooled = (n_a * p_a + n_b * p_b) / (n_a + n_b)  # 0.55
+    se = math.sqrt(p_pooled * (1 - p_pooled) * (1 / n_a + 1 / n_b))
+    z = (p_a - p_b) / se  # 4.26
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(z > z_critical, "z must exceed the critical value to reject H0")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    z_str = fmt(z, precision=2, commas=False)
+    z_math = fmt_math(r"z = " + z_str)
+```
+
+With `{python} FairnessZTest.z_math` (far exceeding critical value $z_{0.05/2} = 1.96$), we reject $H_0$ and conclude the demographic parity violation is statistically significant at $p < 0.001$.
 
 Similar tests can be constructed for equal opportunity and equalized odds by restricting to subpopulations where $Y=1$ or $Y=0$ respectively. Statistical significance does not imply practical significance; even statistically significant disparities may be acceptable if the magnitude is small. Conversely, large disparities in small samples may not reach statistical significance but still warrant intervention.
 
 The quantitative framework developed here transforms fairness from an abstract principle into measurable engineering constraints. By establishing metrics, thresholds, and statistical tests, practitioners can systematically evaluate fairness throughout the ML lifecycle and make data-driven decisions about when intervention is required.
+
+```{python}
+#| echo: false
+#| label: confusion-matrix-audit-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AUDITING A CONFUSION MATRIX (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the "Auditing a confusion matrix" worked-example callout below.
+# │
+# │ Goal: Score demographic parity and equal opportunity on a two-group fraud
+# │       confusion matrix.
+# │ How: Load each group's TP/FP/FN/TN counts (scenario), derive the positive
+# │      prediction rate, the four-fifths ratio, the TPR, and both gaps.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt, fmt_math
+# │ Exports: ConfusionMatrixAudit.ppr_a_math, .ppr_b_math, .parity_gap_str,
+# │          .four_fifths_math, .tpr_a_math, .tpr_b_math, .tpr_gap_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_math
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ConfusionMatrixAudit:
+    """Demographic parity and equal opportunity on a fraud confusion matrix."""
+
+    # ┌── 1. LOAD (Per-group confusion counts, scenario inputs) ────────────
+    a_tp, a_fp, a_fn, a_tn = 450, 50, 30, 470
+    b_tp, b_fp, b_fn, b_tn = 180, 70, 120, 630
+    a_n = a_tp + a_fp + a_fn + a_tn
+    b_n = b_tp + b_fp + b_fn + b_tn
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ppr_a = (a_tp + a_fp) / a_n  # 0.50
+    ppr_b = (b_tp + b_fp) / b_n  # 0.25
+    parity_gap = ppr_a - ppr_b  # 0.25
+    four_fifths = ppr_b / ppr_a  # 0.5
+    tpr_a = a_tp / (a_tp + a_fn)  # 0.938
+    tpr_b = b_tp / (b_tp + b_fn)  # 0.60
+    tpr_gap = round(tpr_a, 3) - tpr_b  # 0.338
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(a_n == 1000 and b_n == 1000, "Each group must total 1,000 records")
+    check(four_fifths < 0.8, "Parity must breach the four-fifths rule")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    _ppr_a = fmt(ppr_a, precision=2, commas=False)
+    _ppr_b = fmt(ppr_b, precision=2, commas=False)
+    _four_fifths = fmt(four_fifths, precision=1, commas=False)
+    _tpr_a = fmt(tpr_a, precision=3, commas=False)
+    _tpr_b = fmt(tpr_b, precision=2, commas=False)
+    ppr_a_math = fmt_math(r"(450+50)/1000 = " + _ppr_a)
+    ppr_b_math = fmt_math(r"(180+70)/1000 = " + _ppr_b)
+    parity_gap_str = fmt(parity_gap, precision=2, commas=False)
+    four_fifths_math = fmt_math(r"0.25/0.50 = " + _four_fifths + r" < 0.8")
+    tpr_a_math = fmt_math(r"450 / (450+30) = " + _tpr_a)
+    tpr_b_math = fmt_math(r"180 / (180+120) = " + _tpr_b)
+    tpr_gap_str = fmt(tpr_gap, precision=3, commas=False)
+```
 
 ::: {#nbk-responsible-ai-auditing-confusion-matrix .callout-notebook title="Auditing a confusion matrix"}
 
@@ -686,14 +985,14 @@ The quantitative framework developed here transforms fairness from an abstract p
 **Math**:
 
 1. **Demographic parity (positive prediction rate)**: $\Pr(\hat{Y}=1)$.
-   - Group A: $(450+50)/1000 = 0.50$.
-   - Group B: $(180+70)/1000 = 0.25$.
-   - **Gap**: 0.25. (Violates four-fifths rule: $0.25/0.50 = 0.5 < 0.8$).
+   - Group A: `{python} ConfusionMatrixAudit.ppr_a_math`.
+   - Group B: `{python} ConfusionMatrixAudit.ppr_b_math`.
+   - **Gap**: `{python} ConfusionMatrixAudit.parity_gap_str`. (Violates four-fifths rule: `{python} ConfusionMatrixAudit.four_fifths_math`).
 
 2. **Equal opportunity (TPR)**: $\text{TP} / (\text{TP}+\text{FN})$.
-   - Group A: $450 / (450+30) = 0.938$.
-   - Group B: $180 / (180+120) = 0.60$.
-   - **Gap**: 0.338. (Severe violation).
+   - Group A: `{python} ConfusionMatrixAudit.tpr_a_math`.
+   - Group B: `{python} ConfusionMatrixAudit.tpr_b_math`.
+   - **Gap**: `{python} ConfusionMatrixAudit.tpr_gap_str`. (Severe violation).
 
 **Systems insight**: Fixing TPR requires lowering the threshold for Group B to catch more fraud (reducing FNs). However, this will likely increase FPs (false alarms) for Group B, worsening predictive parity. This is a concrete demonstration of the impossibility theorem: one fairness constraint cannot be changed in isolation.
 
@@ -723,7 +1022,7 @@ The privacy challenges extend beyond obvious sensitive data to seemingly innocuo
 
 Addressing these challenges requires understanding privacy as a system principle that entails robust data governance. This includes defining what data is collected, under what conditions, and with what degree of consent and transparency. Foundational data engineering practices, including data validation, schema management, versioning, and lineage tracking, provide the technical infrastructure for implementing these governance requirements. Responsible governance requires attention to labeling practices, access controls, logging infrastructure, and compliance with jurisdictional requirements. These mechanisms serve to constrain how data flows through a system and to document accountability for its use.
 
-@Fig-privacy-risk-flow outlines key privacy checkpoints in the early stages of a data pipeline, highlighting where safeguards such as differential privacy, federated learning, and secure aggregation reduce attacker visibility into raw personal data. Actual implementations often involve more nuanced tradeoffs and context-sensitive decisions, including separate consent and governance controls, but this diagram provides a scaffold for identifying where privacy risks arise and how they can be mitigated through responsible design choices.\index{Privacy!preserving machine learning pipeline}
+@Fig-privacy-risk-flow outlines key privacy checkpoints in the early stages of a data pipeline, highlighting where safeguards such as differential privacy, federated learning, and secure aggregation reduce attacker visibility into raw personal data. Actual implementations often involve more nuanced trade-offs and context-sensitive decisions, including separate consent and governance controls, but this diagram provides a scaffold for identifying where privacy risks arise and how they can be mitigated through responsible design choices.\index{Privacy!preserving machine learning pipeline}
 
 ::: {#fig-privacy-risk-flow fig-env="figure" fig-pos="htb" fig-cap="**Privacy-Preserving Machine Learning Pipeline**: A multi-stage architecture for training a global model while minimizing data exposure. The pipeline applies sequential safeguards—differential privacy, federated learning, and secure aggregation—that progressively reduce attacker visibility into raw personal data." fig-alt="Horizontal flow: Raw Personal Data -> Differential Privacy -> Federated Learning -> Secure Aggregation -> Global Model. Bands beneath show Attacker Visibility decreasing across stages."}
 ![](images/svg/privacy-flow.svg)
@@ -859,7 +1158,7 @@ That same deployment split creates the next responsible AI tension. Keeping sens
 
 Privacy inherits the same centralization trade-off, sharpened. Aggregating data in the cloud enables high-capacity modeling and monitoring but concentrates exposure to breaches and surveillance, so it must be paired with strong encryption, access control, and auditability. Keeping data local on mobile, federated, or TinyML clients reduces that central risk but removes the global observability needed to monitor or enforce compliance, forcing privacy safeguards to be compiled into the model and firmware before deployment, with no runtime channel to adjust them. @Tbl-ml-principles-comparison records where each environment lands.
 
-The constraint the table cannot show is that privacy is judged at the serving layer, not just at training time. A model that satisfies every formal privacy definition can still leak: membership inference attacks recover whether a user's record was in the training set by reading model outputs, so defenses must extend into interface design, rate limiting, and access control. And a technically compliant system can still violate user expectations if data collection is opaque, which makes consent surfaces and clear disclosure part of the privacy architecture rather than a UI afterthought.
+The constraint the table cannot show is that privacy is judged at the serving layer, not just at training time. A model that satisfies every formal privacy definition can still leak: membership inference attacks recover whether a user's record was in the training set by reading model outputs, so defenses must extend into interface design, rate limiting, and access control. Furthermore, a technically compliant system can still violate user expectations if data collection is opaque, which makes consent surfaces and clear disclosure part of the privacy architecture rather than a UI afterthought.
 
 Privacy protects data flows, but it does not guarantee that the system's outputs remain reliable when inputs shift, sensors degrade, or adversaries probe the interface. That gap leads from privacy architecture to safety and robustness architecture: the system must also define how it behaves under stress.
 
@@ -881,9 +1180,9 @@ Accountability is realized through concrete traceability infrastructure, and its
 
 The deployment that most tests this is mobile, because responsibility is split across a local model, a remote service, and the interface design, so when something goes wrong it is often unclear which layer owns the failure. Governance there depends on accessible recourse pathways and mechanisms for surfacing, explaining, and contesting decisions at the user level, embedded into both the interface and the surrounding service architecture rather than bolted on as a policy overlay. Across every environment, sustaining accountability means planning for failure as deliberately as for success: defining how anomalies are detected, how roles are assigned, how records are maintained, and how remediation occurs, all traceable in logs and enforceable through interfaces. Governance also has to account for the environmental and distributional impacts of infrastructure choices, because organizations deploying AI systems bear responsibility not only for algorithmic outcomes but for the broader effects of resource usage on environmental justice and equitable access.
 
-### Design tradeoffs {#sec-responsible-ai-design-tradeoffs-6f5a}
+### Design trade-offs {#sec-responsible-ai-design-tradeoffs-6f5a}
 
-The governance challenges across deployment contexts reveal a general pattern: responsible AI tradeoffs are architectural tradeoffs. Machine learning systems do not operate in idealized silos; they must navigate competing objectives under finite resources, strict latency requirements, evolving user behavior, and regulatory complexity.
+The governance challenges across deployment contexts reveal a general pattern: responsible AI trade-offs are architectural trade-offs. Machine learning systems do not operate in idealized silos; they must navigate competing objectives under finite resources, strict latency requirements, evolving user behavior, and regulatory complexity.
 
 Cloud-based systems often support extensive monitoring, fairness audits, interpretability services, and privacy-preserving tools due to ample computational and storage resources. However, these benefits typically come with centralized data handling, which introduces risks related to surveillance, data breaches, and complex governance. In contrast, on-device systems such as mobile applications, edge platforms, or TinyML deployments provide stronger data locality and user control, but limit postdeployment visibility, fairness instrumentation, and model adaptation.
 
@@ -924,16 +1223,57 @@ The operational techniques that follow fall into three complementary categories,
 
 The next sections unpack the technical methods in detail, but their systems cost is visible before the implementation details. @Tbl-responsible-ai-overhead shows the performance impact of responsible AI techniques\index{Responsible AI!performance impact}: detection, mitigation, validation, privacy, and explanation techniques each impose different costs on training, inference, memory, and accuracy. Reading the table first lets engineers evaluate responsible AI methods as deployable system choices rather than as abstract ethical labels.
 
-| **Technique**                      |    **Accuracy Impact**    |    **Training Overhead**     |      **Inference Cost**     | **Memory Overhead**          |
-|:-----------------------------------|:-------------------------:|:----------------------------:|:---------------------------:|:-----------------------------|
-| **Differential Privacy**           |  -2 percent to -5 percent |  +15 percent to +30 percent  |           Minimal           | +10 percent to +20 percent   |
-| **(DP-SGD)**                       |                           |                              |                             |                              |
-| **Fairness-Aware Training**        |  -1 percent to -3 percent |  +5 percent to +15 percent   |           Minimal           | +5 percent to +10 percent    |
-| **(Reweighting/Constraints)**      |                           |                              |                             |                              |
-| **Approximate SHAP (Tree/Kernel)** |            N/A            |             N/A              | +50 percent to +200 percent | +20 percent to +100 percent  |
-| **Exact SHAP**                     |            N/A            |             N/A              |  50$\times$ to 1000$\times$ | +50 percent to +200 percent  |
-| **Adversarial Training**           |  -2 percent to -5 percent | +100 percent to +300 percent |           Minimal           | +50 percent to +100 percent  |
-| **Federated Learning**             | -5 percent to -15 percent | +200 percent to +500 percent |           Minimal           | +100 percent to +300 percent |
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESPONSIBLE-AI OVERHEAD TABLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: Compose @tbl-responsible-ai-overhead cells from Literature.ResponsibleAIOverhead.
+# │ How: signed percentage-point ranges per technique/column; Exact SHAP as a x-multiplier.
+# │ Exports: RaiOverheadTable.<technique>_<column> range strings.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_multiple_range, MarkdownStr
+
+class RaiOverheadTable:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    _R = Literature.ResponsibleAIOverhead
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    # Each cell is a signed percentage-point range (or a x-multiplier for Exact
+    # SHAP); MarkdownStr marks the composed range string as render-ready.
+    dp_accuracy_str = MarkdownStr(f"{int(_R.DpAccuracyLowPct)}% to {int(_R.DpAccuracyHighPct)}%")
+    dp_training_str = MarkdownStr(f"+{int(_R.DpTrainingLowPct)}% to +{int(_R.DpTrainingHighPct)}%")
+    dp_memory_str = MarkdownStr(f"+{int(_R.DpMemoryLowPct)}% to +{int(_R.DpMemoryHighPct)}%")
+    fair_accuracy_str = MarkdownStr(f"{int(_R.FairnessAccuracyLowPct)}% to {int(_R.FairnessAccuracyHighPct)}%")
+    fair_training_str = MarkdownStr(f"+{int(_R.FairnessTrainingLowPct)}% to +{int(_R.FairnessTrainingHighPct)}%")
+    fair_memory_str = MarkdownStr(f"+{int(_R.FairnessMemoryLowPct)}% to +{int(_R.FairnessMemoryHighPct)}%")
+    approx_inference_str = MarkdownStr(f"+{int(_R.ApproxShapInferenceLowPct)}% to +{int(_R.ApproxShapInferenceHighPct)}%")
+    approx_memory_str = MarkdownStr(f"+{int(_R.ApproxShapMemoryLowPct)}% to +{int(_R.ApproxShapMemoryHighPct)}%")
+    exact_inference_mult_str = fmt_multiple_range(
+        int(_R.ExactShapInferenceLowX),
+        int(_R.ExactShapInferenceHighX),
+        precision=0,
+        commas=True,
+    )
+    exact_memory_str = MarkdownStr(f"+{int(_R.ExactShapMemoryLowPct)}% to +{int(_R.ExactShapMemoryHighPct)}%")
+    adv_accuracy_str = MarkdownStr(f"{int(_R.AdversarialAccuracyLowPct)}% to {int(_R.AdversarialAccuracyHighPct)}%")
+    adv_training_str = MarkdownStr(f"+{int(_R.AdversarialTrainingLowPct)}% to +{int(_R.AdversarialTrainingHighPct)}%")
+    adv_memory_str = MarkdownStr(f"+{int(_R.AdversarialMemoryLowPct)}% to +{int(_R.AdversarialMemoryHighPct)}%")
+    fed_accuracy_str = MarkdownStr(f"{int(_R.FederatedAccuracyLowPct)}% to {int(_R.FederatedAccuracyHighPct)}%")
+    fed_training_str = MarkdownStr(f"+{int(_R.FederatedTrainingLowPct)}% to +{int(_R.FederatedTrainingHighPct)}%")
+    fed_memory_str = MarkdownStr(f"+{int(_R.FederatedMemoryLowPct)}% to +{int(_R.FederatedMemoryHighPct)}%")
+```
+
+| **Technique**                      |              **Accuracy Impact**              |             **Training Overhead**             |                  **Inference Cost**                  | **Memory Overhead**                           |
+|:-----------------------------------|:---------------------------------------------:|:---------------------------------------------:|:----------------------------------------------------:|:----------------------------------------------|
+| **Differential Privacy**           |  `{python} RaiOverheadTable.dp_accuracy_str`  |  `{python} RaiOverheadTable.dp_training_str`  |                       Minimal                        | `{python} RaiOverheadTable.dp_memory_str`     |
+| **(DP-SGD)**                       |                                               |                                               |                                                      |                                               |
+| **Fairness-Aware Training**        | `{python} RaiOverheadTable.fair_accuracy_str` | `{python} RaiOverheadTable.fair_training_str` |                       Minimal                        | `{python} RaiOverheadTable.fair_memory_str`   |
+| **(Reweighting/Constraints)**      |                                               |                                               |                                                      |                                               |
+| **Approximate SHAP (Tree/Kernel)** |                      N/A                      |                      N/A                      |   `{python} RaiOverheadTable.approx_inference_str`   | `{python} RaiOverheadTable.approx_memory_str` |
+| **Exact SHAP**                     |                      N/A                      |                      N/A                      | `{python} RaiOverheadTable.exact_inference_mult_str` | `{python} RaiOverheadTable.exact_memory_str`  |
+| **Adversarial Training**           |  `{python} RaiOverheadTable.adv_accuracy_str` |  `{python} RaiOverheadTable.adv_training_str` |                       Minimal                        | `{python} RaiOverheadTable.adv_memory_str`    |
+| **Federated Learning**             |  `{python} RaiOverheadTable.fed_accuracy_str` |  `{python} RaiOverheadTable.fed_training_str` |                       Minimal                        | `{python} RaiOverheadTable.fed_memory_str`    |
 
 : **Performance Impact of Responsible AI Techniques**: Quantitative analysis reveals that responsible AI techniques impose measurable computational overhead across training and inference phases. Differential privacy and fairness constraints add modest overhead; explainability cost depends sharply on the variant, with approximate TreeSHAP and kernel-based methods adding tens to hundreds of percent and exact SHAP imposing 50$\times$ to 1000$\times$ inference overhead. These metrics help engineers optimize responsible AI implementations for production constraints. {#tbl-responsible-ai-overhead}
 
@@ -1389,9 +1729,10 @@ class RealTimeFairnessMonitor:
     async def process_prediction(
         self, prediction, demographics, actual_label=None
     ):
+        # Slide a fixed window over the live stream, then re-check
+        # fairness.
         self.window.append((prediction, demographics, actual_label))
         self.window = self.window[-self.window_size :]
-
         metrics = self._compute_metrics()
         if (
             metrics["demographic_parity"] > self.alert_threshold
@@ -1401,66 +1742,39 @@ class RealTimeFairnessMonitor:
         return metrics
 
     def _compute_metrics(self):
+        # Bucket predictions and labels by protected group.
         by_group = {}
         for pred, demo, label in self.window:
-            group = demo.get("ethnicity", "unknown")
             bucket = by_group.setdefault(
-                group, {"preds": [], "labels": []}
+                demo.get("ethnicity", "unknown"),
+                {"preds": [], "labels": []},
             )
             bucket["preds"].append(pred)
             if label is not None:
                 bucket["labels"].append((pred, label))
 
+        # Demographic parity: positive-prediction-rate spread.
         rates = [
-            np.mean(data["preds"])
-            for data in by_group.values()
-            if data["preds"]
+            np.mean(d["preds"])
+            for d in by_group.values()
+            if d["preds"]
         ]
         parity = max(rates) - min(rates) if len(rates) > 1 else 0.0
-        odds = self._equalized_odds_gap(by_group)
-        counts = {
-            group: len(data["preds"])
-            for group, data in by_group.items()
-        }
         return {
             "demographic_parity": parity,
-            "equalized_odds": odds,
-            "groups": counts,
+            "equalized_odds": self._equalized_odds_gap(by_group),
+            "groups": {
+                g: len(d["preds"]) for g, d in by_group.items()
+            },
         }
 
     def _equalized_odds_gap(self, by_group):
-        tpr_values = []
-        fpr_values = []
+        # Largest TPR/FPR gap across labeled groups; detail omitted.
+        ...
 
-        for data in by_group.values():
-            labeled = data["labels"]
-            if len(labeled) < self.min_labeled_per_group:
-                continue
-
-            preds = np.array([pred for pred, _ in labeled])
-            labels = np.array([label for _, label in labeled])
-
-            positives = labels == 1
-            negatives = labels == 0
-            if positives.any():
-                tpr_values.append(np.mean(preds[positives] == 1))
-            if negatives.any():
-                fpr_values.append(np.mean(preds[negatives] == 1))
-
-        tpr_gap = (
-            max(tpr_values) - min(tpr_values)
-            if len(tpr_values) > 1
-            else 0.0
-        )
-        fpr_gap = (
-            max(fpr_values) - min(fpr_values)
-            if len(fpr_values) > 1
-            else 0.0
-        )
-        return max(tpr_gap, fpr_gap)
-
-    async def _trigger_bias_alert(self, metrics):
-        print(f"[AUDIT] bias alert: {metrics}")
+    async def _trigger_bias_alert(
+        self, metrics
+    ): ...  # page on-call and append the event to the audit log
 ```
 
 :::
@@ -1511,7 +1825,7 @@ To mitigate such vulnerabilities, a range of privacy-preserving techniques have 
 
 [^fn-differential-privacy]: **Differential Privacy**\index{Differential Privacy!training overhead}: A mathematical framework introduced by @dwork2006calibrating guaranteeing that any single training example's inclusion or exclusion changes model outputs by at most a bounded amount, parameterized by $\epsilon$. DP-SGD implements this by clipping per-example gradients and injecting calibrated Gaussian noise, increasing training time by 15--30 percent and reducing accuracy by 2--5 percent in representative settings. The privacy budget $\epsilon$ quantifies the trade-off: published Apple deployments reported moderate $\epsilon$ values for selected telemetry tasks, while stronger guarantees such as $\epsilon = 1$ require more training compute.
 
-However, differential privacy introduces significant system-level tradeoffs. The noise added during training can degrade model accuracy, increase the number of training iterations, and require access to larger datasets to maintain performance. These constraints are especially pronounced in resource-limited deployments such as mobile, edge, or embedded systems, where memory, compute, and power budgets are tightly constrained. In such settings, it may be necessary to combine lightweight privacy techniques (for example, feature obfuscation, local differential privacy) with architectural strategies that limit data collection, shorten retention, or enforce strict access control at the edge.
+However, differential privacy introduces significant system-level trade-offs. The noise added during training can degrade model accuracy, increase the number of training iterations, and require access to larger datasets to maintain performance. These constraints are especially pronounced in resource-limited deployments such as mobile, edge, or embedded systems, where memory, compute, and power budgets are tightly constrained. In such settings, it may be necessary to combine lightweight privacy techniques (for example, feature obfuscation, local differential privacy) with architectural strategies that limit data collection, shorten retention, or enforce strict access control at the edge.
 
 ```{python}
 #| echo: false
@@ -1585,7 +1899,7 @@ The privacy parameter $\epsilon$ is the privacy budget. Lower $\epsilon$ means m
 
 **Weak privacy** ($\epsilon = 10$): Minimal noise. Less than 1 percent accuracy loss. Limited formal guarantees.
 
-Privacy is not binary. It is a continuous curve where organizations buy user trust with compute dollars and model accuracy. The key engineering decision is allocating the privacy budget across the system lifecycle: how much $\epsilon$ to spend during training, how much to reserve for postdeployment queries, and how to communicate these tradeoffs to users and regulators.
+Privacy is not binary. It is a continuous curve where organizations buy user trust with compute dollars and model accuracy. The key engineering decision is allocating the privacy budget across the system lifecycle: how much $\epsilon$ to spend during training, how much to reserve for postdeployment queries, and how to communicate these trade-offs to users and regulators.
 
 :::
 
@@ -1654,6 +1968,7 @@ class UnlearningCostAnalysis:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     sisa_cost_m = full_cost_m / n_shards
     sisa_time_hr = (full_time_days * 24) / n_shards
+    shard_fraction = 1 / n_shards
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1661,9 +1976,10 @@ class UnlearningCostAnalysis:
     check(sisa_cost_m < 0.1, f"Expected <$100k SISA cost, got {sisa_cost_m:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_percent_range, fmt_rate, fmt_time, fmt_usd
+    from mlsysim.fmt import fmt, fmt_percent, fmt_percent_range, fmt_rate, fmt_time, fmt_usd
 
     full_cost_m_str = fmt_usd(full_cost_m * MILLION, scale="M", precision=1, commas=False)
+    shard_fraction_pct_str = fmt_percent(shard_fraction, precision=0, commas=False, style='prose')
     n_shards_str = fmt(n_shards, precision=0, commas=False)
     sisa_cost_str = fmt_usd(sisa_cost_m * MILLION, precision=0)
     sisa_time_hr_str = fmt_time(sisa_time_hr, 'hour', precision=1, commas=False, style='word')
@@ -1685,9 +2001,9 @@ A user invokes GDPR Article 17 ("Right to Erasure") on a model trained on 1&nbsp
 
 **Baseline (full retraining)**: For a 175B-parameter model at GPT-3 scale, retraining requires `{python} UnlearningCostAnalysis.full_retrain_gpus_str` A100 GPUs for approximately `{python} UnlearningCostAnalysis.full_time_days_str` at a cost of roughly `{python} UnlearningCostAnalysis.full_cost_m_str`.
 
-**Engineering fix (SISA)**: Sharded, Isolated, Sliced, and Aggregated training partitions data into $K =$ `{python} UnlearningCostAnalysis.n_shards_str` independent shards, training 100 sub-models. To delete one datum, retrain only the specific shard containing it (1 percent of data). New cost: `{python} UnlearningCostAnalysis.sisa_cost_str`. Time: approximately `{python} UnlearningCostAnalysis.sisa_time_hr_str`.
+**Engineering fix (SISA)**: Sharded, Isolated, Sliced, and Aggregated training partitions data into $K =$ `{python} UnlearningCostAnalysis.n_shards_str` independent shards, training `{python} UnlearningCostAnalysis.n_shards_str` sub-models. To delete one datum, retrain only the specific shard containing it (`{python} UnlearningCostAnalysis.shard_fraction_pct_str` of data). New cost: `{python} UnlearningCostAnalysis.sisa_cost_str`. Time: approximately `{python} UnlearningCostAnalysis.sisa_time_hr_str`.
 
-**Trade-off**: Accuracy drops `{python} UnlearningCostAnalysis.acc_drop_pct_range_str` because each sub-model sees less data. Inference slows because predictions must be aggregated across 100 sub-models. For a fleet receiving `{python} UnlearningCostAnalysis.deletion_requests_per_day_str` in erasure traffic, SISA transforms unlearning from "economically impossible" to "manageable operational cost"---at the price of model quality.
+**Trade-off**: Accuracy drops `{python} UnlearningCostAnalysis.acc_drop_pct_range_str` because each sub-model sees less data. Inference slows because predictions must be aggregated across `{python} UnlearningCostAnalysis.n_shards_str` sub-models. For a fleet receiving `{python} UnlearningCostAnalysis.deletion_requests_per_day_str` in erasure traffic, SISA transforms unlearning from "economically impossible" to "manageable operational cost"---at the price of model quality.
 
 :::
 
@@ -1791,7 +2107,7 @@ However, this rigor comes at significant computational cost. This 3-feature exam
 
 Another posthoc approach involves **counterfactual explanations**\index{Counterfactual Explanations}[^fn-counterfactual-explanations], which describe how a model's output would change if the input were modified in specific ways.
 
-[^fn-counterfactual-explanations]: **Counterfactual Explanations**\index{Counterfactual Explanations!recourse}: Formalized for ML by @wachter2017, counterfactuals answer "what would need to change?" rather than "why did this happen?" For regulatory compliance, they provide actionable recourse: "if the applicant's income were \$5,000 higher, the loan would be approved." Generating counterfactuals requires solving a constrained optimization problem (finding the minimal feasible input change that flips the output), adding 50--500 ms per explanation depending on feature dimensionality and domain constraints like monotonicity or immutability.
+[^fn-counterfactual-explanations]: [offset=-6mm] **Counterfactual Explanations**\index{Counterfactual Explanations!recourse}: Formalized for ML by @wachter2017, counterfactuals answer "what would need to change?" rather than "why did this happen?" For regulatory compliance, they provide actionable recourse: "if the applicant's income were \$5,000 higher, the loan would be approved." Generating counterfactuals requires solving a constrained optimization problem (finding the minimal feasible input change that flips the output), adding 50--500 ms per explanation depending on feature dimensionality and domain constraints like monotonicity or immutability.
 
 These are especially relevant for decision-facing applications such as credit or hiring systems. For example, a counterfactual explanation might state that an applicant would have received a loan approval if their reported income were higher or their debt lower [@wachter2017]. Counterfactual generation requires access to domain-specific constraints and realistic data manifolds, making integration into real-time systems challenging.
 
@@ -1851,6 +2167,9 @@ Work such as Olah et al. and Geiger et al. applies **mechanistic interpretabilit
 From a systems perspective, explainability introduces a number of architectural dependencies. Explanations must be generated, stored, surfaced, and evaluated within system constraints. The required infrastructure may include explanation APIs, memory for storing attribution maps, visualization libraries, and logging mechanisms that capture intermediate model behavior. Models must often be instrumented with hooks or configured to support repeated evaluations, particularly for explanation methods that require sampling, perturbation, or backpropagation.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-5mm}
+```
 ![](images/svg/vol2_responsible_ai_margin_001.svg){width="100%" fig-alt="Exact SHAP subset evaluations explode from 3 to 20 features."}
 
 *Exact SHAP cost explodes with feature count.*
@@ -1860,7 +2179,56 @@ These requirements interact directly with deployment constraints and impose quan
 
 For resource-constrained environments, gradient-based attribution methods offer more efficient alternatives, typically adding only 10–50&nbsp;ms overhead per explanation by reusing backpropagation infrastructure from training. However, these methods are less reliable for complex models and may produce inconsistent explanations across model updates. Edge deployments often implement explainability through precomputed rule approximations or simplified decision boundaries, sacrificing explanation fidelity for feasible latency profiles under 100&nbsp;ms.
 
-Storage requirements also scale significantly with explanation needs. Storing SHAP values for tabular data requires approximately 4-8 bytes per feature per prediction, so monthly storage is 30 million predictions times the feature count times 4--8 bytes for a system logging 1 million predictions daily. Gradient attribution maps for images can require 1-10&nbsp;MB per explanation depending on resolution; logging every image explanation at the same 1 million-per-day rate would require roughly 30--300 TB per month unless explanations are sampled, compressed, or retained for a shorter window. These volumes necessitate careful data lifecycle management and retention policies.
+```{python}
+#| echo: false
+#| label: explanation-storage-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EXPLANATION-LOG STORAGE FOOTPRINT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the explanation-storage paragraph immediately below.
+# │
+# │ Goal: Size the monthly storage of logging every model explanation.
+# │ Show: per-feature SHAP byte range (4–8 bytes), monthly prediction volume
+# │       (30 million), per-image map range (1–10 MB), and the monthly image-log
+# │       footprint (30–300 TB).
+# │ How: Load the daily prediction rate and the per-explanation size ranges
+# │      (scenario); derive the monthly prediction count and TB footprint.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt_count, fmt_range
+# │ Exports: ExplanationStorage.predictions_per_day_str, .monthly_predictions_str,
+# │          .shap_bytes_range_str, .image_map_range_str, .image_log_tb_range_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_range
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ExplanationStorage:
+    """Monthly storage footprint of logging model explanations."""
+
+    # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────
+    predictions_per_day = 1_000_000
+    days_per_month = 30
+    shap_bytes_low, shap_bytes_high = 4, 8  # bytes per feature per prediction
+    image_map_mb_low, image_map_mb_high = 1, 10  # MB per gradient attribution map
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    monthly_predictions = predictions_per_day * days_per_month  # 30 million
+    # Logging every image explanation: monthly_predictions × MB-per-map → TB.
+    image_log_tb_low = monthly_predictions * image_map_mb_low / 1e6  # 30 TB
+    image_log_tb_high = monthly_predictions * image_map_mb_high / 1e6  # 300 TB
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(image_log_tb_high > image_log_tb_low, "TB range must be ordered")
+    check(monthly_predictions == 30_000_000, "Monthly volume must be 30 million")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    predictions_per_day_str = fmt_count(predictions_per_day, scale='M', precision=0, scale_style='word')
+    monthly_predictions_str = fmt_count(monthly_predictions, scale='M', precision=0, scale_style='word')
+    shap_bytes_range_str = fmt_range(shap_bytes_low, shap_bytes_high, unit='bytes', precision=0)
+    image_map_range_str = fmt_range(image_map_mb_low, image_map_mb_high, unit='MB', precision=0)
+    image_log_tb_range_str = fmt_range(image_log_tb_low, image_log_tb_high, unit='TB', precision=0)
+```
+
+Storage requirements also scale significantly with explanation needs. Storing SHAP values for tabular data requires approximately `{python} ExplanationStorage.shap_bytes_range_str` per feature per prediction, so monthly storage is `{python} ExplanationStorage.monthly_predictions_str` predictions times the feature count times `{python} ExplanationStorage.shap_bytes_range_str` for a system logging `{python} ExplanationStorage.predictions_per_day_str` predictions daily. Gradient attribution maps for images can require `{python} ExplanationStorage.image_map_range_str` per explanation depending on resolution; logging every image explanation at the same `{python} ExplanationStorage.predictions_per_day_str`-per-day rate would require roughly `{python} ExplanationStorage.image_log_tb_range_str` per month unless explanations are sampled, compressed, or retained for a shorter window. These volumes necessitate careful data lifecycle management and retention policies.
 
 Explainability spans the full machine learning lifecycle. During development, interpretability tools are used for dataset auditing, concept validation, and early debugging. At inference time, they support accountability, decision verification, and user communication. Postdeployment, explanations may be logged, surfaced in audits, or queried during error investigations. System design must support each of these phases, ensuring that explanation tools are integrated into training frameworks, model serving infrastructure, and user-facing applications.
 
@@ -1889,12 +2257,75 @@ This requires telemetry pipelines that capture model versioning, input character
 Monitoring also supports feedback-driven improvement. For example, repeated user disagreement, correction requests, or operator overrides can signal problematic behavior. This feedback must be aggregated, validated, and translated into updates to training datasets, data labeling processes, or model architecture. However, such feedback loops carry risks: biased user responses can introduce new inequities, and excessive logging can compromise privacy. Designing these loops requires careful coordination between user experience design, system security, and ethical governance.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-5mm}
+```
 ![](images/svg/responsible_ai_monitoring_scale.svg){width="100%" fig-alt="Three compact rows showing responsible AI monitoring scale: 150 metrics, 8.64 million events per day, and 7.5 false alerts per day."}
 
 *Responsible AI monitoring becomes its own production data system.*
 :::
 
-At the scale of a global production fleet, responsible AI monitoring becomes a massive data engineering challenge. A platform serving roughly 864 million inferences per day at 10,000 QPS across 50 distinct demographic subgroups must track at least 150 metrics continuously (for example, false positive rate, true positive rate, and calibration error for each of the 50 groups). Even with a 1 percent sampling rate, this generates 8.64 million monitoring events daily. Storing the necessary metadata---prediction inputs, confidence scores, ground truth labels, and sensitive attributes---at a modest 200 bytes per record requires approximately 1.7&nbsp;GB per day of storage, while full audit logging can consume substantially more. This scale introduces a meta-monitoring problem: the monitoring infrastructure itself becomes a complex distributed system that must be reliable, secure, and cost-effective. With 150 active metrics, a standard false alarm rate of just 5 percent would trigger roughly 7.5 spurious alerts every day, leading to severe alert fatigue. Effective monitoring therefore requires intelligent aggregation, hierarchical alerting logic, and automated root cause analysis to distinguish genuine fairness drift from statistical noise.
+```{python}
+#| echo: false
+#| label: monitoring-scale-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESPONSIBLE-AI MONITORING AT FLEET SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the monitoring-scale paragraph immediately below.
+# │
+# │ Goal: Size the data-engineering load of fleet-scale fairness monitoring.
+# │ Show: daily inferences (864 million), tracked metrics (150), sampled events
+# │       (8.64 million), daily storage (1.7 GB), and spurious alerts (7.5).
+# │ How: Load the serving rate, group/metric structure, sampling and record-size
+# │      assumptions (scenario); derive each downstream load.
+# │
+# │ Imports: from mlsysim import GB, byte;
+# │          from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_qty
+# │ Exports: MonitoringScale.qps_str, .inferences_str, .groups_str, .metrics_str,
+# │          .events_str, .storage_gb_str, .alerts_str, .bytes_per_record_str,
+# │          .sampling_pct_str, .false_alarm_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import GB, byte
+from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_qty
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MonitoringScale:
+    """Data-engineering load of fleet-scale fairness monitoring."""
+
+    # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────
+    qps = 10_000  # inference queries per second
+    seconds_per_day = 86_400
+    groups = 50  # demographic subgroups tracked
+    metrics_per_group = 3  # FPR, TPR, calibration error per group
+    sampling_rate = 0.01  # 1 percent of inferences logged
+    bytes_per_record = 200  # metadata footprint per logged event
+    false_alarm_rate = 0.05  # per-metric spurious-alert rate
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    inferences = qps * seconds_per_day  # 864 million/day
+    metrics = groups * metrics_per_group  # 150
+    events = inferences * sampling_rate  # 8.64 million/day
+    storage = (events * bytes_per_record) * byte  # 1.7 GB/day
+    alerts = metrics * false_alarm_rate  # 7.5/day
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(events < inferences, "Sampling must reduce the logged volume")
+    check(metrics > 0 and alerts > 0, "Metric and alert counts must be positive")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    qps_str = fmt(qps, precision=0)
+    inferences_str = fmt_count(inferences, scale='M', precision=0, scale_style='word')
+    groups_str = fmt(groups, precision=0, commas=False)
+    metrics_str = fmt(metrics, precision=0, commas=False)
+    events_str = fmt_count(events, scale='M', precision=2, scale_style='word')
+    storage_gb_str = fmt_qty(storage, GB, precision=1)
+    alerts_str = fmt(alerts, precision=1, commas=False)
+    bytes_per_record_str = fmt(bytes_per_record, precision=0, commas=False)
+    sampling_pct_str = fmt_percent(sampling_rate, precision=0, commas=False, style='prose')
+    false_alarm_pct_str = fmt_percent(false_alarm_rate, precision=0, commas=False, style='prose')
+```
+
+At the scale of a global production fleet, responsible AI monitoring becomes a massive data engineering challenge. A platform serving roughly `{python} MonitoringScale.inferences_str` inferences per day at `{python} MonitoringScale.qps_str` QPS across `{python} MonitoringScale.groups_str` distinct demographic subgroups must track at least `{python} MonitoringScale.metrics_str` metrics continuously (for example, false positive rate, true positive rate, and calibration error for each of the `{python} MonitoringScale.groups_str` groups). Even with a `{python} MonitoringScale.sampling_pct_str` sampling rate, this generates `{python} MonitoringScale.events_str` monitoring events daily. Storing the necessary metadata---prediction inputs, confidence scores, ground truth labels, and sensitive attributes---at a modest `{python} MonitoringScale.bytes_per_record_str` bytes per record requires approximately `{python} MonitoringScale.storage_gb_str` per day of storage, while full audit logging can consume substantially more. This scale introduces a meta-monitoring problem: the monitoring infrastructure itself becomes a complex distributed system that must be reliable, secure, and cost-effective. With `{python} MonitoringScale.metrics_str` active metrics, a standard false alarm rate of just `{python} MonitoringScale.false_alarm_pct_str` would trigger roughly `{python} MonitoringScale.alerts_str` spurious alerts every day, leading to severe alert fatigue. Effective monitoring therefore requires intelligent aggregation, hierarchical alerting logic, and automated root cause analysis to distinguish genuine fairness drift from statistical noise.
 
 Monitoring mechanisms vary by deployment architecture. In cloud-based systems, rich logging and compute capacity allow for real-time telemetry, scheduled fairness audits, and continuous integration of new data into retraining pipelines. These environments support dynamic reconfiguration and centralized policy enforcement. However, the volume of telemetry may introduce its own challenges in terms of cost, privacy risk, and regulatory compliance.
 
@@ -1938,7 +2369,7 @@ A hospital deployed a highly accurate sepsis prediction model, but mortality rat
 
 The previous section focused on technical tools for solving well-defined problems: algorithms for detecting bias, methods for preserving privacy, and techniques for generating explanations. The discussion shifts to challenges that cannot be solved with algorithms alone.
 
-The next sections examine how responsible AI systems interact with people, organizations, and competing values. This transition requires different reasoning skills: instead of optimizing objective functions, we analyze stakeholder conflicts; instead of tuning hyperparameters, we navigate ethical tradeoffs; instead of measuring technical performance, we assess social impact. These are the challenges of sociotechnical engineering: designing systems that must satisfy both computational constraints and human values.
+The next sections examine how responsible AI systems interact with people, organizations, and competing values. This transition requires different reasoning skills: instead of optimizing objective functions, we analyze stakeholder conflicts; instead of tuning hyperparameters, we navigate ethical trade-offs; instead of measuring technical performance, we assess social impact. These are the challenges of sociotechnical engineering: designing systems that must satisfy both computational constraints and human values.
 
 :::
 
@@ -1998,6 +2429,48 @@ Consider a hospital triage system that uses a machine learning model to prioriti
 
 In such systems, human oversight is not merely a matter of policy declaration, but a function of infrastructure design: how predictions are surfaced, what information is retained, how intervention is enacted, and how feedback loops connect human decisions to system updates. Without integration across these components, oversight becomes fragmented, and responsibility may shift invisibly from human to machine.
 
+```{python}
+#| echo: false
+#| label: automation-bias-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE AUTOMATION BIAS PARADOX (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the "automation bias paradox" worked-example callout below.
+# │
+# │ Goal: Quantify the residual failure rate when a human rubber-stamps AI errors.
+# │ Show: accepted-error failure probability (0.035) and combined sensitivity
+# │       (96.5 percent).
+# │ How: Load AI sensitivity and the acceptance rate (scenario); derive the
+# │      accepted-error failure probability and the upper-bound sensitivity.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
+# │ Exports: AutomationBias.fail_prob_math, .sensitivity_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AutomationBias:
+    """Residual failure rate from human acceptance of AI errors."""
+
+    # ┌── 1. LOAD (Scenario inputs) ───────────────────────────────────────
+    s_ai = 0.95  # AI sensitivity
+    alpha = 0.70  # rate at which the human accepts AI errors
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ai_error = 1 - s_ai  # 0.05
+    fail_prob = ai_error * alpha  # 0.035
+    sensitivity = 1 - fail_prob  # 0.965
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(0 < fail_prob < 1, "Accepted-error failure probability must be a fraction")
+    check(sensitivity < 1, "Rubber-stamped AI errors keep sensitivity below 100 percent")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    _fail_prob = fmt(fail_prob, precision=3, commas=False)
+    fail_prob_math = fmt_math(r"0.05 \times 0.7 = " + _fail_prob)
+    sensitivity_pct_str = fmt_percent(sensitivity, precision=1, commas=False, style='prose')
+```
+
 :::: {#nbk-responsible-ai-automation-bias-paradox .callout-notebook title="The automation bias paradox"}
 
 Consider a radiology department deploying an AI assistant for tumor detection.
@@ -2005,7 +2478,7 @@ Consider a radiology department deploying an AI assistant for tumor detection.
 - **Human sensitivity**: $S_{\text{human}} = 92\%$
 - **AI sensitivity**: $S_{\text{AI}} = 95\%$
 
-One might assume the combined system performance would exceed 95 percent. However, studies in automation bias show that humans accept erroneous AI recommendations at rates of $\alpha = 60\text{--}80\%$. If the AI makes an error (probability $1 - S_{\text{AI}} = 0.05$) and the human blindly accepts it ($\alpha = 0.7$), accepted AI errors alone create a failure probability of $0.05 \times 0.7 = 0.035$. In this simplified upper-bound case, where every non-accepted AI error is corrected, sensitivity is 96.5 percent; real workflows can do worse once human override errors, false positives, fatigue, and interface delays are included.
+One might assume the combined system performance would exceed 95 percent. However, studies in automation bias show that humans accept erroneous AI recommendations at rates of $\alpha = 60\text{--}80\%$. If the AI makes an error (probability $1 - S_{\text{AI}} = 0.05$) and the human blindly accepts it ($\alpha = 0.7$), accepted AI errors alone create a failure probability of `{python} AutomationBias.fail_prob_math`. In this simplified upper-bound case, where every non-accepted AI error is corrected, sensitivity is `{python} AutomationBias.sensitivity_pct_str`; real workflows can do worse once human override errors, false positives, fatigue, and interface delays are included.
 
 As AI reliability increases, human vigilance decreases---a phenomenon known as the paradox of reliability.
 
@@ -2060,19 +2533,19 @@ What constitutes a fair outcome for one stakeholder may be perceived as inequita
 
 Fairness is a particularly prominent site of value conflict. Fairness can be formalized in multiple, often incompatible ways. A model that satisfies demographic parity may violate equalized odds; a model that prioritizes individual fairness may undermine group-level parity. Choosing among these definitions is not purely a technical decision but a normative one, informed by domain context, historical patterns of discrimination, and the perspectives of those affected by model outcomes. In practice, multiple stakeholders, including engineers, users, auditors, and regulators, may hold conflicting views on which definitions are most appropriate and why.
 
-Value conflicts extend beyond fairness alone. Conflicts also arise between interpretability and predictive performance, privacy and personalization, or short-term utility and long-term consequences. These tradeoffs manifest differently depending on the systems deployment architecture, revealing how deeply value conflicts are tied to the design and operation of ML systems.
+Value conflicts extend beyond fairness alone. Conflicts also arise between interpretability and predictive performance, privacy and personalization, or short-term utility and long-term consequences. These trade-offs manifest differently depending on the systems deployment architecture, revealing how deeply value conflicts are tied to the design and operation of ML systems.
 
 Consider a voice-based assistant deployed on a mobile device. To enhance personalization, the system may learn user preferences locally, without sending raw data to the cloud. This design improves privacy and reduces latency, but it may also lead to performance disparities if users with underrepresented usage patterns receive less accurate or responsive predictions. One way to improve fairness would be to centralize updates using group-level statistics, but doing so introduces new privacy risks and may violate user expectations around local data handling. Here, the design must navigate among valid but competing values: privacy, fairness, and personalization.
 
 In cloud-based deployments, such as credit scoring platforms or recommendation engines, tensions often arise between transparency and proprietary protection. End users or regulators may demand clear explanations of why a decision was made, particularly in situations with significant consequences, but the models in use may rely on complex ensembles or proprietary training data. Revealing these internals may be commercially sensitive or technically infeasible. In such cases, the system must reconcile competing pressures for institutional accountability and business confidentiality.
 
-In edge systems, such as home security cameras or autonomous drones, resource constraints often dictate model selection and update frequency. Prioritizing low latency and energy efficiency may require deploying compressed or quantized models that are less robust to distribution shift or adversarial perturbations. More resilient models could improve safety, but they may exceed the system's memory budget or violate power constraints. Here, safety, efficiency, and maintainability must be balanced under hardware-imposed tradeoffs. Efficiency techniques and optimization methods are essential for implementing responsible AI in resource-constrained environments.
+In edge systems, such as home security cameras or autonomous drones, resource constraints often dictate model selection and update frequency. Prioritizing low latency and energy efficiency may require deploying compressed or quantized models that are less robust to distribution shift or adversarial perturbations. More resilient models could improve safety, but they may exceed the system's memory budget or violate power constraints. Here, safety, efficiency, and maintainability must be balanced under hardware-imposed trade-offs. Efficiency techniques and optimization methods are essential for implementing responsible AI in resource-constrained environments.
 
-On TinyML platforms, where models are deployed to microcontrollers with no persistent connectivity, tradeoffs are even more pronounced. A system may be optimized for static performance on a fixed dataset, but unable to incorporate new fairness constraints, retrain on updated inputs, or generate explanations once deployed. Hardware constraints fundamentally shape what responsible AI practices are feasible on resource-limited devices. The value conflict extends beyond what the model optimizes to encompass what the system can support postdeployment.
+On TinyML platforms, where models are deployed to microcontrollers with no persistent connectivity, trade-offs are even more pronounced. A system may be optimized for static performance on a fixed dataset, but unable to incorporate new fairness constraints, retrain on updated inputs, or generate explanations once deployed. Hardware constraints fundamentally shape what responsible AI practices are feasible on resource-limited devices. The value conflict extends beyond what the model optimizes to encompass what the system can support postdeployment.
 
 The recurring systems constraint is **Normative pluralism**\index{Normative Pluralism}, not an abstract philosophical challenge. Technical approaches such as multi-objective optimization, constrained training, and fairness-aware evaluation can help surface and formalize trade-offs, but they do not eliminate the need for judgment. Decisions about whose values to represent, which harms to mitigate, and how to balance competing objectives cannot be made algorithmically. They require deliberation, stakeholder input, and governance structures that extend beyond the model itself.
 
-Participatory and value-sensitive design methodologies offer potential paths forward. Rather than treating values as parameters to be optimized after deployment, these approaches seek to engage stakeholders during the requirements phase, define ethical tradeoffs explicitly, and trace how they are instantiated in system architecture. While no design process can satisfy all values simultaneously, systems that are transparent about their tradeoffs and open to revision are better positioned to sustain trust and accountability over time.
+Participatory and value-sensitive design methodologies offer potential paths forward. Rather than treating values as parameters to be optimized after deployment, these approaches seek to engage stakeholders during the requirements phase, define ethical trade-offs explicitly, and trace how they are instantiated in system architecture. While no design process can satisfy all values simultaneously, systems that are transparent about their trade-offs and open to revision are better positioned to sustain trust and accountability over time.
 
 Machine learning systems are not neutral tools. They embed and enact value judgments, whether explicitly specified or implicitly assumed. A commitment to responsible AI requires acknowledging this fact and building systems that reflect and respond to the ethical and social pluralism of their operational contexts.
 
@@ -2158,7 +2631,7 @@ Responsible AI requires sustained investment in practices such as subgroup perfo
 
 Responsibility is further complicated by ambiguity over ownership. In many organizations, no single team is responsible for ensuring that a system behaves ethically over time. Model performance may be owned by one team, user experience by another, data infrastructure by a third, and compliance by a fourth. When issues arise, including disparate impact in predictions or insufficient explanation quality, there may be no clear protocol for identifying root causes or coordinating mitigation. As a result, concerns raised by developers, users, or auditors may go unaddressed, not because of malicious intent, but due to lack of process and cross-functional alignment.
 
-Establishing effective organizational structures for responsible AI requires more than policy declarations. It demands operational mechanisms: designated roles with responsibility for ethical oversight, documented escalation pathways, accountability for postdeployment monitoring, and incentives that reward teams for ethical foresight and system maintainability. In some organizations, this may take the form of Responsible AI committees, cross-functional review boards, or model risk teams that work alongside developers throughout the model lifecycle. In others, domain experts or user advocates may be embedded into product teams to anticipate downstream impacts and evaluate value tradeoffs in context.
+Establishing effective organizational structures for responsible AI requires more than policy declarations. It demands operational mechanisms: designated roles with responsibility for ethical oversight, documented escalation pathways, accountability for postdeployment monitoring, and incentives that reward teams for ethical foresight and system maintainability. In some organizations, this may take the form of Responsible AI committees, cross-functional review boards, or model risk teams that work alongside developers throughout the model lifecycle. In others, domain experts or user advocates may be embedded into product teams to anticipate downstream impacts and evaluate value trade-offs in context.
 
 The responsibility for ethical system behavior is distributed across multiple constituencies, including industry, academia, civil society, and government. @Fig-human-centered-ai maps this distribution across nested layers of accountability, from individual teams implementing technical practices through organizational safety culture to industry-wide certification and government regulation [@shneiderman2022human; @shneiderman2020]. Within organizations, this distribution must be mirrored by mechanisms that connect technical design with strategic oversight and operational control. Without these linkages, responsibility becomes diffuse, and well-intentioned efforts may be undermined by systemic misalignment.\index{Layers of Responsibility}
 
@@ -2257,6 +2730,9 @@ class RepresentationTax:
 2. **Representation-tax scenario**: For `{python} RepresentationTax.subgroup_count_str`, at the midpoint of the cost range, `{python} RepresentationTax.subgroup_count_str` times `{python} RepresentationTax.images_per_subgroup_count_str` per subgroup times `{python} RepresentationTax.midpoint_cost_usd_str` per image yields `{python} RepresentationTax.acquisition_total_usd_m_str` in data acquisition alone.
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-22mm}
+```
 ![](images/svg/responsible_ai_representation_tax_ladder.svg){width="100%" fig-alt="Two-rung cost ladder comparing one subgroup at about 12.5 million dollars with ten subgroups at about 125 million dollars before harmonization overhead."}
 
 *Representation cost scales with subgroup coverage, not just dataset size.*
@@ -2280,21 +2756,21 @@ Improving data quality is therefore fundamentally a question of how responsibili
 
 ### Balancing competing objectives {#sec-responsible-ai-balancing-competing-objectives-088e}
 
-Machine learning system design is often framed as a process of optimization, improving accuracy, reducing loss, or maximizing utility. Yet in responsible ML practice, optimization must be balanced against a range of competing objectives, including fairness, interpretability, robustness, privacy, and resource efficiency. These objectives are not always aligned, and improvements in one dimension may entail tradeoffs in another. While these tensions are well understood in theory, managing them in real-world systems is a persistent and unresolved challenge.
+Machine learning system design is often framed as a process of optimization, improving accuracy, reducing loss, or maximizing utility. Yet in responsible ML practice, optimization must be balanced against a range of competing objectives, including fairness, interpretability, robustness, privacy, and resource efficiency. These objectives are not always aligned, and improvements in one dimension may entail trade-offs in another. While these tensions are well understood in theory, managing them in real-world systems is a persistent and unresolved challenge.
 
 Consider the trade-off between model accuracy and interpretability. In many cases, more interpretable models, including shallow decision trees and linear models, achieve lower predictive performance than complex ensemble methods or deep neural networks. In low-stakes applications, this trade-off may be acceptable, or even preferred. In high-stakes domains such as healthcare or finance, however, where decisions affect individuals' well-being or access to opportunity, teams are often caught between the demand for performance and the need for transparent reasoning. Even when interpretability is prioritized during development, it may be overridden at deployment in favor of marginal gains in model accuracy.
 
 Similar tensions emerge between personalization and fairness. A recommendation system trained to maximize user engagement may personalize aggressively, using fine-grained behavioral data to tailor outputs to individual users. While this approach can improve satisfaction for some users, it may entrench disparities across demographic groups, particularly if personalization draws on features correlated with race, gender, or socioeconomic status. Adding fairness constraints may reduce disparities at the group level, but at the cost of reducing perceived personalization for some users. These effects are often difficult to measure, and even more difficult to explain to product teams under pressure to optimize engagement metrics.
 
-Privacy introduces another set of constraints. Techniques such as differential privacy, federated learning, or local data minimization [@biega2020] can meaningfully reduce privacy risks. They also introduce noise, limit model capacity, or reduce access to training data. In centralized systems, these costs may be absorbed through infrastructure scaling or hybrid training architectures. In edge or TinyML deployments, however, the tradeoffs are more acute. A wearable device tasked with local inference must often balance model complexity, energy consumption, latency, and privacy guarantees simultaneously. Supporting one constraint typically weakens another, forcing system designers to prioritize among equally important goals. These tensions are further amplified by deployment-specific design decisions such as quantization levels, activation clipping, or compression strategies that affect how effectively models can support multiple objectives at once.
+Privacy introduces another set of constraints. Techniques such as differential privacy, federated learning, or local data minimization [@biega2020] can meaningfully reduce privacy risks. They also introduce noise, limit model capacity, or reduce access to training data. In centralized systems, these costs may be absorbed through infrastructure scaling or hybrid training architectures. In edge or TinyML deployments, however, the trade-offs are more acute. A wearable device tasked with local inference must often balance model complexity, energy consumption, latency, and privacy guarantees simultaneously. Supporting one constraint typically weakens another, forcing system designers to prioritize among equally important goals. These tensions are further amplified by deployment-specific design decisions such as quantization levels, activation clipping, or compression strategies that affect how effectively models can support multiple objectives at once.
 
-The tradeoffs are not purely technical; they reflect deeper normative judgments about what a system is designed to achieve and for whom, as explored in detail in @sec-responsible-ai-normative-pluralism-value-conflicts-d61f. Responsible ML development requires making these judgments explicit, evaluating them in context, and subjecting them to stakeholder input and institutional oversight.
+The trade-offs are not purely technical; they reflect deeper normative judgments about what a system is designed to achieve and for whom, as explored in detail in @sec-responsible-ai-normative-pluralism-value-conflicts-d61f. Responsible ML development requires making these judgments explicit, evaluating them in context, and subjecting them to stakeholder input and institutional oversight.
 
-What makes this challenge particularly difficult in implementation is that these competing objectives are rarely owned by a single team or function. Performance may be optimized by the modeling team, fairness monitored by a responsible AI group, and privacy handled by legal or compliance departments. Without deliberate coordination, system-level tradeoffs can be made implicitly, piecemeal, or without visibility into long-term consequences. Over time, the result may be a model that appears well-behaved in isolation but fails to meet its ethical goals when embedded in production infrastructure.
+What makes this challenge particularly difficult in implementation is that these competing objectives are rarely owned by a single team or function. Performance may be optimized by the modeling team, fairness monitored by a responsible AI group, and privacy handled by legal or compliance departments. Without deliberate coordination, system-level trade-offs can be made implicitly, piecemeal, or without visibility into long-term consequences. Over time, the result may be a model that appears well-behaved in isolation but fails to meet its ethical goals when embedded in production infrastructure.
 
-Balancing competing objectives requires not only technical fluency but a commitment to transparency, deliberation, and alignment across teams. Systems must be designed to surface tradeoffs rather than obscure them, to make room for constraint-aware development rather than pursue narrow optimization. In practice, this may require redefining what "success" looks like, not as performance on a single metric, but as sustained alignment between system behavior and its intended role in a broader social or operational context.
+Balancing competing objectives requires not only technical fluency but a commitment to transparency, deliberation, and alignment across teams. Systems must be designed to surface trade-offs rather than obscure them, to make room for constraint-aware development rather than pursue narrow optimization. In practice, this may require redefining what "success" looks like, not as performance on a single metric, but as sustained alignment between system behavior and its intended role in a broader social or operational context.
 
-Across these first three challenges (organizational structures, data quality, and competing objectives), a pattern emerges: responsible AI failure rarely stems from technical ignorance. Teams understand fairness metrics, privacy techniques, and bias mitigation methods. Instead, failure occurs at the intersection of organizational fragmentation that distributes responsibility without accountability, data constraints that create technical barriers even with clear intentions, and competing objectives that force normative tradeoffs disguised as technical problems. When modeling teams optimize performance, compliance teams address privacy, and product teams prioritize engagement independently, system-level ethical behavior emerges by accident rather than design. These are fundamentally sociotechnical governance problems requiring clear ownership structures that span organizational boundaries, data infrastructure designed for ethical auditing, and deliberative processes for making value tradeoffs explicit. These challenges become even more acute when systems must maintain responsible behavior at scale over time.
+Across these first three challenges (organizational structures, data quality, and competing objectives), a pattern emerges: responsible AI failure rarely stems from technical ignorance. Teams understand fairness metrics, privacy techniques, and bias mitigation methods. Instead, failure occurs at the intersection of organizational fragmentation that distributes responsibility without accountability, data constraints that create technical barriers even with clear intentions, and competing objectives that force normative trade-offs disguised as technical problems. When modeling teams optimize performance, compliance teams address privacy, and product teams prioritize engagement independently, system-level ethical behavior emerges by accident rather than design. These are fundamentally sociotechnical governance problems requiring clear ownership structures that span organizational boundaries, data infrastructure designed for ethical auditing, and deliberative processes for making value trade-offs explicit. These challenges become even more acute when systems must maintain responsible behavior at scale over time.
 
 ### Scalability and maintenance {#sec-responsible-ai-scalability-maintenance-a1ca}
 
@@ -2324,7 +2800,7 @@ Responsible AI evaluation also suffers from a mismatch between the unit of analy
 
 Further complicating matters is the lack of lifecycle-aware metrics. Most evaluation tools are applied at a single point in time, often just before deployment. Yet responsible AI properties such as fairness and robustness are dynamic. They depend on how data distributions evolve, how models are updated, and how users interact with the system. Without continuous or periodic evaluation, it is difficult to determine whether a system remains aligned with its intended ethical goals after deployment. Postdeployment monitoring tools exist, but they are rarely integrated with the development-time metrics used to assess initial model quality. This disconnect makes it hard to detect drift in ethical performance, or to trace observed harms back to their upstream sources.
 
-Tool fragmentation further contributes to these challenges. Responsible AI tooling is often distributed across disconnected packages, dashboards, or internal systems, each designed for a specific task or metric. A team may use one tool for explainability, another for bias detection, and a third for compliance reporting, with no unified interface for reasoning about system-level tradeoffs. The lack of interoperability hinders collaboration between teams, complicates documentation, and increases the risk that important evaluations will be skipped or performed inconsistently. These challenges are compounded by missing hooks for metadata propagation or event logging across components like feature stores, inference gateways, and model registries.
+Tool fragmentation further contributes to these challenges. Responsible AI tooling is often distributed across disconnected packages, dashboards, or internal systems, each designed for a specific task or metric. A team may use one tool for explainability, another for bias detection, and a third for compliance reporting, with no unified interface for reasoning about system-level trade-offs. The lack of interoperability hinders collaboration between teams, complicates documentation, and increases the risk that important evaluations will be skipped or performed inconsistently. These challenges are compounded by missing hooks for metadata propagation or event logging across components like feature stores, inference gateways, and model registries.
 
 The failed-transfer case introduced above is the concrete shape of the problem: a model certified fair under demographic parity on one benchmark can fail equalized odds in a new domain or jurisdiction, so the certification does not travel with the model. Closing that gap requires evaluation criteria that are measurable and auditable across domains, applied to full system pipelines rather than isolated models, and re-run as a recurring lifecycle activity so a passing result at launch does not silently expire as distributions drift. Until those practices are shared rather than ad hoc, responsible AI remains described in principles but difficult to verify in practice.
 
@@ -2345,13 +2821,13 @@ Four decision heuristics guide these trade-offs in practice:
 
 | **Deployment Context**                   | **Primary** **Principles** | **Implementation Priority**                                          | **Acceptable Trade-offs**                                                                                     |
 |:-----------------------------------------|:--------------------------:|:---------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|
-| **High-Stakes Individual Decisions**     |         Fairness,          | Mandatory fairness metrics                                           | Accept 2--5 percent accuracy reduction for                                                                    |
+| **High-Stakes Individual Decisions**     |         Fairness,          | Mandatory fairness metrics                                           | Accept 2--5% accuracy reduction for                                                                           |
 | **(healthcare diagnosis, credit/loans,** |      Explainability,       | across protected groups;                                             | interpretability; 20--100 ms latency for                                                                      |
 | **criminal justice, employment)**        |       Accountability       | explainability for negative outcomes; human oversight for edge cases | explanations; higher computational costs                                                                      |
 | **Safety-Critical Systems**              |          Safety,           | Certified adversarial                                                | Accept significant training overhead                                                                          |
-| **(autonomous vehicles, medical**        |        Robustness,         | defenses; formal validation;                                         | (100--300 percent for adversarial training);                                                                  |
+| **(autonomous vehicles, medical**        |        Robustness,         | defenses; formal validation;                                         | (100--300% for adversarial training);                                                                         |
 | **devices, industrial control)**         |       Accountability       | failsafe mechanisms; comprehensive logging                           | conservative confidence thresholds; redundant inference                                                       |
-| **Privacy-Sensitive Applications**       |          Privacy,          | Differential privacy                                                 | Accept 2--5 percent accuracy loss for DP; higher                                                              |
+| **Privacy-Sensitive Applications**       |          Privacy,          | Differential privacy                                                 | Accept 2--5% accuracy loss for DP; higher                                                                     |
 | **(health records, financial data,**     |         Security,          | (ε≤1.0); local processing;                                           | client-side compute; limited model                                                                            |
 | **personal communications)**             |        Transparency        | data minimization; user consent mechanisms                           | updates; reduced personalization                                                                              |
 | **Large-Scale Consumer Systems**         |         Fairness,          | Bias monitoring across                                               | Balance explainability costs against                                                                          |
@@ -2421,7 +2897,7 @@ The consequences of autonomous systems operating with limited real-time human ov
 
 While autonomous driving systems are often the focal point of public concern, similar risks arise in other domains. Reports from recent conflicts have documented increasing use of remotely piloted and autonomous military systems [@reuters2023humanmachine], raising not only safety and effectiveness concerns but also difficult questions about ethical oversight, rules of engagement, and responsibility. When autonomous systems fail, the question of who should be held accountable remains both legally and ethically unresolved [@cigi2023autonomous].
 
-At its core, this challenge reflects a deeper tension between human and machine autonomy. Engineering and computer science disciplines have historically emphasized machine autonomy, improving system performance, minimizing human intervention, and maximizing automation. A bibliometric analysis of the ACM Digital Library found that, as of 2019, 90 percent of the most cited papers referencing "autonomy" focused on machine, rather than human, autonomy [@calvo2020supporting]. Productivity, efficiency, and automation have been widely treated as default objectives, often without interrogating the assumptions or tradeoffs they entail for human agency and oversight.
+At its core, this challenge reflects a deeper tension between human and machine autonomy. Engineering and computer science disciplines have historically emphasized machine autonomy, improving system performance, minimizing human intervention, and maximizing automation. A bibliometric analysis of the ACM Digital Library found that, as of 2019, 90 percent of the most cited papers referencing "autonomy" focused on machine, rather than human, autonomy [@calvo2020supporting]. Productivity, efficiency, and automation have been widely treated as default objectives, often without interrogating the assumptions or trade-offs they entail for human agency and oversight.
 
 However, these goals can place human interests at risk when systems operate in dynamic, uncertain environments where full specification of safe behavior is infeasible. This difficulty is formally captured by the frame problem and qualification problem, both of which highlight the impossibility of enumerating all the preconditions and contingencies needed for real-world action to succeed [@mccarthy1981]. The frame problem asks which facts in the world remain relevant after an action; the qualification problem asks which hidden preconditions must hold before the action is safe. In practice, such limitations manifest as brittle autonomy: systems that appear competent under nominal conditions but fail silently or dangerously when faced with ambiguity or distributional shift.
 
@@ -2613,12 +3089,12 @@ class FairnessGapCalc:
 
 The worked example reports disaggregated fairness metrics\index{Disaggregated Fairness Metrics}, including false positive rate\index{False Positive Rate}, so the same prediction table can satisfy one criterion while failing others.
 
-| **Metric**                    | **Definition**                    |   **A**    |   **B**    |                    **Gap**                     |
-|:------------------------------|:----------------------------------|:----------:|:----------:|:----------------------------------------------:|
-| **Approval Rate**             | (TP + FP) divided by total        | 55 percent | 40 percent | `{python} FairnessGapCalc.approval_gap_pp_str` |
-| **True Positive Rate**        | TP divided by positives           | 90 percent | 60 percent |   `{python} FairnessGapCalc.tpr_gap_pp_str`    |
-| **False Positive Rate**       | FP divided by negatives           | 20 percent | 20 percent |   `{python} FairnessGapCalc.fpr_gap_pp_str`    |
-| **Positive Predictive Value** | TP divided by predicted positives | 82 percent | 75 percent |   `{python} FairnessGapCalc.ppv_gap_pp_str`    |
+| **Metric**                    | **Definition**                    | **A** | **B** |                    **Gap**                     |
+|:------------------------------|:----------------------------------|:-----:|:-----:|:----------------------------------------------:|
+| **Approval Rate**             | (TP + FP) divided by total        |  55%  |  40%  | `{python} FairnessGapCalc.approval_gap_pp_str` |
+| **True Positive Rate**        | TP divided by positives           |  90%  |  60%  |   `{python} FairnessGapCalc.tpr_gap_pp_str`    |
+| **False Positive Rate**       | FP divided by negatives           |  20%  |  20%  |   `{python} FairnessGapCalc.fpr_gap_pp_str`    |
+| **Positive Predictive Value** | TP divided by predicted positives |  82%  |  75%  |   `{python} FairnessGapCalc.ppv_gap_pp_str`    |
 
 : **Disaggregated Fairness Metrics**: A hypothetical loan approval system satisfies equalized false positive rates (`{python} FairnessGapCalc.fpr_gap_pp_str` gap) but violates demographic parity (`{python} FairnessGapCalc.approval_gap_pp_str` approval gap) and equal opportunity (`{python} FairnessGapCalc.tpr_gap_pp_str` TPR gap). The metrics expose incompatible operational priorities, so production systems must make explicit choices about which fairness criterion to prioritize. {#tbl-responsible-ai-fairness-summary}
 
@@ -2637,6 +3113,8 @@ The impossibility theorems formalized in this chapter make explicit what practit
 * **The right to be forgotten**: Privacy preservation includes the temporal dimension. Machine unlearning can help organizations reduce or remove the influence of specific users from trained models when deletion rights apply, without always retraining from scratch.
 
 :::
+
+Every constraint in this book until now has had an optimum. Latency, memory, energy, even robustness could be measured, traded, and pushed toward a best achievable point, and the engineer's job was to find it. Fairness is the first constraint with no such point, because the chapter's impossibility result is not a gap to be closed but a fork in the road. That changes the job. The engineer can quantify each branch and hold the system to whichever is taken, but the taking is a human, normative act that no metric performs, and the most honest thing engineering can do here is refuse to disguise the choice as a calculation.
 
 ::: {.callout-chapter-connection title="From responsibility to synthesis"}
 

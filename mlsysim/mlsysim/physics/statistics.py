@@ -11,9 +11,9 @@ def calc_population_stability_index(expected, actual, epsilon=1e-12):
     Measures distribution drift between a reference ("expected") and an
     observed ("actual") binned distribution:
     ``PSI = sum_i (actual_i - expected_i) * ln(actual_i / expected_i)``
-    (the symmetrized KL divergence). Standard credit-risk/monitoring rule of
-    thumb: PSI < 0.1 = stable, 0.1-0.25 = moderate shift, > 0.25 = significant
-    drift requiring investigation.
+    (the symmetrized KL divergence). Interpretation thresholds live in
+    ``Ops.Monitoring`` (the single source of truth the book follows:
+    0.10 warn / 0.20 review / 0.25 critical) — do not restate bands here.
 
     Parameters
     ----------
@@ -68,6 +68,10 @@ def calc_two_proportion_sample_size(baseline_rate, detectable_lift, z_alpha=1.96
     """
     p = float(baseline_rate)
     delta = float(detectable_lift)
+    if not 0.0 < p < 1.0:
+        raise ValueError(f"baseline_rate must be in (0, 1), got {p}")
+    if delta <= 0.0:
+        raise ValueError(f"detectable_lift must be > 0, got {delta}")
     variance = p * (1 - p)
     return 2 * (float(z_alpha) + float(z_beta)) ** 2 * variance / delta ** 2
 

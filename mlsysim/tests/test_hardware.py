@@ -48,6 +48,18 @@ def test_nvlink_on_cloud_gpus():
     assert Hardware.Cloud.B200.nvlink.bandwidth.m_as(GB / second) == 1800.0
 
 
+def test_h100_die_area_is_registry_backed():
+    assert Hardware.Cloud.H100.die_area is not None
+    assert Hardware.Cloud.H100.die_area.m_as("mm^2") == pytest.approx(814.0)
+
+
+def test_h100_unit_cost_range_is_registry_backed():
+    assert Hardware.Cloud.H100.unit_cost is not None
+    assert Hardware.Cloud.H100.unit_cost_max is not None
+    assert Hardware.Cloud.H100.unit_cost.m_as("USD") == pytest.approx(25_000)
+    assert Hardware.Cloud.H100.unit_cost_max.m_as("USD") == pytest.approx(30_000)
+
+
 def test_memory_tech_bandwidth_tiers():
     """Memory-interface bandwidth tiers live in Hardware.Tech.Memory."""
     from mlsysim.core.units import GB, second
@@ -56,3 +68,24 @@ def test_memory_tech_bandwidth_tiers():
     assert Hardware.Tech.Memory.HBM2.bandwidth.m_as(GB / second) == pytest.approx(900)
     assert Hardware.Tech.Memory.HBM3.bandwidth.m_as(GB / second) == pytest.approx(1600)
     assert Hardware.Tech.Memory.GDDR6X.bandwidth.m_as(GB / second) == pytest.approx(760)
+
+
+def test_interconnect_direction_convention():
+    """2026-06-10 audit (findings_provenance.md M1/M2): NVLink datasheet
+    figures are bidirectional totals; PCIe figures are per-direction. The
+    schema must declare the convention and the per-direction accessor must
+    halve only the bidirectional entries."""
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.core.units import ureg
+
+    h100 = Hardware.Cloud.H100
+    assert h100.nvlink.direction == "bidirectional_total"
+    assert h100.nvlink.bandwidth.m_as("GB/s") == 900.0
+    assert h100.nvlink.bandwidth_per_direction.m_as("GB/s") == 450.0
+    # PCIe stays per-direction: accessor is the identity
+    assert h100.interconnect.direction == "per_direction"
+    assert h100.interconnect.bandwidth_per_direction == h100.interconnect.bandwidth
+    # All NVLink-family entries are tagged
+    for dev in ("V100", "A100", "H200", "B200", "TPUv5p"):
+        nv = getattr(Hardware.Cloud, dev).nvlink
+        assert nv.direction == "bidirectional_total", dev

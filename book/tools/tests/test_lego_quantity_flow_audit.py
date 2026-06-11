@@ -5,11 +5,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from book.cli.checks.lego_prose_literals import check_file as check_prose_literals
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "book" / "tools" / "audit"))
 
 from book_check_lego_quantity_flow import check_file  # noqa: E402
-from book_check_lego_prose_literals import check_file as check_prose_literals  # noqa: E402
 
 
 def _write_qmd(tmp_path: Path, body: str) -> Path:

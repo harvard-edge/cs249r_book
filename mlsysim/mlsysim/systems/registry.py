@@ -44,7 +44,7 @@ class Nodes(Registry):
         name="DGX H100",
         accelerator=Hardware.Cloud.H100,
         accelerators_per_node=8,
-        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
         host_memory=2 * TB,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
@@ -53,7 +53,7 @@ class Nodes(Registry):
         name="DGX A100",
         accelerator=Hardware.Cloud.A100,
         accelerators_per_node=8,
-        intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
@@ -61,7 +61,7 @@ class Nodes(Registry):
         name="DGX B200",
         accelerator=Hardware.Cloud.B200,
         accelerators_per_node=8,
-        intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth_per_direction,
         nics_per_node=8,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
@@ -69,7 +69,7 @@ class Nodes(Registry):
         name="Kempner H100 4-GPU Server",
         accelerator=Hardware.Cloud.H100,
         accelerators_per_node=4,
-        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=4,
         metadata=Metadata(
             provenance=pc.KEMPNER_AI_CLUSTER_H100,
@@ -284,8 +284,10 @@ class NetworkEnergy(Registry):
 
     Per5gMb = sourced_qty(100 * ureg.millijoule / MB, pc.NETWORK_ENERGY_ANCHORS,
         name="5G transfer energy per MB", description="Approximate radio-access energy to move 1 MB over 5G.")
-    Per1Kb = sourced_qty(1_000_000 * ureg.picojoule, pc.NETWORK_ENERGY_ANCHORS,
-        name="Network energy per KB", description="Approximate energy to move 1 KB across a datacenter network (~1 µJ).")
+    # (2026-06-10 audit: Per1Kb deleted — zero consumers, and its 1,000
+    # pJ/byte contradicted Hardware.Tech.Movement.Network's canonical
+    # 10,000 pJ/byte 10x. Datacenter-network movement energy lives in
+    # Hardware.Tech.Movement; do not re-add a competing anchor here.)
     NvlinkEnergyPerBit = sourced_qty(7.5 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
         name="NVLink energy per bit", description="Representative midpoint of a 5--10 pJ/bit NVLink transfer envelope.")
     InfiniBandEnergyPerBit = sourced_qty(35 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,

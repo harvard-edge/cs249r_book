@@ -346,11 +346,15 @@ from mlsysim.fmt import fmt, check, fmt_qty
 class CommAlgorithmSelection:
     from mlsysim import Hardware
 
-    ib_ndr_beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth
-    nvlink_to_ndr_ratio = (nvlink_h100_bw / ib_ndr_beta).to_base_units().magnitude
+    ib_ndr_beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port (per direction)
+    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s bidirectional aggregate (spec)
+    nvlink_h100_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way
+    # Like-with-like cliff, both per-direction: 450/50 = 9x. (Comparing the
+    # 900 GB/s bidirectional total against a per-port rate would give a
+    # spurious 18x by mixing conventions.)
+    nvlink_to_ndr_ratio = (nvlink_h100_perdir / ib_ndr_beta).to_base_units().magnitude
 
-    check(abs(nvlink_to_ndr_ratio - 18) < 1e-9, "NVLink/NDR ratio should be 18x")
+    check(abs(nvlink_to_ndr_ratio - 9) < 1e-9, "Per-direction NVLink/NDR ratio should be 9x")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     nvlink_bw_gb_per_s_str = fmt_qty(nvlink_h100_bw, GB / second, precision=0, commas=False)
@@ -361,7 +365,7 @@ class CommAlgorithmSelection:
 
 Modern clusters have a two-level topology: GPUs within a node are connected by NVLink (`{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str`), while nodes are connected by InfiniBand (`{python} CommAlgorithmSelection.ib_ndr_beta_gb_per_s_str`). Hierarchical AllReduce exploits this asymmetry in three phases:
 
-1. **Intra-node reduce** (NVLink): Each node reduces its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs to a single result using NVLink's `{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str` bandwidth. This is fast because NVLink is `{python} CommAlgorithmSelection.nvlink_to_ndr_ratio_mult_str` faster than InfiniBand NDR.
+1. **Intra-node reduce** (NVLink): Each node reduces its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs to a single result using NVLink's `{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str` bandwidth. This is fast because NVLink's per-direction rate is `{python} CommAlgorithmSelection.nvlink_to_ndr_ratio_mult_str` that of an InfiniBand NDR port.
 2. **Inter-node AllReduce** (InfiniBand): The per-node results are all-reduced across nodes. Only one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs participates, so the inter-node ring has one-eighth as many participants as a flat GPU-level ring.
 3. **Intra-node broadcast** (NVLink): Each node broadcasts the global result to its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs.
 
