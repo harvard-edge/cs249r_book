@@ -82,6 +82,49 @@ class ComputeTrend:
     list = entries  # parity with the Registry `.list` convention
 
 
+# ---------------------------------------------------------------------------
+# Edge-inference latency/energy scatter for @fig-edge-inference-landscape. A
+# multi-field series (device, latency, energy, tier), so it lives in Python like
+# ComputeTrend above. Values are published MLPerf Tiny / vendor measurements.
+# ---------------------------------------------------------------------------
+_EDGE_INFERENCE_PROVENANCE = Provenance(
+    kind=ProvenanceKind.LITERATURE,
+    ref=(
+        "MLPerf Tiny benchmark (Banbury et al. 2021) and vendor inference "
+        "benchmarks (Syntiant, STMicroelectronics, Google Coral, NVIDIA Jetson)"
+    ),
+    url="https://arxiv.org/abs/2106.07597",
+    verified="2026-06-11",
+)
+
+# (name, latency_ms, energy_uj, tier)  tier: 0 = MCU/ASIC, 1 = edge accelerator, 2 = edge GPU
+_EDGE_INFERENCE_ROWS = (
+    ("Syntiant Core 2\n(KWS, low-energy)", 4.4, 31.5, 0),
+    ("Syntiant Core 2\n(KWS, high-perf)", 1.5, 43.8, 0),
+    ("STM32N6 NPU\n(KWS, low-power)", 1.6, 156.5, 0),
+    ("STM32N6 NPU\n(IC, high-perf)", 2.9, 443.9, 0),
+    ("Syntiant Core 2\n(VWW)", 12.7, 71.7, 0),
+    ("Syntiant Core 2\n(IC)", 5.1, 139.4, 0),
+    ("Google Coral\nEdge TPU", 2.4, 4800, 1),
+    ("Jetson AGX Orin\n(ResNet-50)", 0.64, 15000, 2),
+)
+
+
+class EdgeInferenceBenchmarks:
+    """Published edge-inference latency (ms) and energy (uJ) by device and tier.
+
+    Source: see ``provenance``. Consumed by @fig-edge-inference-landscape.
+    Each entry is a dict ``{"name", "latency_ms", "energy_uj", "tier"}``.
+    """
+
+    provenance = _EDGE_INFERENCE_PROVENANCE
+    entries = tuple(
+        {"name": n, "latency_ms": l, "energy_uj": e, "tier": t}
+        for (n, l, e, t) in _EDGE_INFERENCE_ROWS
+    )
+    list = entries  # parity with the Registry `.list` convention
+
+
 class Literature(Registry):
     """Registry namespace for Literature."""
     Training = Training
@@ -94,3 +137,4 @@ class Literature(Registry):
     Crypto = Crypto
     ResponsibleAIOverhead = ResponsibleAIOverhead
     ComputeTrend = ComputeTrend
+    EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
