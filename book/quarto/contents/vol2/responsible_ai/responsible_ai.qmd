@@ -2136,7 +2136,56 @@ These requirements interact directly with deployment constraints and impose quan
 
 For resource-constrained environments, gradient-based attribution methods offer more efficient alternatives, typically adding only 10–50&nbsp;ms overhead per explanation by reusing backpropagation infrastructure from training. However, these methods are less reliable for complex models and may produce inconsistent explanations across model updates. Edge deployments often implement explainability through precomputed rule approximations or simplified decision boundaries, sacrificing explanation fidelity for feasible latency profiles under 100&nbsp;ms.
 
-Storage requirements also scale significantly with explanation needs. Storing SHAP values for tabular data requires approximately 4-8 bytes per feature per prediction, so monthly storage is 30 million predictions times the feature count times 4--8 bytes for a system logging 1 million predictions daily. Gradient attribution maps for images can require 1-10&nbsp;MB per explanation depending on resolution; logging every image explanation at the same 1 million-per-day rate would require roughly 30--300 TB per month unless explanations are sampled, compressed, or retained for a shorter window. These volumes necessitate careful data lifecycle management and retention policies.
+```{python}
+#| echo: false
+#| label: explanation-storage-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EXPLANATION-LOG STORAGE FOOTPRINT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the explanation-storage paragraph immediately below.
+# │
+# │ Goal: Size the monthly storage of logging every model explanation.
+# │ Show: per-feature SHAP byte range (4–8 bytes), monthly prediction volume
+# │       (30 million), per-image map range (1–10 MB), and the monthly image-log
+# │       footprint (30–300 TB).
+# │ How: Load the daily prediction rate and the per-explanation size ranges
+# │      (scenario); derive the monthly prediction count and TB footprint.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt_count, fmt_range
+# │ Exports: ExplanationStorage.predictions_per_day_str, .monthly_predictions_str,
+# │          .shap_bytes_range_str, .image_map_range_str, .image_log_tb_range_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_range
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ExplanationStorage:
+    """Monthly storage footprint of logging model explanations."""
+
+    # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────
+    predictions_per_day = 1_000_000
+    days_per_month = 30
+    shap_bytes_low, shap_bytes_high = 4, 8  # bytes per feature per prediction
+    image_map_mb_low, image_map_mb_high = 1, 10  # MB per gradient attribution map
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    monthly_predictions = predictions_per_day * days_per_month  # 30 million
+    # Logging every image explanation: monthly_predictions × MB-per-map → TB.
+    image_log_tb_low = monthly_predictions * image_map_mb_low / 1e6  # 30 TB
+    image_log_tb_high = monthly_predictions * image_map_mb_high / 1e6  # 300 TB
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(image_log_tb_high > image_log_tb_low, "TB range must be ordered")
+    check(monthly_predictions == 30_000_000, "Monthly volume must be 30 million")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    predictions_per_day_str = fmt_count(predictions_per_day, scale='M', precision=0, scale_style='word')
+    monthly_predictions_str = fmt_count(monthly_predictions, scale='M', precision=0, scale_style='word')
+    shap_bytes_range_str = fmt_range(shap_bytes_low, shap_bytes_high, unit='bytes', precision=0)
+    image_map_range_str = fmt_range(image_map_mb_low, image_map_mb_high, unit='MB', precision=0)
+    image_log_tb_range_str = fmt_range(image_log_tb_low, image_log_tb_high, unit='TB', precision=0)
+```
+
+Storage requirements also scale significantly with explanation needs. Storing SHAP values for tabular data requires approximately `{python} ExplanationStorage.shap_bytes_range_str` per feature per prediction, so monthly storage is `{python} ExplanationStorage.monthly_predictions_str` predictions times the feature count times `{python} ExplanationStorage.shap_bytes_range_str` for a system logging `{python} ExplanationStorage.predictions_per_day_str` predictions daily. Gradient attribution maps for images can require `{python} ExplanationStorage.image_map_range_str` per explanation depending on resolution; logging every image explanation at the same `{python} ExplanationStorage.predictions_per_day_str`-per-day rate would require roughly `{python} ExplanationStorage.image_log_tb_range_str` per month unless explanations are sampled, compressed, or retained for a shorter window. These volumes necessitate careful data lifecycle management and retention policies.
 
 Explainability spans the full machine learning lifecycle. During development, interpretability tools are used for dataset auditing, concept validation, and early debugging. At inference time, they support accountability, decision verification, and user communication. Postdeployment, explanations may be logged, surfaced in audits, or queried during error investigations. System design must support each of these phases, ensuring that explanation tools are integrated into training frameworks, model serving infrastructure, and user-facing applications.
 
