@@ -525,6 +525,17 @@ HSM_GPU_CRYPTO = _est(
     ),
 )
 
+RESPONSIBLE_AI_OVERHEAD = _est(
+    "prov:responsible-ai-overhead-benchmarks",
+    "Responsible-AI technique overheads (accuracy, training, inference, memory) across published benchmarks",
+    notes=(
+        "Synthesis of reported overheads for DP-SGD, fairness-aware training, SHAP/LIME "
+        "explainability, adversarial training, and federated learning. Ranges are "
+        "order-of-magnitude empirical findings across the responsible-AI efficiency "
+        "literature, not vendor specifications."
+    ),
+)
+
 ORCHESTRATION_ASSUMPTIONS = _est(
     "prov:mlsysim-orchestration-assumptions",
     "MLSysIM cluster orchestration defaults for utilization, queue discipline, and job duration",

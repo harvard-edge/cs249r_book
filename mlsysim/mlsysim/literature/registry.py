@@ -25,6 +25,7 @@ BatchSize = _load("batchsize", "BatchSize", "McCandlish et al. (2018) critical b
 Fairness = _load("fairness", "Fairness", "Buolamwini & Gebru (2018) Gender Shades intersectional error rates.")
 Surveys = _load("surveys", "Surveys", "Industry survey figures (CrowdFlower 2016 data-science time allocation).")
 Crypto = _load("crypto", "Crypto", "Security/crypto overhead anchors (TEE, FHE, HSM) for the security_privacy chapter.")
+ResponsibleAIOverhead = _load("rai_overhead", "ResponsibleAIOverhead", "Responsible-AI technique overhead ranges for the responsible_ai chapter.")
 
 
 # ---------------------------------------------------------------------------
@@ -91,4 +92,5 @@ class Literature(Registry):
     Fairness = Fairness
     Surveys = Surveys
     Crypto = Crypto
+    ResponsibleAIOverhead = ResponsibleAIOverhead
     ComputeTrend = ComputeTrend
