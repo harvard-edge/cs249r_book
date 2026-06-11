@@ -495,6 +495,36 @@ HBM_SOFT_ERROR_FIT_PER_MBIT = _est(
     url="https://tezzaron.com/media/soft_errors_1_1_secure.pdf",
 )
 
+FHE_OVERHEAD = _lit(
+    "prov:fhe-overhead-slowdown",
+    "Fully homomorphic encryption compute overhead, 2-6 orders of magnitude vs plaintext",
+    url="https://www.math-lock.com/benchmarks.html",
+    notes=(
+        "General-purpose FHE libraries (HElib, PALISADE) run 1e4-1e6x slower than "
+        "plaintext; the book uses 1e4x (10,000x) as a conservative low-end teaching figure."
+    ),
+)
+
+TEE_HARDWARE_SPECS = _est(
+    "prov:tee-hardware-specs",
+    "Trusted-execution-environment overheads (Intel SGX, ARM TrustZone) from vendor documentation",
+    notes=(
+        "SGX enclave page cache ~128 MB with ~100x paging penalty on overflow and 15-30 us "
+        "enclave transitions; TrustZone world switch ~300-1000 cycles and 15-30% secure-mode "
+        "power; mTLS handshake 15-30 ms. Order-of-magnitude figures from Intel SGX / ARM "
+        "TrustZone documentation and security-engineering literature."
+    ),
+)
+
+HSM_GPU_CRYPTO = _est(
+    "prov:hsm-gpu-crypto-throughput",
+    "HSM vs GPU RSA-2048 throughput and unit cost from security-engineering practice",
+    notes=(
+        "Enterprise HSMs ~10,000 RSA-2048 ops/s at $20k-$100k/unit; general-purpose GPUs "
+        "~100,000 ops/s at ~$1k; the ~10x throughput gap is the tamper-resistance tax."
+    ),
+)
+
 ORCHESTRATION_ASSUMPTIONS = _est(
     "prov:mlsysim-orchestration-assumptions",
     "MLSysIM cluster orchestration defaults for utilization, queue discipline, and job duration",

@@ -1720,7 +1720,43 @@ The mechanisms work best when they are composed across hardware, firmware, and s
 
 Modern ML systems require analysis of security trade-offs across the entire hardware-software stack, just as performance optimization analyzes compute, memory, and energy together. The interdependence between hardware security features and software defenses creates both opportunities and constraints that must be understood quantitatively.
 
-Hardware security mechanisms introduce measurable overhead that must be factored into system design. ARM TrustZone world-switching adds approximately 300--1000 cycles depending on processor generation and cache state (0.6--2.0 $\mu$s at 500MHz) of latency per transition between secure and nonsecure worlds. Cryptographic operations in secure mode typically consume 15--30 percent additional power compared to normal execution, impacting battery life in mobile ML applications. Intel SGX context switching imposes 15--30 $\mu$s overhead per inference, representing 2 percent energy overhead for typical edge ML workloads.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TEE WORLD-SWITCH / ENCLAVE OVERHEAD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: TrustZone world-switch and SGX context-switch overhead figures.
+# │ How: world-switch cycles / 500 MHz reference clock -> microseconds; registry ranges.
+# │ Exports: TeeOverheadSpecs.tz_cycles_low_str/_high_str, tz_us_low_str/_high_str,
+# │          tz_power_low_str/_high_str, sgx_ctx_low_str/_high_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt
+
+class TeeOverheadSpecs:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    tz_cycles_low = Literature.Crypto.TrustZoneWorldSwitchLowCycles
+    tz_cycles_high = Literature.Crypto.TrustZoneWorldSwitchHighCycles
+    tz_power_low_pct = Literature.Crypto.TrustZoneSecurePowerLowPct
+    tz_power_high_pct = Literature.Crypto.TrustZoneSecurePowerHighPct
+    sgx_ctx_low_us = Literature.Crypto.SgxContextSwitchLowUs
+    sgx_ctx_high_us = Literature.Crypto.SgxContextSwitchHighUs
+    clock_mhz = 500  # scenario: 500 MHz reference clock
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    tz_us_low = float(tz_cycles_low) / clock_mhz  # cycles / MHz = microseconds
+    tz_us_high = float(tz_cycles_high) / clock_mhz
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    tz_cycles_low_str = fmt(tz_cycles_low, precision=0, commas=False)
+    tz_cycles_high_str = fmt(tz_cycles_high, precision=0, commas=True)
+    tz_us_low_str = fmt(tz_us_low, precision=1, commas=False)
+    # 1000 cycles / 500 MHz = 2.0 us (integer-like); precision=0 avoids a dead decimal
+    tz_us_high_str = fmt(tz_us_high, precision=0, commas=False)
+    tz_power_low_str = fmt(tz_power_low_pct, precision=0, commas=False)
+    tz_power_high_str = fmt(tz_power_high_pct, precision=0, commas=False)
+    sgx_ctx_low_str = fmt(sgx_ctx_low_us, precision=0, commas=False)
+    sgx_ctx_high_str = fmt(sgx_ctx_high_us, precision=0, commas=False)
+```
+
+Hardware security mechanisms introduce measurable overhead that must be factored into system design. ARM TrustZone world-switching adds approximately `{python} TeeOverheadSpecs.tz_cycles_low_str`--`{python} TeeOverheadSpecs.tz_cycles_high_str` cycles depending on processor generation and cache state (`{python} TeeOverheadSpecs.tz_us_low_str`--`{python} TeeOverheadSpecs.tz_us_high_str` $\mu$s at 500MHz) of latency per transition between secure and nonsecure worlds. Cryptographic operations in secure mode typically consume `{python} TeeOverheadSpecs.tz_power_low_str`--`{python} TeeOverheadSpecs.tz_power_high_str` percent additional power compared to normal execution, impacting battery life in mobile ML applications. Intel SGX context switching imposes `{python} TeeOverheadSpecs.sgx_ctx_low_str`--`{python} TeeOverheadSpecs.sgx_ctx_high_str` $\mu$s overhead per inference, representing 2 percent energy overhead for typical edge ML workloads.
 
 ```{python}
 #| echo: false
@@ -1750,7 +1786,7 @@ class TEEMemoryFootprint:
     int8_bytes_q = BYTES_INT8
     sgx_epc_q = Hardware.Cloud.IntelSGX.memory.capacity
     sgx_latency_base_q = Hardware.Cloud.IntelSGX.dispatch_tax
-    epc_overflow_penalty = 100  # EPC cache misses cause roughly 100-times penalty
+    epc_overflow_penalty = Literature.Crypto.SgxEpcOverflowPenalty  # ~100x paging penalty on EPC overflow
     sgx_latency_overflow_q = sgx_latency_base_q * epc_overflow_penalty
     small_model_limit_q = 10 * MB  # scenario assumption: practical TEE fit threshold
 
@@ -1810,7 +1846,7 @@ class EncryptionOverhead:
     # ┌── 1. LOAD ──────────────────────────────────────────
     t_inference_q = 20 * ms  # scenario assumption: baseline plaintext inference
     overhead_aes_q = 0.5 * ms  # scenario assumption: AES-NI accelerated encryption
-    multiplier_fhe = 10000  # Fully Homomorphic Encryption overhead
+    multiplier_fhe = Literature.Crypto.FheOverheadMultiplier  # FHE overhead vs plaintext
     # ┌── 2. EXECUTE ───────────────────────────────────────
     t_aes_q = t_inference_q + overhead_aes_q
     t_fhe_q = t_inference_q * multiplier_fhe
@@ -2100,7 +2136,32 @@ HSMs also play a role in maintaining the integrity of machine learning models. I
 
 In addition to protecting inference workloads, HSMs can be used to secure model training. During training, data may originate from distributed and potentially untrusted sources. HSM-backed protocols can help ensure that training pipelines perform encryption, integrity checks, and access control enforcement securely and in compliance with organizational or legal requirements. In regulated industries such as healthcare and finance, such protections are often necessary to satisfy required safeguards. For instance, the HIPAA Security Rule requires technical safeguards such as access control, audit controls, integrity protections, and transmission security, while treating encryption and some integrity controls as addressable implementation specifications. GDPR lists pseudonymization and encryption as examples of appropriate technical and organizational measures where they fit the risk.
 
-These benefits are bought with a tamper-resistance tax. The dedicated, hardened silicon delivers roughly 10$\times$ lower cryptographic throughput than a general-purpose GPU at \$20,000--\$100,000+ per unit, and that single trade-off cascades into every constraint a resource-limited ML deployment cares about: the latency it adds to key exchange and on-the-fly decryption can break real-time inference budgets; its continuous secure operations draw power that shortens battery life on edge devices; its size and dedicated APIs force circuit-board and software redesign; and provisioning unique keys across a fleet of edge nodes turns identity management into a distributed-systems problem. Regulated deployments add a final cost: certification and compliance processes[^fn-hsm-certification] such as FIPS 140-2[^fn-fips-140] or Common Criteria can take longer than training the model the HSM protects.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HSM vs GPU CRYPTO THROUGHPUT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: HSM tamper-resistance tax = throughput gap vs a general-purpose GPU.
+# │ How: GPU RSA-2048 ops/s / HSM RSA-2048 ops/s; registry unit-cost range.
+# │ Exports: HsmGpuCrypto.throughput_ratio_str, hsm_cost_low_str, hsm_cost_high_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_multiple, fmt_usd
+
+class HsmGpuCrypto:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    hsm_ops = Literature.Crypto.HsmRsa2048OpsPerSec
+    gpu_ops = Literature.Crypto.GpuRsa2048OpsPerSec
+    hsm_cost_low = Literature.Crypto.HsmUnitCostLowUsd
+    hsm_cost_high = Literature.Crypto.HsmUnitCostHighUsd
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    throughput_ratio = float(gpu_ops) / float(hsm_ops)  # ~10x tamper-resistance tax
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    throughput_ratio_str = fmt_multiple(throughput_ratio, precision=0, commas=False)
+    hsm_cost_low_str = fmt_usd(float(hsm_cost_low), precision=0)
+    hsm_cost_high_str = fmt_usd(float(hsm_cost_high), precision=0)
+```
+
+These benefits are bought with a tamper-resistance tax. The dedicated, hardened silicon delivers roughly `{python} HsmGpuCrypto.throughput_ratio_str` lower cryptographic throughput than a general-purpose GPU at `{python} HsmGpuCrypto.hsm_cost_low_str`--`{python} HsmGpuCrypto.hsm_cost_high_str`+ per unit, and that single trade-off cascades into every constraint a resource-limited ML deployment cares about: the latency it adds to key exchange and on-the-fly decryption can break real-time inference budgets; its continuous secure operations draw power that shortens battery life on edge devices; its size and dedicated APIs force circuit-board and software redesign; and provisioning unique keys across a fleet of edge nodes turns identity management into a distributed-systems problem. Regulated deployments add a final cost: certification and compliance processes[^fn-hsm-certification] such as FIPS 140-2[^fn-fips-140] or Common Criteria can take longer than training the model the HSM protects.
 
 [^fn-hsm-certification]: **HSM Certification**\index{Hardware Security Module!certification}: FIPS 140-2 or Common Criteria certification takes 12–24 months and costs \$500,000--\$2 million per device family. Banking, government, and some healthcare procurement regimes may require Level 3+ certification for cryptographic operations. For ML systems in regulated industries, this certification timeline creates a deployment bottleneck: the HSM protecting model signing keys may take longer to certify than the model takes to train.
 

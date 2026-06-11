@@ -24,6 +24,7 @@ Communication = _load("communication", "Communication")
 BatchSize = _load("batchsize", "BatchSize", "McCandlish et al. (2018) critical batch size estimates.")
 Fairness = _load("fairness", "Fairness", "Buolamwini & Gebru (2018) Gender Shades intersectional error rates.")
 Surveys = _load("surveys", "Surveys", "Industry survey figures (CrowdFlower 2016 data-science time allocation).")
+Crypto = _load("crypto", "Crypto", "Security/crypto overhead anchors (TEE, FHE, HSM) for the security_privacy chapter.")
 
 
 # ---------------------------------------------------------------------------
@@ -89,4 +90,5 @@ class Literature(Registry):
     BatchSize = BatchSize
     Fairness = Fairness
     Surveys = Surveys
+    Crypto = Crypto
     ComputeTrend = ComputeTrend
