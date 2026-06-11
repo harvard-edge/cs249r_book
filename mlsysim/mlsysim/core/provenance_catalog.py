@@ -483,6 +483,18 @@ MEMORY_SOFT_ERROR_RATE = _est(
     notes="Used as a teaching-scale sanity anchor rather than a device-specific FIT rate.",
 )
 
+HBM_SOFT_ERROR_FIT_PER_MBIT = _est(
+    "prov:hbm-soft-error-fit-per-mbit",
+    "Unprotected HBM soft-error rate, low end of the published 200-5000 FIT/Mbit DRAM range",
+    notes=(
+        "Teaching-scale figure (250 FIT/Mbit) at the low end of the 200-5000 FIT/Mbit "
+        "DRAM soft-error range reported in the soft-error literature (Tezzaron, 'Soft "
+        "Errors in Electronic Memory'; en.wikipedia.org/wiki/Soft_error). Motivates why "
+        "unprotected HBM at fleet scale mandates ECC; not a device-specific datasheet value."
+    ),
+    url="https://tezzaron.com/media/soft_errors_1_1_secure.pdf",
+)
+
 ORCHESTRATION_ASSUMPTIONS = _est(
     "prov:mlsysim-orchestration-assumptions",
     "MLSysIM cluster orchestration defaults for utilization, queue discipline, and job duration",

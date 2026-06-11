@@ -313,7 +313,35 @@ $$R_{\text{system}}(t) = \prod_{i=1}^{N} R_i(t), \qquad \text{MTBF}_{\text{syste
 which is why adding components reduces system MTBF linearly. For **parallel systems**\index{Parallel Systems} providing redundancy (for example, active-active model replicas), failure occurs only when all redundant components fail simultaneously:
 $$R_{\text{system}}(t) = 1 - \prod_{i=1}^{N} (1 - R_i(t))$$
 
-Composition also exposes which subsystem dominates the budget, and memory is the consequential case. Consider training an Archetype A (GPT-4/Llama-3) 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs. Unprotected HBM is the binding term: at roughly 250 FIT per megabit, the cluster's $1,024 \times 80 \text{ GB}$ of memory accumulates so many failure sites that uncorrected corruption would strike every few tens of seconds, making large-scale training impossible. Error-correcting-code (ECC) memory protection is therefore not optional. ECC detects and corrects common single-bit errors, cutting the effective soft-error rate by roughly two orders of magnitude and pushing memory back below the logic and interconnect terms in the budget, though residual multi-bit or escaped corruptions remain (the silent-data-corruption problem developed later in this chapter).
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ UNPROTECTED-HBM SOFT-ERROR BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: Show why unprotected HBM at cluster scale corrupts memory every tens of seconds.
+# │ How: 250 FIT/Mbit x (1,024 x A100 HBM) megabits -> aggregate FIT -> mean time to first error.
+# │ Exports: HbmSerBudget.fit_per_mbit_str, HbmSerBudget.time_to_error_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_time, check
+
+class HbmSerBudget:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    ser_fit_per_mbit = Systems.Reliability.Hbm.soft_error_fit_per_mbit
+    cluster_gpus = Systems.Clusters.Training_1K.total_accelerators  # Archetype A 70B cluster
+    hbm_per_gpu = Hardware.Cloud.A100.memory.capacity
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    total_mbit = (cluster_gpus * hbm_per_gpu).to(bit).magnitude / 1e6
+    aggregate_fit = float(ser_fit_per_mbit) * total_mbit
+    failures_per_hour = aggregate_fit / BILLION  # FIT = failures per 1e9 device-hours
+    time_to_error_s = SEC_PER_HOUR / failures_per_hour
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(10 <= time_to_error_s <= 60, "Unprotected HBM should corrupt every tens of seconds at cluster scale")
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    fit_per_mbit_str = fmt(ser_fit_per_mbit, precision=0, commas=False)
+    time_to_error_str = fmt_time(round(time_to_error_s), 'second', precision=0, commas=False, style='word')
+```
+
+Composition also exposes which subsystem dominates the budget, and memory is the consequential case. Consider training an Archetype A (GPT-4/Llama-3) 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs. Unprotected HBM is the binding term: at roughly `{python} HbmSerBudget.fit_per_mbit_str` FIT per megabit, the cluster's $1,024 \times 80 \text{ GB}$ of memory accumulates so many failure sites that uncorrected corruption would strike roughly every `{python} HbmSerBudget.time_to_error_str`, making large-scale training impossible. Error-correcting-code (ECC) memory protection is therefore not optional. ECC detects and corrects common single-bit errors, cutting the effective soft-error rate by roughly two orders of magnitude and pushing memory back below the logic and interconnect terms in the budget, though residual multi-bit or escaped corruptions remain (the silent-data-corruption problem developed later in this chapter).
 
 These per-component FIT figures describe the silicon's intrinsic soft-error budget, which is why they differ from the 50,000-hour whole-device MTTF used in the worked cascade that follows: the device MTTF folds in every field failure mode (thermal stress, power events, mechanical wear), not just the logic and memory soft-error rates isolated here. The cascade composes those whole-device rates into the cluster figure that actually sets the checkpoint interval; this estimate only establishes why memory protection is the precondition for everything that follows.
 
