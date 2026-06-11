@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Phase A1 — classify all 18,439 vol1 annotations into editorial buckets.
 
-Reads ``~/Desktop/MIT_Press_Feedback/00_overview/data/all_annotations.json``
-and tags every entry with one of the buckets below plus a
+Reads ``00_overview/data/all_annotations.json`` from the configured
+release-audit data root and tags every entry with one of the buckets below plus a
 ``needs_locator`` flag indicating whether Phase B has to find the change in
 the current QMD source (vs. being verified by the audit scanner or handled
 by the typesetter).
 
-Output: ``~/Desktop/MIT_Press_Feedback/16_release_audit/ledgers/vol1-annotations-ground-truth.json``
-plus a per-chapter summary table.
+Output: ``ledgers/vol1-annotations-ground-truth.json`` plus a per-chapter
+summary table.
 
 This script is read-only with respect to the manuscript.
 """
@@ -16,14 +16,17 @@ This script is read-only with respect to the manuscript.
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections import Counter, defaultdict
-from pathlib import Path
 from typing import Any
 
-INPUT = Path.home() / "Desktop/MIT_Press_Feedback/00_overview/data/all_annotations.json"
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers"
+try:
+    from .paths import DATA_ROOT, LEDGER_DIR
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import DATA_ROOT, LEDGER_DIR
+
+INPUT = DATA_ROOT / "00_overview/data/all_annotations.json"
+OUT_DIR = LEDGER_DIR
 
 BUCKETS = [
     "bulk-emdash",

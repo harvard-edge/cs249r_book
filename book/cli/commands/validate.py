@@ -5279,7 +5279,7 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     # Contraction → full form. Body prose forbids contractions as a deliberate
-    # register choice (mit-press-editorial.md §10.11), overriding the copy
+    # register choice (.claude/rules/prose-craft.md), overriding the copy
     # editor's permissive "OK unless excessive." The lone exception is quoted
     # speech / direct dialogue, so we mask double-quoted spans before matching.
     CONTRACTION_EXPANSIONS = {
@@ -6708,9 +6708,8 @@ class ValidateCommand:
             semicolon, open paren, a lowercase word, or a plain-prose colon
             renders a stray capital ("...as Table 2 shows") and must be
             lowercased (@sec-, @fig-, ...). A colon is mid-sentence ONLY in
-            running prose ("...as follows: section 3 derives ..."), per MIT
-            Press house style (mit-press-editorial.md S10.4, which lowercases
-            generic section/figure/table refs in running text). A colon after
+            running prose ("...as follows: section 3 derives ..."), per
+            .claude/rules/cross-references.md prefix-casing style. A colon after
             a bold structural label ("**Setup**: @Fig- shows ...") instead
             begins a complete sentence (emphasis.md bold lead-in rule) and is
             classified as a sentence start.
@@ -6803,9 +6802,8 @@ class ValidateCommand:
                     #     ref is a sentence start and takes a capital prefix
                     #     (emphasis.md bold lead-in rule).
                     #   * in plain running prose ("...as follows: @sec-3 derives
-                    #     ...") the colon introduces a single clause, which
-                    #     mit-press-editorial.md §10.4 lowercases ("section 3"),
-                    #     so the ref is mid-sentence and takes a lowercase prefix.
+                    #     ...") the colon introduces a single clause, so the ref
+                    #     is mid-sentence and takes a lowercase prefix.
                     # Drop any \index{} tag before testing the label shape.
                     head = re.sub(r'\\index\{[^}]*\}', '', before[:-1]).strip()
                     is_label_leadin = bool(
