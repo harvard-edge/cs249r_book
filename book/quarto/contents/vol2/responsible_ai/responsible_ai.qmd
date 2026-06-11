@@ -753,6 +753,53 @@ For equalized odds, both true positive and false positive rate constraints must 
 
 However, threshold adjustment has limitations. If base rates differ substantially between groups (that is, $\Pr(Y=1 \mid A=a) \neq \Pr(Y=1 \mid A=b)$), achieving one fairness criterion through thresholding will necessarily violate others due to the impossibility theorems. The resulting accuracy cost can be quantified directly.
 
+```{python}
+#| echo: false
+#| label: cost-of-fairness-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE COST OF FAIRNESS — THRESHOLD SCENARIO (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the "Engineering metric: The cost of fairness" callout below.
+# │
+# │ Goal: Quantify the accuracy cost of enforcing demographic parity by threshold.
+# │ Show: scenario approval/accuracy percents and the derived 4 pp / 4.7 percent
+# │       relative accuracy drop.
+# │ How: Load the unconstrained and parity-constrained accuracies (scenario),
+# │      derive the absolute and relative drops.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt_pp, fmt_percent
+# │ Exports: CostOfFairness.tax_pp_str, .tax_relative_pct_str,
+# │          .approval_a_pct_str, .approval_b_pct_str,
+# │          .acc_unconstrained_pct_str, .acc_constrained_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_pp, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CostOfFairness:
+    """Accuracy cost of enforcing demographic parity via group thresholds."""
+
+    # ┌── 1. LOAD (Scenario inputs) ───────────────────────────────────────
+    approval_a = 0.80  # majority approval at threshold 60
+    approval_b = 0.60  # minority approval at threshold 60 (unconstrained)
+    acc_unconstrained = 0.85  # max-profit accuracy
+    acc_constrained = 0.81  # parity-constrained accuracy
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    tax = acc_unconstrained - acc_constrained  # 0.04
+    tax_relative = tax / acc_unconstrained  # 0.047
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(tax > 0, "Parity constraint reduces overall accuracy")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tax_pp_str = fmt_pp(tax * 100, precision=0, commas=False)
+    tax_relative_pct_str = fmt_percent(tax_relative, precision=1, commas=False, style='prose')
+    approval_a_pct_str = fmt_percent(approval_a, precision=0, commas=False, style='prose')
+    approval_b_pct_str = fmt_percent(approval_b, precision=0, commas=False, style='prose')
+    acc_unconstrained_pct_str = fmt_percent(acc_unconstrained, precision=0, commas=False, style='prose')
+    acc_constrained_pct_str = fmt_percent(acc_constrained, precision=0, commas=False, style='prose')
+```
+
 ::: {#exmp-responsible-ai-engineering-metric-cost-fairness .callout-example title="Engineering metric: The cost of fairness"}
 
 **Trade-off**: Satisfying a fairness constraint often requires deviating from the optimal accuracy threshold. This deviation is the "fairness tax."
@@ -765,16 +812,16 @@ However, threshold adjustment has limitations. If base rates differ substantiall
 **Unconstrained optimization (max profit)**:
 
 *   $\text{Threshold} = 60$ for everyone.
-*   $\text{Approval}_A = 80\%$, $\text{Approval}_B = 60\%$.
-*   $\text{Accuracy} = 85\%$.
+*   $\text{Approval}_A =$ `{python} CostOfFairness.approval_a_pct_str`, $\text{Approval}_B =$ `{python} CostOfFairness.approval_b_pct_str`.
+*   $\text{Accuracy} =$ `{python} CostOfFairness.acc_unconstrained_pct_str`.
 
 **Fairness constrained (demographic parity)**:
 
-*   Constraint: Group B Approval must equal Group A (80 percent).
+*   Constraint: Group B Approval must equal Group A (`{python} CostOfFairness.approval_a_pct_str`).
 *   New $\text{Threshold}_B = 50$.
-*   **Result**: Group B false positives increase. Overall accuracy drops to 81 percent.
+*   **Result**: Group B false positives increase. Overall accuracy drops to `{python} CostOfFairness.acc_constrained_pct_str`.
 
-**Systems insight**: The "Cost of Fairness" is 4 percentage points of accuracy, about a 4.7 percent relative accuracy drop in this scenario. The engineering decision requires weighing this measured accuracy trade-off against social equity gains.
+**Systems insight**: The "Cost of Fairness" is `{python} CostOfFairness.tax_pp_str` of accuracy, about a `{python} CostOfFairness.tax_relative_pct_str` relative accuracy drop in this scenario. The engineering decision requires weighing this measured accuracy trade-off against social equity gains.
 
 :::
 
@@ -869,6 +916,63 @@ Similar tests can be constructed for equal opportunity and equalized odds by res
 
 The quantitative framework developed here transforms fairness from an abstract principle into measurable engineering constraints. By establishing metrics, thresholds, and statistical tests, practitioners can systematically evaluate fairness throughout the ML lifecycle and make data-driven decisions about when intervention is required.
 
+```{python}
+#| echo: false
+#| label: confusion-matrix-audit-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AUDITING A CONFUSION MATRIX (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the "Auditing a confusion matrix" worked-example callout below.
+# │
+# │ Goal: Score demographic parity and equal opportunity on a two-group fraud
+# │       confusion matrix.
+# │ How: Load each group's TP/FP/FN/TN counts (scenario), derive the positive
+# │      prediction rate, the four-fifths ratio, the TPR, and both gaps.
+# │
+# │ Imports: from mlsysim.fmt import check, fmt, fmt_math
+# │ Exports: ConfusionMatrixAudit.ppr_a_math, .ppr_b_math, .parity_gap_str,
+# │          .four_fifths_math, .tpr_a_math, .tpr_b_math, .tpr_gap_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_math
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ConfusionMatrixAudit:
+    """Demographic parity and equal opportunity on a fraud confusion matrix."""
+
+    # ┌── 1. LOAD (Per-group confusion counts, scenario inputs) ────────────
+    a_tp, a_fp, a_fn, a_tn = 450, 50, 30, 470
+    b_tp, b_fp, b_fn, b_tn = 180, 70, 120, 630
+    a_n = a_tp + a_fp + a_fn + a_tn
+    b_n = b_tp + b_fp + b_fn + b_tn
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ppr_a = (a_tp + a_fp) / a_n  # 0.50
+    ppr_b = (b_tp + b_fp) / b_n  # 0.25
+    parity_gap = ppr_a - ppr_b  # 0.25
+    four_fifths = ppr_b / ppr_a  # 0.5
+    tpr_a = a_tp / (a_tp + a_fn)  # 0.938
+    tpr_b = b_tp / (b_tp + b_fn)  # 0.60
+    tpr_gap = round(tpr_a, 3) - tpr_b  # 0.338
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(a_n == 1000 and b_n == 1000, "Each group must total 1,000 records")
+    check(four_fifths < 0.8, "Parity must breach the four-fifths rule")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    _ppr_a = fmt(ppr_a, precision=2, commas=False)
+    _ppr_b = fmt(ppr_b, precision=2, commas=False)
+    _four_fifths = fmt(four_fifths, precision=1, commas=False)
+    _tpr_a = fmt(tpr_a, precision=3, commas=False)
+    _tpr_b = fmt(tpr_b, precision=2, commas=False)
+    ppr_a_math = fmt_math(r"(450+50)/1000 = " + _ppr_a)
+    ppr_b_math = fmt_math(r"(180+70)/1000 = " + _ppr_b)
+    parity_gap_str = fmt(parity_gap, precision=2, commas=False)
+    four_fifths_math = fmt_math(r"0.25/0.50 = " + _four_fifths + r" < 0.8")
+    tpr_a_math = fmt_math(r"450 / (450+30) = " + _tpr_a)
+    tpr_b_math = fmt_math(r"180 / (180+120) = " + _tpr_b)
+    tpr_gap_str = fmt(tpr_gap, precision=3, commas=False)
+```
+
 ::: {#nbk-responsible-ai-auditing-confusion-matrix .callout-notebook title="Auditing a confusion matrix"}
 
 **Problem**: A fraud detection model operates on two groups. What do demographic parity and equal opportunity reveal about the deployment?
@@ -881,14 +985,14 @@ The quantitative framework developed here transforms fairness from an abstract p
 **Math**:
 
 1. **Demographic parity (positive prediction rate)**: $\Pr(\hat{Y}=1)$.
-   - Group A: $(450+50)/1000 = 0.50$.
-   - Group B: $(180+70)/1000 = 0.25$.
-   - **Gap**: 0.25. (Violates four-fifths rule: $0.25/0.50 = 0.5 < 0.8$).
+   - Group A: `{python} ConfusionMatrixAudit.ppr_a_math`.
+   - Group B: `{python} ConfusionMatrixAudit.ppr_b_math`.
+   - **Gap**: `{python} ConfusionMatrixAudit.parity_gap_str`. (Violates four-fifths rule: `{python} ConfusionMatrixAudit.four_fifths_math`).
 
 2. **Equal opportunity (TPR)**: $\text{TP} / (\text{TP}+\text{FN})$.
-   - Group A: $450 / (450+30) = 0.938$.
-   - Group B: $180 / (180+120) = 0.60$.
-   - **Gap**: 0.338. (Severe violation).
+   - Group A: `{python} ConfusionMatrixAudit.tpr_a_math`.
+   - Group B: `{python} ConfusionMatrixAudit.tpr_b_math`.
+   - **Gap**: `{python} ConfusionMatrixAudit.tpr_gap_str`. (Severe violation).
 
 **Systems insight**: Fixing TPR requires lowering the threshold for Group B to catch more fraud (reducing FNs). However, this will likely increase FPs (false alarms) for Group B, worsening predictive parity. This is a concrete demonstration of the impossibility theorem: one fairness constraint cannot be changed in isolation.
 
