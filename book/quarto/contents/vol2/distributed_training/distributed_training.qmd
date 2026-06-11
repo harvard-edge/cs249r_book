@@ -2909,10 +2909,13 @@ The parallelism strategies examined so far assume a single model being trained o
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-distributed-training-rlhf-coordination
-# │ Exports: DistTrainH100Capacity.h100_mem_gb_str
+# │ Exports: DistTrainH100Capacity.h100_mem_gb_str,
+# │          DistTrainH100Capacity.policy_params_b_str,
+# │          DistTrainH100Capacity.policy_train_gb_str,
+# │          DistTrainH100Capacity.bytes_weights_str / bytes_grad_str / bytes_adam_str
 from mlsysim import Hardware, Models
 from mlsysim.core.units import GiB, Bparam, GB, byte, param, BYTES_FP16
-from mlsysim.fmt import fmt, MarkdownStr, fmt_memory_capacity, fmt_qty, fmt_memory
+from mlsysim.fmt import fmt, MarkdownStr, fmt_memory_capacity, fmt_qty, fmt_memory, fmt_params
 from mlsysim.physics import memory_from_params
 import math
 
@@ -2925,8 +2928,13 @@ class DistTrainH100Capacity:
     bytes_train = 16 * (byte / param)
     bytes_infer = BYTES_FP16 / param
     h100_mem_budget = Hardware.Cloud.H100.memory.capacity.to(GiB) * (GB / GiB)
+    # Policy-model full training state: weights (FP16) + gradients (FP16) + Adam (FP32 x3)
+    bytes_weights_b = BYTES_FP16.to(byte).magnitude
+    bytes_grad_b = BYTES_FP16.to(byte).magnitude
+    bytes_adam_b = 12
+    policy_train_mem = memory_from_params(policy_params, bytes_train)
     ppo_total_mem = (
-        memory_from_params(policy_params, bytes_train)
+        policy_train_mem
         + memory_from_params(policy_params, bytes_infer)
         + memory_from_params(reward_b * Bparam, bytes_infer)
         + memory_from_params(value_b * Bparam, bytes_train)
@@ -2935,19 +2943,24 @@ class DistTrainH100Capacity:
     ppo_total_mem_gb_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
     min_gpus_mem_str = fmt_count(min_gpus_mem, commas=False, label="GPU")
     min_gpus_practical_str = MarkdownStr("64--128 GPUs")
+    policy_params_b_str = fmt_params(policy_params, scale="B", precision=0, commas=False)
+    policy_train_gb_str = fmt_memory(policy_train_mem, unit=GB, precision=0, commas=True)
+    bytes_weights_str = fmt(bytes_weights_b, precision=0, commas=False)
+    bytes_grad_str = fmt(bytes_grad_b, precision=0, commas=False)
+    bytes_adam_str = fmt(bytes_adam_b, precision=0, commas=False)
 ```
 
 ### The multi-model coordination problem {#sec-distributed-training-rlhf-coordination}
 
 Standard pretraining involves one model, one loss function, and one gradient stream. RLHF alignment, by contrast, orchestrates a system of models that interact during every training step. In the Proximal Policy Optimization\index{Proximal Policy Optimization!model asymmetry} (PPO) formulation [@ouyang2022instructgpt], four distinct models must operate in concert:
 
-1. The **policy model**\index{Policy Model} (the model being aligned) requires full training state: parameters, gradients, optimizer moments, and activations. For a 70B parameter model in mixed precision with Adam, this consumes approximately 70B $\times$ (2 + 2 + 12) = 1,120 GB of memory—the same budget as standard pretraining.
+1. The **policy model**\index{Policy Model} (the model being aligned) requires full training state: parameters, gradients, optimizer moments, and activations. For a `{python} DistTrainH100Capacity.policy_params_b_str` parameter model in mixed precision with Adam, this consumes approximately `{python} DistTrainH100Capacity.policy_params_b_str` $\times$ (`{python} DistTrainH100Capacity.bytes_weights_str` $+$ `{python} DistTrainH100Capacity.bytes_grad_str` $+$ `{python} DistTrainH100Capacity.bytes_adam_str`) = `{python} DistTrainH100Capacity.policy_train_gb_str` of memory—the same budget as standard pretraining.
 
 2. The **reference model**\index{Reference Model} (a frozen copy of the pretrained policy) requires only inference-mode memory: parameters in FP16/BF16 without gradients or optimizer state. The same 70B model in inference mode needs 70B $\times$ 2 = 140 GB, roughly 8$\times$ less than the training configuration. The reference model computes KL-divergence penalties that prevent the policy from drifting too far from the pretrained distribution.
 
 3. The **reward model**\index{Reward Model} (typically a separate model trained on human preference data) also runs in inference mode. Reward models are often smaller than the policy—a 13B reward model requires approximately 26 GB in FP16—but must process every generated sequence to produce scalar reward signals.
 
-4. The **value model**\index{Value Model} (the PPO critic that estimates expected future reward) requires its own training state. If the value model shares the policy's architecture, it adds another 1,120 GB of training memory; in practice, value models are often smaller or share the policy backbone with a separate value head, reducing this to 200--400 GB.
+4. The **value model**\index{Value Model} (the PPO critic that estimates expected future reward) requires its own training state. If the value model shares the policy's architecture, it adds another `{python} DistTrainH100Capacity.policy_train_gb_str` of training memory; in practice, value models are often smaller or share the policy backbone with a separate value head, reducing this to 200--400 GB.
 
 The aggregate memory demand of the four-model PPO system dwarfs standard pretraining. A naive co-location of a 70B policy, 70B reference, 13B reward, and 13B value model requires approximately `{python} DistTrainH100Capacity.ppo_total_mem_gb_str` of accelerator memory, before accounting for the KV caches and intermediate activations generated during sequence generation. On H100 GPUs with `{python} DistTrainH100Capacity.h100_mem_gb_str` of HBM each, this system requires a minimum of `{python} DistTrainH100Capacity.min_gpus_mem_str` for parameter storage alone. Once generation-phase KV caches (which grow linearly with output sequence length) and training-phase activations are included, the practical minimum rises to `{python} DistTrainH100Capacity.min_gpus_practical_str` for a single RLHF training instance.
 
