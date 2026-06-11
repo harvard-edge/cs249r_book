@@ -220,16 +220,35 @@ The serving tax quantified above consumes a fraction of the latency budget per r
 ```{python}
 #| echo: false
 #| label: serving-cost-multiplier-simple
-from mlsysim.fmt import fmt_int, fmt_usd, check, fmt, fmt_percent, fmt_count
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERVING-COST MULTIPLIER (CapEx vs OpEx)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-inference-serving-cost-multiplier worked-example callout —
+# │          the "Problem", "Math", and "Systems insight" prose immediately below.
+# │
+# │ Goal:    Show that annual serving (OpEx) dominates one-time training (CapEx).
+# │ Show:    Annual request volume, cost/request, annual serving cost, the
+# │          serving/training ratio, and the savings from an efficiency gain.
+# │ How:     Scenario assumptions (DAU, reqs/day, cost/request, efficiency gain)
+# │          combine with DAYS_PER_YEAR to derive annual volume and cost.
+# │
+# │ Imports: mlsysim public API (DAYS_PER_YEAR, BILLION, units, fmt helpers)
+# │ Exports: annual_reqs_calc_math, annual_reqs_b_str, annual_serving_cost_str,
+# │          serving_training_ratio_mult_str, efficiency_savings_str,
+# │          training_cost_str, dau_str, reqs_per_day_str, cost_per_request_usd_str,
+# │          efficiency_gain_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt_usd, check, fmt, fmt_percent, fmt_count, fmt_math
 
 class ServingCostSimple:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    training_cost = 2_000_000
-    dau = 1_000_000
-    reqs_per_day = 50
+    training_cost = 2_000_000  # scenario assumption: one-time training spend
+    dau = 1_000_000  # scenario assumption: daily active users
+    reqs_per_day = 50  # scenario assumption: requests per user per day
     days_per_year = DAYS_PER_YEAR
-    cost_per_request = 0.001
-    efficiency_gain = 0.10
+    cost_per_request = 0.001  # scenario assumption: serving cost per request
+    efficiency_gain = 0.10  # scenario assumption: efficiency improvement
+    dau_exp = 6  # 10^6 users, displayed in scientific form
     # ┌── 2. EXECUTE ───────────────────────────────────────
     annual_reqs = dau * reqs_per_day * days_per_year
     annual_reqs_b = annual_reqs / BILLION
@@ -239,7 +258,11 @@ class ServingCostSimple:
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(annual_reqs > 10e9, "Should be >10B annual requests")
     check(round(serving_training_ratio) == 9, "Serving/training ratio should round to 9x")
+    check(10**dau_exp == dau, "dau_exp must match dau in scientific form")
     # ┌── 4. OUTPUT ────────────────────────────────────────
+    annual_reqs_calc_math = fmt_math(
+        rf"10^{{{dau_exp}}}\,\text{{users}} \times {reqs_per_day}\,\text{{reqs}} " rf"\times {days_per_year}\,\text{{days}} \approx"
+    )
     annual_reqs_b_str = fmt_count(annual_reqs, scale="B", precision=2, commas=False)
     annual_serving_cost_str = fmt_usd(annual_serving_cost)
     serving_training_ratio_mult_str = fmt_multiple(serving_training_ratio, precision=1, commas=False)
@@ -263,7 +286,7 @@ class ServingCostSimple:
 **Math**:
 
 1.  **Training Cost**\index{Training Cost}: `{python} ServingCostSimple.training_cost_str` (One-time).
-2.  **Metric**: Annual inference volume is $10^6 \text{ users} \times 50 \text{ reqs} \times 365 \text{ days} \approx$ `{python} ServingCostSimple.annual_reqs_b_str` requests/year.
+2.  **Metric**: Annual inference volume is `{python} ServingCostSimple.annual_reqs_calc_math` `{python} ServingCostSimple.annual_reqs_b_str` requests/year.
 3.  **Cost per Request**\index{Serving Cost!cost per request}: Assume a 70B model on H100 costs $\approx$ `{python} ServingCostSimple.cost_per_request_usd_str` (input + output).
 4.  **Annual Serving Cost**\index{Serving Cost!annual serving cost}: `{python} ServingCostSimple.annual_reqs_b_str` requests $\times$ `{python} ServingCostSimple.cost_per_request_usd_str` = `{python} ServingCostSimple.annual_serving_cost_str`.
 
@@ -866,31 +889,59 @@ Translating these batch-level equations into system-wide capacity planning requi
 ```{python}
 #| echo: false
 #| label: littles-law-example
-from mlsysim.fmt import fmt_int, check, fmt_time
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LITTLE'S LAW — CONCURRENCY AND CAPACITY PLANNING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @thrm-inference-littles-law-inference theorem callout —
+# │          the Application, Capacity Planning, and Verification prose below.
+# │
+# │ Goal:    Apply Little's Law (Q = λ·T) to size a serving fleet against an SLO.
+# │ Show:    Required concurrency, per-replica throughput, replicas needed, total
+# │          system concurrency, and the queue shortfall.
+# │ How:     Scenario throughput target and latency SLO give required concurrency;
+# │          replica batch/latency give per-replica throughput and replica count.
+# │
+# │ Imports: mlsysim public API (second, millisecond units, fmt helpers)
+# │ Exports: target_throughput_str, latency_slo_ms_str, latency_slo_s_str,
+# │          required_concurrency_math, required_concurrency_str,
+# │          replica_throughput_calc_math, replica_throughput_str,
+# │          replicas_needed_str, batch_size_str, replica_latency_ms_str,
+# │          total_concurrency_calc_math, total_concurrency_str, queue_shortfall_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, check, fmt_time, fmt_math
 
 class LittlesLawExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    target_throughput = 1000
-    latency_slo_s = 0.1
-    batch_size = 8
-    replica_latency_s = 0.08
+    target_throughput = 1000  # scenario assumption: target requests/sec
+    latency_slo = 0.1 * second  # scenario assumption: per-request latency SLO
+    batch_size = 8  # scenario assumption: per-replica batch size
+    replica_latency = 0.08 * second  # scenario assumption: per-replica latency
     # ┌── 2. EXECUTE ───────────────────────────────────────
+    latency_slo_s = latency_slo.to(second).magnitude
+    replica_latency_s = replica_latency.to(second).magnitude
     required_concurrency = int(target_throughput * latency_slo_s)
     replica_throughput = int(batch_size / replica_latency_s)
     replicas_needed = int(target_throughput / replica_throughput)
     total_concurrency = replicas_needed * batch_size
+    queue_shortfall = required_concurrency - total_concurrency
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(required_concurrency == 100, "required concurrency should be 100")
     check(replicas_needed == 10, "Should need 10 replicas")
+    check(queue_shortfall == 20, "queue shortfall should be 20")
     # ┌── 4. OUTPUT ────────────────────────────────────────
+    required_concurrency_math = fmt_math(rf"Q_{{\text{{req}}}} = {target_throughput} \times {latency_slo_s} =")
     required_concurrency_str = fmt_int(required_concurrency, commas=False)
+    replica_throughput_calc_math = fmt_math(rf"{batch_size}/{replica_latency_s} =")
     replica_throughput_str = fmt_int(replica_throughput, commas=False)
     replicas_needed_str = fmt_int(replicas_needed, commas=False)
+    total_concurrency_calc_math = fmt_math(rf"{replicas_needed}\text{{ replicas}} \times {batch_size}\text{{ batch}} =")
     total_concurrency_str = fmt_int(total_concurrency, commas=False)
+    queue_shortfall_str = fmt_int(queue_shortfall, commas=False)
     target_throughput_str = fmt_int(target_throughput)
-    latency_slo_ms_str = fmt_time(round(latency_slo_s * THOUSAND), 'millisecond', precision=0, commas=False)
+    latency_slo_ms_str = fmt_time(latency_slo, millisecond, precision=0, commas=False)
+    latency_slo_s_str = fmt_time(latency_slo, second, precision=1, commas=False)
     batch_size_str = fmt_int(batch_size, commas=False)
-    replica_latency_ms_str = fmt_time(replica_latency_s * THOUSAND, 'millisecond', precision=0, commas=False)
+    replica_latency_ms_str = fmt_time(replica_latency, millisecond, precision=0, commas=False)
 ```
 
 ::: {#thrm-inference-littles-law-inference .callout-theorem title="Little's Law for inference"}
@@ -902,18 +953,18 @@ $$ Q_{\text{req}} = \lambda_{\text{arr}} \cdot T_{\text{lat}} $$
 **Application: Concurrency Planning**
 
 - **Target Throughput** $(\lambda_{\text{arr}})$: `{python} LittlesLawExample.target_throughput_str` requests/sec
-- **Latency SLO** $(T_{\text{lat}})$: `{python} LittlesLawExample.latency_slo_ms_str` (0.1 s)
+- **Latency SLO** $(T_{\text{lat}})$: `{python} LittlesLawExample.latency_slo_ms_str` (`{python} LittlesLawExample.latency_slo_s_str`)
 
-**Required Concurrency** $(Q_{\text{req}})$: $Q_{\text{req}} = 1000 \times 0.1 =$ `{python} LittlesLawExample.required_concurrency_str` concurrent requests
+**Required Concurrency** $(Q_{\text{req}})$: `{python} LittlesLawExample.required_concurrency_math` `{python} LittlesLawExample.required_concurrency_str` concurrent requests
 
 **Capacity Planning**\index{Capacity Planning}:
-If a single GPU replica handles batch size 8 with 80 ms latency:
+If a single GPU replica handles batch size `{python} LittlesLawExample.batch_size_str` with `{python} LittlesLawExample.replica_latency_ms_str` latency:
 
-1. Replica Throughput $= 8/0.08 =$ `{python} LittlesLawExample.replica_throughput_str` req/s
-2. Replicas Needed = 1000 divided by `{python} LittlesLawExample.replica_throughput_str` = `{python} LittlesLawExample.replicas_needed_str` replicas
+1. Replica Throughput $=$ `{python} LittlesLawExample.replica_throughput_calc_math` `{python} LittlesLawExample.replica_throughput_str` req/s
+2. Replicas Needed = `{python} LittlesLawExample.target_throughput_str` divided by `{python} LittlesLawExample.replica_throughput_str` = `{python} LittlesLawExample.replicas_needed_str` replicas
 
 **Verification**:
-Total system concurrency $=$ `{python} LittlesLawExample.replicas_needed_str` replicas $\times$ 8 batch $=$ `{python} LittlesLawExample.total_concurrency_str`, short of the `{python} LittlesLawExample.required_concurrency_str` required. The shortfall is the queue: with `{python} LittlesLawExample.replicas_needed_str` replicas actively processing `{python} LittlesLawExample.total_concurrency_str` requests, the remaining 20 wait in queues, and that queue wait must fit inside the SLO.
+Total system concurrency $=$ `{python} LittlesLawExample.total_concurrency_calc_math` `{python} LittlesLawExample.total_concurrency_str`, short of the `{python} LittlesLawExample.required_concurrency_str` required. The shortfall is the queue: with `{python} LittlesLawExample.replicas_needed_str` replicas actively processing `{python} LittlesLawExample.total_concurrency_str` requests, the remaining `{python} LittlesLawExample.queue_shortfall_str` wait in queues, and that queue wait must fit inside the SLO.
 
 :::
 
@@ -931,51 +982,146 @@ $$E[T_{\text{total}}] = E[T_{\text{queue}}] + T_{\text{batch}} + T_{\text{infere
 
 where $E[T_{\text{queue}}]$ is the expected queuing delay, $T_{\text{batch}}$ is the batch formation delay (up to $T_{\text{window}}$), and $T_{\text{inference}}(B)$ is the inference time for batch size $B$. Example \ref{exmp-dynamic-batching-resnet50} illustrates how these components interact in practice.
 
+```{python}
+#| echo: false
+#| label: dynamic-batching-resnet50
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DYNAMIC BATCHING — RESNET-50 VISION SERVICE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @exmp-dynamic-batching-resnet50 worked-example callout immediately
+# │          below — Options A/B/C utilization analysis and the trade-off.
+# │
+# │ Goal:    Show how dynamic batching converts latency headroom into throughput,
+# │          driving per-replica utilization from overloaded (>1) to sustainable.
+# │ Show:    Per-replica arrival rate, service times, expected batch sizes, and
+# │          the resulting utilization for no-batching vs two batching windows.
+# │ How:     Utilization ρ = λ·T_svc; expected batch E[B] = λ·T_window; per-request
+# │          compute = inference_time / batch; capacity gain and utilization drop.
+# │
+# │ Imports: mlsysim public API (units, fmt helpers)
+# │ Exports: arrival_qps_str, replicas_str, per_replica_qps_str, latency_slo_ms_str,
+# │          svc_b1_ms_str, svc_b32_ms_str, rho_a_eq_math, eb_b_eq_math, eb_c_eq_math,
+# │          per_req_b_ms_str, per_req_c_ms_str, rho_b_eq_math, rho_c_eq_math,
+# │          bmax_b_str, twindow_b_ms_str, bmax_c_str, twindow_c_ms_str,
+# │          inf_b_ms_str, inf_c_ms_str, eb_b_str, eb_c_str,
+# │          capacity_gain_pct_str, util_drop_pct_str, lat_c_ms_str, lat_b_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt, fmt_percent, fmt_time, fmt_rate, fmt_math, fmt_ratio, check
+
+class DynamicBatchingResNet50:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    arrival_qps = 5000  # scenario assumption: total arrival rate
+    replicas = 10  # scenario assumption: replica count
+    latency_slo_ms = 50  # scenario assumption: P99 latency SLO
+    svc_b1_ms = 5  # scenario assumption: per-image time at batch=1
+    svc_b32_ms = 25  # scenario assumption: per-image time at batch=32
+    # Option B / C serving-policy knobs
+    bmax_b = 16
+    twindow_b_ms = 10
+    inf_b_ms = 8  # interpolated inference time
+    bmax_c = 32
+    twindow_c_ms = 20
+    inf_c_ms = 12  # interpolated inference time
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    per_replica_qps = arrival_qps / replicas
+    twindow_b_s = (twindow_b_ms * millisecond).to(second).magnitude
+    twindow_c_s = (twindow_c_ms * millisecond).to(second).magnitude
+    svc_b1_s = (svc_b1_ms * millisecond).to(second).magnitude
+    # Option A: no batching
+    rho_a = per_replica_qps * svc_b1_s
+    # Option B
+    eb_b = per_replica_qps * twindow_b_s
+    per_req_b_ms = inf_b_ms / eb_b
+    rho_b = per_replica_qps * (per_req_b_ms * millisecond).to(second).magnitude
+    # Option C
+    eb_c = per_replica_qps * twindow_c_s
+    per_req_c_ms = inf_c_ms / eb_c
+    rho_c = per_replica_qps * (per_req_c_ms * millisecond).to(second).magnitude
+    # Trade-off
+    capacity_gain = rho_b / rho_c - 1
+    util_drop = (rho_b - rho_c) / rho_b
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(rho_a > 1, "Option A must be overloaded")
+    check(rho_b < 1 and rho_c < 1, "Batching options must be sustainable")
+    check(rho_c < rho_b, "Wider window must lower utilization")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    arrival_qps_str = fmt_rate(arrival_qps, "QPS")
+    replicas_str = fmt_int(replicas, commas=False)
+    per_replica_qps_str = fmt_rate(round(per_replica_qps), "QPS")
+    latency_slo_ms_str = fmt_time(latency_slo_ms * millisecond, millisecond, precision=0, commas=False)
+    svc_b1_ms_str = fmt_time(svc_b1_ms * millisecond, millisecond, precision=0, commas=False)
+    svc_b32_ms_str = fmt_time(svc_b32_ms * millisecond, millisecond, precision=0, commas=False)
+    bmax_b_str = fmt_int(bmax_b, commas=False)
+    bmax_c_str = fmt_int(bmax_c, commas=False)
+    twindow_b_ms_str = fmt_time(twindow_b_ms * millisecond, millisecond, precision=0, commas=False)
+    twindow_c_ms_str = fmt_time(twindow_c_ms * millisecond, millisecond, precision=0, commas=False)
+    inf_b_ms_str = fmt_time(inf_b_ms * millisecond, millisecond, precision=0, commas=False)
+    inf_c_ms_str = fmt_time(inf_c_ms * millisecond, millisecond, precision=0, commas=False)
+    eb_b_str = fmt_int(round(eb_b), commas=False)
+    eb_c_str = fmt_int(round(eb_c), commas=False)
+    per_req_b_ms_str = fmt_time(per_req_b_ms * millisecond, millisecond, precision=1, commas=False)
+    per_req_c_ms_str = fmt_time(per_req_c_ms * millisecond, millisecond, precision=1, commas=False)
+    rho_a_eq_math = fmt_math(
+        rf"\rho = \lambda_{{\text{{arr}}}} \times T_{{\text{{svc}}}} "
+        rf"= {int(per_replica_qps)} \times {svc_b1_s} = {fmt_ratio(rho_a, precision=1)}"
+    )
+    eb_b_eq_math = fmt_math(
+        rf"E[B] = \lambda_{{\text{{arr}}}} \times T_{{\text{{window}}}} " rf"= {int(per_replica_qps)} \times {twindow_b_s} = {round(eb_b)}"
+    )
+    eb_c_eq_math = fmt_math(rf"E[B] = {int(per_replica_qps)} \times {twindow_c_s} = {round(eb_c)}")
+    rho_b_eq_math = fmt_math(rf"\rho = {int(per_replica_qps)} \times {round(per_req_b_ms / 1000, 4)} " rf"= {fmt_ratio(rho_b, precision=1)}")
+    rho_c_eq_math = fmt_math(rf"\rho = {int(per_replica_qps)} \times {round(per_req_c_ms / 1000, 4)} " rf"= {fmt_ratio(rho_c, precision=1)}")
+    capacity_gain_pct_str = fmt_percent(round(capacity_gain * 100) / 100, precision=0, commas=False, style="prose")
+    util_drop_pct_str = fmt_percent(util_drop, precision=0, commas=False, style="prose")
+    lat_b_ms_str = fmt_time(15 * millisecond, millisecond, precision=0, commas=False)
+    lat_c_ms_str = fmt_time(22 * millisecond, millisecond, precision=0, commas=False)
+```
+
 ::: {#exmp-dynamic-batching-resnet50 .callout-example title="Dynamic batching for ResNet-50"}
 
 Consider a vision classification service with the following requirements:
 
-- **Arrival rate**: 5,000 QPS
-- **Latency SLO**: 50 ms P99
-- **Per-image inference time**: 5 ms at batch=1, 25 ms at batch=32
-- **Number of replicas**: 10 (each handling 500 QPS)
+- **Arrival rate**: `{python} DynamicBatchingResNet50.arrival_qps_str`
+- **Latency SLO**: `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99
+- **Per-image inference time**: `{python} DynamicBatchingResNet50.svc_b1_ms_str` at batch=1, `{python} DynamicBatchingResNet50.svc_b32_ms_str` at batch=32
+- **Number of replicas**: `{python} DynamicBatchingResNet50.replicas_str` (each handling `{python} DynamicBatchingResNet50.per_replica_qps_str`)
 
-For a single replica with Poisson arrivals at $\lambda_{\text{arr}} = 500$ QPS:
+For a single replica with Poisson arrivals at $\lambda_{\text{arr}} =$ `{python} DynamicBatchingResNet50.per_replica_qps_str`:
 
 **Option A: No batching (batch=1)**
 
-- Service time: 5 ms per request
-- Utilization: $\rho = \lambda_{\text{arr}} \times T_{\text{svc}} = 500 \times 0.005 = 2.5$ (impossible, system is overloaded)
+- Service time: `{python} DynamicBatchingResNet50.svc_b1_ms_str` per request
+- Utilization: `{python} DynamicBatchingResNet50.rho_a_eq_math` (impossible, system is overloaded)
 
 This configuration *cannot* meet demand. Batching is required.
 
-**Option B: Dynamic batching** with $B_{\text{max}}=16$, $T_{\text{window}}=10 ms$
+**Option B: Dynamic batching** with $B_{\text{max}}=$ `{python} DynamicBatchingResNet50.bmax_b_str`, $T_{\text{window}}=$ `{python} DynamicBatchingResNet50.twindow_b_ms_str`
 
-Expected requests per window: $E[B] = \lambda_{\text{arr}} \times T_{\text{window}} = 500 \times 0.01 = 5$
+Expected requests per window: `{python} DynamicBatchingResNet50.eb_b_eq_math`
 
-With 5 requests per batch:
+With `{python} DynamicBatchingResNet50.eb_b_str` requests per batch:
 
-- Inference time: approximately 8 ms (interpolating between batch=1 and batch=32)
-- Per-request compute: 8 ms/5 = 1.6 ms
-- Maximum batch delay: 10 ms
-- Expected total latency: ~15 ms mean, ~30 ms P99
+- Inference time: approximately `{python} DynamicBatchingResNet50.inf_b_ms_str` (interpolating between batch=1 and batch=32)
+- Per-request compute: `{python} DynamicBatchingResNet50.inf_b_ms_str`/`{python} DynamicBatchingResNet50.eb_b_str` = `{python} DynamicBatchingResNet50.per_req_b_ms_str`
+- Maximum batch delay: `{python} DynamicBatchingResNet50.twindow_b_ms_str`
+- Expected total latency: ~`{python} DynamicBatchingResNet50.lat_b_ms_str` mean, ~30 ms P99
 
-Utilization: $\rho = 500 \times 0.0016 = 0.8$ (sustainable)
+Utilization: `{python} DynamicBatchingResNet50.rho_b_eq_math` (sustainable)
 
-**Option C: Dynamic batching** with $B_{\text{max}}=32$, $T_{\text{window}}=20 ms$
+**Option C: Dynamic batching** with $B_{\text{max}}=$ `{python} DynamicBatchingResNet50.bmax_c_str`, $T_{\text{window}}=$ `{python} DynamicBatchingResNet50.twindow_c_ms_str`
 
-Expected requests per window: $E[B] = 500 \times 0.02 = 10$
+Expected requests per window: `{python} DynamicBatchingResNet50.eb_c_eq_math`
 
-With 10 requests per batch:
+With `{python} DynamicBatchingResNet50.eb_c_str` requests per batch:
 
-- Inference time: approximately 12 ms
-- Per-request compute: 12 ms/10 = 1.2 ms
-- Maximum batch delay: 20 ms
-- Expected total latency: ~22 ms mean, ~42 ms P99
+- Inference time: approximately `{python} DynamicBatchingResNet50.inf_c_ms_str`
+- Per-request compute: `{python} DynamicBatchingResNet50.inf_c_ms_str`/`{python} DynamicBatchingResNet50.eb_c_str` = `{python} DynamicBatchingResNet50.per_req_c_ms_str`
+- Maximum batch delay: `{python} DynamicBatchingResNet50.twindow_c_ms_str`
+- Expected total latency: ~`{python} DynamicBatchingResNet50.lat_c_ms_str` mean, ~42 ms P99
 
-Utilization: $\rho = 500 \times 0.0012 = 0.6$ (comfortable)
+Utilization: `{python} DynamicBatchingResNet50.rho_c_eq_math` (comfortable)
 
-**Trade-off**: Option C achieves about 33 percent higher per-replica capacity, or 25 percent lower utilization, at the cost of higher average latency (22 ms vs. 15 ms). Both meet the 50 ms P99 SLO.
+**Trade-off**: Option C achieves about `{python} DynamicBatchingResNet50.capacity_gain_pct_str` higher per-replica capacity, or `{python} DynamicBatchingResNet50.util_drop_pct_str` lower utilization, at the cost of higher average latency (`{python} DynamicBatchingResNet50.lat_c_ms_str` vs. `{python} DynamicBatchingResNet50.lat_b_ms_str`). Both meet the `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99 SLO.
 
 **Systems insight**: Dynamic batching is useful only when the latency budget has slack. The serving policy converts unused latency headroom into higher throughput, but the same window would violate an already tight SLO.
 
@@ -1186,9 +1332,14 @@ class BatchingRequestTotals:
 # │   BatchingWorkedExample.r3_lat_str, BatchingWorkedExample.r4_lat_str,
 # │   BatchingWorkedExample.trad_lat_ms_str, BatchingWorkedExample.cont_avg_lat_str,
 # │   BatchingWorkedExample.latency_red_str, BatchingWorkedExample.r1_imp_mult_str,
-# │   BatchingWorkedExample.r3_imp_mult_str, BatchingWorkedExample.r4_imp_mult_str
+# │   BatchingWorkedExample.r3_imp_mult_str, BatchingWorkedExample.r4_imp_mult_str,
+# │   BatchingWorkedExample.total_iterations_str, BatchingWorkedExample.max_output_str,
+# │   BatchingWorkedExample.decode_time_ms_str, BatchingWorkedExample.mean_output_eq_math,
+# │   BatchingWorkedExample.total_batch_time_calc_math,
+# │   BatchingWorkedExample.total_seq_iters_calc_math, BatchingWorkedExample.waste_eq_math,
+# │   BatchingWorkedExample.r{1,2,3,4}_lat_calc_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_percent, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt_int, fmt, fmt_percent, MarkdownStr, fmt_time, fmt_math
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BatchingWorkedExample:
@@ -1226,10 +1377,28 @@ class BatchingWorkedExample:
     r3_improvement = trad_latency_ms / r3_latency_ms
     r4_improvement = trad_latency_ms / r4_latency_ms
 
+    # Step 5: Waste ratio (mean / max), per @eq-waste-ratio
+    waste_ratio = mean_output / max_output  # 125 / 200 = 0.625
+
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(latency_reduction_pct == 37.5, f"Expected 37.5% reduction, got {latency_reduction_pct}")
+    check(total_iterations == max_output, "total iterations equals the longest output")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    total_iterations_str = fmt_int(total_iterations, commas=False)
+    max_output_str = fmt_count(max_output, commas=False, label="token")
+    decode_time_ms_str = fmt_time(decode_time_ms * millisecond, millisecond, precision=0, commas=False)
+    mean_output_eq_math = fmt_math(r"(" + " + ".join(str(v) for v in output_lengths) + rf") / {n_requests} =")
+    total_batch_time_calc_math = fmt_math(rf"{total_iterations} \times {decode_time_ms}\text{{ ms}} =")
+    total_seq_iters_calc_math = fmt_math(rf"{n_requests} \times {max_output} =")
+    waste_eq_math = fmt_math(
+        rf"W = 1 - \frac{{{int(mean_output)}}}{{{max_output}}} = 1 - {waste_ratio} = "
+        + str(fmt_percent(latency_reduction_pct / 100, precision=1, commas=False, style="symbol"))
+    )
+    r1_lat_calc_math = fmt_math(rf"{output_lengths[0]} \times {decode_time_ms}\text{{ ms}} =")
+    r2_lat_calc_math = fmt_math(rf"{output_lengths[1]} \times {decode_time_ms}\text{{ ms}} =")
+    r3_lat_calc_math = fmt_math(rf"{output_lengths[2]} \times {decode_time_ms}\text{{ ms}} =")
+    r4_lat_calc_math = fmt_math(rf"{output_lengths[3]} \times {decode_time_ms}\text{{ ms}} =")
     mean_output_str = fmt_count(mean_output, commas=False, label="token")
     total_batch_time_ms_str = fmt_time(round(total_batch_time_ms), 'millisecond', precision=0, commas=True)
     total_seq_iters_str = fmt_int(total_seq_iters)
@@ -1252,16 +1421,16 @@ class BatchingWorkedExample:
 
 The calculation starts from three system parameters:
 
-- Decode time per iteration (batch of 4): 20 ms
-- Maximum output length in batch: 200 tokens (R2)
-- Mean output length: (50 + 200 + 100 + 150) / 4 = `{python} BatchingWorkedExample.mean_output_str`
+- Decode time per iteration (batch of 4): `{python} BatchingWorkedExample.decode_time_ms_str`
+- Maximum output length in batch: `{python} BatchingWorkedExample.max_output_str` (R2)
+- Mean output length: `{python} BatchingWorkedExample.mean_output_eq_math` `{python} BatchingWorkedExample.mean_output_str`
 
 #### Traditional batching analysis {#sec-inference-scale-traditional-batching-analysis-372e}
 
 With traditional batching, all four requests must wait for R2 to complete its 200 tokens:
 
-- Total decode iterations: 200
-- Total batch time: $200 \times 20$ ms = `{python} BatchingWorkedExample.total_batch_time_ms_str`
+- Total decode iterations: `{python} BatchingWorkedExample.total_iterations_str`
+- Total batch time: `{python} BatchingWorkedExample.total_batch_time_calc_math` `{python} BatchingWorkedExample.total_batch_time_ms_str`
 - Request completion times:
   - R1 completes useful work at iteration 50, but waits until iteration 200 → latency = `{python} BatchingWorkedExample.trad_lat_ms_str`
   - R2 completes at iteration 200 → latency = `{python} BatchingWorkedExample.trad_lat_ms_str`
@@ -1270,9 +1439,9 @@ With traditional batching, all four requests must wait for R2 to complete its 20
 
 Waste calculation using @eq-waste-ratio:
 
-$$W = 1 - \frac{125}{200} = 1 - 0.625 = 37.5\%$$
+`{python} BatchingWorkedExample.waste_eq_math`
 
-The GPU performs $4 \times 200$ = `{python} BatchingWorkedExample.total_seq_iters_str` "sequence-iterations" but only `{python} BatchingWorkedExample.useful_seq_iters_str` are useful.
+The GPU performs `{python} BatchingWorkedExample.total_seq_iters_calc_math` `{python} BatchingWorkedExample.total_seq_iters_str` "sequence-iterations" but only `{python} BatchingWorkedExample.useful_seq_iters_str` are useful.
 
 #### Continuous batching analysis {#sec-inference-scale-continuous-batching-analysis-2846}
 
@@ -1285,10 +1454,10 @@ With continuous batching, sequences depart the batch upon completion, and new re
 
 Request latencies with continuous batching (assuming no queuing delay):
 
-- R1: $50 \times 20$ ms = `{python} BatchingWorkedExample.r1_lat_ms_str` (`{python} BatchingWorkedExample.r1_imp_mult_str` improvement over traditional)
-- R3: $100 \times 20$ ms = `{python} BatchingWorkedExample.r3_lat_str` (`{python} BatchingWorkedExample.r3_imp_mult_str` improvement)
-- R4: $150 \times 20$ ms = `{python} BatchingWorkedExample.r4_lat_str` (`{python} BatchingWorkedExample.r4_imp_mult_str` improvement)
-- R2: $200 \times 20$ ms = `{python} BatchingWorkedExample.r2_lat_str` (no improvement for longest request)
+- R1: `{python} BatchingWorkedExample.r1_lat_calc_math` `{python} BatchingWorkedExample.r1_lat_ms_str` (`{python} BatchingWorkedExample.r1_imp_mult_str` improvement over traditional)
+- R3: `{python} BatchingWorkedExample.r3_lat_calc_math` `{python} BatchingWorkedExample.r3_lat_str` (`{python} BatchingWorkedExample.r3_imp_mult_str` improvement)
+- R4: `{python} BatchingWorkedExample.r4_lat_calc_math` `{python} BatchingWorkedExample.r4_lat_str` (`{python} BatchingWorkedExample.r4_imp_mult_str` improvement)
+- R2: `{python} BatchingWorkedExample.r2_lat_calc_math` `{python} BatchingWorkedExample.r2_lat_str` (no improvement for longest request)
 
 Average latency comparison
 
@@ -2347,9 +2516,16 @@ All three requests reference the same physical blocks for the system prompt. Onl
 # │   PrefixCachingAnalysis.total_tokens_cached_str,
 # │   PrefixCachingAnalysis.kv_tb_cached_str,
 # │   PrefixCachingAnalysis.memory_reduction_pct_str,
-# │   PrefixCachingAnalysis.concurrent_mult_str
+# │   PrefixCachingAnalysis.concurrent_mult_str,
+# │   PrefixCachingAnalysis.system_prompt_tokens_str,
+# │   PrefixCachingAnalysis.concurrent_users_str,
+# │   PrefixCachingAnalysis.avg_response_tokens_str,
+# │   PrefixCachingAnalysis.tokens_per_user_eq_math,
+# │   PrefixCachingAnalysis.kv_no_cache_factors_math,
+# │   PrefixCachingAnalysis.total_tokens_cached_eq_math,
+# │   PrefixCachingAnalysis.kv_cached_factors_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_count, fmt_int, fmt_memory, fmt_percent
+from mlsysim.fmt import check, fmt_count, fmt_int, fmt_memory, fmt_percent, fmt_math
 
 # ┌── LEGO ───────────────────────────────────────────────
 class PrefixCachingAnalysis:
@@ -2392,23 +2568,32 @@ class PrefixCachingAnalysis:
     kv_tb_cached_str = fmt_memory(kv_cached, unit=TB, precision=1, commas=False)
     memory_reduction_pct_str = fmt_percent(memory_reduction_pct_val / 100, precision=1, commas=False, style='prose')
     concurrent_mult_str = fmt_multiple(round(concurrent_multiplier_val), commas=False, precision=0)
+    system_prompt_tokens_str = fmt_int(system_prompt_tokens)
+    concurrent_users_str = fmt_int(concurrent_users)
+    avg_response_tokens_str = fmt_int(avg_response_tokens)
+    tokens_per_user_eq_math = fmt_math(rf"{system_prompt_tokens} + {avg_response_tokens}\text{{ (avg response)}} =")
+    kv_no_cache_factors_math = fmt_math(
+        rf"\times {concurrent_users} \times {n_kv_pairs} \times {n_layers} " rf"\times {hidden_dim} \times {bytes_per_element} ="
+    )
+    total_tokens_cached_eq_math = fmt_math(rf"({system_prompt_tokens} \times 1) + ({avg_response_tokens} \times {concurrent_users}) =")
+    kv_cached_factors_math = fmt_math(rf"\times {n_kv_pairs} \times {n_layers} \times {hidden_dim} \times {bytes_per_element} =")
 ```
 
 ::: {#exmp-inference-prefix-caching-at-scale .callout-example title="Prefix caching at scale"}
 
-**Scenario**: A chatbot service uses a 2000-token system prompt and serves 1000 concurrent users.
+**Scenario**: A chatbot service uses a `{python} PrefixCachingAnalysis.system_prompt_tokens_str`-token system prompt and serves `{python} PrefixCachingAnalysis.concurrent_users_str` concurrent users.
 
 **Without prefix caching**:
 
-- KV cache per user: 2000 + 500 (avg response) = `{python} PrefixCachingAnalysis.tokens_per_user_str`
-- Total KV cache: `{python} PrefixCachingAnalysis.tokens_per_user_str` $\times$ 1000 $\times$ 2 $\times$ 80 $\times$ $8192 \times 2$ = `{python} PrefixCachingAnalysis.kv_tb_no_cache_str`
+- KV cache per user: `{python} PrefixCachingAnalysis.tokens_per_user_eq_math` `{python} PrefixCachingAnalysis.tokens_per_user_str`
+- Total KV cache: `{python} PrefixCachingAnalysis.tokens_per_user_str` `{python} PrefixCachingAnalysis.kv_no_cache_factors_math` `{python} PrefixCachingAnalysis.kv_tb_no_cache_str`
 
 **With prefix caching**:
 
-- Shared prefix: 2000 tokens (once)
-- Unique per user: 500 tokens
-- Total: $(2000 \times 1) + (500 \times 1000)$ = `{python} PrefixCachingAnalysis.total_tokens_cached_str`
-- Memory: `{python} PrefixCachingAnalysis.total_tokens_cached_str` $\times$ 2 $\times$ 80 $\times$ $8192 \times 2$ = `{python} PrefixCachingAnalysis.kv_tb_cached_str`
+- Shared prefix: `{python} PrefixCachingAnalysis.system_prompt_tokens_str` tokens (once)
+- Unique per user: `{python} PrefixCachingAnalysis.avg_response_tokens_str` tokens
+- Total: `{python} PrefixCachingAnalysis.total_tokens_cached_eq_math` `{python} PrefixCachingAnalysis.total_tokens_cached_str`
+- Memory: `{python} PrefixCachingAnalysis.total_tokens_cached_str` `{python} PrefixCachingAnalysis.kv_cached_factors_math` `{python} PrefixCachingAnalysis.kv_tb_cached_str`
 
 **Result**: Prefix caching yields a `{python} PrefixCachingAnalysis.memory_reduction_pct_str` memory reduction\index{Prefix Caching!memory savings} in KV cache, enabling `{python} PrefixCachingAnalysis.concurrent_mult_str` more concurrent users.
 
@@ -3038,7 +3223,10 @@ where $T_{\text{compute}}$ is the sequential compute time, $t$ is the tensor-par
 # │ Imports: (none—pure Python arithmetic, no pint quantities)
 # │ Exports: TpSpeedupCalc.tp_speedup_mult_str, TpSpeedupCalc.tp_theoretical_mult_str,
 # │   TpSpeedupCalc.n_layers_str, TpSpeedupCalc.seq_total_ms_str,
-# │   TpSpeedupCalc.tp8_total_ms_str, TpSpeedupCalc.nvlink_h100_gb_per_s_str
+# │   TpSpeedupCalc.tp8_total_ms_str, TpSpeedupCalc.nvlink_h100_gb_per_s_str,
+# │   TpSpeedupCalc.mem_70b_eq_math, TpSpeedupCalc.{att,ff}_{seq,tp}_ms_str,
+# │   TpSpeedupCalc.allreduce_tp_ms_str, TpSpeedupCalc.{att,ff}_speedup_mult_str,
+# │   TpSpeedupCalc.seq_per_layer_ms_str, TpSpeedupCalc.tp8_per_layer_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class TpSpeedupCalc:
@@ -3046,9 +3234,14 @@ class TpSpeedupCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     _model = Models.Language.Llama2_70B
-    seq_per_layer_ms = 30.0  # sequential compute per layer (attention + FF, 1 GPU)
-    tp8_per_layer_ms = 4.35  # 8-way TP per layer (compute sharded + AllReduce overhead)
+    # @tbl-inference-tp8-layer-breakdown per-layer phase timings (1 GPU vs 8-way TP):
+    att_seq_ms = 12.0  # attention compute, sequential (1 GPU)
+    att_tp_ms = 1.5  # attention compute, 8-way TP
+    ff_seq_ms = 18.0  # feed-forward compute, sequential (1 GPU)
+    ff_tp_ms = 2.25  # feed-forward compute, 8-way TP
+    allreduce_tp_ms = 0.3  # AllReduce overhead per collective, 8-way TP
     tp_theoretical = 8  # linear scaling limit
+    bytes_per_element = 2  # FP16
     n_layers = _model.layers
     hidden_dim = _model.hidden_dim
     attention_heads = _model.heads
@@ -3058,16 +3251,24 @@ class TpSpeedupCalc:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Per-layer totals from the phase breakdown (two AllReduce ops per layer)
+    seq_per_layer_ms = att_seq_ms + ff_seq_ms
+    tp8_per_layer_ms = att_tp_ms + ff_tp_ms + 2 * allreduce_tp_ms
+    att_speedup = att_seq_ms / att_tp_ms
+    ff_speedup = ff_seq_ms / ff_tp_ms
     tp_speedup = seq_per_layer_ms / tp8_per_layer_ms
 
     # Step 1: Full-model prefill-pass timing
     seq_total_ms = seq_per_layer_ms * n_layers
     tp8_total_ms = tp8_per_layer_ms * n_layers
+    weight_fp16_gb_val = weight_fp16.to(GB).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check, fmt, fmt_bandwidth, fmt_memory, fmt_time, fmt_params
+    from mlsysim.fmt import fmt_int, check, fmt, fmt_bandwidth, fmt_memory, fmt_time, fmt_params, fmt_math
 
     check(tp_speedup < tp_theoretical, f"Realized speedup ({tp_speedup:.2f}) must be less than theoretical ({tp_theoretical})")
+    check(abs(seq_per_layer_ms - 30.0) < 1e-9, "per-layer sequential must sum to 30 ms")
+    check(abs(tp8_per_layer_ms - 4.35) < 1e-9, "per-layer 8-way TP must sum to 4.35 ms")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tp_speedup_mult_str = fmt_multiple(tp_speedup, precision=1, commas=False)
@@ -3081,6 +3282,20 @@ class TpSpeedupCalc:
     hidden_dim_str = fmt_int(hidden_dim)
     weight_fp16_gb_str = fmt_memory(weight_fp16, unit=GB, precision=0, commas=False)
     activation_mb_str = fmt_memory(activation, unit=MB, precision=0, commas=False)
+    # Weight-memory equation: params (B) × 10^9 × bytes/element = weight (GB)
+    mem_70b_eq_math = fmt_math(
+        rf"\text{{Memory}}_{{\text{{70B}}}} = {int(parameters_b)} \times 10^9 \times " rf"{bytes_per_element} = {int(weight_fp16_gb_val)}\text{{ GB}}"
+    )
+    # Per-layer phase breakdown for @tbl-inference-tp8-layer-breakdown
+    att_seq_ms_str = fmt_time(att_seq_ms * millisecond, millisecond, precision=0, commas=False)
+    att_tp_ms_str = fmt_time(att_tp_ms * millisecond, millisecond, precision=1, commas=False)
+    ff_seq_ms_str = fmt_time(ff_seq_ms * millisecond, millisecond, precision=0, commas=False)
+    ff_tp_ms_str = fmt_time(ff_tp_ms * millisecond, millisecond, precision=2, commas=False)
+    allreduce_tp_ms_str = fmt_time(allreduce_tp_ms * millisecond, millisecond, precision=1, commas=False)
+    att_speedup_mult_str = fmt_multiple(att_speedup, precision=0, commas=False)
+    ff_speedup_mult_str = fmt_multiple(ff_speedup, precision=0, commas=False)
+    seq_per_layer_ms_str = fmt_time(seq_per_layer_ms * millisecond, millisecond, precision=0, commas=False)
+    tp8_per_layer_ms_str = fmt_time(tp8_per_layer_ms * millisecond, millisecond, precision=2, commas=False)
 ```
 
 ::: {#exmp-inference-tensor-parallelism-llama-70b .callout-example title="Tensor parallelism for Llama-70B"}
@@ -3096,7 +3311,7 @@ Consider serving Llama-70B with the following configuration: [@touvron2023llama2
 
 **Memory per GPU** (weight only, FP16):
 
-$$\text{Memory}_{\text{70B}} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
+`{python} TpSpeedupCalc.mem_70b_eq_math`
 
 **Minimum sharding**: 2-way (`{python} TpSpeedupCalc.weight_fp16_gb_str`/`{python} HardwareSetupSharding.h100_mem_gb_str` per H100)
 
@@ -3120,13 +3335,13 @@ The `{python} TpSpeedupCalc.tp_speedup_mult_str` speedup (vs. theoretical `{pyth
 
 :::
 
-| **Component**             | **Sequential (1 GPU)** | **8-way TP** |   **Speedup**   |
-|:--------------------------|:----------------------:|:------------:|:---------------:|
-| **Attention compute**     |         12 ms          |    1.5 ms    |    8$\times$    |
-| **AllReduce (attention)** |          0 ms          |    0.3 ms    |       N/A       |
-| **Feed-forward compute**  |         18 ms          |   2.25 ms    |    8$\times$    |
-| **AllReduce (FF)**        |          0 ms          |    0.3 ms    |       N/A       |
-| **Total per layer**       |       **30 ms**        | **4.35 ms**  | **6.9$\times$** |
+| **Component**             |               **Sequential (1 GPU)**              |                    **8-way TP**                   |                   **Speedup**                    |
+|:--------------------------|:-------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------:|
+| **Attention compute**     |      `{python} TpSpeedupCalc.att_seq_ms_str`      |       `{python} TpSpeedupCalc.att_tp_ms_str`      |  `{python} TpSpeedupCalc.att_speedup_mult_str`   |
+| **AllReduce (attention)** |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
+| **Feed-forward compute**  |       `{python} TpSpeedupCalc.ff_seq_ms_str`      |       `{python} TpSpeedupCalc.ff_tp_ms_str`       |   `{python} TpSpeedupCalc.ff_speedup_mult_str`   |
+| **AllReduce (FF)**        |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
+| **Total per layer**       | **`{python} TpSpeedupCalc.seq_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp8_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp_speedup_mult_str`** |
 
 : **8-Way Tensor Parallelism Per-Layer Breakdown**: Sequential vs. 8-way tensor-parallel timings for attention, feed-forward, and AllReduce phases of one Llama-70B transformer layer, decomposing the realized 6.9$\times$ speedup into compute scaling and communication tax. {#tbl-inference-tp8-layer-breakdown}
 
@@ -4424,6 +4639,9 @@ class NoisyNeighborImpact:
     slo_ms_str = fmt_time(round(slo_ms), 'millisecond', precision=0, commas=False)
     tenant_base_qps_str = fmt_rate(tenant_base_qps, "QPS", commas=False)
     tenant_burst_qps_str = fmt_rate(tenant_burst_qps, "QPS", commas=False)
+    # Bare numbers for table cells whose column header already reads "QPS"
+    tenant_base_qps_num_str = fmt_int(tenant_base_qps, commas=False)
+    tenant_burst_qps_num_str = fmt_int(tenant_burst_qps, commas=False)
     gpu_util_pct_str = fmt_percent(round(70) / 100, precision=0, commas=False, style='prose')
 
 class NoisyNeighborQuotaScenario:
@@ -4461,12 +4679,12 @@ Consider an inference platform serving 10 tenants on shared H100 GPUs:
 
 Tenant 3 bursts to `{python} NoisyNeighborImpact.tenant_burst_qps_str` (5$\times$ baseline). Without per-tenant quotas, the burst cascades into SLO violations for all ten tenants on the shared pool (@tbl-inference-noisy-neighbor-no-isolation):
 
-| **Tenant**       | **QPS**  | **P99 Latency** | **SLO Status** |
-|:-----------------|:--------:|:---------------:|:--------------:|
-| **Tenant 1**     |   100    |      25 ms      |    Violated    |
-| **Tenant 2**     |   100    |      28 ms      |    Violated    |
-| **Tenant 3**     |   500    |      45 ms      |    Violated    |
-| **Tenants 4-10** | 100 each |     22-30 ms    |    Violated    |
+| **Tenant**       |                           **QPS**                           | **P99 Latency** | **SLO Status** |
+|:-----------------|:-----------------------------------------------------------:|:---------------:|:--------------:|
+| **Tenant 1**     |    `{python} NoisyNeighborImpact.tenant_base_qps_num_str`   |      25 ms      |    Violated    |
+| **Tenant 2**     |    `{python} NoisyNeighborImpact.tenant_base_qps_num_str`   |      28 ms      |    Violated    |
+| **Tenant 3**     |   `{python} NoisyNeighborImpact.tenant_burst_qps_num_str`   |      45 ms      |    Violated    |
+| **Tenants 4-10** | `{python} NoisyNeighborImpact.tenant_base_qps_num_str` each |     22-30 ms    |    Violated    |
 
 : **Noisy neighbor without isolation (unprotected pool)**: All tenants violate their latency SLO when one tenant bursts. {#tbl-inference-noisy-neighbor-no-isolation tbl-colwidths="[26,20,24,30]"}
 
@@ -4478,10 +4696,10 @@ Enabling per-tenant quotas contains the impact to the offending tenant alone (@t
 
 | **Tenant**       |                              **QPS (actual)**                              |                      **P99 Latency**                       |                             **SLO Status**                             |
 |:-----------------|:--------------------------------------------------------------------------:|:----------------------------------------------------------:|:----------------------------------------------------------------------:|
-| **Tenant 1**     |                                    100                                     | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
-| **Tenant 2**     |                                    100                                     | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
+| **Tenant 1**     |           `{python} NoisyNeighborImpact.tenant_base_qps_num_str`           | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
+| **Tenant 2**     |           `{python} NoisyNeighborImpact.tenant_base_qps_num_str`           | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
 | **Tenant 3**     | `{python} NoisyNeighborQuotaScenario.tenant_throttled_qps_str` (throttled) |   `{python} NoisyNeighborQuotaScenario.burst_p99_ms_str`   | `{python} NoisyNeighborQuotaScenario.burst_status_str` (only for them) |
-| **Tenants 4-10** |                                  100 each                                  | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
+| **Tenants 4-10** |        `{python} NoisyNeighborImpact.tenant_base_qps_num_str` each         | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
 
 : **Noisy neighbor with per-tenant quotas**: Per-tenant QPS, p99 latency, and SLO status after enabling per-tenant resource quotas in the same workload. {#tbl-inference-noisy-neighbor-quotas}
 
@@ -5450,11 +5668,49 @@ The final selection matches the method to the binding constraint. Deployment con
 
 @Tbl-quantization-serving-cost shows how quantization reshapes serving cost per million tokens:
 
-| **Configuration**               | **Cost per 1M tokens (estimated)** |
-|:--------------------------------|:----------------------------------:|
-| **FP16 on 8$\times$ A100**      |               \$2.40               |
-| **AWQ 4-bit on 4$\times$ A100** |               \$1.20               |
-| **AWQ 4-bit on 2$\times$ A100** |               \$0.60               |
+```{python}
+#| echo: false
+#| label: quantization-serving-cost
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTIZATION IMPACT ON SERVING COST
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-quantization-serving-cost cost-per-1M-tokens table below.
+# │
+# │ Goal:    Show that 4-bit quantization cuts serving cost in proportion to the
+# │          GPU count it removes, not from per-GPU throughput gains.
+# │ Show:    Cost per 1M tokens for FP16 (8 GPUs), AWQ 4-bit (4 GPUs), AWQ 4-bit
+# │          (2 GPUs), scaled linearly from the FP16 baseline.
+# │ How:     cost = baseline_cost × (gpu_count / baseline_gpus).
+# │
+# │ Imports: mlsysim public API (fmt helpers)
+# │ Exports: cost_fp16_8_str, cost_awq_4_str, cost_awq_2_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_usd, check
+
+class QuantizationServingCost:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    baseline_cost = 2.40  # scenario assumption: FP16 cost per 1M tokens (estimated)
+    baseline_gpus = 8  # FP16 on 8x A100
+    gpus_awq_4 = 4  # AWQ 4-bit on 4x A100
+    gpus_awq_2 = 2  # AWQ 4-bit on 2x A100
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    cost_fp16_8 = baseline_cost
+    cost_awq_4 = baseline_cost * gpus_awq_4 / baseline_gpus
+    cost_awq_2 = baseline_cost * gpus_awq_2 / baseline_gpus
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(cost_awq_4 - 1.20) < 1e-9, "AWQ 4-bit (4 GPU) cost should be \\$1.20")
+    check(abs(cost_awq_2 - 0.60) < 1e-9, "AWQ 4-bit (2 GPU) cost should be \\$0.60")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    cost_fp16_8_str = fmt_usd(cost_fp16_8, precision=2, commas=False)
+    cost_awq_4_str = fmt_usd(cost_awq_4, precision=2, commas=False)
+    cost_awq_2_str = fmt_usd(cost_awq_2, precision=2, commas=False)
+```
+
+| **Configuration**               |         **Cost per 1M tokens (estimated)**         |
+|:--------------------------------|:--------------------------------------------------:|
+| **FP16 on 8$\times$ A100**      | `{python} QuantizationServingCost.cost_fp16_8_str` |
+| **AWQ 4-bit on 4$\times$ A100** | `{python} QuantizationServingCost.cost_awq_4_str`  |
+| **AWQ 4-bit on 2$\times$ A100** | `{python} QuantizationServingCost.cost_awq_2_str`  |
 
 : **Quantization Impact on Serving Cost**: Estimated cost per million tokens at three configurations. Halving the GPU count via 4-bit quantization halves the cost; halving it again brings the per-million-token cost to one quarter of the FP16 baseline. The cost savings come almost entirely from fewer GPUs rather than from per-GPU throughput gains. {#tbl-quantization-serving-cost tbl-colwidths="[58,42]"}
 
@@ -5663,7 +5919,7 @@ class RankingCascadeCost:
     cascade_budget_ms = l0_budget_ms + l1_budget_ms + l2_budget_ms + l3_budget_ms
     l3_per_candidate_ms = l3_budget_ms / l3_candidates
     l3_all_ms = initial_candidates * l3_per_candidate_ms
-    l3_all_s = l3_all_ms / 1000
+    l3_all_time = l3_all_ms * millisecond
     cost_reduction = l3_all_ms / cascade_budget_ms
     cost_reduction_rounded = round(cost_reduction / 100) * 100
 
@@ -5674,7 +5930,7 @@ class RankingCascadeCost:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     final_eval_reduction_mult_str = fmt_multiple(final_eval_reduction, precision=0, commas=True)
     l3_per_candidate_ms_str = fmt_time(round(l3_per_candidate_ms), 'millisecond', precision=0, commas=False)
-    l3_all_s_str = fmt_time(l3_all_s, second, precision=0, commas=False)
+    l3_all_s_str = fmt_time(l3_all_time, second, precision=0, commas=False)
     cascade_budget_ms_str = fmt_time(round(cascade_budget_ms), 'millisecond', precision=0, commas=False)
     cost_reduction_rounded_mult_str = fmt_multiple(cost_reduction_rounded, precision=0, commas=True)
 ```
