@@ -2226,23 +2226,27 @@ Staged rollout is the mechanism that turns deployment risk into a controllable e
 # │ Imports: mlsysim.book (check)
 # │ Exports: ds_canary_pct_str, ds_risk_reduction_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, MarkdownStr
+from mlsysim.fmt import check, fmt, fmt_math, MarkdownStr
 
 class DeploymentSafety:
     # ┌── 1. LOAD ──────────────────────────────────────────
+    full_cutover_pct = 1.0  # 100% blue-green cutover
     canary_pct = 0.05  # 5% canary traffic
     detection_time_h = 2  # hours to detect a major crash/bug
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Risk exposure is the expected number of broken requests
     # Ratio of exposure: (100% * T) / (5% * T)
-    risk_reduction = 1.0 / canary_pct
+    risk_reduction = full_cutover_pct / canary_pct
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(risk_reduction == 20.0, f"Risk reduction {risk_reduction} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     # Custom percent suffix → MarkdownStr escape-hatch (preserves "%" appended)
     ds_canary_pct_str = fmt_percent(canary_pct, precision=0, commas=False, style='symbol')
     ds_risk_reduction_mult_str = fmt_multiple(risk_reduction, precision=0, commas=False)
-    ds_full_cutover_pct_str = fmt_percent(100 / 100, precision=0, commas=False, style='symbol')
+    ds_full_cutover_pct_str = fmt_percent(full_cutover_pct, precision=0, commas=False, style='symbol')
+    ds_risk_reduction_eq_math = fmt_math(
+        rf"{fmt(full_cutover_pct * 100, precision=0)} / {fmt(canary_pct * 100, precision=0)} " rf"= {fmt(risk_reduction, precision=0)}\times"
+    )
 ```
 
 ::: {#nbk-ops-scale-safety-staged-rollouts .callout-notebook title="The safety of staged rollouts"}
@@ -2254,7 +2258,7 @@ Risk exposure is proportional to the traffic percentage affected during the dete
 
 1. **Blue-Green Exposure**\index{Blue-Green Deployment!blue-green exposure}: `{python} DeploymentSafety.ds_full_cutover_pct_str` of users affected until rollback.
 2. **Canary Exposure**\index{Canary Deployment!canary, exposure}: `{python} DeploymentSafety.ds_canary_pct_str` of users affected until rollback.
-3. **Risk Mitigation**\index{Risk Mitigation}: 100/5 = `{python} DeploymentSafety.ds_risk_reduction_mult_str`.
+3. **Risk Mitigation**\index{Risk Mitigation}: `{python} DeploymentSafety.ds_risk_reduction_eq_math`.
 
 **Systems insight**: Staged rollouts are an insurance policy for model quality. Limiting initial exposure to `{python} DeploymentSafety.ds_canary_pct_str` reduces the blast radius of a catastrophic failure by `{python} DeploymentSafety.ds_risk_reduction_mult_str`. In the Machine Learning Fleet, where model behavior is probabilistic and hard to unit-test, gradual exposure is the only reliable way to ensure that "SOTA on paper" does not become "Broken in Production."
 
@@ -2292,11 +2296,41 @@ where $T_{\text{stage}}$ is the duration required at a given percentage, $n_{\te
 
 A model serves 1 million requests per hour. To detect a 1 percent change in click-through rate with 95 percent confidence requires approximately 10,000 samples per variant.
 
-At 1 percent canary traffic:
-$$T_{1\%} = \frac{10,000}{1,000,000 \times 0.01} = 1 \text{ hour}$$
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-canary-duration worked example—stage durations.
+# │ Exports: CanaryDuration.t_1pct_eq_math, .t_5pct_eq_math
+from mlsysim.fmt import fmt, fmt_math, check
 
-At 5 percent canary traffic:
-$$T_{5\%} = \frac{10,000}{1,000,000 \times 0.05} = 0.2 \text{ hours} = 12 \text{ minutes}$$
+class CanaryDuration:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    samples_needed = 10_000  # per variant for 1% CTR change at 95% confidence
+    request_rate_per_h = 1_000_000  # requests/hour
+    p_1pct = 0.01
+    p_5pct = 0.05
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_1pct_h = samples_needed / (request_rate_per_h * p_1pct)
+    t_5pct_h = samples_needed / (request_rate_per_h * p_5pct)
+    t_5pct_min = t_5pct_h * 60
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(t_1pct_h == 1.0 and t_5pct_min == 12.0, "Canary durations drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    t_1pct_eq_math = fmt_math(
+        rf"T_{{1\%}} = \frac{{{fmt(samples_needed, precision=0)}}}"
+        rf"{{{fmt(request_rate_per_h, precision=0)} \times {p_1pct}}} "
+        rf"= {fmt(t_1pct_h, precision=0)}\text{{ hour}}"
+    )
+    t_5pct_eq_math = fmt_math(
+        rf"T_{{5\%}} = \frac{{{fmt(samples_needed, precision=0)}}}"
+        rf"{{{fmt(request_rate_per_h, precision=0)} \times {p_5pct}}} "
+        rf"= {fmt(t_5pct_h, precision=1)}\text{{ hours}} = {fmt(t_5pct_min, precision=0)}\text{{ minutes}}"
+    )
+```
+
+At 1 percent canary traffic: `{python} CanaryDuration.t_1pct_eq_math`.
+
+At 5 percent canary traffic: `{python} CanaryDuration.t_5pct_eq_math`.
 
 The organization might configure five rollout stages:
 
