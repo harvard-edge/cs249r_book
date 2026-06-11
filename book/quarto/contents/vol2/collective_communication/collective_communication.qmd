@@ -1012,11 +1012,13 @@ class RingTrace:
     steps_str = fmt(total_steps, precision=0, commas=False)
     elem_str = fmt(elem_per_step, precision=0, commas=False)
     total_str = fmt(total_per_gpu, precision=0, commas=False)
+    n_gpus_str = fmt(N, precision=0, commas=False)
+    vec_len_str = fmt(M, precision=0, commas=False)
 ```
 
 ::: {#nbk-collective-communication-ring-allreduce-step-by-step-trace-4-gpus .callout-notebook title="Ring AllReduce: Step-by-step trace (4 GPUs)"}
 
-**Setup**: 4 GPUs in a ring $(0 \to 1 \to 2 \to 3 \to 0)$. Each GPU holds a vector of 4 values. We use concrete numbers for clarity:
+**Setup**: `{python} RingTrace.n_gpus_str` GPUs in a ring $(0 \to 1 \to 2 \to 3 \to 0)$. Each GPU holds a vector of `{python} RingTrace.vec_len_str` values. We use concrete numbers for clarity:
 
 - GPU 0: $[1, 5, 3, 7]$
 - GPU 1: $[2, 6, 4, 8]$
@@ -1338,6 +1340,18 @@ class RingVsTree:
     M_mb_str = fmt_qty(M, MB, precision=0, commas=False)
     N_str = fmt(N, precision=0, commas=False)
     tree_win_margin_pct_str = fmt_percent(round(tree_win_margin_pct) / 100, precision=0, commas=False, style='prose')
+    # Formula-substitution math spans: the operands (N-1, log2N, 2.log2N, M, beta,
+    # alpha) come straight from the LOAD/EXECUTE values so the worked lines cannot
+    # drift from the cell.
+    from mlsysim.fmt import fmt_math
+
+    _alpha_us = int(alpha.to(microsecond).magnitude)
+    _m_mb = int(M.to(MB).magnitude)
+    _beta_gbs = int(beta.to(GB / second).magnitude)
+    ring_lat_sub_math = fmt_math(rf"2 \times {N - 1} \times {_alpha_us}\ \mu\text{{s}}")
+    tree_lat_sub_math = fmt_math(rf"2 \times {log2N} \times {_alpha_us}\ \mu\text{{s}}")
+    ring_bw_sub_math = fmt_math(rf"2 \times \frac{{{_m_mb}\text{{ MB}}}}{{{_beta_gbs}\text{{ GB/s}}}}")
+    tree_bw_sub_math = fmt_math(rf"{2 * log2N} \times \frac{{{_m_mb}\text{{ MB}}}}{{{_beta_gbs}\text{{ GB/s}}}}")
 ```
 
 ::: {#nbk-collective-communication-ring-vs-tree-crossover .callout-notebook title="The ring vs. tree crossover"}
@@ -1348,13 +1362,13 @@ class RingVsTree:
 
 **Latency**:
 
-1.  **Ring Latency**\index{Ring AllReduce!latency}: $2(N-1)\alpha = 2 \times 63 \times 10\ \mu\text{s}$ = `{python} RingVsTree.ring_lat_us_str`.
-2.  **Tree Latency**\index{Tree AllReduce!latency}: $2(\log_2 N)\alpha = 2 \times 6 \times 10\ \mu\text{s}$ = `{python} RingVsTree.tree_lat_us_str`.
+1.  **Ring Latency**\index{Ring AllReduce!latency}: $2(N-1)\alpha =$ `{python} RingVsTree.ring_lat_sub_math` = `{python} RingVsTree.ring_lat_us_str`.
+2.  **Tree Latency**\index{Tree AllReduce!latency}: $2(\log_2 N)\alpha =$ `{python} RingVsTree.tree_lat_sub_math` = `{python} RingVsTree.tree_lat_us_str`.
 
 **Bandwidth** (note the difference):
 
-3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{N-1}{N}\frac{M}{\beta} \approx 2 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.ring_bw_us_str` (optimal: each byte sent once).
-4.  **Tree Bandwidth**\index{Tree AllReduce!bandwidth}: $2\log_2 N \cdot \frac{M}{\beta} = 12 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = `{python} RingVsTree.tree_bw_us_str` (each level sends full message).
+3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{N-1}{N}\frac{M}{\beta} \approx$ `{python} RingVsTree.ring_bw_sub_math` = `{python} RingVsTree.ring_bw_us_str` (optimal: each byte sent once).
+4.  **Tree Bandwidth**\index{Tree AllReduce!bandwidth}: $2\log_2 N \cdot \frac{M}{\beta} =$ `{python} RingVsTree.tree_bw_sub_math` = `{python} RingVsTree.tree_bw_us_str` (each level sends full message).
 
 @Tbl-collective-communication-ring-vs-tree-1mb-64gpu sums the latency and bandwidth contributions into a head-to-head comparison:
 
