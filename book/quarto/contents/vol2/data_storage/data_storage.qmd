@@ -2074,6 +2074,45 @@ class GlacierCostRecap:
     glacier_annual_usd_str = fmt_usd(glacier_annual_cost, precision=0)
 ```
 
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @sec-storage-economics—egress, IOPS, and retrieval iceberg costs
+# │ Exports: StorageIcebergCosts.egress_10epoch_usd_str, .get_request_usd_str,
+# │          .storage_monthly_usd_str, .glacier_retrieval_usd_str,
+# │          .glacier_egress_usd_str, .file_count_str, .epochs_str,
+# │          .egress_rate_gb_str
+from mlsysim import Infrastructure
+from mlsysim.fmt import fmt, fmt_usd, fmt_count, check
+
+class StorageIcebergCosts:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    dataset = 100 * TB  # scenario: representative training dataset
+    epochs = 10  # scenario: epochs (dataset reads) per run
+    file_count = 100_000_000  # scenario: number of individual files
+    get_rate_per_1k = 0.0004  # scenario: S3 GET price per 1,000 requests
+    egress_rate = Infrastructure.Pricing.Cloud.EgressPerGB.rate
+    s3_rate = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
+    glacier_retrieval_rate = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    egress_10epoch = (dataset * epochs * egress_rate).to(USD)
+    egress_once = (dataset * egress_rate).to(USD)
+    get_request_cost = file_count * (get_rate_per_1k / 1000) * USD
+    storage_monthly = (dataset * s3_rate * ureg.month).to(USD)
+    glacier_retrieval = (dataset * glacier_retrieval_rate).to(USD)
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(egress_10epoch.magnitude > storage_monthly.magnitude, "Egress should dwarf monthly storage")
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    egress_10epoch_usd_str = fmt_usd(egress_10epoch.magnitude, precision=0)
+    get_request_usd_str = fmt_usd(get_request_cost.to(USD).magnitude, precision=0)
+    storage_monthly_usd_str = fmt_usd(storage_monthly.magnitude, precision=0)
+    glacier_retrieval_usd_str = fmt_usd(glacier_retrieval.magnitude, precision=0)
+    glacier_egress_usd_str = fmt_usd(egress_once.magnitude, precision=0)
+    file_count_str = fmt_count(file_count, scale="M", precision=0)
+    epochs_str = fmt(epochs, precision=0)
+    egress_rate_gb_str = fmt_usd(egress_rate.to(USD / GB).magnitude, precision=2, commas=False, suffix="/GB")
+```
+
 Consider storing a 100 TB training dataset. The annual storage cost varies enormously by tier:
 
 - **Object storage (S3 Standard)**: `{python} ObjectStorageCostRecap.s3_annual_usd_str`/year
@@ -2089,7 +2128,7 @@ The `{python} EconRatios.tier_cost_ratio_mult_str` cost difference between local
 *Repeated egress, not storage, dominates cloud cost.*
 :::
 
-Storage cost, however, is only part of the equation. **Data transfer costs**\index{Data Transfer Cost} can dominate, especially in cloud environments. Under the representative cross-boundary egress assumption used here, reading the 100 TB dataset from object storage to compute instances incurs a transfer charge of `{python} EconRatios.egress_100tb_usd_str`. For multi-epoch training that reads the dataset ten times, the egress cost alone exceeds \$90,000, more than the annual storage cost. This inversion, where *reading* data costs more than *storing* it, drives the architecture decision to cache data on local NVMe rather than streaming from object storage each epoch.
+Storage cost, however, is only part of the equation. **Data transfer costs**\index{Data Transfer Cost} can dominate, especially in cloud environments. Under the representative cross-boundary egress assumption used here, reading the 100 TB dataset from object storage to compute instances incurs a transfer charge of `{python} EconRatios.egress_100tb_usd_str`. For multi-epoch training that reads the dataset `{python} StorageIcebergCosts.epochs_str` times, the egress cost alone exceeds `{python} StorageIcebergCosts.egress_10epoch_usd_str`, more than the annual storage cost. This inversion, where *reading* data costs more than *storing* it, drives the architecture decision to cache data on local NVMe rather than streaming from object storage each epoch.
 
 The economic analysis changes further when accounting for the opportunity cost of accelerator idle time. A 1,000-GPU cluster at \$2/GPU/hour costs \$48,000 per day. If an undersized storage system reduces accelerator utilization from 90 percent to 70 percent, the organization loses \$9,600 per day in wasted compute. Over a 30-day training run, this amounts to \$288,000 of lost compute value, an amount that would easily fund a parallel file system upgrade or additional NVMe capacity. The economically rational approach treats storage investment not as an expense but as an enabler of compute utilization: every dollar spent improving storage throughput returns several dollars of increased accelerator productivity.
 
@@ -2097,10 +2136,10 @@ The economic analysis changes further when accounting for the opportunity cost o
 
 The visible cost of storage (\$/GB/month) is the tip of the iceberg. Below the surface lie costs that often exceed the storage cost itself:
 
-- **Egress fees**\index{Egress Fee}: A representative cross-boundary egress charge of \$0.09/GB makes a 100 TB dataset read once per epoch across 10 epochs cost \$90,000 in egress alone.
-- **IOPS charges**\index{IOPS!charges}: Object storage charges per-request fees. S3 Standard GET requests cost about \$0.0004 per 1,000 requests, so a dataset of 100 million individual files, read once, costs about \$40 in GET request fees before data transfer or retrieval charges, even though the storage cost is \$2,300/month.
+- **Egress fees**\index{Egress Fee}: A representative cross-boundary egress charge of `{python} StorageIcebergCosts.egress_rate_gb_str` makes a 100 TB dataset read once per epoch across `{python} StorageIcebergCosts.epochs_str` epochs cost `{python} StorageIcebergCosts.egress_10epoch_usd_str` in egress alone.
+- **IOPS charges**\index{IOPS!charges}: Object storage charges per-request fees. S3 Standard GET requests cost about \$0.0004 per 1,000 requests, so a dataset of `{python} StorageIcebergCosts.file_count_str` individual files, read once, costs about `{python} StorageIcebergCosts.get_request_usd_str` in GET request fees before data transfer or retrieval charges, even though the storage cost is `{python} StorageIcebergCosts.storage_monthly_usd_str`/month.
 - **Idle accelerator cost**\index{Idle Accelerator Cost}: If storage stalls reduce GPU utilization from 90 percent to 70 percent on a 1,000-GPU cluster at \$2/GPU/hour, the lost compute costs \$9,600/day (20 percent of \$48,000 daily spend), dwarfing any storage savings.
-- **Retrieval fees**\index{Retrieval Fee}: Archive storage charges retrieval fees (\$0.02/GB for Glacier) in addition to egress. Restoring a 100 TB dataset from Glacier costs \$2,000 in retrieval fees plus \$9,000 in egress.
+- **Retrieval fees**\index{Retrieval Fee}: Archive storage charges retrieval fees (\$0.02/GB for Glacier) in addition to egress. Restoring a 100 TB dataset from Glacier costs `{python} StorageIcebergCosts.glacier_retrieval_usd_str` in retrieval fees plus `{python} StorageIcebergCosts.glacier_egress_usd_str` in egress.
 
 The economically rational strategy often invests more in storage (local NVMe caching, parallel file system capacity) to reduce transfer costs and prevent accelerator stalls.
 
