@@ -1723,15 +1723,30 @@ The cascade shown in @fig-power-path reveals why power delivery is an infrastruc
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt, fmt_int, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Exports: H100TdpWallRecap.tdp_w_str, H100TdpWallRecap.flops_fp16_tflop_per_s_str
+# │ Exports: H100TdpWallRecap.tdp_w_str, H100TdpWallRecap.flops_fp16_tflop_per_s_str,
+# │          die_area_mm2_str, heat_flux_str, stove_flux_str, stove_ratio_str
 class H100TdpWallRecap:
 
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    tdp = Hardware.Cloud.H100.tdp
+    die_area_mm2 = 814  # H100 SXM5 die area (~29x28 mm)
+    stove_flux_w_cm2 = 10  # electric stovetop burner at high heat (reference)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    tdp_w = tdp.to(watt).magnitude
+    heat_flux_w_cm2 = tdp_w / (die_area_mm2 / 100)  # W per cm^2
+    stove_ratio = heat_flux_w_cm2 / stove_flux_w_cm2
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tdp_w_str = fmt_qty(Hardware.Cloud.H100.tdp, watt, precision=0, commas=False)
+    tdp_w_str = fmt_qty(tdp, watt, precision=0, commas=False)
     flops_fp16_tflop_per_s_str = fmt_qty(Hardware.Cloud.H100.compute.peak_flops, TFLOP / second, precision=0, commas=False)
+    die_area_mm2_str = fmt_int(die_area_mm2)
+    heat_flux_str = fmt_int(heat_flux_w_cm2)
+    stove_flux_str = fmt_int(stove_flux_w_cm2)
+    stove_ratio_str = fmt(stove_ratio, precision=1)
 ```
 
 Every floating-point operation dissipates energy as heat. Dense Tensor Core activity during large matrix multiplications drives heat proportional to the switching activity of billions of transistors. The Thermal Design Power (TDP)\index{TDP}[^fn-tdp-thermal] of an accelerator is the maximum sustained heat dissipation that the cooling system must handle, and it has become the single most consequential specification in fleet design. At dense fleet scale, this creates the power wall\index{Power Wall}: the point where facility power delivery and heat removal, not available arithmetic units, determine how much compute can be installed and sustained.
@@ -1831,7 +1846,7 @@ Accelerators implement sophisticated power management to operate within their TD
 
 Dynamic power management means that the actual power draw of a GPU varies continuously during training. A typical training step might see power swing from 400 W (during communication phases when most SMs are idle) to `{python} H100TdpWallRecap.tdp_w_str` (during the forward and backward pass when all Tensor Cores are active) and back, with each transition occurring in microseconds. The VRMs on the baseboard must respond to these transitions fast enough to maintain a stable supply voltage despite the rapidly changing current draw.
 
-To appreciate the physical challenge, consider what `{python} H100TdpWallRecap.tdp_w_str` means in terms of heat flux. An H100 die measures approximately 814 mm$^2$ (roughly $29{\times}28$ mm). Dissipating `{python} H100TdpWallRecap.tdp_w_str` from this area produces a heat flux of approximately 86 W/cm$^2$. For comparison, the surface of an electric stovetop burner at high heat produces approximately 10 W/cm$^2$. An H100 die generates 8.6$\times$ the heat flux of a stove burner, concentrated on an area the size of a large postage stamp.
+To appreciate the physical challenge, consider what `{python} H100TdpWallRecap.tdp_w_str` means in terms of heat flux. An H100 die measures approximately `{python} H100TdpWallRecap.die_area_mm2_str` mm$^2$ (roughly $29{\times}28$ mm). Dissipating `{python} H100TdpWallRecap.tdp_w_str` from this area produces a heat flux of approximately `{python} H100TdpWallRecap.heat_flux_str` W/cm$^2$. For comparison, the surface of an electric stovetop burner at high heat produces approximately `{python} H100TdpWallRecap.stove_flux_str` W/cm$^2$. An H100 die generates `{python} H100TdpWallRecap.stove_ratio_str`$\times$ the heat flux of a stove burner, concentrated on an area the size of a large postage stamp.
 
 The B200 pushes even further: at 1,000 W across a dual-die package, the average heat flux remains comparable, but the total energy that must be removed per package increases by 43 percent. Removing this heat without allowing the junction temperature to exceed 83 degrees Celsius (the typical operating maximum for HBM reliability) requires thermal solutions with extremely low thermal resistance from die to coolant.
 
