@@ -2899,7 +2899,56 @@ Some facilities also maintain an emergency air cooling capability as a last-reso
 
 The failure modes of liquid cooling systems are qualitatively different from those of air cooling. Air cooling fails gracefully: a fan failure reduces airflow, causing temperatures to rise slowly over minutes, providing ample time for automated load shedding. Liquid cooling can fail catastrophically: a coolant leak can simultaneously damage hardware (if the coolant is conductive) and remove cooling capacity (if the leak drains the loop). Quick-disconnect fittings, which allow hot-swapping of server nodes without draining the entire coolant loop, are a critical design feature that reduces maintenance downtime from hours to minutes. However, these fittings are also the most common point of failure in the coolant loop, as the O-ring seals degrade over thousands of connect/disconnect cycles. Facilities that perform frequent hardware swaps (common in research environments where nodes are regularly reconfigured) must budget for quarterly O-ring replacement and maintain a stock of spare fittings.
 
-The economics of cooling reliability shift dramatically when moving from independent inference servers to tightly coupled training clusters. In a distributed training run using synchronous parallelism, a single rack failure halts the entire job. Consider a cooling failure that triggers a thermal shutdown of a 256-GPU rack within a 10,000-GPU cluster. The direct hardware cost is negligible, but the opportunity cost is immense. If the repair time for a CDU pump is four hours, the immediate loss of 256 GPUs at \$4 per GPU-hour is only \$4,096. However, because the training algorithm requires all workers to proceed in lockstep, the remaining 9,744 GPUs also sit idle, burning electricity without making progress. This straggler effect inflates the cost to \$160,000 in lost compute time. When adding the overhead of checkpoint retrieval and the rollback to the last saved state -- often losing 30 to 60 minutes of computation -- the total financial impact of a single cooling component failure easily exceeds \$200,000. The nonlinear scaling of failure costs makes N+1 redundancy in cooling loops a mathematical necessity for training economics.
+```{python}
+#| echo: false
+#| label: straggler-failure-cost-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STRAGGLER FAILURE-COST SCENARIO (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: narrative prose immediately below — cooling-failure economics.
+# │
+# │ Goal: Quantify the lockstep-straggler cost of a cooling failure that idles a
+# │       full synchronous training cluster for the CDU repair window.
+# │ Show: $4,096 direct (256 GPUs) vs $160,000 full-cluster idle (10,000 GPUs).
+# │ How: direct = failed_gpus·rate·hours; cluster = total_gpus·rate·hours.
+# │
+# │ Imports: mlsysim.Systems, Infrastructure; mlsysim.core.units; mlsysim.fmt
+# │ Exports: failed_gpus_str, cluster_gpus_str, idle_gpus_str, repair_hours_str,
+# │          gpu_hour_rate_str, direct_cost_str, cluster_cost_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems, Infrastructure
+from mlsysim.fmt import fmt, fmt_int, fmt_usd, fmt_time, check
+from mlsysim.core.units import hour
+
+class StragglerFailureCost:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    failed_gpus = 256  # scenario: GPUs in the shut-down rack
+    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
+    repair_duration = 4 * hour  # scenario: CDU pump repair window
+    gpu_hour_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    idle_gpus = cluster_gpus - failed_gpus
+    repair_hours = repair_duration.to(hour).magnitude
+    rate = gpu_hour_rate.to("dollar/hour").magnitude
+    direct_cost = failed_gpus * rate * repair_hours
+    cluster_cost = cluster_gpus * rate * repair_hours
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(direct_cost - 4096) < 1, f"Direct straggler cost drifted: {direct_cost}")
+    check(abs(cluster_cost - 160000) < 1, f"Cluster straggler cost drifted: {cluster_cost}")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    failed_gpus_str = fmt(failed_gpus, precision=0, commas=False)
+    cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
+    idle_gpus_str = fmt(idle_gpus, precision=0, commas=True)
+    repair_hours_str = fmt_time(repair_duration, unit=hour, precision=0, commas=False, style="word")
+    gpu_hour_rate_str = fmt_usd(rate, precision=0, commas=False)
+    direct_cost_str = fmt_usd(direct_cost, precision=0, commas=True)
+    cluster_cost_str = fmt_usd(cluster_cost, precision=0, commas=True)
+```
+
+The economics of cooling reliability shift dramatically when moving from independent inference servers to tightly coupled training clusters. In a distributed training run using synchronous parallelism, a single rack failure halts the entire job. Consider a cooling failure that triggers a thermal shutdown of a `{python} StragglerFailureCost.failed_gpus_str`-GPU rack within a `{python} StragglerFailureCost.cluster_gpus_str`-GPU cluster. The direct hardware cost is negligible, but the opportunity cost is immense. If the repair time for a CDU pump is `{python} StragglerFailureCost.repair_hours_str`, the immediate loss of `{python} StragglerFailureCost.failed_gpus_str` GPUs at `{python} StragglerFailureCost.gpu_hour_rate_str` per GPU-hour is only `{python} StragglerFailureCost.direct_cost_str`. However, because the training algorithm requires all workers to proceed in lockstep, the remaining `{python} StragglerFailureCost.idle_gpus_str` GPUs also sit idle, burning electricity without making progress. This straggler effect inflates the cost to `{python} StragglerFailureCost.cluster_cost_str` in lost compute time. When adding the overhead of checkpoint retrieval and the rollback to the last saved state -- often losing 30 to 60 minutes of computation -- the total financial impact of a single cooling component failure easily exceeds \$200,000. The nonlinear scaling of failure costs makes N+1 redundancy in cooling loops a mathematical necessity for training economics.
 
 ::: {.column-margin}
 ![](images/svg/sustainable_ai_cooling_failure_blast.svg){width="100%" fig-alt="Blast-radius fan with one red cooling-failure source sending arrows to six blue affected nodes, labeled to show that a rack failure idles the synchronized training job."}
