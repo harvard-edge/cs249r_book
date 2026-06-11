@@ -53,11 +53,62 @@ The parallelism strategies introduced in @sec-distributed-training-systems (data
 
 The gap between that assumption and reality reveals a fundamental asymmetry in *how* computation and communication scale. Computation is inherently *local*: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently *global*: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space. The most critical instance of this coordination is gradient synchronization, and making it fast is what this chapter is about: a cost model for predicting communication time, the collective primitives that distributed training relies on, the AllReduce algorithms and topology-aware schedules that move gradients efficiently, and the compression and overlap techniques that hide whatever communication remains.
 
+```{python}
+#| echo: false
+#| label: gradient-sync-significance-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRADIENT-SYNC SIGNIFICANCE—70B BF16 RING ALLREDUCE NAPKIN MATH
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @dfn-collective-communication-gradient-synchronization Significance
+# │          bullet, plus the "140 GB of gradients" body sentence below it.
+# │
+# │ Goal: Pin the 70B BF16 gradient size (140 GB), the per-link bandwidth
+# │       (50 GB/s = registry NDR), and the bandwidth-only ring AllReduce time
+# │       (2M/beta ~ 5.6 s) so the definition's headline numbers trace to the
+# │       registry instead of being hand-typed.
+# │ Show: 140 GB; 50 GB/s; ~5.6 s; the "2 x 140 / 50" operand span.
+# │ How: gradient = P x 2 bytes/param; ring bandwidth term = 2M/beta.
+# │
+# │ Imports: mlsysim (Models, Systems) + core.units + fmt
+# │ Exports: GradSyncSignificance.* (_str / _math per displayed value)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, Systems
+from mlsysim.core.units import GB, byte, param, second
+from mlsysim.fmt import check, fmt_count, fmt_math, fmt_qty, fmt_time
+
+class GradSyncSignificance:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    m = Models.Language.Llama2_70B
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per link (registry NDR)
+    # Illustrative cluster size (scenario assumption; the bandwidth-only estimate
+    # is per-worker and independent of this count, which only frames the example).
+    cluster_size = 1000
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    gradient = (m.parameters * (2 * byte / param)).to(GB)
+    # Bandwidth-only ring AllReduce estimate: T ~ 2M / beta.
+    ring_time = (2 * gradient / beta).to(second)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(gradient.to(GB).magnitude - 140) < 1, "70B BF16 gradient should be ~140 GB")
+    check(abs(ring_time.to(second).magnitude - 5.6) < 0.1, "Ring AllReduce time should be ~5.6 s")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    gradient_gb_str = fmt_qty(gradient, GB, precision=0, commas=False)
+    beta_gb_per_s_str = fmt_qty(beta, GB / second, precision=0, commas=False)
+    ring_time_s_str = fmt_time(ring_time, second, precision=1, commas=False)
+    n_gpus_str = fmt_count(cluster_size, commas=True, label="GPU")
+    # "2 x 140 / 50" operand span for the bandwidth-only ring estimate.
+    _grad_gb = int(gradient.to(GB).magnitude)
+    _beta_gbs = int(beta.to(GB / second).magnitude)
+    ring_operands_math = fmt_math(rf"2 \times {_grad_gb}/{_beta_gbs}")
+```
+
 ::: {#dfn-collective-communication-gradient-synchronization .callout-definition title="Gradient synchronization"}
 
 ***Gradient Synchronization***\index{Gradient Synchronization!definition} is the collective communication protocol executed at each training step in which every worker transmits its locally computed gradient tensor to all other workers, receives their gradients, and computes an aggregate update that all workers apply identically to their model copies.
 
-1.  **Significance (quantitative)**: A 70B-parameter model in BF16 generates 140 GB of gradient data per worker per step. Synchronizing across 1,000 GPUs via ring AllReduce at 50 GB/s per link requires approximately $2 \times 140/50 \approx 5.6$ seconds of communication per step, dominating the bandwidth (data-movement) term in the iron law and consuming 40--70 percent of total training time before overlap techniques are applied.
+1.  **Significance (quantitative)**: A 70B-parameter model in BF16 generates `{python} GradSyncSignificance.gradient_gb_str` of gradient data per worker per step. Synchronizing across `{python} GradSyncSignificance.n_gpus_str` via ring AllReduce at `{python} GradSyncSignificance.beta_gb_per_s_str` per link requires approximately `{python} GradSyncSignificance.ring_operands_math` $\approx$ `{python} GradSyncSignificance.ring_time_s_str` of communication per step, dominating the bandwidth (data-movement) term in the iron law and consuming 40--70 percent of total training time before overlap techniques are applied.
 2.  **Observation**: Unlike parameter-server approaches (where all workers send gradients to a centralized aggregator whose bandwidth scales as $\mathcal{O}(N)$), ring AllReduce distributes the communication across all workers so that each worker's per-step communication cost stays constant at $2 \times (N-1)/N \times M$ regardless of cluster size.
 3.  **Pitfall**: A frequent misconception is that gradient synchronization overhead scales with the number of GPUs. In ring AllReduce, per-node communication volume is constant as the cluster grows—the bottleneck is the gradient volume per step (proportional to model size), not the number of participants.
 
@@ -67,7 +118,7 @@ The requirement for gradient synchronization is not a design choice; it is a mat
 
 [^fn-ps-bottleneck]: **Parameter Server (PS)**\index{Parameter Server!bottleneck}: Google's DistBelief (2012) used a star topology where all workers sent gradients to a central server whose bandwidth had to match the aggregate bandwidth of all workers. As clusters scaled from 10 to 1,000 nodes, the central server's NIC saturated, making per-step communication cost grow as $\mathcal{O}(N)$ and forcing the transition to peer-to-peer collectives where per-node cost is constant.
 
-The volume of data that must be synchronized is proportional to the model size. A model with $P$ parameters stored in BF16 (2 bytes per parameter) generates $2P$ bytes of gradient data per training step per GPU. For a 70 billion parameter model, this is 140 GB of gradients that every GPU must send and receive.[^fn-ring-allreduce-origin]
+The volume of data that must be synchronized is proportional to the model size. A model with $P$ parameters stored in BF16 (2 bytes per parameter) generates $2P$ bytes of gradient data per training step per GPU. For a 70 billion parameter model, this is `{python} GradSyncSignificance.gradient_gb_str` of gradients that every GPU must send and receive.[^fn-ring-allreduce-origin]
 
 [^fn-ring-allreduce-origin]: **Ring AllReduce**\index{Ring AllReduce!origin}: The algorithm dates to the 1990s HPC community (Patarasuk and Yuan formalized it in 2009), but Baidu's Andrew Gibiansky popularized it for ML in February 2017, demonstrating 31$\times$ speedup scaling to 40 GPUs. Uber's Horovod library (2017) and NVIDIA's NCCL helped make it a common distributed-training primitive, because its $\mathcal{O}(1)$-per-node bandwidth cost broke the $\mathcal{O}(N)$ bottleneck of parameter servers.
 
