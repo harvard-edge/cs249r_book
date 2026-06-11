@@ -988,11 +988,61 @@ class NonBlockingOversubscription:
 
 The first property, bisection bandwidth, quantifies the worst-case throughput ceiling that the topology imposes on global collectives. A cluster can have thousands of fast links at the edge and still starve its AllReduce operations if the cross-sectional capacity at the narrowest point in the switching hierarchy is insufficient.
 
+```{python}
+#| echo: false
+#| label: bisection-bandwidth-definition-example
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BISECTION BANDWIDTH DEFINITION EXAMPLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @dfn-network-fabrics-bisection-bandwidth — the significance bullet.
+# │
+# │ Goal: Quantify the 1,024-GPU fat-tree bisection bandwidth at 1:1 and 4:1
+# │       subscription, and the slowdown the oversubscribed spine imposes.
+# │ Show: 512 × 50 GB/s = 25.6 TB/s (1:1); 6.4 TB/s (4:1); 4× slower.
+# │ How: BW_bisect = (N/2) × beta / oversub_ratio via calc_bisection_bandwidth.
+# │
+# │ Imports: mlsysim registries (Systems) + physics + fmt helpers
+# │ Exports: BisectionDefinitionExample.gpus_str, .link_gbit_per_s_str,
+# │          .bisect_1_1_math, .bisect_4_1_tb_per_s_str, .slowdown_mult_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_count, fmt_bandwidth, fmt_qty, fmt_multiple, fmt_math, check
+from mlsysim.physics import calc_bisection_bandwidth
+
+class BisectionDefinitionExample:
+    """1,024-GPU fat-tree bisection bandwidth at 1:1 vs 4:1 subscription."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    n_gpus = Systems.Clusters.Training_1K.total_accelerators
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400 Gb/s (50 GB/s) per port
+    oversub_ratio = 4.0  # scenario assumption: oversubscribed spine ratio
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    gpus_per_side = n_gpus // 2
+    bisect_1_1 = calc_bisection_bandwidth(gpus_per_side, beta)
+    bisect_4_1 = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=oversub_ratio)
+    slowdown = (bisect_1_1 / bisect_4_1).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(bisect_1_1.to(TB / second).magnitude - 25.6) < 1e-6, "1:1 bisection should be 25.6 TB/s")
+    check(abs(bisect_4_1.to(TB / second).magnitude - 6.4) < 1e-6, "4:1 bisection should be 6.4 TB/s")
+    check(round(slowdown, 3) == 4.0, "Slowdown must match the oversubscription ratio")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
+    link_gbit_per_s_str = fmt_bandwidth(beta, unit=Gbps, precision=0, commas=False)
+    bisect_1_1_math = fmt_math(
+        rf"\text{{BW}}_{{\text{{bisect}}}} = {gpus_per_side} \times {beta.to(GB / second).magnitude:.0f}\,\text{{GB/s}} "
+        rf"= {bisect_1_1.to(TB / second).magnitude:.1f}\,\text{{TB/s}}"
+    )
+    bisect_4_1_tb_per_s_str = fmt_qty(bisect_4_1, TB / second, precision=1, commas=False)
+    slowdown_mult_str = fmt_multiple(slowdown, precision=0, commas=False)
+```
+
 ::: {#dfn-network-fabrics-bisection-bandwidth .callout-definition title="Bisection bandwidth"}
 
 ***Bisection Bandwidth***\index{Bisection Bandwidth!definition} is a network topology metric defined as the minimum aggregate link capacity crossing any partition that divides the cluster into two equal halves, representing the worst-case throughput ceiling for all-to-all communication patterns such as AllReduce.
 
-1.  **Significance (quantitative)**: Bisection bandwidth $\text{BW}_{\text{bisect}}$ directly sets the cluster-scale bandwidth ceiling for global synchronization. A 1,024-GPU fat-tree with 400 Gb/s (50 GB/s) links at 1:1 subscription provides $\text{BW}_{\text{bisect}} = 512 \times 50\,\text{GB/s} = 25.6\,\text{TB/s}$ per direction; a 4:1 oversubscribed spine reduces this to $6.4\,\text{TB/s}$, making each AllReduce step 4$\times$ slower and turning the network into the dominant iron law bottleneck rather than the accelerator.
+1.  **Significance (quantitative)**: Bisection bandwidth $\text{BW}_{\text{bisect}}$ directly sets the cluster-scale bandwidth ceiling for global synchronization. A `{python} BisectionDefinitionExample.gpus_str` fat-tree with `{python} BisectionDefinitionExample.link_gbit_per_s_str` links at 1:1 subscription provides `{python} BisectionDefinitionExample.bisect_1_1_math` per direction; a 4:1 oversubscribed spine reduces this to `{python} BisectionDefinitionExample.bisect_4_1_tb_per_s_str`, making each AllReduce step `{python} BisectionDefinitionExample.slowdown_mult_str` slower and turning the network into the dominant iron law bottleneck rather than the accelerator.
 2.  **Observation**: Unlike aggregate bandwidth (the sum of all edge link speeds, which can be high even in a poorly connected topology), $\text{BW}_{\text{bisect}}$ measures global connectivity—a star topology with 1,000 edge links all meeting at one central switch has high aggregate bandwidth but $\text{BW}_{\text{bisect}}$ limited by that switch's backplane capacity.
 3.  **Pitfall**: A frequent misconception is that adding more leaf switches always increases $\text{BW}_{\text{bisect}}$. In a three-tier fat-tree, oversubscribing the spine layer (using fewer uplinks than downlinks per pod switch) reduces $\text{BW}_{\text{bisect}}$ below the edge-link total regardless of how many leaf switches are present.
 
