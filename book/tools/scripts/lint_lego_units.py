@@ -156,8 +156,9 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
                 f"Closed name {match.group('name')} uses open fmt() — use fmt_qty/domain formatter.",
             ))
         for match in MASG_TO_CLOSED.finditer(block):
+            lineno = base_line + block[: match.start()].count("\n")
             issues.append(LintIssue(
-                "L016", rel, base_line + match.start() // 80 + 1,
+                "L016", rel, lineno,
                 f"{match.group('name')} assigned from .m_as() scalar.",
             ))
         # L017 retired: fmt_qty closed-auto names (e.g. throughput_str) are valid per lego-units.md.
