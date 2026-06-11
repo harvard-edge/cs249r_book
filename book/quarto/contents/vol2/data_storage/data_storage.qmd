@@ -999,28 +999,41 @@ Local NVMe is also the primary tier for **local checkpoint staging**. When savin
 # │ How: T_step_remote = T_compute + T_IO_remote; T_step_local = T_compute.
 # │
 # │ Imports: mlsysim.book (check)
-# │ Exports: lc_compute_ms_str, lc_remote_io_ms_str, lc_util_remote_str, lc_util_local_str
+# │ Exports: lc_compute_ms_str, lc_remote_io_ms_str, lc_util_remote_str, lc_util_local_str,
+# │          lc_local_io_ms_str, lc_util_gain_str, lc_cluster_gpus_str, lc_recovered_gpus_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_time
+from mlsysim.fmt import check, fmt, fmt_time, fmt_count, fmt_usd
 
 class LocalCacheRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
     t_compute_ms = 800
     t_io_remote_ms = 150  # Remote PFS latency + bandwidth limit
     t_io_local_ms = 10  # Local NVMe prefetch (effective overhead)
+    cluster_gpus = Systems.Clusters.Training_1K.total_accelerators
+    gpu_node_usd = Infrastructure.Pricing.Capital.H100GpuPurchaseUsd.rate
+    nvme_drive_usd = 500 * USD  # scenario: cost of one local NVMe staging drive
     # ┌── 2. EXECUTE ───────────────────────────────────────
     t_step_remote = t_compute_ms + t_io_remote_ms
     t_step_local = t_compute_ms + t_io_local_ms
     util_remote = (t_compute_ms / t_step_remote) * 100
     util_local = (t_compute_ms / t_step_local) * 100
+    util_gain = util_local - util_remote
+    recovered_gpus = round(cluster_gpus * util_gain / 100)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(util_remote < 85, f"Remote util {util_remote:.1f}% too high")
     check(util_local > 98, f"Local util {util_local:.1f}% too low")
+    check(util_gain > 0, "Local caching must improve utilization")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     lc_compute_ms_str = fmt_time(t_compute_ms, 'millisecond', precision=0, commas=False)
     lc_remote_io_ms_str = fmt_time(t_io_remote_ms, 'millisecond', precision=0, commas=False)
+    lc_local_io_ms_str = fmt_time(t_io_local_ms, 'millisecond', precision=0, commas=False)
     lc_util_remote_str = fmt_percent(util_remote / 100, precision=1, commas=False, style='prose')
     lc_util_local_str = fmt_percent(util_local / 100, precision=1, commas=False, style='prose')
+    lc_util_gain_str = fmt_percent(util_gain / 100, precision=1, commas=False, style='prose')
+    lc_cluster_gpus_str = fmt(cluster_gpus, precision=0)
+    lc_recovered_gpus_str = fmt_count(recovered_gpus, label='GPU')
+    lc_gpu_node_usd_str = fmt_usd(gpu_node_usd, precision=0)
+    lc_nvme_drive_usd_str = fmt_usd(nvme_drive_usd, precision=0)
 ```
 
 The same local NVMe tier also pays for itself by recovering utilization lost to remote-read latency.
@@ -1034,9 +1047,9 @@ GPU utilization $(\eta_{\text{hw}})$ is the fraction of step time spent in compu
 
 1. **Remote Only**\index{Warm Cache!remote-read baseline}: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + `{python} LocalCacheRoi.lc_remote_io_ms_str`) $\approx$ `{python} LocalCacheRoi.lc_util_remote_str`.
 2. **Local Cache**\index{Warm Cache!local NVMe cache}: Using prefetching into local NVMe reduces the exposed I/O wait to near zero.
-   - New Util: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + 10) $\approx$ `{python} LocalCacheRoi.lc_util_local_str`.
+   - New Util: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + `{python} LocalCacheRoi.lc_local_io_ms_str`) $\approx$ `{python} LocalCacheRoi.lc_util_local_str`.
 
-**Systems insight**: Local storage is a *GPU utilization multiplier*. In this scenario, adding a \$500 NVMe drive to a \$30,000 GPU node recovers 15 percent of the GPU's capacity that was previously wasted on I/O wait. Across a 1,000-GPU cluster, that utilization gain is equivalent to adding 150 GPUs worth of useful work without buying 150 more accelerators. In ML infrastructure, local NVMe is not auxiliary; it is the physical buffer that decouples expensive compute from unpredictable shared storage.
+**Systems insight**: Local storage is a *GPU utilization multiplier*. In this scenario, adding a `{python} LocalCacheRoi.lc_nvme_drive_usd_str` NVMe drive to a `{python} LocalCacheRoi.lc_gpu_node_usd_str` GPU node recovers `{python} LocalCacheRoi.lc_util_gain_str` of the GPU's capacity that was previously wasted on I/O wait. Across a `{python} LocalCacheRoi.lc_cluster_gpus_str`-GPU cluster, that utilization gain is equivalent to adding `{python} LocalCacheRoi.lc_recovered_gpus_str` worth of useful work without buying that many more accelerators. In ML infrastructure, local NVMe is not auxiliary; it is the physical buffer that decouples expensive compute from unpredictable shared storage.
 
 :::
 
