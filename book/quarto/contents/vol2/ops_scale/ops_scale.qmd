@@ -4056,9 +4056,39 @@ Consider training a large language model:
 - PUE: 1.15 (efficient hyperscale data center)
 - Failure overhead: 15 percent (typical for multi-node training)
 
-$$C_{\text{train}} = 256 \times (14 \times 24) \times \$3.50 \times 1.15 \times 1.15 \approx \$398,147$$
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-training-cost worked example—single-run and annual cost.
+# │ Exports: TrainingCostExample.c_train_eq_math, .annual_str
+from mlsysim.fmt import fmt, fmt_math, fmt_usd, check
 
-If this model requires quarterly retraining, annual training cost reaches approximately \$1.6 million. However, training cost often represents a small fraction of total TCO for production systems serving millions of users.
+class TrainingCostExample:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 256
+    days = 14
+    gpu_hour_rate = 3.50  # illustrative cloud H100-hour rate for this scenario
+    pue = 1.15
+    fail_factor = 1.15  # 15% failure overhead
+    retrains_per_year = 4
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    hours = days * 24
+    c_train = n_gpus * hours * gpu_hour_rate * pue * fail_factor
+    annual_cost = c_train * retrains_per_year
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(round(c_train) == 398_147, f"C_train {c_train} drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    c_train_eq_math = fmt_math(
+        rf"C_{{\text{{train}}}} = {fmt(n_gpus, precision=0)} \times ({days} \times 24) "
+        rf"\times {fmt_usd(gpu_hour_rate, precision=2, commas=False)} \times {pue} \times {fail_factor} "
+        rf"\approx {fmt_usd(round(c_train))}"
+    )
+    annual_str = fmt_usd(annual_cost, scale="M", precision=1)
+```
+
+`{python} TrainingCostExample.c_train_eq_math`
+
+If this model requires quarterly retraining, annual training cost reaches approximately `{python} TrainingCostExample.annual_str`. However, training cost often represents a small fraction of total TCO for production systems serving millions of users.
 
 #### Inference cost model {#sec-ml-operations-scale-inference-cost-model-63ed}
 
@@ -4263,21 +4293,57 @@ The breakeven equation becomes useful only after the dominant cost component is 
 
 #### Worked example: Optimization investment decision {#sec-ml-operations-scale-worked-example-optimization-investment-decision-cc81}
 
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-optimization-breakeven worked examples (inference + training).
+# │ Exports: OptimizationBreakeven.infer_savings_eq_str, .infer_breakeven_eq_math,
+# │          .train_savings_eq_str, .train_breakeven_eq_math
+from mlsysim.fmt import fmt, fmt_math, fmt_usd, MarkdownStr, check
+
+class OptimizationBreakeven:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    impl_cost = 80_000
+    infer_monthly = 400_000
+    infer_reduction = 0.40
+    train_monthly = 150_000
+    train_reduction = 0.30
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    infer_savings = infer_monthly * infer_reduction
+    infer_breakeven_months = impl_cost / infer_savings
+    train_savings = train_monthly * train_reduction
+    train_breakeven_months = impl_cost / train_savings
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(infer_savings == 160_000 and infer_breakeven_months == 0.5, "Inference breakeven drift")
+    check(train_savings == 45_000 and abs(train_breakeven_months - 1.8) < 0.05, "Training breakeven drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    infer_savings_eq_str = MarkdownStr(f"{fmt_usd(infer_monthly)} $\\times$ {fmt(infer_reduction, precision=2)} = {fmt_usd(infer_savings)}")
+    infer_breakeven_eq_math = fmt_math(
+        rf"T_{{\text{{breakeven}}}} = \frac{{{fmt_usd(impl_cost)}}}{{{fmt_usd(infer_savings, per='month')}}} "
+        rf"= {fmt(infer_breakeven_months, precision=1)} \text{{ months}}"
+    )
+    train_savings_eq_str = MarkdownStr(f"{fmt_usd(train_monthly)} $\\times$ {fmt(train_reduction, precision=2)} = {fmt_usd(train_savings)}")
+    train_breakeven_eq_math = fmt_math(
+        rf"T_{{\text{{breakeven}}}} = \frac{{{fmt_usd(impl_cost)}}}{{{fmt_usd(train_savings, per='month')}}} "
+        rf"= {fmt(train_breakeven_months, precision=1)} \text{{ months}}"
+    )
+```
+
 A production company $(C_{\text{infer}} = \$400K/\text{month})$ evaluates INT8 quantization:
 
 - Implementation cost: \$80,000 (engineering time + validation)
 - Expected inference cost reduction: 40 percent
-- Monthly savings: \$400,000 $\times$ 0.40 = \$160,000
+- Monthly savings: `{python} OptimizationBreakeven.infer_savings_eq_str`
 
-$$T_{\text{breakeven}} = \frac{\$80,000}{\$160,000/month} = 0.5 \text{ months}$$
+`{python} OptimizationBreakeven.infer_breakeven_eq_math`
 
 Breakeven in 2 weeks makes this investment highly attractive. However, if the same company $(C_{\text{train}} = \$150K/\text{month})$ evaluates a training optimization:
 
 - Implementation cost: \$80,000
 - Expected training cost reduction: 30 percent
-- Monthly savings: \$150,000 $\times$ 0.30 = \$45,000
+- Monthly savings: `{python} OptimizationBreakeven.train_savings_eq_str`
 
-$$T_{\text{breakeven}} = \frac{\$80,000}{\$45,000/month} = 1.8 \text{ months}$$
+`{python} OptimizationBreakeven.train_breakeven_eq_math`
 
 Still attractive, but lower priority than inference optimization due to longer payback and smaller absolute savings.
 
