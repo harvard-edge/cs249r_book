@@ -2113,12 +2113,48 @@ class StorageIcebergCosts:
     egress_rate_gb_str = fmt_usd(egress_rate.to(USD / GB).magnitude, precision=2, commas=False, suffix="/GB")
 ```
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STORAGE COST EXTREMES — HBM-AS-STORAGE + IDLE-ACCELERATOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: Bracket the cost ladder (HBM capital top end) and the opportunity cost
+# │       of storage-induced accelerator idle time.
+# │ How: 100 TB x HBM $/GB; 1,000-GPU x Fleet GpuHourRef x utilization shortfall.
+# │ Exports: StorageCostExtremes.hbm_storage_usd_str, idle_daily_usd_str,
+# │          idle_loss_daily_usd_str, idle_loss_run_usd_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_usd, check
+
+class StorageCostExtremes:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    dataset_tb = 100  # scenario: 100 TB training dataset
+    hbm_per_gb = Infrastructure.Pricing.Storage.HbmEquivalentPerGb.rate
+    cluster_size = 1000  # scenario: round 1,000-GPU cluster
+    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate
+    util_high = 0.90  # scenario: storage-healthy utilization
+    util_low = 0.70  # scenario: storage-starved utilization
+    run_days = 30
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    hbm_storage = (dataset_tb * TB).to(GB) * hbm_per_gb
+    idle_daily = cluster_size * gpu_hour_rate * (HOURS_PER_DAY * hour)
+    idle_loss_daily = idle_daily * (util_high - util_low)
+    idle_loss_run = idle_loss_daily * run_days
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(hbm_storage.to(USD).magnitude - 1_500_000) < 1, "HBM-as-storage should be $1.5M for 100 TB")
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    hbm_storage_usd_str = fmt_usd(hbm_storage.to(USD).magnitude, precision=0)
+    idle_daily_usd_str = fmt_usd(idle_daily.to(USD).magnitude, precision=0)
+    idle_loss_daily_usd_str = fmt_usd(idle_loss_daily.to(USD).magnitude, precision=0)
+    idle_loss_run_usd_str = fmt_usd(idle_loss_run.to(USD).magnitude, precision=0)
+```
+
 Consider storing a 100 TB training dataset. The annual storage cost varies enormously by tier:
 
 - **Object storage (S3 Standard)**: `{python} ObjectStorageCostRecap.s3_annual_usd_str`/year
 - **Local NVMe (provisioned)**: `{python} ObjectStorageCostRecap.nvme_annual_usd_str`/year
 - **Archive (Glacier)**: `{python} GlacierCostRecap.glacier_annual_usd_str`/year
-- **HBM equivalent** (hypothetically storing 100 TB in GPU memory at \$15/GB): \$1,500,000 in hardware amortization
+- **HBM equivalent** (hypothetically storing 100 TB in GPU memory at \$15/GB): `{python} StorageCostExtremes.hbm_storage_usd_str` in hardware amortization
 
 The `{python} EconRatios.tier_cost_ratio_mult_str` cost difference between local NVMe and object storage (with the full HBM-to-archive span exceeding 3,000$\times$) explains why the hierarchy exists: data must live at the cheapest tier possible, migrating upward only when needed and returning downward when done. This cost gradient reflects the underlying physics. Faster storage requires more expensive materials (HBM uses 3D-stacked silicon with through-silicon vias), more energy per bit accessed, and more physical proximity to the accelerator (which limits the amount that can be provisioned per node). Cheaper storage uses commodity components (standard hard drives for archive), consumes minimal energy when idle, and can be located anywhere with network connectivity.
 
@@ -2130,7 +2166,7 @@ The `{python} EconRatios.tier_cost_ratio_mult_str` cost difference between local
 
 Storage cost, however, is only part of the equation. **Data transfer costs**\index{Data Transfer Cost} can dominate, especially in cloud environments. Under the representative cross-boundary egress assumption used here, reading the 100 TB dataset from object storage to compute instances incurs a transfer charge of `{python} EconRatios.egress_100tb_usd_str`. For multi-epoch training that reads the dataset `{python} StorageIcebergCosts.epochs_str` times, the egress cost alone exceeds `{python} StorageIcebergCosts.egress_10epoch_usd_str`, more than the annual storage cost. This inversion, where *reading* data costs more than *storing* it, drives the architecture decision to cache data on local NVMe rather than streaming from object storage each epoch.
 
-The economic analysis changes further when accounting for the opportunity cost of accelerator idle time. A 1,000-GPU cluster at \$2/GPU/hour costs \$48,000 per day. If an undersized storage system reduces accelerator utilization from 90 percent to 70 percent, the organization loses \$9,600 per day in wasted compute. Over a 30-day training run, this amounts to \$288,000 of lost compute value, an amount that would easily fund a parallel file system upgrade or additional NVMe capacity. The economically rational approach treats storage investment not as an expense but as an enabler of compute utilization: every dollar spent improving storage throughput returns several dollars of increased accelerator productivity.
+The economic analysis changes further when accounting for the opportunity cost of accelerator idle time. A 1,000-GPU cluster at \$2/GPU/hour costs `{python} StorageCostExtremes.idle_daily_usd_str` per day. If an undersized storage system reduces accelerator utilization from 90 percent to 70 percent, the organization loses `{python} StorageCostExtremes.idle_loss_daily_usd_str` per day in wasted compute. Over a 30-day training run, this amounts to `{python} StorageCostExtremes.idle_loss_run_usd_str` of lost compute value, an amount that would easily fund a parallel file system upgrade or additional NVMe capacity. The economically rational approach treats storage investment not as an expense but as an enabler of compute utilization: every dollar spent improving storage throughput returns several dollars of increased accelerator productivity.
 
 ::: {#psp-data-storage-storage-cost-iceberg .callout-perspective title="The storage cost iceberg"}
 
@@ -2138,7 +2174,7 @@ The visible cost of storage (\$/GB/month) is the tip of the iceberg. Below the s
 
 - **Egress fees**\index{Egress Fee}: A representative cross-boundary egress charge of `{python} StorageIcebergCosts.egress_rate_gb_str` makes a 100 TB dataset read once per epoch across `{python} StorageIcebergCosts.epochs_str` epochs cost `{python} StorageIcebergCosts.egress_10epoch_usd_str` in egress alone.
 - **IOPS charges**\index{IOPS!charges}: Object storage charges per-request fees. S3 Standard GET requests cost about \$0.0004 per 1,000 requests, so a dataset of `{python} StorageIcebergCosts.file_count_str` individual files, read once, costs about `{python} StorageIcebergCosts.get_request_usd_str` in GET request fees before data transfer or retrieval charges, even though the storage cost is `{python} StorageIcebergCosts.storage_monthly_usd_str`/month.
-- **Idle accelerator cost**\index{Idle Accelerator Cost}: If storage stalls reduce GPU utilization from 90 percent to 70 percent on a 1,000-GPU cluster at \$2/GPU/hour, the lost compute costs \$9,600/day (20 percent of \$48,000 daily spend), dwarfing any storage savings.
+- **Idle accelerator cost**\index{Idle Accelerator Cost}: If storage stalls reduce GPU utilization from 90 percent to 70 percent on a 1,000-GPU cluster at \$2/GPU/hour, the lost compute costs `{python} StorageCostExtremes.idle_loss_daily_usd_str`/day (20 percent of `{python} StorageCostExtremes.idle_daily_usd_str` daily spend), dwarfing any storage savings.
 - **Retrieval fees**\index{Retrieval Fee}: Archive storage charges retrieval fees (\$0.02/GB for Glacier) in addition to egress. Restoring a 100 TB dataset from Glacier costs `{python} StorageIcebergCosts.glacier_retrieval_usd_str` in retrieval fees plus `{python} StorageIcebergCosts.glacier_egress_usd_str` in egress.
 
 The economically rational strategy often invests more in storage (local NVMe caching, parallel file system capacity) to reduce transfer costs and prevent accelerator stalls.
@@ -2361,7 +2397,32 @@ The movement of data between tiers should be automated through lifecycle policie
 
 Return to our running example to see tiering in action. The `{python} StorageTieringCorpus.compressed_text_tb_str` source corpus and `{python} StorageTieringCorpus.tokenized_text_tb_str` serialized training shards live permanently in object storage (cold tier). When a training job is scheduled, the orchestration system triggers a "data staging" phase that copies the tokenized shards to the parallel file system (warm tier) before the first training node boots. Each node's data loader then copies its assigned shards to local NVMe (hot tier) during the first epoch. Subsequent epochs read entirely from local NVMe, incurring no network traffic. When the job completes, a cleanup process deletes the local NVMe copies and, after a configurable grace period, purges the parallel file system copy. The entire lifecycle, from staging through training to cleanup, is managed by policy rather than by the training engineer.
 
-The economic benefit of automated tiering compounds over time. An organization running 50 concurrent training jobs, each using 10 TB of data, would need 500 TB of parallel file system capacity if all data were left in place. Automated demotion after job completion might reduce the steady-state parallel file system usage to 100 TB, saving \$144,000 per year at the parallel file system's per-TB rate. These savings are invisible in any single experiment but substantial when accumulated across the fleet.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PARALLEL-FILE-SYSTEM TIERING SAVINGS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: Annual PFS-capacity savings from demoting idle datasets after jobs end.
+# │ How: (in-place 500 TB - steady 100 TB) x PFS $/TB-month x 12 months.
+# │ Exports: PfsTieringSavings.savings_usd_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_usd
+from mlsysim.core.units import ureg
+
+class PfsTieringSavings:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    n_jobs = 50  # scenario: 50 concurrent training jobs
+    job_data_tb = 10  # scenario: 10 TB per job
+    steady_state_tb = 100  # scenario: usage after automated demotion
+    pfs_rate = Infrastructure.Pricing.Storage.ParallelFileSystemPerTbMonth.rate
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    inplace_tb = n_jobs * job_data_tb  # 500 TB if all data left in place
+    annual_savings = (inplace_tb - steady_state_tb) * TB * pfs_rate * (12 * ureg.month)
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    savings_usd_str = fmt_usd(annual_savings.to(USD).magnitude, precision=0)
+```
+
+The economic benefit of automated tiering compounds over time. An organization running 50 concurrent training jobs, each using 10 TB of data, would need 500 TB of parallel file system capacity if all data were left in place. Automated demotion after job completion might reduce the steady-state parallel file system usage to 100 TB, saving `{python} PfsTieringSavings.savings_usd_str` per year at the parallel file system's per-TB rate. These savings are invisible in any single experiment but substantial when accumulated across the fleet.
 
 #### Data staging patterns {.unnumbered}
 
