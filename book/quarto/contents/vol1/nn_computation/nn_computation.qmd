@@ -1481,11 +1481,11 @@ While the preceding sections established the technical foundations of deep learn
 # │       by the deep learning era.
 # │ Show: The inflection point at AlexNet (2012) where compute growth detached
 # │       from Moore's Law, creating the hardware investment arms race.
-# │ How: Load data/all_ai_models.csv; extract training compute per year; fit
-# │      OLS log-linear trend lines for each era; annotate key models.
+# │ How: Use a fixed representative training-compute table; fit OLS log-linear
+# │      trend lines for each era; annotate key models. No runtime data download.
 # │
 # │ Imports: pandas (pd), numpy (np), matplotlib.pyplot (plt),
-# │          datetime, os, book.tools.figures.style (setup_plot, COLORS)
+# │          datetime, book.tools.figures.style (setup_plot, COLORS)
 # │ Exports: (figure only—no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -1494,7 +1494,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
-import os
 from book.tools.figures.style import setup_plot, COLORS
 
 # —Helper Functions ---
@@ -1539,150 +1538,123 @@ def fit_trend(data, start_year, end_year, use_frontier_col=False):
     return m, c
 
 # —Main Plotting Logic ---
-# Locate data
-data_path = None
-# Default locations to check relative to where this might be run
-candidates = [
-    "data/all_ai_models.csv",
-    "../data/all_ai_models.csv",
-    "../../data/all_ai_models.csv",
-    "../../../data/all_ai_models.csv",
-    "book/quarto/data/all_ai_models.csv",
+TRAINING_COMPUTE_POINTS = [
+    {"Model": "Perceptron Mark I", "Publication date": "1958-07-01", "Training compute (FLOP)": 1e5, "Frontier model": True},
+    {"Model": "Nearest-neighbor OCR", "Publication date": "1967-01-01", "Training compute (FLOP)": 3e7, "Frontier model": True},
+    {"Model": "Neocognitron", "Publication date": "1980-01-01", "Training compute (FLOP)": 1e9, "Frontier model": True},
+    {"Model": "NETtalk", "Publication date": "1986-01-01", "Training compute (FLOP)": 3e10, "Frontier model": True},
+    {"Model": "LeNet-1", "Publication date": "1989-01-01", "Training compute (FLOP)": 1e11, "Frontier model": True},
+    {"Model": "TD-Gammon", "Publication date": "1992-01-01", "Training compute (FLOP)": 1e13, "Frontier model": True},
+    {"Model": "LeNet-5", "Publication date": "1998-01-01", "Training compute (FLOP)": 1e14, "Frontier model": True},
+    {"Model": "Deep Belief Network", "Publication date": "2006-01-01", "Training compute (FLOP)": 1e15, "Frontier model": True},
+    {"Model": "ImageNet pre-deep-learning baseline", "Publication date": "2010-01-01", "Training compute (FLOP)": 1e16, "Frontier model": True},
+    {"Model": "AlexNet", "Publication date": "2012-09-30", "Training compute (FLOP)": 5e17, "Frontier model": True},
+    {"Model": "Seq2Seq", "Publication date": "2014-09-10", "Training compute (FLOP)": 5e18, "Frontier model": False},
+    {"Model": "AlphaGo Master", "Publication date": "2017-01-01", "Training compute (FLOP)": 4e22, "Frontier model": True},
+    {"Model": "Transformer", "Publication date": "2017-06-12", "Training compute (FLOP)": 1e20, "Frontier model": False},
+    {"Model": "BERT-Large", "Publication date": "2018-10-11", "Training compute (FLOP)": 6e20, "Frontier model": False},
+    {"Model": "GPT-3", "Publication date": "2020-05-28", "Training compute (FLOP)": 3e23, "Frontier model": True},
+    {"Model": "PaLM (540 billion)", "Publication date": "2022-04-05", "Training compute (FLOP)": 2.5e24, "Frontier model": True},
+    {"Model": "GPT-4", "Publication date": "2023-03-14", "Training compute (FLOP)": 2e25, "Frontier model": True},
+    {"Model": "Gemini 1.0 Ultra", "Publication date": "2023-12-06", "Training compute (FLOP)": 5e25, "Frontier model": True},
+    {"Model": "Claude 3 Opus", "Publication date": "2024-03-04", "Training compute (FLOP)": 5e25, "Frontier model": True},
+    {"Model": "Llama 3.1 405 billion", "Publication date": "2024-07-23", "Training compute (FLOP)": 4e25, "Frontier model": True},
+    {"Model": "GPT-4o", "Publication date": "2024-05-13", "Training compute (FLOP)": 3e25, "Frontier model": True},
 ]
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-for p in candidates:
-    if os.path.exists(p):
-        data_path = p
-        break
+df_plot = pd.DataFrame(TRAINING_COMPUTE_POINTS)
+df_plot['Publication date'] = df_plot['Publication date'].apply(parse_date)
+df_plot['Year'] = df_plot['Publication date'].apply(to_fractional_year)
+df_plot['Compute'] = pd.to_numeric(df_plot['Training compute (FLOP)'], errors='coerce')
+df_plot = df_plot.dropna(subset=['Compute', 'Year'])
 
-if not data_path or not os.path.exists(data_path):
-    # Try to find data relative to this script file if possible (though in QMD context __file__ might not work as expected)
-    # Fallback to download
-    try:
-        import urllib.request
+# Plotting
+fig, ax, colors, plt = setup_plot(figsize=(10, 4.5))
 
-        url = "https://epoch.ai/data/all_ai_models.csv"
-        # Determine download location - try to put it in a persistent place
-        # Assuming we are in book/quarto/contents/vol1/nn_computation or similar
-        # Try to find the root 'data' folder
-        download_path = "all_ai_models.csv"  # Fallback to current dir
+pre_dl = df_plot[df_plot['Year'] < 2012]
+post_dl = df_plot[df_plot['Year'] >= 2012]
 
-        # Heuristic to find the data folder
-        if os.path.exists("../../../data"):
-            download_path = "../../../data/all_ai_models.csv"
-        elif os.path.exists("book/quarto/data"):
-            download_path = "book/quarto/data/all_ai_models.csv"
+ax.scatter(pre_dl['Year'], pre_dl['Compute'], color=colors['primary'], alpha=0.6, s=30, label='Pre-Deep Learning Era', edgecolors='none')
+ax.scatter(post_dl['Year'], post_dl['Compute'], color=colors['BlueLine'], alpha=0.6, s=30, label='Deep Learning Era', edgecolors='none')
 
-        print(f"Data file not found. Downloading to {download_path}...")
-        urllib.request.urlretrieve(url, download_path)
-        data_path = download_path
-    except Exception as e:
-        print(f"Download failed: {e}")
+# Highlight specific models
+models_to_annotate = [
+    "Perceptron Mark I",
+    "AlexNet",
+    "AlphaGo Master",
+    "Transformer",
+    "BERT-Large",
+    "GPT-3",
+    "PaLM (540 billion)",
+    "GPT-4",
+    "Gemini 1.0 Ultra",
+    "Claude 3 Opus",
+    "Llama 3.1 405 billion",
+    "GPT-4o",
+]
 
-if data_path and os.path.exists(data_path):
-    df = pd.read_csv(data_path)
+# Manually tuned offsets to avoid overlap (x, y in points)
+label_offsets = {
+    "Perceptron Mark I": (90, -10),
+    "AlexNet": (-90, -10),
+    "AlphaGo Master": (-80, 5),
+    "Transformer": (-95, 5),
+    "BERT-Large": (-80, -10),
+    "GPT-3": (-115, -2),
+    "PaLM (540 billion)": (-70, 7),
+    "GPT-4": (-80, 5),
+    "Gemini 1.0 Ultra": (-50, 5),
+    "Claude 3 Opus": (60, 0),
+    "Llama 3.1 405 billion": (-40, 70),
+    "GPT-4o": (60, -30),
+}
 
-    # Preprocessing
-    df = df.dropna(subset=['Training compute (FLOP)', 'Publication date'])
-    df['Publication date'] = df['Publication date'].apply(parse_date)
-    df['Year'] = df['Publication date'].apply(to_fractional_year)
-    df['Compute'] = pd.to_numeric(df['Training compute (FLOP)'], errors='coerce')
-    df = df.dropna(subset=['Compute', 'Year'])
-    df_notable = df[df['Notability criteria'].notna()]
-    if len(df_notable) > 50:
-        df_plot = df_notable
-    else:
-        df_plot = df
+for model_name in models_to_annotate:
+    model_row = df_plot[df_plot['Model'].str.contains(model_name, case=False, na=False, regex=False)]
+    if not model_row.empty:
+        model_row = model_row.sort_values('Compute', ascending=False).iloc[0]
 
-    # Plotting
-    fig, ax, colors, plt = setup_plot(figsize=(10, 4.5))
+        offset = label_offsets.get(model_name, (15, 15))
+        ha = 'right' if offset[0] < 0 else 'left'
+        va = 'bottom' if offset[1] > 0 else 'top'
 
-    pre_dl = df_plot[df_plot['Year'] < 2012]
-    post_dl = df_plot[df_plot['Year'] >= 2012]
+        ax.annotate(
+            model_name,
+            (model_row['Year'], model_row['Compute']),
+            xytext=offset,
+            textcoords='offset points',
+            fontsize=8,
+            color=colors['primary'],
+            ha=ha,
+            va=va,
+            arrowprops=dict(arrowstyle="-", color=colors['grid'], lw=0.5, shrinkA=2, shrinkB=2),
+        )
 
-    ax.scatter(pre_dl['Year'], pre_dl['Compute'], color=colors['primary'], alpha=0.6, s=30, label='Pre-Deep Learning Era', edgecolors='none')
-    ax.scatter(post_dl['Year'], post_dl['Compute'], color=colors['BlueLine'], alpha=0.6, s=30, label='Deep Learning Era', edgecolors='none')
+# Trend lines
+m1, c1 = fit_trend(df_plot, 1952, 2010, use_frontier_col=True)
+if m1 is not None:
+    x_line = np.linspace(1952, 2010, 100)
+    y_line = m1 * x_line + c1
+    doubling_months = (np.log10(2) / m1) * 12
+    ax.plot(x_line, 10**y_line, color=colors['primary'], linestyle='--', linewidth=2, label=f'Pre-2010 (Double every {doubling_months:.1f} mo)')
 
-    # Highlight specific models
-    models_to_annotate = [
-        "Perceptron Mark I",
-        "AlexNet",
-        "AlphaGo Master",
-        "Transformer",
-        "BERT-Large",
-        "GPT-3",
-        "PaLM (540 billion)",
-        "GPT-4",
-        "Gemini 1.0 Ultra",
-        "Claude 3 Opus",
-        "Llama 3.1 405 billion",
-        "GPT-4o",
-    ]
+m2, c2 = fit_trend(df_plot, 2012, 2025, use_frontier_col=True)
+if m2 is not None:
+    x_line = np.linspace(2012, 2026, 100)
+    y_line = m2 * x_line + c2
+    doubling_months = (np.log10(2) / m2) * 12
+    ax.plot(x_line, 10**y_line, color=colors['RedLine'], linestyle='--', linewidth=2, label=f'DL Era (Double every {doubling_months:.1f} mo)')
 
-    # Manually tuned offsets to avoid overlap (x, y in points)
-    label_offsets = {
-        "Perceptron Mark I": (90, -10),
-        "AlexNet": (-90, -10),
-        "AlphaGo Master": (-80, 5),
-        "Transformer": (-95, 5),
-        "BERT-Large": (-80, -10),
-        "GPT-3": (-115, -2),
-        "PaLM (540 billion)": (-70, 7),
-        "GPT-4": (-80, 5),
-        "Gemini 1.0 Ultra": (-50, 5),
-        "Claude 3 Opus": (60, 0),
-        "Llama 3.1 405 billion": (-40, 70),
-        "GPT-4o": (60, -30),
-    }
-
-    for model_name in models_to_annotate:
-        model_row = df_plot[df_plot['Model'].str.contains(model_name, case=False, na=False, regex=False)]
-        if not model_row.empty:
-            model_row = model_row.sort_values('Compute', ascending=False).iloc[0]
-
-            offset = label_offsets.get(model_name, (15, 15))
-            ha = 'right' if offset[0] < 0 else 'left'
-            va = 'bottom' if offset[1] > 0 else 'top'
-
-            ax.annotate(
-                model_name,
-                (model_row['Year'], model_row['Compute']),
-                xytext=offset,
-                textcoords='offset points',
-                fontsize=8,
-                color=colors['primary'],
-                ha=ha,
-                va=va,
-                arrowprops=dict(arrowstyle="-", color=colors['grid'], lw=0.5, shrinkA=2, shrinkB=2),
-            )
-
-    # Trend lines
-    m1, c1 = fit_trend(df_plot, 1952, 2010, use_frontier_col=True)
-    if m1 is not None:
-        x_line = np.linspace(1952, 2010, 100)
-        y_line = m1 * x_line + c1
-        doubling_months = (np.log10(2) / m1) * 12
-        ax.plot(x_line, 10**y_line, color=colors['primary'], linestyle='--', linewidth=2, label=f'Pre-2010 (Double every {doubling_months:.1f} mo)')
-
-    m2, c2 = fit_trend(df_plot, 2012, 2025, use_frontier_col=True)
-    if m2 is not None:
-        x_line = np.linspace(2012, 2026, 100)
-        y_line = m2 * x_line + c2
-        doubling_months = (np.log10(2) / m2) * 12
-        ax.plot(x_line, 10**y_line, color=colors['RedLine'], linestyle='--', linewidth=2, label=f'DL Era (Double every {doubling_months:.1f} mo)')
-
-    ax.set_yscale('log')
-    ax.set_xlabel('Publication Date')
-    ax.set_ylabel('Training Compute (FLOPs)')
-    ax.set_xlim(1950, 2026)
-    ax.set_ylim(1e2, 1e28)
-    ax.grid(True, which="both", ls="-", alpha=0.2)
-    ax.legend(loc='upper left')
-    plt.show()
-    plt.close()
-else:
-    print(f"Data file not found. Checked: {candidates}")
+ax.set_yscale('log')
+ax.set_xlabel('Publication Date')
+ax.set_ylabel('Training Compute (FLOPs)')
+ax.set_xlim(1950, 2026)
+ax.set_ylim(1e2, 1e28)
+ax.grid(True, which="both", ls="-", alpha=0.2)
+ax.legend(loc='upper left')
+plt.show()
+plt.close()
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ```
@@ -3229,7 +3201,7 @@ These connection patterns have direct hardware consequences as well as theoretic
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_math, check, MarkdownStr
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST MODEL SIZE—PARAMETER BREAKDOWN
@@ -3277,9 +3249,9 @@ class MnistModelSizeLocal:
     w1_str = fmt(weights[0], precision=0, commas=True)
     w2_str = fmt(weights[1], precision=0, commas=True)
     w3_str = fmt(weights[2], precision=0, commas=True)
-    w1_dims_math = MarkdownStr(f"${mnist_l1_dim}{{\\times}}{mnist_l2_dim}$")
-    w2_dims_math = MarkdownStr(f"${mnist_l2_dim}{{\\times}}{mnist_l3_dim}$")
-    w3_dims_math = MarkdownStr(f"${mnist_l3_dim}{{\\times}}{mnist_l4_dim}$")
+    w1_dims_math = fmt_math(f"{mnist_l1_dim}{{\\times}}{mnist_l2_dim}")
+    w2_dims_math = fmt_math(f"{mnist_l2_dim}{{\\times}}{mnist_l3_dim}")
+    w3_dims_math = fmt_math(f"{mnist_l3_dim}{{\\times}}{mnist_l4_dim}")
     b1_str = fmt(biases[0], precision=0, commas=False)
     b2_str = fmt(biases[1], precision=0, commas=False)
     b3_str = fmt(biases[2], precision=0, commas=False)
@@ -3374,7 +3346,7 @@ class MnistTrainingMemoryCalc:
     total_infer_act_kb_str = fmt_qty_int(inf_act, KB, commas=False)
     total_train_mb_str = fmt_qty(training_total, MB, precision=1, commas=False)
     total_infer_kb_str = fmt_qty_int(inference_total, KB, commas=False)
-    training_ratio_mult_str = fmt_multiple(training_ratio, precision=1, commas=False)
+    training_ratio_mult_str = fmt_multiple(training_ratio, commas=False)
 ```
 
 ::: {#exmp-nn-computation-memory-training-vs-inference .callout-example title="Memory: Training vs. inference"}
@@ -3984,7 +3956,7 @@ For each image in the batch, this produces a probability distribution over the p
 # │          MnistFlopsCalc.double_ratio_mult_str, MnistFlopsCalc.double_ratio_exact_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_percent, fmt_qty_int, check, MarkdownStr, fmt_arithmetic_intensity
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_math, fmt_percent, fmt_qty_int, check, MarkdownStr, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistFlopsCalc:
@@ -4067,11 +4039,11 @@ class MnistFlopsCalc:
     l3_mm_str = fmt(flops_l3_mm_value, precision=0)
     l3_bias_str = fmt(flops_l3_bias_value, precision=0)
     # FLOPs-column LHS products pinned to layer dimensions (2 ops x batch x dims)
-    l1_mm_math = MarkdownStr(f"$2 \\times {batch_size} \\times {in_dim}{{\\times}}{h1_dim}$")
-    l1_bias_math = MarkdownStr(f"$2{{\\times}}{batch_h1_values:,}$")
-    l2_mm_math = MarkdownStr(f"$2 \\times {batch_size} \\times {h1_dim}{{\\times}}{h2_dim}$")
-    l2_bias_math = MarkdownStr(f"$2{{\\times}}{batch_h2_values:,}$")
-    l3_mm_math = MarkdownStr(f"$2 \\times {batch_size} \\times {h2_dim}{{\\times}}{out_dim}$")
+    l1_mm_math = fmt_math(f"2 \\times {batch_size} \\times {in_dim}{{\\times}}{h1_dim}")
+    l1_bias_math = fmt_math(f"2{{\\times}}{batch_h1_values:,}")
+    l2_mm_math = fmt_math(f"2 \\times {batch_size} \\times {h1_dim}{{\\times}}{h2_dim}")
+    l2_bias_math = fmt_math(f"2{{\\times}}{batch_h2_values:,}")
+    l3_mm_math = fmt_math(f"2 \\times {batch_size} \\times {h2_dim}{{\\times}}{out_dim}")
     total_mops_str = fmt_int(total_mops_value, commas=False)
     per_image_kops_str = fmt_int(per_image_kops, commas=False)
     layer1_pct_str = fmt_percent(layer1_pct / 100, precision=1, commas=False, style='prose')
@@ -4448,7 +4420,7 @@ Activation storage is only the first backward-pass cost. As model size scales, t
 # │          BackpropMemory.bp_total_params_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty_int, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_math, fmt_qty_int, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BackpropMemory:
@@ -5062,13 +5034,13 @@ class MnistInferenceResourceLocal:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     mnist_arch_str = MarkdownStr(f"{in_dim} → {h1_dim} → {h2_dim} → {out_dim}")
-    training_ratio_mult_str = fmt_multiple(training_ratio, precision=1, commas=False)
+    training_ratio_mult_str = fmt_multiple(training_ratio, commas=False)
     w1_str = fmt(weights[0], precision=0, commas=True)
     w2_str = fmt(weights[1], precision=0, commas=True)
     w3_str = fmt(weights[2], precision=0, commas=True)
-    w1_dims_math = MarkdownStr(f"${in_dim}{{\\times}}{h1_dim}$")
-    w2_dims_math = MarkdownStr(f"${h1_dim}{{\\times}}{h2_dim}$")
-    w3_dims_math = MarkdownStr(f"${h2_dim}{{\\times}}{out_dim}$")
+    w1_dims_math = fmt_math(f"{in_dim}{{\\times}}{h1_dim}")
+    w2_dims_math = fmt_math(f"{h1_dim}{{\\times}}{h2_dim}")
+    w3_dims_math = fmt_math(f"{h2_dim}{{\\times}}{out_dim}")
     b1_str = fmt(biases[0], precision=0, commas=False)
     b2_str = fmt(biases[1], precision=0, commas=False)
     b3_str = fmt(biases[2], precision=0, commas=False)
@@ -5784,9 +5756,9 @@ class FallacyQuantExamples:
     imbalance_ratio_str = MarkdownStr(f"{majority_class}:{minority_class}")
     imbalance_majority_acc_str = fmt_percent(imbalance_majority_acc / 100, precision=0, commas=False, style='symbol')
     mnist_arith_intensity_str = fmt_arithmetic_intensity(mnist_arith_intensity * flop / byte, unit=flop / byte, precision=1, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
-    h100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.H100.ridge_point(), unit=flop / byte, precision=1, commas=False)
-    training_ratio_mult_str = fmt_multiple(training_ratio, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.H100.ridge_point(), unit=flop / byte, commas=False)
+    training_ratio_mult_str = fmt_multiple(training_ratio, commas=False)
 ```
 
 Intuitions from traditional software (that bugs are deterministic, that more resources always help, that code inspection reveals problems) fail when applied to statistical learning systems. The following fallacies and pitfalls cause teams to misallocate effort, deploy inappropriate solutions, or encounter production failures that could have been avoided.

@@ -175,6 +175,7 @@ class HardwareNode(BaseModel):
     tdp: Optional[Quantity] = None
     tdp_min: Optional[Quantity] = None
     tdp_max: Optional[Quantity] = None
+    die_area: Optional[Quantity] = None
     battery_capacity: Optional[Quantity] = None
     unit_cost: Optional[Quantity] = None
     unit_cost_max: Optional[Quantity] = None
@@ -193,6 +194,11 @@ class HardwareNode(BaseModel):
     @classmethod
     def _validate_power_fields(cls, v, info):
         return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @field_validator("die_area", mode="after")
+    @classmethod
+    def _validate_die_area(cls, v):
+        return require_dimensionality(v, ureg.meter**2, "die_area")
 
     @field_validator("battery_capacity", mode="after")
     @classmethod

@@ -1,11 +1,7 @@
 """Tests for closed LEGO export ↔ prose unit duplication checker."""
-import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "book" / "tools" / "audit"))
-
-from book_check_lego_prose_units import check_file  # noqa: E402
+from book.cli.checks.lego_prose_units import check_file
 
 
 def _write(tmp_path, body: str) -> Path:
@@ -63,6 +59,36 @@ def test_closed_carbon_intensity_dup_g_per_kwh(tmp_path):
     )
     issues = check_file(p)
     assert issues
+
+
+def test_closed_area_dup_mm2(tmp_path):
+    p = _write(
+        tmp_path,
+        CELL.format(
+            assigns=(
+                "area_mm2_str = fmt_area("
+                "814 * ureg.millimeter**2, unit=ureg.millimeter**2, commas=False)"
+            ),
+            prose="die area `{python} C.area_mm2_str` mm^2 is large",
+        ),
+    )
+    issues = check_file(p)
+    assert issues, "expected duplicate mm^2 after closed area export"
+
+
+def test_closed_heat_flux_dup_w_per_cm2(tmp_path):
+    p = _write(
+        tmp_path,
+        CELL.format(
+            assigns=(
+                "flux_w_per_cm2_str = fmt_heat_flux("
+                "86 * watt / (ureg.centimeter**2), unit=watt / (ureg.centimeter**2), commas=False)"
+            ),
+            prose="heat flux `{python} C.flux_w_per_cm2_str` W/cm^2 is high",
+        ),
+    )
+    issues = check_file(p)
+    assert issues, "expected duplicate W/cm^2 after closed heat-flux export"
 
 
 def test_open_byte_scalar_allows_bytes_in_prose(tmp_path):

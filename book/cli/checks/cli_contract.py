@@ -161,6 +161,7 @@ CASES: tuple[ContractCase, ...] = (
         expected_exit=0,
         must_include=(
             "binder check math",
+            "prose-contract",
             "multiplier-style",
             "body-prose",
             "multiplier suffixes",

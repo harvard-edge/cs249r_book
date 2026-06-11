@@ -48,6 +48,18 @@ def test_nvlink_on_cloud_gpus():
     assert Hardware.Cloud.B200.nvlink.bandwidth.m_as(GB / second) == 1800.0
 
 
+def test_h100_die_area_is_registry_backed():
+    assert Hardware.Cloud.H100.die_area is not None
+    assert Hardware.Cloud.H100.die_area.m_as("mm^2") == pytest.approx(814.0)
+
+
+def test_h100_unit_cost_range_is_registry_backed():
+    assert Hardware.Cloud.H100.unit_cost is not None
+    assert Hardware.Cloud.H100.unit_cost_max is not None
+    assert Hardware.Cloud.H100.unit_cost.m_as("USD") == pytest.approx(25_000)
+    assert Hardware.Cloud.H100.unit_cost_max.m_as("USD") == pytest.approx(30_000)
+
+
 def test_memory_tech_bandwidth_tiers():
     """Memory-interface bandwidth tiers live in Hardware.Tech.Memory."""
     from mlsysim.core.units import GB, second

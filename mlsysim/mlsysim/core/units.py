@@ -14,6 +14,7 @@ __all__ = [
     "QUADRILLION", "TRILLION", "BILLION", "MILLION", "THOUSAND", "HUNDRED",
     # Base units
     "byte", "bit", "second", "joule", "watt", "kilowatt", "milliwatt", "meter", "liter", "L", "hour", "day", "count",
+    "kelvin", "K",
     # Data scale units
     "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
     # Precision sizes
@@ -48,7 +49,7 @@ __all__ = [
     "GW", "MW", "kW", "mW", "uW",
     "kilojoule", "microjoule", "gigawatt", "megawatt", "microwatt",
     # Mass and length
-    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km",
+    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km", "foot", "feet",
 ]
 
 ureg = pint.UnitRegistry()
@@ -81,6 +82,8 @@ L = ureg.liter
 hour = ureg.hour
 day = ureg.day
 count = ureg.count
+kelvin = ureg.kelvin
+K = ureg.kelvin
 
 # --- Exported aliases from loaded/custom registry ---
 KB = ureg.KB
@@ -264,6 +267,8 @@ metric_ton = ureg.metric_ton
 tonne = ureg.metric_ton
 kilometer = ureg.kilometer
 km = ureg.kilometer
+foot = ureg.foot
+feet = ureg.foot
 megabit = ureg.megabit
 gigabit = ureg.gigabit
 terabit = ureg.terabit

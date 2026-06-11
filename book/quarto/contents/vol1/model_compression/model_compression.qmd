@@ -211,8 +211,8 @@ To understand *why* numerics matter so deeply, move from the algorithm to silico
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Horowitz energy hierarchy for quantization physics callout.
 # │ Exports: QuantizationEnergyPhysics.{energy_dram,energy_dram_per_byte,energy_flop_fp32,energy_op_int8,energy_float_add_ratio,energy_dram_read_bits,energy_dram_read_ratio,int8_energy_reduction}_str
-from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_energy_per_flop, fmt_qty, fmt_time
-from mlsysim.core.units import pJ, byte
+from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_energy_per_op, fmt_qty, fmt_time
+from mlsysim.core.units import pJ, byte, flop
 
 class QuantizationEnergyPhysics:
     # Energy values sourced from the mlsysim registry (Hardware.Tech).
@@ -251,8 +251,8 @@ class QuantizationEnergyPhysics:
     energy_dram_pj_str = fmt_qty(energy_dram, pJ, precision=0, commas=False)
     energy_int8_fetch_pj_str = fmt_qty(energy_int8_fetch, pJ, precision=0, commas=False)
     energy_dram_read_bits_value_str = fmt(energy_dram_read_bits, precision=0, commas=False)
-    energy_flop_fp32_pj_str = fmt_energy_per_flop(energy_flop_fp32, precision=1, commas=False)
-    energy_op_int8_pj_str = fmt_energy_per_flop(energy_op_int8, precision=1, commas=False)
+    energy_flop_fp32_pj_per_op_str = fmt_energy_per_op(energy_flop_fp32, precision=1, commas=False)
+    energy_op_int8_pj_per_op_str = fmt_energy_per_op(energy_op_int8, precision=1, commas=False)
     energy_float_add_ratio_mult_str = fmt_multiple(energy_float_add_ratio, precision=0, commas=False)
     energy_dram_read_ratio_mult_str = fmt_multiple(energy_dram_read_ratio, precision=1, commas=True)
     int8_energy_reduction_mult_str = fmt_multiple(int8_energy_reduction, precision=0, commas=False)
@@ -268,7 +268,7 @@ The energy-movement invariant $(E_{\text{move}} \gg E_{\text{compute}})$ means t
 According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, which decomposes execution time into data volume moved, operations performed, and fixed latency, reducing the bit-width of a weight has a roughly proportional effect on efficiency:
 
 1.  **Memory movement $(D_{\text{vol}} \times E_{\text{move}})$**: Fetching a 32-bit float from DRAM costs ≈ `{python} QuantizationEnergyPhysics.energy_dram_pj_str`. Fetching one 8-bit weight costs ≈ `{python} QuantizationEnergyPhysics.energy_int8_fetch_pj_str`.
-2.  **Compute work $(O \times E_{\text{compute}})$**: A 32-bit multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_flop_fp32_pj_str`. An INT8 multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_op_int8_pj_str`.
+2.  **Compute work $(O \times E_{\text{compute}})$**: A 32-bit multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_flop_fp32_pj_per_op_str`. An INT8 multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_op_int8_pj_per_op_str`.
 
 @Tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access.
 
@@ -361,7 +361,7 @@ The same memory pressure that shaped AlexNet's architecture appears in everyday 
 # │          dscnn_tiny_fit_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Platforms
-from mlsysim.fmt import fmt, fmt_int, MarkdownStr, fmt_multiple, fmt_qty, fmt_qty_int
+from mlsysim.fmt import fmt, fmt_int, MarkdownStr, fmt_multiple, fmt_qty, fmt_qty_int, fmt_memory
 
 def _get_ratio(model_mem, device_mem):
     """Return 'ok' if model fits, else 'no (N×)' with how many times it overflows."""
@@ -408,7 +408,7 @@ class ModelDeviceComparison:
     dlrm_gb_str = fmt_qty(dlrm_mem, GB, precision=0, commas=False)
     gpt2_gb_str = fmt_qty(gpt2_mem, GB, precision=0, commas=False)
     resnet_mb_str = fmt_qty(resnet_mem, MB, precision=0, commas=False)
-    mobilenet_mb_str = fmt_qty(mobilenet_mem, MB, precision=1, commas=False)
+    mobilenet_mb_str = fmt_memory(mobilenet_mem, unit=MB, commas=False)
     mobilenet_int8_mb_str = fmt_qty(mobilenet_int8_mem, MB, precision=1, commas=False)
     dscnn_kb_str = fmt_qty(dscnn_mem, KB, precision=0, commas=False)
     cloud_cap_gb_str = fmt_qty_int(cloud_mem, GB, commas=False, approx=True)
@@ -2893,9 +2893,11 @@ Precision is an energy decision\index{Energy Efficiency!numerical precision impa
 # │
 # │ Imports: mlsysim Hardware.Tech.Op (AddFp32.energy, AddFp16.energy,
 # │          AddInt32.energy, AddInt8.energy)
-# │ Exports: EnergyCosts.energy_add_fp32_pj_value_str, .energy_add_fp16_pj_value_str,
-# │          .energy_add_int32_pj_value_str, .energy_add_int8_pj_value_str
+# │ Exports: EnergyCosts.energy_add_fp32_pj_per_op_str, .energy_add_fp16_pj_per_op_str,
+# │          .energy_add_int32_pj_per_op_str, .energy_add_int8_pj_per_op_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import pJ, flop
+from mlsysim.fmt import check, fmt_energy_per_op
 
 class EnergyCosts:
     """Energy per addition operation across numerical precisions (Horowitz 2014)."""
@@ -2915,21 +2917,18 @@ class EnergyCosts:
     # ┌── 2. EXECUTE—(values are direct from constants) ─────────────────
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check, MarkdownStr
-
     check(energy_add_fp32_pj > energy_add_int8_pj, "FP32 add must cost more energy than INT8 add.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    # Floats where canonical fmt(x, precision=1) would corrupt (e.g., 0.03 → "0.0") — escape-hatch
-    energy_add_fp32_pj_value_str = MarkdownStr(f"{energy_add_fp32_pj}")
-    energy_add_fp16_pj_value_str = MarkdownStr(f"{energy_add_fp16_pj}")
-    energy_add_int32_pj_value_str = MarkdownStr(f"{energy_add_int32_pj}")
-    energy_add_int8_pj_value_str = MarkdownStr(f"{energy_add_int8_pj}")
+    energy_add_fp32_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_FP32_PJ, commas=False)
+    energy_add_fp16_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_FP16_PJ, commas=False)
+    energy_add_int32_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_INT32_PJ, commas=False)
+    energy_add_int8_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_INT8_PJ, commas=False)
 ```
 
 #### Energy costs {#sec-model-compression-energy-costs-d1d5}
 
-@Tbl-model-compression-energy-hierarchy established the canonical gap between arithmetic and data movement; precision granularity extends it. @Fig-quantized-energy gives representative operation-level energy costs across more formats and across the SRAM hierarchy: a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_pj_value_str` pJ, while an 8-bit integer addition is just `{python} EnergyCosts.energy_add_int8_pj_value_str` pJ. Floating-point arithmetic follows the same direction: a 32-bit floating-point addition consumes approximately `{python} EnergyCosts.energy_add_fp32_pj_value_str` pJ, whereas a 16-bit floating-point addition requires `{python} EnergyCosts.energy_add_fp16_pj_value_str` pJ. DRAM access\index{DRAM!energy cost of access} is more expensive still. These savings compound across large-scale models operating over billions of operations. Reducing a model's energy footprint therefore contributes to sustainable and accessible AI deployment: it helps mitigate the environmental impact\index{Environmental Impact!model compression benefits} of large-scale ML training and inference as AI workloads scale [@patterson2021carbon], and it expands the reach of machine learning into low-resource environments, from rural healthcare to autonomous systems operating in the field.
+@Tbl-model-compression-energy-hierarchy established the canonical gap between arithmetic and data movement; precision granularity extends it. @Fig-quantized-energy gives representative operation-level energy costs across more formats and across the SRAM hierarchy: a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_pj_per_op_str`, while an 8-bit integer addition is just `{python} EnergyCosts.energy_add_int8_pj_per_op_str`. Floating-point arithmetic follows the same direction: a 32-bit floating-point addition consumes approximately `{python} EnergyCosts.energy_add_fp32_pj_per_op_str`, whereas a 16-bit floating-point addition requires `{python} EnergyCosts.energy_add_fp16_pj_per_op_str`. DRAM access\index{DRAM!energy cost of access} is more expensive still. These savings compound across large-scale models operating over billions of operations. Reducing a model's energy footprint therefore contributes to sustainable and accessible AI deployment: it helps mitigate the environmental impact\index{Environmental Impact!model compression benefits} of large-scale ML training and inference as AI workloads scale [@patterson2021carbon], and it expands the reach of machine learning into low-resource environments, from rural healthcare to autonomous systems operating in the field.
 
 ::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision**: Bar chart comparing energy in picojoules for representative integer arithmetic operations (INT8 add: 0.03 pJ; INT32 multiply: 3.10 pJ) and SRAM memory accesses (5 to 50 pJ by cache size). Lower precision yields order-of-magnitude energy savings, while memory accesses can dominate arithmetic costs. Energy figures from [@horowitz2014]." fig-alt="Bar chart comparing energy consumption in picojoules for integer arithmetic operations and memory accesses. INT8 add uses 0.03 pJ, INT32 multiply uses 3.10 pJ, and SRAM reads range from 5 to 50 pJ depending on cache size."}
 
@@ -3034,7 +3033,8 @@ class EnergyCosts:
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Contrast bit-reduction vs energy-reduction in quantization.
 # │ Exports: EnergyDividend.{energy_add_fp32,energy_add_int8,energy_dividend,energy_dram,dram_read_bits,dram_read_vs_int8_mac}_str
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.core.units import pJ, flop, byte
+from mlsysim.fmt import fmt, fmt_energy_per_op, fmt_multiple, fmt_qty, check
 
 class EnergyDividend:
     # Energy values sourced from the mlsysim registry (Hardware.Tech).
@@ -3059,10 +3059,10 @@ class EnergyDividend:
     check(abs(dram_read_bits - 32) < 1e-9, "The 640 pJ DRAM access should correspond to a 32-bit read under the per-byte constant.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_add_fp32_pj_value_str = fmt(e_add_fp32, precision=2, commas=False)
-    energy_add_int8_pj_value_str = fmt(e_add_int8, precision=2, commas=False)
+    energy_add_fp32_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_FP32_PJ, commas=False)
+    energy_add_int8_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_INT8_PJ, commas=False)
     energy_dividend_factor_mult_str = fmt_multiple(round(dividend), precision=0, commas=False)
-    energy_dram_pj_value_str = fmt(e_dram, precision=0, commas=False)
+    energy_dram_pj_str = fmt_qty(ENERGY_DRAM_ACCESS_PJ, pJ, precision=0, commas=False)
     dram_read_bits_value_str = fmt(dram_read_bits, precision=0, commas=False)
     dram_read_vs_int8_mac_mult_str = fmt_multiple(dram_read_vs_int8_mac, precision=1, commas=True)
 ```
@@ -3073,8 +3073,8 @@ The memory reduction of quantization is often the primary motivation, but the **
 
 The framework section's energy hierarchy already exposed this asymmetry; here it becomes the dividend. Consider the energy per operation $(E_{\text{op}})$ for an addition, the backbone of the accumulators in matrix multiplication:
 
-*   **FP32 Addition**: Requires `{python} EnergyDividend.energy_add_fp32_pj_value_str` pJ.
-*   **INT8 Addition**: Requires `{python} EnergyDividend.energy_add_int8_pj_value_str` pJ.
+*   **FP32 Addition**: Requires `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`.
+*   **INT8 Addition**: Requires `{python} EnergyDividend.energy_add_int8_pj_per_op_str`.
 
 The resulting efficiency gain is `{python} EnergyDividend.energy_dividend_factor_mult_str`. We call this the "Dividend" because the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, quantization is often mandatory to stay within the power envelope even if a model could fit in memory at higher precision. This disparity reinforces why the "Machine" axis of the AI Triad has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware.
 
@@ -3150,7 +3150,7 @@ In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory ban
 
 :::
 
-Together, the two lighthouses separate the two reasons quantization matters. DLRM uses lower precision to make enormous tables fit; TinyML uses lower precision to keep every inference within a tiny energy and SRAM budget. Beyond direct compute savings, reducing numerical precision also lowers memory energy consumption, which often dominates total system power. Lower-precision representations reduce data storage requirements and memory bandwidth usage, leading to fewer and more efficient memory accesses. Accessing memory, particularly off-chip DRAM, is far more energy-intensive than performing arithmetic operations: the representative `{python} EnergyDividend.dram_read_bits_value_str`-bit DRAM read used in this chapter costs `{python} EnergyDividend.energy_dram_pj_value_str` pJ, compared with picojoule-scale cache and arithmetic operations. An instruction's total energy can therefore be dominated by memory access patterns rather than computation[^fn-int8-energy-deployment].
+Together, the two lighthouses separate the two reasons quantization matters. DLRM uses lower precision to make enormous tables fit; TinyML uses lower precision to keep every inference within a tiny energy and SRAM budget. Beyond direct compute savings, reducing numerical precision also lowers memory energy consumption, which often dominates total system power. Lower-precision representations reduce data storage requirements and memory bandwidth usage, leading to fewer and more efficient memory accesses. Accessing memory, particularly off-chip DRAM, is far more energy-intensive than performing arithmetic operations: the representative `{python} EnergyDividend.dram_read_bits_value_str`-bit DRAM read used in this chapter costs `{python} EnergyDividend.energy_dram_pj_str`, compared with picojoule-scale cache and arithmetic operations. An instruction's total energy can therefore be dominated by memory access patterns rather than computation[^fn-int8-energy-deployment].
 
 [^fn-int8-energy-deployment]: **INT8 Energy Impact**: The energy dominance of memory access is extreme: with the Horowitz constants used here, a single `{python} EnergyDividend.dram_read_bits_value_str`-bit DRAM read costs roughly `{python} EnergyDividend.dram_read_vs_int8_mac_mult_str` the energy of an INT8 multiply-accumulate [@horowitz2014]. Quantizing from FP32 to INT8 attacks this disparity on both fronts—4$\times$ fewer bytes moved *and* cheaper arithmetic per operation. Representative MobileNetV2 INT8 measurements show multi-fold energy-per-inference reductions, with most savings coming from reduced memory traffic rather than cheaper arithmetic. \index{Quantization!energy impact}
 
@@ -4355,7 +4355,7 @@ Compare the two mapping diagrams side by side in @fig-calibration-ranges. Symmet
 # │ Exports: alpha_str, beta_str, range_str, steps_str, scale_str,
 # │          zero_point_str, x_val_str, x_q_str, x_recon_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_math, check, MarkdownStr
 
 class QuantizationMathCalc:
     """Derive affine quantization parameters: scale and zero-point for [-1.0, 3.0] → UINT8."""
@@ -4395,7 +4395,7 @@ class QuantizationMathCalc:
     steps_str = fmt(int_steps, precision=0, commas=False)
     scale_str = fmt(scale, precision=4, commas=False)
     zp_quotient_str = fmt(zp_quotient, precision=2, commas=False)
-    steps_math = MarkdownStr(f"$2^{bits} - 1$")
+    steps_math = fmt_math(f"2^{bits} - 1")
     zero_point_str = fmt_int(zero_point, commas=False)
     x_val_str = fmt_int(x_val, commas=False)
     x_q_str = fmt_int(x_q, commas=False)

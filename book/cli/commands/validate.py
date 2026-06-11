@@ -441,6 +441,8 @@ class ValidateCommand:
                   note="LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt"),
             Scope("canonical", "_run_math_canonical",
                   note="fmt-family + _str/_math/_eq/_frac suffix discipline (LEGO)"),
+            Scope("prose-contract", "_run_fmt_prose_contract",
+                  note="formatter-owned glyphs/units are not duplicated in prose"),
             # Added 2026-05-26: blocklist for banned suffix= values in fmt()
             # calls (wrong unit conventions like TFLOPS, Gbps, etc.).
             Scope("suffix-consistency", "_run_suffix_consistency",
@@ -5996,6 +5998,41 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_fmt_prose_contract(self, root: Path) -> ValidationRunResult:
+        """math --scope prose-contract: formatter-owned glyphs match prose use."""
+        from cli.checks.fmt_prose_contract import check_file
+
+        start = time.time()
+        qmd_files = self._qmd_files(root)
+
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            for violation in check_file(qmd):
+                file_path = Path(violation.file)
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+                except ValueError:
+                    try:
+                        rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                    except ValueError:
+                        rel = violation.file
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.msg,
+                    severity="error",
+                    context=f"{{python}} {violation.ref}",
+                ))
+
+        return ValidationRunResult(
+            name="fmt-prose-contract",
+            description="Formatter-owned glyph/unit prose contract",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_math_multiplier_style(self, root: Path) -> ValidationRunResult:
         """math --scope multiplier-style: multiplier and times typography."""
         from cli.checks.math_multiplier_style import audit
@@ -9221,7 +9258,8 @@ class ValidateCommand:
 
         t0 = time.time()
         repo = repo_root_from_here()
-        raw = check_lego_prose_literals(repo)
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_prose_literals(repo, paths=qmd_files)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -9229,11 +9267,10 @@ class ValidateCommand:
             )
             for i in raw
         ]
-        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
         return ValidationRunResult(
             name="lego-prose-literals",
-            description=f"LEGO walkthrough prose literal scan ({qmd_count} files)",
-            files_checked=qmd_count,
+            description=f"LEGO walkthrough prose literal scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -9244,7 +9281,8 @@ class ValidateCommand:
 
         t0 = time.time()
         repo = repo_root_from_here()
-        raw = check_lego_prose_units(repo)
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_prose_units(repo, paths=qmd_files)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -9252,11 +9290,10 @@ class ValidateCommand:
             )
             for i in raw
         ]
-        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
         return ValidationRunResult(
             name="lego-prose-units",
-            description=f"LEGO prose unit-after-_str scan ({qmd_count} files)",
-            files_checked=qmd_count,
+            description=f"LEGO prose unit-after-_str scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -9267,7 +9304,8 @@ class ValidateCommand:
 
         t0 = time.time()
         repo = repo_root_from_here()
-        raw = check_lego_load_pint(repo)
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_load_pint(repo, paths=qmd_files)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -9275,11 +9313,10 @@ class ValidateCommand:
             )
             for i in raw
         ]
-        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
         return ValidationRunResult(
             name="lego-load-pint",
-            description=f"LEGO pint LOAD lint ({qmd_count} files)",
-            files_checked=qmd_count,
+            description=f"LEGO pint LOAD lint ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -9290,7 +9327,8 @@ class ValidateCommand:
 
         t0 = time.time()
         repo = repo_root_from_here()
-        raw = check_lego_equations(repo)
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_equations(repo, paths=qmd_files)
         issues = [
             ValidationIssue(
                 file=i.file, line=i.line, code=i.code,
@@ -9298,11 +9336,10 @@ class ValidateCommand:
             )
             for i in raw
         ]
-        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
         return ValidationRunResult(
             name="lego-equations",
-            description=f"LEGO equation coherence ({qmd_count} files)",
-            files_checked=qmd_count,
+            description=f"LEGO equation coherence ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -9310,43 +9347,36 @@ class ValidateCommand:
     def _run_lego_units(self, root: Path) -> ValidationRunResult:
         """code --scope lego-units: warning-only LEGO unit discipline linter."""
         import json
-        import subprocess
-        import sys
+        from cli.checks.lego_units import lint_file
 
         t0 = time.time()
-        repo = root
+        repo = self.config_manager.root_dir
+        qmd_files = self._qmd_files(root)
         baseline = repo / "book" / "tools" / "audit" / "lego_units_baseline.json"
-        script = repo / "book" / "tools" / "scripts" / "lint_lego_units.py"
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(script),
-                "--baseline",
-                str(baseline),
-                "--fail-on",
-                "warning",
-            ],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-        )
+        allowed: set[tuple[str, str, str]] = set()
+        if baseline.exists():
+            for entry in json.loads(baseline.read_text(encoding="utf-8")):
+                allowed.add((entry["rule"], entry["file"], entry["message"]))
+
         issues: list[ValidationIssue] = []
-        if proc.returncode != 0 and proc.stdout.strip():
-            for entry in json.loads(proc.stdout):
+        for qmd in qmd_files:
+            for issue in lint_file(qmd, repo):
+                key = (issue.rule, issue.file, issue.message)
+                if key in allowed:
+                    continue
                 issues.append(
                     ValidationIssue(
-                        file=entry["file"],
-                        line=entry["line"],
-                        code=entry["rule"],
-                        message=entry["message"],
-                        severity=entry.get("severity", "warning"),
+                        file=issue.file,
+                        line=issue.line,
+                        code=issue.rule,
+                        message=issue.message,
+                        severity=issue.severity,
                     )
                 )
-        qmd_count = len(list((repo / "book" / "quarto" / "contents").rglob("*.qmd")))
         return ValidationRunResult(
             name="lego-units",
-            description=f"LEGO unit discipline lint ({qmd_count} files)",
-            files_checked=qmd_count,
+            description=f"LEGO unit discipline lint ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )

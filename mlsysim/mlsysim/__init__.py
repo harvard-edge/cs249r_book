@@ -40,13 +40,14 @@ from .physics import *  # noqa: F401,F403
 from .fmt import (
     fmt, fmt_int, fmt_qty, fmt_usd, fmt_eur, fmt_percent, fmt_pp, fmt_multiple,
     fmt_multiple_range, fmt_time, fmt_rate, fmt_count, fmt_params, fmt_tokens,
-    fmt_ratio, fmt_range, fmt_magnitude,
+    fmt_ratio, fmt_range, fmt_magnitude, fmt_text, fmt_display_math,
     fmt_qty_range, fmt_time_range, fmt_count_range, fmt_usd_range,
     fmt_percent_range, fmt_sci_qty,
     fmt_power, fmt_energy, fmt_bandwidth, fmt_flop_rate, fmt_flops,
     fmt_arithmetic_intensity, fmt_ops_rate, fmt_compute_efficiency,
-    fmt_memory, fmt_length, fmt_emissions, fmt_carbon_intensity, fmt_water,
+    fmt_area, fmt_heat_flux, fmt_specific_heat, fmt_memory, fmt_length, fmt_emissions, fmt_carbon_intensity, fmt_water,
     fmt_water_rate, fmt_water_intensity, fmt_latency,
+    fmt_energy_per_op,
     assert_qty_close, check, MarkdownStr,
 )
 

@@ -22,6 +22,7 @@ wrapper around this module for ad-hoc runs.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -49,19 +50,19 @@ CANONICAL_STR_CALL = re.compile(
     r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
     r"|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range|fmt_count_range"
     r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
-    r"|fmt_magnitude"
+    r"|fmt_magnitude|fmt_text|fmt_display_math"
     r"|fmt_percent_range|fmt_multiple_range"
-    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat"
     r"|fmt_memory_capacity"
     r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
-    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_byte|fmt_energy_per_bit"
+    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_op|fmt_energy_per_byte|fmt_energy_per_bit"
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
     r"|MarkdownStr)\s*\("
 )
 CANONICAL_MATH_CALL = re.compile(
-    r"\b(fmt_math|MarkdownStr)\s*\("
+    r"\b(fmt_math|fmt_display_math|MarkdownStr)\s*\("
 )
 CANONICAL_FRAC_CALL = re.compile(r"\b(fmt_frac|MarkdownStr)\s*\(")
 
@@ -125,11 +126,11 @@ FMT_FAMILY_USE = re.compile(
     r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_math|fmt_percent|fmt_pp|fmt_multiple"
     r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
     r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit"
-    r"|fmt_magnitude"
-    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency"
+    r"|fmt_magnitude|fmt_text|fmt_display_math"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat"
     r"|fmt_memory_capacity"
     r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
-    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_byte|fmt_energy_per_bit"
+    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_op|fmt_energy_per_byte|fmt_energy_per_bit"
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
@@ -149,14 +150,15 @@ MLSYSIM_STAR_FMT_NAMES = frozenset({
     "fmt", "fmt_qty", "fmt_qty_int", "fmt_int", "fmt_usd", "fmt_eur", "fmt_percent", "fmt_pp", "fmt_multiple",
     "fmt_count", "fmt_ratio", "fmt_range", "fmt_qty_range", "fmt_time_range",
     "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_val",
-    "fmt_unit", "fmt_sci", "fmt_sci_qty", "fmt_magnitude", "fmt_frac", "fmt_math", "MarkdownStr", "check",
+    "fmt_unit", "fmt_sci", "fmt_sci_qty", "fmt_magnitude", "fmt_text",
+    "fmt_frac", "fmt_math", "fmt_display_math", "MarkdownStr", "check",
     "fmt_percent_range", "fmt_multiple_range",
     "sci_latex",
     "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
-    "fmt_latency", "fmt_memory_capacity",
+    "fmt_latency", "fmt_area", "fmt_heat_flux", "fmt_specific_heat", "fmt_memory_capacity",
     "fmt_params", "fmt_tokens", "fmt_flop_rate", "fmt_compute_efficiency",
     "fmt_flops", "fmt_ops_rate", "fmt_arithmetic_intensity", "fmt_length",
-    "fmt_sci_flops", "fmt_energy_per_flop", "fmt_energy_per_byte",
+    "fmt_sci_flops", "fmt_energy_per_flop", "fmt_energy_per_op", "fmt_energy_per_byte",
     "fmt_energy_per_bit",
     "fmt_decibel", "fmt_illuminance", "fmt_temperature",
     "fmt_temperature_rate",
@@ -703,6 +705,86 @@ def _audit_manual_fmt_string_assembly(qmd_path: Path) -> list[Violation]:
     return out
 
 
+def _extract_python_cells(lines: list[str]):
+    """Yield ``(fence_line, source)`` for each Python cell in a QMD file."""
+    in_cell = False
+    start = 0
+    body: list[str] = []
+    for i, line in enumerate(lines, 1):
+        if not in_cell and CELL_START.match(line):
+            in_cell = True
+            start = i
+            body = []
+            continue
+        if in_cell and CELL_END.match(line):
+            yield start, "\n".join(body)
+            in_cell = False
+            body = []
+            continue
+        if in_cell:
+            body.append(line)
+
+
+def _call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _string_template(node: ast.AST) -> str:
+    """Return literal text with formatted slots replaced by ``{}``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts: list[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            else:
+                parts.append("{}")
+        return "".join(parts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _string_template(node.left) + _string_template(node.right)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        # Preserve the common MarkdownStr((rf"$...$").replace(...)) shape.
+        return _string_template(node.func.value)
+    return ""
+
+
+def _audit_manual_markdown_math(qmd_path: Path) -> list[Violation]:
+    """Flag MarkdownStr("$...$") and MarkdownStr("$$...$$") math wrappers."""
+    out: list[Violation] = []
+    lines = qmd_path.read_text(encoding="utf-8").splitlines()
+    rel = str(qmd_path)
+    for fence_line, src in _extract_python_cells(lines):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or _call_name(node.func) != "MarkdownStr" or not node.args:
+                continue
+            template = _string_template(node.args[0]).strip()
+            if not (template.startswith("$") and template.endswith("$")):
+                continue
+            helper = "fmt_display_math" if template.startswith("$$") else "fmt_math"
+            out.append(
+                Violation(
+                    file=rel,
+                    line=fence_line + node.lineno,
+                    code="manual_markdownstr_math",
+                    message=(
+                        f"Manual MarkdownStr math wrapper detected. Use `{helper}(...)` "
+                        "so math rendering goes through the canonical formatter API."
+                    ),
+                    context=(ast.get_source_segment(src, node) or "").replace("\n", " ")[:160],
+                )
+            )
+    return out
+
+
 def audit(paths: list[Path]) -> list[Violation]:
     all_violations: list[Violation] = []
     for p in paths:
@@ -720,6 +802,7 @@ def audit(paths: list[Path]) -> list[Violation]:
             all_violations.extend(_audit_missing_fmt_imports(f))
             all_violations.extend(_audit_fmt_percent_suffix(f))
             all_violations.extend(_audit_manual_fmt_string_assembly(f))
+            all_violations.extend(_audit_manual_markdown_math(f))
     return all_violations
 
 

@@ -3,24 +3,28 @@
 import pytest
 
 from mlsysim.core.units import ureg
-from mlsysim.core.units import GB, TB, USD, hour, kWh
+from mlsysim.core.units import GB, J, K, MB, TB, USD, hour, kg, kWh, second
 import math
 
 from mlsysim.fmt import (
     MarkdownStr,
     fmt,
     fmt_arithmetic_intensity,
+    fmt_area,
     fmt_count,
     fmt_count_range,
     fmt_compute_efficiency,
     fmt_carbon_intensity,
     fmt_decibel,
+    fmt_display_math,
     fmt_emissions,
     fmt_eur,
     fmt_int,
     fmt_energy_per_bit,
     fmt_energy_per_byte,
     fmt_energy_per_flop,
+    fmt_energy_per_op,
+    fmt_heat_flux,
     fmt_illuminance,
     fmt_multiple,
     fmt_multiple_range,
@@ -29,10 +33,12 @@ from mlsysim.fmt import (
     fmt_percent_range,
     fmt_pp,
     fmt_params,
+    fmt_power,
     fmt_qty,
     fmt_qty_int,
     fmt_qty_range,
     fmt_magnitude,
+    fmt_bandwidth,
     fmt_flop_rate,
     fmt_flops,
     fmt_length,
@@ -46,8 +52,10 @@ from mlsysim.fmt import (
     fmt_sci,
     fmt_sci_flops,
     fmt_sci_qty,
+    fmt_specific_heat,
     fmt_temperature,
     fmt_temperature_rate,
+    fmt_text,
     fmt_time,
     fmt_time_range,
     fmt_tokens,
@@ -56,6 +64,27 @@ from mlsysim.fmt import (
     fmt_usd_range,
     fmt_val,
 )
+
+
+class TestFmtComposition:
+    def test_fmt_text_preserves_markdown_rendering(self):
+        out = fmt_text(
+            fmt_usd(400_000),
+            " $\\times$ ",
+            fmt(0.4, precision=2),
+            " = ",
+            fmt_usd(160_000),
+        )
+
+        assert out == "\\$400,000 $\\times$ 0.40 = \\$160,000"
+        assert isinstance(out, MarkdownStr)
+        assert out._repr_markdown_() == str(out)
+
+    def test_fmt_display_math_wraps_block_math(self):
+        out = fmt_display_math(r"x = 1")
+
+        assert out == r"$$x = 1$$"
+        assert isinstance(out, MarkdownStr)
 
 
 class TestFmtPrecisionGuards:
@@ -86,11 +115,40 @@ class TestFmtPrecisionGuards:
         assert fmt(10.7, precision=1, commas=False) == "10.7"
         assert fmt(8.5, precision=1, commas=False) == "8.5"
 
+    def test_fmt_precision_none_auto_trims_integer_like_values(self):
+        assert fmt(153.0, precision=None, commas=False) == "153"
+        assert fmt(153.016, precision=None, commas=False) == "153"
+        assert fmt(2.04, precision=None, commas=False) == "2.04"
+        assert fmt(0.2, precision=None, commas=False) == "0.2"
+
     def test_auto_precision_preserves_large_fractions(self):
-        assert fmt_arithmetic_intensity(
-            153.016 * ureg.flop / ureg.byte,
-            commas=False,
-        ) == "153.0 FLOP/byte"
+        assert (
+            fmt_arithmetic_intensity(
+                153.016 * ureg.flop / ureg.byte,
+                commas=False,
+            )
+            == "153 FLOP/byte"
+        )
+
+    def test_auto_precision_keeps_meaningful_small_decimals(self):
+        assert fmt_bandwidth(0.2 * MB / second, unit=MB / second, commas=False) == "0.2 MB/s"
+        assert fmt_bandwidth(2.04 * TB / second, unit=TB / second, commas=False) == "2.04 TB/s"
+
+    def test_auto_precision_trim_preserves_commas(self):
+        assert (
+            fmt_bandwidth(1000.01 * MB / second, unit=MB / second, commas=True)
+            == "1,000 MB/s"
+        )
+
+    def test_explicit_precision_preserves_requested_decimal(self):
+        assert (
+            fmt_arithmetic_intensity(
+                153.016 * ureg.flop / ureg.byte,
+                precision=1,
+                commas=False,
+            )
+            == "153.0 FLOP/byte"
+        )
 
     def test_precision_one_rejects_spurious_trailing_zeros_on_integers(self):
         with pytest.raises(ValueError, match="spurious trailing zeros"):
@@ -108,7 +166,7 @@ class TestFmtPrecisionGuards:
         assert fmt(1000, precision=0, lower_bound=True, suffix=" MB/s") == "> 1,000 MB/s"
 
     def test_rejects_conflicting_display_markers(self):
-        with pytest.raises(ValueError, match="both approximate and a lower bound"):
+        with pytest.raises(ValueError, match="only one display marker"):
             fmt(100, precision=0, approx=True, lower_bound=True)
         with pytest.raises(ValueError, match="Use either prefix="):
             fmt(100, precision=0, prefix="~", approx=True)
@@ -189,8 +247,7 @@ class TestFmtQty:
     def test_unit_label_preserves_dimension_check(self):
         q = 5 * ureg.flop / ureg.byte
         assert (
-            fmt_qty(q, ureg.flop / ureg.byte, precision=0, unit_label="FLOP/byte")
-            == "5 FLOP/byte"
+            fmt_qty(q, ureg.flop / ureg.byte, precision=0, unit_label="FLOP/byte") == "5 FLOP/byte"
         )
         with pytest.raises(Exception):
             fmt_qty(5 * ureg.second, ureg.flop / ureg.byte, unit_label="FLOP/byte")
@@ -212,10 +269,7 @@ class TestFmtQty:
 
 class TestFmtQtyInt:
     def test_rounds_quantity_after_unit_conversion(self):
-        assert (
-            fmt_qty_int(100 * ureg.GiB, ureg.GB, commas=False)
-            == "107 GB"
-        )
+        assert fmt_qty_int(100 * ureg.GiB, ureg.GB, commas=False) == "107 GB"
 
     def test_supports_structured_quantity_suffixes(self):
         out = fmt_qty_int(
@@ -252,19 +306,15 @@ class TestFmtUsd:
 
     def test_structured_scale_and_denominator(self):
         assert fmt_usd(4_600_000, precision=1, commas=False, scale="M") == "\\$4.6M"
-        assert (
-            fmt_usd(4_750_000, precision=2, commas=False, scale="million")
-            == "\\$4.75 million"
-        )
-        assert (
-            fmt_usd(4_750_000, precision=2, commas=False, scale="Million")
-            == "\\$4.75 Million"
-        )
+        assert fmt_usd(4_750_000, precision=2, commas=False, scale="million") == "\\$4.75 million"
+        assert fmt_usd(4_750_000, precision=2, commas=False, scale="Million") == "\\$4.75 Million"
         assert fmt_usd(0.09, precision=2, commas=False, per="GB") == "\\$0.09/GB"
         assert fmt_usd(0.50, precision=2, commas=False, per="click") == "\\$0.50/click"
         assert fmt_usd(10_000, per="run") == "\\$10,000/run"
         assert fmt_usd(10, commas=False, per="million queries") == "\\$10/million queries"
-        assert fmt_usd(0.06, precision=2, commas=False, per="1K inferences") == "\\$0.06/1K inferences"
+        assert (
+            fmt_usd(0.06, precision=2, commas=False, per="1K inferences") == "\\$0.06/1K inferences"
+        )
         assert fmt_usd(12_000, commas=False, scale="K", per="year") == "\\$12K/year"
         assert fmt_usd(8000, approx=True, marker="*") == "~\\$8,000*"
 
@@ -294,8 +344,7 @@ class TestFmtUsd:
         assert fmt_usd(0.09 * USD / GB, precision=2, commas=False, per="GB") == "\\$0.09/GB"
         assert fmt_usd(5 * USD / hour, commas=False, per="hr") == "\\$5/hr"
         assert (
-            fmt_usd(23 * USD / (TB * ureg.month), commas=False, per="TB/month")
-            == "\\$23/TB/month"
+            fmt_usd(23 * USD / (TB * ureg.month), commas=False, per="TB/month") == "\\$23/TB/month"
         )
         assert fmt_usd(0.12 * USD / kWh, precision=2, commas=False, per="kWh") == "\\$0.12/kWh"
 
@@ -329,10 +378,7 @@ class TestFmtRate:
     def test_formats_allowlisted_service_rates(self):
         assert fmt_rate(2500, "QPS") == "2,500 QPS"
         assert fmt_rate(1200, "tokens/s") == "1,200 tokens/s"
-        assert (
-            fmt_rate(500_000, "tokens/s", scale="K", commas=False)
-            == "500K tokens/s"
-        )
+        assert fmt_rate(500_000, "tokens/s", scale="K", commas=False) == "500K tokens/s"
         assert (
             fmt_rate(
                 45_200_000,
@@ -380,18 +426,9 @@ class TestFmtTime:
         assert fmt_time(2, "year", precision=0, style="word") == "2 years"
 
     def test_attributive_word_style_is_hyphenated_singular(self):
-        assert (
-            fmt_time(1, "hour", precision=0, style="word", attributive=True)
-            == "1-hour"
-        )
-        assert (
-            fmt_time(24, "hour", precision=0, style="word", attributive=True)
-            == "24-hour"
-        )
-        assert (
-            fmt_time(15, "minute", precision=0, style="word", attributive=True)
-            == "15-minute"
-        )
+        assert fmt_time(1, "hour", precision=0, style="word", attributive=True) == "1-hour"
+        assert fmt_time(24, "hour", precision=0, style="word", attributive=True) == "24-hour"
+        assert fmt_time(15, "minute", precision=0, style="word", attributive=True) == "15-minute"
 
     def test_attributive_rejects_symbol_style_and_per(self):
         with pytest.raises(ValueError, match="attributive"):
@@ -471,10 +508,11 @@ class TestFmtPercentGuards:
 
     def test_allow_negative_widens_domain_for_signed_change(self):
         # ROI / cost-delta: signed, may exceed 100% -> opt in explicitly
-        assert fmt_percent(-0.818, precision=1, style="symbol",
-                           allow_negative=True) == "-81.8%"
-        assert fmt_percent(8.089, precision=1, style="symbol",
-                           allow_negative=True, max_ratio=9) == "808.9%"
+        assert fmt_percent(-0.818, precision=1, style="symbol", allow_negative=True) == "-81.8%"
+        assert (
+            fmt_percent(8.089, precision=1, style="symbol", allow_negative=True, max_ratio=9)
+            == "808.9%"
+        )
 
     def test_allow_negative_still_bounds_magnitude(self):
         # the guard still catches a true 100x blunder even when signed
@@ -531,6 +569,13 @@ class TestFmtMultiple:
         assert fmt_multiple(3.2) == "3.2×"
         assert fmt_multiple(10, precision=0) == "10×"
 
+    def test_owns_display_markers(self):
+        assert fmt_multiple(7.8, precision=1, approx=True) == "~7.8×"
+        assert fmt_multiple(10, precision=0, lower_bound=True) == "> 10×"
+        assert fmt_multiple(2, precision=0, upper_bound=True) == "< 2×"
+        with pytest.raises(ValueError, match="only one display marker"):
+            fmt_multiple(2, approx=True, upper_bound=True)
+
     def test_inherits_fmt_precision_guard(self):
         # An integer-like factor at precision=1 would render "2.0" — the
         # shared fmt() guard rejects that; explicit precision=1 still errors.
@@ -550,6 +595,24 @@ class TestFmtMultiple:
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_multiple(2.5), MarkdownStr)
+
+
+class TestFmtSpecificHeat:
+    def test_uses_textbook_unit_label(self):
+        assert fmt_specific_heat(1005 * J / (kg * K), precision=0, commas=True) == "1,005 J/kg/K"
+
+    def test_rejects_wrong_dimension(self):
+        with pytest.raises(ValueError, match="energy/mass/temperature"):
+            fmt_specific_heat(1 * J, precision=0)
+
+
+class TestFmtTimeAutoPrecision:
+    def test_auto_precision_trims_integer_like_display(self):
+        assert fmt_time(1.0 * second, second, precision=None, commas=False) == "1 s"
+        assert fmt_time(37.0 * second, second, precision=None, commas=False) == "37 s"
+
+    def test_auto_precision_preserves_sub_unit_fraction(self):
+        assert fmt_time(0.98 * second, second, precision=None, commas=False) == "0.98 s"
 
 
 class TestFiniteGuard:
@@ -685,10 +748,7 @@ class TestFmtCount:
     def test_rejects_fractional_count_by_default(self):
         with pytest.raises(ValueError, match="whole-number count"):
             fmt_count(1.5, label="GPU", precision=1)
-        assert (
-            fmt_count(1.5, label="GPU", precision=1, allow_fractional=True)
-            == "1.5 GPUs"
-        )
+        assert fmt_count(1.5, label="GPU", precision=1, allow_fractional=True) == "1.5 GPUs"
 
     def test_rejects_unknown_scale(self):
         with pytest.raises(ValueError, match="scale must be"):
@@ -788,25 +848,18 @@ class TestTypedRanges:
             fmt_percent_range(84.6, 88, precision=1)
 
     def test_multiple_range_owns_times_glyph_and_is_checked(self):
-        assert (
-            fmt_multiple_range(3, 7.8, precision=(0, 1), commas=False)
-            == "3\u20137.8×"
-        )
+        assert fmt_multiple_range(3, 7.8, precision=(0, 1), commas=False) == "3\u20137.8×"
         with pytest.raises(ValueError, match="non-negative"):
             fmt_multiple_range(-1, 2)
         with pytest.raises(ValueError, match="hi >= lo"):
             fmt_multiple_range(3, 2)
 
     def test_time_range_symbol_and_word_styles(self):
-        assert (
-            fmt_time_range(5, 20, ureg.millisecond, precision=0, commas=False)
-            == "5\u201320 ms"
-        )
+        assert fmt_time_range(5, 20, ureg.millisecond, precision=0, commas=False) == "5\u201320 ms"
         assert fmt_time_range(5, 20, ureg.millisecond, commas=False) == "5\u201320 ms"
         assert fmt_time_range(5, 20, unit=ureg.millisecond, commas=False) == "5\u201320 ms"
         assert (
-            fmt_time_range(1, 2, ureg.second, precision=0, style="word",
-                           commas=False)
+            fmt_time_range(1, 2, ureg.second, precision=0, style="word", commas=False)
             == "1\u20132 seconds"
         )
 
@@ -834,10 +887,7 @@ class TestTypedRanges:
         )
 
     def test_usd_range_supports_scale_and_denominator(self):
-        assert (
-            fmt_usd_range(10_000, 30_000, scale="K", commas=False)
-            == "\\$10K\u2013\\$30K"
-        )
+        assert fmt_usd_range(10_000, 30_000, scale="K", commas=False) == "\\$10K\u2013\\$30K"
         assert (
             fmt_usd_range(25000, 30000, approx=True, repeat_symbol=False)
             == "~\\$25,000\u201330,000"
@@ -914,6 +964,26 @@ class TestDomainFormatters:
         out = fmt_bandwidth(3.35 * TB / second, precision=2, commas=False)
         assert out == "3.35 TB/s"
 
+    def test_fmt_area_owns_square_unit_label(self):
+        assert (
+            fmt_area(814 * ureg.millimeter**2, unit=ureg.millimeter**2, commas=False)
+            == "814 mm²"
+        )
+        with pytest.raises(ValueError, match="area unit"):
+            fmt_area(814 * ureg.millimeter**2, unit=ureg.watt)
+
+    def test_fmt_heat_flux_owns_power_density_label(self):
+        assert (
+            fmt_heat_flux(
+                86.0 * ureg.watt / (ureg.centimeter**2),
+                unit=ureg.watt / (ureg.centimeter**2),
+                commas=False,
+            )
+            == "86 W/cm²"
+        )
+        with pytest.raises(ValueError, match="power/area"):
+            fmt_heat_flux(86 * ureg.watt / (ureg.centimeter**2), unit=ureg.watt)
+
     def test_fmt_params_auto_precision(self):
         from mlsysim.core.units import Bparam, Mparam
 
@@ -971,13 +1041,9 @@ class TestDomainFormatters:
     def test_fmt_arithmetic_intensity_owns_flop_per_byte_label(self):
         from mlsysim.core.units import GB, TFLOP, byte, flop
 
+        assert fmt_arithmetic_intensity(5 * flop / byte, precision=0, commas=False) == "5 FLOP/byte"
         assert (
-            fmt_arithmetic_intensity(5 * flop / byte, precision=0, commas=False)
-            == "5 FLOP/byte"
-        )
-        assert (
-            fmt_arithmetic_intensity(1 * TFLOP / GB, precision=0, commas=False)
-            == "1000 FLOP/byte"
+            fmt_arithmetic_intensity(1 * TFLOP / GB, precision=0, commas=False) == "1000 FLOP/byte"
         )
 
     def test_fmt_energy_density_helpers_own_readable_labels(self):
@@ -986,6 +1052,9 @@ class TestDomainFormatters:
         assert fmt_energy_per_byte(160 * pJ / byte, precision=0, commas=False) == "160 pJ/byte"
         assert fmt_energy_per_bit(5 * pJ / bit, precision=0, commas=False) == "5 pJ/bit"
         assert fmt_energy_per_flop(10 * pJ / flop, precision=0, commas=False) == "10 pJ/FLOP"
+        assert fmt_energy_per_op(0.9 * pJ / flop, commas=False) == "0.9 pJ/op"
+        assert fmt_energy_per_op(0.03 * pJ / flop, commas=False) == "0.03 pJ/op"
+        assert fmt_energy_per_op(0.03 * pJ / flop, precision=2, commas=False) == "0.03 pJ/op"
         assert fmt_qty(160 * pJ / byte, pJ / byte, precision=0, commas=False) == "160 pJ/byte"
 
     def test_fmt_energy_density_helpers_require_quantities(self):
@@ -995,6 +1064,12 @@ class TestDomainFormatters:
             fmt_energy_per_bit(5)
         with pytest.raises(TypeError, match="requires a Pint Quantity"):
             fmt_energy_per_flop(10)
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_energy_per_op(10)
+        with pytest.raises(ValueError, match="energy/operation"):
+            fmt_energy_per_op(10 * ureg.picojoule, unit=ureg.picojoule)
+        with pytest.raises(ValueError, match="non-negative energy"):
+            fmt_energy_per_op(-1 * ureg.picojoule / ureg.flop)
 
     def test_fmt_ops_rate_scales_integer_ops(self):
         from mlsysim.core.units import TOPS
@@ -1018,24 +1093,56 @@ class TestDomainFormatters:
         assert fmt_rate(90, "queries/hour", precision=0, commas=False) == "90 queries/hour"
         assert fmt_rate(5000, "queries/class", precision=0, commas=True) == "5,000 queries/class"
         assert fmt_rate(4, "deploys/week", precision=0, commas=False) == "4 deploys/week"
-        assert fmt_rate(40, "utterances/speaker", precision=0, commas=False) == "40 utterances/speaker"
+        assert (
+            fmt_rate(40, "utterances/speaker", precision=0, commas=False) == "40 utterances/speaker"
+        )
         assert fmt_rate(12, "cameras/store", precision=0, commas=False) == "12 cameras/store"
         assert fmt_rate(3, "boards/store", precision=0, commas=False) == "3 boards/store"
         assert fmt_rate(1000, "cases/day", precision=0, commas=True) == "1,000 cases/day"
         assert fmt_rate(120, "km/h", precision=0, commas=False) == "120 km/h"
 
+    def test_fmt_named_markers_include_upper_bound(self):
+        from mlsysim.core.units import GB, TOPS, TFLOP, milliwatt, second
+
+        assert fmt(100, precision=0, lower_bound=True, suffix=" MB/s") == "> 100 MB/s"
+        assert fmt(100, precision=0, upper_bound=True, suffix=" MB/s") == "< 100 MB/s"
+        assert (
+            fmt_flop_rate(
+                100 * TFLOP / second,
+                unit=TFLOP / second,
+                precision=0,
+                commas=False,
+                lower_bound=True,
+            )
+            == "> 100 TFLOP/s"
+        )
+        assert (
+            fmt_bandwidth(
+                500 * GB / second,
+                unit=GB / second,
+                precision=0,
+                commas=False,
+                lower_bound=True,
+            )
+            == "> 500 GB/s"
+        )
+        assert (
+            fmt_ops_rate(1 * TOPS, unit=TOPS, precision=0, commas=False, upper_bound=True)
+            == "< 1 TOPS"
+        )
+        assert (
+            fmt_power(10 * milliwatt, unit=milliwatt, precision=0, commas=False, upper_bound=True)
+            == "< 10 mW"
+        )
+        with pytest.raises(ValueError, match="only one display marker"):
+            fmt(100, precision=0, approx=True, upper_bound=True)
+
     def test_small_physical_label_helpers(self):
         from mlsysim.core.units import second
 
-        assert (
-            fmt_decibel(ureg.Quantity(20, ureg.decibel), precision=0, commas=False)
-            == "20 dB"
-        )
+        assert fmt_decibel(ureg.Quantity(20, ureg.decibel), precision=0, commas=False) == "20 dB"
         assert fmt_illuminance(100 * ureg.lux, precision=0, commas=False) == "100 lux"
-        assert (
-            fmt_temperature(ureg.Quantity(80, ureg.degC), precision=0, commas=False)
-            == "80 °C"
-        )
+        assert fmt_temperature(ureg.Quantity(80, ureg.degC), precision=0, commas=False) == "80 °C"
         assert (
             fmt_temperature_rate(
                 1 * ureg.delta_degC / second,
@@ -1067,30 +1174,17 @@ class TestDomainFormatters:
         from mlsysim.core.units import GB, GiB, KiB, MiB
         from mlsysim.fmt import fmt_memory
 
-        assert (
-            fmt_memory_capacity(80 * GiB, unit=GiB, precision=0, commas=False)
-            == "80 GB"
-        )
-        assert (
-            fmt_memory_capacity(33 * MiB, unit=MiB, precision=0, commas=False)
-            == "33 MB"
-        )
-        assert (
-            fmt_memory_capacity(256 * KiB, unit=KiB, precision=0, commas=False)
-            == "256 KB"
-        )
+        assert fmt_memory_capacity(80 * GiB, unit=GiB, precision=0, commas=False) == "80 GB"
+        assert fmt_memory_capacity(33 * MiB, unit=MiB, precision=0, commas=False) == "33 MB"
+        assert fmt_memory_capacity(256 * KiB, unit=KiB, precision=0, commas=False) == "256 KB"
         assert fmt_memory(80 * GiB, unit=GB, precision=1, commas=False) == "85.9 GB"
 
     def test_fmt_carbon_intensity_defaults_to_grams_per_kwh(self):
         from mlsysim.core.units import gram, kilogram, kWh
 
+        assert fmt_carbon_intensity(429 * gram / kWh, precision=0, commas=False) == "429 g/kWh"
         assert (
-            fmt_carbon_intensity(429 * gram / kWh, precision=0, commas=False)
-            == "429 g/kWh"
-        )
-        assert (
-            fmt_carbon_intensity(0.429 * kilogram / kWh, precision=0, commas=False)
-            == "429 g/kWh"
+            fmt_carbon_intensity(0.429 * kilogram / kWh, precision=0, commas=False) == "429 g/kWh"
         )
 
     def test_fmt_emissions_supports_display_markers(self):
@@ -1215,9 +1309,7 @@ class TestAuditRepairs:
         from mlsysim.core.units import Q_
 
         q = Q_(2, "EFLOPs/second")
-        qty_suffix = str(
-            fmt_qty(q, q.units, precision=0, commas=False)
-        ).split(" ", 1)[1]
+        qty_suffix = str(fmt_qty(q, q.units, precision=0, commas=False)).split(" ", 1)[1]
         assert str(fmt_unit(q)) == qty_suffix
 
     def test_fmt_unit_default_and_plain_units(self):

@@ -15,6 +15,8 @@ class DatasetProfile(BaseModel):
     languages: Optional[int] = Field(default=None, ge=1)
     keywords: Optional[int] = Field(default=None, ge=1)
     sample_duration: Optional[Quantity] = None
+    sample_rate: Optional[Quantity] = None
+    sample_width: Optional[Quantity] = None
     image_width: Optional[int] = None
     image_height: Optional[int] = None
     image_channels: Optional[int] = None
@@ -29,3 +31,13 @@ class DatasetProfile(BaseModel):
     @classmethod
     def _validate_sample_duration(cls, v, info):
         return require_dimensionality(v, ureg.second, info.field_name)
+
+    @field_validator("sample_rate", mode="after")
+    @classmethod
+    def _validate_sample_rate(cls, v, info):
+        return require_dimensionality(v, 1 / ureg.second, info.field_name)
+
+    @field_validator("sample_width", mode="after")
+    @classmethod
+    def _validate_sample_width(cls, v, info):
+        return require_unit_family(v, ureg.byte, info.field_name, "data")

@@ -2012,10 +2012,11 @@ While tensor cores package matrix operations into structured computational units
 # │ How: Compare DRAM access counts for naive vs. systolic matrix multiplication.
 # │
 # │ Imports: mlsysim Hardware.Tech.Memory.DRAM.energy_per_access
-# │ Exports: SystolicEnergy.energy_ratio_mult_str, SystolicEnergy.vector_energy_pj_per_op_value_str,
-# │          SystolicEnergy.systolic_energy_pj_per_op_value_str
+# │ Exports: SystolicEnergy.energy_ratio_mult_str, SystolicEnergy.vector_energy_pj_per_op_str,
+# │          SystolicEnergy.systolic_energy_pj_per_op_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, MarkdownStr, check
+from mlsysim.core.units import pJ, flop
+from mlsysim.fmt import fmt, fmt_energy_per_op, fmt_multiple, fmt_qty, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SystolicEnergy:
@@ -2052,13 +2053,13 @@ class SystolicEnergy:
     check(efficiency_ratio >= 100, f"Systolic efficiency ({efficiency_ratio:.1f}×) is too low. Should be >100× to justify TPU design.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    dram_access_pj_value_str = fmt(dram_pj, precision=0, commas=False)
+    dram_access_pj_str = fmt_qty(ENERGY_DRAM_ACCESS_PJ, pJ, precision=0, commas=False)
     systolic_size_str = fmt(array_dim, precision=0, commas=False)
     vector_accesses_str = fmt(vector_dram_accesses, precision=0, commas=False)
-    compute_energy_pj_value_str = fmt(mac_pj, precision=0, commas=False)
-    vector_energy_pj_per_op_value_str = fmt(e_vector, precision=0)
+    compute_energy_pj_str = fmt_qty(mac_pj * pJ, pJ, precision=0, commas=False)
+    vector_energy_pj_per_op_str = fmt_energy_per_op(e_vector * pJ / flop, precision=0)
     systolic_access_str = fmt(systolic_dram_per_op, precision=3, commas=False)
-    systolic_energy_pj_per_op_value_str = fmt(e_systolic, precision=0, commas=False)
+    systolic_energy_pj_per_op_str = fmt_energy_per_op(e_systolic * pJ / flop, precision=0, commas=False)
     energy_ratio_mult_str = fmt_multiple(efficiency_ratio, precision=1, commas=False)
 ```
 
@@ -2107,11 +2108,11 @@ The systolic architecture improves energy efficiency by keeping operands local a
 
 1.  **Vector unit**: Loads $A$, loads $B$, computes $A \times B + C$, writes $C$.
     - **Data movement**: 3 loads + 1 write = `{python} SystolicEnergy.vector_accesses_str` DRAM accesses (per operation).
-    - **Energy**: ≈ `{python} SystolicEnergy.vector_accesses_str` $\times$ `{python} SystolicEnergy.dram_access_pj_value_str` pJ + `{python} SystolicEnergy.compute_energy_pj_value_str` pJ (compute) = `{python} SystolicEnergy.vector_energy_pj_per_op_value_str` pJ/operation.
+    - **Energy**: ≈ `{python} SystolicEnergy.vector_accesses_str` $\times$ `{python} SystolicEnergy.dram_access_pj_str` + `{python} SystolicEnergy.compute_energy_pj_str` (compute) = `{python} SystolicEnergy.vector_energy_pj_per_op_str`.
 
 2.  **Systolic Array** (`{python} SystolicEnergy.systolic_size_str` $\times$ `{python} SystolicEnergy.systolic_size_str` size): Loads A and B once at the edges. Data "pulses" through `{python} SystolicEnergy.systolic_size_str` processing elements.
     - **Data movement**: 2 loads per `{python} SystolicEnergy.systolic_size_str` operations = `{python} SystolicEnergy.systolic_access_str` DRAM accesses (per operation).
-    - **Energy**: ≈ `{python} SystolicEnergy.systolic_access_str` $\times$ `{python} SystolicEnergy.dram_access_pj_value_str` pJ + `{python} SystolicEnergy.compute_energy_pj_value_str` pJ (compute) ≈ `{python} SystolicEnergy.systolic_energy_pj_per_op_value_str` pJ/operation.
+    - **Energy**: ≈ `{python} SystolicEnergy.systolic_access_str` $\times$ `{python} SystolicEnergy.dram_access_pj_str` + `{python} SystolicEnergy.compute_energy_pj_str` (compute) ≈ `{python} SystolicEnergy.systolic_energy_pj_per_op_str`.
 
 **Systems insight**: A systolic array is `{python} SystolicEnergy.energy_ratio_mult_str` more energy-efficient than a naive vector unit for large matrix multiplications.
 
@@ -2505,7 +2506,8 @@ class AcceleratorEconomics:
 
     price_v100 = Hardware.Cloud.V100.unit_cost.to(USD).magnitude  # older generation
     price_a100 = Hardware.Cloud.A100.unit_cost.to(USD).magnitude  # current workhorse
-    price_h100 = 25000  # lower bound of range
+    price_h100 = h_h100.unit_cost.to(USD).magnitude
+    price_h100_max = h_h100.unit_cost_max.to(USD).magnitude
     price_tpu = 8000  # estimated from cloud rates
     price_gaudi = 12000  # Intel alternative
 
@@ -2549,7 +2551,7 @@ class AcceleratorEconomics:
     h100_fp8_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops["fp8"], unit=TFLOPs / second, precision=0)
     h100_bw_gb_per_s_str = fmt_qty(h_h100.memory.bandwidth, GB / second, precision=0, commas=True)
     h100_bw_tb_per_s_str = fmt_qty(h_h100.memory.bandwidth, TB / second, precision=2, commas=False)
-    h100_price_str = fmt_usd_range(price_h100, 30000, precision=0, approx=True, repeat_symbol=False)
+    h100_price_str = fmt_usd_range(price_h100, price_h100_max, precision=0, approx=True, repeat_symbol=False)
     h100_pp_usd_str = fmt_usd(h100_ratio, precision=1, commas=False, approx=True, per="(TFLOP/s)")
 
     # TPUv4 specs
@@ -3295,13 +3297,33 @@ The key pattern in @tbl-memory-hierarchy is that each step down the hierarchy tr
 
 The hierarchy invites an apparently simple solution: build larger, faster off-chip memory and eliminate the need for on-chip SRAM entirely. The answer is rooted in physics: signal propagation within and between chips imposes a hard latency floor.
 
+```{python}
+#| echo: false
+from mlsysim import Hardware
+from mlsysim.core.units import ureg
+from mlsysim.fmt import check, fmt_area
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: SpeedOfLightLimitCalc.h100_die_area_mm2_str
+class SpeedOfLightLimitCalc:
+    """Chip-area reference for the signal-propagation callout."""
+
+    h100_die_area = Hardware.Cloud.H100.die_area
+
+    check(h100_die_area is not None, "H100 registry entry should expose die_area.")
+    check(800 <= h100_die_area.to(ureg.millimeter**2).magnitude <= 830, "H100 die area should stay near 814 mm^2.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    h100_die_area_mm2_str = fmt_area(h100_die_area, unit=ureg.millimeter**2, commas=False)
+```
+
 ::: {#nbk-hw-acceleration-speed-light-limit .callout-notebook title="The speed of light limit"}
 
 **Problem**: Why is on-chip SRAM necessary instead of fetching all data from HBM?
 
 **Physics**:
 
-1.  **Distance**: On a large 700 mm² chip, signals travel ~20 mm.
+1.  **Distance**: On an H100-class `{python} SpeedOfLightLimitCalc.h100_die_area_mm2_str` die, signals travel ~20 mm.
 2.  **Speed**: Signals in silicon travel at $\approx 0.5c$ (half speed of light).
 3.  **Latency**: 20 mm takes $\approx 130 \text{ ps}$.
 4.  **Clock cycle**: At 2 GHz, a cycle is $500 \text{ ps}$.
@@ -3501,8 +3523,8 @@ class InterconnectHierarchy:
     taper_pcie = Hardware.Cloud.H100.interconnect.bandwidth
     taper_net = Systems.Fabrics.InfiniBand_NDR.bandwidth
     check(taper_hbm > taper_nvlink > taper_pcie > taper_net, "bandwidth taper HBM > NVLink > PCIe > Network must hold")
-    taper_eq_math = MarkdownStr(
-        rf"$$\begin{{aligned}} \text{{HBM ({taper_hbm.to(GB/second).magnitude:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink.to(GB/second).magnitude:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie.to(GB/second).magnitude:.0f} GB/s)}} \gg \text{{Network ({taper_net.to(GB/second).magnitude:.0f} GB/s)}} \end{{aligned}}$$"
+    taper_eq_math = fmt_display_math(
+        rf"\begin{{aligned}} \text{{HBM ({taper_hbm.to(GB/second).magnitude:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink.to(GB/second).magnitude:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie.to(GB/second).magnitude:.0f} GB/s)}} \gg \text{{Network ({taper_net.to(GB/second).magnitude:.0f} GB/s)}} \end{{aligned}}"
     )
 ```
 
@@ -3702,9 +3724,9 @@ class RooflineGap:
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
 
-    v100_ridge_str = fmt_arithmetic_intensity(h_v100.ridge_point(), unit=flop / byte, precision=1, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, precision=1, commas=False)
-    h100_ridge_str = fmt_arithmetic_intensity(h_h100.ridge_point(), unit=flop / byte, precision=1, commas=False)
+    v100_ridge_str = fmt_arithmetic_intensity(h_v100.ridge_point(), unit=flop / byte, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity(h_h100.ridge_point(), unit=flop / byte, commas=False)
     a100_ridge_fp32_str = fmt_arithmetic_intensity(
         h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth, unit=flop / byte, precision=1, commas=False
     )
@@ -3844,13 +3866,13 @@ class TransformerLayerCalc:
     t_batch_str = fmt(batch_size, precision=0, commas=False)
     t_seq_str = fmt(seq_len, precision=0, commas=False)
     t_heads_str = fmt(num_heads, precision=0, commas=False)
-    qkv_gflop_str = fmt_flops(qkv_flops_value * flop, unit=GFLOPs, precision=1, commas=False)
+    qkv_gflop_str = fmt_flops(qkv_flops_value * flop, unit=GFLOPs, commas=False)
     qkv_mb_str = fmt_memory(qkv_memory, unit=MB, precision=1, commas=False)
     qkv_ai_str = fmt(qkv_ai_value, precision=1, commas=False)
-    softmax_mflop_str = fmt_flops(softmax_flops_value * flop, unit=MFLOPs, precision=1, commas=False)
+    softmax_mflop_str = fmt_flops(softmax_flops_value * flop, unit=MFLOPs, commas=False)
     softmax_mb_str = fmt_memory(softmax_memory, unit=MB, precision=1, commas=False)
     softmax_ai_str = fmt(softmax_ai_value, precision=2, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
 ```
 
 ::: {#nbk-transformer-layers .callout-notebook title="Transformer layer analysis"}
@@ -3949,16 +3971,16 @@ class Conv2dAnalysisCalc:
     conv_output_mb_str = fmt_memory(conv_output_memory, unit=MB, precision=1, commas=False)
     conv_total_mb_str = fmt_memory(conv_total_memory, unit=MB, precision=1, commas=False)
     conv_ai_str = fmt(conv_ai, precision=1, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     # Calc-line LHS products pinned to cell constants (inline {python} cannot
     # evaluate inside $...$): each renders the explicit derivation expression.
     _fpb = int(conv_fp_bytes)
-    conv_out_dims_math = MarkdownStr(f"${conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w}$")
-    conv_flops_per_out_math = MarkdownStr(f"${conv_cin} \\times {conv_k} \\times {conv_k} \\times 2$")
-    conv_input_dims_math = MarkdownStr(f"${conv_batch} \\times {conv_cin} \\times {conv_h} \\times {conv_w} \\times {_fpb}$")
-    conv_weights_dims_math = MarkdownStr(f"${conv_cout} \\times {conv_cin} \\times {conv_k} \\times {conv_k} \\times {_fpb}$")
-    conv_output_dims_math = MarkdownStr(f"${conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w} \\times {_fpb}$")
+    conv_out_dims_math = fmt_math(f"{conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w}")
+    conv_flops_per_out_math = fmt_math(f"{conv_cin} \\times {conv_k} \\times {conv_k} \\times 2")
+    conv_input_dims_math = fmt_math(f"{conv_batch} \\times {conv_cin} \\times {conv_h} \\times {conv_w} \\times {_fpb}")
+    conv_weights_dims_math = fmt_math(f"{conv_cout} \\times {conv_cin} \\times {conv_k} \\times {conv_k} \\times {_fpb}")
+    conv_output_dims_math = fmt_math(f"{conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w} \\times {_fpb}")
 ```
 
 ::: {#nbk-conv-analysis .callout-notebook title="Convolutional layer analysis"}
@@ -4009,7 +4031,7 @@ However, not all layers in a neural network exhibit this favorable profile. The 
 # │          DenseLayerAnalysisCalc.dense_weights_mb_str,
 # │          DenseLayerAnalysisCalc.dense_output_kb_str,
 # │          DenseLayerAnalysisCalc.dense_total_mb_str,
-# │          DenseLayerAnalysisCalc.dense_ai_str,
+# │          DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str,
 # │          DenseLayerAnalysisCalc.dense_attainable_tflop_per_s_str,
 # │          DenseLayerAnalysisCalc.dense_util_pct_str,
 # │          DenseLayerAnalysisCalc.a100_bw_gb_per_s_str,
@@ -4050,18 +4072,18 @@ class DenseLayerAnalysisCalc:
     dense_weights_mb_str = fmt_memory(dense_weights_memory, unit=MB, precision=1, commas=False)
     dense_output_kb_str = fmt_memory(dense_output_memory, unit=KB, precision=1, commas=False)
     dense_total_mb_str = fmt_memory(dense_total_memory, unit=MB, precision=1, commas=False)
-    dense_ai_str = fmt(dense_ai, precision=1, commas=False)
-    dense_attainable_tflop_per_s_str = fmt_flop_rate(dense_attainable, unit=TFLOP / second, precision=1, commas=False)
+    dense_ai_flops_per_byte_str = fmt_arithmetic_intensity(dense_ai_qty, unit=flop / byte, commas=False)
+    dense_attainable_tflop_per_s_str = fmt_flop_rate(dense_attainable, unit=TFLOP / second, commas=False)
     dense_util_pct_str = fmt_percent(dense_util_pct / 100, precision=1, commas=False, style='symbol')
     a100_bw_gb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=True)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
     # Calc-line LHS products pinned to cell constants (inline {python} cannot
     # evaluate inside $...$): each renders the explicit derivation expression.
-    dense_matmul_dims_math = MarkdownStr(f"$({dense_batch} \\times {dense_in}) \\times ({dense_in} \\times {dense_out})$")
-    dense_total_flops_math = MarkdownStr(f"$2 \\times {dense_batch} \\times {dense_in} \\times {dense_out}$")
-    dense_input_dims_math = MarkdownStr(f"${dense_batch} \\times {dense_in} \\times 2$")
-    dense_weights_dims_math = MarkdownStr(f"${dense_in} \\times {dense_out} \\times 2$")
-    dense_output_dims_math = MarkdownStr(f"${dense_batch} \\times {dense_out} \\times 2$")
+    dense_matmul_dims_math = fmt_math(f"({dense_batch} \\times {dense_in}) \\times ({dense_in} \\times {dense_out})")
+    dense_total_flops_math = fmt_math(f"2 \\times {dense_batch} \\times {dense_in} \\times {dense_out}")
+    dense_input_dims_math = fmt_math(f"{dense_batch} \\times {dense_in} \\times 2")
+    dense_weights_dims_math = fmt_math(f"{dense_in} \\times {dense_out} \\times 2")
+    dense_output_dims_math = fmt_math(f"{dense_batch} \\times {dense_out} \\times 2")
 ```
 
 ::: {#nbk-hw-acceleration-dense-layer-analysis .callout-notebook title="Dense layer analysis"}
@@ -4081,10 +4103,10 @@ Consider a fully connected layer\index{Dense Layer!roofline analysis}\index{Roof
 - Total: `{python} DenseLayerAnalysisCalc.dense_total_mb_str`
 
 **Arithmetic intensity**:
-$\text{AI}$ = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str` / `{python} DenseLayerAnalysisCalc.dense_total_mb_str` = `{python} DenseLayerAnalysisCalc.dense_ai_str` FLOP/byte
+$\text{AI}$ = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str` / `{python} DenseLayerAnalysisCalc.dense_total_mb_str` = `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str`
 
 This is below A100's ridge point of `{python} DenseLayerAnalysisCalc.a100_ridge_str`, making this operation memory-bound. Attainable performance:
-$R_{\text{attainable}}$ = `{python} DenseLayerAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} DenseLayerAnalysisCalc.dense_ai_str` FLOP/byte = `{python} DenseLayerAnalysisCalc.dense_attainable_tflop_per_s_str`
+$R_{\text{attainable}}$ = `{python} DenseLayerAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str` = `{python} DenseLayerAnalysisCalc.dense_attainable_tflop_per_s_str`
 
 This is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, demonstrating the memory wall effect for small batch sizes.
 
@@ -4169,8 +4191,8 @@ class LayernormAnalysisCalc:
     ln_fp_bytes_str = fmt(ln_fp_bytes, precision=0, commas=False)
     # Calc-line LHS products pinned to cell constants (inline {python} cannot
     # evaluate inside $...$).
-    ln_elements_dims_math = MarkdownStr(f"${ln_batch} \\times {ln_seq} \\times {ln_hidden}$")
-    ln_params_dims_math = MarkdownStr(f"${ln_hidden} \\times 2 \\times {ln_fp_bytes}$")
+    ln_elements_dims_math = fmt_math(f"{ln_batch} \\times {ln_seq} \\times {ln_hidden}")
+    ln_params_dims_math = fmt_math(f"{ln_hidden} \\times 2 \\times {ln_fp_bytes}")
 ```
 
 ::: {#nbk-hw-acceleration-layernorm-analysis .callout-notebook title="LayerNorm analysis"}
@@ -4218,7 +4240,7 @@ For low-AI operations, operator fusion\index{Operator Fusion!memory-bound optimi
 ```{python}
 #| echo: false
 #| label: batch-ai-calc
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
 
 class BatchAiCalc:
     """Arithmetic intensity for a 2048x2048 dense layer as batch size grows."""
@@ -4246,9 +4268,9 @@ class BatchAiCalc:
     check(200 < batch256_ai < 210, f"Batch-256 AI should be near 205, got {batch256_ai:.2f}")
 
     # OUTPUT
-    batch1_ai_str = fmt(batch1_ai, precision=1, commas=False)
-    batch32_ai_str = fmt(batch32_ai, precision=1, commas=False)
-    batch256_ai_str = fmt(batch256_ai, precision=1, commas=False)
+    batch1_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch1_ai * flop / byte, unit=flop / byte, commas=False)
+    batch32_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch32_ai * flop / byte, unit=flop / byte, commas=False)
+    batch256_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch256_ai * flop / byte, unit=flop / byte, commas=False)
     batch_small_str = fmt(batch_small, precision=0, commas=False)
     batch_medium_str = fmt(batch_medium, precision=0, commas=False)
     batch_large_str = fmt(batch_large, precision=0, commas=False)
@@ -4263,9 +4285,9 @@ $$\text{AI} = \frac{2BMN}{2BM + 2MN + 2BN} \approx \frac{2BMN}{2MN} = B \quad (\
 
 Example: Dense layer with M=N=`{python} BatchAiCalc.matrix_dim_str` (FP16)
 
-- Batch = `{python} BatchAiCalc.batch_small_str`: AI ≈ `{python} BatchAiCalc.batch1_ai_str` FLOP/byte (memory bound)
-- Batch = `{python} BatchAiCalc.batch_medium_str`: AI ≈ `{python} BatchAiCalc.batch32_ai_str` FLOP/byte (memory bound)
-- Batch = `{python} BatchAiCalc.batch_large_str`: AI ≈ `{python} BatchAiCalc.batch256_ai_str` FLOP/byte (compute bound on A100)
+- Batch = `{python} BatchAiCalc.batch_small_str`: AI ≈ `{python} BatchAiCalc.batch1_ai_flops_per_byte_str` (memory bound)
+- Batch = `{python} BatchAiCalc.batch_medium_str`: AI ≈ `{python} BatchAiCalc.batch32_ai_flops_per_byte_str` (memory bound)
+- Batch = `{python} BatchAiCalc.batch_large_str`: AI ≈ `{python} BatchAiCalc.batch256_ai_flops_per_byte_str` (compute bound on A100)
 
 This explains the 10--100$\times$ throughput improvement from batching in production inference systems, as MLPerf Inference\index{MLPerf!inference benchmarking}, the standardized benchmark suite covered in @sec-benchmarking, demonstrates by separating bulk-throughput runs from latency-constrained serving runs.
 
@@ -4336,12 +4358,12 @@ class Gpt2ThroughputCalc:
     gpt2_weight_gb_str = fmt_memory(gpt2_weight, unit=GB, precision=0, commas=False)
     gpt2_decode_gflop_str = fmt_flops(gpt2_decode_flops, unit=GFLOPs, precision=0, commas=False)
     gpt2_decode_ai_str = fmt(gpt2_decode_ai, precision=0, commas=False)
-    gpt2_max_tflop_per_s_str = fmt_flop_rate(gpt2_max_flops, unit=TFLOP / second, precision=1, commas=False)
+    gpt2_max_tflop_per_s_str = fmt_flop_rate(gpt2_max_flops, unit=TFLOP / second, commas=False)
     gpt2_utilization_pct_str = fmt_percent(gpt2_utilization / 100, precision=1, commas=False, style='symbol')
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
     a100_fp32_tflop_per_s_str = fmt_flop_rate(a100_fp32_flops, unit=TFLOP / second, precision=1, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
     a100_ridge_fp32_str = fmt_arithmetic_intensity(
         Hardware.Cloud.A100.compute.precision_flops['fp32'] / Hardware.Cloud.A100.memory.bandwidth, unit=flop / byte, precision=1, commas=False
     )
@@ -5784,7 +5806,7 @@ class FpWorkloadFitRecap:
     )
 
     # OUTPUT
-    a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, commas=False)
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
     softmax_ai_low_str = fmt_arithmetic_intensity(softmax_ai_low, unit=flop / byte, commas=False)
     softmax_ai_high_str = fmt_arithmetic_intensity(softmax_ai_high, unit=flop / byte, commas=False)
@@ -5975,8 +5997,8 @@ Accelerators have separate datapaths for different precisions, and the peak thro
 # │
 # │ Imports: mlsysim.core.units (Hardware.Cloud.T4.compute.peak_flops, Hardware.Cloud.T4.memory.bandwidth, Hardware.Cloud.A100.memory.bandwidth, TFLOPs,
 # │          second, GB), mlsysim.book (fmt)
-# │ Exports: FpSmallBatchCalc.fp_ai_b1_str,
-# │          FpSmallBatchCalc.fp_ai_b256_str,
+# │ Exports: FpSmallBatchCalc.fp_ai_b1_flops_per_byte_str,
+# │          FpSmallBatchCalc.fp_ai_b256_flops_per_byte_str,
 # │          FpSmallBatchCalc.fp_t4_ridge_str,
 # │          FpSmallBatchCalc.fp_t4_flops_tflop_per_s_str,
 # │          FpSmallBatchCalc.fp_t4_bw_gb_per_s_str
@@ -6011,18 +6033,18 @@ class FpSmallBatchCalc:
     t4_roof_b1 = (t4_bw * ai_b1 * flop / byte).to(TFLOP / second)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    fp_ai_b1_str = fmt(ai_b1, precision=1, commas=False)
-    fp_ai_b256_str = fmt(ai_b256, precision=1, commas=False)
+    fp_ai_b1_flops_per_byte_str = fmt_arithmetic_intensity(ai_b1 * flop / byte, unit=flop / byte, commas=False)
+    fp_ai_b256_flops_per_byte_str = fmt_arithmetic_intensity(ai_b256 * flop / byte, unit=flop / byte, commas=False)
     fp_t4_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.T4.ridge_point(), unit=flop / byte, precision=1, commas=False)
     fp_t4_flops_tflop_per_s_str = fmt_flop_rate(t4_flops, unit=TFLOP / second, precision=0, commas=False)
     fp_t4_bw_gb_per_s_str = fmt_bandwidth(t4_bw, unit=GB / second, precision=0, commas=False)
-    fp_a100_roof_b1_tflop_per_s_str = fmt_flop_rate(a100_roof_b1, unit=TFLOP / second, precision=1, commas=False)
-    fp_t4_roof_b1_tflop_per_s_str = fmt_flop_rate(t4_roof_b1, unit=TFLOP / second, precision=1, commas=False)
+    fp_a100_roof_b1_tflop_per_s_str = fmt_flop_rate(a100_roof_b1, unit=TFLOP / second, commas=False)
+    fp_t4_roof_b1_tflop_per_s_str = fmt_flop_rate(t4_roof_b1, unit=TFLOP / second, commas=False)
 ```
 
 **Pitfall**: *Deploying small-batch inference workloads on high-compute accelerators.*
 
-Teams deploy high-throughput training accelerators (A100, H100) for latency-sensitive inference with batch size 1–4. As the roofline model (@sec-hardware-acceleration-roofline-model-42ff) predicts, small batches severely reduce arithmetic intensity: a dense layer with M=N=2048 achieves AI = `{python} FpSmallBatchCalc.fp_ai_b1_str` FLOP/byte at batch=1 vs. AI = `{python} FpSmallBatchCalc.fp_ai_b256_str` FLOP/byte at batch=256. At batch=1, the memory-bound roofline ceiling is only about `{python} FpSmallBatchCalc.fp_a100_roof_b1_tflop_per_s_str` on A100 and `{python} FpSmallBatchCalc.fp_t4_roof_b1_tflop_per_s_str` on T4. The T4's peak is `{python} FpSmallBatchCalc.fp_t4_flops_tflop_per_s_str` (FP16 Tensor Core) with a ridge point of `{python} FpSmallBatchCalc.fp_t4_ridge_str` (`{python} FpSmallBatchCalc.fp_t4_flops_tflop_per_s_str` / `{python} FpSmallBatchCalc.fp_t4_bw_gb_per_s_str`). Small-batch inference remains memory bound on both accelerators, so the T4's lower cost can make it more economical despite its much lower peak compute. Training-class accelerator instances often rent for several times more than inference-class instances for little latency gain in this regime. Inference deployments should match batch size to accelerator characteristics, using high-compute accelerators only for batched serving where arithmetic intensity exceeds ridge points.
+Teams deploy high-throughput training accelerators (A100, H100) for latency-sensitive inference with batch size 1–4. As the roofline model (@sec-hardware-acceleration-roofline-model-42ff) predicts, small batches severely reduce arithmetic intensity: a dense layer with M=N=2048 achieves AI = `{python} FpSmallBatchCalc.fp_ai_b1_flops_per_byte_str` at batch=1 vs. AI = `{python} FpSmallBatchCalc.fp_ai_b256_flops_per_byte_str` at batch=256. At batch=1, the memory-bound roofline ceiling is only about `{python} FpSmallBatchCalc.fp_a100_roof_b1_tflop_per_s_str` on A100 and `{python} FpSmallBatchCalc.fp_t4_roof_b1_tflop_per_s_str` on T4. The T4's peak is `{python} FpSmallBatchCalc.fp_t4_flops_tflop_per_s_str` (FP16 Tensor Core) with a ridge point of `{python} FpSmallBatchCalc.fp_t4_ridge_str` (`{python} FpSmallBatchCalc.fp_t4_flops_tflop_per_s_str` / `{python} FpSmallBatchCalc.fp_t4_bw_gb_per_s_str`). Small-batch inference remains memory bound on both accelerators, so the T4's lower cost can make it more economical despite its much lower peak compute. Training-class accelerator instances often rent for several times more than inference-class instances for little latency gain in this regime. Inference deployments should match batch size to accelerator characteristics, using high-compute accelerators only for batched serving where arithmetic intensity exceeds ridge points.
 
 **Fallacy**: *Vendor-specific optimizations have no long-term portability cost.*
 
@@ -6146,7 +6168,7 @@ class SummaryRooflineRecap:
     check(150 * (flop / byte) <= a100_ridge <= 160 * (flop / byte), f"Unexpected A100 summary ridge: {a100_ridge.to(flop / byte).magnitude:.1f}")
 
     # OUTPUT
-    a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, commas=False)
 ```
 
 Engineers who internalize the Roofline model and arithmetic intensity analysis gain a diagnostic framework: when inference runs slower than expected, they can immediately determine whether the bottleneck lies in compute throughput, memory bandwidth, or software overhead, and then select the appropriate optimization strategy. This systems-level understanding transforms hardware selection from vendor comparison into principled engineering.

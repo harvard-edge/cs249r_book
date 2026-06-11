@@ -70,10 +70,7 @@ def check_registry_sources(root: Path, paths: list[Path] | None = None) -> list[
 
 def check_lego_prose_literals(root: Path, paths: list[Path] | None = None) -> list[RegistryIssue]:
     """Flag hardcoded numeric literals in LEGO walkthrough prose."""
-    mod = _load_script_module(
-        "book_check_lego_prose_literals",
-        root / "book" / "tools" / "audit" / "book_check_lego_prose_literals.py",
-    )
+    from cli.checks import lego_prose_literals
 
     if paths is None:
         paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
@@ -83,7 +80,7 @@ def check_lego_prose_literals(root: Path, paths: list[Path] | None = None) -> li
         p = path if path.is_absolute() else root / path
         if not p.exists() or p.suffix != ".qmd":
             continue
-        for lineno, snippet, labels in mod.check_file(p):
+        for lineno, snippet, labels in lego_prose_literals.check_file(p):
             uniq = ", ".join(dict.fromkeys(labels))
             issues.append(RegistryIssue(
                 code="lego_prose_literal",
@@ -100,7 +97,8 @@ def _load_check_module(name: str, root: Path):
 
 def check_lego_prose_units(root: Path, paths: list[Path] | None = None) -> list[RegistryIssue]:
     """Flag unit/currency tokens immediately after {python} *_str refs."""
-    mod = _load_check_module("book_check_lego_prose_units", root)
+    from cli.checks import lego_prose_units
+
     if paths is None:
         paths = sorted((root / "book" / "quarto" / "contents").rglob("*.qmd"))
     issues: list[RegistryIssue] = []
@@ -108,7 +106,7 @@ def check_lego_prose_units(root: Path, paths: list[Path] | None = None) -> list[
         p = path if path.is_absolute() else root / path
         if not p.exists() or p.suffix != ".qmd":
             continue
-        for lineno, snippet, labels in mod.check_file(p):
+        for lineno, snippet, labels in lego_prose_units.check_file(p):
             uniq = ", ".join(dict.fromkeys(labels))
             issues.append(RegistryIssue(
                 code="lego_prose_unit",

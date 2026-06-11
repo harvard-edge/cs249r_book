@@ -1,10 +1,11 @@
 """Tests for the OUTPUT-formatter ↔ prose glyph contract checker."""
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/audit/fmt"))
-from fmt_prose_contract import check_file, build_formatter_map  # noqa: E402
-from audit_fmt_usage import extract_python_cells  # noqa: E402
+from book.cli.checks.fmt_prose_contract import (
+    build_formatter_map,
+    check_file,
+    extract_python_cells,
+)
 
 
 def _write(tmp_path, body: str) -> Path:

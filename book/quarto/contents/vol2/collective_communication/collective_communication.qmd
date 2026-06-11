@@ -736,7 +736,7 @@ class LlamaBudgetCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gradient_bf16_gb_str = fmt_qty(gradient_bf16, GB, precision=0, commas=False)
     hier_total_llama_ms_str = fmt_time(hier_total_llama, ms, precision=1, commas=False)
-    flat_total_ms_str = fmt_int(flat_total, ms, commas=True, suffix=" ms")
+    flat_total_ms_str = fmt_time(flat_total, ms, precision=None, commas=True)
 ```
 
 Using BF16 gradients (a common practice that halves communication volume to `{python} LlamaBudgetCalc.gradient_bf16_gb_str`), the contrast is stark. Routing the full gradient over the slow inter-node fabric, as a flat Ring AllReduce does, costs roughly `{python} LlamaBudgetCalc.flat_total_ms_str`. Confining most of the traffic to NVLink and sending only the reduced shard over InfiniBand cuts that to approximately `{python} LlamaBudgetCalc.hier_total_llama_ms_str`. The difference is not marginal; it determines whether communication can be hidden behind computation or whether it becomes the critical path.
@@ -798,36 +798,37 @@ class NcclRealityGap:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     # Predictions/measured: us for the first three rows, ms for the last three.
-    # Integer-displayed cells use fmt_int (intentional rounding); fractional
-    # cells use fmt_time at precision 1. Ratios carry a "~" prose prefix.
-    pred_1kb_str = fmt_time(predicted[0], microsecond, precision=1, commas=False, approx=True)
-    pred_64kb_str = fmt_time(predicted[1], microsecond, precision=1, commas=False, approx=True)
-    pred_1mb_str = fmt_int(predicted[2], microsecond, commas=False, approx=True, suffix=" μs")
-    pred_64mb_str = fmt_time(predicted[3], ms, precision=1, commas=False, approx=True)
-    pred_1gb_str = fmt_int(predicted[4], ms, commas=False, approx=True, suffix=" ms")
-    pred_10gb_str = fmt_int(predicted[5], ms, commas=False, approx=True, suffix=" ms")
-    meas_1kb_str = fmt_int(measured[0], microsecond, commas=False, approx=True, suffix=" μs")
-    meas_64kb_str = fmt_int(measured[1], microsecond, commas=False, approx=True, suffix=" μs")
-    meas_1mb_str = fmt_int(measured[2], microsecond, commas=False, approx=True, suffix=" μs")
+    # Scenario measurements are exact integer display values; computed
+    # predictions keep one decimal when fractional. Ratios carry the
+    # approximate marker.
+    pred_1kb_str = fmt_time(predicted[0], microsecond, precision=None, commas=False, approx=True)
+    pred_64kb_str = fmt_time(predicted[1], microsecond, precision=None, commas=False, approx=True)
+    pred_1mb_str = fmt_time(predicted[2], microsecond, precision=None, commas=False, approx=True)
+    pred_64mb_str = fmt_time(predicted[3], ms, precision=None, commas=False, approx=True)
+    pred_1gb_str = fmt_time(predicted[4], ms, precision=None, commas=False, approx=True)
+    pred_10gb_str = fmt_time(predicted[5], ms, precision=None, commas=False, approx=True)
+    meas_1kb_str = fmt_time(measured[0], microsecond, precision=0, commas=False, approx=True)
+    meas_64kb_str = fmt_time(measured[1], microsecond, precision=0, commas=False, approx=True)
+    meas_1mb_str = fmt_time(measured[2], microsecond, precision=0, commas=False, approx=True)
     meas_64mb_str = fmt_time(measured[3], ms, precision=1, commas=False, approx=True)
-    meas_1gb_str = fmt_int(measured[4], ms, commas=False, approx=True, suffix=" ms")
-    meas_10gb_str = fmt_int(measured[5], ms, commas=False, approx=True, suffix=" ms")
-    ratio_1kb_str = fmt_multiple(ratios[0], precision=1)
-    ratio_64kb_str = fmt_multiple(ratios[1], precision=1)
-    ratio_1mb_str = fmt_multiple(ratios[2], precision=1)
-    ratio_64mb_str = fmt_multiple(ratios[3], precision=1)
-    ratio_1gb_str = fmt_multiple(ratios[4], precision=2)
-    ratio_10gb_str = fmt_multiple(ratios[5], precision=2)
+    meas_1gb_str = fmt_time(measured[4], ms, precision=0, commas=False, approx=True)
+    meas_10gb_str = fmt_time(measured[5], ms, precision=0, commas=False, approx=True)
+    ratio_1kb_mult_str = fmt_multiple(ratios[0], precision=1, approx=True)
+    ratio_64kb_mult_str = fmt_multiple(ratios[1], precision=1, approx=True)
+    ratio_1mb_mult_str = fmt_multiple(ratios[2], precision=1, approx=True)
+    ratio_64mb_mult_str = fmt_multiple(ratios[3], precision=1, approx=True)
+    ratio_1gb_mult_str = fmt_multiple(ratios[4], precision=2, approx=True)
+    ratio_10gb_mult_str = fmt_multiple(ratios[5], precision=2, approx=True)
 ```
 
-| **Message Size** |     **$\alpha$-$\beta$ Prediction**     |            **Measured NCCL**            |       **Ratio (Measured/Predicted)**      | **Explanation**                         |
-|:-----------------|:---------------------------------------:|:---------------------------------------:|:-----------------------------------------:|:----------------------------------------|
-| 1 KB             |  `{python} NcclRealityGap.pred_1kb_str` |  `{python} NcclRealityGap.meas_1kb_str` |  ~`{python} NcclRealityGap.ratio_1kb_str` | NCCL protocol setup dominates           |
-| 64 KB            | `{python} NcclRealityGap.pred_64kb_str` | `{python} NcclRealityGap.meas_64kb_str` | ~`{python} NcclRealityGap.ratio_64kb_str` | Still latency-bound; NCCL overhead      |
-| 1 MB             |  `{python} NcclRealityGap.pred_1mb_str` |  `{python} NcclRealityGap.meas_1mb_str` |  ~`{python} NcclRealityGap.ratio_1mb_str` | Transitioning to bandwidth-bound        |
-| 64 MB            | `{python} NcclRealityGap.pred_64mb_str` | `{python} NcclRealityGap.meas_64mb_str` | ~`{python} NcclRealityGap.ratio_64mb_str` | NCCL approaches theoretical bandwidth   |
-| 1 GB             |  `{python} NcclRealityGap.pred_1gb_str` |  `{python} NcclRealityGap.meas_1gb_str` |  ~`{python} NcclRealityGap.ratio_1gb_str` | Bandwidth-dominant; NCCL nearly optimal |
-| 10 GB            | `{python} NcclRealityGap.pred_10gb_str` | `{python} NcclRealityGap.meas_10gb_str` | ~`{python} NcclRealityGap.ratio_10gb_str` | Large payloads saturate the wire        |
+| **Message Size** |     **$\alpha$-$\beta$ Prediction**     |            **Measured NCCL**            |         **Ratio (Measured/Predicted)**        | **Explanation**                         |
+|:-----------------|:---------------------------------------:|:---------------------------------------:|:---------------------------------------------:|:----------------------------------------|
+| 1 KB             |  `{python} NcclRealityGap.pred_1kb_str` |  `{python} NcclRealityGap.meas_1kb_str` |  `{python} NcclRealityGap.ratio_1kb_mult_str` | NCCL protocol setup dominates           |
+| 64 KB            | `{python} NcclRealityGap.pred_64kb_str` | `{python} NcclRealityGap.meas_64kb_str` | `{python} NcclRealityGap.ratio_64kb_mult_str` | Still latency-bound; NCCL overhead      |
+| 1 MB             |  `{python} NcclRealityGap.pred_1mb_str` |  `{python} NcclRealityGap.meas_1mb_str` |  `{python} NcclRealityGap.ratio_1mb_mult_str` | Transitioning to bandwidth-bound        |
+| 64 MB            | `{python} NcclRealityGap.pred_64mb_str` | `{python} NcclRealityGap.meas_64mb_str` | `{python} NcclRealityGap.ratio_64mb_mult_str` | NCCL approaches theoretical bandwidth   |
+| 1 GB             |  `{python} NcclRealityGap.pred_1gb_str` |  `{python} NcclRealityGap.meas_1gb_str` |  `{python} NcclRealityGap.ratio_1gb_mult_str` | Bandwidth-dominant; NCCL nearly optimal |
+| 10 GB            | `{python} NcclRealityGap.pred_10gb_str` | `{python} NcclRealityGap.meas_10gb_str` | `{python} NcclRealityGap.ratio_10gb_mult_str` | Large payloads saturate the wire        |
 
 : **$\alpha$-$\beta$ Predictions vs. Measured NCCL Performance**: For small messages, NCCL's protocol overhead (memory registration, channel setup, kernel launch) inflates the effective latency by 7--8$\times$ over the bare-wire $\alpha$. For large messages, NCCL achieves within 8--15 percent of theoretical bandwidth, validating the one-message payload model in the bandwidth-bound regime. Values are illustrative reference numbers for an effective NCCL payload-transfer model on 8-node DGX H100 clusters with InfiniBand NDR 400G; actual collective timings vary with algorithm, topology, NCCL version, and tuning. {#tbl-nccl-vs-theory}
 
@@ -1559,7 +1560,7 @@ class CommInfraScenario:
     bandwidth_ratio = (nvlink_raw / ib_ndr_raw).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check, fmt_int, fmt_qty
+    from mlsysim.fmt import check, fmt_multiple, fmt_qty
 
     check(bandwidth_ratio > 1, "NVLink bandwidth should exceed InfiniBand bandwidth")
 
@@ -1569,19 +1570,19 @@ class CommInfraScenario:
     # Approx-prefixed forms + the intra/inter ratio for @tbl-bandwidth-hierarchy.
     nvlink_bw_approx_str = fmt_qty(nvlink_raw, GB / second, precision=0, commas=False, approx=True)
     ib_ndr_bw_approx_str = fmt_qty(ib_ndr_raw, GB / second, precision=0, commas=False, approx=True)
-    bandwidth_ratio_str = fmt_int(bandwidth_ratio, commas=False)
+    bandwidth_ratio_mult_str = fmt_multiple(bandwidth_ratio, precision=0, commas=False)
 ```
 
 A GPU node delivers an order of magnitude more intra-node bandwidth (NVLink at `{python} CommInfraScenario.nvlink_h100_bw_gb_per_s_str`) than inter-node bandwidth (InfiniBand at `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str`).
 
 ### Hierarchical AllReduce {#sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338}
 
-The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a flat network\index{Flat Network} where every link has the same bandwidth. This assumption holds within a single node (where all GPUs are connected by NVLink at equal bandwidth) but fails by `{python} CommInfraScenario.bandwidth_ratio_str`$\times$ in multi-node clusters. Real clusters are hierarchical networks\index{Hierarchical Network}, with fundamentally different bandwidths at each tier, as @tbl-bandwidth-hierarchy quantifies.
+The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a flat network\index{Flat Network} where every link has the same bandwidth. This assumption holds within a single node (where all GPUs are connected by NVLink at equal bandwidth) but fails by `{python} CommInfraScenario.bandwidth_ratio_mult_str` in multi-node clusters. Real clusters are hierarchical networks\index{Hierarchical Network}, with fundamentally different bandwidths at each tier, as @tbl-bandwidth-hierarchy quantifies.
 
-| **Tier**       |   **Interconnect**  |                   **Bandwidth**                   |                        **Relative Speed**                       |
-|:---------------|:-------------------:|:-------------------------------------------------:|:---------------------------------------------------------------:|
-| **Intra-Node** |      NVLink 4.0     | `{python} CommInfraScenario.nvlink_bw_approx_str` | `{python} CommInfraScenario.bandwidth_ratio_str`$\times$ faster |
-| **Inter-Node** | InfiniBand NDR 400G | `{python} CommInfraScenario.ib_ndr_bw_approx_str` |                       1$\times$ (baseline)                      |
+| **Tier**       |   **Interconnect**  |                   **Bandwidth**                   |                      **Relative Speed**                      |
+|:---------------|:-------------------:|:-------------------------------------------------:|:------------------------------------------------------------:|
+| **Intra-Node** |      NVLink 4.0     | `{python} CommInfraScenario.nvlink_bw_approx_str` | `{python} CommInfraScenario.bandwidth_ratio_mult_str` faster |
+| **Inter-Node** | InfiniBand NDR 400G | `{python} CommInfraScenario.ib_ndr_bw_approx_str` |                     1$\times$ (baseline)                     |
 
 : **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. {#tbl-bandwidth-hierarchy}
 
@@ -1681,10 +1682,10 @@ class HierarchicalAllreduceCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     flat_time_ms_str = fmt_time(flat_time, ms, precision=0, commas=False)
     intra_data_mb_str = fmt_qty(intra_data, MB, precision=0, commas=False)
-    intra_rs_ms_str = fmt_int(intra_rs, ms, commas=False, suffix=" ms")
+    intra_rs_ms_str = fmt_time(intra_rs, ms, precision=1, commas=False)
     inter_data_mb_str = fmt_qty(inter_data, MB, precision=0, commas=False)
     inter_time_ms_str = fmt_time(inter_time, ms, precision=1, commas=False)
-    intra_ag_ms_str = fmt_int(intra_ag, ms, commas=False, suffix=" ms")
+    intra_ag_ms_str = fmt_time(intra_ag, ms, precision=1, commas=False)
     hier_total_ms_str = fmt_time(hier_total, ms, precision=1, commas=False)
     ib_bw_gb_per_s_str = fmt_qty(ib_bw, GB / second, precision=0, commas=False)
     # per-direction rate (the beta that produced intra_rs); matches the
@@ -1893,6 +1894,8 @@ from mlsysim.fmt import check, fmt, fmt_percent, MarkdownStr
 
 def _ef_dec(x):
     """One-decimal trace value with a Unicode minus sign (matches the table)."""
+    if abs(x - round(x)) <= 1e-9:
+        return MarkdownStr(str(int(round(x))))
     return MarkdownStr(f"{x:.1f}".replace("-", "−"))
 
 def _ef_int(x):
