@@ -1,6 +1,6 @@
 """Component MTTF and recovery assumptions (fleet reliability appendix)."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from ..core.provenance import Sourced, sourced, fleet_mttf_hours
 from ..core.registry import Registry
@@ -12,6 +12,22 @@ class ReliabilityComponent(BaseModel):
     name: str
     mttf_hours: Sourced | float
     failure_mode: str = ""
+    # Unprotected soft-error rate in FIT per megabit (FIT = failures per 1e9 device-hours).
+    # Optional: only memory components (HBM/DRAM) carry an intrinsic soft-error budget.
+    soft_error_fit_per_mbit: Sourced | float | None = None
+
+    @field_validator("soft_error_fit_per_mbit", mode="after")
+    @classmethod
+    def _validate_soft_error_fit(cls, v):
+        # Guard against drift: the published DRAM/HBM soft-error rate spans
+        # 200-5000 FIT/Mbit (Tezzaron; soft-error literature). Anything outside
+        # that band is almost certainly a units or transcription error.
+        if v is not None and not (200.0 <= float(v) <= 5000.0):
+            raise ValueError(
+                f"soft_error_fit_per_mbit={v} is outside the published "
+                "200-5000 FIT/Mbit DRAM soft-error range"
+            )
+        return v
 
 
 class RecoveryProfile(BaseModel):
@@ -52,6 +68,12 @@ class Reliability(Registry):
     Hbm = ReliabilityComponent(
         name="HBM",
         mttf_hours=fleet_mttf_hours(200_000, component="HBM", failure_mode="bit-flip accumulation, TSV"),
+        soft_error_fit_per_mbit=sourced(
+            250,
+            pc.HBM_SOFT_ERROR_FIT_PER_MBIT,
+            name="HBM unprotected soft-error rate (FIT/Mbit)",
+            description="Low-end teaching figure for the per-megabit soft-error budget of unprotected HBM.",
+        ),
     )
     DgxNodeComposite = ReliabilityComponent(
         name="DGX node composite",

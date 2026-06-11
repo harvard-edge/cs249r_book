@@ -393,7 +393,7 @@ The consequences reach beyond technical optimization into every phase of the mac
 
 ### Motivations and benefits {#sec-edge-intelligence-motivations-benefits-37c3}
 
-Machine learning systems have traditionally relied on centralized training pipelines. Models are developed and refined using large, curated datasets and powerful cloud-based infrastructure [@dean2012large]. Once trained, these models are deployed to client devices for inference, creating a clear separation between the training and deployment phases. While this architectural separation has served many use cases well, it imposes significant limitations in applications where local data is dynamic, private, or highly personalized.
+Machine learning systems have traditionally relied on centralized training pipelines. Models are developed and refined using large, curated datasets and cloud-based infrastructure [@dean2012large]. Once trained, these models are deployed to client devices for inference, creating a clear separation between the training and deployment phases. While this architectural separation has served many use cases well, it imposes significant limitations in applications where local data is dynamic, private, or highly personalized.
 
 On-device learning challenges this established model by enabling systems to train or adapt directly on the device, without relying on constant connectivity to the cloud. The shift reflects changing application requirements and user expectations that demand responsive, personalized, and privacy-preserving[^fn-differential-privacy-leak] machine learning systems.
 
@@ -437,7 +437,7 @@ For applications with critical timing requirements, network round-trip times mak
 
 ### Knowledge transfer as the adaptation foundation {#sec-edge-intelligence-knowledge-transfer-adaptation-foundation}
 
-These motivations are grounded in the broader concept of knowledge transfer\index{Knowledge Transfer}, where a pretrained model transfers useful representations to a new task or domain. This foundational principle makes on-device learning both feasible and effective, enabling sophisticated adaptation with minimal local resources. @Fig-transfer-conceptual illustrates how knowledge transfer occurs between closely related tasks such as playing different board games or musical instruments, or across domains that share structure such as from riding a bicycle to driving a scooter. In the context of on-device learning, this means using a model pretrained in the cloud and adapting it efficiently to a new context using only local data and limited updates, allowing fast adaptation without relearning from scratch even when the new task diverges in input modality or goal.
+These motivations are grounded in the broader concept of knowledge transfer\index{Knowledge Transfer}, where a pretrained model transfers useful representations to a new task or domain. This foundational principle makes on-device learning both feasible and effective, enabling sophisticated adaptation with minimal local resources. @Fig-transfer-conceptual illustrates how knowledge transfer occurs between closely related tasks such as playing different board games or musical instruments, or across domains that share structure such as from riding a bicycle to driving a scooter. In on-device learning, a model pretrained in the cloud adapts efficiently to a new context using only local data and limited updates, allowing fast adaptation without relearning from scratch even when the new task diverges in input modality or goal.
 
 ::: {#fig-transfer-conceptual fig-env="figure" fig-pos="htb" fig-cap="**Knowledge Transfer**: Pretrained models accelerate learning on new tasks by using existing representations, as seen by adapting skills between related board games or musical instruments. This transfer extends across domains like bicycle riding and scooter operation, where shared underlying structures allow efficient adaptation with limited new data." fig-alt="Conceptual diagram with four transfer learning examples: chess to checkers, violin to cello, bicycle to scooter, and guitar to ukulele, showing how similar skills transfer between related domains."}
 
@@ -512,7 +512,7 @@ Decentralized, continuous learning rewrites the rules of system design. We are n
 
 ## Design Constraints {#sec-edge-intelligence-design-constraints-c776}
 
-Attempting to fine-tune a neural network on a smartphone is a thermodynamic battle. A typical GPU training cluster consumes megawatts of power, while a smartphone must execute backpropagation on a 10-Watt thermal budget without burning the user's hand or draining the battery in five minutes. These severe constraints force us to radically redesign our learning algorithms to be hyper-efficient in compute, memory, and data.
+Attempting to fine-tune a neural network on a smartphone is a thermodynamic battle. A typical GPU training cluster consumes megawatts of power, while a smartphone must execute backpropagation on a 10 W thermal budget without burning the user's hand or draining the battery in five minutes. These severe constraints force us to radically redesign our learning algorithms to be hyper-efficient in compute, memory, and data.
 
 The constraints on parameters, operations, and data interact *multiplicatively* rather than *additively*, creating a constrained optimization problem far more challenging than inference-only deployment. The most important shift is in what compression is for: quantization shrinks bytes per weight, pruning removes unnecessary parameters, and knowledge distillation transfers behavior into a smaller architecture, and on-device learning turns these tools from optional optimizations into baseline feasibility requirements. This compression baseline, established here, is what later sections build on rather than re-derive.
 
@@ -1037,19 +1037,9 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9, 6))
 # Tier 2: Edge GPU (Jetson)
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-devices = [
-    # MCU/ASIC tier
-    ("Syntiant Core 2\n(KWS, low-energy)", 4.4, 31.5, 0),
-    ("Syntiant Core 2\n(KWS, high-perf)", 1.5, 43.8, 0),
-    ("STM32N6 NPU\n(KWS, low-power)", 1.6, 156.5, 0),
-    ("STM32N6 NPU\n(IC, high-perf)", 2.9, 443.9, 0),
-    ("Syntiant Core 2\n(VWW)", 12.7, 71.7, 0),
-    ("Syntiant Core 2\n(IC)", 5.1, 139.4, 0),
-    # Edge accelerator tier
-    ("Google Coral\nEdge TPU", 2.4, 4800, 1),
-    # Edge GPU tier
-    ("Jetson AGX Orin\n(ResNet-50)", 0.64, 15000, 2),
-]
+# Sourced from Literature.EdgeInferenceBenchmarks (MLPerf Tiny + vendor data);
+# tiers: 0 = MCU/ASIC, 1 = edge accelerator, 2 = edge GPU.
+devices = [(d["name"], d["latency_ms"], d["energy_uj"], d["tier"]) for d in Literature.EdgeInferenceBenchmarks.list]
 
 tier_colors = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["BlueLine"]]
 tier_labels = ["MCU/ASIC (Syntiant, STM32N6)", "Edge Accelerator (Coral)", "Edge GPU (Jetson)"]
@@ -1810,7 +1800,34 @@ $$
 $$
 where $U \in \mathbb{R}^{m \times r}$ and $V \in \mathbb{R}^{n \times r}$, with $r \ll \min(m,n)$. This reduces the number of trainable parameters from $mn$ to $r(m + n)$.
 
-The mathematical intuition behind this decomposition connects to fundamental linear algebra principles: any matrix can be expressed as a sum of rank-one matrices through singular value decomposition. By constraining our updates to low rank (typically $r = 4$ to $16$), we capture the most significant modes of variation while reducing parameters. For a typical transformer layer with dimensions $768{\times}768$, full fine-tuning requires updating 589,824 parameters. With rank-4 decomposition, we update only $768{\times}4{\times}2 = 6,144$ parameters, a 99 percent reduction, while empirically retaining 85--90 percent of the adaptation quality.
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Low-rank update parameter count for a generic transformer layer.
+# │ Scope: local — backs the rank-4 vs. full fine-tuning prose comparison.
+# │ Exports: EdgeLowRankParams.full_params_str, lora_params_str,
+# │          lora_reduction_pct_str
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class EdgeLowRankParams:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    layer_dim = 768  # scenario assumption: square weight matrix of a generic transformer layer
+    lora_rank = 4  # scenario assumption: rank-4 low-rank update
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    full_params = layer_dim * layer_dim
+    lora_params = layer_dim * lora_rank * 2  # down- and up-projection
+    lora_reduction = 1 - lora_params / full_params
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(full_params == 589_824, f"Full param count {full_params} unexpected")
+    check(lora_params == 6_144, f"LoRA param count {lora_params} unexpected")
+    check(0.98 < lora_reduction < 0.99, f"Reduction {lora_reduction:.3f} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    full_params_str = fmt_int(full_params)
+    lora_params_str = fmt_int(lora_params)
+    lora_reduction_pct_str = fmt_percent(round(lora_reduction * 100) / 100, precision=0, commas=False, style="prose")
+```
+
+The mathematical intuition behind this decomposition connects to fundamental linear algebra principles: any matrix can be expressed as a sum of rank-one matrices through singular value decomposition. By constraining our updates to low rank (typically $r = 4$ to $16$), we capture the most significant modes of variation while reducing parameters. For a typical transformer layer with dimensions $768{\times}768$, full fine-tuning requires updating `{python} EdgeLowRankParams.full_params_str` parameters. With rank-4 decomposition, we update only $768{\times}4{\times}2 = $ `{python} EdgeLowRankParams.lora_params_str` parameters, a `{python} EdgeLowRankParams.lora_reduction_pct_str` reduction, while empirically retaining 85--90 percent of the adaptation quality.
 
 During adaptation, the new weight is computed as:
 $$

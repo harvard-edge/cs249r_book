@@ -92,7 +92,7 @@ Single-model MLOps focuses on continuous integration, deployment pipelines, and 
 
 Independence vanishes as model count grows. Models begin sharing data sources, and changes to upstream data pipelines cascade through multiple consumers. Infrastructure becomes contested: deployment of one model delays deployment of another. Monitoring dashboards multiply until no single team can observe the complete system state. On-call rotations expand from single-model responsibility to cross-model coordination that requires understanding interactions between systems developed by different teams with different assumptions.
 
-Infrastructure efficiency compounds these coordination challenges. Production ML workloads rarely achieve high GPU utilization because training jobs run intermittently and inference loads fluctuate with user traffic. A single model team might accept 20 percent GPU utilization because optimizing further is not worth the engineering investment. Multiply by 100 models, and that underutilization represents millions of dollars in wasted infrastructure. Similarly, a single model's occasional production incident is manageable, but 100 models with independent failure modes produce a constant stream of alerts that exhaust on-call engineers and mask genuine emergencies.
+Infrastructure efficiency compounds these coordination challenges. Production ML workloads rarely achieve high accelerator utilization because training jobs run intermittently and inference loads fluctuate with user traffic. A single model team might accept 20 percent accelerator utilization because optimizing further is not worth the engineering investment. Multiply by one hundred models, and that underutilization represents millions of dollars in wasted infrastructure. Similarly, a single model's occasional production incident is manageable, but one hundred models with independent failure modes produce a constant stream of alerts that exhaust on-call engineers and mask genuine emergencies.
 
 The organizational response is platform thinking. Rather than treating each model as an independent system with its own infrastructure, platforms provide shared services that amortize operational costs across the entire model portfolio. Feature stores[^fn-feature-store-skew] eliminate redundant feature computation. Unified deployment pipelines ensure consistent rollout practices. Centralized monitoring aggregates signals across models to detect system-wide issues and enable capacity planning. The challenge is designing, implementing, and operating these platforms so they scale with the portfolio rather than against it.
 
@@ -144,8 +144,12 @@ class MultiTenantEfficiency:
     # Shared needs: 30 / 0.70 = 43 GPUs
     savings_pct = (1 - (avg_util_dedicated / avg_util_shared)) * 100
     annual_savings = annual_budget_m * (savings_pct / 100) * MILLION
+    # Active GPU-equivalents under each regime at the fixed hardware budget.
+    active_dedicated = n_gpus_required * avg_util_dedicated  # 30
+    active_shared = n_gpus_required * avg_util_shared  # 70
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(55 < savings_pct < 60, f"Savings {savings_pct:.1f}% unexpected")
+    check((active_dedicated, active_shared) == (30, 70), "Active GPU-equivalents drift")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     # Non-numeric label strings → MarkdownStr per recipe Rule 1 escape-hatch
     mt_idle_dedicated_str = MarkdownStr("70%")
@@ -155,6 +159,8 @@ class MultiTenantEfficiency:
     mt_savings_pct_round_str = fmt_percent(round(savings_pct) / 100, precision=0, commas=False, style='prose')
     mt_annual_budget_m_str = fmt_usd(annual_budget_m * MILLION, scale="M", precision=2, commas=False)
     mt_annual_savings_str = fmt_usd(annual_savings, precision=0)
+    mt_active_dedicated_str = fmt(active_dedicated, precision=0, commas=False)
+    mt_active_shared_str = fmt(active_shared, precision=0, commas=False)
 ```
 
 ::: {#nbk-ops-scale-sharing-dividend .callout-notebook title="The sharing dividend"}
@@ -168,7 +174,7 @@ For a fixed active workload, required hardware is inverse to utilization, while 
 2. **Hardware Reduction**: 1 - (0.30/0.70) = `{python} MultiTenantEfficiency.mt_savings_pct_str`.
 3. **Annual Savings**\index{Savings!annual}: `{python} MultiTenantEfficiency.mt_savings_pct_round_str` of `{python} MultiTenantEfficiency.mt_annual_budget_m_str` budget $\approx$ `{python} MultiTenantEfficiency.mt_annual_savings_str`/year.
 
-**Systems insight**: Multi-tenancy acts as an infrastructure multiplier. Breaking down resource silos reduces required hardware by 57 percent for the same workload; with the same hardware budget, it raises useful work from 30 to 70 active GPU-equivalents. In the machine learning fleet, *statistical multiplexing* (the principle that different teams' peak demands rarely coincide) is the mechanism that makes shared platforms economically sustainable. The platform team's primary role is to harvest this sharing dividend and reinvest it into future capacity growth.
+**Systems insight**: Multi-tenancy acts as an infrastructure multiplier. Breaking down resource silos reduces required hardware by `{python} MultiTenantEfficiency.mt_savings_pct_round_str` for the same workload; with the same hardware budget, it raises useful work from `{python} MultiTenantEfficiency.mt_active_dedicated_str` to `{python} MultiTenantEfficiency.mt_active_shared_str` active GPU-equivalents. In the machine learning fleet, *statistical multiplexing* (the principle that different teams' peak demands rarely coincide) is the mechanism that makes shared platforms economically sustainable. The platform team's primary role is to harvest this sharing dividend and reinvest it into future capacity growth.
 
 :::
 
@@ -288,7 +294,7 @@ The equation reveals why platform investments make sense only at sufficient scal
 # │ Imports: mlsysim.book (check)
 # │ Exports: pr_n_models_str, pr_savings_h_str, pr_roi_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_ratio, fmt_time, fmt_usd
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_ratio, fmt_time, fmt_usd
 
 class PlatformRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -301,6 +307,13 @@ class PlatformRoi:
     roi_ratio = total_savings / platform_cost_per_month
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(roi_ratio == 1.25, f"ROI {roi_ratio} unexpected")
+    # Scaling-threshold scenario: a smaller fleet flips the sign of the return.
+    n_models_low = 20
+    return_pct_high = (roi_ratio - 1) * 100  # return above platform cost at n_models
+    savings_low = n_models_low * savings_h_per_month * engineer_rate
+    loss_pct_low = (platform_cost_per_month - savings_low) / platform_cost_per_month * 100
+    check(return_pct_high == 25.0, f"Return {return_pct_high} unexpected")
+    check(loss_pct_low == 50.0, f"Loss {loss_pct_low} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     pr_n_models_str = fmt(n_models, precision=0, commas=False)
     pr_savings_h_str = fmt_time(savings_h_per_month, 'hour', precision=0, commas=False, style='word')
@@ -309,6 +322,10 @@ class PlatformRoi:
     pr_platform_cost_str = fmt_usd(platform_cost_per_month, precision=0, per="month")
     pr_gross_savings_str = fmt_usd(total_savings, precision=0)
     pr_net_benefit_str = fmt_usd(total_savings - platform_cost_per_month, precision=0)
+    pr_n_models_low_str = fmt(n_models_low, precision=0, commas=False)
+    pr_return_pct_high_str = fmt_percent(return_pct_high / 100, precision=0, commas=False, style='prose')
+    pr_savings_low_str = fmt_usd(savings_low, precision=0)
+    pr_loss_pct_low_str = fmt_percent(loss_pct_low / 100, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-ops-scale-platform-dividend .callout-notebook title="The platform dividend"}
@@ -321,7 +338,7 @@ class PlatformRoi:
 2. **Net Monthly Benefit**: `{python} PlatformRoi.pr_gross_savings_str` (Savings) - `{python} PlatformRoi.pr_platform_cost_str` (Cost) = `{python} PlatformRoi.pr_net_benefit_str`.
 3. **ROI Ratio**\index{ROI Ratio}: `{python} PlatformRoi.pr_gross_savings_str` / `{python} PlatformRoi.pr_platform_cost_str` = `{python} PlatformRoi.pr_roi_ratio_str`.
 
-**Systems insight**: Platforms exhibit a scaling threshold. At 50 models, this platform earns a 25 percent return on its cost. However, if the organization only had 20 models, the savings would be only \$60,000—a 50 percent loss on the platform team's salary. In MLOps, platform engineering is a fixed cost that pays off through variable savings. The right time to build a platform is when the "manual toil tax" across the model fleet exceeds the "platform maintenance tax."
+**Systems insight**: Platforms exhibit a scaling threshold. At `{python} PlatformRoi.pr_n_models_str` models, this platform earns a `{python} PlatformRoi.pr_return_pct_high_str` return on its cost. However, if the organization only had `{python} PlatformRoi.pr_n_models_low_str` models, the savings would be only `{python} PlatformRoi.pr_savings_low_str`—a `{python} PlatformRoi.pr_loss_pct_low_str` loss on the platform team's salary. In MLOps, platform engineering is a fixed cost that pays off through variable savings. The right time to build a platform is when the "manual toil tax" across the model fleet exceeds the "platform maintenance tax."
 
 :::
 
@@ -389,12 +406,24 @@ class PlatformEconomics:
     check(savings_pct > 50, f"Expected >50% savings, got {savings_pct:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_usd
+    from mlsysim.fmt import fmt, fmt_usd, fmt_math
 
     annual_cost_before_str = fmt_usd(annual_cost_before_val, precision=0)
     annual_cost_after_str = fmt_usd(annual_cost_after_val, precision=1)
     annual_savings_str = fmt_usd(annual_savings, precision=1)
     savings_pct_str = fmt_percent(savings_pct / 100, precision=1, commas=False, style='prose')
+
+    # Worked-math LaTeX (operands sourced from LOAD constants above; currency via fmt_usd)
+    annual_cost_before_eq_math = fmt_math(
+        rf"C_{{\text{{current}}}} = {n_models} \times {hours_per_model_month} "
+        rf"\times {months_per_year} \times {engineer_cost_hr} = {annual_cost_before_str}"
+    )
+    annual_cost_after_eq_math = fmt_math(
+        rf"C_{{\text{{after}}}} = {n_models} \times {hours_after} \times {months_per_year} "
+        rf"\times {engineer_cost_hr} + \frac{{{fmt(platform_cost, precision=0)}}}{{{amortization_years}}} "
+        rf"= {fmt_usd(annual_ops_after, precision=0)} + {fmt_usd(annual_platform_amort, precision=0)} "
+        rf"= {annual_cost_after_str}"
+    )
 ```
 
 Consider an organization evaluating whether to build a centralized ML platform. Five parameters define the current state:
@@ -407,11 +436,11 @@ Consider an organization evaluating whether to build a centralized ML platform. 
 
 Before platform (annual operational cost):
 
-$C_{\text{current}} = 50 \times 40 \times 12 \times 150 =$ `{python} PlatformEconomics.annual_cost_before_str`
+`{python} PlatformEconomics.annual_cost_before_eq_math`
 
 After platform (annual operational cost plus amortized platform cost):
 
-$C_{\text{after}} = 50 \times 10 \times 12 \times 150 + \frac{2{,}000{,}000}{3} = 900{,}000 + 666{,}667 =$ `{python} PlatformEconomics.annual_cost_after_str`
+`{python} PlatformEconomics.annual_cost_after_eq_math`
 
 Annual savings reach `{python} PlatformEconomics.annual_savings_str`, a `{python} PlatformEconomics.savings_pct_str` reduction in operational costs. The platform pays for itself within the first year.
 
@@ -584,13 +613,17 @@ class TrainingCapacityCost:
     check(n_gpus == 2048, f"Expected 2,048 GPUs, got {n_gpus}")
     check(2.9 * MILLION < training_cost < 3.0 * MILLION, f"Unexpected training cost ${training_cost:,.0f}")
 
+    n_nodes = fleet.count
+
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     n_gpus_str = fmt_count(n_gpus, label="GPU")
     gpu_hour_rate_str = fmt_usd(gpu_hour_rate, precision=0, commas=False, per="GPU-hour")
     training_cost_m_str = fmt_usd(training_cost, precision=2, commas=False, scale="M")
+    n_nodes_str = fmt(n_nodes, precision=0, commas=False)
+    training_days_str = fmt(training_days, precision=0, commas=False)
 ```
 
-Capacity planning for large-scale ML is an exercise in optimizing the economics of the GPU-hour. Consider a concrete case: a 30-day training run on a 256-node H100 cluster (`{python} TrainingCapacityCost.n_gpus_str`) at an illustrative market rate of `{python} TrainingCapacityCost.gpu_hour_rate_str` represents a direct investment of roughly `{python} TrainingCapacityCost.training_cost_m_str`. At this scale, the cost per training run $(C_{\text{run}})$ becomes a primary design lever that dictates the sizing of the entire fleet. Faster time-to-market pushes the planner toward more GPUs, but larger jobs also suffer diminishing parallel efficiency and a higher probability of hardware interruption. Total cost is therefore not merely a function of compute time; it must account for data staging, checkpointing, and the cost of recovery from interruptions (@sec-fault-tolerance-reliability).
+Capacity planning for large-scale ML is an exercise in optimizing the economics of the GPU-hour. Consider a concrete case: a `{python} TrainingCapacityCost.training_days_str`-day training run on a `{python} TrainingCapacityCost.n_nodes_str`-node H100 cluster (`{python} TrainingCapacityCost.n_gpus_str`) at an illustrative market rate of `{python} TrainingCapacityCost.gpu_hour_rate_str` represents a direct investment of roughly `{python} TrainingCapacityCost.training_cost_m_str`. At this scale, the cost per training run $(C_{\text{run}})$ becomes a primary design lever that dictates the sizing of the entire fleet. Faster time-to-market pushes the planner toward more GPUs, but larger jobs also suffer diminishing parallel efficiency and a higher probability of hardware interruption. Total cost is therefore not merely a function of compute time; it must account for data staging, checkpointing, and the cost of recovery from interruptions (@sec-fault-tolerance-reliability).
 
 The drive for efficiency forces capacity to behave like a dynamic resource rather than a static allocation. Organizations must decide when to buy additional permanent capacity and when to recover the same effective throughput through better orchestration or model optimization. The decision also has an energy dimension: powering thousands of GPUs for months consumes enough electricity that financial cost and carbon cost move together. Capacity planning therefore becomes a strategic lever that balances performance, budget, energy use, and responsible engineering in the same decision.
 
@@ -693,11 +726,47 @@ An ML platform team supporting 40 production models with 15 engineers faces depl
 
 The audit records the three debt categories in @tbl-ml-debt-audit-inputs before scoring them. Each row pairs an operational symptom with the impact measure that makes the debt comparable across teams.
 
-| **Debt category**      | **Symptom**                                                                                                               | **Impact metric**                                       | **Technical measure**                                              | **Estimated annual cost**                                                               |
-|:-----------------------|:--------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------|:-------------------------------------------------------------------|:----------------------------------------------------------------------------------------|
-| **Configuration debt** | Each model has custom YAML (YAML Ain't Markup Language) configuration files averaging 847 lines with no validation schema | 35% of deployment delays result from late config errors | Manual config review required for every deployment                 | 12 engineer-hours per deployment $\times$ 80 deployments/year = 960 hours               |
-| **Pipeline glue code** | Data preprocessing uses 23 different scripts with 62% code duplication                                                    | 12 engineer-hours per week debugging pipeline breaks    | No shared preprocessing library; each team implements custom logic | 12 hours/week $\times$ 52 weeks = 624 hours                                             |
-| **Monitoring debt**    | Each model uses ad-hoc monitoring, with no unified observability platform                                                 | Mean time to detect (MTTD) incidents is 4.2 hours       | 23 monitoring approaches across 40 models                          | Extended incident duration costs \$50K per incident $\times$ 15 incidents/year = \$750K |
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @tbl-ml-debt-audit-inputs—estimated annual cost column.
+# │ Exports: DebtAuditInputs.config_eq_str, .glue_eq_str, .monitoring_eq_str
+from mlsysim.fmt import fmt, fmt_usd, check, MarkdownStr
+
+class DebtAuditInputs:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    config_hours_per_deploy = 12
+    deploys_per_year = 80
+    glue_hours_per_week = 12
+    weeks_per_year = 52
+    incident_cost_usd = 50_000
+    incidents_per_year = 15
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    config_hours = config_hours_per_deploy * deploys_per_year
+    glue_hours = glue_hours_per_week * weeks_per_year
+    monitoring_cost = incident_cost_usd * incidents_per_year
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check((config_hours, glue_hours, monitoring_cost) == (960, 624, 750_000), "Debt-audit cost drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    config_eq_str = MarkdownStr(
+        f"{fmt(config_hours_per_deploy, precision=0)} engineer-hours per deployment "
+        f"$\\times$ {fmt(deploys_per_year, precision=0)} deployments/year = {fmt(config_hours, precision=0)} hours"
+    )
+    glue_eq_str = MarkdownStr(
+        f"{fmt(glue_hours_per_week, precision=0)} hours/week $\\times$ {fmt(weeks_per_year, precision=0)} weeks "
+        f"= {fmt(glue_hours, precision=0)} hours"
+    )
+    monitoring_eq_str = MarkdownStr(
+        f"Extended incident duration costs {fmt_usd(incident_cost_usd, scale='K')} per incident "
+        f"$\\times$ {fmt(incidents_per_year, precision=0)} incidents/year = {fmt_usd(monitoring_cost, scale='K')}"
+    )
+```
+
+| **Debt category**      | **Symptom**                                                                                                               | **Impact metric**                                       | **Technical measure**                                              | **Estimated annual cost**                    |
+|:-----------------------|:--------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------|:-------------------------------------------------------------------|:---------------------------------------------|
+| **Configuration debt** | Each model has custom YAML (YAML Ain't Markup Language) configuration files averaging 847 lines with no validation schema | 35% of deployment delays result from late config errors | Manual config review required for every deployment                 | `{python} DebtAuditInputs.config_eq_str`     |
+| **Pipeline glue code** | Data preprocessing uses 23 different scripts with 62% code duplication                                                    | 12 engineer-hours per week debugging pipeline breaks    | No shared preprocessing library; each team implements custom logic | `{python} DebtAuditInputs.glue_eq_str`       |
+| **Monitoring debt**    | Each model uses ad-hoc monitoring, with no unified observability platform                                                 | Mean time to detect (MTTD) incidents is 4.2 hours       | 23 monitoring approaches across 40 models                          | `{python} DebtAuditInputs.monitoring_eq_str` |
 
 : **ML Debt Audit Inputs**: Initial observations for configuration debt, pipeline glue code, and monitoring debt before priority scoring. The table preserves the symptom, impact metric, technical measure, and estimated annual cost for each debt category. {#tbl-ml-debt-audit-inputs}
 
@@ -978,7 +1047,31 @@ Platform economics improve monotonically with fleet size. Because @eq-platform-r
 
 While operational tooling saves engineering hours, the financial ledger of a deployed model fleet is dominated by utilization. A GPU that is idle between bursts, reserved for failed rollouts, or stranded behind a scheduling bottleneck costs the same as a GPU serving useful predictions. Deployment practices therefore cannot scale economically until the platform can see where capacity is used, where it is reserved, and where it is wasted.
 
-Engineering constraints are ultimately economic constraints: every design decision trades cost against performance, and the "right" infrastructure is the one that maximizes useful computation per dollar over the system's lifetime. Using the \$350,000 per 8-GPU DGX H100 node assumption, a 10,000-GPU cluster represents about \$437.5 million in node hardware CapEx before networking, facility, staffing, and maintenance costs. The purchase price, however, is only the beginning. Over a typical three-year hardware lifecycle, power, cooling, facility, networking, staffing, and maintenance determine whether the fleet is an asset or an idle liability. Total cost of ownership (TCO)\index{Total Cost of Ownership!hardware}[^fn-tco-framework] matters here because it turns utilization into the central operating invariant behind the broader ML-lifecycle accounting developed in @sec-ml-operations-scale-ml-systems-tco-framework-b980.
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: fleet-economics opener—node CapEx for a 10,000-GPU cluster.
+# │ Exports: FleetCapexRecap.node_price_str, .cluster_gpus_str,
+# │          .hardware_capex_m_str
+from mlsysim.fmt import fmt, fmt_usd, check
+
+class FleetCapexRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    _cluster = Systems.Clusters.Training_10K
+    cluster_gpus = _cluster.total_accelerators
+    cluster_nodes = _cluster.count
+    node_price_usd = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    hardware_capex_usd = cluster_nodes * node_price_usd
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(hardware_capex_usd - 437_500_000) < 1, "Cluster CapEx drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    node_price_str = fmt_usd(node_price_usd, precision=0)
+    cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
+    hardware_capex_m_str = fmt_usd(hardware_capex_usd, scale="M", precision=1, commas=False)
+```
+
+Engineering constraints are ultimately economic constraints: every design decision trades cost against performance, and the "right" infrastructure is the one that maximizes useful computation per dollar over the system's lifetime. Using the `{python} FleetCapexRecap.node_price_str` per 8-GPU DGX H100 node assumption, a `{python} FleetCapexRecap.cluster_gpus_str`-GPU cluster represents about `{python} FleetCapexRecap.hardware_capex_m_str` in node hardware CapEx before networking, facility, staffing, and maintenance costs. The purchase price, however, is only the beginning. Over a typical three-year hardware lifecycle, power, cooling, facility, networking, staffing, and maintenance determine whether the fleet is an asset or an idle liability. Total cost of ownership (TCO)\index{Total Cost of Ownership!hardware}[^fn-tco-framework] matters here because it turns utilization into the central operating invariant behind the broader ML-lifecycle accounting developed in @sec-ml-operations-scale-ml-systems-tco-framework-b980.
 
 The economics of ML infrastructure differ from traditional IT in three fundamental ways. Accelerators depreciate quickly, power is a first-order operating cost, and utilization sensitivity is extreme: the same fleet can be a brilliant investment at 80 percent utilization or a financial disaster at 20 percent utilization, with no change in hardware or facility costs. For operations at scale, this is the durable lesson. The platform must keep expensive capacity doing useful work while still preserving enough headroom for failures, rollbacks, and traffic spikes.
 
@@ -1332,27 +1425,28 @@ For the `{python} InfraFrontierTcoDeprecRecap.frontier_params_b_str` model, the 
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_compute_efficiency, fmt_flop_rate, fmt_power
+from mlsysim.fmt import fmt_compute_efficiency, fmt_flop_rate, fmt_power, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Exports: GpuEfficiencyTableRecap.v100_efficiency_tflop_per_s_per_w_str, GpuEfficiencyTableRecap.a100_efficiency_tflop_per_s_per_w_str, GpuEfficiencyTableRecap.h100_efficiency_tflop_per_s_per_w_str, GpuEfficiencyTableRecap.b200_efficiency_tflop_per_s_per_w_str, GpuEfficiencyTableRecap.b200_fp8_tflop_per_s_str, GpuEfficiencyTableRecap.b200_tdp_w_str
 class GpuEfficiencyTableRecap:
 
+    # ┌── 2. EXECUTE (relative efficiency vs. V100 baseline) ──────────────────
+    _v100_eff = Hardware.Cloud.V100.compute.peak_flops / Hardware.Cloud.V100.tdp
+    _a100_eff = Hardware.Cloud.A100.compute.peak_flops / Hardware.Cloud.A100.tdp
+    _h100_eff = Hardware.Cloud.H100.compute.precision_flops['fp8'] / Hardware.Cloud.H100.tdp
+    _b200_eff = Hardware.Cloud.B200.compute.precision_flops['fp8'] / Hardware.Cloud.B200.tdp
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(
-        Hardware.Cloud.V100.compute.peak_flops / Hardware.Cloud.V100.tdp, unit=TFLOPs / second / watt, precision=2, commas=False
-    )
-    a100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(
-        Hardware.Cloud.A100.compute.peak_flops / Hardware.Cloud.A100.tdp, unit=TFLOPs / second / watt, precision=2, commas=False
-    )
-    h100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(
-        Hardware.Cloud.H100.compute.precision_flops['fp8'] / Hardware.Cloud.H100.tdp, unit=TFLOPs / second / watt, precision=2, commas=False
-    )
-    b200_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(
-        Hardware.Cloud.B200.compute.precision_flops['fp8'] / Hardware.Cloud.B200.tdp, unit=TFLOPs / second / watt, precision=2, commas=False
-    )
+    v100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_v100_eff, unit=TFLOPs / second / watt, precision=2, commas=False)
+    a100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_a100_eff, unit=TFLOPs / second / watt, precision=2, commas=False)
+    h100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_h100_eff, unit=TFLOPs / second / watt, precision=2, commas=False)
+    b200_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_b200_eff, unit=TFLOPs / second / watt, precision=2, commas=False)
     b200_fp8_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.B200.compute.precision_flops['fp8'], unit=TFLOP / second, precision=0, commas=False)
     b200_tdp_w_str = fmt_power(Hardware.Cloud.B200.tdp, unit=watt, precision=0, commas=False)
+    v100_relative_mult_str = fmt_multiple((_v100_eff / _v100_eff).magnitude, precision=0, commas=False)
+    a100_relative_mult_str = fmt_multiple((_a100_eff / _v100_eff).magnitude, precision=1, commas=False)
+    h100_relative_mult_str = fmt_multiple((_h100_eff / _v100_eff).magnitude, precision=1, commas=False)
+    b200_relative_mult_str = fmt_multiple((_b200_eff / _v100_eff).magnitude, precision=1, commas=False)
 ```
 
 ### Power efficiency trajectory {#sec-ml-operations-scale-power-efficiency}
@@ -1409,12 +1503,12 @@ class TensorCoreEfficiencyRecap:
     h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs / second, precision=0, commas=True)
 ```
 
-| **Generation**  |                   **Peak TFLOP/s (best precision)**                    |                    **TDP (W)**                    |                           **TFLOP/s per watt**                           | **Relative Efficiency** |
-|:----------------|:----------------------------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------------------:|:-----------------------:|
-| **V100 (2017)** |    `{python} V100EfficiencyRecap.flops_fp16_tflop_per_s_str` (FP16)    |      `{python} V100EfficiencyRecap.tdp_w_str`     | `{python} GpuEfficiencyTableRecap.v100_efficiency_tflop_per_s_per_w_str` |        1$\times$        |
-| **A100 (2020)** |  `{python} A100EfficiencyRowRecap.flops_fp16_tflop_per_s_str` (FP16)   |    `{python} A100EfficiencyRowRecap.tdp_w_str`    | `{python} GpuEfficiencyTableRecap.a100_efficiency_tflop_per_s_per_w_str` |       1.9$\times$       |
-| **H100 (2022)** | `{python} TensorCoreEfficiencyRecap.h100_fp8_tc_tflop_per_s_str` (FP8) |    `{python} H100TdpEfficiencyRecap.tdp_w_str`    | `{python} GpuEfficiencyTableRecap.h100_efficiency_tflop_per_s_per_w_str` |       6.8$\times$       |
-| **B200 (2024)** |   `{python} GpuEfficiencyTableRecap.b200_fp8_tflop_per_s_str` (FP8)    | `{python} GpuEfficiencyTableRecap.b200_tdp_w_str` | `{python} GpuEfficiencyTableRecap.b200_efficiency_tflop_per_s_per_w_str` |       10.8$\times$      |
+| **Generation**  |                   **Peak TFLOP/s (best precision)**                    |                    **TDP (W)**                    |                           **TFLOP/s per watt**                           |                  **Relative Efficiency**                  |
+|:----------------|:----------------------------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------------------:|:---------------------------------------------------------:|
+| **V100 (2017)** |    `{python} V100EfficiencyRecap.flops_fp16_tflop_per_s_str` (FP16)    |      `{python} V100EfficiencyRecap.tdp_w_str`     | `{python} GpuEfficiencyTableRecap.v100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.v100_relative_mult_str` |
+| **A100 (2020)** |  `{python} A100EfficiencyRowRecap.flops_fp16_tflop_per_s_str` (FP16)   |    `{python} A100EfficiencyRowRecap.tdp_w_str`    | `{python} GpuEfficiencyTableRecap.a100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.a100_relative_mult_str` |
+| **H100 (2022)** | `{python} TensorCoreEfficiencyRecap.h100_fp8_tc_tflop_per_s_str` (FP8) |    `{python} H100TdpEfficiencyRecap.tdp_w_str`    | `{python} GpuEfficiencyTableRecap.h100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.h100_relative_mult_str` |
+| **B200 (2024)** |   `{python} GpuEfficiencyTableRecap.b200_fp8_tflop_per_s_str` (FP8)    | `{python} GpuEfficiencyTableRecap.b200_tdp_w_str` | `{python} GpuEfficiencyTableRecap.b200_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.b200_relative_mult_str` |
 
 : **Power Efficiency Across GPU Generations**: Each generation delivers substantially more computation per watt, meaning that for a fixed power budget, newer hardware provides multiplicatively more throughput. A facility that draws 10 MW can train models roughly 10$\times$ faster with B200s than with V100s, without any increase in electricity cost. {#tbl-power-efficiency}
 
@@ -1680,7 +1774,7 @@ class RackPowerPlanningRecap:
     rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
 ```
 
-The same chain becomes concrete for the `{python} InfraFrontierTcoPlanningRecap.frontier_params_b_str` training plan. Large-batch training is compute-bound, so the design optimizes for sustained TFLOP/s per dollar and selects H100s rather than a bandwidth-optimized inference accelerator. The 2.2 TB training state cannot live on one device, which forces tensor parallelism inside each node plus optimizer sharding, activation checkpointing, and offload across the wider data-parallel group. That memory constraint produces the DGX H100 node shape before the facility planner ever reaches the power spreadsheet.
+The same chain becomes concrete for the `{python} InfraFrontierTcoPlanningRecap.frontier_params_b_str` training plan. Large-batch training is compute bound, so the design optimizes for sustained TFLOP/s per dollar and selects H100s rather than a bandwidth-optimized inference accelerator. The 2.2 TB training state cannot live on one device, which forces tensor parallelism inside each node plus optimizer sharding, activation checkpointing, and offload across the wider data-parallel group. That memory constraint produces the DGX H100 node shape before the facility planner ever reaches the power spreadsheet.
 
 Cluster size then follows from the compute budget. At 6 FLOPs per parameter-token over 175 billion parameters and 300 billion tokens, the run requires `{python} PlanningThroughputScenario.total_flops_str`. Using a conservative BF16/FP16 planning basis rather than the FP8 headline peak, each H100 delivers `{python} PlanningThroughputScenario.h100_peak_tflop_per_s_str` peak and `{python} PlanningThroughputScenario.per_gpu_sustained_tflop_per_s_str` sustained at `{python} PlanningThroughputScenario.mfu_pct_str` MFU. With `{python} PlanningThroughputScenario.gpus_str`, the cluster reaches roughly `{python} PlanningThroughputScenario.cluster_sustained_pflop_per_s_str` sustained and completes the run in about `{python} PlanningThroughputScenario.ideal_days_str` days of idealized compute time, or 2--4 weeks with operational overhead. The TP-8, PP-4, DP-32 configuration generates structured AllReduce traffic suited to a rail-optimized InfiniBand fabric.
 
@@ -1891,7 +1985,7 @@ Recommendation systems exemplify the multi-model management challenge because th
 
 Modern recommendation systems use ensemble architectures because one model cannot simultaneously satisfy every latency, quality, and business constraint. Diverse objectives demand specialized models: engagement, diversity, freshness, inventory, and business constraints often pull in different directions, so separate models specialize in each objective and the ensemble combines their outputs. Staged filtering is the systems counterpart to that specialization. Processing billions of candidates with a single model is computationally infeasible, so multi-stage architectures[^fn-multi-stage-recsys-latency] progressively filter candidates [@covington2016; @liu2022]: retrieval narrows billions to thousands, coarse ranking reduces thousands to hundreds, fine ranking selects tens from hundreds, and re-ranking produces the final ordering.
 
-[^fn-multi-stage-recsys-latency]: **Multi-Stage Recommendation Architecture**\index{Recommendation!architecture, multi-stage recommendation}\index{Recommendation!architecture, multi-stage, recommendation}: YouTube's 2016 deep-recommendation paper established this paradigm: a fast retrieval model narrows billions of candidates to thousands, then a compute-intensive ranking model scores the survivors. The trade-off is latency vs. accuracy at each stage -- the retrieval model sacrifices precision for speed (sub-10 ms over the full corpus), while the ranker spends its budget on the reduced set. Updating any single stage without re-validating downstream stages is a primary source of ensemble regression at fleet scale.
+[^fn-multi-stage-recsys-latency]: **Multi-Stage Recommendation Architecture**\index{Recommendation!architecture, multi-stage recommendation}\index{Recommendation!architecture, multi-stage, recommendation}: YouTube's 2016 deep-recommendation paper established this paradigm: a fast retrieval model narrows billions of candidates to thousands, then a compute-intensive ranking model scores the survivors. The trade-off is latency vs. accuracy at each stage---the retrieval model sacrifices precision for speed (sub-10 ms over the full corpus), while the ranker spends its budget on the reduced set. Updating any single stage without re-validating downstream stages is a primary source of ensemble regression at fleet scale.
 
 The same decomposition improves experimentation velocity because teams can update individual components without retraining the entire recommendation stack, but that independence creates version-compatibility obligations for the platform. It also changes risk management. Other ensemble components can sometimes compensate when one model fails or produces poor results, yet the platform must detect when compensation hides a regression rather than resolving it.
 
@@ -2173,23 +2267,27 @@ Staged rollout is the mechanism that turns deployment risk into a controllable e
 # │ Imports: mlsysim.book (check)
 # │ Exports: ds_canary_pct_str, ds_risk_reduction_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, MarkdownStr
+from mlsysim.fmt import check, fmt, fmt_math, MarkdownStr
 
 class DeploymentSafety:
     # ┌── 1. LOAD ──────────────────────────────────────────
+    full_cutover_pct = 1.0  # 100% blue-green cutover
     canary_pct = 0.05  # 5% canary traffic
     detection_time_h = 2  # hours to detect a major crash/bug
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Risk exposure is the expected number of broken requests
     # Ratio of exposure: (100% * T) / (5% * T)
-    risk_reduction = 1.0 / canary_pct
+    risk_reduction = full_cutover_pct / canary_pct
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(risk_reduction == 20.0, f"Risk reduction {risk_reduction} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     # Custom percent suffix → MarkdownStr escape-hatch (preserves "%" appended)
     ds_canary_pct_str = fmt_percent(canary_pct, precision=0, commas=False, style='symbol')
     ds_risk_reduction_mult_str = fmt_multiple(risk_reduction, precision=0, commas=False)
-    ds_full_cutover_pct_str = fmt_percent(100 / 100, precision=0, commas=False, style='symbol')
+    ds_full_cutover_pct_str = fmt_percent(full_cutover_pct, precision=0, commas=False, style='symbol')
+    ds_risk_reduction_eq_math = fmt_math(
+        rf"{fmt(full_cutover_pct * 100, precision=0)} / {fmt(canary_pct * 100, precision=0)} " rf"= {fmt(risk_reduction, precision=0)}\times"
+    )
 ```
 
 ::: {#nbk-ops-scale-safety-staged-rollouts .callout-notebook title="The safety of staged rollouts"}
@@ -2201,7 +2299,7 @@ Risk exposure is proportional to the traffic percentage affected during the dete
 
 1. **Blue-Green Exposure**\index{Blue-Green Deployment!blue-green exposure}: `{python} DeploymentSafety.ds_full_cutover_pct_str` of users affected until rollback.
 2. **Canary Exposure**\index{Canary Deployment!canary, exposure}: `{python} DeploymentSafety.ds_canary_pct_str` of users affected until rollback.
-3. **Risk Mitigation**\index{Risk Mitigation}: 100/5 = `{python} DeploymentSafety.ds_risk_reduction_mult_str`.
+3. **Risk Mitigation**\index{Risk Mitigation}: `{python} DeploymentSafety.ds_risk_reduction_eq_math`.
 
 **Systems insight**: Staged rollouts are an insurance policy for model quality. Limiting initial exposure to `{python} DeploymentSafety.ds_canary_pct_str` reduces the blast radius of a catastrophic failure by `{python} DeploymentSafety.ds_risk_reduction_mult_str`. In the Machine Learning Fleet, where model behavior is probabilistic and hard to unit-test, gradual exposure is the only reliable way to ensure that "SOTA on paper" does not become "Broken in Production."
 
@@ -2239,11 +2337,41 @@ where $T_{\text{stage}}$ is the duration required at a given percentage, $n_{\te
 
 A model serves 1 million requests per hour. To detect a 1 percent change in click-through rate with 95 percent confidence requires approximately 10,000 samples per variant.
 
-At 1 percent canary traffic:
-$$T_{1\%} = \frac{10,000}{1,000,000 \times 0.01} = 1 \text{ hour}$$
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-canary-duration worked example—stage durations.
+# │ Exports: CanaryDuration.t_1pct_eq_math, .t_5pct_eq_math
+from mlsysim.fmt import fmt, fmt_math, check
 
-At 5 percent canary traffic:
-$$T_{5\%} = \frac{10,000}{1,000,000 \times 0.05} = 0.2 \text{ hours} = 12 \text{ minutes}$$
+class CanaryDuration:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    samples_needed = 10_000  # per variant for 1% CTR change at 95% confidence
+    request_rate_per_h = 1_000_000  # requests/hour
+    p_1pct = 0.01
+    p_5pct = 0.05
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_1pct_h = samples_needed / (request_rate_per_h * p_1pct)
+    t_5pct_h = samples_needed / (request_rate_per_h * p_5pct)
+    t_5pct_min = t_5pct_h * 60
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(t_1pct_h == 1.0 and t_5pct_min == 12.0, "Canary durations drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    t_1pct_eq_math = fmt_math(
+        rf"T_{{1\%}} = \frac{{{fmt(samples_needed, precision=0)}}}"
+        rf"{{{fmt(request_rate_per_h, precision=0)} \times {p_1pct}}} "
+        rf"= {fmt(t_1pct_h, precision=0)}\text{{ hour}}"
+    )
+    t_5pct_eq_math = fmt_math(
+        rf"T_{{5\%}} = \frac{{{fmt(samples_needed, precision=0)}}}"
+        rf"{{{fmt(request_rate_per_h, precision=0)} \times {p_5pct}}} "
+        rf"= {fmt(t_5pct_h, precision=1)}\text{{ hours}} = {fmt(t_5pct_min, precision=0)}\text{{ minutes}}"
+    )
+```
+
+At 1 percent canary traffic: `{python} CanaryDuration.t_1pct_eq_math`.
+
+At 5 percent canary traffic: `{python} CanaryDuration.t_5pct_eq_math`.
 
 The organization might configure five rollout stages:
 
@@ -2283,7 +2411,8 @@ class SilentFailure:
     value_per_click = 0.50  # $0.50 per click
     # ┌── 2. EXECUTE ───────────────────────────────────────
     total_requests = qps * SEC_PER_HOUR * t_detection_h
-    lost_clicks = total_requests * (ctr_baseline - ctr_new)
+    ctr_drop = ctr_baseline - ctr_new  # 0.005 absolute CTR drop
+    lost_clicks = total_requests * ctr_drop
     lost_clicks_count = round(lost_clicks)
     total_loss = lost_clicks * value_per_click
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -2298,6 +2427,7 @@ class SilentFailure:
     sf_sec_per_day_str = fmt_time(SEC_PER_HOUR * 24, "second", precision=0, commas=False, per="day")
     sf_total_requests_str = fmt_count(total_requests, commas=False, label="request")
     sf_lost_clicks_str = fmt_count(lost_clicks_count, label="lost click")
+    sf_ctr_drop_ratio_str = fmt(ctr_drop, precision=3, commas=False)
 ```
 
 ::: {#nbk-ops-scale-cost-delayed-alert .callout-notebook title="The cost of a delayed alert"}
@@ -2307,7 +2437,7 @@ class SilentFailure:
 **Math**:
 
 1. **Total Requests**: `{python} SilentFailure.sf_qps_str` $\times$ `{python} SilentFailure.sf_sec_per_day_str` = `{python} SilentFailure.sf_total_requests_str`.
-2. **Lost Clicks**: `{python} SilentFailure.sf_total_requests_str` $\times$ 0.005 = `{python} SilentFailure.sf_lost_clicks_str`.
+2. **Lost Clicks**: `{python} SilentFailure.sf_total_requests_str` $\times$ `{python} SilentFailure.sf_ctr_drop_ratio_str` = `{python} SilentFailure.sf_lost_clicks_str`.
 3. **Total Financial Loss**: `{python} SilentFailure.sf_lost_clicks_str` $\times$ `{python} SilentFailure.sf_value_per_click_str` = `{python} SilentFailure.sf_total_loss_str`.
 
 **Systems insight**: A "minor" 0.5 percentage-point regression in a high-traffic model is a `{python} SilentFailure.sf_total_loss_str` daily disaster. MLOps is fundamentally economic risk management. Every hour shaved from "Time-to-Detection" via canary deployments and automated drift monitoring translates directly into saved revenue. In the fleet stack, monitoring is the "Insurance Policy" that protects model business value.
@@ -2611,7 +2741,34 @@ $$n_{\text{sample}} = \frac{(1.96 + 0.84)^2 \times 2 \times 0.05 \times 0.95}{0.
 
 $$n_{\text{sample}} = \frac{7.84 \times 0.095}{0.000025} = \frac{0.7448}{0.000025} = 29,792$$
 
-Each variant requires approximately 30,000 samples, totaling 60,000 observations. At 1 million requests per day, this experiment requires less than 2 hours. However, for a model with 1 percent baseline CTR detecting a 5 percent relative improvement (0.05 percentage points), the calculation yields:
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-ops-scale-ab-sample-size worked example—sample size, duration.
+# │ Exports: AbSampleSize.per_variant_str, .total_str, .duration_str
+from mlsysim.fmt import fmt_count, fmt_time, check
+
+class AbSampleSize:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    z_alpha = 1.96
+    z_beta = 0.84
+    p_baseline = 0.05
+    delta = 0.005  # 0.5 percentage-point absolute effect
+    requests_per_day = 1_000_000
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    n_exact = (z_alpha + z_beta) ** 2 * 2 * p_baseline * (1 - p_baseline) / delta**2
+    n_per_variant = round(n_exact, -3)  # ≈ 30,000 (reader-facing rounding)
+    n_total = 2 * n_per_variant
+    duration_h = n_total / requests_per_day * 24
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(n_per_variant == 30_000 and n_total == 60_000, "Sample-size drift")
+    check(duration_h < 2, f"Duration {duration_h}h exceeds 2h")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    per_variant_str = fmt_count(n_per_variant, commas=True, label="sample")
+    total_str = fmt_count(n_total, commas=True, label="observation")
+```
+
+Each variant requires approximately `{python} AbSampleSize.per_variant_str`, totaling `{python} AbSampleSize.total_str`. At 1 million requests per day, this experiment requires less than 2 hours. However, for a model with 1 percent baseline CTR detecting a 5 percent relative improvement (0.05 percentage points), the calculation yields:
 
 $$n_{\text{sample}} = \frac{7.84 \times 2 \times 0.01 \times 0.99}{0.0005^2} = \frac{0.1552}{0.00000025} = 620,800$$
 
@@ -2673,7 +2830,30 @@ Metric selection can mislead when surrogate metrics (clicks, engagement) do not 
 
 #### Worked example: Multiple testing scenario {#sec-ml-operations-scale-worked-example-multiple-testing-scenario-ce6c}
 
-A platform team runs 30 A/B tests per quarter comparing candidate models. Using $\alpha_{\text{sig}} = 0.05$ without correction, expect $30 \times 0.05 = 1.5$ false positives per quarter. Over a year, expect approximately 6 models falsely identified as improvements, wasting engineering effort on deployments that provide no actual value.
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: multiple-testing worked example—false positives per quarter/year.
+# │ Exports: MultipleTestingFp.per_quarter_eq_math, .per_year_str
+from mlsysim.fmt import fmt, fmt_math, fmt_count, check
+
+class MultipleTestingFp:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    tests_per_quarter = 30
+    alpha_sig = 0.05
+    quarters_per_year = 4
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    fp_per_quarter = tests_per_quarter * alpha_sig
+    fp_per_year = round(fp_per_quarter * quarters_per_year)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(fp_per_quarter == 1.5 and fp_per_year == 6, "False-positive drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    tests_per_quarter_str = fmt(tests_per_quarter, precision=0, commas=False)
+    per_quarter_eq_math = fmt_math(rf"{fmt(tests_per_quarter, precision=0)} \times {alpha_sig} = {fmt(fp_per_quarter, precision=1)}")
+    per_year_str = fmt_count(fp_per_year, commas=False, label="model")
+```
+
+A platform team runs `{python} MultipleTestingFp.tests_per_quarter_str` A/B tests per quarter comparing candidate models. Using $\alpha_{\text{sig}} = 0.05$ without correction, expect `{python} MultipleTestingFp.per_quarter_eq_math` false positives per quarter. Over a year, expect approximately `{python} MultipleTestingFp.per_year_str` falsely identified as improvements, wasting engineering effort on deployments that provide no actual value.
 
 Applying Bonferroni correction: $\alpha_{\text{sig}}' = \frac{0.05}{30} = 0.00167$ per test. This requires larger sample sizes. For the recommendation model example above (5 percent baseline, 0.5pp effect), original requirement was 30K samples per variant. With a two-sided Bonferroni threshold, the critical value rises to about 3.14, increasing the requirement to roughly 60K samples per variant.
 
@@ -2727,24 +2907,58 @@ Experimental setup:
 - Clustering coefficient $C = 0.4$ (typical for social networks)
 - Outcome: daily engagement minutes
 
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: SUTVA network-effect worked example—measured vs. corrected effect.
+# │ Exports: NetworkEffectBias.measured_min_str, .measured_pct_str, ...
+from mlsysim.fmt import fmt_time, fmt_percent, check
+
+class NetworkEffectBias:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    treatment_min = 45.2
+    control_min = 43.8
+    adjusted_control_min = 42.3
+    rho = 0.15
+    cluster_size_m = 1.4
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    measured_effect = treatment_min - control_min
+    measured_pct = measured_effect / control_min
+    true_effect = treatment_min - adjusted_control_min
+    true_pct = true_effect / adjusted_control_min
+    inflation_min = control_min - adjusted_control_min
+    deff = 1 + (cluster_size_m - 1) * rho
+    deff_inflation_pct = deff - 1
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(measured_effect - 1.4) < 0.05 and abs(true_effect - 2.9) < 0.05, "Effect drift")
+    check(abs(deff - 1.06) < 0.005, f"DEFF {deff} drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    measured_min_str = fmt_time(measured_effect, 'minute', precision=1, commas=False, style='word')
+    measured_pct_str = fmt_percent(measured_pct, precision=1, commas=False, style='prose')
+    true_min_str = fmt_time(true_effect, 'minute', precision=1, commas=False, style='word')
+    true_pct_str = fmt_percent(true_pct, precision=1, commas=False, style='prose')
+    inflation_min_str = fmt_time(inflation_min, 'minute', precision=1, commas=False, style='word')
+    deff_inflation_pct_str = fmt_percent(deff_inflation_pct, precision=0, commas=False, style='prose')
+```
+
 Naive analysis results:
 
 - Treatment group: 45.2 minutes average
 - Control group: 43.8 minutes average
-- Measured effect: +1.4 minutes (+3.2 percent)
+- Measured effect: +`{python} NetworkEffectBias.measured_min_str` (+`{python} NetworkEffectBias.measured_pct_str`)
 
 However, network analysis reveals that control group users have on average about half of their connections in treatment, as expected under independent individual randomization. These treatment connections share algorithmically-boosted content that control users see, inflating control group engagement.
 
 Corrected analysis using inverse probability weighting for network exposure:
 
 - Adjusted control baseline: 42.3 minutes (what control would show without spillover)
-- True treatment effect: +2.9 minutes (+6.9 percent)
-- SUTVA violation inflated control by 1.5 minutes, halving the measured effect
+- True treatment effect: +`{python} NetworkEffectBias.true_min_str` (+`{python} NetworkEffectBias.true_pct_str`)
+- SUTVA violation inflated control by `{python} NetworkEffectBias.inflation_min_str`, halving the measured effect
 
 With intra-cluster correlation $\rho = 0.15$ and an average experiment cluster size of $m = 1.4$ effective users:
 $$\text{DEFF} = 1 + (1.4 - 1) \times 0.15 = 1.06$$
 
-This toy calculation gives 6 percent variance inflation and would require 6 percent larger sample sizes for equivalent power, but the bias correction is far more impactful than the variance adjustment.
+This toy calculation gives `{python} NetworkEffectBias.deff_inflation_pct_str` variance inflation and would require `{python} NetworkEffectBias.deff_inflation_pct_str` larger sample sizes for equivalent power, but the bias correction is far more impactful than the variance adjustment.
 
 #### Detection strategies {#sec-ml-operations-scale-detection-strategies-dc16}
 
@@ -2907,7 +3121,7 @@ Before a training job is allocated to a set of nodes, the scheduler employs auto
 *One slow accelerator stalls every peer at the barrier.*
 :::
 
-The most insidious adversary in a large fleet is not the hard failure but the gray failure\index{Gray Failure} -- a component that continues to function but at degraded performance. A single GPU with a partially failed HBM stack might operate at only 75 percent of its peak bandwidth. An NVLink with marginal signal integrity might force frequent link retraining, causing microsecond stalls that accumulate into seconds of lost time per training step. In a synchronous data-parallel workload, a single straggler slows the entire cluster, because every other GPU must wait for the slowest participant to complete its AllReduce contribution. These gray failures are invisible to simple "up/down" health checks and require continuous, fine-grained performance benchmarking to detect. The most effective approach is to run periodic micro-benchmarks on idle nodes (or during scheduled maintenance windows) and compare each node's performance against the fleet baseline. A node whose GEMM throughput drops below 90 percent of the fleet median, or whose NVLink bandwidth drops below 85 percent, is flagged for investigation even though it has not experienced any hard error.
+The most insidious adversary in a large fleet is not the hard failure but the gray failure\index{Gray Failure}: a component that continues to function but at degraded performance. A single GPU with a partially failed HBM stack might operate at only 75 percent of its peak bandwidth. An NVLink with marginal signal integrity might force frequent link retraining, causing microsecond stalls that accumulate into seconds of lost time per training step. In a synchronous data-parallel workload, a single straggler slows the entire cluster, because every other GPU must wait for the slowest participant to complete its AllReduce contribution. These gray failures are invisible to simple "up/down" health checks and require continuous, fine-grained performance benchmarking to detect. The most effective approach is to run periodic micro-benchmarks on idle nodes (or during scheduled maintenance windows) and compare each node's performance against the fleet baseline. A node whose GEMM throughput drops below 90 percent of the fleet median, or whose NVLink bandwidth drops below 85 percent, is flagged for investigation even though it has not experienced any hard error.
 
 ::: {#psp-ops-scale-proactive-vs-reactive-maintenance .callout-perspective title="Proactive vs. reactive maintenance"}
 
@@ -2927,7 +3141,7 @@ class InfraFrontierStragglerRecap15:
 
 In multi-tenant clusters where multiple training jobs share the same physical infrastructure, the noisy neighbor problem introduces a performance hazard that is invisible to individual job metrics. While containerization strictly limits CPU and memory usage, the network fabric is often a shared resource susceptible to interference. If Job A initiates a massive AllReduce operation across the spine switches just as Job B attempts to fetch training data from networked storage, the resulting micro-bursts of packet contention can throttle Job B's throughput by 30--40 percent. This interference is particularly pernicious in RDMA-enabled clusters where traffic bypasses the host CPU, rendering standard OS-level packet scheduling ineffective. Modern orchestration mitigates this via static rail alignment\index{Static Rail Alignment} -- physically dedicating specific InfiniBand subnets to specific jobs -- or by deploying congestion notification protocols that throttle aggressive flows at the switch hardware level. For organizations running the `{python} InfraFrontierStragglerRecap15.frontier_params_b_str` model training alongside smaller research experiments, the safest approach is to physically partition the cluster into isolated "islands" with dedicated network fabrics, accepting the utilization penalty of fragmentation in exchange for performance predictability.
 
-Checkpoint cadence is the point where hardware telemetry becomes visible to ML operators rather than only to data-center technicians. A degraded node that forces frequent checkpoint recovery, or a storage path that lengthens checkpoint writes, turns directly into lost training throughput. The checkpoint-compute trade-off and the Young/Daly interval are derived in @sec-appdx-reliability-foundations-young-daly and applied to checkpointing strategies in @sec-fault-tolerance-young-daly; the operations responsibility here is to expose the telemetry those formulas depend on: write time, failure rate, straggler behavior, and recovery duration. Without that visibility, a platform may report that a job is "running" while useful learning has quietly collapsed behind retries and slow checkpoints.
+Checkpoint cadence is the point where hardware telemetry becomes visible to ML operators rather than only to data-center technicians. A degraded node that forces frequent checkpoint recovery, or a storage path that lengthens checkpoint writes, turns directly into lost training throughput. @Sec-appdx-reliability-foundations-young-daly derives the checkpoint-compute trade-off and the Young/Daly interval, which @sec-fault-tolerance-young-daly applies to checkpointing strategies; the operations responsibility here is to expose the telemetry those formulas depend on: write time, failure rate, straggler behavior, and recovery duration. Without that visibility, a platform may report that a job is "running" while useful learning has quietly collapsed behind retries and slow checkpoints.
 
 With the physical substrate accounted for, monitoring returns to the deployed model fleet. Models that pass validation gates and survive canary deployment enter a production environment where gradual degradation, data drift, and emergent interactions can erode performance over weeks or months. The staged rollout strategies and rollback triggers examined in CI/CD detect acute failures during deployment; monitoring systems must detect chronic degradation during operation. At platform scale, where hundreds of models operate simultaneously, the naive approach of applying single-model monitoring practices to each model independently leads to alert fatigue\index{Alert Fatigue}, missed correlations, and operational chaos. Monitoring strategies appropriate for enterprise-scale ML platforms require hierarchical aggregation and systemic governance.
 
@@ -3031,10 +3245,38 @@ An ML platform monitors 100 models with the following configuration:
 - Alert threshold at 2 standard deviations (approximately 5 percent false positive rate per metric)
 - Metrics checked every 5 minutes
 
-Expected daily false alerts:
-$$\text{Daily false alerts} = 100 \times 10 \times 0.05 \times \frac{24 \times 60}{5} = 14,400$$
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: 2-sigma alert-volume worked example.
+# │ Exports: TwoSigmaAlerts.daily_eq_math, .remaining_str
+from mlsysim.fmt import fmt, fmt_math, fmt_count, check
 
-Even if 99 percent of these are deduplicated or auto-resolved, the remaining 144 alerts daily overwhelm any on-call team. The monitoring system becomes useless despite (or rather, because of) comprehensive coverage.
+class TwoSigmaAlerts:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_models = 100
+    n_metrics = 10
+    fpr = 0.05  # 2-sigma false positive rate
+    check_interval_min = 5
+    dedup_resolved = 0.99  # 99% auto-resolved
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    checks_per_day = (24 * 60) / check_interval_min
+    daily_alerts = n_models * n_metrics * fpr * checks_per_day
+    remaining = daily_alerts * (1 - dedup_resolved)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(daily_alerts == 14_400 and abs(remaining - 144) < 1e-6, "Alert-volume drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    daily_eq_math = fmt_math(
+        rf"\text{{Daily false alerts}} = {fmt(n_models, precision=0)} \times {fmt(n_metrics, precision=0)} "
+        rf"\times {fpr} \times \frac{{24 \times 60}}{{{check_interval_min}}} = {fmt(daily_alerts, precision=0)}"
+    )
+    remaining_str = fmt_count(round(remaining), commas=False, label="alert")
+    daily_alerts_str = fmt(daily_alerts, precision=0, commas=True)
+```
+
+Expected daily false alerts: `{python} TwoSigmaAlerts.daily_eq_math`.
+
+Even if 99 percent of these are deduplicated or auto-resolved, the remaining `{python} TwoSigmaAlerts.remaining_str` daily overwhelm any on-call team. The monitoring system becomes useless despite (or rather, because of) comprehensive coverage.
 
 ### Hierarchical monitoring architecture {#sec-ml-operations-scale-hierarchical-monitoring-architecture-407d}
 
@@ -3175,6 +3417,7 @@ class DriftLatency:
     # Custom percent suffix → MarkdownStr escape-hatch (preserves "%" appended)
     dl_base_acc_str = fmt_percent(p1, precision=0, commas=False, style='symbol')
     dl_drop_str = fmt_percent(p1 - p2, precision=0, commas=False, style='symbol')
+    dl_drop_prose_str = fmt_percent(p1 - p2, precision=0, commas=False, style='prose')
     dl_samples_needed_str = fmt_int(n)
     dl_samples_per_hour_str = fmt_rate(dl_samples_per_hour, "samples/hour", precision=0, commas=False)
     dl_detection_hours_str = fmt_time(dl_detection_hours, 'hour', precision=1, commas=False, style='word')
@@ -3191,7 +3434,7 @@ Detection requires enough samples to distinguish the signal (the `{python} Drift
 1. **Samples Required**\index{Samples Required}: Using a two-sample proportion test, detecting a `{python} DriftLatency.dl_drop_str` drop with `{python} DriftLatency.dl_confidence_pct_str` confidence requires `{python} DriftLatency.dl_samples_needed_str` samples.
 2. **Detection Latency**\index{Latency!detection}: `{python} DriftLatency.dl_samples_needed_str` samples / `{python} DriftLatency.dl_samples_per_hour_str` $\approx$ `{python} DriftLatency.dl_detection_hours_str`.
 
-**Systems insight**: Monitoring is not instantaneous. For a 2 percent degradation, the model operates in a broken state for over 2 hours before there is enough data to trigger an alert. This is the *monitoring lag*. Reducing this lag requires either increasing the volume of labeled data (expensive) or monitoring "proxy" metrics like PSI\index{Population Stability Index!proxy metric} (faster but noisier). In a high-stakes fleet, the alert triggers on *input drift* as a leading indicator rather than waiting for accuracy to drop.
+**Systems insight**: Monitoring is not instantaneous. For a `{python} DriftLatency.dl_drop_prose_str` degradation, the model operates in a broken state for approximately `{python} DriftLatency.dl_detection_hours_str` before there is enough data to trigger an alert. This is the *monitoring lag*. Reducing this lag requires either increasing the volume of labeled data (expensive) or monitoring "proxy" metrics like PSI\index{Population Stability Index!proxy metric} (faster but noisier). In a high-stakes fleet, the alert triggers on *input drift* as a leading indicator rather than waiting for accuracy to drop.
 
 :::
 
@@ -3292,9 +3535,31 @@ For percentage-based alerts, false positive rates depend on the underlying volat
 
 A recommendation service typically costs \$100 per day for inference compute. The operations team receives an alert: today's cost has reached \$250 by end of day.
 
-Historical data shows mean daily cost $\mu = \$100$ with standard deviation $\sigma = \$15$, so the first check is whether the alert is statistically plausible under normal operations:
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: cost-spike Z-score worked example.
+# │ Exports: CostSpikeZScore.z_eq_math
+from mlsysim.fmt import fmt, fmt_math, fmt_usd, check
 
-$$Z = \frac{\$250 - \$100}{\$15} = \frac{\$150}{\$15} = 10$$
+class CostSpikeZScore:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    cost_current = 250  # $/day observed
+    cost_mean = 100  # $/day historical mean (mu)
+    cost_std = 15  # $/day historical std (sigma)
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    numerator = cost_current - cost_mean
+    z_score = numerator / cost_std
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(numerator == 150 and z_score == 10, "Z-score drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    z_eq_math = fmt_math(
+        rf"Z = \frac{{{fmt_usd(cost_current)} - {fmt_usd(cost_mean)}}}{{{fmt_usd(cost_std)}}} "
+        rf"= \frac{{{fmt_usd(numerator)}}}{{{fmt_usd(cost_std)}}} = {fmt(z_score, precision=0)}"
+    )
+```
+
+Historical data shows mean daily cost $\mu = \$100$ with standard deviation $\sigma = \$15$, so the first check is whether the alert is statistically plausible under normal operations: `{python} CostSpikeZScore.z_eq_math`.
 
 A Z-score of 10 is extraordinarily unlikely under normal operations, but the team still confirms the billing data before treating the alert as real. After ruling out billing delays, double-counting, and pipeline errors, the investigation turns to the operating signal. Query volume is unchanged, so traffic did not cause the spike. P99 latency increased from 50 ms to 125 ms, which means each request now consumes roughly 2.5$\times$ the GPU-seconds. A new model version deployed at 2:00 AM used a larger ranking model and additional features for quality improvements, while GPU utilization stayed near 95 percent and throughput per GPU dropped 60 percent. The root cause was therefore the model update, which increased computational cost per prediction: with unchanged traffic and a 2.5$\times$ per-request cost, total cost rose from \$100/day to \$250/day. The platform decision is whether the quality improvement justifies the cost increase or whether optimization through quantization, smaller batches, or model distillation is required.
 
@@ -3553,7 +3818,7 @@ Training Cost Comparison (100 GPU-hours):
 
 The serving side allocates risk differently. Serving costs scale with traffic, but ML serving cannot autoscale like a stateless web application. Large models may take seconds or minutes to load, so purely reactive scaling arrives after the latency spike; the platform needs predictive scale-up before anticipated demand.
 
-The capacity steps are also lumpy. GPU memory makes serving scale in jumps of 0, 1, 2, or 4 GPUs rather than smooth CPU fractions, and batching adds another coupling because waiting for a larger batch improves utilization but consumes latency budget. An autoscaling policy must therefore choose the least expensive capacity step that still protects the p99 latency SLO.
+The capacity steps are also lumpy. Accelerator memory makes serving scale in jumps of 0, 1, 2, or 4 accelerators rather than smooth CPU fractions, and batching adds another coupling because waiting for a larger batch improves utilization but consumes latency budget. An autoscaling policy must therefore choose the least expensive capacity step that still protects the p99 latency SLO.
 
 Instance selection then starts from the binding constraint rather than the newest instance type. Memory-bound training with large embedding tables prioritizes GPU memory capacity and bandwidth. Compute-bound dense training maximizes sustained FLOP/s per dollar.
 
@@ -3581,11 +3846,37 @@ FinOps extends beyond infrastructure optimization because cost feedback changes 
 
 Model selection should explicitly consider cost alongside accuracy. @Tbl-ops-scale-cost-quality illustrates cost-quality trade-off analysis\index{Cost!quality trade-off analysis}: moving from small to medium model yields a 3 percentage-point accuracy gain for 10$\times$ training cost increase, while medium to large yields only 1 additional percentage point for another 10$\times$ cost, a pattern that should inform deployment decisions:
 
-| **Model**  | **Accuracy** | **Training Cost** | **Serving Cost/1K** | **Value Judgment**                                |
-|:-----------|:------------:|:-----------------:|:-------------------:|:--------------------------------------------------|
-| **Small**  |     92%      |       \$500       |        \$0.10       | Baseline                                          |
-| **Medium** |     95%      |      \$5,000      |        \$0.50       | 3 percentage points for 10$\times$ cost           |
-| **Large**  |     96%      |      \$50,000     |        \$2.00       | Additional 1 percentage point for 10$\times$ more |
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @tbl-ops-scale-cost-quality—value-judgment column.
+# │ Exports: CostQualityTradeoff.medium_judgment_str, .large_judgment_str
+from mlsysim.fmt import fmt_pp, fmt_multiple, MarkdownStr, check
+
+class CostQualityTradeoff:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    acc_small, acc_medium, acc_large = 92, 95, 96  # accuracy (percent)
+    cost_small, cost_medium, cost_large = 500, 5_000, 50_000  # training cost (USD)
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    medium_gain_pp = acc_medium - acc_small
+    large_gain_pp = acc_large - acc_medium
+    medium_cost_mult = cost_medium / cost_small
+    large_cost_mult = cost_large / cost_medium
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check((medium_gain_pp, large_gain_pp) == (3, 1), "Accuracy-gap drift")
+    check((medium_cost_mult, large_cost_mult) == (10, 10), "Cost-multiple drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    medium_judgment_str = MarkdownStr(f"{fmt_pp(medium_gain_pp, style='prose')} for {fmt_multiple(medium_cost_mult, precision=0, commas=False)} cost")
+    large_judgment_str = MarkdownStr(
+        f"Additional {fmt_pp(large_gain_pp, style='prose')} for {fmt_multiple(large_cost_mult, precision=0, commas=False)} more"
+    )
+```
+
+| **Model**  | **Accuracy** | **Training Cost** | **Serving Cost/1K** | **Value Judgment**                                 |
+|:-----------|:------------:|:-----------------:|:-------------------:|:---------------------------------------------------|
+| **Small**  |     92%      |       \$500       |        \$0.10       | Baseline                                           |
+| **Medium** |     95%      |      \$5,000      |        \$0.50       | `{python} CostQualityTradeoff.medium_judgment_str` |
+| **Large**  |     96%      |      \$50,000     |        \$2.00       | `{python} CostQualityTradeoff.large_judgment_str`  |
 
 : **Cost-Quality Tradeoff Analysis**: Diminishing returns in model scaling. Small-to-medium model transition yields a 3 percentage-point accuracy gain for 10$\times$ cost increase; medium-to-large yields only 1 additional percentage point for another 10$\times$ cost. This pattern demonstrates why explicit cost-quality analysis should inform model selection rather than defaulting to larger architectures. {#tbl-ops-scale-cost-quality}
 
@@ -3769,9 +4060,39 @@ Consider training a large language model:
 - PUE: 1.15 (efficient hyperscale data center)
 - Failure overhead: 15 percent (typical for multi-node training)
 
-$$C_{\text{train}} = 256 \times (14 \times 24) \times \$3.50 \times 1.15 \times 1.15 \approx \$398,147$$
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-training-cost worked example—single-run and annual cost.
+# │ Exports: TrainingCostExample.c_train_eq_math, .annual_str
+from mlsysim.fmt import fmt, fmt_math, fmt_usd, check
 
-If this model requires quarterly retraining, annual training cost reaches approximately \$1.6 million. However, training cost often represents a small fraction of total TCO for production systems serving millions of users.
+class TrainingCostExample:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 256
+    days = 14
+    gpu_hour_rate = 3.50  # illustrative cloud H100-hour rate for this scenario
+    pue = 1.15
+    fail_factor = 1.15  # 15% failure overhead
+    retrains_per_year = 4
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    hours = days * 24
+    c_train = n_gpus * hours * gpu_hour_rate * pue * fail_factor
+    annual_cost = c_train * retrains_per_year
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(round(c_train) == 398_147, f"C_train {c_train} drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    c_train_eq_math = fmt_math(
+        rf"C_{{\text{{train}}}} = {fmt(n_gpus, precision=0)} \times ({days} \times 24) "
+        rf"\times {fmt_usd(gpu_hour_rate, precision=2, commas=False)} \times {pue} \times {fail_factor} "
+        rf"\approx {fmt_usd(round(c_train))}"
+    )
+    annual_str = fmt_usd(annual_cost, scale="M", precision=1)
+```
+
+`{python} TrainingCostExample.c_train_eq_math`
+
+If this model requires quarterly retraining, annual training cost reaches approximately `{python} TrainingCostExample.annual_str`. However, training cost often represents a small fraction of total TCO for production systems serving millions of users.
 
 #### Inference cost model {#sec-ml-operations-scale-inference-cost-model-63ed}
 
@@ -3976,21 +4297,57 @@ The breakeven equation becomes useful only after the dominant cost component is 
 
 #### Worked example: Optimization investment decision {#sec-ml-operations-scale-worked-example-optimization-investment-decision-cc81}
 
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @eq-optimization-breakeven worked examples (inference + training).
+# │ Exports: OptimizationBreakeven.infer_savings_eq_str, .infer_breakeven_eq_math,
+# │          .train_savings_eq_str, .train_breakeven_eq_math
+from mlsysim.fmt import fmt, fmt_math, fmt_usd, MarkdownStr, check
+
+class OptimizationBreakeven:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    impl_cost = 80_000
+    infer_monthly = 400_000
+    infer_reduction = 0.40
+    train_monthly = 150_000
+    train_reduction = 0.30
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    infer_savings = infer_monthly * infer_reduction
+    infer_breakeven_months = impl_cost / infer_savings
+    train_savings = train_monthly * train_reduction
+    train_breakeven_months = impl_cost / train_savings
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(infer_savings == 160_000 and infer_breakeven_months == 0.5, "Inference breakeven drift")
+    check(train_savings == 45_000 and abs(train_breakeven_months - 1.8) < 0.05, "Training breakeven drift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    infer_savings_eq_str = MarkdownStr(f"{fmt_usd(infer_monthly)} $\\times$ {fmt(infer_reduction, precision=2)} = {fmt_usd(infer_savings)}")
+    infer_breakeven_eq_math = fmt_math(
+        rf"T_{{\text{{breakeven}}}} = \frac{{{fmt_usd(impl_cost)}}}{{{fmt_usd(infer_savings, per='month')}}} "
+        rf"= {fmt(infer_breakeven_months, precision=1)} \text{{ months}}"
+    )
+    train_savings_eq_str = MarkdownStr(f"{fmt_usd(train_monthly)} $\\times$ {fmt(train_reduction, precision=2)} = {fmt_usd(train_savings)}")
+    train_breakeven_eq_math = fmt_math(
+        rf"T_{{\text{{breakeven}}}} = \frac{{{fmt_usd(impl_cost)}}}{{{fmt_usd(train_savings, per='month')}}} "
+        rf"= {fmt(train_breakeven_months, precision=1)} \text{{ months}}"
+    )
+```
+
 A production company $(C_{\text{infer}} = \$400K/\text{month})$ evaluates INT8 quantization:
 
 - Implementation cost: \$80,000 (engineering time + validation)
 - Expected inference cost reduction: 40 percent
-- Monthly savings: \$400,000 $\times$ 0.40 = \$160,000
+- Monthly savings: `{python} OptimizationBreakeven.infer_savings_eq_str`
 
-$$T_{\text{breakeven}} = \frac{\$80,000}{\$160,000/month} = 0.5 \text{ months}$$
+`{python} OptimizationBreakeven.infer_breakeven_eq_math`
 
 Breakeven in 2 weeks makes this investment highly attractive. However, if the same company $(C_{\text{train}} = \$150K/\text{month})$ evaluates a training optimization:
 
 - Implementation cost: \$80,000
 - Expected training cost reduction: 30 percent
-- Monthly savings: \$150,000 $\times$ 0.30 = \$45,000
+- Monthly savings: `{python} OptimizationBreakeven.train_savings_eq_str`
 
-$$T_{\text{breakeven}} = \frac{\$80,000}{\$45,000/month} = 1.8 \text{ months}$$
+`{python} OptimizationBreakeven.train_breakeven_eq_math`
 
 Still attractive, but lower priority than inference optimization due to longer payback and smaller absolute savings.
 
@@ -4147,54 +4504,21 @@ This query retrieves the most recent feature values that existed before each eve
 
 ```{python}
 #| echo: false
-#| label: feature-store-scale-scenario
+#| label: feature-store-storage-scenario
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ FEATURE STORE SCALE SCENARIO
+# │ FEATURE STORE — STORAGE FOOTPRINT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Feature-store scale, data-quality incident, and freshness examples
-# │
-# │ Goal: Keep recurring feature-store quantities in one scenario so storage,
-# │       latency, quality, and incident-impact prose do not drift independently.
-# │ Show: Feature-history volume, lookup rate, latency budget, completeness,
-# │       CTR incident impact, and monitoring-sampling assumptions.
-# │ How: Derive displayed values from one recommendation-platform scenario.
-# │
-# │ Imports: mlsysim.core.units, mlsysim.core.units, mlsysim.fmt
-# │ Exports: FeatureStoreScale.storage_users_str, .storage_features_str,
+# │ Context: point-in-time storage cost for the recommendation feature store.
+# │ Exports: FeatureStoreStorage.storage_users_str, .storage_features_str,
 # │          .storage_retention_years_str, .storage_update_interval_hr_str,
 # │          .storage_feature_values_str, .storage_bytes_per_value_str,
-# │          .storage_total_pb_str, .daily_recommendations_str,
-# │          .features_per_recommendation_str, .lookups_per_day_str,
-# │          .avg_lookup_rate_str, .peak_traffic_range_mult_str,
-# │          .recommendation_budget_ms_str, .feature_budget_range_ms_str,
-# │          .network_overhead_range_ms_str, .store_lookup_range_ms_str,
-# │          .expected_events_str, .delivered_events_str,
-# │          .completeness_pct_str, .validation_failure_threshold_pct_str,
-# │          .ctr_drop_pct_str, .incident_days_str, .ctr_before_pct_str,
-# │          .ctr_after_pct_str, .freshness_slo_hr_str, .engagement_before_str,
-# │          .engagement_after_str, .engagement_decline_pct_str,
-# │          .weekly_revenue_usd_str, .revenue_impact_usd_str,
-# │          .alert_detection_hr_str, .impact_reduction_pct_str,
-# │          .feature_shift_threshold_pct_str, .freshness_feature_count_str,
-# │          .freshness_sample_pct_str, .pipeline_feature_count_str
+# │          .storage_total_pb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import MILLION, BILLION
-from mlsysim.core.units import PB, byte
-from mlsysim.fmt import (
-    check,
-    fmt,
-    fmt_count,
-    fmt_memory,
-    fmt_multiple_range,
-    fmt_percent,
-    fmt_rate,
-    fmt_time,
-    fmt_time_range,
-    fmt_usd,
-)
+from mlsysim.core.units import MILLION, BILLION, PB, byte
+from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_time
 
-class FeatureStoreScale:
-    """Recommendation feature-store scenario used across the scale discussion."""
+class FeatureStoreStorage:
+    """Feature-history storage footprint for a 100M-user recommendation store."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
     storage_users = 100 * MILLION
@@ -4203,64 +4527,13 @@ class FeatureStoreScale:
     storage_update_interval_hr = 1
     hours_per_year = 365 * 24
     storage_bytes_per_value = 100 * byte
-
-    daily_recommendations = 1 * BILLION
-    features_per_recommendation = 100
-    seconds_per_day = 24 * 60 * 60
-    peak_traffic_min = 5
-    peak_traffic_max = 10
-
-    recommendation_budget_ms = 50
-    feature_budget_min_ms = 5
-    feature_budget_max_ms = 10
-    network_overhead_min_ms = 1
-    network_overhead_max_ms = 2
-    store_lookup_min_ms = 3
-    store_lookup_max_ms = 8
-
-    expected_events = 10 * MILLION
-    delivered_events = 8.2 * MILLION
-    validation_failure_threshold = 0.05
-
-    ctr_drop = 0.08
-    incident_days = 5
-    ctr_before = 0.042
-    ctr_after = 0.0387
-    freshness_slo_hr = 1
-    engagement_before = 0.42
-    engagement_after = 0.31
-    weekly_revenue = 15 * MILLION
-    alert_detection_hr = 4
-    feature_shift_threshold = 0.10
-
-    freshness_feature_count = 10_000
-    freshness_sample = 0.01
-    pipeline_feature_count = 500
-
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     storage_versions_per_feature = storage_retention_years * hours_per_year / storage_update_interval_hr
     storage_feature_values = storage_users * storage_features * storage_versions_per_feature
     storage_total_bytes = storage_feature_values * storage_bytes_per_value
-
-    lookups_per_day = daily_recommendations * features_per_recommendation
-    avg_lookups_per_s = lookups_per_day / seconds_per_day
-
-    completeness = delivered_events / expected_events
-    engagement_decline = (engagement_before - engagement_after) / engagement_before
-    revenue_impact = ctr_drop * weekly_revenue * incident_days / 7
-    impact_reduction = 1 - (alert_detection_hr / (incident_days * 24))
-    engagement_decline_rounded = round(engagement_decline, 2)
-    revenue_impact_rounded = round(revenue_impact / 1000) * 1000
-    impact_reduction_rounded = round(impact_reduction, 2)
-
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(storage_feature_values == 876_000_000_000_000, "Feature-history count drifted.")
     check(87 < storage_total_bytes.to(PB).magnitude < 88, "Storage should remain about 87 PB.")
-    check(1.1 * MILLION < avg_lookups_per_s < 1.2 * MILLION, "Average lookup rate should be about 1.16M/s.")
-    check(abs(completeness - 0.82) < 1e-9, "Completeness example should remain 82%.")
-    check(850_000 < revenue_impact < 860_000, "Revenue-impact example should remain about $857K.")
-    check(0.96 < impact_reduction < 0.98, "Alert reduction should remain about 97%.")
-
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     storage_users_str = fmt_count(storage_users, scale="million", precision=0, scale_style="word", label="user")
     storage_features_str = fmt_count(storage_features, commas=False, label="feature")
@@ -4269,47 +4542,13 @@ class FeatureStoreScale:
     storage_feature_values_str = fmt_count(storage_feature_values, scale="trillion", precision=0, scale_style="word", label="feature value")
     storage_bytes_per_value_str = fmt_memory(storage_bytes_per_value, unit=byte, precision=0, commas=False)
     storage_total_pb_str = fmt_memory(storage_total_bytes, unit=PB, precision=1, commas=False)
-
-    daily_recommendations_str = fmt_count(daily_recommendations, scale="billion", precision=0, scale_style="word", label="daily recommendation")
-    features_per_recommendation_str = fmt_count(features_per_recommendation, commas=False, label="feature")
-    lookups_per_day_str = fmt_count(lookups_per_day, scale="billion", precision=0, scale_style="word", label="feature lookup")
-    avg_lookup_rate_str = fmt_rate(avg_lookups_per_s, "requests/s", scale="M", precision=2, commas=False)
-    peak_traffic_range_mult_str = fmt_multiple_range(peak_traffic_min, peak_traffic_max, precision=0, commas=False)
-
-    recommendation_budget_ms_str = fmt_time(recommendation_budget_ms, "millisecond", precision=0, commas=False)
-    feature_budget_range_ms_str = fmt_time_range(feature_budget_min_ms, feature_budget_max_ms, "millisecond", precision=0, commas=False)
-    network_overhead_range_ms_str = fmt_time_range(network_overhead_min_ms, network_overhead_max_ms, "millisecond", precision=0, commas=False)
-    store_lookup_range_ms_str = fmt_time_range(store_lookup_min_ms, store_lookup_max_ms, "millisecond", precision=0, commas=False)
-
-    expected_events_str = fmt_count(expected_events, scale="million", precision=0, scale_style="word", label="user event")
-    delivered_events_str = fmt_count(delivered_events, scale="million", precision=1, scale_style="word", label="user event", allow_fractional=True)
-    completeness_pct_str = fmt_percent(completeness, precision=0, commas=False, style="prose")
-    validation_failure_threshold_pct_str = fmt_percent(validation_failure_threshold, precision=0, commas=False, style="prose")
-
-    ctr_drop_pct_str = fmt_percent(ctr_drop, precision=0, commas=False, style="prose")
-    incident_days_str = fmt_time(incident_days, "day", precision=0, commas=False, style="word")
-    ctr_before_pct_str = fmt_percent(ctr_before, precision=1, commas=False, style="prose")
-    ctr_after_pct_str = fmt_percent(ctr_after, precision=2, commas=False, style="prose")
-    freshness_slo_hr_str = fmt_time(freshness_slo_hr, "hour", precision=0, commas=False, style="word", attributive=True)
-    engagement_before_str = fmt(engagement_before, precision=2, commas=False)
-    engagement_after_str = fmt(engagement_after, precision=2, commas=False)
-    engagement_decline_pct_str = fmt_percent(engagement_decline_rounded, precision=0, commas=False, style="prose")
-    weekly_revenue_usd_str = fmt_usd(weekly_revenue, scale="M", precision=0, commas=False)
-    revenue_impact_usd_str = fmt_usd(revenue_impact_rounded, scale="K", precision=0, commas=False)
-    alert_detection_hr_str = fmt_time(alert_detection_hr, "hour", precision=0, commas=False, style="word")
-    impact_reduction_pct_str = fmt_percent(impact_reduction_rounded, precision=0, commas=False, style="prose")
-    feature_shift_threshold_pct_str = fmt_percent(feature_shift_threshold, precision=0, commas=False, style="prose")
-
-    freshness_feature_count_str = fmt_count(freshness_feature_count, commas=True, label="feature")
-    freshness_sample_pct_str = fmt_percent(freshness_sample, precision=0, commas=False, style="prose")
-    pipeline_feature_count_str = fmt_count(pipeline_feature_count, commas=False, label="feature")
 ```
 
 Point-in-time correctness has a storage cost because the store must retain feature history rather than current values alone. The same guarantee that prevents leakage also multiplies retained state:
 
 $$\text{Storage} = N_{\text{entities}} \times N_{\text{features}} \times \frac{T_{\text{retention}}}{T_{\text{update}}}$$
 
-For `{python} FeatureStoreScale.storage_users_str`, `{python} FeatureStoreScale.storage_features_str`, `{python} FeatureStoreScale.storage_retention_years_str` retention, and updates every `{python} FeatureStoreScale.storage_update_interval_hr_str`, the history contains `{python} FeatureStoreScale.storage_feature_values_str`. At `{python} FeatureStoreScale.storage_bytes_per_value_str` per value, this represents approximately `{python} FeatureStoreScale.storage_total_pb_str` before compression. Efficient feature stores use compression, columnar storage, and retention policies to manage this scale.
+For `{python} FeatureStoreStorage.storage_users_str`, `{python} FeatureStoreStorage.storage_features_str`, `{python} FeatureStoreStorage.storage_retention_years_str` retention, and updates every `{python} FeatureStoreStorage.storage_update_interval_hr_str`, the history contains `{python} FeatureStoreStorage.storage_feature_values_str`. At `{python} FeatureStoreStorage.storage_bytes_per_value_str` per value, this represents approximately `{python} FeatureStoreStorage.storage_total_pb_str` before compression. Efficient feature stores use compression, columnar storage, and retention policies to manage this scale.
 
 ### Feature versioning and lineage {#sec-ml-operations-scale-feature-versioning-lineage-624c}
 
@@ -4343,9 +4582,58 @@ The practical pattern is incremental. Historical data is processed in date parti
 
 Feature stores at recommendation system scale face a coupled systems problem: request volume, latency budget, and storage history all bind at once.
 
-The arithmetic behind a large recommender explains why feature stores become serving infrastructure rather than a metadata convenience. `{python} FeatureStoreScale.daily_recommendations_str` with `{python} FeatureStoreScale.features_per_recommendation_str` per recommendation produces `{python} FeatureStoreScale.lookups_per_day_str` per day. That average load is roughly `{python} FeatureStoreScale.avg_lookup_rate_str` before peak traffic, which commonly reaches `{python} FeatureStoreScale.peak_traffic_range_mult_str` the mean.
+```{python}
+#| echo: false
+#| label: feature-store-latency-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FEATURE STORE — REQUEST VOLUME AND LATENCY BUDGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: recommendation-scale lookup rate and per-request latency budget.
+# │ Exports: FeatureStoreLatency.daily_recommendations_str,
+# │          .features_per_recommendation_str, .lookups_per_day_str,
+# │          .avg_lookup_rate_str, .peak_traffic_range_mult_str,
+# │          .recommendation_budget_ms_str, .feature_budget_range_ms_str,
+# │          .network_overhead_range_ms_str, .store_lookup_range_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import BILLION
+from mlsysim.fmt import check, fmt_count, fmt_multiple_range, fmt_rate, fmt_time, fmt_time_range
 
-Feature retrieval must fit inside the overall latency budget because every extra lookup millisecond steals time from ranking. If the recommendation budget is `{python} FeatureStoreScale.recommendation_budget_ms_str`, the feature store may receive only `{python} FeatureStoreScale.feature_budget_range_ms_str`. Network overhead can consume `{python} FeatureStoreScale.network_overhead_range_ms_str` of that allocation, leaving roughly `{python} FeatureStoreScale.store_lookup_range_ms_str` for the store lookup itself. Meeting this budget requires in-memory storage, careful batching, and geographic placement close enough to the serving fleet that network latency does not dominate.
+class FeatureStoreLatency:
+    """Request volume and per-request latency budget for the recommendation store."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    daily_recommendations = 1 * BILLION
+    features_per_recommendation = 100
+    seconds_per_day = 24 * 60 * 60
+    peak_traffic_min = 5
+    peak_traffic_max = 10
+    recommendation_budget_ms = 50
+    feature_budget_min_ms = 5
+    feature_budget_max_ms = 10
+    network_overhead_min_ms = 1
+    network_overhead_max_ms = 2
+    store_lookup_min_ms = 3
+    store_lookup_max_ms = 8
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    lookups_per_day = daily_recommendations * features_per_recommendation
+    avg_lookups_per_s = lookups_per_day / seconds_per_day
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(1.1 * 10**6 < avg_lookups_per_s < 1.2 * 10**6, "Average lookup rate should be about 1.16M/s.")
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    daily_recommendations_str = fmt_count(daily_recommendations, scale="billion", precision=0, scale_style="word", label="daily recommendation")
+    features_per_recommendation_str = fmt_count(features_per_recommendation, commas=False, label="feature")
+    lookups_per_day_str = fmt_count(lookups_per_day, scale="billion", precision=0, scale_style="word", label="feature lookup")
+    avg_lookup_rate_str = fmt_rate(avg_lookups_per_s, "requests/s", scale="M", precision=2, commas=False)
+    peak_traffic_range_mult_str = fmt_multiple_range(peak_traffic_min, peak_traffic_max, precision=0, commas=False)
+    recommendation_budget_ms_str = fmt_time(recommendation_budget_ms, "millisecond", precision=0, commas=False)
+    feature_budget_range_ms_str = fmt_time_range(feature_budget_min_ms, feature_budget_max_ms, "millisecond", precision=0, commas=False)
+    network_overhead_range_ms_str = fmt_time_range(network_overhead_min_ms, network_overhead_max_ms, "millisecond", precision=0, commas=False)
+    store_lookup_range_ms_str = fmt_time_range(store_lookup_min_ms, store_lookup_max_ms, "millisecond", precision=0, commas=False)
+```
+
+The arithmetic behind a large recommender explains why feature stores become serving infrastructure rather than a metadata convenience. `{python} FeatureStoreLatency.daily_recommendations_str` with `{python} FeatureStoreLatency.features_per_recommendation_str` per recommendation produces `{python} FeatureStoreLatency.lookups_per_day_str` per day. That average load is roughly `{python} FeatureStoreLatency.avg_lookup_rate_str` before peak traffic, which commonly reaches `{python} FeatureStoreLatency.peak_traffic_range_mult_str` the mean.
+
+Feature retrieval must fit inside the overall latency budget because every extra lookup millisecond steals time from ranking. If the recommendation budget is `{python} FeatureStoreLatency.recommendation_budget_ms_str`, the feature store may receive only `{python} FeatureStoreLatency.feature_budget_range_ms_str`. Network overhead can consume `{python} FeatureStoreLatency.network_overhead_range_ms_str` of that allocation, leaving roughly `{python} FeatureStoreLatency.store_lookup_range_ms_str` for the store lookup itself. Meeting this budget requires in-memory storage, careful batching, and geographic placement close enough to the serving fleet that network latency does not dominate.
 
 Production feature stores also carry two time horizons at once. The online path keeps current values for billions of entities and thousands of features per entity, usually in the terabyte range before replication. The offline path keeps enough historical state to reconstruct training examples, which can push retained feature history into petabytes. Multi-region replication then serves both availability and latency, but it also makes freshness and consistency visible operational concerns.
 
@@ -4353,7 +4641,38 @@ Production feature stores also carry two time horizons at once. The online path 
 
 Data quality\index{Data Quality} issues are a major source of production ML problems [@polyzotis2017]. While model monitoring detects symptoms, data quality monitoring prevents problems at their source. At scale, data quality operations become as critical as model quality operations, requiring systematic monitoring, validation, and incident response procedures.
 
-The first step is measurement: data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce `{python} FeatureStoreScale.expected_events_str` but delivering only `{python} FeatureStoreScale.delivered_events_str` is `{python} FeatureStoreScale.completeness_pct_str` complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than `{python} FeatureStoreScale.validation_failure_threshold_pct_str` of validation rules because allowing corrupt data through is more expensive than delaying a batch.
+```{python}
+#| echo: false
+#| label: feature-store-data-quality-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FEATURE STORE — DATA QUALITY MEASUREMENT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: completeness measurement and batch-rejection threshold.
+# │ Exports: FeatureStoreDataQuality.expected_events_str, .delivered_events_str,
+# │          .completeness_pct_str, .validation_failure_threshold_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import MILLION
+from mlsysim.fmt import check, fmt_count, fmt_percent
+
+class FeatureStoreDataQuality:
+    """Completeness measurement for a daily feature pipeline."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    expected_events = 10 * MILLION
+    delivered_events = 8.2 * MILLION
+    validation_failure_threshold = 0.05
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    completeness = delivered_events / expected_events
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(completeness - 0.82) < 1e-9, "Completeness example should remain 82%.")
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    expected_events_str = fmt_count(expected_events, scale="million", precision=0, scale_style="word", label="user event")
+    delivered_events_str = fmt_count(delivered_events, scale="million", precision=1, scale_style="word", label="user event", allow_fractional=True)
+    completeness_pct_str = fmt_percent(completeness, precision=0, commas=False, style="prose")
+    validation_failure_threshold_pct_str = fmt_percent(validation_failure_threshold, precision=0, commas=False, style="prose")
+```
+
+The first step is measurement: data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce `{python} FeatureStoreDataQuality.expected_events_str` but delivering only `{python} FeatureStoreDataQuality.delivered_events_str` is `{python} FeatureStoreDataQuality.completeness_pct_str` complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than `{python} FeatureStoreDataQuality.validation_failure_threshold_pct_str` of validation rules because allowing corrupt data through is more expensive than delaying a batch.
 
 Timeliness measures freshness against the SLO of the consuming model. Fraud detection may need features less than 100 milliseconds old, while demographic features can tolerate staleness measured in days; the alert threshold should therefore be tied to the feature's use, not a global constant. Accuracy asks whether values remain correct within expected distributions. Sensor drift after calibration lapses, for example, can leave values well-typed but wrong. Statistical tests such as Kolmogorov-Smirnov for continuous features, chi-square for categorical features, and Maximum Mean Discrepancy for high-dimensional data turn those accuracy checks into recurring gates.
 
@@ -4361,7 +4680,64 @@ Validation then turns those measurements into a layered defense. Schema validati
 
 #### Worked example: Debugging data quality incident {#sec-ml-operations-scale-worked-example-debugging-data-quality-incident-72cd}
 
-A recommendation model's click-through rate (CTR) drops `{python} FeatureStoreScale.ctr_drop_pct_str` over `{python} FeatureStoreScale.incident_days_str`. Initial hypothesis focuses on model drift, but data quality investigation reveals the root cause.
+```{python}
+#| echo: false
+#| label: data-quality-incident-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA QUALITY INCIDENT — CTR REGRESSION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: feature-computation-bug incident, revenue impact, alert reduction.
+# │ Exports: DataQualityIncident.ctr_drop_pct_str, .incident_days_str,
+# │          .ctr_before_pct_str, .ctr_after_pct_str, .freshness_slo_hr_str,
+# │          .engagement_before_str, .engagement_after_str,
+# │          .engagement_decline_pct_str, .weekly_revenue_usd_str,
+# │          .revenue_impact_usd_str, .alert_detection_hr_str,
+# │          .impact_reduction_pct_str, .feature_shift_threshold_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import MILLION
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_time, fmt_usd
+
+class DataQualityIncident:
+    """A feature-computation bug that silently degrades CTR over five days."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    ctr_drop = 0.08
+    incident_days = 5
+    ctr_before = 0.042
+    ctr_after = 0.0387
+    freshness_slo_hr = 1
+    engagement_before = 0.42
+    engagement_after = 0.31
+    weekly_revenue = 15 * MILLION
+    alert_detection_hr = 4
+    feature_shift_threshold = 0.10
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    engagement_decline = (engagement_before - engagement_after) / engagement_before
+    revenue_impact = ctr_drop * weekly_revenue * incident_days / 7
+    impact_reduction = 1 - (alert_detection_hr / (incident_days * 24))
+    engagement_decline_rounded = round(engagement_decline, 2)
+    revenue_impact_rounded = round(revenue_impact / 1000) * 1000
+    impact_reduction_rounded = round(impact_reduction, 2)
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(850_000 < revenue_impact < 860_000, "Revenue-impact example should remain about $857K.")
+    check(0.96 < impact_reduction < 0.98, "Alert reduction should remain about 97%.")
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    ctr_drop_pct_str = fmt_percent(ctr_drop, precision=0, commas=False, style="prose")
+    incident_days_str = fmt_time(incident_days, "day", precision=0, commas=False, style="word")
+    ctr_before_pct_str = fmt_percent(ctr_before, precision=1, commas=False, style="prose")
+    ctr_after_pct_str = fmt_percent(ctr_after, precision=2, commas=False, style="prose")
+    freshness_slo_hr_str = fmt_time(freshness_slo_hr, "hour", precision=0, commas=False, style="word", attributive=True)
+    engagement_before_str = fmt(engagement_before, precision=2, commas=False)
+    engagement_after_str = fmt(engagement_after, precision=2, commas=False)
+    engagement_decline_pct_str = fmt_percent(engagement_decline_rounded, precision=0, commas=False, style="prose")
+    weekly_revenue_usd_str = fmt_usd(weekly_revenue, scale="M", precision=0, commas=False)
+    revenue_impact_usd_str = fmt_usd(revenue_impact_rounded, scale="K", precision=0, commas=False)
+    alert_detection_hr_str = fmt_time(alert_detection_hr, "hour", precision=0, commas=False, style="word")
+    impact_reduction_pct_str = fmt_percent(impact_reduction_rounded, precision=0, commas=False, style="prose")
+    feature_shift_threshold_pct_str = fmt_percent(feature_shift_threshold, precision=0, commas=False, style="prose")
+```
+
+A recommendation model's click-through rate (CTR) drops `{python} DataQualityIncident.ctr_drop_pct_str` over `{python} DataQualityIncident.incident_days_str`. Initial hypothesis focuses on model drift, but data quality investigation reveals the root cause.
 
 ::: {.column-margin}
 ```{=latex}
@@ -4372,11 +4748,11 @@ A recommendation model's click-through rate (CTR) drops `{python} FeatureStoreSc
 *Every minute of delayed detection compounds the cost.*
 :::
 
-The investigation starts with the model symptom and then works backward through the data path. Model metrics\index{Model Metrics} confirm that CTR declined from `{python} FeatureStoreScale.ctr_before_pct_str` to `{python} FeatureStoreScale.ctr_after_pct_str`, but freshness checks\index{Data!data freshness} show that features still arrive within the `{python} FeatureStoreScale.freshness_slo_hr_str` SLO. That rules out a stale pipeline and points to semantic change. Distribution analysis then shows the `user_engagement_score` mean shifting from `{python} FeatureStoreScale.engagement_before_str` to `{python} FeatureStoreScale.engagement_after_str`, a `{python} FeatureStoreScale.engagement_decline_pct_str` decline, and lineage tracking\index{Lineage Tracking} ties the shift to an upstream pipeline version deployed `{python} FeatureStoreScale.incident_days_str` earlier. The root cause is not model drift but a feature computation bug in the new pipeline version.
+The investigation starts with the model symptom and then works backward through the data path. Model metrics\index{Model Metrics} confirm that CTR declined from `{python} DataQualityIncident.ctr_before_pct_str` to `{python} DataQualityIncident.ctr_after_pct_str`, but freshness checks\index{Data!data freshness} show that features still arrive within the `{python} DataQualityIncident.freshness_slo_hr_str` SLO. That rules out a stale pipeline and points to semantic change. Distribution analysis then shows the `user_engagement_score` mean shifting from `{python} DataQualityIncident.engagement_before_str` to `{python} DataQualityIncident.engagement_after_str`, a `{python} DataQualityIncident.engagement_decline_pct_str` decline, and lineage tracking\index{Lineage Tracking} ties the shift to an upstream pipeline version deployed `{python} DataQualityIncident.incident_days_str` earlier. The root cause is not model drift but a feature computation bug in the new pipeline version.
 
-The quantitative impact is the relative CTR loss multiplied by weekly revenue and the fraction of the week exposed: `{python} FeatureStoreScale.ctr_drop_pct_str` of `{python} FeatureStoreScale.weekly_revenue_usd_str`/week over `{python} FeatureStoreScale.incident_days_str` produces `{python} FeatureStoreScale.revenue_impact_usd_str` in lost revenue. Distribution monitoring with automated alerts would detect the shift within `{python} FeatureStoreScale.alert_detection_hr_str`, reducing impact by `{python} FeatureStoreScale.impact_reduction_pct_str`.
+The quantitative impact is the relative CTR loss multiplied by weekly revenue and the fraction of the week exposed: `{python} DataQualityIncident.ctr_drop_pct_str` of `{python} DataQualityIncident.weekly_revenue_usd_str`/week over `{python} DataQualityIncident.incident_days_str` produces `{python} DataQualityIncident.revenue_impact_usd_str` in lost revenue. Distribution monitoring with automated alerts would detect the shift within `{python} DataQualityIncident.alert_detection_hr_str`, reducing impact by `{python} DataQualityIncident.impact_reduction_pct_str`.
 
-The resolution is to roll back the pipeline to the previous version, redeploy models with correctly computed features, and add a distribution validation gate to prevent future pipeline deployments with feature shifts exceeding the `{python} FeatureStoreScale.feature_shift_threshold_pct_str` threshold.
+The resolution is to roll back the pipeline to the previous version, redeploy models with correctly computed features, and add a distribution validation gate to prevent future pipeline deployments with feature shifts exceeding the `{python} DataQualityIncident.feature_shift_threshold_pct_str` threshold.
 
 #### Operational integration {#sec-ml-operations-scale-operational-integration-a2de}
 
@@ -4386,7 +4762,32 @@ The contract becomes operational through continuous validation\index{Continuous 
 
 At enterprise scale with thousands of features, monitoring must aggregate by likely shared failure mode. Individual feature monitoring creates alert fatigue, while hierarchical monitoring preserves signal by grouping features along operational boundaries. Source-system grouping catches shared upstream failures, such as a payment-processing outage that affects all payment-related features simultaneously. Computation-pipeline grouping catches errors in transformation code or dependencies. Update-frequency grouping separates streaming features from daily batch features because staleness thresholds and alert sensitivity vary by update pattern. Business-domain grouping then routes user demographic, product catalog, and interaction-feature alerts to the teams that understand the affected models.
 
-Freshness monitoring applies the same aggregation rule to time. For `{python} FeatureStoreScale.freshness_feature_count_str` updated at different frequencies, continuous freshness checking generates substantial overhead, so efficient implementations reduce the number of checks without losing systemic signal. Sampling `{python} FeatureStoreScale.freshness_sample_pct_str` of representative entities rather than every feature value is usually enough to detect systemic freshness failures. Pipeline-level aggregation is even cheaper when one pipeline updates `{python} FeatureStoreScale.pipeline_feature_count_str`, because the pipeline update timestamp captures the freshness state of the group. Threshold stratification reserves per-feature monitoring for revenue-critical features and uses aggregated monitoring for features whose staleness has lower immediate impact. The resulting overhead scales with the number of distinct features, not the volume of feature values, so efficient implementations maintain $\mathcal{O}(F)$ overhead even when feature values scale to billions of entities.
+```{python}
+#| echo: false
+#| label: freshness-monitoring-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FRESHNESS MONITORING — SAMPLING AND AGGREGATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: monitoring-overhead reduction via sampling and pipeline aggregation.
+# │ Exports: FreshnessMonitoring.freshness_feature_count_str,
+# │          .freshness_sample_pct_str, .pipeline_feature_count_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_count, fmt_percent
+
+class FreshnessMonitoring:
+    """Sampling and aggregation assumptions for fleet-scale freshness checks."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    freshness_feature_count = 10_000
+    freshness_sample = 0.01
+    pipeline_feature_count = 500
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    freshness_feature_count_str = fmt_count(freshness_feature_count, commas=True, label="feature")
+    freshness_sample_pct_str = fmt_percent(freshness_sample, precision=0, commas=False, style="prose")
+    pipeline_feature_count_str = fmt_count(pipeline_feature_count, commas=False, label="feature")
+```
+
+Freshness monitoring applies the same aggregation rule to time. For `{python} FreshnessMonitoring.freshness_feature_count_str` updated at different frequencies, continuous freshness checking generates substantial overhead, so efficient implementations reduce the number of checks without losing systemic signal. Sampling `{python} FreshnessMonitoring.freshness_sample_pct_str` of representative entities rather than every feature value is usually enough to detect systemic freshness failures. Pipeline-level aggregation is even cheaper when one pipeline updates `{python} FreshnessMonitoring.pipeline_feature_count_str`, because the pipeline update timestamp captures the freshness state of the group. Threshold stratification reserves per-feature monitoring for revenue-critical features and uses aggregated monitoring for features whose staleness has lower immediate impact. The resulting overhead scales with the number of distinct features, not the volume of feature values, so efficient implementations maintain $\mathcal{O}(F)$ overhead even when feature values scale to billions of entities.
 
 ## Organizational Patterns {#sec-ml-operations-scale-organizational-patterns-e2e8}
 
@@ -4816,7 +5217,7 @@ Operating machine learning systems at scale involves counterintuitive complexity
 
 **Fallacy**: *Operational complexity grows linearly with model count.*
 
-In production, complexity grows superlinearly due to inter-model dependencies: 100 models introduce dense dependency graphs where Model A depends on features from Pipeline B using embeddings from Model C, making isolated updates impossible. The monitoring burden alone is telling: 100 models with 10 metrics each at 5 percent false positive rate generate 14,400 false alerts daily. A platform supporting 40 models with per-model operational practices requires 1,600 engineer-hours monthly (\$2.88M annually at \$150/hour). Per-model CI/CD, monitoring, and deployment patterns do not compose at scale.
+In production, complexity grows superlinearly due to inter-model dependencies: 100 models introduce dense dependency graphs where Model A depends on features from Pipeline B using embeddings from Model C, making isolated updates impossible. The monitoring burden alone is telling: 100 models with 10 metrics each at 5 percent false positive rate generate `{python} TwoSigmaAlerts.daily_alerts_str` false alerts daily. A platform supporting 40 models with per-model operational practices requires 1,600 engineer-hours monthly (\$2.88M annually at \$150/hour). Per-model CI/CD, monitoring, and deployment patterns do not compose at scale.
 
 **Pitfall**: *Applying independent alerts to every model and metric.*
 

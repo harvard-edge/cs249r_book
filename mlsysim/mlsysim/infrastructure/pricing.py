@@ -90,9 +90,19 @@ class Storage(Registry):
         rate=300 * USD / TB / ureg.month,
         metadata=_STORAGE,
     )
+    ParallelFileSystemPerTbMonth = PricePoint(
+        name="Parallel file system (Lustre/GPFS-class)",
+        rate=30 * USD / TB / ureg.month,
+        metadata=_STORAGE,
+    )
     GlacierRetrievalPerGB = PricePoint(
         name="Glacier retrieval",
         rate=0.02 * USD / GB,
+        metadata=_STORAGE,
+    )
+    HbmEquivalentPerGb = PricePoint(
+        name="HBM capital cost per GB (storage-ladder comparison)",
+        rate=15 * USD / GB,
         metadata=_STORAGE,
     )
 

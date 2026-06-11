@@ -137,6 +137,25 @@ class IOInterconnect(BaseModel):
     def _validate_latency(cls, v):
         return require_dimensionality(v, ureg.second, "latency")
 
+class MigProfile(BaseModel):
+    """A single NVIDIA Multi-Instance GPU partition profile (e.g. ``1g.10gb``).
+
+    MIG carves one physical GPU into hardware-isolated instances, each with a fixed
+    slice of HBM and a fixed number of streaming multiprocessors. The profiles are a
+    frozen per-product spec (NVIDIA MIG User Guide), so they live on the device node.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
+    name: str                     # NVIDIA profile name, e.g. "1g.10gb"
+    gpu_memory: Quantity          # dedicated HBM per instance
+    sm_count: int                 # streaming multiprocessors per instance
+    typical_workload: str = ""
+
+    @field_validator("gpu_memory", mode="after")
+    @classmethod
+    def _validate_gpu_memory(cls, v):
+        return require_unit_family(v, ureg.byte, "gpu_memory", "data")
+
+
 class HardwareNode(BaseModel):
     """
     Layer B (Hardware Supply): Represents a complete hardware accelerator.
@@ -165,6 +184,9 @@ class HardwareNode(BaseModel):
         description="Embodied CO2e in kg from manufacturing, packaging, and transport (Gupta et al. 2022)."
     )
     dispatch_tax: Quantity = Field(default_factory=lambda: Q_("0.01 ms"))
+    # Multi-Instance GPU partition profiles, when the device supports MIG (A100+).
+    # None for devices without MIG. Frozen per-product spec (NVIDIA MIG User Guide).
+    mig_profiles: Optional[tuple[MigProfile, ...]] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("tdp", "tdp_min", "tdp_max", mode="after")
