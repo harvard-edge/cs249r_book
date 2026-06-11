@@ -202,7 +202,7 @@ Structural exceptions, all documented inline in `.pre-commit-config.yaml`:
 
 - **Format-vs-content split** (`book-check-tables` runs `binder check tables` for content; `book-check-tables-format` runs `binder format tables --check` for whitespace) — these are different binder commands.
 
-No inline bash scripts. One CLI, one validation framework, one error format. Retired-hook history lives in `.pre-commit-history.md` so the live config is not a graveyard.
+No inline bash scripts. One CLI, one validation framework, one error format. Retired-hook context belongs in the commit or PR that removes the hook, not in a repo-side graveyard file.
 
 ## Adding a new check
 
