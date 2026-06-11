@@ -367,6 +367,11 @@ class ValidateCommand:
                   note=":::/ :::: balance and form"),
             Scope("callouts", "_run_callout_structure",
                   note="supported callout types, titles, and attributes"),
+            # default=False until vol2 narrative callouts are normalized to the
+            # same schema vol1 uses; flip to True once `--scope callout-schema`
+            # is clean on dev for both volumes.
+            Scope("callout-schema", "_run_callout_schema", default=False,
+                  note="per-type bold-label structure (war-story = Context/Failure mode/Systems lesson)"),
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
@@ -6255,6 +6260,99 @@ class ValidateCommand:
         return ValidationRunResult(
             name="callouts",
             description="Callout types, required titles, and unsupported attributes",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # Per-type bold-label schema: a callout of this type must show exactly this
+    # sequence of bold paragraph-lead labels (**Label**:) and ***Term*** heads.
+    # Types not listed are heterogeneous by design (.callout-example,
+    # .callout-perspective carry many valid shapes) and are not schema-enforced.
+    # "«term»" is the sentinel for a ***Term*** definition head.
+    _CALLOUT_LABEL_SCHEMAS = {
+        "callout-war-story": ("Context", "Failure mode", "Systems lesson"),
+        "callout-definition": ("«term»",),
+    }
+
+    def _run_callout_schema(self, root: Path) -> ValidationRunResult:
+        """Enforce a uniform bold-label structure per callout type.
+
+        Some callout types carry a fixed narrative schema: every
+        ``.callout-war-story`` is Context / Failure mode / Systems lesson, and
+        every ``.callout-definition`` opens with a single ``***Term***`` head.
+        This scope flags any instance of an enforced type whose bold
+        paragraph-lead labels deviate, keeping the structure consistent across
+        the corpus. Heterogeneous types (example, perspective) are skipped.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        label_re = re.compile(r"^\*\*([^*]+?)\*\*:")
+        term_re = re.compile(r"^\*\*\*([^*]+?)\*\*\*")
+        close_re = re.compile(r"^(:{3,})\s*$")
+        id_re = re.compile(r"#([\w-]+)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            stack: List[list] = []  # [colons, callout_class, id, [labels], open_line]
+            for idx, raw in enumerate(lines, 1):
+                stripped = raw.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if opener:
+                    attrs = opener.group(1)
+                    cls = next(
+                        (c for c in self._ATTR_CLASS_RE.findall(attrs)
+                         if c.startswith("callout-")),
+                        "",
+                    )
+                    cid = id_re.search(attrs)
+                    colons = len(stripped) - len(stripped.lstrip(":"))
+                    stack.append([colons, cls, cid.group(1) if cid else "(no-id)", [], idx])
+                    continue
+                cm = close_re.match(stripped)
+                if cm and stack:
+                    colons = len(cm.group(1))
+                    for k in range(len(stack) - 1, -1, -1):
+                        if stack[k][0] == colons:
+                            _, cls, cid, labels, open_line = stack.pop(k)
+                            want = self._CALLOUT_LABEL_SCHEMAS.get(cls)
+                            if want is not None and tuple(labels) != want:
+                                issues.append(
+                                    ValidationIssue(
+                                        file=self._relative_file(file),
+                                        line=open_line,
+                                        code="callout_schema_mismatch",
+                                        message=(
+                                            f".{cls} {cid}: expected bold labels "
+                                            f"[{' / '.join(want)}]; found "
+                                            f"[{' / '.join(labels) if labels else '(none)'}]"
+                                        ),
+                                        severity="error",
+                                        suggestion=(
+                                            f"Fold or rename labels so every .{cls} "
+                                            "shares the same structure"
+                                        ),
+                                    )
+                                )
+                            break
+                    continue
+                if stack:
+                    lm = label_re.match(stripped)
+                    if lm:
+                        stack[-1][3].append(lm.group(1))
+                    elif term_re.match(stripped):
+                        stack[-1][3].append("«term»")
+
+        return ValidationRunResult(
+            name="callout-schema",
+            description="Per-type bold-label structure (war-story, definition)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
