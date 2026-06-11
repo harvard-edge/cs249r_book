@@ -1882,32 +1882,51 @@ After changing the local work through fusion, precision, compilation, speculatio
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-performance-engineering-overlap—70B TP AllReduce example
 # │
-# │ Goal: Provide H100 NVLink 4.0 bandwidth for the AllReduce data-volume example.
-# │ Show: ~900 GB/s NVLink bandwidth.
-# │ How: pulling Hardware.Cloud.H100.nvlink.bandwidth from mlsysim.core.units.
+# │ Goal: Provide H100 NVLink 4.0 bandwidth and the per-AllReduce data volume +
+# │       transfer time for the 70B tensor-parallel example at batch size 1 and 64.
+# │ Show: ~900 GB/s NVLink bandwidth; ~32.8 KB / 36.4 ns at B=1; ~2.1 MB / 2.3 us at B=64.
+# │ How: bandwidth from Hardware.Cloud.H100.nvlink.bandwidth; AllReduce volume =
+# │      2 * d_model * B * 2 bytes (FP16); transfer time = volume / bandwidth.
 # │
-# │ Imports: mlsysim.core.units (Hardware.Cloud.H100.nvlink.bandwidth, GB, second)
-# │ Exports: NvlinkH100.bw_gb_per_s_str
+# │ Imports: mlsysim public API (Hardware, Models, units, fmt helpers)
+# │ Exports: NvlinkH100.bw_gb_per_s_str, NvlinkH100.b1_vol_kb_str, NvlinkH100.b1_time_ns_str,
+# │          NvlinkH100.b64_vol_mb_str, NvlinkH100.b64_time_us_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class NvlinkH100:
-    """H100 NVLink 4.0 bandwidth reference."""
+    """H100 NVLink 4.0 bandwidth and per-AllReduce data volume / transfer time."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     bw = Hardware.Cloud.H100.nvlink.bandwidth
+    d_model = Models.Language.Llama2_70B.hidden_dim
+    bytes_per_elem = BYTES_FP16
+    batch_small = 1
+    batch_large = 64
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Each AllReduce moves 2 * d_model * B activations, 2 bytes each (FP16).
+    b1_vol = 2 * d_model * batch_small * bytes_per_elem
+    b64_vol = 2 * d_model * batch_large * bytes_per_elem
+    b1_time = (b1_vol / bw).to(nanosecond)
+    b64_time = (b64_vol / bw).to(microsecond)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_qty_int, check
+    from mlsysim.fmt import fmt, fmt_qty, fmt_qty_int, fmt_time, check
 
     check(bw > 500 * GB / second, "H100 NVLink bandwidth should exceed 500 GB/s")
+    check(b64_vol == 64 * b1_vol, "Batch-64 volume should be 64x the batch-1 volume")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     bw_gb_per_s_str = fmt_qty_int(bw, GB / second, commas=False)
+    b1_vol_kb_str = fmt_qty(b1_vol, KB, precision=1, commas=False)
+    b1_time_ns_str = fmt_time(b1_time, nanosecond, precision=1, commas=False)
+    b64_vol_mb_str = fmt_qty(b64_vol, MB, precision=1, commas=False)
+    b64_time_us_str = fmt_time(b64_time, microsecond, precision=1, commas=False)
 ```
 
-Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d_{\text{model}} \times B \times 2$ bytes at FP16 (where $d_{\text{model}} = 8192$ for a 70B model and $B$ is batch size). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At `{python} NvlinkH100.bw_gb_per_s_str` NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
+Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d_{\text{model}} \times B \times 2$ bytes at FP16 (where $d_{\text{model}} = 8192$ for a 70B model and $B$ is batch size). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 =$ `{python} NvlinkH100.b1_vol_kb_str` per AllReduce. At `{python} NvlinkH100.bw_gb_per_s_str` NVLink bandwidth, this transfer takes approximately `{python} NvlinkH100.b1_time_ns_str`. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
-At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 = 2$ MB, taking approximately 2.2 $\mu$s at NVLink bandwidth. The compute path over a shard is now a bundle of kernels, not a single GEMM: the attention and FFN work together take on the order of 20 $\mu$s for this configuration, while the communication remains around 2.2 $\mu$s. Here, the compute time exceeds the communication time by about 9$\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
+At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 =$ `{python} NvlinkH100.b64_vol_mb_str`, taking approximately `{python} NvlinkH100.b64_time_us_str` at NVLink bandwidth. The compute path over a shard is now a bundle of kernels, not a single GEMM: the attention and FFN work together take on the order of 20 $\mu$s for this configuration, while the communication remains around `{python} NvlinkH100.b64_time_us_str`. Here, the compute time exceeds the communication time by about 9$\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
 
 This per-layer tensor-parallel example is the small-payload side of the overlap problem. Training gradient synchronization uses the same exposed-time test with much larger payloads, so the gradient-overlap calculation switches from activation exchanges to ring AllReduce over the gradient tensor.
 
