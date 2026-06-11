@@ -3227,8 +3227,8 @@ Where the boundary falls determines what counts as energy, but within any bounda
 # │          energy_reg_pj_str, energy_l1_pj_str, energy_l2_pj_str,
 # │          dram_vs_reg_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, fmt_qty, fmt_energy_per_flop
-from mlsysim.core.units import pJ, byte
+from mlsysim.fmt import fmt, fmt_multiple, fmt_qty, fmt_energy_per_flop, MarkdownStr
+from mlsysim.core.units import pJ, byte, flop
 
 class EnergyPerOp:
     """Energy per operation and memory access for precision comparison tables."""
@@ -3243,7 +3243,20 @@ class EnergyPerOp:
     ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
     dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ.to(pJ).magnitude / 1000) * THOUSAND
 
+    # Relative-cost columns: per-op energy vs FP32, and memory tier vs register
+    _fp32_e = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
+    fp16_rel_value = ENERGY_FLOP_FP16_PJ.to(pJ / flop).magnitude / _fp32_e
+    int8_rel_value = ENERGY_OP_INT8_PJ.to(pJ / flop).magnitude / _fp32_e
+    l1_rel_value = round(ENERGY_SRAM_L1_PJ.to(pJ).magnitude / ENERGY_REG_PJ.to(pJ).magnitude)
+    l2_rel_value = round(ENERGY_SRAM_L2_PJ.to(pJ).magnitude / ENERGY_REG_PJ.to(pJ).magnitude)
+
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    fp32_rel_mult_str = MarkdownStr("1.0$\\times$")
+    fp16_rel_mult_str = MarkdownStr(f"{fp16_rel_value:.1f}$\\times$")
+    int8_rel_mult_str = MarkdownStr(f"{int8_rel_value:.2f}$\\times$")
+    reg_rel_mult_str = fmt_multiple(1, precision=0, commas=False)
+    l1_rel_mult_str = fmt_multiple(l1_rel_value, precision=0, commas=False)
+    l2_rel_mult_str = fmt_multiple(l2_rel_value, precision=0, commas=False)
     energy_fp32_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
     energy_fp16_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP16_PJ, precision=1, commas=False)
     energy_int8_pj_str = fmt_energy_per_flop(ENERGY_OP_INT8_PJ, precision=1, commas=False)
@@ -3319,11 +3332,11 @@ Because transistor count scales roughly with bit-width squared, narrower datatyp
 \renewcommand{\arraystretch}{1.25}
 ```
 
-| **Precision** |           **Multiplier Energy**            | **Relative Cost** |
-|:--------------|:------------------------------------------:|:-----------------:|
-| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_pj_str` |    1.0$\times$    |
-| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_pj_str` |    0.3$\times$    |
-| **INT8**      | ~`{python} EnergyPerOp.energy_int8_pj_str` |    0.05$\times$   |
+| **Precision** |           **Multiplier Energy**            |            **Relative Cost**             |
+|:--------------|:------------------------------------------:|:----------------------------------------:|
+| **FP32**      | ~`{python} EnergyPerOp.energy_fp32_pj_str` | `{python} EnergyPerOp.fp32_rel_mult_str` |
+| **FP16**      | ~`{python} EnergyPerOp.energy_fp16_pj_str` | `{python} EnergyPerOp.fp16_rel_mult_str` |
+| **INT8**      | ~`{python} EnergyPerOp.energy_int8_pj_str` | `{python} EnergyPerOp.int8_rel_mult_str` |
 
 : **Per-operation energy by precision**: Energy cost of a single multiply-accumulate at FP32, FP16, and INT8, with relative cost normalized to FP32, illustrating why narrower datatypes dominate compute-energy savings. {#tbl-benchmarking-energy-per-precision}
 
@@ -3334,12 +3347,12 @@ An 8-bit multiplier uses ~20$\times$ less energy than a 32-bit floating-point mu
 
 @Tbl-benchmarking-energy-memory-tier extends the picture to memory access, with energy cost per byte across each tier of the hierarchy:
 
-| **Memory Level** |                     **Energy per Byte**                     | **Relative Cost** |
-|:-----------------|:-----------------------------------------------------------:|:-----------------:|
-| **Register**     |          ~`{python} EnergyPerOp.energy_reg_pj_str`          |     1$\times$     |
-| **L1 Cache**     |           ~`{python} EnergyPerOp.energy_l1_pj_str`          |     50$\times$    |
-| **L2 Cache**     |           ~`{python} EnergyPerOp.energy_l2_pj_str`          |    200$\times$    |
-| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_per_byte_str` |   16,000$\times$  |
+| **Memory Level** |                     **Energy per Byte**                     |                 **Relative Cost**                 |
+|:-----------------|:-----------------------------------------------------------:|:-------------------------------------------------:|
+| **Register**     |          ~`{python} EnergyPerOp.energy_reg_pj_str`          |      `{python} EnergyPerOp.reg_rel_mult_str`      |
+| **L1 Cache**     |           ~`{python} EnergyPerOp.energy_l1_pj_str`          |       `{python} EnergyPerOp.l1_rel_mult_str`      |
+| **L2 Cache**     |           ~`{python} EnergyPerOp.energy_l2_pj_str`          |       `{python} EnergyPerOp.l2_rel_mult_str`      |
+| **DRAM**         | ~`{python} EnergyBreakdownCalc.dram_energy_pj_per_byte_str` | `{python} EnergyPerOp.dram_vs_reg_ratio_mult_str` |
 
 : **Memory access energy by tier**: Per-byte energy cost across the register-to-DRAM hierarchy, with relative cost normalized to a register read, exposing why off-chip memory traffic dominates inference energy budgets. {#tbl-benchmarking-energy-memory-tier}
 
