@@ -6265,14 +6265,23 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
-    # Per-type bold-label schema: a callout of this type must show exactly this
-    # sequence of bold paragraph-lead labels (**Label**:) and ***Term*** heads.
-    # Types not listed are heterogeneous by design (.callout-example,
-    # .callout-perspective carry many valid shapes) and are not schema-enforced.
-    # "«term»" is the sentinel for a ***Term*** definition head.
+    # Per-type bold-label schema: a callout of this type must match one of the
+    # allowed sequences of bold paragraph-lead labels (**Label**:) and
+    # ***Term*** heads. Types not listed are heterogeneous by design
+    # (.callout-example, .callout-perspective carry many valid shapes) and are
+    # not schema-enforced. "«term»" is the sentinel for a ***Term*** head.
+    #
+    # War-stories come in two archetypes: a disaster, where the third beat is
+    # the damage and folds into Failure mode (Context / Failure mode / Systems
+    # lesson), and a constraint→response, where the third beat is the
+    # engineering fix and stays visible as **Resolution** (Context / Failure
+    # mode / Resolution / Systems lesson).
     _CALLOUT_LABEL_SCHEMAS = {
-        "callout-war-story": ("Context", "Failure mode", "Systems lesson"),
-        "callout-definition": ("«term»",),
+        "callout-war-story": (
+            ("Context", "Failure mode", "Systems lesson"),
+            ("Context", "Failure mode", "Resolution", "Systems lesson"),
+        ),
+        "callout-definition": (("«term»",),),
     }
 
     def _run_callout_schema(self, root: Path) -> ValidationRunResult:
@@ -6322,8 +6331,11 @@ class ValidateCommand:
                     for k in range(len(stack) - 1, -1, -1):
                         if stack[k][0] == colons:
                             _, cls, cid, labels, open_line = stack.pop(k)
-                            want = self._CALLOUT_LABEL_SCHEMAS.get(cls)
-                            if want is not None and tuple(labels) != want:
+                            allowed = self._CALLOUT_LABEL_SCHEMAS.get(cls)
+                            if allowed is not None and tuple(labels) not in allowed:
+                                expected = " or ".join(
+                                    "[" + " / ".join(s) + "]" for s in allowed
+                                )
                                 issues.append(
                                     ValidationIssue(
                                         file=self._relative_file(file),
@@ -6331,7 +6343,7 @@ class ValidateCommand:
                                         code="callout_schema_mismatch",
                                         message=(
                                             f".{cls} {cid}: expected bold labels "
-                                            f"[{' / '.join(want)}]; found "
+                                            f"{expected}; found "
                                             f"[{' / '.join(labels) if labels else '(none)'}]"
                                         ),
                                         severity="error",
