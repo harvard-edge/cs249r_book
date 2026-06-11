@@ -3645,12 +3645,14 @@ class DLRMLighthouseProfile:
     dlrm_model_size = dlrm.model_size
     resnet_fp32 = resnet.size_in_bytes(BYTES_FP32)
     gpt3_fp16 = gpt3.size_in_bytes(BYTES_FP16)
+    bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(dlrm_model_size > resnet_fp32, "DLRM profile should be larger than ResNet-50 weight memory.")
     check(gpt3_fp16 > 100 * GB, f"Expected GPT-3 FP16 weights to be larger than 100 GB, got {gpt3_fp16.to(GB).magnitude:.0f}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
     dlrm_entries_b_str = fmt_params(dlrm.embedding_entries, scale="B", precision=0, commas=False)
     dlrm_model_size_gb_str = fmt_memory(dlrm_model_size, unit=GB, precision=0, commas=True)
     resnet_fp32_mb_str = fmt_memory(resnet_fp32, unit=MB, precision=1, commas=True)
@@ -3661,13 +3663,13 @@ class DLRMLighthouseProfile:
 
 **Why it matters**: DLRM exemplifies **memory-capacity-bound**\index{Memory-capacity-bound workload} workloads. Its massive embedding tables often exceed the memory of a single accelerator or server, so the system must decide where those tables live before it can optimize arithmetic throughput. The interaction layer then gathers selected embedding vectors and combines them with dense features, making capacity and irregular data movement the dominant constraints. This contrasts sharply with CNNs (compute bound) and transformers (memory-bandwidth bound), requiring different hardware and deployment choices. @Tbl-nn-architectures-dlrm-profile summarizes the recommendation lighthouse's quantitative properties:
 
-| **Property**             | **Value**                                                      | **System Implication**                                   |
-|:-------------------------|:---------------------------------------------------------------|:---------------------------------------------------------|
-| **Embedding Parameters** | `{python} DLRMLighthouseProfile.dlrm_entries_b_str`            | Parameters $\times$ 4 bytes; dominates total model size. |
-| **Model Size**           | `{python} DLRMLighthouseProfile.dlrm_model_size_gb_str` (FP32) | May exceed one device's fast memory.                     |
-| **Constraint**           | Memory Capacity                                                | Model size > Single GPU Memory.                          |
-| **Bottleneck**           | Irregular Data Movement                                        | Gather operations dominate sparse feature processing.    |
-| **Profile**              | Mixed (Sparse/Dense)                                           | Combines memory-heavy lookups with compute-heavy MLPs.   |
+| **Property**             | **Value**                                                      | **System Implication**                                                                                       |
+|:-------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------|
+| **Embedding Parameters** | `{python} DLRMLighthouseProfile.dlrm_entries_b_str`            | Parameters $\times$ `{python} DLRMLighthouseProfile.bytes_fp32_value_str` bytes; dominates total model size. |
+| **Model Size**           | `{python} DLRMLighthouseProfile.dlrm_model_size_gb_str` (FP32) | May exceed one device's fast memory.                                                                         |
+| **Constraint**           | Memory Capacity                                                | Model size > Single GPU Memory.                                                                              |
+| **Bottleneck**           | Irregular Data Movement                                        | Gather operations dominate sparse feature processing.                                                        |
+| **Profile**              | Mixed (Sparse/Dense)                                           | Combines memory-heavy lookups with compute-heavy MLPs.                                                       |
 
 : **DLRM systems profile**: Quantitative properties of the recommendation lighthouse and their system consequences. Billion-entry embedding tables push the model past single-device memory, creating a capacity-bound regime that the iron law does not directly address. {#tbl-nn-architectures-dlrm-profile tbl-colwidths="[18,24,58]"}
 
