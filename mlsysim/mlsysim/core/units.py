@@ -22,7 +22,8 @@ __all__ = [
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
     "normalize_precision", "resolve_precision",
     "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
-    "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT", "VIDEO_FPS_STANDARD",
+    "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT",
+    "VIDEO_4K_WIDTH", "VIDEO_4K_HEIGHT", "VIDEO_FPS_STANDARD",
     # Time units
     "MS", "US", "NS", "ms", "MILLISECOND", "MICROSECOND", "NANOSECOND",
     "microsecond", "millisecond", "nanosecond", "minute", "week", "year",
@@ -151,6 +152,8 @@ IMAGE_CHANNELS_RGB = 3
 VIDEO_BYTES_PER_PIXEL_RGB = 3 * byte
 VIDEO_1080P_WIDTH = 1920
 VIDEO_1080P_HEIGHT = 1080
+VIDEO_4K_WIDTH = 3840   # UHD 4K (2160p) horizontal resolution
+VIDEO_4K_HEIGHT = 2160  # UHD 4K (2160p) vertical resolution
 VIDEO_FPS_STANDARD = Q_(30, 'Hz')
 
 KiB = ureg.KiB
