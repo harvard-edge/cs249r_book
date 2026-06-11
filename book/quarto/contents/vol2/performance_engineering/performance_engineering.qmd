@@ -1154,7 +1154,52 @@ After processing all tiles, the running output contains the mathematically equiv
 
 The cost of this tiling is additional arithmetic: the rescaling operations in step 3 add FLOPs that the standard algorithm does not perform. Because the operation is profoundly memory-bound (the arithmetic intensity of standard attention is roughly 1--10 FLOP/byte for typical sequence lengths), the additional compute is "free" in the sense that the GPU's arithmetic units would otherwise be idle, waiting for HBM data transfers. *Trading extra compute for fewer memory accesses is profitable whenever the operation is memory-bound*, the central principle of this entire chapter.
 
-The mechanism that delivers the materialized-state reduction quantified above is tiling. FlashAttention processes the computation in tiles (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 \approx 33$ KB), a block of $K$ ($128 \times 128 \times 2 \approx 33$ KB), and a block of $V$ (33 KB), totaling approximately 98 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $A_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 = 64$ column tiles for each of $64$ row tiles, reloading tiles as required by the kernel schedule. The important point is that the quadratic $S{\times}S$ score and probability matrices are never materialized: the persistent per-head tensors are $Q$, $K$, $V$, $Y$, and $\mathcal{O}(S)$ softmax statistics, instead of the hundreds of megabytes of quadratic intermediates the canonical accounting above counted.
+```{python}
+#| echo: false
+#| label: flash-attention-tiling
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLASHATTENTION TILE SIZING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-flashattention tiling paragraph below.
+# │
+# │ Goal: Size one FlashAttention tile's Q/K/V SRAM footprint and the tile-loop
+# │       counts for a 128x128 tile over an 8192-token sequence in FP16, and
+# │       confirm the footprint fits the H100 shared-memory-per-SM budget.
+# │ Show: ~32.8 KB per Q/K/V block, ~98.3 KB total, 228 KB shared/SM, 64 tiles.
+# │ How: tile_dim^2 * BYTES_FP16 per block; shared memory from the registry;
+# │      tile counts = seq_len / tile_dim.
+# │
+# │ Imports: mlsysim public API (Hardware, units, fmt helpers)
+# │ Exports: FlashAttentionTiling.{block_kb,total_kb,shared_kb,tiles_per_dim}_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt_qty, fmt_memory_capacity, check
+
+class FlashAttentionTiling:
+    """One-tile SRAM footprint and tile-loop counts for FlashAttention."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    tile_dim = 128  # scenario assumption: FlashAttention tile size on H100
+    seq_len = 8192  # sequence length (matches the materialized-state example above)
+    bytes_per_elem = BYTES_FP16
+    shared_per_sm = Hardware.Cloud.H100.memory.shared_memory_per_sm
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    block_bytes = tile_dim * tile_dim * bytes_per_elem  # Q (or K, or V) tile
+    total_bytes = 3 * block_bytes  # Q + K + V resident together
+    tiles_per_dim = seq_len // tile_dim
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(total_bytes < shared_per_sm, "Q/K/V tiles must fit in shared memory per SM")
+    check(tiles_per_dim == 64, f"8192/128 should be 64 tiles, got {tiles_per_dim}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    block_kb_str = fmt_qty(block_bytes, KB, precision=1, commas=False)
+    total_kb_str = fmt_qty(total_bytes, KB, precision=1, commas=False)
+    shared_kb_str = fmt_memory_capacity(shared_per_sm, unit=KiB, precision=0, commas=False)
+    tiles_per_dim_str = fmt_int(tiles_per_dim, commas=False)
+```
+
+The mechanism that delivers the materialized-state reduction quantified above is tiling. FlashAttention processes the computation in tiles (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), a block of $K$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), and a block of $V$ (`{python} FlashAttentionTiling.block_kb_str`), totaling approximately `{python} FlashAttentionTiling.total_kb_str`. This fits comfortably in the H100's `{python} FlashAttentionTiling.shared_kb_str` of shared memory per SM. The tile score $A_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 =$ `{python} FlashAttentionTiling.tiles_per_dim_str` column tiles for each of `{python} FlashAttentionTiling.tiles_per_dim_str` row tiles, reloading tiles as required by the kernel schedule. The important point is that the quadratic $S{\times}S$ score and probability matrices are never materialized: the persistent per-head tensors are $Q$, $K$, $V$, $Y$, and $\mathcal{O}(S)$ softmax statistics, instead of the hundreds of megabytes of quadratic intermediates the canonical accounting above counted.
 
 FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for GPU architectures with many streaming multiprocessors by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
