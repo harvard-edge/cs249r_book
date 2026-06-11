@@ -2650,39 +2650,136 @@ A wearable cardiac monitor classifies arrhythmias from raw ECG signals collected
 
 This framework treats DP as one tool in a privacy-preserving toolkit rather than a universal solution. The most effective deployments often combine DP with complementary techniques: federated learning for data minimization, secure aggregation for gradient protection, and access controls for deployment security. A concrete DP-SGD calculation shows how the decision criteria translate into an operational privacy budget.
 
+```{python}
+#| echo: false
+#| label: dp-sgd-budget-callout-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DP-SGD PRIVACY BUDGET WORKED EXAMPLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: #exmp-security-privacy-dp-sgd-privacy-budget-example .callout-example
+# │
+# │ Goal: Pin the RDP accounting for a sentiment-classifier DP-SGD run:
+# │       per-step RDP coefficient, total over k steps, and the (eps,delta)
+# │       conversion swept over the Renyi order alpha.
+# │ Show: per-step ~0.000312*alpha, total ~0.156*alpha, optimal eps ~3.1.
+# │ How: eps_step = q^2 / (2 sigma^2); eps(alpha) = total*alpha + ln(1/delta)/(alpha-1).
+# │
+# │ Imports: math, numpy, mlsysim.fmt (fmt, fmt_math, check)
+# │ Exports: dpsgd_* scenario inputs, coefficients, alpha-sweep, and the
+# │          per-step / total RDP _math expressions.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+import numpy as np
+from mlsysim.fmt import fmt, fmt_math, check
+
+class DPSGDBudget:
+    """RDP accounting for a DP-SGD sentiment-classifier privacy budget."""
+
+    # ┌── 1. LOAD (scenario assumptions) ───────────────────────────────────
+    n_records = 100_000  # scenario assumption: customer reviews
+    batch_size = 2_000  # scenario assumption
+    clip_norm = 1.0  # gradient clipping norm C
+    n_epochs = 10  # scenario assumption
+    sigma = 0.8  # noise multiplier (typical starting point)
+    eps_target = 8  # target privacy budget
+    delta = 1e-6  # target failure probability
+
+    # ┌── 2. EXECUTE (RDP accounting) ──────────────────────────────────────
+    q = batch_size / n_records  # subsampling rate
+    k_steps = int(n_epochs * n_records / batch_size)
+    q_sq = q**2
+    two_sigma_sq = 2 * sigma**2
+    eps_step_coef = q_sq / two_sigma_sq  # per-step RDP slope in alpha
+    eps_total_coef = k_steps * eps_step_coef  # total RDP slope in alpha
+    ln_inv_delta = math.log(1 / delta)
+    _grid = np.linspace(1.1, 40, 400_000)
+    _eps = eps_total_coef * _grid + ln_inv_delta / (_grid - 1)
+    alpha_opt = float(_grid[_eps.argmin()])
+    eps_opt = float(_eps.min())
+
+    # ┌── 3. GUARD (anchors + feasibility) ─────────────────────────────────
+    check(abs(eps_step_coef - 0.000312) < 1e-5, f"per-step {eps_step_coef}")
+    check(abs(eps_total_coef - 0.156) < 1e-3, f"total {eps_total_coef}")
+    check(eps_opt < eps_target, f"eps_opt {eps_opt} must meet target {eps_target}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    n_records_str = fmt(n_records, precision=0)
+    batch_size_str = fmt(batch_size, precision=0)
+    clip_norm_str = fmt(clip_norm, precision=0, commas=False)
+    n_epochs_str = fmt(n_epochs, precision=0, commas=False)
+    sigma_str = fmt(sigma, precision=1, commas=False)
+    eps_target_str = fmt(eps_target, precision=0, commas=False)
+    q_str = fmt(q, precision=2, commas=False)
+    k_steps_str = fmt(k_steps, precision=0, commas=False)
+    eps_step_coef_str = fmt(eps_step_coef, precision=6, commas=False)
+    eps_total_coef_str = fmt(eps_total_coef, precision=3, commas=False)
+    alpha_opt_str = fmt(alpha_opt, precision=1, commas=False)
+    eps_opt_str = fmt(eps_opt, precision=1, commas=False)
+    # Per-step RDP identity: q^2 alpha / (2 sigma^2) = num/den = coef*alpha.
+    q_sq_str = fmt(q_sq, precision=4, commas=False)
+    two_sigma_sq_str = fmt(two_sigma_sq, precision=2, commas=False)
+    eps_step_math = fmt_math(
+        rf"\varepsilon_{{\text{{step}}}}(\alpha) = \frac{{({q_str})^2 \alpha}}"
+        rf"{{2({sigma_str})^2}} = \frac{{{q_sq_str}\alpha}}{{{two_sigma_sq_str}}} "
+        rf"\approx {eps_step_coef_str}\alpha"
+    )
+    eps_total_math = fmt_math(
+        rf"\varepsilon_{{\text{{total}}}}(\alpha) = {k_steps_str} \times " rf"{eps_step_coef_str}\alpha = {eps_total_coef_str}\alpha"
+    )
+    eps_convert_math = fmt_math(
+        rf"\epsilon = \varepsilon_{{\text{{total}}}}(\alpha) + "
+        rf"\frac{{\ln(1/\delta)}}{{\alpha - 1}} = {eps_total_coef_str}\alpha + "
+        rf"\frac{{\ln(10^6)}}{{\alpha - 1}}"
+    )
+
+    # Per-alpha sweep: slope term (total_coef*alpha), tail term
+    # (ln(1/delta)/(alpha-1)), and their sum (total epsilon).
+    slope_a8_str = fmt(eps_total_coef * 8, precision=2, commas=False)
+    slope_a10_str = fmt(eps_total_coef * 10, precision=2, commas=False)
+    slope_a12_str = fmt(eps_total_coef * 12, precision=2, commas=False)
+    tail_a8_str = fmt(ln_inv_delta / 7, precision=2, commas=False)
+    tail_a10_str = fmt(ln_inv_delta / 9, precision=2, commas=False)
+    tail_a12_str = fmt(ln_inv_delta / 11, precision=2, commas=False)
+    eps_a8_str = fmt(eps_total_coef * 8 + ln_inv_delta / 7, precision=2, commas=False)
+    eps_a10_str = fmt(eps_total_coef * 10 + ln_inv_delta / 9, precision=2, commas=False)
+    eps_a12_str = fmt(eps_total_coef * 12 + ln_inv_delta / 11, precision=2, commas=False)
+```
+
 ::: {#exmp-security-privacy-dp-sgd-privacy-budget-example .callout-example title="DP-SGD privacy budget example"}
 
-**Scenario**: Train a sentiment classifier on 100,000 customer reviews with target privacy $(\epsilon, \delta) = (8, 10^{-6})$.
+**Scenario**: Train a sentiment classifier on `{python} DPSGDBudget.n_records_str` customer reviews with target privacy $(\epsilon, \delta) = ($ `{python} DPSGDBudget.eps_target_str` $, 10^{-6})$.
 
 **Step 1**: Configure DP-SGD parameters.
-- Dataset size: $n_{\text{records}} = 100,000$
-- Batch size: $B = 2,000$ (sampling rate $q = B/n_{\text{records}} = 0.02$)
-- Gradient clipping norm: $C = 1.0$
-- Training epochs: $N_{\text{epochs}} = 10$ (total steps $k = N_{\text{epochs}} \times n_{\text{records}}/B = 500$)
-- Target: $\epsilon = 8$, $\delta = 10^{-6}$
+- Dataset size: $n_{\text{records}} =$ `{python} DPSGDBudget.n_records_str`
+- Batch size: $B =$ `{python} DPSGDBudget.batch_size_str` (sampling rate $q = B/n_{\text{records}} =$ `{python} DPSGDBudget.q_str`)
+- Gradient clipping norm: $C =$ `{python} DPSGDBudget.clip_norm_str`
+- Training epochs: $N_{\text{epochs}} =$ `{python} DPSGDBudget.n_epochs_str` (total steps $k = N_{\text{epochs}} \times n_{\text{records}}/B =$ `{python} DPSGDBudget.k_steps_str`)
+- Target: $\epsilon =$ `{python} DPSGDBudget.eps_target_str`, $\delta = 10^{-6}$
 
 **Step 2**: Calculate required noise multiplier.
-Using the Gaussian mechanism formula and RDP accounting, we need noise multiplier $\sigma$ such that after $k = 500$ iterations with sampling rate $q = 0.02$, the total privacy loss is $\epsilon \leq 8$.
+Using the Gaussian mechanism formula and RDP accounting, we need noise multiplier $\sigma$ such that after $k =$ `{python} DPSGDBudget.k_steps_str` iterations with sampling rate $q =$ `{python} DPSGDBudget.q_str`, the total privacy loss is $\epsilon \leq$ `{python} DPSGDBudget.eps_target_str`.
 
 The per-step RDP guarantee for Gaussian mechanism with subsampling is approximately:
 $$\varepsilon_{\text{step}}(\alpha) \approx \frac{q^2 \alpha}{2\sigma^2}$$
 
-For $\sigma = 0.8$ (a typical starting point):
-$$\varepsilon_{\text{step}}(\alpha) = \frac{(0.02)^2 \alpha}{2(0.8)^2} = \frac{0.0004\alpha}{1.28} \approx 0.000312\alpha$$
+For $\sigma =$ `{python} DPSGDBudget.sigma_str` (a typical starting point):
 
-After 500 steps: $\varepsilon_{\text{total}}(\alpha) = 500 \times 0.000312\alpha = 0.156\alpha$
+`{python} DPSGDBudget.eps_step_math`
+
+After `{python} DPSGDBudget.k_steps_str` steps: `{python} DPSGDBudget.eps_total_math`
 
 **Step 3**: Convert RDP to DP.
 Converting to $(\epsilon, \delta)$-DP by optimizing over $\alpha$:
-$$\epsilon = \varepsilon_{\text{total}}(\alpha) + \frac{\ln(1/\delta)}{\alpha - 1} = 0.156\alpha + \frac{\ln(10^6)}{\alpha - 1}$$
+
+`{python} DPSGDBudget.eps_convert_math`
 
 We evaluate the bound at several $\alpha$ values:
 
-- $\alpha = 8$: $\epsilon = 0.156 \times 8 + 13.8/7 = 1.25 + 1.97 = 3.22$
-- $\alpha = 10$: $\epsilon = 0.156 \times 10 + 13.8/9 = 1.56 + 1.53 = 3.09$
-- $\alpha = 12$: $\epsilon = 0.156 \times 12 + 13.8/11 = 1.87 + 1.25 = 3.12$
+- $\alpha = 8$: $\epsilon =$ `{python} DPSGDBudget.slope_a8_str` $+$ `{python} DPSGDBudget.tail_a8_str` $=$ `{python} DPSGDBudget.eps_a8_str`
+- $\alpha = 10$: $\epsilon =$ `{python} DPSGDBudget.slope_a10_str` $+$ `{python} DPSGDBudget.tail_a10_str` $=$ `{python} DPSGDBudget.eps_a10_str`
+- $\alpha = 12$: $\epsilon =$ `{python} DPSGDBudget.slope_a12_str` $+$ `{python} DPSGDBudget.tail_a12_str` $=$ `{python} DPSGDBudget.eps_a12_str`
 
-Optimizing the displayed approximation gives $\alpha \approx 10.4$ and $\epsilon \approx 3.1$, which satisfies the target of $\epsilon \leq 8$ with margin.
+Optimizing the displayed approximation gives $\alpha \approx$ `{python} DPSGDBudget.alpha_opt_str` and $\epsilon \approx$ `{python} DPSGDBudget.eps_opt_str`, which satisfies the target of $\epsilon \leq$ `{python} DPSGDBudget.eps_target_str` with margin.
 
 **Step 4**: Expected accuracy impact.
 With $\sigma = 0.8$ and $\epsilon \approx 3.1$ under this simplified accountant, expect a nontrivial accuracy degradation compared to nonprivate training. For a sentiment classifier achieving 92 percent accuracy without DP, the private version might land several points lower depending on model capacity, clipping norm, optimizer, and data distribution.
