@@ -1568,6 +1568,14 @@ class HierarchicalAllreduceCalc:
     n_gpus_total_str = fmt(n_nodes_har * gpus_per_node, precision=0, commas=False)
     gradient_gb_str = fmt_qty(gradient, GB, precision=0, commas=False)
     flat_send_gb_str = fmt_qty(flat_data, GB, precision=0, commas=False)
+    # Worked-line operand spans for the flat-ring time and the inter-node shard:
+    # 2 . M / beta_IB, and M / G (GPUs per node).
+    from mlsysim.fmt import fmt_math
+
+    _grad_gb = int(gradient.to(GB).magnitude)
+    _ib_gbs = int(ib_bw.to(GB / second).magnitude)
+    flat_time_sub_math = fmt_math(rf"2 \times {_grad_gb}\ \text{{GB}} / {_ib_gbs}\ \text{{GB/s}}")
+    inter_data_sub_math = fmt_math(rf"{_grad_gb}\ \text{{GB}}/{gpus_per_node}")
 ```
 
 ::: {#nbk-collective-communication-hierarchical-bandwidth-multiplier .callout-notebook title="The hierarchical bandwidth multiplier"}
@@ -1579,12 +1587,12 @@ class HierarchicalAllreduceCalc:
 - Each GPU sends ~`{python} HierarchicalAllreduceCalc.flat_send_gb_str` total (the bandwidth-optimal Ring AllReduce formula).
 - The ring crosses node boundaries multiple times.
 - **Effective bandwidth**\index{Bandwidth!effective}: Limited by the slowest link = `{python} HierarchicalAllreduceCalc.ib_bw_gb_per_s_str` (InfiniBand).
-- **Time**: $\approx 2 \times 1\ \text{GB} / 50\ \text{GB/s}$ = `{python} HierarchicalAllreduceCalc.flat_time_ms_str` (bandwidth term dominates).
+- **Time**: $\approx$ `{python} HierarchicalAllreduceCalc.flat_time_sub_math` = `{python} HierarchicalAllreduceCalc.flat_time_ms_str` (bandwidth term dominates).
 
 **Hierarchical AllReduce (3-step decomposition)**:
 
 1. **Intra-node ReduceScatter**: Each GPU sends `{python} HierarchicalAllreduceCalc.intra_data_mb_str` at `{python} HierarchicalAllreduceCalc.nvlink_bw_gb_per_s_str` per direction → ~`{python} HierarchicalAllreduceCalc.intra_rs_ms_str`
-2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU AllReduces a $1\ \text{GB}/8$ = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` shard over InfiniBand; Ring moves roughly $2(N-1)/N$ times that payload, giving ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` at `{python} HierarchicalAllreduceCalc.ib_bw_gb_per_s_str`
+2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU AllReduces a `{python} HierarchicalAllreduceCalc.inter_data_sub_math` = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` shard over InfiniBand; Ring moves roughly $2(N-1)/N$ times that payload, giving ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` at `{python} HierarchicalAllreduceCalc.ib_bw_gb_per_s_str`
 
    (Only 1/8 of the data crosses InfiniBand!)
 
@@ -2142,11 +2150,11 @@ class OverlapBudgetCalc:
 
 **Without overlap (sequential)**:
 
-$T_{\text{sequential}} = T_{\text{backward}} + T_{\text{comm}}(N)$ = `{python} OverlapBudgetCalc.total_backward_ms_str` + 32 $\times$ `{python} OverlapBudgetCalc.allreduce_per_layer_ms_str` = `{python} OverlapBudgetCalc.no_overlap_ms_str`.
+$T_{\text{sequential}} = T_{\text{backward}} + T_{\text{comm}}(N)$ = `{python} OverlapBudgetCalc.total_backward_ms_str` + `{python} OverlapBudgetCalc.n_layers_str` $\times$ `{python} OverlapBudgetCalc.allreduce_per_layer_ms_str` = `{python} OverlapBudgetCalc.no_overlap_ms_str`.
 
 **With overlap (pipelined)**:
 
-Each layer's AllReduce (`{python} OverlapBudgetCalc.allreduce_per_layer_ms_str`) runs in parallel with the next layer's backward pass (15 ms). Since `{python} OverlapBudgetCalc.allreduce_per_layer_ms_str` > 15 ms, there is `{python} OverlapBudgetCalc.exposed_per_layer_ms_str` of exposed communication per layer that cannot be hidden.
+Each layer's AllReduce (`{python} OverlapBudgetCalc.allreduce_per_layer_ms_str`) runs in parallel with the next layer's backward pass (`{python} OverlapBudgetCalc.backward_per_layer_ms_str`). Since `{python} OverlapBudgetCalc.allreduce_per_layer_ms_str` > `{python} OverlapBudgetCalc.backward_per_layer_ms_str`, there is `{python} OverlapBudgetCalc.exposed_per_layer_ms_str` of exposed communication per layer that cannot be hidden.
 
 $T_{\text{pipelined}} = T_{\text{backward}} + T_{\text{first layer comm}} + (N_L - 1) \times T_{\text{exposed}}$ = `{python} OverlapBudgetCalc.with_overlap_ms_str`.
 
