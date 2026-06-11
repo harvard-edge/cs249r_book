@@ -737,7 +737,7 @@ class WorkloadIntensityCalc:
     gemm_intensity_table_str = fmt_arithmetic_intensity(round(gemm_intensity) * flop / byte, unit=flop / byte, precision=0, commas=True)
     # GEMM work and operand traffic for the prose above.
     gemm_flops_billion_str = fmt(gemm_flops.to(flop).magnitude / 1e9, precision=1, commas=False)
-    gemm_bytes_mb_str = fmt_qty(gemm_bytes, MB, precision=0, commas=False)
+    gemm_bytes_mb_str = fmt_qty(gemm_bytes, MB, precision=1, commas=False)
 ```
 
 Large general matrix multiply (GEMM) operations are the most compute-intensive operations in ML. A square matrix multiplication of dimension $4096{\times}4096$ in FP16 performs approximately `{python} WorkloadIntensityCalc.gemm_flops_billion_str` billion FLOPs while loading roughly `{python} WorkloadIntensityCalc.gemm_bytes_mb_str` of data, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.gemm_intensity_str`. This sits well above the H100's ridge point, making large GEMMs firmly compute bound.
@@ -849,12 +849,15 @@ The performance characteristics of each phase determine which optimization techn
 #| echo: false
 #| label: roofline-diagnostic
 from mlsysim.fmt import (
+    fmt,
     fmt_arithmetic_intensity,
     fmt_count,
     fmt_memory,
     fmt_percent,
     fmt_rate,
     fmt_time,
+    fmt_math,
+    sci_latex,
     check,
 )
 
@@ -875,12 +878,20 @@ class RooflineDiagnostic:
     tokens_per_sec = token_throughput(1 * count, decode_time)
     achieved_flop_rate = (flops / decode_time).to(TFLOP / second)
     achieved_fp16_util = (achieved_flop_rate / h100_fp16_peak).to("").magnitude
+    h100_ridge = (h100_fp16_peak / h100_bw).to(flop / byte)
+    # Scalar magnitudes for the worked-math operands and equation displays.
+    _ppg = params_per_gpu.to("").magnitude  # 8.75e9
+    _flops_mag = flops.to(flop).magnitude  # 1.75e10
+    _weight_gb = weight_qty.to(GB).magnitude  # 17.5
+    _bytes_mag = weight_qty.to(byte).magnitude  # 1.75e10
+    _bw_tb = h100_bw.to(TB / second).magnitude  # 3.35
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(arith_intensity - 1.0 * flop / byte) < 0.01 * flop / byte, f"AI should be 1.0 FLOP/byte, got {arith_intensity:~P}")
     check(5 * ms < decode_time < 6 * ms, f"Decode time should be ~5.2 ms, got {fmt_time(decode_time, millisecond, precision=1, commas=False)}")
     check(180 / second < tokens_per_sec < 200 / second, f"Token rate should be ~191 tokens/s, got {tokens_per_sec:~P}")
     check(achieved_fp16_util < 0.004, f"Decode should use less than 0.4 percent of H100 FP16 peak, got {achieved_fp16_util:.4f}")
+    check(290 * flop / byte < h100_ridge < 300 * flop / byte, f"H100 FP16 ridge should be ~295 FLOP/byte, got {h100_ridge:~P}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     flops_str = fmt_count(flops.to(flop).magnitude, scale="B", precision=1, commas=False, label="FLOP")
@@ -889,31 +900,41 @@ class RooflineDiagnostic:
     decode_ms_str = fmt_time(decode_time, millisecond, precision=1, commas=False)
     tps_tokens_per_s_str = fmt_rate(tokens_per_sec.to(1 / second).magnitude, "tokens/s", precision=1, commas=False)
     achieved_fp16_util_pct_str = fmt_percent(achieved_fp16_util, precision=1, commas=False, style="prose")
+    ridge_str = fmt_arithmetic_intensity(round(h100_ridge.magnitude) * flop / byte, unit=flop / byte, precision=0, commas=False)
+    params_per_gpu_b_str = fmt(_ppg / 1e9, precision=2, commas=False)
+    # Worked-math operand and equation displays (no hand-typed literals in prose).
+    flops_math = fmt_math(rf"2 \times {sci_latex(_ppg)}")
+    bytes_math = fmt_math(rf"{sci_latex(_ppg)} \times 2 \text{{ bytes}}")
+    ai_eq_math = fmt_math(
+        rf"I = \frac{{{sci_latex(_flops_mag)} \text{{ FLOP}}}}{{{sci_latex(_bytes_mag)} \text{{ bytes}}}} = "
+        rf"{fmt(arith_intensity.magnitude, precision=0, commas=False)} \text{{ FLOP/byte}}"
+    )
+    decode_eq_math = fmt_math(
+        rf"t_{{\text{{decode}}}} = \frac{{{fmt(_weight_gb, precision=1, commas=False)}\,\text{{GB}}}}"
+        rf"{{{fmt(_bw_tb, precision=2, commas=False)}\,\text{{TB/s}}}} \approx "
+        rf"{fmt(decode_time.magnitude, precision=1, commas=False)}\,\text{{ms per token}}"
+    )
 ```
 
 A quick decode calculation shows why the memory wall dominates even when the accelerator has abundant unused FLOP/s.
 
 ::: {#nbk-performance-engineering-roofline-diagnostic .callout-notebook title="The Roofline diagnostic"}
 
-**Problem**: A 70B parameter LLM is deployed on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 8.75B parameters in FP16 (`{python} RooflineDiagnostic.weight_gb_str` of weights). Each decode step reads its weight shard to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
+**Problem**: A 70B parameter LLM is deployed on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately `{python} RooflineDiagnostic.params_per_gpu_b_str`B parameters in FP16 (`{python} RooflineDiagnostic.weight_gb_str` of weights). Each decode step reads its weight shard to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
 
 **Math**:
 
 Step 1: Arithmetic intensity.
-Each decode step per GPU: FLOPs $= 2 \times 8.75 \times 10^9 =$ `{python} RooflineDiagnostic.flops_str`. Bytes loaded $= 8.75 \times 10^9 \times 2$ bytes $=$ `{python} RooflineDiagnostic.weight_gb_str`.
+Each decode step per GPU: FLOPs $=$ `{python} RooflineDiagnostic.flops_math` $=$ `{python} RooflineDiagnostic.flops_str`. Bytes loaded $=$ `{python} RooflineDiagnostic.bytes_math` $=$ `{python} RooflineDiagnostic.weight_gb_str`.
 
-$$
-I = \frac{17.5 \times 10^9 \text{ FLOP}}{17.5 \times 10^9 \text{ bytes}} = 1.0 \text{ FLOP/byte}
-$$
+`{python} RooflineDiagnostic.ai_eq_math`
 
-At `{python} RooflineDiagnostic.ai_str`, the operation sits far below the H100 ridge point of ~295 FLOP/byte: deeply memory-bound.
+At `{python} RooflineDiagnostic.ai_str`, the operation sits far below the H100 ridge point of ~`{python} RooflineDiagnostic.ridge_str`: deeply memory-bound.
 
 Step 2: Token rate.
 Since the operation is memory-bound, performance is limited by bandwidth, not compute:
 
-$$
-t_{\text{decode}} = \frac{17.5 \text{ GB}}{3.35 \text{ TB/s}} \approx 5.2 \text{ ms per token}
-$$
+`{python} RooflineDiagnostic.decode_eq_math`
 
 This yields approximately `{python} RooflineDiagnostic.tps_tokens_per_s_str` per GPU, or about `{python} RooflineDiagnostic.tps_tokens_per_s_str` for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this substantially below the ideal bandwidth-only limit.
 
