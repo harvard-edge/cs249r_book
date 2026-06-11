@@ -439,15 +439,80 @@ This result means the cluster experiences a failure approximately every `{python
 
 The cluster MTBF scaling\index{Cluster!MTBF scaling} in @tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation is lower once PCIe, power, and network failure domains are included.
 
-| **Cluster Size (GPUs)** | **Individual GPU MTBF** |   **Cluster MTBF**   | **Expected Failures per Day** |
-|:------------------------|:-----------------------:|:--------------------:|:-----------------------------:|
-| 8                       |        50,000 hrs       | 6,250 hrs (260 days) |             0.004             |
-| 64                      |        50,000 hrs       |  781 hrs (32 days)   |              0.03             |
-| 512                     |        50,000 hrs       |   98 hrs (4 days)    |              0.24             |
-| 1,000                   |        50,000 hrs       |   50 hrs (2 days)    |              0.48             |
-| 4,000                   |        50,000 hrs       |       12.5 hrs       |              1.9              |
-| 10,000                  |        50,000 hrs       |        5 hrs         |              4.8              |
-| 25,000                  |        50,000 hrs       |        2 hrs         |              12.0             |
+```{python}
+#| echo: false
+#| label: cluster-mtbf-scaling-table
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CLUSTER MTBF SCALING TABLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-cluster-mtbf-scaling — GPU-only MTBF and failures-per-day rows
+# │          across seven cluster sizes.
+# │
+# │ Goal: Compute each row's cluster MTBF and expected failures per day from the
+# │       single canonical per-GPU MTTF constant, so the whole table reproduces
+# │       the 1/N scaling law and cannot drift from the registry.
+# │ Show: Per-row cluster MTBF (hours, plus a days parenthetical for the long-MTBF
+# │       rows) and expected failures per day.
+# │ How:  cluster_mtbf = MTTF / N; failures_per_day = 24 * N / MTTF.
+# │
+# │ Imports: mlsysim public API (Systems, fmt, fmt_int, MarkdownStr, check)
+# │ Exports: gpu_mttf_hrs_str; n0..n6_str; mtbf0..mtbf6_str; fpd0..fpd6_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_int, MarkdownStr, check
+
+def _mtbf_h(v):
+    # integer-like rows display as whole hours; fractional rows keep one place
+    return fmt_int(int(round(v))) if float(v).is_integer() else fmt(v, precision=1, commas=False)
+
+def _mtbf_cell(v):
+    # show the days parenthetical only where the cluster MTBF is at least a day
+    hrs = _mtbf_h(v)
+    if v >= 24.0:
+        return MarkdownStr(f"{hrs} hrs ({fmt_int(round(v / 24.0))} days)")
+    return MarkdownStr(f"{hrs} hrs")
+
+def _fpd_cell(v):
+    if v < 0.01:
+        return fmt(v, precision=3, commas=False)
+    if v < 1.0:
+        return fmt(v, precision=2, commas=False)
+    if float(round(v, 1)).is_integer():
+        return fmt_int(int(round(v)))
+    return fmt(v, precision=1, commas=False)
+
+class ClusterMtbfScaling:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    sizes = [8, 64, 512, 1000, 4000, 10000, 25000]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    cluster_mtbf_h = []
+    failures_per_day = []
+    for _n in sizes:
+        cluster_mtbf_h.append(gpu_mttf_h / _n)
+        failures_per_day.append(24.0 * _n / gpu_mttf_h)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(cluster_mtbf_h[0] > cluster_mtbf_h[-1] > 0, "cluster MTBF must fall with size and stay positive")
+    check(failures_per_day[-1] > failures_per_day[0] > 0, "failures/day must rise with size")
+    check(abs(cluster_mtbf_h[3] - 50.0) < 1e-9, "1,000-GPU row anchors at 50 h cluster MTBF")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    gpu_mttf_hrs_str = MarkdownStr(f"{fmt_int(int(gpu_mttf_h))} hrs")
+    n0_str, n1_str, n2_str, n3_str, n4_str, n5_str, n6_str = [fmt_int(_n) for _n in sizes]
+    mtbf0_str, mtbf1_str, mtbf2_str, mtbf3_str, mtbf4_str, mtbf5_str, mtbf6_str = [_mtbf_cell(_v) for _v in cluster_mtbf_h]
+    fpd0_str, fpd1_str, fpd2_str, fpd3_str, fpd4_str, fpd5_str, fpd6_str = [_fpd_cell(_v) for _v in failures_per_day]
+```
+
+| **Cluster Size (GPUs)**              |            **Individual GPU MTBF**             |             **Cluster MTBF**            |     **Expected Failures per Day**      |
+|:-------------------------------------|:----------------------------------------------:|:---------------------------------------:|:--------------------------------------:|
+| `{python} ClusterMtbfScaling.n0_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf0_str` | `{python} ClusterMtbfScaling.fpd0_str` |
+| `{python} ClusterMtbfScaling.n1_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf1_str` | `{python} ClusterMtbfScaling.fpd1_str` |
+| `{python} ClusterMtbfScaling.n2_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf2_str` | `{python} ClusterMtbfScaling.fpd2_str` |
+| `{python} ClusterMtbfScaling.n3_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf3_str` | `{python} ClusterMtbfScaling.fpd3_str` |
+| `{python} ClusterMtbfScaling.n4_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf4_str` | `{python} ClusterMtbfScaling.fpd4_str` |
+| `{python} ClusterMtbfScaling.n5_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf5_str` | `{python} ClusterMtbfScaling.fpd5_str` |
+| `{python} ClusterMtbfScaling.n6_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf6_str` | `{python} ClusterMtbfScaling.fpd6_str` |
 
 : **Cluster MTBF Scaling**: GPU-only mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. Additional host, power, storage, and network failure domains reduce system-level MTBF further. {#tbl-cluster-mtbf-scaling}
 
