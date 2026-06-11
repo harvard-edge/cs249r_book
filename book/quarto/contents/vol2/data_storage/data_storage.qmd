@@ -1358,7 +1358,9 @@ The comparison in @tbl-data-formats sets the data-volume term in the pipeline eq
 # │          mlsysim.fmt (fmt, check)
 # │ Exports: PipelineCalcs.req_bw_imagenet_gb_per_s_str, PipelineCalcs.data_stall_pct_str,
 # │          PipelineCalcs.t_comp_stall_str, PipelineCalcs.t_io_stall_str,
-# │          PipelineCalcs.stall_pct_display_math
+# │          PipelineCalcs.stall_pct_display_math,
+# │          PipelineCalcs.tstep_seq_display_math, PipelineCalcs.stall_seq_display_math,
+# │          PipelineCalcs.tstep_pipe_display_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_time, fmt_bandwidth
 import math
@@ -1378,10 +1380,13 @@ class PipelineCalcs:
     req_bw_imagenet_gbs_val = req_bw_imagenet.to(GB / second).magnitude
     stall_max_t = max(t_comp, t_io)
     data_stall_pct_val = ((stall_max_t - t_comp) / stall_max_t).to("").magnitude * 100
+    t_step_seq = t_io + t_comp  # no overlap: I/O then compute
+    stall_seq_val = (t_io / t_step_seq).to("").magnitude * 100
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(req_bw_imagenet_gbs_val > 10, f"ImageNet aggregate BW should be high, got {req_bw_imagenet_gbs_val:.1f} GB/s")
     check(data_stall_pct_val == 20, "Data stall calculation mismatch")
+    check(54 < stall_seq_val < 57, "Sequential stall should be about 55.6%")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     req_bw_imagenet_gb_per_s_str = fmt_bandwidth(req_bw_imagenet, unit=GB / second, precision=1, commas=False)
@@ -1389,11 +1394,19 @@ class PipelineCalcs:
     t_comp_stall_str = fmt_time(t_comp, ms, precision=0, commas=False)
     t_io_stall_str = fmt_time(t_io, ms, precision=0, commas=False)
 
+    _io_ms = t_io.to(ms).magnitude
+    _comp_ms = t_comp.to(ms).magnitude
+    _seq_ms = t_step_seq.to(ms).magnitude
+    _pipe_ms = stall_max_t.to(ms).magnitude
+
     stall_pct_display_math = MarkdownStr(
-        f"$$\\text{{Stall \\%}} = \\frac{{{t_io.to(ms).magnitude:.0f} - {t_comp.to(ms).magnitude:.0f}}}"
-        f"{{{t_io.to(ms).magnitude:.0f}}} = "
-        f"\\mathbf{{{data_stall_pct_val:.0f}\\%}}$$"
+        f"$$\\text{{Stall \\%}} = \\frac{{{_io_ms:.0f} - {_comp_ms:.0f}}}" f"{{{_io_ms:.0f}}} = " f"\\mathbf{{{data_stall_pct_val:.0f}\\%}}$$"
     )
+    tstep_seq_display_math = MarkdownStr(
+        f"$$T_{{\\text{{step}}}} = T_{{\\text{{I/O}}}} + T_{{\\text{{compute}}}} = " f"{_io_ms:.0f} + {_comp_ms:.0f} = {_seq_ms:.0f} \\text{{ ms}}$$"
+    )
+    stall_seq_display_math = MarkdownStr(f"$$\\text{{Stall \\%}} = \\frac{{{_io_ms:.0f}}}{{{_seq_ms:.0f}}} = " f"{stall_seq_val:.1f}\\%$$")
+    tstep_pipe_display_math = MarkdownStr(f"$$T_{{\\text{{step}}}} = \\max({_comp_ms:.0f}, {_io_ms:.0f}) = {_pipe_ms:.0f} \\text{{ ms}}$$")
 ```
 
 ## The Data Pipeline Equation {#sec-storage-pipeline-equation}
@@ -1420,15 +1433,15 @@ where $T_{\text{step}} = T_{\text{compute}} + T_{\text{I/O}}$ when I/O and compu
 
 **Without pipelining** (sequential I/O then compute):
 
-$$T_{\text{step}} = T_{\text{I/O}} + T_{\text{compute}} = 250 + 200 = 450 \text{ ms}$$
-$$\text{Stall \%} = \frac{250}{450} = 55.6\%$$
+`{python} PipelineCalcs.tstep_seq_display_math`
+`{python} PipelineCalcs.stall_seq_display_math`
 
 **With pipelining** (I/O overlapped with compute):
 
-$$T_{\text{step}} = \max(200, 250) = 250 \text{ ms}$$
+`{python} PipelineCalcs.tstep_pipe_display_math`
 `{python} PipelineCalcs.stall_pct_display_math`
 
-**Systems insight**: Even with pipelining, the accelerator is idle `{python} PipelineCalcs.data_stall_pct_str` of the time. To eliminate the stall entirely, the next batch must arrive within the 200 ms compute window, either by increasing effective storage bandwidth, hiding tail latency with deeper prefetch buffers, or using more parallel I/O streams.
+**Systems insight**: Even with pipelining, the accelerator is idle `{python} PipelineCalcs.data_stall_pct_str` of the time. To eliminate the stall entirely, the next batch must arrive within the `{python} PipelineCalcs.t_comp_stall_str` compute window, either by increasing effective storage bandwidth, hiding tail latency with deeper prefetch buffers, or using more parallel I/O streams.
 
 :::
 
