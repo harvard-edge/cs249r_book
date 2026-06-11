@@ -4016,6 +4016,7 @@ Access pattern alone does not exhaust the storage problem. ML workloads also sto
 # │          GB, BYTES_FP32, BYTES_FP16, BILLION, MILLION),
 # │          mlsysim.book (fmt, check)
 # │ Exports: ModelStorageScale.gpt3_fp32_gb_str,
+# │          ModelStorageScale.bytes_fp32_value_str,
 # │          ModelStorageScale.gpt3_params_b_str,
 # │          ModelStorageScale.gpt3_fp16_gb_str,
 # │          ModelStorageScale.alexnet_params_m_str,
@@ -4023,7 +4024,7 @@ Access pattern alone does not exhaust the storage problem. ML workloads also sto
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.fmt import fmt, fmt_multiple, fmt_params, fmt_qty, check, MarkdownStr
-from mlsysim.core.units import Bparam, Mparam, GB
+from mlsysim.core.units import Bparam, Mparam, GB, byte
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ModelStorageScale:
@@ -4037,6 +4038,7 @@ class ModelStorageScale:
     gpt3_params_b = m_gpt3.parameters.to(Bparam).magnitude
     gpt3_fp32 = m_gpt3.size_in_bytes(BYTES_FP32)
     gpt3_fp16 = m_gpt3.size_in_bytes(BYTES_FP16)
+    bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
     alexnet_params_m = m_alexnet.parameters.to(Mparam).magnitude
     model_growth_factor = int(gpt3_params_b * BILLION / (alexnet_params_m * MILLION))
 
@@ -4046,13 +4048,14 @@ class ModelStorageScale:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     gpt3_params_b_str = fmt_params(m_gpt3.parameters, scale="B", precision=0, commas=False)
+    bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
     gpt3_fp32_gb_str = fmt_qty(gpt3_fp32, GB, precision=0, commas=False)
     gpt3_fp16_gb_str = fmt_qty(gpt3_fp16, GB, precision=0, commas=False)
     alexnet_params_m_str = fmt_params(m_alexnet.parameters, scale="M", precision=0, commas=False)
     model_growth_factor_mult_str = fmt_multiple(model_growth_factor, precision=0)
 ```
 
-Modern ML models contain millions to trillions of parameters\index{Model Parameters!storage requirements} requiring storage and retrieval patterns fundamentally different from traditional data. GPT-3 [@brown2020language] requires approximately `{python} ModelStorageScale.gpt3_fp32_gb_str` for model weights when stored in FP32 format (`{python} ModelStorageScale.gpt3_params_b_str` parameters times 4 bytes), though practical deployments often use smaller numeric formats such as FP16 (`{python} ModelStorageScale.gpt3_fp16_gb_str`) to reduce storage and access cost. Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's `{python} ModelStorageScale.alexnet_params_m_str` parameters [@krizhevsky2012imagenet] to GPT-3's `{python} ModelStorageScale.gpt3_params_b_str` parameters [@brown2020language], model size grew approximately `{python} ModelStorageScale.model_growth_factor_mult_str` in eight years. Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple accelerators need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources. @Sec-model-compression later explains the model-side techniques that reduce these footprints further.
+Modern ML models contain millions to trillions of parameters\index{Model Parameters!storage requirements} requiring storage and retrieval patterns fundamentally different from traditional data. GPT-3 [@brown2020language] requires approximately `{python} ModelStorageScale.gpt3_fp32_gb_str` for model weights when stored in FP32 format (`{python} ModelStorageScale.gpt3_params_b_str` parameters times `{python} ModelStorageScale.bytes_fp32_value_str` bytes), though practical deployments often use smaller numeric formats such as FP16 (`{python} ModelStorageScale.gpt3_fp16_gb_str`) to reduce storage and access cost. Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's `{python} ModelStorageScale.alexnet_params_m_str` parameters [@krizhevsky2012imagenet] to GPT-3's `{python} ModelStorageScale.gpt3_params_b_str` parameters [@brown2020language], model size grew approximately `{python} ModelStorageScale.model_growth_factor_mult_str` in eight years. Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple accelerators need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources. @Sec-model-compression later explains the model-side techniques that reduce these footprints further.
 
 The iterative nature of ML development introduces versioning requirements\index{Model Versioning!requirements} qualitatively different from traditional software. Git excels at tracking code changes where files are predominantly text with small incremental modifications, but it fails for large binary files where even small model changes result in entirely new checkpoints. Storing ten versions of a 10 GB model naively would consume 100 GB; ML versioning systems typically keep lightweight metadata pointers in Git or a registry and store artifacts in external content-addressed storage. Identical files can be deduplicated, but changed binary checkpoints are often stored as separate objects unless the backend adds its own delta compression. Tools like DVC (Data Version Control) and MLflow\index{MLflow!model versioning} maintain pointers to model artifacts rather than storing copies, enabling efficient versioning while preserving the ability to reproduce any historical model. A typical ML project generates hundreds of model versions during hyperparameter tuning—one version per training run as engineers explore learning rates, batch sizes, architectures, and regularization strategies. Without systematic versioning capturing training configuration, accuracy metrics, and training data version alongside model weights, reproducing results becomes impossible when yesterday's model performed better than today's but teams cannot identify which configuration produced it. This reproducibility challenge connects directly to the governance requirements addressed by @sec-data-engineering-data-versioning-ml-reproducibility-16d0: regulatory compliance often requires demonstrating exactly which data and process produced specific model predictions.
 
