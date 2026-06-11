@@ -439,15 +439,80 @@ This result means the cluster experiences a failure approximately every `{python
 
 The cluster MTBF scaling\index{Cluster!MTBF scaling} in @tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation is lower once PCIe, power, and network failure domains are included.
 
-| **Cluster Size (GPUs)** | **Individual GPU MTBF** |   **Cluster MTBF**   | **Expected Failures per Day** |
-|:------------------------|:-----------------------:|:--------------------:|:-----------------------------:|
-| 8                       |        50,000 hrs       | 6,250 hrs (260 days) |             0.004             |
-| 64                      |        50,000 hrs       |  781 hrs (32 days)   |              0.03             |
-| 512                     |        50,000 hrs       |   98 hrs (4 days)    |              0.24             |
-| 1,000                   |        50,000 hrs       |   50 hrs (2 days)    |              0.48             |
-| 4,000                   |        50,000 hrs       |       12.5 hrs       |              1.9              |
-| 10,000                  |        50,000 hrs       |        5 hrs         |              4.8              |
-| 25,000                  |        50,000 hrs       |        2 hrs         |              12.0             |
+```{python}
+#| echo: false
+#| label: cluster-mtbf-scaling-table
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CLUSTER MTBF SCALING TABLE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-cluster-mtbf-scaling — GPU-only MTBF and failures-per-day rows
+# │          across seven cluster sizes.
+# │
+# │ Goal: Compute each row's cluster MTBF and expected failures per day from the
+# │       single canonical per-GPU MTTF constant, so the whole table reproduces
+# │       the 1/N scaling law and cannot drift from the registry.
+# │ Show: Per-row cluster MTBF (hours, plus a days parenthetical for the long-MTBF
+# │       rows) and expected failures per day.
+# │ How:  cluster_mtbf = MTTF / N; failures_per_day = 24 * N / MTTF.
+# │
+# │ Imports: mlsysim public API (Systems, fmt, fmt_int, MarkdownStr, check)
+# │ Exports: gpu_mttf_hrs_str; n0..n6_str; mtbf0..mtbf6_str; fpd0..fpd6_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_int, MarkdownStr, check
+
+def _mtbf_h(v):
+    # integer-like rows display as whole hours; fractional rows keep one place
+    return fmt_int(int(round(v))) if float(v).is_integer() else fmt(v, precision=1, commas=False)
+
+def _mtbf_cell(v):
+    # show the days parenthetical only where the cluster MTBF is at least a day
+    hrs = _mtbf_h(v)
+    if v >= 24.0:
+        return MarkdownStr(f"{hrs} hrs ({fmt_int(round(v / 24.0))} days)")
+    return MarkdownStr(f"{hrs} hrs")
+
+def _fpd_cell(v):
+    if v < 0.01:
+        return fmt(v, precision=3, commas=False)
+    if v < 1.0:
+        return fmt(v, precision=2, commas=False)
+    if float(round(v, 1)).is_integer():
+        return fmt_int(int(round(v)))
+    return fmt(v, precision=1, commas=False)
+
+class ClusterMtbfScaling:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    sizes = [8, 64, 512, 1000, 4000, 10000, 25000]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    cluster_mtbf_h = []
+    failures_per_day = []
+    for _n in sizes:
+        cluster_mtbf_h.append(gpu_mttf_h / _n)
+        failures_per_day.append(24.0 * _n / gpu_mttf_h)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(cluster_mtbf_h[0] > cluster_mtbf_h[-1] > 0, "cluster MTBF must fall with size and stay positive")
+    check(failures_per_day[-1] > failures_per_day[0] > 0, "failures/day must rise with size")
+    check(abs(cluster_mtbf_h[3] - 50.0) < 1e-9, "1,000-GPU row anchors at 50 h cluster MTBF")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    gpu_mttf_hrs_str = MarkdownStr(f"{fmt_int(int(gpu_mttf_h))} hrs")
+    n0_str, n1_str, n2_str, n3_str, n4_str, n5_str, n6_str = [fmt_int(_n) for _n in sizes]
+    mtbf0_str, mtbf1_str, mtbf2_str, mtbf3_str, mtbf4_str, mtbf5_str, mtbf6_str = [_mtbf_cell(_v) for _v in cluster_mtbf_h]
+    fpd0_str, fpd1_str, fpd2_str, fpd3_str, fpd4_str, fpd5_str, fpd6_str = [_fpd_cell(_v) for _v in failures_per_day]
+```
+
+| **Cluster Size (GPUs)**              |            **Individual GPU MTBF**             |             **Cluster MTBF**            |     **Expected Failures per Day**      |
+|:-------------------------------------|:----------------------------------------------:|:---------------------------------------:|:--------------------------------------:|
+| `{python} ClusterMtbfScaling.n0_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf0_str` | `{python} ClusterMtbfScaling.fpd0_str` |
+| `{python} ClusterMtbfScaling.n1_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf1_str` | `{python} ClusterMtbfScaling.fpd1_str` |
+| `{python} ClusterMtbfScaling.n2_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf2_str` | `{python} ClusterMtbfScaling.fpd2_str` |
+| `{python} ClusterMtbfScaling.n3_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf3_str` | `{python} ClusterMtbfScaling.fpd3_str` |
+| `{python} ClusterMtbfScaling.n4_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf4_str` | `{python} ClusterMtbfScaling.fpd4_str` |
+| `{python} ClusterMtbfScaling.n5_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf5_str` | `{python} ClusterMtbfScaling.fpd5_str` |
+| `{python} ClusterMtbfScaling.n6_str` | `{python} ClusterMtbfScaling.gpu_mttf_hrs_str` | `{python} ClusterMtbfScaling.mtbf6_str` | `{python} ClusterMtbfScaling.fpd6_str` |
 
 : **Cluster MTBF Scaling**: GPU-only mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. Additional host, power, storage, and network failure domains reduce system-level MTBF further. {#tbl-cluster-mtbf-scaling}
 
@@ -1321,7 +1386,46 @@ Software faults in ML frameworks range from syntactic and logical errors to memo
 
 [^fn-memory-leak-gpu]: **Memory Leak**\index{Memory!leak, gpu training}: A programming error where allocated memory is never released. In ML systems, GPU memory leaks are uniquely destructive because accelerator memory is scarce (40--80 GB per device) and shared across the entire training pipeline. A single leaked tensor per batch---perhaps from a debugging hook left in production---can exhaust GPU memory within hours, causing silent OOM failures that kill long-running training jobs without checkpointing.
 
-Resource mismanagement is a prominent failure class. GPU memory allocations accumulate across training iterations as intermediate activations, optimizer states, and gradient buffers are allocated but not released, until the allocator exhausts available capacity and raises an out-of-memory error mid-batch. A 70B parameter model in BF16 with AdamW optimizer states requires roughly 840 GB of GPU memory across a node, leaving virtually no headroom for unexpected buffer growth. Memory pressure builds gradually over hundreds of iterations, making root-cause attribution difficult without per-layer memory profiling.
+```{python}
+#| echo: false
+#| label: oom-70b-adamw-footprint
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ 70B + ADAMW MEMORY FOOTPRINT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-ft-software-fault-properties — the out-of-memory resource-
+# │          mismanagement paragraph.
+# │
+# │ Goal: Compute the BF16-weights-plus-AdamW training-state footprint for a 70B
+# │       model so the "no headroom" claim tracks the model size and byte budget.
+# │ Show: Parameter count and the aggregate per-node training-state footprint.
+# │ How:  footprint = memory_from_params(params, bytes_per_param). The 12 B/param
+# │       budget is BF16 weights (2) plus AdamW optimizer states (10).
+# │
+# │ Imports: mlsysim public API (Models, memory_from_params, fmt_params, fmt_qty)
+# │ Exports: params_b_str, footprint_gb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import memory_from_params
+from mlsysim.fmt import fmt_params, fmt_qty, check
+
+class OomAdamwFootprint:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    model = Models.Language.Llama2_70B
+    bytes_per_param = 12  # scenario budget: BF16 weights (2) + AdamW states (10)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    params_count = model.parameters.to(param).magnitude
+    footprint = memory_from_params(params_count * param, bytes_per_param * byte / param)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(footprint.to(GB).magnitude > 0, "footprint must be positive")
+    check(footprint.to(GB).magnitude > 8 * 80, "BF16+AdamW 70B state must exceed one 8x80 GB node")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
+    footprint_gb_str = fmt_qty(footprint, GB, precision=0, commas=False)
+```
+
+Resource mismanagement is a prominent failure class. GPU memory allocations accumulate across training iterations as intermediate activations, optimizer states, and gradient buffers are allocated but not released, until the allocator exhausts available capacity and raises an out-of-memory error mid-batch. A `{python} OomAdamwFootprint.params_b_str` parameter model in BF16 with AdamW optimizer states requires roughly `{python} OomAdamwFootprint.footprint_gb_str` of GPU memory across a node, leaving virtually no headroom for unexpected buffer growth. Memory pressure builds gradually over hundreds of iterations, making root-cause attribution difficult without per-layer memory profiling.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -1849,7 +1953,7 @@ Check-and-verify methods turn that mindset into a data-path invariant. The syste
 ```{python}
 #| echo: false
 #| label: sdc-prob-calc
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_time
+from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_percent, fmt_time
 
 class SDCCollective:
     """The risk of silent corruption in global collectives."""
@@ -1859,13 +1963,17 @@ class SDCCollective:
     p_sdc_per_gpu_hr = Systems.Reliability.SdcRatePerGpuHr  # 1 in a million chance per hour
     training_step_s = 2
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    p_step_sdc = 1 - (1 - p_sdc_per_gpu_hr) ** (n_gpus * (training_step_s / SEC_PER_HOUR))
+    exposure_gpu_hr = n_gpus * (training_step_s / SEC_PER_HOUR)  # aggregate GPU-hours per step
+    p_step_sdc = 1 - (1 - p_sdc_per_gpu_hr) ** exposure_gpu_hr
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(p_step_sdc > 0.00005, f"Prob {p_step_sdc:.6f} unexpected")
+    check(exposure_gpu_hr > 0, "exposure must be positive")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     prob_str = fmt_percent(p_step_sdc, precision=4, commas=False, style='symbol')
     n_gpus_str = fmt(n_gpus, precision=0, commas=True)
     training_step_s_str = fmt_time(training_step_s, unit="second", precision=0, commas=False)
+    _n_tex = n_gpus_str.replace(",", "{,}")
+    exposure_eq_math = fmt_math(rf"{_n_tex} \times ({training_step_s}/{SEC_PER_HOUR}) \approx {fmt_int(round(exposure_gpu_hr))}")
 ```
 
 ::: {#nbk-fault-tolerance-napkin-math-sdc-certainty .callout-notebook title="The SDC certainty"}
@@ -1874,7 +1982,7 @@ class SDCCollective:
 
 1. **Fleet size**: `{python} SDCCollective.n_gpus_str` accelerators.
 2. **Individual risk**: $10^{-6}$ per hour (a conservative estimate for SDC).
-3. **The exposure**: In a 2-second window, the fleet has $100,000 \times (2/3600) \approx 55$ "GPU-hours" of exposure.
+3. **The exposure**: In a 2-second window, the fleet has `{python} SDCCollective.exposure_eq_math` "GPU-hours" of exposure.
 4. **The probability**: $\Pr(\text{at least one SDC}) \approx$ `{python} SDCCollective.prob_str`.
 
 **Systems insight**: In a 100k-GPU fleet, a silent error occurs every 18,000 steps (roughly every 10 hours). Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, model parameters silently accumulate corrupted contributions and drift within half a day. Robustness moves from being a *restart* problem to a *verification* problem: the fleet must perform redundant reductions or use parity-protected gradients to catch silent parameter corruption.
@@ -2438,9 +2546,47 @@ While the theoretical overhead of checkpointing appears manageable for individua
 
 ::: {#exmp-fault-tolerance-checkpoint-storm .callout-example title="The checkpoint storm"}
 
+```{python}
+#| echo: false
+#| label: checkpoint-storm-payload
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT STORM AGGREGATE PAYLOAD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @exmp-fault-tolerance-checkpoint-storm — the embedding-heavy
+# │          recommendation / MoE storm illustration in the Mechanism paragraph.
+# │
+# │ Goal: Compute the aggregate simultaneous-write payload when every worker in a
+# │       fleet flushes a per-worker shard at the same instant, so the headline
+# │       payload tracks the worker count and shard size.
+# │ Show: Worker count, per-worker shard, and the aggregate payload (TB).
+# │ How:  payload = n_workers * shard_size.
+# │
+# │ Imports: mlsysim public API (Systems, GB, TB, fmt_qty, fmt_count, check)
+# │ Exports: storm_workers_str, storm_shard_gb_str, storm_payload_tb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_qty, fmt_count, check
+
+class CheckpointStorm:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    n_workers = Systems.Clusters.Training_10K.total_accelerators
+    shard_size = 10 * GB  # scenario assumption: per-worker embedding/model shard
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    payload = n_workers * shard_size
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(payload.to(TB).magnitude > 0, "aggregate payload must be positive")
+    check(abs(payload.to(TB).magnitude - 100.0) < 1e-6, "10k workers x 10 GB must total 100 TB")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    storm_workers_str = fmt_count(n_workers, label="GPU")
+    storm_shard_gb_str = fmt_qty(shard_size, GB, precision=0, commas=False)
+    storm_payload_tb_str = fmt_qty(payload, TB, precision=0, commas=False)
+```
+
 **Scenario**: A training job saves a distributed checkpoint from thousands of accelerators at the same instant.
 
-**Mechanism**: For the `{python} CheckpointOverheadCalc.archA_ckpt_tb_str` mixed-precision optimizer footprint in the Archetype A row above—not the `{python} CheckpointOverheadCalc.archA_fp32_tb_str` full FP32 total—`{python} CheckpointOverheadCalc.archA_workers_str` would each write roughly `{python} CheckpointOverheadCalc.archA_shard_gb_str` of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: 10,000 GPUs, each holding a 10 GB shard of model or embedding state, can flood the network fabric with 100 TB of simultaneous writes.
+**Mechanism**: For the `{python} CheckpointOverheadCalc.archA_ckpt_tb_str` mixed-precision optimizer footprint in the Archetype A row above—not the `{python} CheckpointOverheadCalc.archA_fp32_tb_str` full FP32 total—`{python} CheckpointOverheadCalc.archA_workers_str` would each write roughly `{python} CheckpointOverheadCalc.archA_shard_gb_str` of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: `{python} CheckpointStorm.storm_workers_str`, each holding a `{python} CheckpointStorm.storm_shard_gb_str` shard of model or embedding state, can flood the network fabric with `{python} CheckpointStorm.storm_payload_tb_str` of simultaneous writes.
 
 **Systems lesson**: A checkpoint storm occurs when massive parallel writes overwhelm the cluster's I/O infrastructure, causing switch buffers to overflow and storage controllers to lock up.
 
@@ -2568,7 +2714,7 @@ The infrastructure layer reveals our first insight: even with perfect efficiency
 - **Write pattern**\index{Write Pattern}: All `{python} CheckpointDebug.n_nodes_str` writing simultaneously to shared NFS
 - **Observed behavior**\index{Observed Behavior}: writes that take `{python} CheckpointDebug.observed_write_min_str` instead of the `{python} CheckpointDebug.min_write_min_str` theoretical minimum
 
-The Distribution Layer reveals the shared-storage bottleneck. With `{python} CheckpointDebug.n_nodes_str` competing for 10 Gbps, each node effectively receives only `{python} CheckpointDebug.per_node_mb_per_s_str` (10 Gbps / `{python} CheckpointDebug.n_nodes_str`). If the checkpoint is sharded evenly, each node writes about `{python} CheckpointDebug.per_node_shard_gb_str`, so the write still lands near `{python} CheckpointDebug.per_node_write_min_str`. The observed `{python} CheckpointDebug.observed_write_min_str` is therefore close to the bandwidth floor, not something more simultaneous NFS writers can solve.
+The Distribution Layer reveals the shared-storage bottleneck. With `{python} CheckpointDebug.n_nodes_str` competing for 10 Gbps, each node effectively receives only `{python} CheckpointDebug.per_node_mb_per_s_str`, the 10 Gbps link split evenly across all `{python} CheckpointDebug.n_nodes_str`. If the checkpoint is sharded evenly, each node writes about `{python} CheckpointDebug.per_node_shard_gb_str`, so the write still lands near `{python} CheckpointDebug.per_node_write_min_str`. The observed `{python} CheckpointDebug.observed_write_min_str` is therefore close to the bandwidth floor, not something more simultaneous NFS writers can solve.
 
 **Analysis**: The governance layer connects the bottleneck to the completion target.
 
@@ -2870,7 +3016,7 @@ class FaultToleranceRecoveryRecap:
 
 **Total**: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} \approx$ `{python} RecoveryBudget.t_total_min_str` per failure event.
 
-**Impact**: Recovery time\index{Recovery Time!scale impact} optimization matters more as clusters grow. With the GPU-only baseline from @tbl-cluster-mtbf-scaling, a `{python} RecoveryBudget.n_gpus_1k_str`-GPU cluster has MTBF of `{python} RecoveryBudget.mtbf_1k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_1k_str`, losing about `{python} RecoveryBudget.daily_loss_min_1k_str` daily, a modest `{python} RecoveryBudget.overhead_pct_1k_str` overhead. However, a `{python} RecoveryBudget.n_gpus_10k_str`-GPU cluster has GPU-only MTBF of `{python} RecoveryBudget.mtbf_10k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_10k_str`, losing about `{python} RecoveryBudget.daily_loss_min_10k_str` daily—a `{python} RecoveryBudget.overhead_pct_10k_str` overhead equivalent to wasting roughly `{python} RecoveryBudget.waste_gpu_hours_10k_str` every day (`{python} RecoveryBudget.daily_loss_min_10k_str` $\times$ `{python} RecoveryBudget.n_gpus_10k_str` ÷ 60).
+**Impact**: Recovery time\index{Recovery Time!scale impact} optimization matters more as clusters grow. With the GPU-only baseline from @tbl-cluster-mtbf-scaling, a `{python} RecoveryBudget.n_gpus_1k_str`-GPU cluster has MTBF of `{python} RecoveryBudget.mtbf_1k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_1k_str`, losing about `{python} RecoveryBudget.daily_loss_min_1k_str` daily, a modest `{python} RecoveryBudget.overhead_pct_1k_str` overhead. However, a `{python} RecoveryBudget.n_gpus_10k_str`-GPU cluster has GPU-only MTBF of `{python} RecoveryBudget.mtbf_10k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_10k_str`, losing about `{python} RecoveryBudget.daily_loss_min_10k_str` daily—a `{python} RecoveryBudget.overhead_pct_10k_str` overhead equivalent to wasting roughly `{python} RecoveryBudget.waste_gpu_hours_10k_str` every day (the daily lost minutes multiplied across all `{python} RecoveryBudget.n_gpus_10k_str` GPUs).
 
 :::
 
@@ -3578,9 +3724,55 @@ Investing heavily in hardware redundancy while neglecting software robustness (i
 
 Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." The Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
 
-$$\tau_{\text{opt}} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49 \text{ minutes}$$
+```{python}
+#| echo: false
+#| label: young-daly-intuition-fallacy
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ YOUNG-DALY INTUITION FALLACY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-reliability-fallacies-pitfalls-74b8
+# │          ("Setting checkpoint interval by intuition") — the display equation
+# │          and the slower-storage follow-up sentence.
+# │
+# │ Goal: Reproduce the two Young-Daly optimal intervals from a hypothetical
+# │       4-hour-MTBF cluster so the "intuition is wrong" point cannot drift.
+# │ Show: tau_opt = sqrt(2 * T_write * MTBF) for a 5-minute and a 15-minute write.
+# │ How:  Work in minutes; tau = sqrt(2 * write_min * mtbf_min); round to whole
+# │       minutes for display.
+# │
+# │ Imports: mlsysim public API (fmt_int, fmt_math, MarkdownStr, check)
+# │ Exports: tau_opt_fast_eq_math, tau_opt_slow_min_str
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt_int, fmt_math, MarkdownStr, check
 
-The intuitive "every hour" is close but suboptimal. If checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes 85 minutes, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2--3$\times$ from optimal in either direction.
+class YoungDalyIntuitionFallacy:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    # scenario assumptions: a hypothetical 1,000-GPU cluster posed for this pitfall
+    mtbf_min = 4 * 60  # 4-hour cluster MTBF expressed in minutes
+    write_fast_min = 5  # checkpoint write time, fast storage
+    write_slow_min = 15  # checkpoint write time, slower storage / larger model
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    arg_fast = 2 * write_fast_min * mtbf_min
+    tau_fast_min = math.sqrt(arg_fast)
+    tau_slow_min = math.sqrt(2 * write_slow_min * mtbf_min)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(40 < tau_fast_min < 55, "5-minute write should give a ~49-minute interval")
+    check(tau_slow_min > tau_fast_min, "slower storage must lengthen the optimal interval")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    tau_opt_fast_eq_math = MarkdownStr(
+        rf"$$\tau_{{\text{{opt}}}} = \sqrt{{2 \times {write_fast_min} \times {mtbf_min}}} = "
+        rf"\sqrt{{{arg_fast}}} \approx {fmt_int(round(tau_fast_min))} \text{{ minutes}}$$"
+    )
+    tau_opt_slow_min_str = MarkdownStr(f"{fmt_int(round(tau_slow_min))} minutes")
+```
+
+`{python} YoungDalyIntuitionFallacy.tau_opt_fast_eq_math`
+
+The intuitive "every hour" is close but suboptimal. If checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes `{python} YoungDalyIntuitionFallacy.tau_opt_slow_min_str`, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2--3$\times$ from optimal in either direction.
 
 **Fallacy**: *If each GPU is 99.99 percent reliable, a 10,000-GPU cluster is also 99.99 percent reliable.*
 
