@@ -1914,7 +1914,7 @@ Check-and-verify methods turn that mindset into a data-path invariant. The syste
 ```{python}
 #| echo: false
 #| label: sdc-prob-calc
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_time
+from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_percent, fmt_time
 
 class SDCCollective:
     """The risk of silent corruption in global collectives."""
@@ -1924,13 +1924,17 @@ class SDCCollective:
     p_sdc_per_gpu_hr = Systems.Reliability.SdcRatePerGpuHr  # 1 in a million chance per hour
     training_step_s = 2
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    p_step_sdc = 1 - (1 - p_sdc_per_gpu_hr) ** (n_gpus * (training_step_s / SEC_PER_HOUR))
+    exposure_gpu_hr = n_gpus * (training_step_s / SEC_PER_HOUR)  # aggregate GPU-hours per step
+    p_step_sdc = 1 - (1 - p_sdc_per_gpu_hr) ** exposure_gpu_hr
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(p_step_sdc > 0.00005, f"Prob {p_step_sdc:.6f} unexpected")
+    check(exposure_gpu_hr > 0, "exposure must be positive")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     prob_str = fmt_percent(p_step_sdc, precision=4, commas=False, style='symbol')
     n_gpus_str = fmt(n_gpus, precision=0, commas=True)
     training_step_s_str = fmt_time(training_step_s, unit="second", precision=0, commas=False)
+    _n_tex = n_gpus_str.replace(",", "{,}")
+    exposure_eq_math = fmt_math(rf"{_n_tex} \times ({training_step_s}/{SEC_PER_HOUR}) \approx {fmt_int(round(exposure_gpu_hr))}")
 ```
 
 ::: {#nbk-fault-tolerance-napkin-math-sdc-certainty .callout-notebook title="The SDC certainty"}
@@ -1939,7 +1943,7 @@ class SDCCollective:
 
 1. **Fleet size**: `{python} SDCCollective.n_gpus_str` accelerators.
 2. **Individual risk**: $10^{-6}$ per hour (a conservative estimate for SDC).
-3. **The exposure**: In a 2-second window, the fleet has $100,000 \times (2/3600) \approx 55$ "GPU-hours" of exposure.
+3. **The exposure**: In a 2-second window, the fleet has `{python} SDCCollective.exposure_eq_math` "GPU-hours" of exposure.
 4. **The probability**: $\Pr(\text{at least one SDC}) \approx$ `{python} SDCCollective.prob_str`.
 
 **Systems insight**: In a 100k-GPU fleet, a silent error occurs every 18,000 steps (roughly every 10 hours). Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, model parameters silently accumulate corrupted contributions and drift within half a day. Robustness moves from being a *restart* problem to a *verification* problem: the fleet must perform redundant reductions or use parity-protected gradients to catch silent parameter corruption.
