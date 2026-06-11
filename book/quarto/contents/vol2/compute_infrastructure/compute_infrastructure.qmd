@@ -2601,11 +2601,53 @@ class V100NodePowerRecap:
 ```
 The NVSwitch chips themselves consume approximately 200 W each (800 W total for the NVSwitch fabric), a nontrivial power overhead that is justified by the bisection bandwidth it provides. To put this in perspective, the NVSwitch fabric alone consumes more power than an entire previous-generation GPU (the V100 drew `{python} V100NodePowerRecap.tdp_w_str`). Without NVSwitch, achieving full all-to-all connectivity would require 28 direct GPU-to-GPU links, a wiring nightmare that would also consume more total NVLink lane capacity.
 
-During a tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension 12,288 (typical for a 175B model), each of the 8 GPUs holds a $12{,}288{\times}1{,}536$ slice of the weight matrix. After each GPU computes its partial result, an AllReduce operation sums the partial results across all 8 GPUs over NVLink.
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_int, fmt_time, MarkdownStr
 
-The AllReduce for a single layer's output involves exchanging approximately $4 \times 2{,}048 \times 12{,}288 \times 2$ bytes (FP16) across the NVLink fabric. For a typical microbatch size of 4 sequences at 2,048 tokens, this is roughly 200 MB per AllReduce, which completes in about 0.2 ms at `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_gb_per_s_str`.
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Exports: TensorParallelAllReduce.hidden_str, tp_gpus_str, model_params_b_str,
+# │          shard_math, allreduce_formula_math, allreduce_mb_str,
+# │          per_allreduce_ms_str, layers_str, cumulative_ms_str
+class TensorParallelAllReduce:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model = Models.Language.GPT3  # 175B: hidden 12,288, layers 96
+    tp_gpus = 8  # GPUs per node (tensor parallel)
+    microbatch = 4  # sequences per microbatch (scenario)
+    seq_len = 2048  # tokens per sequence (scenario)
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
 
-Even with 96 layers (forward pass) and 96 layers (backward pass), the cumulative AllReduce time is about 38 ms per training step. This is possible because the NVSwitch crossbar allows all 8 GPUs to communicate simultaneously without contention, unlike a ring topology where data must traverse multiple hops sequentially.
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    hidden = model.hidden_dim
+    layers = model.layers
+    shard_cols = hidden // tp_gpus
+    bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
+    allreduce_bytes = microbatch * seq_len * hidden * bytes_fp16 * byte
+    per_allreduce = (allreduce_bytes / nvlink_bw).to("millisecond")
+    cumulative = 2 * layers * per_allreduce
+    hidden_disp = format(hidden, ",").replace(",", "{,}")
+    shard_disp = format(shard_cols, ",").replace(",", "{,}")
+    seq_disp = format(seq_len, ",").replace(",", "{,}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    hidden_str = fmt_int(hidden)
+    tp_gpus_str = fmt_int(tp_gpus)
+    microbatch_str = fmt_int(microbatch)
+    seq_str = fmt_int(seq_len)
+    model_params_b_str = fmt_int(model.parameters.to("Gparam").magnitude)
+    shard_math = MarkdownStr(f"${hidden_disp}{{\\times}}{shard_disp}$")
+    allreduce_formula_math = MarkdownStr(f"${microbatch} \\times {seq_disp} \\times {hidden_disp} \\times {bytes_fp16}$")
+    allreduce_mb_str = fmt_int(allreduce_bytes.to(MB).magnitude)
+    per_allreduce_ms_str = fmt_time(per_allreduce, "millisecond", precision=1, commas=False)
+    layers_str = fmt_int(layers)
+    cumulative_ms_str = fmt_int(cumulative.to("millisecond").magnitude)
+```
+
+During a tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension `{python} TensorParallelAllReduce.hidden_str` (typical for a `{python} TensorParallelAllReduce.model_params_b_str`B model), each of the `{python} TensorParallelAllReduce.tp_gpus_str` GPUs holds a `{python} TensorParallelAllReduce.shard_math` slice of the weight matrix. After each GPU computes its partial result, an AllReduce operation sums the partial results across all `{python} TensorParallelAllReduce.tp_gpus_str` GPUs over NVLink.
+
+The AllReduce for a single layer's output involves exchanging approximately `{python} TensorParallelAllReduce.allreduce_formula_math` bytes (FP16) across the NVLink fabric. For a typical microbatch size of `{python} TensorParallelAllReduce.microbatch_str` sequences at `{python} TensorParallelAllReduce.seq_str` tokens, this is roughly `{python} TensorParallelAllReduce.allreduce_mb_str` MB per AllReduce, which completes in about `{python} TensorParallelAllReduce.per_allreduce_ms_str` at `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_gb_per_s_str`.
+
+Even with `{python} TensorParallelAllReduce.layers_str` layers (forward pass) and `{python} TensorParallelAllReduce.layers_str` layers (backward pass), the cumulative AllReduce time is about `{python} TensorParallelAllReduce.cumulative_ms_str` ms per training step. This is possible because the NVSwitch crossbar allows all 8 GPUs to communicate simultaneously without contention, unlike a ring topology where data must traverse multiple hops sequentially.
 
 The communication overhead is small relative to the compute time per layer, which is approximately 2--5 ms depending on the sequence length and batch size. The resulting tensor-parallel scaling efficiency within the node is typically 85--95 percent, meaning that using 8 GPUs achieves 6.8--7.6$\times$ the throughput of a single GPU.
 
