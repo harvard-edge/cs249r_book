@@ -2112,7 +2112,8 @@ from mlsysim.solvers import DistributedModel
 # │ How: bubble_fraction = (p - 1) / (p - 1 + m).
 # │
 # │ Imports: mlsysim.book (check)
-# │ Exports: pb_stages_str, pb_microbatches_str, pb_bubble_pct_str
+# │ Exports: pb_stages_str, pb_microbatches_str, pb_p_minus_1_str, pb_bubble_pct_str,
+# │          pb_bubble_pct_round_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_count
 
@@ -2122,14 +2123,17 @@ class PipelineBubble:
     m_microbatches = 32  # Microbatches per global batch
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Bubble overhead is the time GPUs spend waiting for the first/last samples
-    bubble_fraction = (p_stages - 1) / (p_stages - 1 + m_microbatches)
+    p_minus_1 = p_stages - 1
+    bubble_fraction = p_minus_1 / (p_minus_1 + m_microbatches)
     bubble_pct = bubble_fraction * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(17 < bubble_pct < 19, f"Bubble {bubble_pct:.1f}% unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     pb_stages_str = fmt_count(p_stages, commas=False, label="stage")
     pb_microbatches_str = fmt(m_microbatches, precision=0, commas=False)
+    pb_p_minus_1_str = fmt(p_minus_1, precision=0, commas=False)
     pb_bubble_pct_str = fmt_percent(bubble_pct / 100, precision=1, commas=False, style='prose')
+    pb_bubble_pct_round_str = fmt_percent(round(bubble_pct) / 100, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-distributed-training-cost-pipeline-bubble .callout-notebook title="The cost of the pipeline bubble"}
@@ -2141,9 +2145,9 @@ In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio
 
 1. **Wait time**: At the start and end of each batch, GPUs sit idle for $p-1$ steps.
 2. **Productive time**: GPUs compute for $m$ steps.
-3. **Bubble fraction**: $(p-1) / (p-1+m) = 7 / (7+32) \approx$ `{python} PipelineBubble.pb_bubble_pct_str`.
+3. **Bubble fraction**: $(p-1) / (p-1+m) =$ `{python} PipelineBubble.pb_p_minus_1_str` $/$ (`{python} PipelineBubble.pb_p_minus_1_str` $+$ `{python} PipelineBubble.pb_microbatches_str`) $\approx$ `{python} PipelineBubble.pb_bubble_pct_str`.
 
-**Systems insight**: Pipeline parallelism is a *utilization-memory trade-off*. Reducing the bubble from 18 percent to 5 percent requires more microbatches $(m)$, which consume additional activation memory on each GPU. In the machine learning fleet, depth does not scale for free; the cluster pays a `{python} PipelineBubble.pb_bubble_pct_str` capacity tax just to keep the stages coordinated. This is why techniques like interleaved pipelining are essential: they chop the bubble into smaller pieces to recover that lost 18 percent of fleet capacity.
+**Systems insight**: Pipeline parallelism is a *utilization-memory trade-off*. Reducing the bubble from `{python} PipelineBubble.pb_bubble_pct_round_str` to 5 percent requires more microbatches $(m)$, which consume additional activation memory on each GPU. In the machine learning fleet, depth does not scale for free; the cluster pays a `{python} PipelineBubble.pb_bubble_pct_str` capacity tax just to keep the stages coordinated. This is why techniques like interleaved pipelining are essential: they chop the bubble into smaller pieces to recover that lost `{python} PipelineBubble.pb_bubble_pct_round_str` of fleet capacity.
 
 :::
 
