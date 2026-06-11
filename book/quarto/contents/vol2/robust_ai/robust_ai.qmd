@@ -1247,11 +1247,69 @@ $$
 \mathcal{D}_{\text{KL}} = \ln\frac{\sigma_{\text{curr}}}{\sigma_{\text{base}}} + \frac{\sigma_{\text{base}}^2 + (\mu_{\text{base}} - \mu_{\text{curr}})^2}{2\sigma_{\text{curr}}^2} - \frac{1}{2}
 $$
 
-$$
-\mathcal{D}_{\text{KL}} = \ln\frac{1.3}{1.1} + \frac{1.1^2 + (4.2 - 4.5)^2}{2 \times 1.3^2} - 0.5 = 0.167 + 0.385 - 0.5 = 0.052
-$$
+```{python}
+#| echo: false
+#| label: continuous-drift-kl-ks-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTINUOUS-FEATURE DRIFT: KL DIVERGENCE + KS CRITICAL VALUE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Step 2/Step 3 of the worked example and @tbl-retraining-decision-matrix
+# │          in @sec-robust-ai-worked-example-production-fraud-detection-model-b25b.
+# │
+# │ Goal: Evaluate transaction-amount drift via Gaussian KL divergence and the
+# │       two-sample KS critical value.
+# │ Show: KL terms (0.167, 0.385), the KL result (0.052), and the KS critical
+# │       value (0.019) at alpha = 0.05.
+# │ How: Scenario means/std-devs, KS statistic, and sample sizes are illustrative
+# │      LOAD constants; the closed-form Gaussian KL and the KS critical value
+# │      c(alpha)*sqrt((n+m)/(n*m)) are derived.
+# │
+# │ Imports: mlsysim.fmt (check, fmt, fmt_math)
+# │ Exports: kl_str, kl_worked_math, ks_crit_str, ks_crit_math
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import check, fmt, fmt_math
 
-The KL divergence of 0.052 indicates moderate drift, warranting further investigation but not immediate retraining.
+class ContinuousDriftAnalysis:
+    # ┌── 1. LOAD (scenario log-dollar distributions + KS setup — illustrative) ─
+    mu_base = 4.2
+    sigma_base = 1.1
+    mu_curr = 4.5
+    sigma_curr = 1.3
+    ks_statistic = 0.089  # observed two-sample KS statistic D
+    n_base = 10_000  # baseline sample size
+    n_curr = 10_000  # current sample size
+    c_alpha = 1.36  # KS critical coefficient at alpha = 0.05
+
+    # ┌── 2. EXECUTE (Gaussian KL closed form + KS critical value) ─────────────
+    kl_term1 = math.log(sigma_curr / sigma_base)
+    kl_term2 = (sigma_base**2 + (mu_base - mu_curr) ** 2) / (2 * sigma_curr**2)
+    kl = kl_term1 + kl_term2 - 0.5
+    ks_crit = c_alpha * math.sqrt((n_base + n_curr) / (n_base * n_curr))
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
+    check(0.0 < kl < 0.1, "Scenario KL should land in the moderate-drift band")
+    check(0.01 < ks_crit < 0.05, "KS critical value should be small for 10k+10k samples")
+    check(ks_statistic > ks_crit, "Observed KS statistic should exceed the critical value")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    kl_term1_str = fmt(kl_term1, precision=3, commas=False)
+    kl_term2_str = fmt(kl_term2, precision=3, commas=False)
+    kl_str = fmt(kl, precision=3, commas=False)
+    ks_crit_str = fmt(ks_crit, precision=3, commas=False)
+
+    # Display-math identities (inline {python} refs do not evaluate inside
+    # $$...$$, so the worked equations are assembled here as _math).
+    kl_worked_math = fmt_math(
+        r"\mathcal{D}_{\text{KL}} = \ln\frac{1.3}{1.1} + "
+        r"\frac{1.1^2 + (4.2 - 4.5)^2}{2 \times 1.3^2} - 0.5 = " + kl_term1_str + " + " + kl_term2_str + " - 0.5 = " + kl_str
+    )
+    ks_crit_math = fmt_math(r"c(0.05) \sqrt{\frac{20000}{10^8}} \approx " + ks_crit_str)
+```
+
+The closed-form solution evaluates to `{python} ContinuousDriftAnalysis.kl_worked_math`.
+
+The KL divergence of `{python} ContinuousDriftAnalysis.kl_str` indicates moderate drift, warranting further investigation but not immediate retraining.
 
 ##### Step 3: Statistical significance via KS test {.unnumbered}
 
@@ -1261,19 +1319,19 @@ $$
 D_{10000,10000} = 0.089
 $$
 
-Critical value at $\alpha = 0.05$: $c(0.05) \sqrt{\frac{20000}{10^8}} \approx 0.019$
+Critical value at $\alpha = 0.05$: `{python} ContinuousDriftAnalysis.ks_crit_math`
 
-Since $0.089 > 0.019$, the difference is statistically significant $(p < 0.001)$. However, *statistical significance* alone does not mandate retraining; the *practical significance* (PSI, KL values) suggests monitoring rather than immediate action.
+Since the observed statistic 0.089 exceeds the critical value `{python} ContinuousDriftAnalysis.ks_crit_str`, the difference is statistically significant $(p < 0.001)$. However, *statistical significance* alone does not mandate retraining; the *practical significance* (PSI, KL values) suggests monitoring rather than immediate action.
 
 ##### Step 4: Decision framework application {.unnumbered}
 
 @Tbl-retraining-decision-matrix combines the quantitative evidence.
 
-| **Metric**                             |  **Value**  |  **Threshold**  | **Action Level** |
-|:---------------------------------------|:-----------:|:---------------:|:----------------:|
-| **PSI (country)**                      |    0.065    |     $< 0.1$     |     Monitor      |
-| **$\mathcal{D}_{\text{KL}}$ (amount)** |    0.052    |     $< 0.1$     |     Monitor      |
-| **KS test**                            | $p < 0.001$ | $\alpha = 0.05$ |   Significant    |
+| **Metric**                             |                    **Value**                     |  **Threshold**  | **Action Level** |
+|:---------------------------------------|:------------------------------------------------:|:---------------:|:----------------:|
+| **PSI (country)**                      | `{python} CountryPSIDecomposition.psi_total_str` |     $< 0.1$     |     Monitor      |
+| **$\mathcal{D}_{\text{KL}}$ (amount)** |    `{python} ContinuousDriftAnalysis.kl_str`     |     $< 0.1$     |     Monitor      |
+| **KS test**                            |                   $p < 0.001$                    | $\alpha = 0.05$ |   Significant    |
 
 : **Retraining Decision Matrix**: Combined quantitative evidence (PSI, KL divergence, KS test) compared against thresholds and the resulting action level. Drift signals below the practical threshold but with statistical significance call for monitoring at increased frequency rather than immediate retraining. {#tbl-retraining-decision-matrix}
 
