@@ -458,27 +458,30 @@ A system architect must organize storage to serve workloads that simultaneously 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-storage-hierarchy-merged and bandwidth cliffs
 # │ Exports: StorageHierarchyTable.h100_bw_tb_per_s_str,
-# │          StorageHierarchyTable.nvme_latency_us_str
+# │          StorageHierarchyTable.nvme_latency_us_str,
+# │          StorageHierarchyTable.host_dram_bw_gb_per_s_str
 from mlsysim import Hardware
 from mlsysim.fmt import fmt_qty, fmt_time
 
 class StorageHierarchyTable:
     # ┌── 1. LOAD ─────────────────────────────────────────
     nvme_latency = Hardware.Tech.Storage.NvmeGen4.latency
+    host_dram_bw = Hardware.Tech.Storage.HostDram.bandwidth
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
     nvme_latency_us_str = fmt_time(nvme_latency, microsecond, precision=0, commas=False)
+    host_dram_bw_gb_per_s_str = fmt_qty(host_dram_bw, GB / second, precision=0, commas=False)
 ```
 
-| **Storage Tier**         | **Typical Capacity** |                     **Bandwidth**                     |                      **Latency**                      | **Cost (\$/GB)** |
-|:-------------------------|:--------------------:|:-----------------------------------------------------:|:-----------------------------------------------------:|:----------------:|
-| **GPU HBM**              |        80 GB         | `{python} StorageHierarchyTable.h100_bw_tb_per_s_str` |                        ~100 ns                        |      ~15.00      |
-| **Host DRAM**            |     512 GB–2 TB      |                        200 GB/s                       |                        ~100 ns                        |      ~3.00       |
-| **Local NVMe SSD**       |       4–30 TB        |                       7–25 GB/s                       | ~`{python} StorageHierarchyTable.nvme_latency_us_str` |      ~0.10       |
-| **Parallel File System** |       100+ PB        |                   1+ TB/s aggregate                   |                         ~1 ms                         |      ~0.03       |
-| **Object Storage**       |   Very large pool    |                   100 GB/s aggregate                  |                         ~50 ms                        |      ~0.02       |
-| **Archive/Cold Storage** |   Very large pool    |                         1 GB/s                        |                    Minutes to hours                   |      ~0.004      |
+| **Storage Tier**         | **Typical Capacity** |                       **Bandwidth**                        |                      **Latency**                      | **Cost (\$/GB)** |
+|:-------------------------|:--------------------:|:----------------------------------------------------------:|:-----------------------------------------------------:|:----------------:|
+| **GPU HBM**              |        80 GB         |   `{python} StorageHierarchyTable.h100_bw_tb_per_s_str`    |                        ~100 ns                        |      ~15.00      |
+| **Host DRAM**            |     512 GB–2 TB      | `{python} StorageHierarchyTable.host_dram_bw_gb_per_s_str` |                        ~100 ns                        |      ~3.00       |
+| **Local NVMe SSD**       |       4–30 TB        |                         7–25 GB/s                          | ~`{python} StorageHierarchyTable.nvme_latency_us_str` |      ~0.10       |
+| **Parallel File System** |       100+ PB        |                     1+ TB/s aggregate                      |                         ~1 ms                         |      ~0.03       |
+| **Object Storage**       |   Very large pool    |                     100 GB/s aggregate                     |                         ~50 ms                        |      ~0.02       |
+| **Archive/Cold Storage** |   Very large pool    |                           1 GB/s                           |                    Minutes to hours                   |      ~0.004      |
 
 : **Extended Memory Hierarchy for ML Systems**: The roughly 30$\times$ aggregate-to-aggregate bandwidth gap between HBM and object storage (and a much larger per-client gap once a single inference instance pulls from a shared object endpoint) drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
 
@@ -493,7 +496,9 @@ The storage hierarchy principle (Principle \ref{pri-storage-hierarchy}) governs 
 # │          StoragePyramidContext.tokenized_text_tb_str,
 # │          StoragePyramidContext.hbm_host_dram_ratio_mult_str,
 # │          StoragePyramidContext.h100_bw_tb_per_s_str,
-# │          StoragePyramidContext.host_dram_bw_gb_per_s_str
+# │          StoragePyramidContext.host_dram_bw_gb_per_s_str,
+# │          StoragePyramidContext.raid0_bw_gb_per_s_str,
+# │          StoragePyramidContext.dram_nvme_ratio_mult_str
 from mlsysim import Hardware
 from mlsysim.fmt import fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_qty, fmt_qty_int
 
@@ -503,14 +508,20 @@ class StoragePyramidContext:
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
     h100_bw = Hardware.Cloud.H100.memory.bandwidth
     host_dram_bw = Hardware.Tech.Storage.HostDram.bandwidth
+    nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth
+    raid0_drive_count = 4  # scenario: 4-drive local NVMe RAID-0 array
+    raid0_bw = raid0_drive_count * nvme_bw
     tokenized_text = training_tokens * token_id_bytes
     hbm_host_dram_ratio_val = (h100_bw / host_dram_bw).to("").magnitude
+    dram_nvme_ratio_val = (host_dram_bw / raid0_bw).to("").magnitude
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     host_dram_bw_gb_per_s_str = fmt_bandwidth(host_dram_bw, unit=GB / second, precision=0, commas=False)
+    raid0_bw_gb_per_s_str = fmt_bandwidth(raid0_bw, unit=GB / second, precision=0, commas=False)
     hbm_host_dram_ratio_mult_str = fmt_multiple(hbm_host_dram_ratio_val, precision=1, commas=False)
+    dram_nvme_ratio_mult_str = fmt_multiple(dram_nvme_ratio_val, precision=0, commas=False)
 ```
 @Fig-storage-pyramid maps these six tiers into a spatial hierarchy, showing how bandwidth decreases and capacity increases at each step away from the accelerator.
 
@@ -526,7 +537,7 @@ The engineering challenge is to ensure that data flows upward through the pyrami
 
 ### Bandwidth cliffs between tiers {#sec-storage-bandwidth-cliffs}
 
-The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy. Between HBM and host DRAM, the ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tb_per_s_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str`). Between host DRAM and NVMe, the ratio is roughly 7$\times$ (`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str` vs. ~28 GB/s from a 4-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a 1 TB/s aggregate PFS serves 256 nodes, each node receives roughly 4 GB/s, a 7$\times$ reduction from local NVMe. Between the parallel file system and object storage, the ratio is typically 10$\times$ or more, depending on the number of concurrent clients and network bandwidth.
+The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy. Between HBM and host DRAM, the ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tb_per_s_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str`). Between host DRAM and NVMe, the ratio is roughly `{python} StoragePyramidContext.dram_nvme_ratio_mult_str` (`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str` vs. ~`{python} StoragePyramidContext.raid0_bw_gb_per_s_str` from a 4-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a 1 TB/s aggregate PFS serves 256 nodes, each node receives roughly 4 GB/s, a 7$\times$ reduction from local NVMe. Between the parallel file system and object storage, the ratio is typically 10$\times$ or more, depending on the number of concurrent clients and network bandwidth.
 
 These bandwidth cliffs have a critical implication: the pipeline cannot simply "stream through" the hierarchy in real time. If the accelerator consumes data at `{python} StoragePyramidContext.h100_bw_tb_per_s_str` from HBM, and the next tier down delivers only 200 GB/s, then HBM can be emptied in under 50 ms but takes 400 ms to refill from host DRAM. The only way the accelerator avoids stalling is if the batch it needs next is already in HBM before it finishes the current batch. This is *why* every tier in the hierarchy serves as a prefetch buffer for the tier above it: host DRAM buffers data for HBM, NVMe buffers data for host DRAM, the parallel file system buffers data for NVMe, and object storage is the ultimate source of truth. Each buffer must be deep enough to absorb the latency and bandwidth variance of the tier below it.
 
