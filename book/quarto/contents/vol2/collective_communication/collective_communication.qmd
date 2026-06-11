@@ -627,7 +627,7 @@ The calculation uses the bandwidth hierarchy before the chapter formalizes it: r
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models, Systems
 from mlsysim.core.units import GB, byte, microsecond, ms, param, second
-from mlsysim.fmt import check, fmt_qty, fmt_time
+from mlsysim.fmt import check, fmt_int, fmt_qty, fmt_time
 from mlsysim.physics import (
     calc_ring_allreduce_time,
     calc_ring_collective_data_factor,
@@ -669,15 +669,13 @@ class LlamaBudgetCalc:
     flat_ring_total = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
     flat_total = flat_ring_total
 
-    flat_total_rounded = round(flat_total.to(ms).magnitude)
-
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(flat_total > hier_total_llama, "Flat AllReduce should be much slower than Hierarchical")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gradient_bf16_gb_str = fmt_qty(gradient_bf16, GB, precision=0, commas=False)
     hier_total_llama_ms_str = fmt_time(hier_total_llama, ms, precision=1, commas=False)
-    flat_total_ms_str = fmt_time(flat_total_rounded, ms, precision=0, commas=True)
+    flat_total_ms_str = fmt_int(flat_total, ms, commas=True, suffix=" ms")
 ```
 
 Using BF16 gradients (a common practice that halves communication volume to `{python} LlamaBudgetCalc.gradient_bf16_gb_str`), the contrast is stark. Routing the full gradient over the slow inter-node fabric, as a flat Ring AllReduce does, costs roughly `{python} LlamaBudgetCalc.flat_total_ms_str`. Confining most of the traffic to NVLink and sending only the reduced shard over InfiniBand cuts that to approximately `{python} LlamaBudgetCalc.hier_total_llama_ms_str`. The difference is not marginal; it determines whether communication can be hidden behind computation or whether it becomes the critical path.
@@ -812,9 +810,12 @@ class MoeAllToAll:
     remote_gpus = n_gpus - 1
     data_per_transfer = tokens_per_transfer * bytes_per_token
     total_sent = remote_gpus * data_per_transfer
-    bw_time = (data_per_transfer / beta).to(microsecond)
-    bw_time_us_approx = round(bw_time.to(microsecond).magnitude)
-    per_transfer = alpha + bw_time_us_approx * microsecond
+    # Bandwidth term rounded to whole microseconds: the worked trace presents it
+    # as the clean "≈ 5 μs" approximation the callout math line displays, so the
+    # downstream per-transfer and serialized totals stay on integer-microsecond
+    # arithmetic (3 + 5 = 8; 7 × 8 = 56).
+    bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
+    per_transfer = alpha + bw_time
     serialized = remote_gpus * per_transfer
     parallel = per_transfer
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -832,7 +833,7 @@ class MoeAllToAll:
     tokens_per_expert_str = fmt_count(tokens_per_expert, label="token", commas=False)
     data_per_transfer_kb_str = fmt_qty(data_per_transfer, KB, precision=3, commas=False)
     total_sent_mb_str = fmt_qty(total_sent, MB, precision=2, commas=False)
-    bw_time_approx_us_str = fmt_time(bw_time_us_approx, microsecond, precision=0, commas=False)
+    bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
     per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=0, commas=False)
     serialized_us_str = fmt_time(serialized, unit=microsecond, precision=0, commas=False)
     parallel_us_str = fmt_time(parallel, unit=microsecond, precision=0, commas=False)
@@ -1476,7 +1477,7 @@ A simple 8-node budget makes this bandwidth multiplication concrete:
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import GB, MB, microsecond, ms, second
 from mlsysim import Hardware, Systems
-from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_qty, fmt_time
+from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_multiple, fmt_qty, fmt_time
 from mlsysim.physics import (
     calc_ring_allreduce_time,
     calc_ring_allreduce_latency_time,
@@ -1518,8 +1519,6 @@ class HierarchicalAllreduceCalc:
 
     hier_total = intra_rs + inter_time + intra_ag
     speedup = (flat_time / hier_total).to_base_units().magnitude
-    intra_rs_rounded = round(intra_rs.to(ms).magnitude)
-    intra_ag_rounded = round(intra_ag.to(ms).magnitude)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(speedup > 1.0, "Hierarchical should be faster than Flat AllReduce")
@@ -1528,10 +1527,10 @@ class HierarchicalAllreduceCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     flat_time_ms_str = fmt_time(flat_time, ms, precision=0, commas=False)
     intra_data_mb_str = fmt_qty(intra_data, MB, precision=0, commas=False)
-    intra_rs_ms_str = fmt_time(intra_rs_rounded, ms, precision=0, commas=False)
+    intra_rs_ms_str = fmt_int(intra_rs, ms, commas=False, suffix=" ms")
     inter_data_mb_str = fmt_qty(inter_data, MB, precision=0, commas=False)
     inter_time_ms_str = fmt_time(inter_time, ms, precision=1, commas=False)
-    intra_ag_ms_str = fmt_time(intra_ag_rounded, ms, precision=0, commas=False)
+    intra_ag_ms_str = fmt_int(intra_ag, ms, commas=False, suffix=" ms")
     hier_total_ms_str = fmt_time(hier_total, ms, precision=1, commas=False)
     ib_bw_gb_per_s_str = fmt_qty(ib_bw, GB / second, precision=0, commas=False)
     # per-direction rate (the beta that produced intra_rs); matches the
@@ -1842,25 +1841,26 @@ The success of 1-bit Adam illustrates a broader principle: compression is most e
 # │          cp_compressed_comm_ms_str, cp_total_new_ms_str, cp_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_multiple, fmt_ratio, fmt_time
+from mlsysim.core.units import ms
 
 class CompressionPayback:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    t_comm_ms = 40  # Original FP32 AllReduce time
+    t_comm = 40 * ms  # scenario assumption: original FP32 AllReduce time
     ratio = 8  # 1-bit quantization (32\times compression, but with protocol overhead)
-    t_overhead_ms = 2  # Compute time to quantize/dequantize
+    t_overhead = 2 * ms  # scenario assumption: compute time to quantize/dequantize
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_compressed_comm = t_comm_ms / ratio
-    t_total_new = t_compressed_comm + t_overhead_ms
-    speedup = t_comm_ms / t_total_new
+    t_compressed_comm = t_comm / ratio
+    t_total_new = t_compressed_comm + t_overhead
+    speedup = (t_comm / t_total_new).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(5 < speedup < 6, f"Speedup {speedup:.1f}x unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    cp_comm_time_ms_str = fmt_time(t_comm_ms, 'millisecond', precision=0, commas=False)
+    cp_comm_time_ms_str = fmt_time(t_comm, ms, precision=0, commas=False)
     cp_throughput_factor_mult_str = fmt_multiple(ratio, precision=0, commas=False)
     cp_ratio_str = fmt_ratio(ratio, precision=0, commas=False)
-    cp_overhead_ms_str = fmt_time(t_overhead_ms, 'millisecond', precision=0, commas=False)
-    cp_compressed_comm_ms_str = fmt_time(t_compressed_comm, 'millisecond', precision=0, commas=False)
-    cp_total_new_ms_str = fmt_time(t_total_new, 'millisecond', precision=0, commas=False)
+    cp_overhead_ms_str = fmt_time(t_overhead, ms, precision=0, commas=False)
+    cp_compressed_comm_ms_str = fmt_time(t_compressed_comm, ms, precision=0, commas=False)
+    cp_total_new_ms_str = fmt_time(t_total_new, ms, precision=0, commas=False)
     cp_speedup_mult_str = fmt_multiple(speedup, precision=1, commas=False)
 ```
 
