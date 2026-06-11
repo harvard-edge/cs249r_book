@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""Apply edited alt-text from MIT Press copy editor docx extraction.
+"""Apply edited alt-text from copy editor JSON extraction.
 
 Reads the alt_text_edits.json and updates fig-alt= attributes in QMD files.
 
 Usage:
-    python3 fix_alt_text.py --dry-run book/quarto/contents/vol1/
-    python3 fix_alt_text.py book/quarto/contents/vol1/
+    python3 fix_alt_text.py --edits data/alt_text_edits.json --dry-run book/quarto/contents/vol1/
+    python3 fix_alt_text.py --edits data/alt_text_edits.json book/quarto/contents/vol1/
 """
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
-
-ALT_TEXT_FILE = Path(__file__).parent.parent.parent.parent.parent.parent / \
-    "Desktop/MIT_Press_Feedback/07_alt_text/data/alt_text_edits.json"
 
 
 def load_alt_text_edits(filepath: Path) -> dict[str, str]:
@@ -79,12 +75,11 @@ def main():
     parser = argparse.ArgumentParser(description="Apply edited alt-text")
     parser.add_argument("path", type=Path, help="Directory to process")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--edits", type=Path, default=None,
+    parser.add_argument("--edits", type=Path, required=True,
                         help="Path to alt_text_edits.json")
     args = parser.parse_args()
 
-    edits_path = args.edits or Path("/Users/VJ/Desktop/MIT_Press_Feedback/07_alt_text/data/alt_text_edits.json")
-    edits = load_alt_text_edits(edits_path)
+    edits = load_alt_text_edits(args.edits)
     print(f"Loaded {len(edits)} alt-text edits")
 
     files = sorted(args.path.rglob("*.qmd"))

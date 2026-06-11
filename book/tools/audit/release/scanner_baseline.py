@@ -21,12 +21,15 @@ import json
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 
-REPO = Path("/Users/VJ/GitHub/MLSysBook-release-audit")
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers"
-LOG_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/logs/scanner-baseline"
+try:
+    from .paths import LEDGER_DIR, LOG_DIR as RELEASE_LOG_DIR, REPO_ROOT
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import LEDGER_DIR, LOG_DIR as RELEASE_LOG_DIR, REPO_ROOT
+
+REPO = REPO_ROOT
+OUT_DIR = LEDGER_DIR
+LOG_DIR = RELEASE_LOG_DIR / "scanner-baseline"
 
 EXPECTED_SCANNER = {
     "vol1": {"total": 4, "accepted": 3, "open": 1},
