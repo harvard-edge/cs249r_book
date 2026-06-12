@@ -1166,7 +1166,7 @@ The preceding computational mapping showed how MLP operations decompose into nes
 # │ Exports: mlp_large_dim_str, mlp_large_params_str, mlp_large_mem_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check
 from mlsysim.physics import model_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2321,7 +2321,8 @@ class AttentionDefinitionCosts:
     seq_len = 4096
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    score_memory = seq_len * seq_len * BYTES_FP16
+    score_count = seq_len * seq_len
+    score_memory = score_count * BYTES_FP16
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
@@ -2330,6 +2331,7 @@ class AttentionDefinitionCosts:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     seq_len_str = fmt(seq_len, precision=0, commas=True)
+    score_count_str = fmt_count(score_count, scale="M", precision=1, commas=False)
     score_mb_str = fmt_memory(score_memory, unit=MB, precision=1, commas=False)
 ```
 
@@ -2337,7 +2339,7 @@ class AttentionDefinitionCosts:
 
 ***Attention Mechanisms***\index{Attention Mechanism!definition} are neural network operations that compute a weighted sum of value vectors, where the weights are derived from learned similarity scores between a query vector and a set of key vectors, enabling dynamic, content-dependent information routing between any two positions in a sequence.
 
-1.  **Significance (quantitative)**: Attention connects any two tokens in $\mathcal{O}(1)$ depth, but the similarity matrix requires quadratic ($S^2$) memory: for a `{python} AttentionDefinitionCosts.seq_len_str`-token sequence with 16-bit scores, the attention matrix alone consumes `{python} AttentionDefinitionCosts.score_mb_str` per layer per head (about 16M scores at 2 bytes each), a direct contribution to the $D_{\text{vol}}$ and $\text{BW}$ terms of the iron law that ultimately caps practical context window length.
+1.  **Significance (quantitative)**: Attention connects any two tokens in $\mathcal{O}(1)$ depth, but the similarity matrix requires quadratic ($S^2$) memory: for a `{python} AttentionDefinitionCosts.seq_len_str`-token sequence with 16-bit scores, the attention matrix alone consumes `{python} AttentionDefinitionCosts.score_mb_str` per layer per head (about `{python} AttentionDefinitionCosts.score_count_str` scores at 2 bytes each), a direct contribution to the $D_{\text{vol}}$ and $\text{BW}$ terms of the iron law that ultimately caps practical context window length.
 2.  **Observation**: Unlike RNNs, which compress all prior context into a single fixed-size state vector, attention mechanisms retain token representations and compute relevance scores directly. During training or full-sequence prefill, the initial pass that processes the whole prompt, score interactions grow quadratically with sequence length; during autoregressive serving, the stored KV cache, the saved key and value vectors from prior tokens, grows as $\mathcal{O}(S d_{\text{model}})$ while each new token attends over prior keys and values.
 3.  **Pitfall**: A frequent misconception is that attention is a general-purpose weighting scheme that can be applied freely. Quadratic attention memory is a hard physical constraint: doubling the context window quadruples the attention memory, which is why FlashAttention and sparse attention variants exist—they recompute rather than store the attention matrix to break this memory wall.
 
@@ -4637,14 +4639,14 @@ class EnergyConsumptionAnalysis:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
-    mac_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude  # pJ per FP MAC
+    mac_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude  # pJ per FP32 FLOP
     dram_pj = ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude  # pJ per 32-bit access
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dram_to_mac_ratio = dram_pj / mac_pj
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(dram_to_mac_ratio > 100, "DRAM access should cost over 100x a reference FP MAC.")
+    check(dram_to_mac_ratio > 100, "DRAM access should cost over 100x a reference FP32 FLOP.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     energy_mac_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
@@ -4661,7 +4663,7 @@ class EnergyConsumptionAnalysis:
 *Moving a value from DRAM costs far more energy than a MAC.*
 :::
 
-Large batched GEMMs in MLPs can achieve excellent arithmetic intensity, but small-batch MLP inference often has low reuse and spends most of its energy on data movement. Each multiply-accumulate operation consumes approximately `{python} EnergyConsumptionAnalysis.energy_mac_pj_str`, while data movement from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str` per 32-bit value [@horowitz2014], about `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str` higher. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency. This energy gap has driven a structural response in accelerator design: maximizing on-chip SRAM capacity keeps weights and activations closer to compute units, avoiding the DRAM penalty on the most frequently accessed data. Architectures that can fit their entire working set on-chip—whether through large tiled SRAM banks on conventional accelerators or through wafer-scale integration that replaces off-chip DRAM with on-chip memory for the largest models—reduce the energy cost of inference by eliminating the dominant term in the energy budget.
+Large batched GEMMs in MLPs can achieve excellent arithmetic intensity, but small-batch MLP inference often has low reuse and spends most of its energy on data movement. The reference FP32 compute cost is approximately `{python} EnergyConsumptionAnalysis.energy_mac_pj_str`, while data movement from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str` per 32-bit value [@horowitz2014], about `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str` higher. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency. This energy gap has driven a structural response in accelerator design: maximizing on-chip SRAM capacity keeps weights and activations closer to compute units, avoiding the DRAM penalty on the most frequently accessed data. Architectures that can fit their entire working set on-chip—whether through large tiled SRAM banks on conventional accelerators or through wafer-scale integration that replaces off-chip DRAM with on-chip memory for the largest models—reduce the energy cost of inference by eliminating the dominant term in the energy budget.
 
 Convolutional operations reduce energy consumption through data reuse but exhibit variable efficiency depending on implementation. Im2col-based convolution implementations trade memory for simplicity; a fully materialized lowering can multiply temporary storage and memory traffic, up to $K^2$ for stride-1 $K{\times}K$ filters away from the borders. Direct convolution implementations can achieve substantially better energy efficiency by eliminating redundant data movement, particularly for larger kernel sizes where im2col duplication is most severe.
 
@@ -5275,8 +5277,8 @@ Engineers add attention to CNNs or convolutions to transformers expecting additi
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_memory, fmt_multiple, MarkdownStr, check
-from mlsysim.core.units import GB
+from mlsysim.fmt import fmt_memory_capacity, fmt_memory, fmt_multiple, MarkdownStr, check
+from mlsysim.core.units import GB, GiB
 
 class A100ClusterMemory:
     """Contrast datacenter and edge memory: 8-GPU A100 node vs Jetson Orin NX."""
@@ -5289,7 +5291,9 @@ class A100ClusterMemory:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     a100_8x_mem = a100.memory.capacity * n_gpus
     edge_mem = edge_device.memory.capacity
-    memory_reduction = (a100_8x_mem / edge_mem).to("").magnitude
+    a100_8x_nominal_gb = a100_8x_mem.to(GiB).magnitude
+    edge_nominal_gb = round(edge_mem.to(GB).magnitude)
+    memory_reduction = a100_8x_nominal_gb / edge_nominal_gb
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -5298,8 +5302,7 @@ class A100ClusterMemory:
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    # Decimal GB for both sides so headline capacities divide consistently with the ratio.
-    a100_8x_mem_gb_str = fmt_memory(a100_8x_mem, unit=GB, precision=1, commas=False)
+    a100_8x_mem_gb_str = fmt_memory_capacity(a100_8x_mem, unit=GiB, precision=0, commas=False)
     edge_device_name_str = MarkdownStr(edge_device.name)
     edge_mem_gb_str = fmt_memory(edge_mem, unit=GB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(round(memory_reduction), precision=0, commas=False)

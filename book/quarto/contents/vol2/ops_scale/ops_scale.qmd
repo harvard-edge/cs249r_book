@@ -791,7 +791,7 @@ The scoring approach uses three criteria: impact severity, frequency, and resolu
 ```{python}
 #| echo: false
 #| label: debt-priority-lego
-from mlsysim.fmt import fmt_rate, fmt_time, fmt_usd
+from mlsysim.fmt import fmt, fmt_count, fmt_percent, fmt_rate, fmt_time, fmt_usd, check
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DEBT PRIORITY SCORING (LEGO)
@@ -823,9 +823,10 @@ class DebtPriority:
     pipeline_frequency = 2
     pipeline_resolution_cost = 3
 
-    deployment_delay_weeks = 6
+    remediation_weeks = 6
     eliminated_delay_fraction = 0.35
-    models_per_year = 40
+    config_hours_per_deploy = 12
+    deploys_per_year = 80
     hours_per_week = 40
     engineer_rate = 150
 
@@ -834,24 +835,28 @@ class DebtPriority:
     monitoring_score = monitoring_impact * monitoring_frequency / monitoring_resolution_cost
     pipeline_score = pipeline_impact * pipeline_frequency / pipeline_resolution_cost
 
-    weeks_saved = deployment_delay_weeks * eliminated_delay_fraction * models_per_year
-    config_savings = weeks_saved * hours_per_week * engineer_rate
+    annual_hours_saved = config_hours_per_deploy * deploys_per_year * eliminated_delay_fraction
+    config_savings = annual_hours_saved * engineer_rate
+    remediation_cost = remediation_weeks * hours_per_week * engineer_rate
+    payback_months = remediation_cost / config_savings * 12
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(config_score > monitoring_score > pipeline_score, "Debt priority ordering changed unexpectedly")
-    check(abs(weeks_saved - 84) < 1e-9, f"Expected 84 weeks saved, got {weeks_saved}")
+    check(abs(annual_hours_saved - 336) < 1e-9, f"Expected 336 hours saved, got {annual_hours_saved}")
+    check(round(config_savings) == 50_400, f"Expected $50,400 annual savings, got {config_savings}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     config_score_str = fmt(config_score, precision=1, commas=False)
     monitoring_score_str = fmt(monitoring_score, precision=0, commas=False)
     pipeline_score_str = fmt(pipeline_score, precision=1, commas=False)
-    weeks_saved_str = fmt_time(weeks_saved, 'week', precision=0, commas=False, style='word')
+    annual_hours_saved_str = fmt_count(annual_hours_saved, precision=0, commas=False, label="engineer-hour")
     config_savings_str = fmt_usd(config_savings, scale='K', precision=0, commas=False)
-    deployment_delay_weeks_str = fmt_time(deployment_delay_weeks, 'week', precision=0, commas=False, style='word')
+    remediation_weeks_str = fmt_time(remediation_weeks, 'week', precision=0, commas=False, style='word')
     eliminated_delay_pct_str = fmt_percent(eliminated_delay_fraction, precision=0, commas=False, style='prose')
-    delay_per_model_weeks_str = fmt_time(deployment_delay_weeks * eliminated_delay_fraction, 'week', precision=1, commas=False, style='word')
-    models_per_year_str = fmt_rate(models_per_year, "models/year", precision=0, commas=False)
-    payback_months_str = fmt_time(2, 'month', precision=0, commas=False, style='word')
+    config_hours_per_deploy_str = fmt_count(config_hours_per_deploy, precision=0, commas=False, label="engineer-hour")
+    deploys_per_year_str = fmt_count(deploys_per_year, precision=0, commas=False, label="deployment")
+    engineer_rate_str = fmt_usd(engineer_rate, precision=0, commas=False, per="hour")
+    payback_months_str = fmt_time(payback_months, 'month', precision=1, commas=False, style='word')
 ```
 
 | **Debt Category** | **Impact** | **Frequency** | **Resolution Cost** |               **Total Score**                | **Priority** |
@@ -864,7 +869,7 @@ class DebtPriority:
 
 The score makes configuration debt the first paydown target: build configuration schema validation and a templating system before addressing lower-scoring pipeline glue.
 
-The investment requires `{python} DebtPriority.deployment_delay_weeks_str` of engineering effort to build the configuration system. It saves `{python} DebtPriority.eliminated_delay_pct_str` of deployment delays = `{python} DebtPriority.delay_per_model_weeks_str` per model $\times$ `{python} DebtPriority.models_per_year_str` = `{python} DebtPriority.weeks_saved_str` of deployment time saved. At \$150/hour engineer cost, `{python} DebtPriority.weeks_saved_str` = `{python} DebtPriority.config_savings_str` annual savings. The investment pays back within `{python} DebtPriority.payback_months_str`.
+The investment requires `{python} DebtPriority.remediation_weeks_str` of engineering effort to build the configuration system. It removes `{python} DebtPriority.eliminated_delay_pct_str` of the recurring configuration-review toil: `{python} DebtPriority.config_hours_per_deploy_str` per deployment $\times$ `{python} DebtPriority.deploys_per_year_str` per year $\times$ `{python} DebtPriority.eliminated_delay_pct_str` = `{python} DebtPriority.annual_hours_saved_str` saved per year. At `{python} DebtPriority.engineer_rate_str`, that is `{python} DebtPriority.config_savings_str` in annual savings, so the investment pays back in about `{python} DebtPriority.payback_months_str`.
 
 #### Decision framework {#sec-ml-operations-scale-decision-framework-b97b}
 
@@ -1121,7 +1126,7 @@ class InfraFrontierTcoClusterRecap:
 - **Electricity** (60--70 percent of OpEx): At \$0.07/kWh, a `{python} InfraFrontierTcoClusterRecap.cluster_gpus_str`-GPU H100 cluster consuming 1 MW (including cooling at PUE 1.1) costs approximately \$615,000 per year in electricity alone.
 - **Staffing and maintenance** (20--30 percent of OpEx): System administrators, hardware technicians, replacement parts, and software license fees.
 
-Consider a `{python} InfraFrontierTcoClusterRecap.frontier_params_b_str`-parameter frontier model as the running cost example for this analysis. For this model, a minimum viable training cluster requires approximately `{python} InfraFrontierTcoClusterRecap.cluster_gpus_str` H100 GPUs spread across `{python} InfraFrontierTcoClusterRecap.cluster_nodes_str` nodes to complete a training run in 2--4 weeks. Evaluating the TCO over a three-year lifecycle reveals a stark utilization dependency. The hardware CapEx dominates at `{python} InfraFrontierTcoClusterRecap.hardware_capex_m_str` (\$350,000 per node), supported by a \$5 million investment in a two-tier InfiniBand fat-tree network and a proportional \$10 million facility allocation. Operational costs add approximately \$1.5 million annually for electricity (at \$0.07/kWh with a PUE of 1.1) and specialized staffing, bringing the three-year total to roughly \$63 million. If this dedicated cluster only trains six large models per year, the effective cost per run is \$3.5 million. Renting the same `{python} InfraFrontierTcoClusterRecap.cluster_gpus_str`-GPU allocation in the public cloud at \$4.00 per GPU-hour costs about \$1.3--2.7 million per run (`{python} InfraFrontierTcoClusterRecap.cluster_gpus_str` times 336--672 hours $\times$ \$4), or \$24--48 million over three years for six runs per year. The cloud is cheaper for this bursty cadence because the organization is not paying for idle weeks. The economic advantage of owning hardware only materializes at *continuous utilization*: if the cluster runs 24/7 (supporting training, inference, fine-tuning, and experimentation), the effective on-premises cost drops to approximately \$2.40 per GPU-hour, significantly undercutting the cloud rate. This utilization dependency is the central tension in every build-vs.-buy analysis.
+Consider a `{python} InfraFrontierTcoClusterRecap.frontier_params_b_str`-parameter frontier model as the running cost example for this analysis. For this model, a minimum viable training cluster requires approximately `{python} InfraFrontierTcoClusterRecap.cluster_gpus_str` H100 GPUs spread across `{python} InfraFrontierTcoClusterRecap.cluster_nodes_str` nodes to complete a training run in 2--4 weeks. Evaluating the TCO over a three-year lifecycle reveals a stark utilization dependency. The hardware CapEx dominates at `{python} InfraFrontierTcoClusterRecap.hardware_capex_m_str` (\$350,000 per node), supported by a \$5 million investment in a two-tier InfiniBand fat-tree network and a proportional \$10 million facility allocation. Operational costs add approximately \$1.5 million annually for electricity (at \$0.07/kWh with a PUE of 1.1) and specialized staffing, bringing the three-year total to roughly \$64 million. If this dedicated cluster only trains six large models per year, the effective cost per run is \$3.5 million. Renting the same `{python} InfraFrontierTcoClusterRecap.cluster_gpus_str`-GPU allocation in the public cloud at \$4.00 per GPU-hour costs about \$1.3--2.7 million per run (`{python} InfraFrontierTcoClusterRecap.cluster_gpus_str` times 336--672 hours $\times$ \$4), or \$24--48 million over three years for six runs per year. The cloud is cheaper for this bursty cadence because the organization is not paying for idle weeks. The economic advantage of owning hardware only materializes at *continuous utilization*: if the cluster runs 24/7 (supporting training, inference, fine-tuning, and experimentation), the effective on-premises cost drops to approximately \$2.40 per GPU-hour, significantly undercutting the cloud rate. This utilization dependency is the central tension in every build-vs.-buy analysis.
 
 ### Utilization as the economic invariant {#sec-ml-operations-scale-build-vs-buy}
 
@@ -1240,6 +1245,7 @@ class TcoScenario:
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(onprem_node_annual < cloud_node_annual, "On-prem should be cheaper at 80% util")
+    check(42.4 < breakeven < 42.6, f"Break-even utilization drifted to {breakeven:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cloud_cost_str = fmt_usd(cloud_node_annual, precision=0)
@@ -1249,7 +1255,7 @@ class TcoScenario:
     breakeven_util_str = fmt_percent(breakeven / 100, precision=1, commas=False, style='prose')
 ```
 
-Cloud providers charge by the GPU-hour. At approximately \$4.00 per H100-hour, a single 8-GPU node running at `{python} TcoScenario.util_pct_str` utilization costs `{python} TcoScenario.cloud_cost_str` per year. An on-premises DGX H100 node costs approximately \$350,000 to purchase. Amortized over three years and combined with electricity costs of `{python} TcoScenario.annual_elec_usd_str` per node per year, the total annual on-premises cost is approximately `{python} TcoScenario.onprem_usd_str` per node. On-premises infrastructure becomes favorable when sustained utilization exceeds roughly `{python} TcoScenario.breakeven_util_str`.
+Cloud providers charge by the GPU-hour. At approximately \$4.00 per H100-hour, a single 8-GPU node running at `{python} TcoScenario.util_pct_str` utilization costs `{python} TcoScenario.cloud_cost_str` per year. An on-premises DGX H100 node costs approximately \$350,000 to purchase. Amortized over three years and combined with electricity costs of `{python} TcoScenario.annual_elec_usd_str` per node per year, the total annual on-premises cost is approximately `{python} TcoScenario.onprem_usd_str` per node. Solving the break-even equation with electricity scaling at the same utilization, on-premises infrastructure becomes favorable when sustained utilization exceeds roughly `{python} TcoScenario.breakeven_util_str`.
 
 The same calculation also explains why cloud pricing cannot be read as a simple price list. Reserved capacity lowers the per-hour rate by 40--60 percent, but it converts optionality into commitment. Spot or preemptible capacity can be 60--80 percent cheaper, but the discount arrives as interruption risk. Cheap capacity is therefore useful only when the training or serving system already has checkpointing, elasticity, and admission control that keep interruptions from becoming lost work or user-visible failures.
 
@@ -1649,7 +1655,7 @@ from mlsysim.fmt import fmt, fmt_count, fmt_rate, fmt_usd
 class TcoDecisionExercise:
     models_per_year = 10
     gpu_hours_per_model = 1_000
-    cluster_gpus = 128
+    cluster_gpus = 8
     cloud_gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
     node_price_usd = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
     electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude
@@ -2441,8 +2447,8 @@ class SilentFailure:
     sf_ctr_drop_str = MarkdownStr("0.5 percentage points (10 percent relative)")
     sf_value_per_click_str = fmt_usd(value_per_click, precision=2, commas=False, per="click")
     sf_total_loss_str = fmt_usd(total_loss, precision=0)
-    sf_sec_per_day_str = fmt_time(SEC_PER_HOUR * 24, "second", precision=0, commas=False, per="day")
-    sf_total_requests_str = fmt_count(total_requests, commas=False, label="request")
+    sf_sec_per_day_str = fmt_time(SEC_PER_HOUR * 24, "second", precision=0, commas=True, per="day")
+    sf_total_requests_str = fmt_count(total_requests, commas=True, label="request")
     sf_lost_clicks_str = fmt_count(lost_clicks_count, label="lost click")
     sf_ctr_drop_ratio_str = fmt(ctr_drop, precision=3, commas=False)
 ```
@@ -4068,19 +4074,21 @@ The decomposition reveals a critical insight: the dominant cost component shifts
 
 #### Training cost model {#sec-ml-operations-scale-training-cost-model-9e15}
 
-Training costs encompass the compute required to develop and maintain models. @Eq-training-cost formalizes training cost as a function of GPU count, training duration, hourly rates, data center efficiency, and failure overhead:
+Training costs encompass the compute required to develop and maintain models. @Eq-training-cost formalizes training cost as a function of GPU count, training duration, non-energy accelerator-hour rates, data center energy overhead, and failure overhead:
 
-$$C_{\text{train}} = N_{\text{GPU}} \times T_{\text{hours}} \times R_{\text{GPU/hr}} \times \text{PUE} \times (1 + F_{\text{fail}})$$ {#eq-training-cost}
+$$C_{\text{train}} = N_{\text{GPU}} \times T_{\text{hours}} \times \left(R_{\text{GPU/hr}} + P_{\text{GPU}} \times R_{\$/\text{kWh}} \times \text{PUE}\right) \times (1 + F_{\text{fail}})$$ {#eq-training-cost}
 
 where:
 
 - $N_{\text{GPU}}$ is the number of GPUs allocated
 - $T_{\text{hours}}$ is the training duration in hours
-- $R_{\text{GPU/hr}}$ is the hourly GPU cost (including instance overhead)
-- $\text{PUE}$ is the Power Usage Effectiveness multiplier (typically 1.1-1.5)
+- $R_{\text{GPU/hr}}$ is the non-energy accelerator-hour cost
+- $P_{\text{GPU}}$ is per-GPU power draw in kW
+- $R_{\$/\text{kWh}}$ is the electricity price
+- $\text{PUE}$ is the Power Usage Effectiveness multiplier applied to the energy term
 - $F_{\text{fail}}$ is the failure overhead factor (fraction of training lost to failures and restarts)
 
-The PUE factor captures data center efficiency: a PUE of 1.2 means 20 percent additional power for cooling and infrastructure. The failure overhead $F_{\text{fail}}$ accounts for checkpoint-and-restart costs; at scale, @sec-fault-tolerance-reliability establishes that failure rates of 1-5 percent per GPU-day require 10–25 percent overhead for fault tolerance.
+The PUE factor captures data center efficiency: a PUE of 1.2 means 20 percent additional power for cooling and infrastructure. It applies to energy consumption, not to the whole accelerator-hour rate. The failure overhead $F_{\text{fail}}$ accounts for checkpoint-and-restart costs; at scale, @sec-fault-tolerance-reliability establishes that failure rates of 1-5 percent per GPU-day require 10–25 percent overhead for fault tolerance.
 
 #### Worked example: Training cost calculation {#sec-ml-operations-scale-worked-example-training-cost-calculation-6535}
 
@@ -4089,32 +4097,42 @@ The PUE factor captures data center efficiency: a PUE of 1.2 means 20 percent ad
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @eq-training-cost worked example—single-run and annual cost.
 # │ Exports: TrainingCostExample.c_train_eq_math, .annual_str and setup inputs.
-from mlsysim import day
-from mlsysim.fmt import fmt, fmt_count, fmt_math, fmt_percent, fmt_time, fmt_usd, check
+from mlsysim import day, Hardware, Infrastructure
+from mlsysim.core.units import kW, kWh, USD, watt
+from mlsysim.fmt import fmt, fmt_count, fmt_math, fmt_percent, fmt_qty, fmt_time, fmt_usd, check
 
 class TrainingCostExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = 256
     days = 14
-    gpu_hour_rate = 3.50  # scenario assumption: illustrative H100 cloud rate
+    gpu_hour_rate = 3.50  # scenario assumption: non-energy H100 accelerator-hour rate
+    gpu_power = Hardware.Cloud.H100.tdp
+    electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate
     pue = 1.15
     fail_factor = 1.15  # 15% failure overhead
     retrains_per_year = 4
     # ┌── 2. EXECUTE ───────────────────────────────────────
     hours = days * 24
-    c_train = n_gpus * hours * gpu_hour_rate * pue * fail_factor
+    facility_energy_rate = round(gpu_power.to(kW).magnitude * electricity_rate.to(USD / kWh).magnitude * pue, 2)
+    effective_gpu_hour_rate = gpu_hour_rate + facility_energy_rate
+    c_train = n_gpus * hours * effective_gpu_hour_rate * fail_factor
     annual_cost = c_train * retrains_per_year
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(round(c_train) == 398_147, f"C_train {c_train} drift")
+    check(round(c_train) == 352_150, f"C_train {c_train} drift")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     n_gpus_str = fmt_count(n_gpus, label="H100 GPU", plural_label="H100 GPUs")
     days_str = fmt_time(days * day, day, precision=0, commas=False, style="word")
     gpu_hour_rate_str = fmt_usd(gpu_hour_rate, precision=2, commas=False, per="GPU-hour")
+    gpu_power_w_str = fmt_qty(gpu_power, watt, precision=0, commas=False)
+    electricity_rate_str = fmt_usd(electricity_rate.to(USD / kWh).magnitude, precision=2, commas=False, per="kWh")
+    facility_energy_rate_str = fmt_usd(facility_energy_rate, precision=2, commas=False, per="GPU-hour")
+    effective_gpu_hour_rate_str = fmt_usd(effective_gpu_hour_rate, precision=2, commas=False, per="GPU-hour")
     pue_str = fmt(pue, precision=2, commas=False)
     fail_overhead_pct_str = fmt_percent(fail_factor - 1, precision=0, commas=False, style="prose")
     c_train_eq_math = fmt_math(
         rf"C_{{\text{{train}}}} = {fmt(n_gpus, precision=0)} \times ({days} \times 24) "
-        rf"\times {fmt_usd(gpu_hour_rate, precision=2, commas=False)} \times {pue} \times {fail_factor} "
+        rf"\times ({fmt_usd(gpu_hour_rate, precision=2, commas=False)} + {fmt_usd(facility_energy_rate, precision=2, commas=False)}) "
+        rf"\times {fail_factor} "
         rf"\approx {fmt_usd(round(c_train))}"
     )
     annual_str = fmt_usd(annual_cost, scale="M", precision=1)
@@ -4123,8 +4141,9 @@ class TrainingCostExample:
 Consider training a large language model:
 
 - Configuration: `{python} TrainingCostExample.n_gpus_str` for `{python} TrainingCostExample.days_str`
-- Hourly rate: `{python} TrainingCostExample.gpu_hour_rate_str` (illustrative H100 cloud-pricing scenario)
-- PUE: `{python} TrainingCostExample.pue_str` (efficient hyperscale data center)
+- Base accelerator-hour rate: `{python} TrainingCostExample.gpu_hour_rate_str`
+- Energy adder: `{python} TrainingCostExample.gpu_power_w_str` at `{python} TrainingCostExample.electricity_rate_str` and PUE `{python} TrainingCostExample.pue_str` adds `{python} TrainingCostExample.facility_energy_rate_str`
+- Effective rate: `{python} TrainingCostExample.effective_gpu_hour_rate_str`
 - Failure overhead: `{python} TrainingCostExample.fail_overhead_pct_str` (typical for multi-node training)
 
 `{python} TrainingCostExample.c_train_eq_math`
@@ -4822,7 +4841,7 @@ class FeatureStoreDataQuality:
     validation_failure_threshold_pct_str = fmt_percent(validation_failure_threshold, precision=0, commas=False, style="prose")
 ```
 
-The first step is measurement: data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce `{python} FeatureStoreDataQuality.expected_events_str` but delivering only `{python} FeatureStoreDataQuality.delivered_events_str` is `{python} FeatureStoreDataQuality.completeness_pct_str` complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an `age` feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than `{python} FeatureStoreDataQuality.validation_failure_threshold_pct_str` of validation rules because allowing corrupt data through is more expensive than delaying a batch.
+The first step is measurement: data quality must be quantified in dimensions that map directly to prevention gates. Completeness measures whether expected records and fields are present. A daily data pipeline expected to produce `{python} FeatureStoreDataQuality.expected_events_str` but delivering only `{python} FeatureStoreDataQuality.delivered_events_str` is `{python} FeatureStoreDataQuality.completeness_pct_str` complete, which usually indicates a pipeline failure or upstream data source issue rather than ordinary statistical variation. Consistency captures schema compliance and referential integrity: an age feature should fall between 0 and 120, while values such as 999 or -1 suggest sentinel leakage or data errors. Production systems often reject batches that fail more than `{python} FeatureStoreDataQuality.validation_failure_threshold_pct_str` of validation rules because allowing corrupt data through is more expensive than delaying a batch.
 
 Timeliness measures freshness against the SLO of the consuming model. Fraud detection may need features less than 100 milliseconds old, while demographic features can tolerate staleness measured in days; the alert threshold should therefore be tied to the feature's use, not a global constant. Accuracy asks whether values remain correct within expected distributions. Sensor drift after calibration lapses, for example, can leave values well-typed but wrong. Statistical tests such as Kolmogorov-Smirnov for continuous features, chi-square for categorical features, and Maximum Mean Discrepancy for high-dimensional data turn those accuracy checks into recurring gates.
 

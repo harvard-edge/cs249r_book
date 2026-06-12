@@ -908,7 +908,7 @@ class NVMeTierCalcs:
 # │ Context: @sec-storage-tier2-nvme
 # │ Exports: NvmeTierContext.*
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
+from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth, fmt_multiple
 
 class NvmeTierContext:
     LOCAL_NVME_DRIVES_PER_NODE_REF = 4 * count  # pedagogical: NVMe drives per node
@@ -919,6 +919,7 @@ class NvmeTierContext:
     nvme_drive_capacity = 7.68 * TB  # scenario NVMe drive capacity assumption
     tokenized_text = training_tokens * token_id_bytes
     tokenized_shard_count_val = round((tokenized_text / tokenized_shard).to("").magnitude)
+    metadata_reduction_val = (training_tokens / tokenized_shard_count_val).to(count).magnitude
     tokenized_local_stream = tokenized_text / (LOCAL_NVME_DRIVES_PER_NODE_REF * nvme_per_drive_bw)
     local_nvme_capacity = LOCAL_NVME_DRIVES_PER_NODE_REF * nvme_drive_capacity
     multimodal_images = 20 * TB  # scenario multimodal image corpus assumption
@@ -927,6 +928,7 @@ class NvmeTierContext:
     multimodal_total = multimodal_images + multimodal_text + multimodal_audio
     multimodal_excess = multimodal_total - local_nvme_capacity
     check(local_nvme_capacity.to(TB).magnitude > 25, "Four 7.68 TB drives should exceed 25 TB local capacity")
+    check(metadata_reduction_val > 100_000_000, "Shard-level metadata access should reduce token-level opens by hundreds of millions.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_per_drive_bw, unit=GB / second, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
@@ -939,6 +941,7 @@ class NvmeTierContext:
     multimodal_excess_tb_str = fmt_memory(multimodal_excess, unit=TB, precision=1, commas=False)
     tokenized_shard_count_str = fmt(tokenized_shard_count_val, precision=0)
     tokenized_shard_gb_str = fmt_memory(tokenized_shard, unit=GB, precision=0, commas=False)
+    metadata_reduction_mult_str = fmt_multiple(metadata_reduction_val, precision=0, commas=True)
 ```
 ### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
 
@@ -962,7 +965,7 @@ The second approach packs all images into a small number of large binary files (
 
 The third approach uses the tar-based archive format popularized by WebDataset. Each sample is stored as a group of related files (image, label, metadata) within a standard POSIX tar archive. The tar format supports sequential iteration without a separate index, because each file's header contains its size, allowing the reader to skip forward to the next sample. This format combines the simplicity of individual files (each sample is self-describing) with the sequential I/O efficiency of large binary files. The tar archives are also valid HyperText Transfer Protocol (HTTP) byte-range targets, making them directly streamable from object storage without local staging.
 
-For our running example, the 1.5 trillion token dataset is typically stored as a collection of 256 MB to 4 GB binary shards, each containing a contiguous sequence of tokenized text. The data loader opens a shard, reads it sequentially into a buffer, and iterates over tokens within the buffer. When the buffer is exhausted, the loader opens the next shard. The total number of `open()` calls per epoch is the number of shards (roughly `{python} NvmeTierContext.tokenized_shard_count_str` if the `{python} NvmeTierContext.tokenized_text_tb_str` serialized corpus is split into `{python} NvmeTierContext.tokenized_shard_gb_str` shards), not the number of tokens (trillions). This 10,000$\times$ to 100,000$\times$ reduction in metadata operations is what makes streaming from both local NVMe and remote storage feasible at training scale.
+For our running example, the 1.5 trillion token dataset is typically stored as a collection of 256 MB to 4 GB binary shards, each containing a contiguous sequence of tokenized text. The data loader opens a shard, reads it sequentially into a buffer, and iterates over tokens within the buffer. When the buffer is exhausted, the loader opens the next shard. The total number of `open()` calls per epoch is the number of shards (roughly `{python} NvmeTierContext.tokenized_shard_count_str` if the `{python} NvmeTierContext.tokenized_text_tb_str` serialized corpus is split into `{python} NvmeTierContext.tokenized_shard_gb_str` shards), not the number of tokens (trillions). This approximately `{python} NvmeTierContext.metadata_reduction_mult_str` reduction in metadata operations is what makes streaming from both local NVMe and remote storage feasible at training scale.
 
 At the NVMe tier, compression represents a critical trade-off between I/O bandwidth and CPU cycles. An I/O-bound pipeline, where the NVMe drives cannot keep up with accelerator demand, benefits from aggressive compression: zstd at level 9 achieves roughly 4:1 compression but decompresses at only 0.5 GB/s per CPU core. A CPU-bound pipeline, where decode and augmentation already saturate the host processor, prefers lighter compression: zstd at level 1 offers roughly 3:1 compression but decompresses at 1.5 GB/s per core. On a 28 GB/s four-drive NVMe RAID array, zstd-1 delivers an effective throughput of 84 GB/s of uncompressed data, while zstd-9 delivers 112 GB/s but requires 3$\times$ more CPU cores dedicated to decompression. The optimal compression level is therefore not a property of the data but a property of the pipeline's bottleneck, and it can change when the cluster configuration changes (adding more GPUs shifts the bottleneck toward I/O, favoring heavier compression).
 
@@ -2013,7 +2016,7 @@ At the end of the training job, the final model checkpoint is promoted from the 
 
 The total number of data copies in this lifecycle is instructive. Each training sample traverses: object storage $\to$ NVMe (staging), NVMe $\to$ host DRAM (read), host DRAM $\to$ GPU HBM (transfer). Each checkpoint traverses: GPU HBM $\to$ NVMe (local save), NVMe $\to$ parallel file system (async copy), parallel file system $\to$ object storage (long-term retention). Every copy consumes bandwidth and contributes latency. The engineering goal is to minimize copies on the critical path (the training loop) and tolerate additional copies on noncritical paths (staging and archival).
 
-The volume of data moved during a 30-day training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every 10 minutes across 256 nodes for 30 days, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling over `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs.
+The volume of data moved during a 30-day training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every 10 minutes across 256 nodes for 30 days, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs.
 
 The physical data path dictates where bytes move; the remaining question is what each movement costs.
 
