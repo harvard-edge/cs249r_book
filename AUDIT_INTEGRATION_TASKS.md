@@ -96,6 +96,9 @@ work. The detailed backlog remains in the sections below.
   - [x] Vol. II appendix-flow audit completed; copyedit PDF appendix order was
     aligned with canonical Vol. II appendix order, and remaining appendix
     content findings are queued for later prose decisions.
+- [x] Suppress the HTML landing-page `Welcome` sections from PDF front matter
+  without removing the web landing pages; verified at the generated LaTeX
+  boundary that the landing-page section commands no longer appear.
 
 ### Concept-Audit Integration Queue
 
