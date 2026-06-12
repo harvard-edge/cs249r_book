@@ -2519,9 +2519,9 @@ The debugging method is to compare scheduler state with physical capability, ins
 
 ::: {#exmp-fleet-orchestration-debugging-low-gpu-utilization .callout-example title="Debugging low GPU utilization"}
 
-**Problem**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization despite a full job queue with over `{python} DebugValueCalc.pending_jobs_str` pending jobs. Engineering leadership expects greater than `{python} DebugValueCalc.debug_target_util_pct_str` utilization given the capital investment. The standard monitoring dashboards show plenty of idle GPUs, yet users complain about long queue times. Identify the binding constraint and the systematic diagnostic path.
+**Problem**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization, below the `{python} DebugValueCalc.debug_target_util_pct_str` operating target, despite a full queue with over `{python} DebugValueCalc.pending_jobs_str` pending jobs. Dashboards show idle GPUs, but users still wait. Identify the binding constraint and the diagnostic path.
 
-The fleet stack framework in @fig-fleet-stack provides a structured approach: analyze the Infrastructure Layer first to understand hardware constraints, then the Distribution Layer to understand scheduling logic, and finally the interaction between layers to identify the root cause.
+The fleet stack framework in @fig-fleet-stack structures the diagnosis: inspect hardware capability first, then scheduling policy, then the mismatch between them.
 
 **Infrastructure Layer Analysis**\index{Infrastructure Layer!analysis}: The cluster contains heterogeneous hardware acquired over three procurement cycles:
 
@@ -2533,7 +2533,7 @@ The fleet stack framework in @fig-fleet-stack provides a structured approach: an
 
 : **Cluster hardware inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
-As @tbl-fleet-orchestration-debug-inventory shows, the physical topology creates three distinct resource pools with different capabilities. The A100 nodes support efficient tensor parallelism via NVLink, while V100 nodes are limited to data parallelism due to PCIe bandwidth constraints.
+The inventory in @tbl-fleet-orchestration-debug-inventory separates physical capability before the scheduler policy is examined.
 
 **Distribution Layer Analysis**\index{Distribution Layer!analysis}: The Slurm scheduler implements gang scheduling with strict resource type matching. Examining the job specifications reveals the demand pattern:
 
@@ -2552,13 +2552,8 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 
 **Root cause (policy-infrastructure mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80 GB cluster. When infrastructure expanded with heterogeneous hardware, the Distribution Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
 
-**Solution**: Implement tiered resource matching with topology awareness. The fix addresses all four pathologies through complementary policy changes:
+**Solution**: Implement tiered resource matching with topology awareness. The policy changes are durable: express capability requirements instead of exact GPU SKUs, reserve NVLink-connected nodes for jobs that need tensor parallelism, backfill compatible smaller jobs into otherwise idle pools, seed appropriate workloads onto older accelerators with lower cost accounting, and make the correct resource request easier than the over-specified template.
 
-1. **Capability-based scheduling**\index{Capability-Based Scheduling}: Replace exact GPU type requests with capability requirements. Instead of `--gres=gpu:a100-80g:64`, jobs submit through a site wrapper or admission policy that maps "at least 40 GB of GPU memory" to valid Slurm features or typed GRES choices, such as nodes tagged `gpu_mem_40gb` or `gpu_mem_80gb`. This eliminates over-specification by expressing what the job *needs* rather than what hardware it *prefers*. The scheduler can then match jobs to the cheapest available hardware that meets their requirements.
-2. **Topology-aware placement**\index{Topology-Aware Placement}: For jobs requiring tensor parallelism (identified by requesting more than 1 GPU per node), add constraint `--constraint="nvlink"` to ensure placement on NVLink-connected nodes. Data-parallel jobs that request only 1 GPU per node can omit this constraint, enabling scheduling on V100 nodes where NVLink is absent but data parallelism works efficiently over any network.
-3. **Backfill and queue policy**: Enable or tune backfill scheduling so smaller compatible jobs can use otherwise idle pools without delaying higher-priority reservations. Revise resource constraints and queue priorities so jobs that can run on A100-40 GB or V100 hardware are not blocked behind A100-80 GB-only requests. Do not rely on `bf_window` or `bf_continue` as a gang-completion timeout; those parameters control backfill lookahead and scheduler behavior, not release of partial GPU allocations.
-4. **V100 workload seeding**\index{V100 Workload Seeding}: Create a "legacy-gpu" queue with lower cost accounting (reflecting V100's lower capability) to incentivize researchers to submit appropriate workloads to V100 hardware. Small-scale experiments, single-GPU development, preprocessing-heavy jobs, and data-parallel training whose per-replica footprint fits within 32 GB can run effectively on V100s.
-5. **Workload-hardware matching guidance**\index{Workload-Hardware Matching Guidance}: Provide researchers with a decision matrix mapping model sizes to minimum GPU memory requirements, reducing over-specification by making the correct resource request the easiest choice.
 **Quantified impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:
 
 | **Pool**         |                                                        **Before**                                                        |                                                       **After**                                                        |                       **Change**                       |
@@ -2572,9 +2567,7 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 
 As @tbl-fleet-orchestration-debug-results shows, this utilization gain adds approximately `{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPUs of productive work. That is equivalent to buying `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs if those GPUs ran at the old `{python} DebugValueCalc.debug_util_before_pct_str` utilization. At `{python} DebugValueCalc.debug_gpu_hour_rate_str`, the equivalent raw capacity represents approximately `{python} DebugValueCalc.debug_annual_usd_str` in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
 
-**Systems lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Distribution Layer), perhaps requiring a more sophisticated scheduler like those discussed in @sec-fleet-orchestration-custom-schedulers. Management initially proposed evaluating Pollux or a custom scheduling solution, which would have required months of engineering effort and introduced operational risk. Deeper analysis revealed the root cause as a mismatch between Infrastructure Layer heterogeneity and Distribution Layer policies designed for homogeneous infrastructure. *The scheduler algorithm was not the problem; the policies it implemented were the problem.* The scheduler correctly implemented its configured policy; the policy itself created the utilization gap.
-
-Effective debugging required examining both layers and their interaction, recognizing that infrastructure evolution (adding A100-40 GB and V100 nodes to an originally homogeneous A100-80 GB cluster) had invalidated assumptions embedded in job templates and scheduling configuration. The fix addressed the policy layer, not the algorithm layer, and was implemented through configuration changes requiring zero code modifications and zero additional hardware investment. This pattern recurs across ML infrastructure: many scheduling problems are not algorithmic insufficiency but policy-infrastructure mismatch, where operational policies designed for one infrastructure configuration are applied without adaptation to a changed infrastructure.
+**Systems lesson**: Surface-level diagnosis suggested a scheduling algorithm problem. Deeper analysis showed a policy-infrastructure mismatch: the scheduler correctly implemented policies written for a homogeneous A100-80 GB cluster, but the infrastructure had become heterogeneous. Many utilization problems have this shape. The fix is not always a new scheduler; often it is updating the operational policy so it matches the fleet that actually exists.
 
 :::
 
