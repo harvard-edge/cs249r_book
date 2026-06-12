@@ -4531,7 +4531,7 @@ Enabling per-tenant quotas contains the impact to the offending tenant alone (@t
 
 Resource quotas\index{Resource Quotas} limit what each tenant can consume, preventing any single tenant from monopolizing shared resources.
 
-Hard quotas enforce strict limits, as shown in @lst-resource-quotas.
+Hard quotas turn shared serving into admission control: the system checks concurrency, KV-cache memory, and request rate before admitting each request. @Lst-resource-quotas uses those three gates so a tenant can be throttled at the scarce resource boundary instead of degrading the whole batch.
 
 ::: {#lst-resource-quotas lst-cap="**Resource Quotas**: Admission control that enforces per-tenant limits on concurrency, KV cache memory, and request rate."}
 
@@ -4558,6 +4558,8 @@ def admit_request(tenant_id, request):
 ```
 
 :::
+
+The invariant is deny before interference. A request that would exceed any tenant quota never enters the scheduler, which keeps protected tenants from paying for another tenant's burst with higher queueing delay or KV-cache pressure.
 
 Soft quotas with fair sharing provide a more flexible alternative. Each tenant has a nominal token generation quota (for example, 10,000 tokens/sec), but when the cluster is underutilized (50 percent capacity), tenants can burst to 2$\times$ their quota. When the cluster saturates (90 percent capacity), quotas are enforced. This approach maximizes utilization during low-traffic periods while protecting tenants during contention.
 
@@ -4663,7 +4665,7 @@ Compute isolation addresses the latency variance that GPU time-sharing introduce
 
 [^fn-mig-partitioning]: **MIG (Multi-Instance GPU)**\index{MIG!partitioning}: Introduced with NVIDIA's A100 [@NVIDIA2020], MIG spatially partitions a single GPU into up to 7 isolated instances, each with dedicated compute SMs, memory bandwidth, and L2 cache. Unlike time-slicing, which shares resources and introduces latency variance of 2--5$\times$, MIG provides hardware-enforced isolation with predictable performance, making it a strong mechanism for serving multiple small models on a single expensive data center GPU when partition sizes match model requirements.
 
-Model loading\index{Model Loading!isolation} presents a subtler isolation challenge: loading a new model should not evict a running model from GPU memory. @Lst-model-loading-isolation demonstrates priority-aware eviction logic that enforces this constraint.
+Model loading\index{Model Loading!isolation} presents a subtler isolation challenge: loading a new model should not evict a running model from GPU memory. @Lst-model-loading-isolation implements that policy as a fail-closed memory check: evict only lower-priority, evictable models, and reject the load when the remaining memory is protected.
 
 ::: {#lst-model-loading-isolation lst-cap="**Model Loading Isolation**: Priority-aware memory management that prevents model eviction from violating tenant isolation constraints."}
 
@@ -4686,6 +4688,8 @@ class ModelManager:
 ```
 
 :::
+
+That rejection path is the isolation guarantee. It may lower utilization in the moment, but it prevents a control-plane load request from turning into an unplanned model eviction or a tenant-visible outage.
 
 ### Observability for multi-tenancy {#sec-inference-scale-observability-multitenancy-8637}
 
@@ -4807,7 +4811,7 @@ Even after weights reside in GPU memory, the first inference runs slower than st
 
 Reactive scaling adjusts capacity after the system observes pressure. It is useful for gradual demand changes, but it cannot solve the cold-start problem by itself because the signal arrives after traffic has already reached the fleet.
 
-@Lst-metric-based-scaling shows a typical metric-based scaling\index{Scaling!metric-based} configuration.
+Metric-based scaling\index{Scaling!metric-based} is a thresholded control loop. @Lst-metric-based-scaling separates the target operating point from the scale-up and scale-down thresholds, while the cooldown period prevents the controller from undoing its own last decision before the new replicas affect the metric.
 
 ::: {#lst-metric-based-scaling lst-cap="**Metric-Based Scaling**: Autoscaling policy driven by utilization thresholds with a cooldown period to prevent oscillation."}
 
@@ -4821,6 +4825,8 @@ autoscaling:
 ```
 
 :::
+
+Those fields encode the responsiveness-stability trade-off. Tighter thresholds react sooner but can oscillate under noisy utilization; longer cooldowns dampen oscillation but leave the fleet overloaded longer after a real spike.
 
 A more responsive alternative scales on queue depth rather than utilization, targeting a maximum queue length per replica:
 
@@ -4900,7 +4906,7 @@ def predict_demand(current_time, history):
 
 :::
 
-Event-driven scaling\index{Scaling!event-driven} scales proactively for known events, as shown in @lst-event-driven-scaling.
+Event-driven scaling\index{Scaling!event-driven} is useful when demand has an external clock the platform can trust. @Lst-event-driven-scaling schedules capacity before a product launch or recurring batch window, using the ramp-up field to hide cold start and the duration field to release extra replicas after the event.
 
 ::: {#lst-event-driven-scaling lst-cap="**Event-Driven Scaling**: Scheduled scaling rules that preprovision capacity for product launches and recurring traffic spikes."}
 
@@ -4918,6 +4924,8 @@ scheduled_scaling:
 ```
 
 :::
+
+This pattern works for launches, batch refreshes, and calendar-driven traffic; it does not replace reactive control for unplanned demand because the schedule is only as good as the event model.
 
 In practice, neither forecasting nor event schedules alone suffice. Production systems combine a predictive baseline with reactive adjustment to handle both anticipated patterns and unexpected deviations:
 
@@ -5055,7 +5063,7 @@ Cloud providers may offer discounted GPU instances[^fn-spot-inference] that can 
 
 : **GPU Instance Types by Pricing and Reliability**: Three GPU instance classes trade discount against interruption risk. On-demand is the reference price with no interruption; reserved instances trade upfront commitment for moderate discount; spot instances trade preemption risk for large savings. Production fleets often run a baseline of reserved + on-demand instances and burst into spot capacity for best-effort traffic. {#tbl-gpu-instance-types}
 
-@Lst-spot-termination illustrates graceful handling of spot termination\index{Spot Instances!termination handling} within the two-minute warning window.
+Spot termination handling\index{Spot Instances!termination handling} is a race against the provider's warning window. @Lst-spot-termination orders the shutdown path so new work stops first, in-flight work drains while time remains, recoverable state is persisted, and the load balancer stops sending traffic before the instance disappears.
 
 ::: {#lst-spot-termination lst-cap="**Spot Termination Handling**: Graceful shutdown sequence that drains in-flight requests, persists KV cache state, and deregisters from the load balancer."}
 
@@ -5079,6 +5087,8 @@ def handle_spot_termination():
 ```
 
 :::
+
+The sequence matters because the steps are not interchangeable. Deregistering too early strands useful capacity, but saving state after shutdown loses the KV cache; the handler preserves availability by draining first and routing away only after the replica can no longer accept work safely.
 
 A spot-aware architecture splits traffic between on-demand and spot replicas by SLO class, as shown in @fig-spot-aware-routing. SLO-critical requests always route to on-demand capacity, while best-effort requests absorb the cost savings and interruption risk of spot instances.
 
