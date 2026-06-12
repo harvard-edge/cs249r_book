@@ -326,9 +326,23 @@ Authorial-decision packets to preserve rather than silently resolve:
   - [x] Queued overlong/body-like footnotes as authorial decisions where a
     safe local edit would change the teaching instrument rather than merely
     fix progressive disclosure.
-- [ ] Run a late-stage Volume II SVG polish pass after text/layout work,
+- [x] Run a late-stage Volume II SVG polish pass after text/layout work,
   including the cited gray-background/soft-rendered diagrams, rectangular arrow
   cleanup, and consistency with the sharper existing SVG style.
+  - [x] Ran the pass with four read-only SVG review agents over early, middle,
+    production/governance, and responsible/backmatter Vol. II figure groups;
+    centralized accepted edits in this worktree.
+  - [x] Removed full-panel gray backgrounds and softened screenshot-like
+    styling from the flagged body SVGs while preserving gray only for semantic
+    neutral containers or inactive terms.
+  - [x] Repaired visual-language issues found during the pass: C3 taxonomy
+    resource colors, AI-triad vertex colors, roofline red misuse, bandwidth
+    hierarchy storage-zone styling, orthogonal tensor-parallel arrows,
+    queuing annotation clearance, budget/provenance margin figures, ladder
+    color semantics, and sustainable-AI label collisions.
+  - [x] XML-parsed and raster-rendered all 28 changed SVGs with `xmllint` and
+    `rsvg-convert`; visual contact-sheet QA passed for gray panels, cut labels,
+    arrow routing, and text collisions.
 - [x] Redraw the Vol. II Fleet Stack, AI Triad, conclusion Fleet Stack,
   reward-hacking loop, and layers-of-responsibility body figures as clean,
   crisp SVGs that match the book visual language and avoid soft/gray
@@ -443,7 +457,11 @@ Authorial-decision packets to preserve rather than silently resolve:
 - Standing review patterns from user feedback:
   - Put every new or changed bibliography entry through a dedicated staging
     `.bib` file and BetterBib before copying the reviewed entry into the real
-    volume bibliography.
+    volume bibliography; never paste raw new metadata directly into
+    `references.bib`.
+  - Treat BetterBib as a cleanup aid, not an authority: verify the cleaned
+    entry against the real source, reject unrelated metadata swaps or bad
+    styling, smoke-test new keys, then copy only the reviewed entry.
   - Replace raw URLs with bibliography-backed references when a stable source
     exists.
   - Watch for date-sensitive or product-specific claims and either source-check

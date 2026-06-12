@@ -321,8 +321,9 @@ def ironbar(ax, segs=(("D", 0.25, MEM), ("C", 0.55, COMP), ("L", 0.2, NET)), dom
                     color=c if i == dom else GRID, alpha=0.95 if i == dom else 0.7)
             frac = v / total if total else 0
             if frac > 0.026 * len(l) + 0.06:
+                label_color = "white" if i == dom else INK
                 ax.text(left + v / 2, 0, l, fontsize=6, ha="center", va="center",
-                        color="white", fontweight="bold")
+                        color=label_color, fontweight="bold")
             else:
                 ax.text(left + v / 2, 0.34, l, fontsize=4.7, ha="center", va="bottom",
                         color=INK, fontweight="bold")
