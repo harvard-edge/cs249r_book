@@ -224,7 +224,7 @@ def test_serving_profile_anchors():
     assert profile.H100VendorMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
     assert float(profile.PrecisionDividendTensorParallelDegree) == pytest.approx(8.0)
     assert float(profile.PrecisionDividendContextLengthTokens) == pytest.approx(4096.0)
-    assert profile.PrecisionDividendGpuMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
+    assert not hasattr(profile, "PrecisionDividendGpuMemoryBudget")
     assert float(profile.PrecisionDividendBaselinePolicyBatchLimit) == pytest.approx(4.0)
     assert float(profile.PrecisionDividendOptimizedPolicyBatchLimit) == pytest.approx(32.0)
     assert float(profile.PrecisionDividendSpeculationBatchThreshold) == pytest.approx(16.0)
