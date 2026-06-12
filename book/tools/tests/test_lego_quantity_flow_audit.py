@@ -57,7 +57,10 @@ def test_flags_fmt_count_precision_zero_boilerplate(tmp_path: Path):
     qmd = _write_qmd(
         tmp_path,
         """```{python}
-# │ Exports: X.params_str
+# │ Context: Example prose immediately below.
+# │ Goal: Exercise scaled-count precision policy.
+# │ Show: Parameter-count display value.
+# │ How: Format a count-like scalar.
 class X:
     params_str = fmt_count(params, scale="B", precision=0, commas=False)
 ```""",
@@ -69,7 +72,10 @@ def test_flags_formatted_string_reused_as_float(tmp_path: Path):
     qmd = _write_qmd(
         tmp_path,
         """```{python}
-# │ Exports: X.t_str
+# │ Context: Example prose immediately below.
+# │ Goal: Exercise formatted-string reuse detection.
+# │ Show: Transfer-time display value.
+# │ How: Reuse a formatted string in arithmetic.
 class X:
     bandwidth_str = fmt(bandwidth_gbs, precision=0)
     seconds = payload_gb / float(bandwidth_str)
