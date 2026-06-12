@@ -4302,17 +4302,130 @@ The comparison reveals four key insights:
 
 Understanding how TCO responds to key parameters enables strategic planning. @Tbl-tco-sensitivity shows the impact of 2$\times$ increases in key parameters on each cost component:
 
-| **Parameter**        | **Change** | **Training** | **Inference** | **Data** | **Total Impact** |
-|:---------------------|:----------:|:------------:|:-------------:|:--------:|:----------------:|
-| **Daily users**      | 2$\times$  |      --      |     +100%     |  +120%   |       +45%       |
-| **Model count**      | 2$\times$  |    +100%     |     +100%     |   +50%   |       +85%       |
-| **Queries per user** | 2$\times$  |      --      |     +100%     |   +80%   |       +40%       |
-| **Model size**       | 2$\times$  |    +150%     |     +120%     |   +30%   |       +55%       |
-| **Retraining freq.** | 2$\times$  |    +100%     |       --      |   +40%   |       +25%       |
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @tbl-tco-sensitivity and the interpretation paragraph below it.
+# │ Goal: Keep the TCO sensitivity matrix and highest/lowest conclusions in
+# │       one executable source.
+# │ How: LOAD contains elasticity assumptions for the illustrative sensitivity
+# │      scenario; EXECUTE derives highest/lowest total-impact claims.
+# │ Exports: TcoSensitivity.*_pct_str, TcoSensitivity.change_mult_str,
+# │          TcoSensitivity.highest_*_str, TcoSensitivity.lowest_*_str
+from mlsysim.fmt import MarkdownStr, check, fmt_multiple, fmt_percent
 
-: **TCO Sensitivity Analysis**: Impact of 2$\times$ increase in key parameters on cost components. Model count has the highest total impact (85 percent) because it affects all components, while retraining frequency has the lowest (25 percent) as it affects only training and associated data costs. User growth shows superlinear data cost impact (120 percent) due to storage and processing requirements scaling faster than user count. {#tbl-tco-sensitivity}
+TCO_SENSITIVITY_ROWS = {
+    "daily_users": {
+        "label": "Daily users",
+        "caption_label": "User growth",
+        "training": None,
+        "inference": 100,
+        "data": 120,
+        "total": 45,
+    },
+    "model_count": {
+        "label": "Model count",
+        "caption_label": "Model count",
+        "training": 100,
+        "inference": 100,
+        "data": 50,
+        "total": 85,
+    },
+    "queries_per_user": {
+        "label": "Queries per user",
+        "caption_label": "Queries per user",
+        "training": None,
+        "inference": 100,
+        "data": 80,
+        "total": 40,
+    },
+    "model_size": {
+        "label": "Model size",
+        "caption_label": "Model size",
+        "training": 150,
+        "inference": 120,
+        "data": 30,
+        "total": 55,
+    },
+    "retraining_frequency": {
+        "label": "Retraining freq.",
+        "caption_label": "retraining frequency",
+        "training": 100,
+        "inference": None,
+        "data": 40,
+        "total": 25,
+    },
+}
 
-The nonlinear effects explain why the total-impact column does not simply mirror the input change. User scaling\index{Scaling!user} makes data costs grow superlinearly (120 percent for 2$\times$ users) because user history accumulation and cross-user feature computation add state faster than headcount. Model size scaling\index{Model Size!scaling} pushes training cost up by 150 percent for 2$\times$ parameters because memory requirements can force multi-GPU configurations rather than a simple larger single-device run. Model count creates the broadest multiplicative effect because every additional model touches training, inference, data, monitoring, deployment, and governance at once, making portfolio growth the most expensive scaling dimension.
+class TcoSensitivity:
+    # ┌── 1. LOAD (Elasticity assumptions) ────────────────────────────────────
+    change_factor = 2
+    rows = TCO_SENSITIVITY_ROWS
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────────
+    highest_key = max(TCO_SENSITIVITY_ROWS, key=lambda key: TCO_SENSITIVITY_ROWS[key]["total"])
+    lowest_key = min(TCO_SENSITIVITY_ROWS, key=lambda key: TCO_SENSITIVITY_ROWS[key]["total"])
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
+    check(highest_key == "model_count", "Model count should be the largest TCO sensitivity")
+    check(lowest_key == "retraining_frequency", "Retraining frequency should be the smallest TCO sensitivity")
+    check(rows["daily_users"]["data"] > rows["daily_users"]["inference"], "User data sensitivity should be superlinear")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    change_mult_str = fmt_multiple(change_factor, precision=0, commas=False)
+
+    daily_users_training_pct_str = MarkdownStr("--")
+    daily_users_inference_pct_str = fmt_percent(rows["daily_users"]["inference"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    daily_users_data_pct_str = fmt_percent(rows["daily_users"]["data"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    daily_users_data_prose_str = fmt_percent(rows["daily_users"]["data"] / 100, precision=0, commas=False, style="prose", max_ratio=1.5)
+    daily_users_total_pct_str = fmt_percent(rows["daily_users"]["total"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+
+    model_count_training_pct_str = fmt_percent(rows["model_count"]["training"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    model_count_inference_pct_str = fmt_percent(rows["model_count"]["inference"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    model_count_data_pct_str = fmt_percent(rows["model_count"]["data"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    model_count_total_pct_str = fmt_percent(rows["model_count"]["total"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+
+    queries_per_user_training_pct_str = MarkdownStr("--")
+    queries_per_user_inference_pct_str = fmt_percent(
+        rows["queries_per_user"]["inference"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5
+    )
+    queries_per_user_data_pct_str = fmt_percent(rows["queries_per_user"]["data"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    queries_per_user_total_pct_str = fmt_percent(rows["queries_per_user"]["total"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+
+    model_size_training_pct_str = fmt_percent(rows["model_size"]["training"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    model_size_training_prose_str = fmt_percent(rows["model_size"]["training"] / 100, precision=0, commas=False, style="prose", max_ratio=1.5)
+    model_size_inference_pct_str = fmt_percent(rows["model_size"]["inference"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    model_size_data_pct_str = fmt_percent(rows["model_size"]["data"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+    model_size_total_pct_str = fmt_percent(rows["model_size"]["total"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5)
+
+    retraining_frequency_training_pct_str = fmt_percent(
+        rows["retraining_frequency"]["training"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5
+    )
+    retraining_frequency_inference_pct_str = MarkdownStr("--")
+    retraining_frequency_data_pct_str = fmt_percent(
+        rows["retraining_frequency"]["data"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5
+    )
+    retraining_frequency_total_pct_str = fmt_percent(
+        rows["retraining_frequency"]["total"] / 100, precision=0, commas=False, style="symbol", max_ratio=1.5
+    )
+
+    highest_param_str = MarkdownStr(rows[highest_key]["caption_label"])
+    highest_total_pct_str = fmt_percent(rows[highest_key]["total"] / 100, precision=0, commas=False, style="prose", max_ratio=1.5)
+    lowest_param_str = MarkdownStr(rows[lowest_key]["caption_label"])
+    lowest_total_pct_str = fmt_percent(rows[lowest_key]["total"] / 100, precision=0, commas=False, style="prose", max_ratio=1.5)
+```
+
+| **Parameter**        |                 **Change**                |                           **Training**                          |                          **Inference**                           |                           **Data**                          |                       **Total Impact**                       |
+|:---------------------|:-----------------------------------------:|:---------------------------------------------------------------:|:----------------------------------------------------------------:|:-----------------------------------------------------------:|:------------------------------------------------------------:|
+| **Daily users**      | `{python} TcoSensitivity.change_mult_str` |      `{python} TcoSensitivity.daily_users_training_pct_str`     |     `{python} TcoSensitivity.daily_users_inference_pct_str`      |      `{python} TcoSensitivity.daily_users_data_pct_str`     |     `{python} TcoSensitivity.daily_users_total_pct_str`      |
+| **Model count**      | `{python} TcoSensitivity.change_mult_str` |      `{python} TcoSensitivity.model_count_training_pct_str`     |     `{python} TcoSensitivity.model_count_inference_pct_str`      |      `{python} TcoSensitivity.model_count_data_pct_str`     |     `{python} TcoSensitivity.model_count_total_pct_str`      |
+| **Queries per user** | `{python} TcoSensitivity.change_mult_str` |   `{python} TcoSensitivity.queries_per_user_training_pct_str`   |   `{python} TcoSensitivity.queries_per_user_inference_pct_str`   |   `{python} TcoSensitivity.queries_per_user_data_pct_str`   |   `{python} TcoSensitivity.queries_per_user_total_pct_str`   |
+| **Model size**       | `{python} TcoSensitivity.change_mult_str` |      `{python} TcoSensitivity.model_size_training_pct_str`      |      `{python} TcoSensitivity.model_size_inference_pct_str`      |      `{python} TcoSensitivity.model_size_data_pct_str`      |      `{python} TcoSensitivity.model_size_total_pct_str`      |
+| **Retraining freq.** | `{python} TcoSensitivity.change_mult_str` | `{python} TcoSensitivity.retraining_frequency_training_pct_str` | `{python} TcoSensitivity.retraining_frequency_inference_pct_str` | `{python} TcoSensitivity.retraining_frequency_data_pct_str` | `{python} TcoSensitivity.retraining_frequency_total_pct_str` |
+
+: **TCO Sensitivity Analysis**: Impact of `{python} TcoSensitivity.change_mult_str` increase in key parameters on cost components. `{python} TcoSensitivity.highest_param_str` has the highest total impact (`{python} TcoSensitivity.highest_total_pct_str`) because it affects all components, while `{python} TcoSensitivity.lowest_param_str` has the lowest (`{python} TcoSensitivity.lowest_total_pct_str`) as it affects only training and associated data costs. User growth shows superlinear data cost impact (`{python} TcoSensitivity.daily_users_data_prose_str`) due to storage and processing requirements scaling faster than user count. {#tbl-tco-sensitivity}
+
+The nonlinear effects explain why the total-impact column does not simply mirror the input change. User scaling\index{Scaling!user} makes data costs grow superlinearly (`{python} TcoSensitivity.daily_users_data_prose_str` for `{python} TcoSensitivity.change_mult_str` users) because user history accumulation and cross-user feature computation add state faster than headcount. Model size scaling\index{Model Size!scaling} pushes training cost up by `{python} TcoSensitivity.model_size_training_prose_str` for `{python} TcoSensitivity.change_mult_str` parameters because memory requirements can force multi-GPU configurations rather than a simple larger single-device run. Model count creates the broadest multiplicative effect because every additional model touches training, inference, data, monitoring, deployment, and governance at once, making portfolio growth the most expensive scaling dimension.
 
 #### Decision framework: Speed vs. efficiency {#sec-ml-operations-scale-decision-framework-speed-vs-efficiency-baf4}
 
