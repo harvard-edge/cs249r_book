@@ -59,8 +59,6 @@ from mlsysim.core.units import *
 # │ Why: Registers this chapter with the mlsys registry and provides shared
 # │      imports for all subsequent calculation cells.
 # │
-# │ Imports: mlsysim.registry, mlsysim.constants, mlsysim.book
-# │ Exports: (none)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check
 ```
@@ -91,12 +89,6 @@ In the fleet stack shown in @fig-fleet-stack, orchestration operates at the Dist
 # │ Show: 10,000-GPU cluster; ~$480k/day operating cost.
 # │ How: Multiply GPU count, GPU-hour cost, and 24 hours.
 # │
-# │ Imports: mlsysim.core.units (Systems.Nodes.DGX_H100.accelerators_per_node, Hardware.Cloud.A100.memory.capacity, Hardware.Cloud.H100.memory.capacity,
-# │          GiB), mlsysim.book (fmt, check)
-# │ Exports: cluster_size_str, gpu_hour_cost_str, daily_cost_str, annual_cost_str,
-# │          daily_waste_str, annual_waste_str, productive_gpu_gain_str,
-# │          raw_gpu_equivalent_gain_str, idle_pct_str, util_low_pct_str,
-# │          util_high_pct_str, a100_mem_gb_str, h100_mem_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_memory_capacity, fmt_qty, fmt_usd, fmt_percent
 
@@ -154,8 +146,8 @@ ML workloads present scheduling challenges that distinguish them from ordinary c
 ***Gang Scheduling***\index{Gang Scheduling!definition} is the ML cluster scheduling policy that allocates all of a job's accelerators atomically (all-or-nothing) because synchronous distributed training makes the marginal value of a partial allocation zero: every worker must reach every collective, so a job cannot trade fewer GPUs for proportionally slower progress.
 
 1.  **Significance (quantitative)**: A 1,024-GPU synchronous job holding 512 GPUs completes zero training steps, not half as many: each AllReduce stalls until every rank arrives, so the held GPUs burn power and capital at 0 percent useful output. Without atomic allocation, two such jobs can each acquire half the cluster and deadlock, both at zero progress while consuming the full cluster's operating cost.
-2.  **Observation**: Unlike cloud service placement (where a service granted half its requested replicas serves roughly half its traffic) and unlike flexible HPC workloads (which degrade gracefully with fewer ranks), synchronous training has step-function utility: full allocation or nothing, which forces the scheduler to reason about atomic multi-resource allocations rather than incremental bin packing.
-3.  **Pitfall**: A frequent misconception is that priorities or quotas alone solve this. Atomicity must extend to every co-scheduled resource the job needs to make progress (accelerators, high-bandwidth interconnect domains, network capacity for collectives); enforcing it at GPU granularity alone recreates the deadlock one resource layer down.
+2.  **Distinction (durable)**: Unlike cloud service placement (where a service granted half its requested replicas serves roughly half its traffic) and unlike flexible HPC workloads (which degrade gracefully with fewer ranks), synchronous training has step-function utility: full allocation or nothing, which forces the scheduler to reason about atomic multi-resource allocations rather than incremental bin packing.
+3.  **Common pitfall**: A frequent misconception is that priorities or quotas alone solve this. Atomicity must extend to every co-scheduled resource the job needs to make progress (accelerators, high-bandwidth interconnect domains, network capacity for collectives); enforcing it at GPU granularity alone recreates the deadlock one resource layer down.
 
 :::
 
@@ -171,8 +163,6 @@ ML workloads present scheduling challenges that distinguish them from ordinary c
 # │ Show: deadlock_prob_pct ≈ 100%—inline in notebook result.
 # │ How: Estimate allocation probability from free GPUs, requested GPUs, and job count. (Conceptual)
 # │
-# │ Imports: mlsysim.fmt (check)
-# │ Exports: gs_n_gpus_str, gs_n_jobs_str, gs_waste_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_percent, fmt_usd
 
@@ -216,7 +206,7 @@ If gang scheduling is the first hard constraint, topology awareness via **placem
 
 [^fn-gang-scheduling]: **Gang Scheduling**\index{Gang Scheduling!origins}: Formalized by @ousterhout1982scheduling for parallel systems, where the "Ousterhout matrix" co-schedules related threads across processors in synchronized time slices. In ML clusters, the constraint is stricter: synchronous AllReduce requires all workers simultaneously, so partial allocation wastes 100 percent of held resources rather than merely degrading throughput. A 1,024-GPU job holding 900 GPUs while waiting for 124 more burns approximately \$1,800/hour in idle capacity [@burns2016].
 
-GPU heterogeneity is the third dimension. Many clusters contain mixtures of A100 and H100 accelerators with different compute throughput (`{python} ClusterEconomicsContext.a100_mem_gb_str` and `{python} ClusterEconomicsContext.h100_mem_gb_str` HBM capacities are comparable, but H100 Tensor Core throughput is roughly twice the A100 rate) and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
+GPU heterogeneity is the third dimension. Many clusters contain mixtures of A100 and H100 accelerators with different compute throughput, comparable HBM capacity (`{python} ClusterEconomicsContext.a100_mem_gb_str` on A100 versus `{python} ClusterEconomicsContext.h100_mem_gb_str` on H100), and different interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
 
 Job duration unpredictability compounds these challenges further. A training run may converge early and complete in days rather than weeks. Hardware failures may abort jobs unexpectedly, returning resources at unpredictable times. Hyperparameter searches may reveal early that certain configurations will not succeed, leading to voluntary termination. Traditional scientific computing workloads, such as weather simulations or molecular dynamics, have more predictable runtimes that enable better scheduling decisions: the scheduler can project when resources will become available and plan accordingly. ML workloads deny this luxury, forcing schedulers to operate with deep uncertainty about when current jobs will release resources.
 
@@ -290,8 +280,6 @@ Consider a 64-GPU fine-tuning run for our 175B model, a scheduling-demo workload
 # │       vs heavy-tailed ML workloads.
 # │ How: Compute the waiting-time multiplier from utilization and service-time variability.
 # │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: wq_uniform_str, wq_ml_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
@@ -347,9 +335,6 @@ The most fundamental scheduling algorithm is **bin packing**[^fn-bin-packing-sch
 # │ How: Compute wasted GPUs per node for a fixed job request; read NVLink and
 # │      InfiniBand bandwidths from the Hardware and Systems registries.
 # │
-# │ Imports: mlsysim (Hardware, Systems, units), mlsysim.fmt (fmt_count, fmt_percent, fmt_qty)
-# │ Exports: FleetFragmentation.total_gpus_str, effective_capacity_pct_str,
-# │          nvlink_h100_gb_per_s_str, ib_ndr_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_qty
 
@@ -400,9 +385,6 @@ A third strategy, **over-subscription**\index{Over-Subscription}, allows more jo
 # │ Show: pcolormesh; job colors; gray = free; status text.
 # │ How: row_patterns grid; ListedColormap; matplotlib.
 # │
-# │ Imports: matplotlib.pyplot (plt), matplotlib.colors (mcolors),
-# │          matplotlib.patches (mpatches), numpy (np)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Heatmap of 8×8 cluster; show fragmented free slots; illustrate why
@@ -523,9 +505,6 @@ A quick cost estimate shows why even modest improvements in this balance justify
 # │ How: Read cluster size from Systems.Clusters and the GPU-hour rate from
 # │      Infrastructure.Pricing; multiply through to daily and annual figures.
 # │
-# │ Imports: mlsysim (Systems, Infrastructure, units), mlsysim.fmt (fmt, fmt_usd, fmt_percent)
-# │ Exports: ClusterEconomicsIdleRecap.cluster_size_str, daily_cost_str, annual_cost_str,
-# │          util_*_pct_str, productive_*_str, idle_*_str, waste_*_str, savings_*_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_usd
 
@@ -592,8 +571,8 @@ The most pernicious of these is priority inversion, a scenario borrowed from rea
 ***Priority Inversion***\index{Priority Inversion!definition} is an ML cluster scheduling pathology in which a high-priority task is forced to wait for a lower-priority task to release a shared resource.
 
 1.  **Significance (quantitative)**: It reduces the progress rate of the entire fleet to that of the lowest-priority job. In ML clusters, this typically occurs when a low-priority job holding GPUs is starved of auxiliary resources (for example, $\text{BW}$ for checkpointing), preventing it from finishing and releasing the accelerators needed by high-priority workloads.
-2.  **Observation**: Unlike Standard Queuing (where tasks wait their turn), Priority Inversion involves an Active Blockage\index{Priority Inversion!active blockage}: the high-priority task is ready to run but is transitively dependent on a task that the scheduler does not prioritize.
-3.  **Pitfall**: A frequent misconception is that strict priority levels solve this. In reality, without Holistic Preemption (reserving all resources needed for a task to exit), increasing priority levels can actually increase the likelihood of inversion by creating more complex dependency chains.
+2.  **Distinction (durable)**: Unlike Standard Queuing (where tasks wait their turn), Priority Inversion involves an Active Blockage\index{Priority Inversion!active blockage}: the high-priority task is ready to run but is transitively dependent on a task that the scheduler does not prioritize.
+3.  **Common pitfall**: A frequent misconception is that strict priority levels solve this. In reality, without Holistic Preemption (reserving all resources needed for a task to exit), increasing priority levels can actually increase the likelihood of inversion by creating more complex dependency chains.
 
 :::
 
@@ -629,7 +608,7 @@ Slurm uses an **imperative scheduling model**\index{Slurm!imperative model}: use
 
 Slurm's architecture consists of a central controller daemon (`slurmctld`) that maintains the global view of cluster state and makes all scheduling decisions, and per-node daemons (`slurmd`) that manage local resources and execute jobs. This centralized architecture provides the strong consistency guarantees discussed in @sec-fleet-orchestration-distributed-scheduling: the controller has authoritative knowledge of every resource allocation, preventing the double-allocation problems that plague eventually-consistent systems. The cost is a potential single point of failure (addressed through active-passive failover) and a scheduling throughput limit (the controller must evaluate every scheduling decision sequentially). For clusters up to approximately 10,000 nodes, this centralized throughput is sufficient; beyond that, scheduling latency becomes measurable and organizations may need to partition the cluster into multiple Slurm federations.
 
-A typical ML cluster configuration defines Slurm partition configuration\index{Slurm!partition configuration} by accelerator type and interconnect:
+A typical ML cluster configuration defines Slurm partition configuration\index{Slurm!partition configuration} by accelerator type and interconnect, as @tbl-fleet-orchestration-slurm-partitions shows:
 
 | **Partition** | **GPUs/Node**  | **Interconnect** |  **Typical Use**   |
 |:--------------|:--------------:|:----------------:|:------------------:|
@@ -713,9 +692,6 @@ This binary allocation model creates a significant inefficiency for inference wo
 # │ How: Read each device's memory capacity from the Hardware registry and
 # │      render the branded capacity label.
 # │
-# │ Imports: mlsysim (Hardware), mlsysim.core.units (GiB, GB), mlsysim.fmt (fmt_memory_capacity)
-# │ Exports: ClusterEconomicsMigRecap.a100_mem_gb_str, h100_mem_gb_str,
-# │          and per-MIG-profile mig_<slice>_mem_str / mig_<slice>_sm_str (table cells)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import GiB, GB
 from mlsysim.fmt import fmt, fmt_memory_capacity, fmt_qty
@@ -791,7 +767,7 @@ Kubernetes excels for mixed training-serving clusters where unified management, 
 
 Many production environments recognize that neither paradigm alone satisfies all requirements, and they deploy both systems in complementary roles. A common architecture uses Slurm for dedicated training clusters where raw performance and scheduling sophistication matter, and Kubernetes for inference serving, pipeline orchestration, and lighter training workloads (fine-tuning, small-scale experimentation). The emerging pattern is to use Kubernetes as the outer orchestration layer, submitting Slurm jobs for large training runs through Kubernetes operators. This hybrid architecture achieves unified management and observability without sacrificing Slurm's batch scheduling capabilities for the workloads that need them most.
 
-The Slurm vs. Kubernetes trade-off\index{Slurm!vs. Kubernetes} organizes around the dimensions most relevant to ML workloads:
+The Slurm vs. Kubernetes trade-off\index{Slurm!vs. Kubernetes} organizes around the dimensions most relevant to ML workloads in @tbl-fleet-orchestration-paradigm-comparison:
 
 | **Dimension**                    | **Slurm**                                                                                                   | **Kubernetes**                                                                                                                  |
 |:---------------------------------|:------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------|
@@ -833,10 +809,10 @@ This convergence turns the paradigm choice into a workload-specific design decis
 
 Before the chapter turns to topology-aware scheduling, review the core trade-offs:
 
-- [ ] **Gang scheduling**: Can you explain why gang scheduling is essential for distributed training but not for inference workloads? What property of synchronous data parallelism creates the all-or-nothing requirement?
-- [ ] **Slurm vs. Kubernetes**: What CAP theorem trade-off does Slurm make differently from Kubernetes? How does this difference manifest during a network partition between the scheduler and a subset of nodes?
-- [ ] **MIG partitioning**: When would MIG partitioning improve cluster utilization (more concurrent inference workloads on fewer GPUs), and when would it reduce it (training jobs that need full GPU memory)?
-- [ ] **Backfill incentives**: Why does backfill scheduling depend on accurate job runtime estimates, and what game-theoretic incentives cause users to provide inaccurate estimates?
+- [ ] **Gang scheduling**: Explain why gang scheduling is essential for distributed training but not for inference workloads, including the property of synchronous data parallelism that creates the all-or-nothing requirement.
+- [ ] **Slurm vs. Kubernetes**: Identify the CAP theorem trade-off Slurm makes differently from Kubernetes, and describe how this difference appears during a network partition between the scheduler and a subset of nodes.
+- [ ] **MIG partitioning**: Determine when MIG partitioning improves cluster utilization through concurrent inference workloads on fewer GPUs and when it reduces utilization for training jobs that need full GPU memory.
+- [ ] **Backfill incentives**: Explain why backfill scheduling depends on accurate job runtime estimates and why users have game-theoretic incentives to provide inaccurate estimates.
 
 :::
 
@@ -859,15 +835,13 @@ Randomly assigning 64 GPUs across a massive data center cripples a synchronous t
 # │
 # │ Goal: Quantify the intra-node NVLink vs inter-node InfiniBand bandwidth gap
 # │       and the resulting activation-transfer slowdown.
+# │ Scope: chapter-anchor — communication hierarchy prose and topology
+# │ placement callout share the same interconnect scenario.
 # │ Show: NVLink (A100/H100) and InfiniBand NDR bandwidths, the activation
 # │       transfer times over each, and the NVLink-to-InfiniBand slowdown.
 # │ How: Read NVLink and InfiniBand bandwidths from the Hardware and Systems
 # │      registries; divide a fixed activation size by each rate.
 # │
-# │ Imports: mlsysim (Hardware, Systems, units), mlsysim.fmt (fmt, check, fmt_bandwidth, fmt_time, fmt_qty, fmt_multiple)
-# │ Exports: FleetTopologyInterconnect.nvlink_a100_gb_per_s_str, nvlink_h100_gb_per_s_str,
-# │          nvlink_h100_perdir_gb_per_s_str, ib_ndr_gbit_per_s_str, ib_ndr_gb_per_s_str,
-# │          activation_gb_str, nvlink_xfer_ms_str, ib_xfer_ms_str, xfer_slowdown_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_time, fmt_qty
 
@@ -978,8 +952,6 @@ Scattered placement runs AllReduce 4.8$\times$ slower than a topology-aware slot
 # │ Show: Four bars with latency (ms) and effective bandwidth labels.
 # │ How: strategies/times; ax.bar; matplotlib.
 # │
-# │ Imports: matplotlib.pyplot (plt), numpy (np)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Bar chart comparing Random, Rack-Aware, Rail-Optimized, Topology-
@@ -1051,12 +1023,6 @@ A **hierarchical placement**\index{Hierarchical Placement} algorithm assigns res
 # │ Goal: Compute speedup from topology-aware placement.
 # │ How: speedup = worst_latency/best_latency
 # │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: TopologyPlacement.random_placement_latency_ms_str,
-# │          TopologyPlacement.rack_aware_latency_ms_str,
-# │          TopologyPlacement.rail_optimized_latency_ms_str,
-# │          TopologyPlacement.optimal_latency_ms_str,
-# │          TopologyPlacement.speedup_mult_str, TopologyPlacement.n_gpus_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import ms
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_time
@@ -1245,10 +1211,6 @@ This logic extends to the temporal dimension, where the scheduler must weigh the
 # │ Goal: Compare three elastic scaling strategies over a 24-hour window.
 # │ How: total_work = run_hours × throughput_at_scale
 # │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: es_s3p1_str, es_s3p2_str, es_s3_str,
-# │          es_s1_math, es_s2_math, es_s3p1_math, es_s3p2_math,
-# │          es_rescale_hours_str, es_trails_wait_pct_str, es_vs_imm_factor_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, check, fmt_time
 
@@ -1331,7 +1293,7 @@ The elastic strategy completes nearly `{python} ElasticScaling.es_vs_imm_factor_
 
 :::
 
-The placement and elasticity mechanisms discussed so far address individual job efficiency, optimizing how each job uses its allocated resources. Fleet economics asks the collective question instead: which allocation policy maximizes useful work across all jobs when every placement, preemption, and reservation creates opportunity cost?
+The placement and elasticity mechanisms discussed so far address individual job efficiency, optimizing how each job uses its allocated resources. Fleet economics shifts the objective to the collective level: an allocation policy must maximize useful work across all jobs when every placement, preemption, and reservation creates opportunity cost.
 
 ## Cost Optimization {#sec-fleet-orchestration-cost-optimization}
 
@@ -1354,9 +1316,6 @@ The utilization-to-dollars relationship established in @sec-fleet-orchestration-
 # │ Show: Four curves; shaded 30–70% typical range; annotations.
 # │ How: Convert idle GPU capacity into annual wasted cost; book_style.setup_plot().
 # │
-# │ Imports: numpy (np), matplotlib.pyplot (plt), book.tools.figures.style (book_style),
-# │          mlsysim.constants (HOURS_PER_YEAR)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot annual wasted cost vs cluster size for 30/50/70/90% utilization;
@@ -1456,8 +1415,6 @@ The idle-capacity figure establishes the economic target; the remaining cost con
 # │ Show: spot and on-demand GPU-hour rates, inline in the prose.
 # │ How: Read both rates from Infrastructure.Pricing and render them as rates.
 # │
-# │ Imports: mlsysim (Infrastructure, units), mlsysim.fmt (fmt_usd)
-# │ Exports: FleetSpotPricing.spot_price_str, on_demand_price_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_usd
 
@@ -1532,8 +1489,6 @@ The optimal mix depends on workload characteristics and organizational prioritie
 # │ Goal: Compare on-demand and spot costs for a 512-GPU, 14-day run.
 # │ How: Compare GPU-hours at on-demand and spot GPU-hour rates.
 # │
-# │ Imports: mlsysim
-# │ Exports: spot_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -1567,12 +1522,12 @@ class SpotTrainingEconomics:
     on_demand_rate_str = fmt_usd(on_demand_rate, precision=0, commas=False, per="GPU-hour")
     spot_rate_str = fmt_usd(spot_rate, precision=2, commas=False, per="GPU-hour")
     on_demand_cost_str = fmt_usd(on_demand_cost, precision=0)
-    spot_base_cost_str = fmt_usd(spot_base_cost, precision=1)
+    spot_base_cost_str = fmt_usd(spot_base_cost, precision=0)
     checkpoint_extra_hours_str = fmt_time(checkpoint_extra_hours, 'hour', precision=1, commas=False, style='word')
     restart_total_hours_str = fmt_time(restart_total_hours, 'hour', precision=0, commas=False, style='word')
     spot_total_hours_str = fmt_time(spot_total_hours, 'hour', precision=1, commas=False, style='word')
-    spot_total_cost_str = fmt_usd(spot_total_cost, precision=1)
-    savings_str = fmt_usd(savings, precision=1)
+    spot_total_cost_str = fmt_usd(spot_total_cost, precision=0)
+    savings_str = fmt_usd(savings, precision=0)
     savings_pct_str = fmt_percent(savings_pct / 100, precision=1, commas=False, style='prose')
     longer_pct_str = fmt_percent(longer_pct / 100, precision=1, commas=False, style='prose')
     spot_gpus_str = fmt_count(gpus, commas=False, label="GPU")
@@ -1635,9 +1590,9 @@ Consider our 175B parameter model. Training requires approximately 34 days on 1,
 
 Before moving to ML-specific schedulers, review how the cost-optimization mechanisms interact:
 
-- [ ] **Spot break-even**: A training job requires 512 GPUs for 14 days. Spot instances offer 65 percent discount but have 1 interruption per day with 30-minute restart overhead. Under what checkpoint frequency does spot training become more expensive than on-demand?
-- [ ] **Double return**: Why does fault tolerance infrastructure have a "double return" for both reliability and cost savings? What is the minimum fault tolerance investment needed to make spot instances viable?
-- [ ] **Reservation sizing**: An organization runs 40 percent of its workloads on reserved capacity. How would you determine whether increasing the reservation to 60 percent would save or waste money?
+- [ ] **Spot break-even**: Determine the checkpoint frequency under which spot training becomes more expensive than on-demand for a 512-GPU, 14-day training job with a 65 percent spot discount, 1 interruption per day, and 30-minute restart overhead.
+- [ ] **Double return**: Explain why fault tolerance infrastructure has a "double return" for reliability and cost savings, and identify the minimum fault tolerance investment needed to make spot instances viable.
+- [ ] **Reservation sizing**: Determine whether increasing reserved capacity from 40 percent to 60 percent would save or waste money for an organization.
 
 :::
 
@@ -1685,7 +1640,7 @@ This co-optimization of scheduling and hyperparameters achieves 37 to 50 percent
 
 ### Scheduler comparison framework {#sec-fleet-orchestration-scheduler-comparison}
 
-Custom ML schedulers represent a progressive trade-off between implementation complexity and scheduling precision, so the comparison matters as a deployment filter rather than a ranking. While general-purpose schedulers treat jobs as opaque boxes, these research systems open the box to exploit specific characteristics of deep learning workloads: their iterative nature, their malleability (elasticity), and their predictability.
+Custom ML schedulers represent a progressive trade-off between implementation complexity and scheduling precision, so the comparison in @tbl-fleet-orchestration-scheduler-comparison matters as a deployment filter rather than a ranking. While general-purpose schedulers treat jobs as opaque boxes, these research systems open the box to exploit specific characteristics of deep learning workloads: their iterative nature, their malleability (elasticity), and their predictability.
 
 | **Scheduler** | **Key Insight**                            | **Scheduling Signal** | **Optimization Target**  |         **Overhead**        |   **Production Readiness**  |
 |:--------------|:-------------------------------------------|:---------------------:|:------------------------:|:---------------------------:|:---------------------------:|
@@ -1734,10 +1689,10 @@ A scheduler designed for general-purpose pod placement will mishandle workloads 
 
 Consider the trade-offs between the four research schedulers:
 
-- [ ] **Estimate-free scheduling**: Tiresias eliminates runtime estimates. What information does it sacrifice, and when would this sacrifice hurt scheduling quality?
-- [ ] **Time-slicing limits**: Gandiva time-slices at iteration boundaries. For which workloads would this approach fail, and why?
-- [ ] **Job starvation**: Themis prioritizes nearly-complete jobs. Could this starve long-running pretraining jobs indefinitely?
-- [ ] **Goodput-model risk**: Pollux adjusts both allocation and hyperparameters. What happens if the goodput model is wrong?
+- [ ] **Estimate-free scheduling**: Identify the information Tiresias sacrifices by eliminating runtime estimates, and describe when that sacrifice hurts scheduling quality.
+- [ ] **Time-slicing limits**: Identify workloads for which Gandiva's iteration-boundary time-slicing fails, and explain why.
+- [ ] **Job starvation**: Assess whether Themis's preference for nearly complete jobs can starve long-running pretraining jobs indefinitely.
+- [ ] **Goodput-model risk**: Describe the failure mode when Pollux's goodput model is wrong.
 
 :::
 
@@ -1751,7 +1706,7 @@ For orchestration, the important serving fact is that inference capacity is a li
 
 ### Autoscaling for inference {#sec-fleet-orchestration-autoscaling}
 
-Kubernetes **Horizontal Pod Autoscaling (HPA)**\index{Horizontal Pod Autoscaling}\index{HPA} adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization\index{GPU Utilization} is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. The metric choice is therefore the first scheduling decision for serving: effective ML autoscaling uses custom inference autoscaling metrics\index{Inference!autoscaling metrics} that predict user-facing degradation before it occurs.
+Kubernetes **Horizontal Pod Autoscaling (HPA)**\index{Horizontal Pod Autoscaling}\index{HPA} adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization\index{GPU Utilization} is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. The metric choice is therefore the first scheduling decision for serving: @tbl-fleet-orchestration-autoscaling-metrics lists custom inference metrics that predict user-facing degradation before it occurs.
 
 | **Metric**              |  **Target Range** | **Considerations**                                              |
 |:------------------------|:-----------------:|:----------------------------------------------------------------|
@@ -1806,9 +1761,6 @@ To prevent **oscillation**\index{Oscillation}, where the scaler rapidly adds and
 # │ How: Detection time from linear ramp; ready_time = detect + load_time;
 # │      SLO violations from excess QPS × duration.
 # │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: as_capacity_qps_str, as_detect_str, as_ready_str, as_excess_qps_str,
-# │          as_violations_str, as_pred_trigger_str, as_pred_capacity_qps_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_rate, fmt_time
 
@@ -1916,8 +1868,6 @@ For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B p
 # │ Goal: Compare exclusive vs shared GPU hosting for inference fleets.
 # │ How: Pack 2 small models per GPU; compute savings in GPUs and dollars.
 # │
-# │ Imports: mlsysim.book (fmt, check), mlsysim.constants (HOURS_PER_YEAR)
-# │ Exports: gs_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt_memory_capacity, fmt_qty, fmt_qty_int, fmt, check, fmt_count, fmt_params, fmt_usd
 
@@ -2015,10 +1965,8 @@ Inference traffic typically follows a "human curve": low at 3 AM, ramping up at 
 # │ Goal: Compare static partitioning vs dynamic sharing for training/serving.
 # │ How: Compare active GPUs to fleet size and convert recovered capacity into annual value.
 # │
-# │ Imports: mlsysim.book (fmt, check), mlsysim.constants (HOURS_PER_YEAR)
-# │ Exports: ds_* strings for callout
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, check, MarkdownStr, fmt_percent
+from mlsysim.fmt import fmt, fmt_count, fmt_int, fmt_percent, fmt_usd, check
 
 class DiurnalGpuShift:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -2057,7 +2005,7 @@ class DiurnalGpuShift:
     ds_serving_peak_util_str = fmt_percent(serving_avg / serving_peak, precision=1, commas=False, style='prose')
     ds_safety_buffer_str = fmt(safety_buffer, precision=0, commas=False)
     ds_serving_reclaimable_str = fmt_count(serving_reclaimable, commas=False, label="GPU")
-    ds_training_full_util_str = MarkdownStr("100 percent")
+    ds_training_full_util_str = fmt_percent(1.0, precision=0, style='prose')
 ```
 
 ::: {#nbk-fleet-orchestration-diurnal-gpu-shift .callout-notebook title="The diurnal GPU shift"}
@@ -2129,9 +2077,6 @@ Attribution in a shared fleet presents a forensic challenge. A single "training"
 # │ Goal: Quantify the visible chargeback cost of a 64-GPU, 34-day run.
 # │ How: Multiply GPU count, wall-clock hours, and internal GPU-hour rate.
 # │
-# │ Imports: mlsysim.fmt (check, fmt_time, fmt_usd)
-# │ Exports: ChargebackExample.chargeback_hours_h_str,
-# │          ChargebackExample.chargeback_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.fmt import check, fmt_time, fmt_usd
@@ -2205,8 +2150,6 @@ A further hidden cost compounds this tax: reconstructing the state of the distri
 # │ Goal: Quantify wasted cost and GPU-hours from repeated preemptions.
 # │ How: Convert recovery time across all GPUs into wasted GPU-hour cost.
 # │
-# │ Imports: mlsysim.fmt (check, fmt_count, fmt_time, fmt_usd)
-# │ Exports: preempt_* strings for prose
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.fmt import check, fmt_count, fmt_time, fmt_usd
@@ -2263,8 +2206,6 @@ Financial accountability further aligns incentives. Organizations typically begi
 # │ Goal: Quantify idle reservation cost for 500 GPUs over three weeks.
 # │ How: Convert idle reserved GPUs and idle duration into GPU-hour cost.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: hoarding_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_usd
 
@@ -2305,9 +2246,9 @@ The "use it or lose it" reclamation policy addresses the most visible symptom of
 
 Consider a 2,000-GPU cluster shared between a research team (60 percent allocation) and a production team (40 percent allocation):
 
-- [ ] **Idle reclamation**: The research team is using only 30 percent of the cluster. Should the production team be able to use the idle 30 percent? What happens when the research team submits a large job?
-- [ ] **Priority classes**: A production inference workload needs 100 GPUs with guaranteed latency SLOs. A research training job can tolerate preemption. How should the priority system be configured?
-- [ ] **Over-commitment ratio**: What over-commitment ratio is appropriate if research jobs average 65 percent GPU utilization and production jobs average 85 percent?
+- [ ] **Idle reclamation**: Decide whether the production team can use the idle 30 percent of the cluster, and describe the preemption behavior when the research team submits a large job.
+- [ ] **Priority classes**: Configure priority classes for a production inference workload that needs 100 GPUs with guaranteed latency SLOs and a research training job that can tolerate preemption.
+- [ ] **Over-commitment ratio**: Determine the appropriate over-commitment ratio when research jobs average 65 percent GPU utilization and production jobs average 85 percent.
 
 :::
 
@@ -2331,8 +2272,6 @@ A cluster dashboard shows average GPU utilization stuck at 60 percent, yet devel
 # │ Show: Three curves (small/mixed/large jobs); log-scale y; shaded zone.
 # │ How: Convert utilization into M/M/1-style waiting-time curves; matplotlib.
 # │
-# │ Imports: numpy (np), matplotlib.pyplot (plt)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot job wait time vs cluster utilization; show M/M/1-style explosion
@@ -2397,9 +2336,6 @@ fig = plt.gcf()
 # │      convert it to recovered raw-GPU capacity at the old utilization;
 # │      convert recovered GPU-equivalent capacity into annual dollar value.
 # │
-# │ Imports: mlsysim
-# │ Exports: debug_cluster_str, debug_productive_gain_str, debug_recovered_str, debug_annual_usd_str,
-# │          debug inventory, demand, utilization, and result table strings.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import GiB
@@ -2517,11 +2453,11 @@ The debugging method is to compare scheduler state with physical capability, ins
 
 ::: {#exmp-fleet-orchestration-debugging-low-gpu-utilization .callout-example title="Debugging low GPU utilization"}
 
-**Problem**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization despite a full job queue with over `{python} DebugValueCalc.pending_jobs_str` pending jobs. Engineering leadership expects greater than `{python} DebugValueCalc.debug_target_util_pct_str` utilization given the capital investment. The standard monitoring dashboards show plenty of idle GPUs, yet users complain about long queue times. Identify the binding constraint and the systematic diagnostic path.
+**Problem**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization, below the `{python} DebugValueCalc.debug_target_util_pct_str` operating target, despite a full queue with over `{python} DebugValueCalc.pending_jobs_str` pending jobs. Dashboards show idle GPUs, but users still wait. Identify the binding constraint and the diagnostic path.
 
-The fleet stack framework in @fig-fleet-stack provides a structured approach: analyze the Infrastructure Layer first to understand hardware constraints, then the Distribution Layer to understand scheduling logic, and finally the interaction between layers to identify the root cause.
+The fleet stack framework in @fig-fleet-stack structures the diagnosis: inspect hardware capability first, then scheduling policy, then the mismatch between them.
 
-**Infrastructure Layer Analysis**\index{Infrastructure Layer!analysis}: The cluster contains heterogeneous hardware acquired over three procurement cycles:
+**Infrastructure Layer Analysis**\index{Infrastructure Layer!analysis}: @Tbl-fleet-orchestration-debug-inventory shows the cluster's heterogeneous hardware across three procurement cycles:
 
 | **GPU Type**   |                  **Count**                  |                     **Memory**                     |                       **Interconnect**                       |                                               **Nodes**                                               |
 |:---------------|:-------------------------------------------:|:--------------------------------------------------:|:------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------:|
@@ -2531,7 +2467,7 @@ The fleet stack framework in @fig-fleet-stack provides a structured approach: an
 
 : **Cluster hardware inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
-As @tbl-fleet-orchestration-debug-inventory shows, the physical topology creates three distinct resource pools with different capabilities. The A100 nodes support efficient tensor parallelism via NVLink, while V100 nodes are limited to data parallelism due to PCIe bandwidth constraints.
+The inventory in @tbl-fleet-orchestration-debug-inventory separates physical capability before the scheduler policy is examined.
 
 **Distribution Layer Analysis**\index{Distribution Layer!analysis}: The Slurm scheduler implements gang scheduling with strict resource type matching. Examining the job specifications reveals the demand pattern:
 
@@ -2550,14 +2486,9 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 
 **Root cause (policy-infrastructure mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80 GB cluster. When infrastructure expanded with heterogeneous hardware, the Distribution Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
 
-**Solution**: Implement tiered resource matching with topology awareness. The fix addresses all four pathologies through complementary policy changes:
+**Solution**: Implement tiered resource matching with topology awareness. The policy changes are durable: express capability requirements instead of exact GPU SKUs, reserve NVLink-connected nodes for jobs that need tensor parallelism, backfill compatible smaller jobs into otherwise idle pools, seed appropriate workloads onto older accelerators with lower cost accounting, and make the correct resource request easier than the over-specified template.
 
-1. **Capability-based scheduling**\index{Capability-Based Scheduling}: Replace exact GPU type requests with capability requirements. Instead of `--gres=gpu:a100-80g:64`, jobs submit through a site wrapper or admission policy that maps "at least 40 GB of GPU memory" to valid Slurm features or typed GRES choices, such as nodes tagged `gpu_mem_40gb` or `gpu_mem_80gb`. This eliminates over-specification by expressing what the job *needs* rather than what hardware it *prefers*. The scheduler can then match jobs to the cheapest available hardware that meets their requirements.
-2. **Topology-aware placement**\index{Topology-Aware Placement}: For jobs requiring tensor parallelism (identified by requesting more than 1 GPU per node), add constraint `--constraint="nvlink"` to ensure placement on NVLink-connected nodes. Data-parallel jobs that request only 1 GPU per node can omit this constraint, enabling scheduling on V100 nodes where NVLink is absent but data parallelism works efficiently over any network.
-3. **Backfill and queue policy**: Enable or tune backfill scheduling so smaller compatible jobs can use otherwise idle pools without delaying higher-priority reservations. Revise resource constraints and queue priorities so jobs that can run on A100-40 GB or V100 hardware are not blocked behind A100-80 GB-only requests. Do not rely on `bf_window` or `bf_continue` as a gang-completion timeout; those parameters control backfill lookahead and scheduler behavior, not release of partial GPU allocations.
-4. **V100 workload seeding**\index{V100 Workload Seeding}: Create a "legacy-gpu" queue with lower cost accounting (reflecting V100's lower capability) to incentivize researchers to submit appropriate workloads to V100 hardware. Small-scale experiments, single-GPU development, preprocessing-heavy jobs, and data-parallel training whose per-replica footprint fits within 32 GB can run effectively on V100s.
-5. **Workload-hardware matching guidance**\index{Workload-Hardware Matching Guidance}: Provide researchers with a decision matrix mapping model sizes to minimum GPU memory requirements, reducing over-specification by making the correct resource request the easiest choice.
-**Quantified impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:
+**Quantified impact**: @Tbl-fleet-orchestration-debug-results reports the two-week validation result after implementing tiered matching and backfill scheduling:
 
 | **Pool**         |                                                        **Before**                                                        |                                                       **After**                                                        |                       **Change**                       |
 |:-----------------|:------------------------------------------------------------------------------------------------------------------------:|:----------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------:|
@@ -2570,9 +2501,7 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 
 As @tbl-fleet-orchestration-debug-results shows, this utilization gain adds approximately `{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPUs of productive work. That is equivalent to buying `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs if those GPUs ran at the old `{python} DebugValueCalc.debug_util_before_pct_str` utilization. At `{python} DebugValueCalc.debug_gpu_hour_rate_str`, the equivalent raw capacity represents approximately `{python} DebugValueCalc.debug_annual_usd_str` in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
 
-**Systems lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Distribution Layer), perhaps requiring a more sophisticated scheduler like those discussed in @sec-fleet-orchestration-custom-schedulers. Management initially proposed evaluating Pollux or a custom scheduling solution, which would have required months of engineering effort and introduced operational risk. Deeper analysis revealed the root cause as a mismatch between Infrastructure Layer heterogeneity and Distribution Layer policies designed for homogeneous infrastructure. *The scheduler algorithm was not the problem; the policies it implemented were the problem.* The scheduler correctly implemented its configured policy; the policy itself created the utilization gap.
-
-Effective debugging required examining both layers and their interaction, recognizing that infrastructure evolution (adding A100-40 GB and V100 nodes to an originally homogeneous A100-80 GB cluster) had invalidated assumptions embedded in job templates and scheduling configuration. The fix addressed the policy layer, not the algorithm layer, and was implemented through configuration changes requiring zero code modifications and zero additional hardware investment. This pattern recurs across ML infrastructure: many scheduling problems are not algorithmic insufficiency but policy-infrastructure mismatch, where operational policies designed for one infrastructure configuration are applied without adaptation to a changed infrastructure.
+**Systems lesson**: Surface-level diagnosis suggested a scheduling algorithm problem. Deeper analysis showed a policy-infrastructure mismatch: the scheduler correctly implemented policies written for a homogeneous A100-80 GB cluster, but the infrastructure had become heterogeneous. Many utilization problems have this shape. The fix is not always a new scheduler; often it is updating the operational policy so it matches the fleet that actually exists.
 
 :::
 

@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why do the engineering principles that work on single machines break down at production scale?_
 
-Machine learning at scale has a physics of its own. On one node, performance is governed by the memory wall: data must reach the accelerator fast enough to keep the math busy. In a distributed cluster, that same problem stretches across machines. Data must move through network links between racks, and the slowest shared crossing can limit the entire job. Hardware failures also change character. When a single-accelerator training job fails, it is an inconvenience; when one node in a 10,000-node cluster fails, it can stall the entire Machine Learning Fleet this chapter defines. This discontinuity explains why mastery of single-machine ML is no longer sufficient: scale is not more of the same, but fundamentally different engineering terrain requiring different principles, different architectures, and different ways of thinking about what makes systems work. That terrain carries a societal dimension that small models do not, because its impact is amplified by the billions of users these systems serve: when a local model exhibits bias, the harm is contained; when a foundation model exhibits bias, it propagates through digital life. The discipline this book builds is the **physics of distribution**\index{Physics of Distribution}, where algorithmic choices must account for network topology, fault tolerance, security, and governance.
+Machine learning at scale has a physics of its own. On one node, performance is governed by the memory wall: data must reach the accelerator fast enough to keep the math busy. In a distributed cluster, that same problem stretches across machines. Data must move through network links between racks, and the slowest shared crossing can limit the entire job. Hardware failures also change character. When a single-accelerator training job fails, it is an inconvenience; when one node in a 10,000-node cluster fails, it can stall the entire Machine Learning Fleet this chapter defines. This discontinuity explains why mastery of single-machine ML is no longer sufficient: scale is not more of the same, but fundamentally different engineering terrain requiring different principles, different architectures, and different ways of thinking about what makes systems work. That terrain carries a societal dimension that small models do not, because its impact is amplified by the billions of users these systems serve: when a local model exhibits bias, the harm is contained; when a foundation model exhibits bias, it propagates through digital life. The discipline this book builds is the **physics of distribution**\index{Physics of Distribution}, where Compute, Communication, and Coordination turn algorithmic choices into questions of topology, fault tolerance, security, and governance.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -70,17 +70,6 @@ from mlsysim.core.units import *
 # │       Moment narrative paragraphs and GPT-4 failure rate callout.
 # │ How: .to(unit).magnitude for all unit extractions; scalar arithmetic for cluster stats.
 # │
-# │ Imports: mlsysim.core.units (Hardware.Cloud.A100.compute.peak_flops, Hardware.Cloud.A100.memory.bandwidth,
-# │           Hardware.Cloud.H100.compute.precision_flops["fp8"], Hardware.Cloud.V100.memory.bandwidth, Hardware.Cloud.TPUv4.compute.peak_flops,
-# │           Hardware.Cloud.H100.nvlink.bandwidth, Systems.Fabrics.InfiniBand_HDR.bandwidth, Systems.Fabrics.InfiniBand_NDR.bandwidth,
-# │           Models.Language.GPT3.parameters, Models.Language.GPT3.training_ops,
-# │           TFLOPs, second, GB, TB, Gbps, param, BILLION, BITS_PER_BYTE)
-# │ Exports: a100_fp16_tflop_per_s_str, a100_mem_bw_gb_per_s_str, a100_mem_bw_tb_per_s_str,
-# │          h100_fp8_tflop_per_s_str, v100_mem_bw_gb_per_s_str, tpuv4_bf16_tflop_per_s_str,
-# │          nvlink_h100_gb_per_s_str, ib_hdr_gbit_per_s_str, ib_ndr_gbit_per_s_str,
-# │          ib_hdr_gb_per_s_str, ib_ndr_gb_per_s_str,
-# │          gpt3_params_b_str, gpt3_training_ops_str, gpt3_gradient_gb_str,
-# │          gpt4_gpus_str, gpt4_days_str, cluster_fail_day_str, mtbf_hours_str, hours_per_day_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_sci, check
 ```
@@ -109,17 +98,9 @@ This book is dedicated to the engineering of this fleet: mastering the physics, 
 # │ Show: illustrative ~25k-GPU, 90-day scenario; ~1 failure every 2 hours.
 # │ How: cluster_mtbf_hours = calc_mtbf_cluster(gpu_mtbf_hours, num_gpus).
 # │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: Gpt4TrainingScenario.gpt4_gpus_str,
-# │          Gpt4TrainingScenario.gpt4_days_str,
-# │          Gpt4TrainingScenario.cluster_fail_day_str,
-# │          Gpt4TrainingScenario.mtbf_hours_str,
-# │          Gpt4TrainingScenario.gpu_mtbf_hours_str,
-# │          Gpt4TrainingScenario.annual_fails_str,
-# │          Gpt4TrainingScenario.hw_name_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Scenarios, Systems
-from mlsysim.fmt import fmt, fmt_int, check, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt, fmt_count, fmt_int, check, MarkdownStr, fmt_time
 from mlsysim.physics import calc_mtbf_cluster
 
 class Gpt4TrainingScenario:
@@ -145,7 +126,9 @@ class Gpt4TrainingScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt4_gpus_str = fmt_count(num_gpus, label="GPU")
+    gpt4_gpus_approx_str = fmt_count(num_gpus, label="GPU", approx=True)
     gpt4_days_str = fmt_time(gpu_days, 'day', precision=0, style='word')
+    gpt4_days_approx_str = fmt_time(gpu_days, 'day', precision=0, style='word', approx=True)
     hours_per_day_str = fmt_int(HOURS_PER_DAY)
     cluster_fail_day_str = fmt_int(cluster_failures_per_day)
     mtbf_hours_str = fmt_time(cluster_mtbf_hours, 'hour', precision=0, commas=True, style='word')
@@ -169,9 +152,9 @@ Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4Trai
 
 **Math**:
 
-1. **System MTBF**\index{MTBF!system}: For $N$ independent GPUs, $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}} / N =$ `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` divided by `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\approx$ `{python} Gpt4TrainingScenario.mtbf_hours_str`.
-2. **Daily failure rate**\index{Failure Rate!daily}: `{python} Gpt4TrainingScenario.hours_per_day_str` hours / `{python} Gpt4TrainingScenario.mtbf_hours_str` $\approx$ `{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day.
-3. **Total annual failures**\index{Failure Rate!annualized count}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\times$ (`{python} Gpt4TrainingScenario.hours_per_year_str` divided by `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str`) $\approx$ `{python} Gpt4TrainingScenario.annual_fails_str` failures per year.
+1. **System MTBF**\index{MTBF!system}: The system MTBF is the component MTBF divided by the number of independent GPUs. With this scenario's values, `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` divided by `{python} Gpt4TrainingScenario.gpt4_gpus_str` is about `{python} Gpt4TrainingScenario.mtbf_hours_str`.
+2. **Daily failure rate**\index{Failure Rate!daily}: `{python} Gpt4TrainingScenario.hours_per_day_str` hours divided by `{python} Gpt4TrainingScenario.mtbf_hours_str` is about `{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day.
+3. **Total annual failures**\index{Failure Rate!annualized count}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` times (`{python} Gpt4TrainingScenario.hours_per_year_str` divided by `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str`) is about `{python} Gpt4TrainingScenario.annual_fails_str` failures per year.
 
 **Systems insight**: In this regime, the system is always in a state of partial failure. Traditional software recovery (manual restart) collapses; the system must be architected for fault tolerance as a first-class citizen. Hardware can no longer be treated as a reliable abstraction; it is a probabilistic resource that requires constant, automated state preservation (checkpointing).
 
@@ -195,7 +178,46 @@ The recovery machinery that defined the Llama 3 run exists because cluster sizes
 
 Compute requirements have grown exponentially. AlexNet trained on two GTX 580 GPUs for approximately 5--6 days [@krizhevsky2012imagenet]. BERT required 64 Tensor Processing Unit (TPU)[^fn-tpu-systolic] chips for 4 days, roughly 6,144 chip hours [@devlin2018bert].
 
-[^fn-tpu-systolic]: **Tensor Processing Unit (TPU)**: Google's custom ASIC, built around a $256{\times}256$ systolic array\index{TPU!systolic array} that trades GPU flexibility for 15--30$\times$ better performance-per-watt on matrix-heavy ML workloads. The fleet-scale consequence is *what* matters here: TPU v4 pods reach 1.1 exaFLOP/s aggregate, but their dedicated ICI interconnect (4,800 Gb/s per chip) is *what* makes them a single distributed computer rather than a collection of fast chips. Without that interconnect, BERT's 64-chip training would have been communication-bound long before it was compute-bound.
+```{python}
+#| echo: false
+#| label: tpuv4-pod-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TPU V4 POD SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol2-introduction-scale-moment
+# │ Scope: chapter-anchor — TPU pod envelope appears in the early TPU footnote
+# │        and later infrastructure-scale paragraph.
+# │
+# │ Goal: Source TPU v4 pod chip count and aggregate peak compute from MLSysIM.
+# │ Show: 4,096 TPU v4 chips; ~1.1 EFLOP/s aggregate peak.
+# │ How: Systems.Pods.TPUv4_4096.chips × Hardware.Cloud.TPUv4.compute.peak_flops.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Systems
+from mlsysim.fmt import fmt_count, fmt_flop_rate, check
+
+class TpuV4PodScenario:
+    """TPU v4 pod envelope sourced from the systems and hardware registries."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    pod = Systems.Pods.TPUv4_4096
+    chip = Hardware.Cloud.TPUv4
+    chips = pod.chips
+    per_chip_peak_q = chip.compute.peak_flops
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    aggregate_peak_q = chips * per_chip_peak_q
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(chips == 4096, f"TPU v4 pod should contain 4096 chips, got {chips}")
+    check(1.0 < aggregate_peak_q.to(EFLOP / second).magnitude < 1.2, "TPU v4 pod peak should be ~1.1 EFLOP/s")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tpuv4_pod_chips_str = fmt_count(chips, label="chip")
+    tpuv4_pod_peak_str = fmt_flop_rate(aggregate_peak_q, unit=EFLOP / second, precision=1, commas=False)
+```
+
+[^fn-tpu-systolic]: **Tensor Processing Unit (TPU)**: Google's custom ASIC, built around a $256{\times}256$ systolic array\index{TPU!systolic array} that trades GPU flexibility for 15--30$\times$ better performance-per-watt on matrix-heavy ML workloads. The fleet-scale consequence is *what* matters here: TPU v4 pods reach `{python} TpuV4PodScenario.tpuv4_pod_peak_str` aggregate, but their dedicated ICI interconnect (4,800 Gb/s per chip) is *what* makes them a single distributed computer rather than a collection of fast chips. Without that interconnect, BERT's 64-chip training would have been communication-bound long before it was compute-bound.
 
 ```{python}
 #| echo: false
@@ -206,14 +228,14 @@ Compute requirements have grown exponentially. AlexNet trained on two GTX 580 GP
 # │ Context: @sec-vol2-introduction-scale-moment
 # │
 # │ Goal: Provide GPT-3 training compute and model size statistics.
-# │ Show: ~175B parameters; ~3.14e23 FLOPs.
-# │ How: pulling constants from mlsysim.core.units.
+# │ Show: ~175B parameters; ~3.14e23 FLOPs; V100 peak lower-bound days.
+# │ How: pulling model constants from MLSysIM and deriving the V100 lower bound
+# │      from training FLOPs / (accelerators × V100 peak FLOP/s).
 # │
-# │ Imports: mlsysim.core.units (Models.Language.GPT3.parameters, Models.Language.GPT3.training_ops, GB,
-# │          param, BILLION, BYTES_FP32), mlsysim.book (sci, check)
-# │ Exports: gpt3_params_b_str, gpt3_training_ops_str, gpt3_gradient_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_sci_flops, check, fmt_memory, fmt_params
+from math import ceil
+from mlsysim import Hardware
+from mlsysim.fmt import fmt, fmt_count, fmt_sci_flops, check, fmt_memory, fmt_params, fmt_time
 
 class Gpt3TrainingScenario:
     """GPT-3 training and model statistics."""
@@ -222,29 +244,36 @@ class Gpt3TrainingScenario:
     params_q = Models.Language.GPT3.parameters
     params = params_q.to(param).magnitude
     ops = Models.Language.GPT3.training_ops.to(Models.Language.GPT3.training_ops.units).magnitude
+    training_accelerators_q = Models.Language.GPT3.training_accelerators_ref
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params / BILLION
     gradient_q = params * BYTES_FP32  # FP32 gradients
+    training_accelerators = training_accelerators_q.to(count).magnitude
+    v100_peak_min_days_q = (Models.Language.GPT3.training_ops / (training_accelerators * Hardware.Cloud.V100.compute.peak_flops)).to(day)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
+    check(training_accelerators == 1024, f"GPT-3 training reference should be 1024 accelerators, got {training_accelerators}")
+    check(v100_peak_min_days_q.magnitude > 28, "V100 peak lower bound should exceed 28 days")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt_params(params_q, scale="B", precision=0, commas=False)
     gpt3_training_ops_str = fmt_sci_flops(ops * flop)
     gpt3_gradient_gb_str = fmt_memory(gradient_q, unit=GB, precision=0, commas=False)
+    gpt3_accelerators_str = fmt_count(training_accelerators, label="V100 GPU", plural_label="V100 GPUs")
+    gpt3_v100_peak_min_days_str = fmt_time(ceil(v100_peak_min_days_q.magnitude), day, precision=0, style='word')
 ```
 
 GPT-3 consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_str` during training on V100 GPUs in a Microsoft high-bandwidth cluster [@brown2020language]. The surrounding Microsoft infrastructure for this era reached roughly 10,000 GPUs, which is the cluster-size anchor used in @fig-cluster-size-explosion [@patterson2021carbon]. PaLM trained on 6,144 TPU v4 chips for roughly 60 days, consuming approximately $10^{24}$ FLOPs [@chowdhery2022palm]. OpenAI's GPT-4 report did not disclose model size, training hardware, or training compute, so the GPT-4-class scenario in this section should be read as illustrative rather than a published configuration [@openai2023gpt4]. These examples sit within the rapid training-compute growth trend\index{Training!compute evolution} documented by earlier compute-trend studies [@amodei2018ai; @sevilla2022].
 
-| **Model**                | **Year** |        **GPUs/TPUs**        |    **Training Time**    | **Estimated FLOPs** |
-|:-------------------------|:--------:|:---------------------------:|:-----------------------:|:-------------------:|
-| **AlexNet**              |   2012   |            2 GPUs           |        5--6 days        |      ~$10^{18}$     |
-| **BERT-Large**           |   2018   |           64 TPUs           |          4 days         |      ~$10^{20}$     |
-| **GPT-3**                |   2020   | ~1,024 V100 GPUs (run est.) |       ~30--34 days      |      ~$10^{23}$     |
-| **PaLM**                 |   2022   |          6,144 TPUs         |         ~60 days        |      ~$10^{24}$     |
-| **GPT-4-class scenario** |   2023   | ~25,000 GPUs (illustrative) | ~90 days (illustrative) | ~$10^{25}$ scenario |
+| **Model**                | **Year** |                            **GPUs/TPUs**                            |                          **Training Time**                           |                  **Estimated FLOPs**                  |
+|:-------------------------|:--------:|:-------------------------------------------------------------------:|:--------------------------------------------------------------------:|:-----------------------------------------------------:|
+| **AlexNet**              |   2012   |                                2 GPUs                               |                              5--6 days                               |                       ~$10^{18}$                      |
+| **BERT-Large**           |   2018   |                               64 TPUs                               |                                4 days                                |                       ~$10^{20}$                      |
+| **GPT-3**                |   2020   |   `{python} Gpt3TrainingScenario.gpt3_accelerators_str` (run est.)  | at least `{python} Gpt3TrainingScenario.gpt3_v100_peak_min_days_str` | `{python} Gpt3TrainingScenario.gpt3_training_ops_str` |
+| **PaLM**                 |   2022   |                              6,144 TPUs                             |                               ~60 days                               |                       ~$10^{24}$                      |
+| **GPT-4-class scenario** |   2023   | `{python} Gpt4TrainingScenario.gpt4_gpus_approx_str` (illustrative) | `{python} Gpt4TrainingScenario.gpt4_days_approx_str` (illustrative)  |                  ~$10^{25}$ scenario                  |
 
 : **Training Compute Evolution**: Growth in hardware scale and training duration across published landmarks and an illustrative GPT-4-class scenario, showing why distributed systems become central as training budgets move from $10^{18}$-scale to the largest training runs. {#tbl-training-compute-evolution}
 
@@ -264,8 +293,6 @@ GPT-3 consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_str
 # │ Show: Log-scale y; scatter; trend line; model annotations.
 # │ How: Verified models/years/gpus; polyfit log-linear; book_style.setup_plot().
 # │
-# │ Imports: numpy (np), book.tools.figures.style (book_style)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Scatter accelerator count vs year for AlexNet→Llama 3; show ~2×
@@ -390,8 +417,8 @@ The discontinuity captured in @fig-scale-moment-discontinuity is qualitative, no
 ***Machine Learning Fleet***\index{Machine Learning Fleet!definition} is a distributed system of thousands of interconnected accelerators, storage arrays, and network fabrics designed to operate as a single coherent computer.
 
 1.  **Significance (quantitative)**: It coordinates synchronous state across all nodes, where the total time $T$ is governed by the Slowest Worker (Straggler)\index{Straggler}. It requires Bisection Bandwidth ($\text{BW}_{\text{bisect}}$) that scales with the aggregate compute capacity ($R_{\text{peak}}$) of the fleet.
-2.  **Observation**: Unlike Traditional Clusters (for example, Spark, MapReduce) that manage independent, asynchronous jobs, an ML Fleet operates under Synchronous Tight Coupling\index{Synchronous Tight Coupling}: all workers must reach the training-step barrier before any can advance, so near-perfect reliability is required to maintain throughput.
-3.  **Pitfall**: A frequent misconception is that an ML Fleet is "just more servers." In reality, it is a Warehouse-Scale Computer (WSC) where the network is the system bus and the orchestrator is the operating system.
+2.  **Distinction (durable)**: Unlike Traditional Clusters (for example, Spark, MapReduce) that manage independent, asynchronous jobs, an ML Fleet operates under Synchronous Tight Coupling\index{Synchronous Tight Coupling}: all workers must reach the training-step barrier before any can advance, so near-perfect reliability is required to maintain throughput.
+3.  **Common pitfall**: A frequent misconception is that an ML Fleet is "just more servers." In reality, it is a Warehouse-Scale Computer (WSC) where the network is the system bus and the orchestrator is the operating system.
 
 :::
 
@@ -415,9 +442,6 @@ On a single GPU, training proceeds deterministically: the same code, data, and r
 # │ Show: ~200 Gbps HDR; ~400 Gbps NDR.
 # │ How: pulling constants from mlsysim.core.units.
 # │
-# │ Imports: mlsysim.core.units (Systems.Fabrics.InfiniBand_HDR.bandwidth, Systems.Fabrics.InfiniBand_NDR.bandwidth,
-# │          Gbps, BITS_PER_BYTE)
-# │ Exports: ib_hdr_gbit_per_s_str, ib_hdr_gb_per_s_str, ib_ndr_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class InfiniBandScenario:
@@ -444,7 +468,7 @@ class InfiniBandScenario:
     ib_ndr_gb_per_s_str = fmt_qty(ndr, GB / second, precision=0, commas=False)
 ```
 
-These scale-induced challenges have driven infrastructure investment by large AI organizations. Meta's Research SuperCluster (RSC), announced in 2022, contained 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbit_per_s_str` InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain 4,096 chips with 1.1 exaFLOP/s of aggregate compute capacity. Microsoft's Azure AI infrastructure has spanned multiple data centers with tens of thousands of GPUs dedicated to AI workloads. The scale of the models dictates the scale of the infrastructure. @Sec-appdx-comm-foundations-alpha-beta catalogs these interconnect bandwidth constants and feeds them into the $\alpha$-$\beta$ communication model, which lets a reader turn a link's bandwidth and latency into a predicted transfer cost.
+These scale-induced challenges have driven infrastructure investment by large AI organizations. Meta's Research SuperCluster (RSC), announced in 2022, contained 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbit_per_s_str` InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain `{python} TpuV4PodScenario.tpuv4_pod_chips_str` with `{python} TpuV4PodScenario.tpuv4_pod_peak_str` of aggregate compute capacity. Microsoft's Azure AI infrastructure has spanned multiple data centers with tens of thousands of GPUs dedicated to AI workloads. The scale of the models dictates the scale of the infrastructure. @Sec-appdx-comm-foundations-alpha-beta catalogs these interconnect bandwidth constants and feeds them into the $\alpha$-$\beta$ communication model, which lets a reader turn a link's bandwidth and latency into a predicted transfer cost.
 
 [^fn-infiniband-rdma-v2]: **InfiniBand (IB)**: Born in 1999 from the merger of Intel's NGIO and the Compaq/IBM Future I/O initiatives, InfiniBand was originally designed to replace the PCI bus. Its defining feature for ML is RDMA (Remote Direct Memory Access)\index{InfiniBand!RDMA}, which bypasses the OS kernel to transfer data directly between application memory on different machines at microsecond-scale latency. HDR IB provides about `{python} InfiniBandScenario.ib_hdr_gb_per_s_str` line-rate bandwidth per link; NDR reaches about `{python} InfiniBandScenario.ib_ndr_gb_per_s_str`. This bandwidth gap compared with common Ethernet links determines whether large-model training is compute-bound or communication-bound.
 
@@ -830,7 +854,6 @@ drawcolor=black,filllcolor=cyan!15!,Linewidth=0.57pt,Linewidth=1pt}};
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @fig-vol2-system-scaling-regimes scaling-regimes prose.
 # │ Goal: Recap NVLink vs InfiniBand NDR for the fleet-stack figure callout.
-# │ Exports: InfiniBandStackRecap.nvlink_h100_gb_per_s_str, InfiniBandStackRecap.ib_ndr_gbit_per_s_str
 class InfiniBandStackRecap:
     hdr = Systems.Fabrics.InfiniBand_HDR.bandwidth
     ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth
@@ -879,10 +902,10 @@ The barrier synchronization pattern in @fig-traditional-vs-ml-fleet explains *wh
 
 Verify your understanding of how ML fleets differ from traditional clusters:
 
-- [ ] **Straggler impact**: Why does a single slow worker (straggler) have a disproportionate impact on a synchronous ML training job compared to a MapReduce job?
-- [ ] **Bisection bottleneck**: In which type of system, traditional web serving or ML training, is bisection bandwidth more likely to be the primary performance bottleneck?
-- [ ] **Tight coupling**: Can you explain the concept of Synchronous Tight Coupling? How does it relate to the global barrier at the end of each training step?
-- [ ] **Linear speedup myth**: True or False: Adding more GPUs to a training job always results in a linear speedup of the training process.
+- [ ] **Straggler impact**: Explain why a single slow worker (straggler) has a disproportionate impact on a synchronous ML training job compared to a MapReduce job.
+- [ ] **Bisection bottleneck**: Identify whether traditional web serving or ML training is more likely to make bisection bandwidth the primary performance bottleneck.
+- [ ] **Tight coupling**: Explain Synchronous Tight Coupling and connect it to the global barrier at the end of each training step.
+- [ ] **Linear speedup myth**: Classify the claim as true or false: adding more GPUs to a training job always results in a linear speedup of the training process.
 
 :::
 
@@ -925,9 +948,6 @@ At small scale, *computation dominates*. Training a model on a single GPU spends
 # │ Show: ~175B parameters; ~700 GB gradient (FP32).
 # │ How: pulling constants from mlsysim.core.units.
 # │
-# │ Imports: mlsysim.core.units (Models.Language.GPT3.parameters, GB, param, BILLION, BYTES_FP32)
-# │ Exports: Gpt3CommunicationScenario.gpt3_params_b_str,
-# │          Gpt3CommunicationScenario.gpt3_gradient_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, assert_qty_close, fmt_memory, fmt_params
 
@@ -983,11 +1003,6 @@ The rapid evolution in AI capabilities since the late 2010s exemplifies this sca
 # │ Show: ~175B parameters; ~3.14e23 FLOPs; ~312 TFLOP/s (A100 FP16).
 # │ How: pulling constants from mlsysim.core.units.
 # │
-# │ Imports: mlsysim.core.units (Models.Language.GPT3.parameters, Models.Language.GPT3.training_ops, Hardware.Cloud.A100.compute.peak_flops,
-# │          param, BILLION, TFLOPs, second), mlsysim.book (sci, check)
-# │ Exports: Gpt3StatsScenario.gpt3_params_b_str,
-# │          Gpt3StatsScenario.gpt3_training_ops_str,
-# │          Gpt3StatsScenario.a100_fp16_tflop_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_flop_rate, fmt_sci_flops, check, fmt_qty, fmt_params
 
@@ -1302,8 +1317,6 @@ When OpenAI sized GPT-3, it did not run an exhaustive architecture search; it ex
 # │ Show: ~175B parameters.
 # │ How: pulling Models.Language.GPT3.parameters from mlsysim.core.units.
 # │
-# │ Imports: mlsysim.core.units (Models.Language.GPT3.parameters, param, BILLION)
-# │ Exports: Gpt3OptimalScenario.gpt3_params_b_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_params
 
@@ -1367,10 +1380,10 @@ Most of these breakdowns share one root cause: growth in one dimension that outp
 
 Verify your understanding of how scaling laws guide resource allocation:
 
-- [ ] **Compute vs. data regime**: A team has a fixed compute budget but limited training data. According to the "Regimes" framework, should they train a large model for fewer steps or a small model for more steps?
-- [ ] **Scaling breakdown**: If you double the model parameters ($P$) but keep the dataset size ($D$) constant, which "Scaling Breakdown" are you most likely to encounter?
-- [ ] **Chinchilla optimality**: Why is Chinchilla optimality considered the "Gold Standard" for resource allocation? What is being minimized?
-- [ ] **Compute vs. capability**: True or False: Scaling laws predict that doubling compute always yields a doubling of model capability.
+- [ ] **Compute vs. data regime**: Choose between training a larger model for fewer steps and training a smaller model for more steps when a team has fixed compute but limited training data.
+- [ ] **Scaling breakdown**: Identify the scaling breakdown that follows from doubling model parameters ($P$) while keeping dataset size ($D$) constant.
+- [ ] **Chinchilla optimality**: Explain why Chinchilla optimality serves as a resource-allocation target and identify the minimized quantity.
+- [ ] **Compute vs. capability**: Classify the claim as true or false: scaling laws predict that doubling compute always yields a doubling of model capability.
 
 :::
 
@@ -1392,6 +1405,8 @@ In traditional software, we treat hardware as a reliable abstraction. A single s
 
 $$ R_{\text{system}}(t) = (R_{\text{component}}(t))^N = e^{-N\lambda t} $$ {#eq-reliability-gap}
 
+Here, $N$ is the number of independent components in the fleet, $\lambda$ is the per-component failure rate per unit time, $t$ is the time window, and $R_{\text{component}}(t)$ is the probability that one component survives that window. The engineering implication is the exponent: every added component multiplies the failure opportunity, so reliability engineering becomes a scaling problem rather than a cleanup task.
+
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_int
@@ -1405,8 +1420,6 @@ from mlsysim.fmt import fmt_int
 # │ Show: That 99.9% reliability collapses to near-zero at fleet scale.
 # │ How: Calculate (0.999)^N for N=1000 and N=10000.
 # │
-# │ Imports: mlsysim.book
-# │ Exports: ReliabilityGap.prob_1k_str, ReliabilityGap.prob_10k_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
@@ -1467,9 +1480,9 @@ Communication and scaling optimizations, from gradient sparsification (sending f
 
 Before proceeding, verify your understanding of the "Scale Mindset":
 
-- [ ] **Communication intensity**: In CI-ratio terms, why can adding more nodes ($N$) to a high-CI workload slow training down rather than speed it up?
-- [ ] **Reliability gap**: Do you understand the reliability gap: why a 10,000-GPU cluster is never "perfectly healthy"?
-- [ ] **Arithmetic vs. communication**: Can you distinguish arithmetic intensity\index{Arithmetic Intensity} (local memory) from communication intensity (global network)?
+- [ ] **Communication intensity**: Explain in CI-ratio terms why adding more nodes ($N$) to a high-CI workload can slow training rather than speed it up.
+- [ ] **Reliability gap**: Explain the reliability gap that prevents a 10,000-GPU cluster from remaining "perfectly healthy."
+- [ ] **Arithmetic vs. communication**: Distinguish arithmetic intensity\index{Arithmetic Intensity} (local memory) from communication intensity (global network).
 
 :::
 
@@ -1597,19 +1610,6 @@ A concrete GPT-3 synchronization estimate makes the coordination tax visible by 
 # │       and "~84" MJ for 1M endpoint synchronizations.
 # │ How: sync_size = 2 × params × 2 bytes; energy = sync_bits * Energy_per_bit.
 # │
-# │ Imports: mlsysim.core.units (Models.Language.GPT3.parameters, Systems.Fabrics.InfiniBand_HDR.bandwidth, Gbps,
-# │           GB, byte, BITS_PER_BYTE)
-# │ Exports: GPT3SyncTax.ib_efficiency_pct_str,
-# │          GPT3SyncTax.eth_efficiency_pct_str,
-# │          GPT3SyncTax.sync_size_gb_str,
-# │          GPT3SyncTax.model_params_b_str,
-# │          GPT3SyncTax.ib_bw_gbit_per_s_str,
-# │          GPT3SyncTax.eth_bw_gbit_per_s_str,
-# │          GPT3SyncTax.energy_per_bit_pj_per_bit_str,
-# │          GPT3SyncTax.sync_energy_j_str,
-# │          GPT3SyncTax.million_steps_str,
-# │          GPT3SyncTax.sync_energy_mj_str,
-# │          GPT3SyncTax.productivity_window_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_energy, fmt_memory, fmt_params, fmt_percent, fmt_qty, fmt_time
 
@@ -1707,35 +1707,7 @@ The fleet stack is the organizing spine for this book. The C$^3$ taxonomy introd
 
 ::: {#fig-fleet-stack fig-env="figure" fig-pos="htb" fig-cap="**The Fleet Stack**: The organizing framework for this book. We build from the Infrastructure Layer (compute, network, data) up through the Distribution Layer (parallelism, communication, fault tolerance) and Serving Layer (inference, performance, edge, operations) to the Governance Layer (security, robustness, sustainability, responsible engineering). Engineering decisions at the bottom constrain possibilities at the top." fig-alt="Four-layer stack diagram. Bottom: The Fleet with compute, network, data. Lower-middle: Distributed ML with parallelism and communication. Upper-middle: Deployment at Scale with inference and operations. Top: The Responsible Fleet with security and sustainability. Arrows show constraints flowing upward."}
 
-```{.tikz}
-\begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
-  \tikzset{
-    part/.style={draw, rounded corners=3pt, minimum width=7cm, minimum height=1.4cm, align=center, font=\bfseries\usefont{T1}{phv}{b}{n}, line width=0.75pt},
-    arrow/.style={-{Triangle[width=18pt,length=8pt]}, line width=1.0pt, opacity=0.6, color=BlueLine!40},
-    label/.style={font=\footnotesize\usefont{T1}{phv}{m}{n}, text=black, text width=4cm},
-    node distance=0.2cm
-  }
-
-  % Nodes with ETH Zurich Blue intensity gradient
-  \node[part, draw=BlueLine, fill=BlueL!25, text=BlueLine] (p1) {Part I: The Fleet\\ Compute, Network, Data};
-  \node[part, draw=BlueLine, fill=BlueL!50, text=BlueLine, above=of p1] (p2) {Part II: Distributed ML\\ Training, Communication, Fault Tolerance, Orchestration};
-  \node[part, draw=BlueLine, fill=BlueL!75, text=BlueLine, above=of p2] (p3) {Part III: Deployment at Scale\\ Inference, Performance, Edge, Operations};
-  \node[part, draw=BlueLine, fill=BlueLine, text=white, above=of p3] (p4) {Part IV: The Responsible Fleet\\ Security, Robustness, Sustainability, Governance};
-
-  % Background arrows showing constraint flow
-  \begin{scope}[on background layer]
-    \draw[arrow] (p1.north) -- (p2.south);
-    \draw[arrow] (p2.north) -- (p3.south);
-    \draw[arrow] (p3.north) -- (p4.south);
-  \end{scope}
-
-  % Annotations
-  \node[label, right=0.3cm of p1] {Infrastructure\\ (Power, Bandwidth, Storage)};
-  \node[label, right=0.3cm of p2] {Distribution\\ (Parallelism, Coordination)};
-  \node[label, right=0.3cm of p3] {Serving\\ (Inference, Operations)};
-  \node[label, right=0.3cm of p4] {Governance\\ (Security, Sustainability)};
-\end{tikzpicture}
-```
+![](images/svg/fleet-stack.svg){width="100%"}
 
 :::
 
@@ -1747,117 +1719,7 @@ The **AI Triad at Scale**\index{AI Triad} is the dependency reminder inside that
 
 ::: {#fig-vol2-ai-triad fig-env="figure" fig-pos="htb" fig-cap="**The AI Triad at Scale**: The three interdependent components of every ML system. At production scale, each component's requirements intensify: data pipelines must handle petabytes with consistent quality; algorithms can demand $10^{25}$ FLOPs for large-model training; and infrastructure must coordinate thousands of accelerators while maintaining fault tolerance. Changes to any vertex cascade through the others, creating the multi-dimensional optimization challenge that defines ML systems engineering." fig-alt="Triangle diagram with three circles at vertices labeled Algorithm, Data, and Infrastructure. Double-headed purple arrows connect all three nodes, showing bidirectional dependencies with scale annotations."}
 
-```{.tikz}
-\scalebox{0.8}{
-\begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
-\tikzset{
-    Line/.style={line width=0.35pt,black!50,text=black},
-    ALineA/.style={VioletLine,line width=1.0pt,shorten <=2pt,shorten >=2pt,
-        {Triangle[width=1.1*6pt,length=0.8*6pt]}-{Triangle[width=1.1*6pt,length=0.8*6pt]}},
-    LineD/.style={line width=0.75pt,black!50,text=black,dashed,dash pattern=on 5pt off 3pt},
-    Circle/.style={inner xsep=2pt,
-        circle,
-        draw=BrownLine,
-        line width=0.75pt,
-        fill=BrownL,
-        minimum size=20mm
-    },
-    scale annotation/.style={font=\fontsize{7pt}{7}\selectfont, text=black!70},
-    circles/.style={
-        circle,
-        draw=\channelcolor,
-        line width=\Linewidth,
-        fill=\fillcolor,
-        minimum size=2.5mm
-    },
-    db cylinder/.style={cylinder, draw=OrangeLine, fill=OrangeL, line width=0.5pt, shape border rotate=90, aspect=0.25},
-    server rack/.style={draw=GreenLine, fill=GreenL, line width=0.5pt, rounded corners=1pt, minimum width=1.6cm, minimum height=1.6cm, inner sep=0pt},
-    server blade/.style={draw=GreenLine, fill=white, line width=0.4pt, minimum width=1.2cm, minimum height=0.24cm, inner sep=0pt},
-    blade light/.style={circle, fill=GreenLine, minimum size=0.12cm, inner sep=0pt}
-}
-
-\pgfkeys{
-    /channel/.cd,
-    channelcolor/.store in=\channelcolor,
-    fillcolor/.store in=\fillcolor,
-    drawchannelcolor/.store in=\drawchannelcolor,
-    scalefac/.store in=\scalefac,
-    Linewidth/.store in=\Linewidth,
-    picname/.store in=\picname,
-    channelcolor=BrownLine,
-    fillcolor=BrownL,
-    drawchannelcolor=BrownLine,
-    scalefac=1,
-    Linewidth=0.5pt,
-    picname=C
-}
-
-% Main nodes - relative positioning
-\node[Circle, draw=RedLine, fill=RedL] (AL) {};
-\node[Circle, draw=GreenLine, fill=GreenL, below left=1.5cm and 2.5cm of AL] (IN) {};
-\node[Circle, draw=OrangeLine, fill=OrangeL, below right=1.5cm and 2.5cm of AL] (DA) {};
-
-% Bidirectional arrows
-\draw[ALineA](AL)--(IN);
-\draw[ALineA](AL)--(DA);
-\draw[ALineA](DA)--(IN);
-
-% Labels
-\node[below=2pt of AL]{\textbf{Algorithm}};
-\node[below=2pt of IN]{\textbf{Infrastructure}};
-\node[below=2pt of DA]{\textbf{Data}};
-
-% Scale annotations (positioned along arrows)
-\node[scale annotation,rotate=30,above left=0.3 and 0.3 of AL,anchor=south east]{10$^{25}$ FLOPs};
-\node[scale annotation,rotate=-30,above right=0.3 and 0.3 of AL,anchor=south west]{Petabytes};
-\node[scale annotation,below=0.8 of $(IN)!0.5!(DA)$]{25,000 GPUs};
-
-% Inner icons - neural network pattern for Algorithm
-\begin{scope}[local bounding box=CIRCLE1,shift={($(AL)+(0.04,-0.24)$)},
-scale=0.55, every node/.append style={transform shape}]
-\foreach \j in {1,2,3} {
-    \pgfmathsetmacro{\y}{(1.5-\j)*0.43 + 0.7}
-    \node[circles={channelcolor=RedLine,fillcolor=RedL}] (1CD\j) at (-0.8,\y) {};
-}
-\foreach \i in {1,...,4} {
-    \pgfmathsetmacro{\y}{(2-\i)*0.43+0.7}
-    \node[circles={channelcolor=RedLine,fillcolor=RedL}] (2CD\i) at (0,\y) {};
-}
-\foreach \j in {1,2} {
-    \pgfmathsetmacro{\y}{(1-\j)*0.43 + 0.7}
-    \node[circles={channelcolor=RedLine,fillcolor=RedL}] (3CD\j) at (0.8,\y) {};
-}
-\foreach \i in {1,2,3} {
-    \foreach \j in {1,2,3,4} {
-        \draw[Line](1CD\i)--(2CD\j);
-    }
-}
-\foreach \i in {1,2,3,4} {
-    \foreach \j in {1,2} {
-        \draw[Line](2CD\i)--(3CD\j);
-    }
-}
-\end{scope}
-
-% Inner icon for Infrastructure - server rack pattern
-\begin{scope}[shift={($(IN)+(-0.15,-0.1)$)},scale=0.3, transform shape]
-\node[server rack] (rack) at (0,0) {};
-\foreach \y in {-0.4,0,0.4} {
-    \node[server blade] at (0,\y) {};
-    \node[blade light] at (-0.4,\y) {};
-    \node[blade light] at (0.4,\y) {};
-}
-\end{scope}
-
-% Inner icon for Data - cylinder/database pattern
-\begin{scope}[shift={($(DA)+(0,-0.15)$)},scale=0.25, transform shape]
-\node[db cylinder, minimum height=0.8cm, minimum width=1.4cm] (db1) at (0,0.4) {};
-\node[db cylinder, minimum height=0.8cm, minimum width=1.4cm] (db2) at (0,-0.2) {};
-\node[db cylinder, minimum height=0.6cm, minimum width=1.0cm] (db3) at (0,-0.8) {};
-\end{scope}
-
-\end{tikzpicture}}
-```
+![](images/svg/ai-triad-scale.svg){width="100%"}
 
 :::
 
@@ -1955,10 +1817,6 @@ The **Universal Efficiency Fallacy**\index{Universal Efficiency Fallacy} assumes
 # │ Show: 120 km/h and 100 ms correspond to 3.33 meters.
 # │ How: speed_m_s = km/h × 1000 / 3600; distance = speed_m_s × delay_s.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: EdgeLatencyDistance.speed_kmh_str,
-# │          EdgeLatencyDistance.delay_ms_str,
-# │          EdgeLatencyDistance.distance_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_time, fmt_length, fmt_rate
 from mlsysim.core.units import meter
@@ -2000,9 +1858,6 @@ This **"Cloud-Lite" Fallacy**\index{Cloud-Lite Fallacy} treats edge systems as r
 # │ Context: @sec-vol2-intro-pitfalls; worked example for coordination overhead.
 # │ Goal: Keep the claimed realized speedup tied to the stated overhead fraction.
 # │ How: realized_speedup = ideal_speedup × (1 - coordination_fraction).
-# │ Exports: LinearScalingFallacy.ideal_speedup_mult_str,
-# │          LinearScalingFallacy.coord_overhead_pct_str,
-# │          LinearScalingFallacy.realized_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
@@ -2026,7 +1881,9 @@ class LinearScalingFallacy:
     realized_speedup_mult_str = fmt_multiple(realized_speedup, precision=1, commas=True)
 ```
 
-The **Linear Scaling Fallacy**\index{Linear Scaling Fallacy} occurs when teams extrapolate resource requirements using power-law relationships without accounting for coordination overhead. $\mathcal{L}(X) = A_{\mathcal{L}} X^{-\alpha_{\text{scale}}} + C_{\mathcal{L}}$ works within validated ranges but fails at the boundaries. A team training 100B-parameter models by extrapolating from 10B-parameter experiments might predict a `{python} LinearScalingFallacy.ideal_speedup_mult_str` improvement but achieve only `{python} LinearScalingFallacy.realized_speedup_mult_str` if coordination and communication overhead consumes `{python} LinearScalingFallacy.coord_overhead_pct_str` of the scaled step time. Production systems designed assuming linear scaling have experienced 2--3$\times$ cost overruns when empirical performance deviated from power-law predictions beyond validated thresholds.
+The **Linear Scaling Fallacy**\index{Linear Scaling Fallacy} occurs when teams extrapolate resource requirements using power-law relationships without accounting for coordination overhead. $\mathcal{L}(X) = A_{\mathcal{L}} X^{-\alpha_{\text{scale}}} + C_{\mathcal{L}}$ works within validated ranges but fails at the boundaries.
+A team training 100B-parameter models by extrapolating from 10B-parameter experiments might predict a `{python} LinearScalingFallacy.ideal_speedup_mult_str` improvement but achieve only `{python} LinearScalingFallacy.realized_speedup_mult_str` if coordination and communication overhead consumes `{python} LinearScalingFallacy.coord_overhead_pct_str` of the scaled step time.
+Production systems designed assuming linear scaling have experienced 2--3$\times$ cost overruns when empirical performance deviated from power-law predictions beyond validated thresholds.
 
 ## Summary {#sec-vol2-intro-summary-66bb}
 

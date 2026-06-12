@@ -5,7 +5,7 @@ illustrative scale anchors (Gmail volume, Waymo sensor rate) and case-study mode
 metrics (the TinyML anomaly detector). Every value carries sourced() provenance.
 
 Note: *evaluatable* scenario bundles (workload + system + SLA, with .evaluate())
-live in the Scenario model in core/scenarios.py. This registry is the
+live in the Scenario model in engine/scenarios.py. This registry is the
 reference-statistics counterpart — sourced numbers the prose cites, not things to run.
 """
 from ..core.provenance import sourced, sourced_qty
@@ -309,7 +309,6 @@ class ServingProfiles(Registry):
         name="Precision-dividend context length",
         description="Reference context length in tokens for the 70B LLM KV-cache precision-dividend example.",
     )
-    PrecisionDividendGpuMemoryBudget = H100VendorMemoryBudget
     PrecisionDividendBaselinePolicyBatchLimit = sourced(
         4,
         pc.LLM_SERVING_PRECISION_DIVIDEND_PROFILE,
@@ -729,7 +728,3 @@ class ReferenceStats(Registry):
     EdgeAdaptationTierProfile = EdgeAdaptationTierProfile
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
-
-
-# Backward-compatible alias while book cells migrate to ``ReferenceStats``.
-Scenarios = ReferenceStats

@@ -45,8 +45,6 @@ Traditional software fails *loudly*: exceptions crash processes, type errors hal
 
 :::
 
-The fleet stack clarifies why robustness is an infrastructure concern: silent failures propagate through every layer of the system, from input perturbations and distribution drift at the data layer to degraded predictions at the service level [@berkeley2024compound].
-
 ::: {#psp-robust-ai-fleet-stack-connection .callout-perspective title="Fleet stack connection"}
 
 Robust AI sits in the Governance Layer of the fleet stack. The division of labor with security and privacy (@sec-security-privacy) is threat-model vs. mechanism, not external vs. internal. @Sec-security-privacy classifies the threats and owns the system security architecture: who the adversary is, what access they hold, and the authentication, isolation, and access-control boundaries that contain them. This chapter engineers the model-level responses to those same threats together with the nonadversarial ones, detecting distribution shift, training models that resist adversarial perturbation, certifying robustness radii, and degrading gracefully under hardware and software faults. A system that is secure but fragile is operationally useless; robustness engineering ensures that the fleet continues to function under perturbation and degraded conditions.
@@ -72,8 +70,8 @@ These failure modes motivate a precise definition of Robust AI:
 ***Robust AI***\index{Robust AI!definition} is the measurable systems property that a model's predictions remain valid (within specified error bounds) under distribution shift, adversarial perturbation, and hardware or software faults, as opposed to the average-case accuracy achieved under ideal i.i.d. conditions.
 
 1.  **Significance (quantitative)**: Robustness is quantified by worst-case guarantees: a certified robust classifier proves that its prediction cannot change for any input within a specified perturbation set, such as an $\ell_\infty$ ball of radius $\epsilon$ around a test point. For image classification, $\epsilon = 8/255$ (a perturbation invisible to humans) typically drives a nonrobust model's accuracy to near zero under strong attacks such as projected gradient descent. Distribution shift compounds this: a clinical NLP model trained on 2019 records and deployed in 2021 without retraining can see accuracy drop 15–25 percent as medical coding practices and terminology evolve.
-2.  **Observation**: Unlike standard generalization (which measures *average-case accuracy* on held-out i.i.d. test data drawn from the same distribution as training), robustness measures *worst-case performance* on adversarial or out-of-distribution inputs, a distinction that matters because a model can achieve 95 percent i.i.d. test accuracy while failing completely on inputs that differ from training by amounts imperceptible to humans.
-3.  **Pitfall**: A frequent misconception is that robustness can be added as a post-hoc monitoring layer to any existing model. A model's robustness properties are determined primarily during training—models trained without adversarial examples or robustness objectives *cannot* achieve certified robustness through inference-time filtering alone, because the vulnerability is in the learned decision boundary, not in which inputs reach the model.
+2.  **Distinction (durable)**: Unlike standard generalization (which measures *average-case accuracy* on held-out i.i.d. test data drawn from the same distribution as training), robustness measures *worst-case performance* on adversarial or out-of-distribution inputs, a distinction that matters because a model can achieve 95 percent i.i.d. test accuracy while failing completely on inputs that differ from training by amounts imperceptible to humans.
+3.  **Common pitfall**: A frequent misconception is that robustness can be added as a post-hoc monitoring layer to any existing model. A model's robustness properties are determined primarily during training—models trained without adversarial examples or robustness objectives *cannot* achieve certified robustness through inference-time filtering alone, because the vulnerability is in the learned decision boundary, not in which inputs reach the model.
 
 :::
 
@@ -340,9 +338,6 @@ from mlsysim.core.units import *
 # │ Show: ~175B params, ~900 GB/s V100 memory bandwidth, ~0.26 errors/hr.
 # │ How: .to(unit).magnitude from mlsysim.core.units plus bit-rate arithmetic.
 # │
-# │ Imports: mlsysim.core.units (*), mlsysim.fmt (*)
-# │ Exports: gpt3_params_b_str, v100_mem_bw_gb_per_s_str, bits_per_second_math,
-# │          base_error_rate_math, expected_errors_per_hour_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_math, fmt_params, fmt_qty, fmt_rate, sci_latex
 
@@ -396,13 +391,10 @@ The connection between hardware reliability and ML performance demands concepts 
 # │ Show: 10K devices at illustrative p=1e-4/hr gives Pr>0.6; ~30K gives Pr>0.95.
 # │ How: Pr(at least one) = 1 - (1-p)^N.
 # │
-# │ Imports: mlsysim.core.units (THOUSAND)
-# │ Exports: p_per_hr_math, n_gpus_large_str, p_total_large_str,
-# │          n_gpus_certain_str
 # └─────────────────────────────────────────────────────────────────────────────
 from math import ceil, log
 from mlsysim.physics.reliability import calc_binomial_failure_probability
-from mlsysim.fmt import fmt, fmt_math, check
+from mlsysim.fmt import fmt, fmt_percent, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 # ┌── LEGO ───────────────────────────────────────────────
@@ -426,14 +418,14 @@ class SilentErrorProbability:
     check(p_at_least_one_val > 0.6, f"Probability ({p_at_least_one_val:.2f}) should be high at 10K devices")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_math
+    from mlsysim.fmt import fmt, fmt_percent
 
-    p_per_hr_math = fmt_math("10^{-4}")
+    p_per_hr_prose_str = fmt_percent(p_per_hr_illustrative, precision=2, commas=False, style="prose")
     n_gpus_large_str = fmt(n_gpus_large, precision=0)
     p_total_large_str = fmt_percent(p_at_least_one_val, precision=1, style='prose')
     n_gpus_certain_str = fmt(n_gpus_certain_val, precision=0)
 ```
-@Sec-fault-tolerance-reliability establishes that per-device silent corruption compounds across a fleet of $N$ devices as $\Pr(\geq 1) = 1 - (1 - p)^N$, the same arithmetic that makes a single bit flip a near-certain event at training scale. The robustness consequence is what @fig-silent-error-probability extends: sweeping the per-device rate $p$ shows how steeply the cluster-level probability climbs once a model is sharded across thousands of devices. The curve uses an illustrative stress-test rate of $p$ = `{python} SilentErrorProbability.p_per_hr_math` per device-hour. At that rate, a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster is more likely than not to see an hourly silent error (`{python} SilentErrorProbability.p_total_large_str` probability), and the probability crosses 95 percent at about `{python} SilentErrorProbability.n_gpus_certain_str` devices. Meta's SDC report confirms corruption at observable fleet scale [@dixit2021silent].
+@Sec-fault-tolerance-reliability establishes that per-device silent corruption compounds across a fleet of $N$ devices as $\Pr(\geq 1) = 1 - (1 - p)^N$, the same arithmetic that makes a single bit flip a near-certain event at training scale. The robustness consequence is what @fig-silent-error-probability extends: sweeping the per-device rate shows how steeply the cluster-level probability climbs once a model is sharded across thousands of devices. The curve uses an illustrative stress-test rate of `{python} SilentErrorProbability.p_per_hr_prose_str` per device-hour. At that rate, a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster is more likely than not to see an hourly silent error (`{python} SilentErrorProbability.p_total_large_str` probability), and the probability crosses 95 percent at about `{python} SilentErrorProbability.n_gpus_certain_str` devices. Meta's SDC report confirms corruption at observable fleet scale [@dixit2021silent].
 
 ::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three illustrative per-device error rates. The curves show how quickly cluster-scale probabilities compound as per-device rates increase." fig-alt="Semilog plot showing three S-curves for per-device SDC rates of 1e-3, 1e-4, and 1e-5. The 1e-3 and 1e-4 curves approach probability 1.0 by 100000 devices; the 1e-5 curve rises to about 0.63."}
 
@@ -448,8 +440,6 @@ class SilentErrorProbability:
 # │ Show: Three S-curves; semilog x; shaded region; annotations.
 # │ How: N = logspace(0,5,500); Pr_at_least_one = 1-(1-p)^N; book_style.setup_plot().
 # │
-# │ Imports: numpy (np), matplotlib.pyplot (plt), book.tools.figures.style (book_style)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot Pr(>=1 SDC) = 1-(1-p)^N vs N for p=1e-3, 1e-4, 1e-5.
@@ -646,9 +636,6 @@ Detection and monitoring form the foundation of that strategy. Each pillar asks 
 # │ Show: training_slowdown ≈ 8x—inline in notebook result.
 # │ How: total time = standard time + PGD steps × standard time.
 # │
-# │ Imports: mlsysim.fmt (check)
-# │ Exports: ap_std_passes_str, ap_n_pgd_steps_str, ap_slowdown_mult_str,
-# │          ap_cert_acc_str, ap_gap_pp_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_percent, fmt_pp, MarkdownStr
 
@@ -721,13 +708,13 @@ The unified framework asks you to name which of the three pillars produced a sil
 
 **Classifying the threat**
 
-- [ ] **Pillar classification**: Can you place each of these in the right pillar: a model losing accuracy as customer behavior evolves, an input crafted to force a misclassification, and a bit flip in an accelerator's HBM?
-- [ ] **Software-fault mimicry**: A preprocessing bug suddenly shifts the feature statistics of every inference. Why is this hard to distinguish from genuine environmental shift, and which pillar actually owns it?
+- [ ] **Pillar classification**: Classify a model losing accuracy as customer behavior evolves, a crafted input that forces misclassification, and an accelerator HBM bit flip under the correct robustness pillars.
+- [ ] **Software-fault mimicry**: Explain why a preprocessing bug that shifts every inference's feature statistics is hard to distinguish from genuine environmental shift, then classify it under the appropriate pillar.
 
 **Choosing the response**
 
-- [ ] **Response selection**: Given the shared detection, graceful-degradation, and adaptive-response pattern, which response does an ECC-corrected single-bit memory error exercise, and which does a fired drift monitor exercise?
-- [ ] **Fleet-scale effects**: At a fleet of tens of thousands of accelerators, why does a per-device silent-corruption rate that is negligible per device become an architectural constraint rather than a component-level concern?
+- [ ] **Response selection**: Map an ECC-corrected single-bit memory error and a fired drift monitor to the shared responses of detection, graceful degradation, and adaptive response.
+- [ ] **Fleet-scale effects**: Explain why a negligible per-device silent-corruption rate becomes an architectural constraint at a fleet scale of tens of thousands of accelerators.
 
 :::
 
@@ -751,11 +738,6 @@ A medical diagnosis model trained on X-ray images from a well-resourced hospital
 # │ Show: p_value ≈ 0.001—inline in notebook result.
 # │ How: Z-score and two-sided normal-tail p-value for mean shift.
 # │
-# │ Imports: statistics (NormalDist), mlsysim.fmt (check, fmt, fmt_percent,
-# │          MarkdownStr)
-# │ Exports: baseline_mean_str, current_mean_str, ds_mean_diff_str,
-# │          ds_std_error_str, ds_z_score_str, ds_n_samples_str,
-# │          ds_p_value_str, ds_shift_detected_str, ds_noise_prob_percent_str
 # └─────────────────────────────────────────────────────────────────────────────
 from statistics import NormalDist
 from mlsysim.fmt import check, fmt, fmt_percent, MarkdownStr
@@ -784,7 +766,7 @@ class ShiftConfidence:
     ds_z_score_str = fmt(z_score, precision=1, commas=False)
     ds_n_samples_str = fmt(n_samples, precision=0)
     ds_std_dev_str = fmt(std_dev, precision=1, commas=False)
-    ds_p_value_str = MarkdownStr("< 0.001")
+    ds_p_value_str = fmt(noise_prob_bound, precision=3, commas=False, upper_bound=True)
     ds_shift_detected_str = MarkdownStr("YES")
     # Systems-insight prose: the noise-probability bound rendered as a percent
     # ("less than 0.1 percent") for the "Is the world changing?" callout.
@@ -807,11 +789,13 @@ Detection requires proving that the observed change is statistically unlikely un
 
 :::
 
+The taxonomy in @fig-shift-types separates the three failure modes that a drift detector can surface: the inputs can move, the label prior can move, or the input-label relationship itself can change.
+
 ::: {#fig-shift-types fig-env="figure" fig-pos="htb" fig-cap="**Types of Distribution Shift**: Comparison of covariate shift ($p(x)$ changes), label shift ($p(y)$ changes), and concept drift ($p(y \mid x)$ changes). Understanding the specific type of shift is crucial for selecting the correct adaptation strategy (for example, importance re-weighting vs. model retraining)." fig-alt="Three-panel diagram showing covariate shift, label shift, and concept drift with distribution curves."}
 ![](images/svg/shift-types.svg)
 :::
 
-@Fig-shift-types categorizes the three fundamental types of distribution shift. These shifts occur naturally as environments evolve. User preferences change seasonally, language evolves with new slang, and economic patterns shift with market conditions. Unlike adversarial attacks that require malicious intent, these shifts emerge organically from the dynamic nature of real-world systems.
+These shifts occur naturally as environments evolve. User preferences change seasonally, language evolves with new slang, and economic patterns shift with market conditions. Unlike adversarial attacks that require malicious intent, these shifts emerge organically from the dynamic nature of real-world systems.
 
 #### Technical categories {#sec-robust-ai-technical-categories-cc06}
 
@@ -828,8 +812,8 @@ Covariate shift occurs when the input distribution changes while the relationshi
 ***Concept Drift***\index{Concept Drift!definition} is the deployed-model subtype of distribution shift (see @sec-robust-ai-distribution-shift-concept-drift-55e2) in which the statistical relationship $p(y \mid x)$ changes over time, meaning the decision boundary itself becomes incorrect rather than merely the input distribution. Its sibling is data drift\index{Data Drift} (see @sec-ml-operations-scale-monitoring-scale-73c5), in which $p(x)$ changes while $p(y \mid x)$ remains stable.
 
 1.  **Significance (quantitative)**: It causes silent model degradation because the historical mapping learned by the model is no longer representative of current reality. Within the iron law\index{Iron Law}, it compresses the effective deployment window before retraining is required: fraud-detection models, recommender systems, and other behavior-dependent models may need periodic retraining or recalibration as adversaries, users, and policies change. Each forced retraining cycle incurs the full $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ cost of the original training run, making the amortized per-prediction cost a direct function of drift velocity.
-2.  **Observation**: Unlike data drift (where fresh $p(x)$ data with unchanged labels fully restores performance), concept drift requires relabeling under the new $p(y \mid x)$, because the same ground-truth labeling procedure that cures data drift is insufficient when the correct answer for the same input has changed. This makes concept drift structurally more expensive to remediate: it demands human annotation of recent examples, not merely resampling of the existing labeled distribution.
-3.  **Pitfall**: A frequent misconception is that concept drift is detectable by monitoring input feature statistics. Because $p(x)$ may be entirely unchanged, input-level monitoring (PSI, KL divergence on features) will show no signal. Concept drift can only be confirmed by comparing predictions to ground-truth outcomes\index{Concept Drift!ground-truth feedback}, making it significantly harder to detect in real time and requiring a ground-truth feedback loop before remediation can begin.
+2.  **Distinction (durable)**: Unlike data drift (where fresh $p(x)$ data with unchanged labels fully restores performance), concept drift requires relabeling under the new $p(y \mid x)$, because the same ground-truth labeling procedure that cures data drift is insufficient when the correct answer for the same input has changed. This makes concept drift structurally more expensive to remediate: it demands human annotation of recent examples, not merely resampling of the existing labeled distribution.
+3.  **Common pitfall**: A frequent misconception is that concept drift is detectable by monitoring input feature statistics. Because $p(x)$ may be entirely unchanged, input-level monitoring (PSI, KL divergence on features) will show no signal. Concept drift can only be confirmed by comparing predictions to ground-truth outcomes\index{Concept Drift!ground-truth feedback}, making it significantly harder to detect in real time and requiring a ground-truth feedback loop before remediation can begin.
 
 :::
 
@@ -857,9 +841,6 @@ Drift monitoring earns its place only when it turns a distribution signal into a
 # │ Show: ~150 ms latency for 10K MMD samples; PSI thresholds (0.1--0.25).
 # │ How: Constant thresholds and an H100-class latency scenario.
 # │
-# │ Imports: mlsysim.core.units (THOUSAND, PSI thresholds)
-# │ Exports: mmd_n_samples_str, mmd_latency_ms_str, ks_n_samples_str,
-# │          psi_warn_thresh_str, psi_critical_thresh_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 from mlsysim import Ops
@@ -954,8 +935,6 @@ When a bin has zero observations in either distribution, adding a small smoothin
 # │ Show: Line plot; axhspan zones; threshold lines; annotations.
 # │ How: Synthetic psi_values; matplotlib.
 # │
-# │ Imports: matplotlib.pyplot (plt), numpy (np)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot weekly PSI over 52 weeks; show Green/Orange/Red zones.
@@ -1133,10 +1112,6 @@ Consider a fraud detection model serving an e-commerce platform with two key inp
 # │      difference (p-q), log-ratio ln(p/q), and contribution (p-q)*ln(p/q)
 # │      are derived per bucket and summed for the total PSI.
 # │
-# │ Imports: mlsysim.fmt (check, fmt, fmt_math)
-# │ Exports: <bucket>_base_str, <bucket>_curr_str, <bucket>_diff_str,
-# │          <bucket>_logratio_str, <bucket>_contrib_str for usa/uk/germany/
-# │          france/other; psi_total_str, psi_sum_math
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import check, fmt, fmt_math
@@ -1264,8 +1239,6 @@ $$
 # │      LOAD constants; the closed-form Gaussian KL and the KS critical value
 # │      c(alpha)*sqrt((n+m)/(n*m)) are derived.
 # │
-# │ Imports: mlsysim.fmt (check, fmt, fmt_math)
-# │ Exports: kl_str, kl_worked_math, ks_crit_str, ks_crit_math
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import check, fmt, fmt_math
@@ -1297,12 +1270,16 @@ class ContinuousDriftAnalysis:
     kl_term2_str = fmt(kl_term2, precision=3, commas=False)
     kl_str = fmt(kl, precision=3, commas=False)
     ks_crit_str = fmt(ks_crit, precision=3, commas=False)
+    kl_numerator = sigma_base**2 + (mu_base - mu_curr) ** 2
+    kl_denominator = 2 * sigma_curr**2
+    kl_numerator_str = fmt(kl_numerator, precision=2, commas=False)
+    kl_denominator_str = fmt(kl_denominator, precision=2, commas=False)
 
     # Display-math identities (inline {python} refs do not evaluate inside
     # $$...$$, so the worked equations are assembled here as _math).
     kl_worked_math = fmt_math(
         r"\mathcal{D}_{\text{KL}} = \ln\frac{1.3}{1.1} + "
-        r"\frac{1.1^2 + (4.2 - 4.5)^2}{2 \times 1.3^2} - 0.5 = " + kl_term1_str + " + " + kl_term2_str + " - 0.5 = " + kl_str
+        r"\frac{" + kl_numerator_str + r"}{" + kl_denominator_str + r"} - 0.5 = " + kl_term1_str + " + " + kl_term2_str + " - 0.5 = " + kl_str
     )
     ks_crit_math = fmt_math(r"c(0.05) \sqrt{\frac{20000}{10^8}} \approx " + ks_crit_str)
 ```
@@ -1402,13 +1379,13 @@ Environmental shifts split into distinct types, and the chapter's drift framewor
 
 **Distinguishing the shift type**
 
-- [ ] **Shift taxonomy**: Can you tell covariate shift, label shift, and concept drift apart by which probability the change touches, and explain why feature-statistics monitoring stays silent under pure concept drift?
-- [ ] **Spurious correlation**: A cow-on-a-beach misclassification is not the world changing but the model having learned the wrong lesson. What is this failure called, and why does standard empirical risk minimization encourage it?
+- [ ] **Shift taxonomy**: Distinguish covariate shift, label shift, and concept drift by which probability the change touches, and explain why feature-statistics monitoring stays silent under pure concept drift.
+- [ ] **Shortcut failure**: Identify the failure in a cow-on-a-beach misclassification where the world has not changed but the model learned the wrong lesson, and explain why standard empirical risk minimization encourages it.
 
 **Reasoning about thresholds and cost**
 
-- [ ] **Threshold judgment**: A high-importance feature shows a population stability index in the major-shift band while precision and recall stay flat. Using the three-level framework, do you retrain, investigate, or keep monitoring, and why?
-- [ ] **Cost asymmetry**: Why is concept drift structurally more expensive to remediate than data drift, even when the same volume of fresh data is available?
+- [ ] **Threshold judgment**: Select retraining, investigation, or continued monitoring for a high-importance feature whose population stability index is in the major-shift band while precision and recall stay flat.
+- [ ] **Cost asymmetry**: Explain why concept drift is structurally more expensive to remediate than data drift, even when the same volume of fresh data is available.
 
 :::
 
@@ -1423,8 +1400,8 @@ Adding a microscopic, mathematically calculated layer of noise to an image of a 
 ***Adversarial Attack***\index{Adversarial Attack!definition} is a deliberate, mathematically crafted perturbation to model inputs designed to cause misclassification while remaining imperceptible to humans.
 
 1.  **Significance (quantitative)**: It reveals that high-dimensional decision boundaries have Counterintuitive Vulnerabilities. The per-feature perturbation magnitude required for misclassification scales inversely with input dimensionality, meaning models operating on high-dimensional inputs (for example, high-resolution images) are susceptible to attacks in which no single feature changes perceptibly.
-2.  **Observation**: Unlike Random Noise (which the model can learn to ignore), Adversarial Perturbations are Gradient-Directed\index{Adversarial Perturbation!gradient-directed}: they are specifically optimized to maximize the model's prediction error.
-3.  **Pitfall**: A frequent misconception is that adversarial vulnerability is a "bug" to be patched. In reality, it is a structural vulnerability of many standard neural networks trained by empirical risk minimization; robust defense typically requires fundamental changes to the objective function (for example, adversarial training).
+2.  **Distinction (durable)**: Unlike Random Noise (which the model can learn to ignore), Adversarial Perturbations are Gradient-Directed\index{Adversarial Perturbation!gradient-directed}: they are specifically optimized to maximize the model's prediction error.
+3.  **Common pitfall**: A frequent misconception is that adversarial vulnerability is a "bug" to be patched. In reality, it is a structural vulnerability of many standard neural networks trained by empirical risk minimization; robust defense typically requires fundamental changes to the objective function (for example, adversarial training).
 
 :::
 
@@ -1515,7 +1492,7 @@ The point of @tbl-attack_types is defense selection, not vocabulary. A model tha
 | **Physical**     | Patches         | Printed patches fool detectors in the real world          |
 |                  | 3D Objects      | Sculpted objects deceive sensors in deployment            |
 
-: **Adversarial Attack Categories**: Input perturbation attacks categorized by mechanism. {#tbl-attack_types tbl-colwidths="[15,18,67]"}
+: **Adversarial Attack Categories**: Attack mechanisms determine defense selection: gradient and optimization attacks require robustness against explicit decision-boundary crossing, transfer attacks test black-box exposure, and physical attacks require evaluation through the deployed sensor loop. {#tbl-attack_types tbl-colwidths="[15,18,67]"}
 
 The defense cannot be chosen generically. Adversarial training raises the cost of gradient-based attacks, input transformation disrupts some small perturbations before inference, ensembles make transfer less reliable, and physical evaluation exposes failures that digital tests miss. The reason this defense budget matters is that adversarial attacks extend far beyond the basic misclassification that @fig-adversarial-googlenet illustrates, where an imperceptible perturbation flips GoogLeNet's prediction on an otherwise unchanged image. That single-image failure is only the entry point; the same principle scales into physical, transferable, and systemic attacks that create risks across deployment domains.
 
@@ -1552,8 +1529,8 @@ The attacks so far perturb a fixed model at inference time. Poisoning instead co
 ***Data Poisoning***\index{Data Poisoning!definition} is the corruption of training data to compromise model behavior at inference time, either by injecting malicious samples or modifying existing labels.
 
 1.  **Significance (quantitative)**: It undermines the foundational assumption of Data Integrity. Even a small fraction of poisoned samples (for example, <1 percent) can create Backdoors or systematic biases that remain latent until triggered by specific inputs during serving.
-2.  **Observation**: Unlike Adversarial Attacks (which occur at Inference Time), Data Poisoning occurs during Data Collection or Training, contaminating the model's learned mapping from the source.
-3.  **Pitfall**: A frequent misconception is that poisoning can be "fixed" by more data. In reality, poisoning often exploits the Aggregation Property of training: adding more clean data may not "wash out" a carefully targeted backdoor that uses a unique trigger.
+2.  **Distinction (durable)**: Unlike Adversarial Attacks (which occur at Inference Time), Data Poisoning occurs during Data Collection or Training, contaminating the model's learned mapping from the source.
+3.  **Common pitfall**: A frequent misconception is that poisoning can be "fixed" by more data. In reality, poisoning often exploits the Aggregation Property of training: adding more clean data may not "wash out" a carefully targeted backdoor that uses a unique trigger.
 
 :::
 
@@ -2125,8 +2102,6 @@ For model-facing perturbation threats, the most direct training-time defense is 
 # │ Show: ~26% accuracy drop for ResNet-50 on ImageNet under eps=8/255.
 # │ How: Compare standard accuracy (76%) vs robust accuracy (~50%).
 # │
-# │ Imports: mlsysim.fmt (check, fmt)
-# │ Exports: clean_acc_str, robust_acc_str, acc_drop_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt
 
@@ -2213,10 +2188,6 @@ Adversarial training is empirical; it resists specific attacks seen during train
 # │ Show:    p_A=0.999, sigma=0.5 gives R≈1.5.
 # │ How:     R = sigma * Phi^{-1}(p_A).
 # │
-# │ Imports: statistics (NormalDist), mlsysim.fmt (check, fmt)
-# │ Exports: RandomizedSmoothingRadius.rs_p_top_str,
-# │          RandomizedSmoothingRadius.rs_sigma_str,
-# │          RandomizedSmoothingRadius.rs_radius_str
 # └─────────────────────────────────────────────────────────────────────────────
 from statistics import NormalDist
 from mlsysim.fmt import check, fmt
@@ -2317,13 +2288,13 @@ An adversarial defense is a budgeted response to a specific threat model, and a 
 
 **Matching defense to threat**
 
-- [ ] **Worst-case evaluation**: Can you explain why a model that passes a white-box PGD test makes a worst-case robustness claim that a model evaluated only on saved digital images cannot?
-- [ ] **Threat-model fit**: An API-facing classifier and a safety-critical road-sign detector face different attacker access. Which defense emphasis does each one need, and why does adversarial training alone not transfer between them?
+- [ ] **Worst-case evaluation**: Explain why a model that passes a white-box PGD test makes a worst-case robustness claim that evaluation only on saved digital images cannot support.
+- [ ] **Threat-model fit**: Match the defense emphasis to an API-facing classifier and a safety-critical road-sign detector, and explain why adversarial training alone does not transfer between them.
 
 **Reasoning about the budget**
 
-- [ ] **Certified vs. empirical**: Certified randomized smoothing and empirical adversarial training both buy robustness. Why does the certified guarantee force smoothing into asynchronous auditing rather than the real-time serving path?
-- [ ] **Defense budget**: For a low-risk component, why is input detection often the rational choice over building intrinsic robustness into the model weights, given the clean-accuracy tax adversarial training imposes?
+- [ ] **Certified vs. empirical**: Explain why certified randomized smoothing's guarantee forces asynchronous auditing rather than real-time serving-path use.
+- [ ] **Defense budget**: Justify input detection over intrinsic model robustness for a low-risk component given the clean-accuracy tax adversarial training imposes.
 
 :::
 
@@ -2667,9 +2638,6 @@ Influence functions\index{Influence Functions!data sanitization} [@koh2017unders
 # │ How: MSE loss scales as e^2; the residual term in the MSE gradient scales
 # │      linearly with e.
 # │
-# │ Imports: mlsysim.fmt (check, fmt_multiple)
-# │ Exports: normal_error_mult_str, squared_loss_mult_str,
-# │          residual_gradient_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_multiple
 
@@ -2787,7 +2755,6 @@ Building multi-layered defenses against these failure modes transforms a fragile
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Summary takeaways — robustness vs accuracy trade-off.
 # │ Goal: Recap the ImageNet robustness-tax percentage locally.
-# │ Exports: RobustnessTaxRecap.acc_drop_pp_str
 class RobustnessTaxRecap:
     clean_acc = 76.0
     robust_acc = 50.0

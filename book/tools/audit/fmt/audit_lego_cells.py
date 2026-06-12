@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Verify every LEGO cell in archived chapters: exec, exports, HTML refs.
+"""Verify every LEGO cell in archived chapters: exec, outputs, HTML refs.
 
-For each ``{python}`` cell marked as LEGO (header comment or ``Exports:``):
+For each ``{python}`` cell marked by a LEGO header or output section:
 
 1. Exec all chapter cells in order (shared namespace — matches Quarto render).
-2. List every ``*_str`` / ``*_math`` / ``*_eq`` / ``*_frac`` export on the class.
-3. Confirm each export resolves after exec.
-4. For each ``{python} Class.export`` ref in prose, confirm the rendered value
+2. List every ``*_str`` / ``*_math`` / ``*_eq`` / ``*_frac`` output on the class.
+3. Confirm each output resolves after exec.
+4. For each ``{python} Class.output`` ref in prose, confirm the rendered value
    appears in archived HTML (same rules as ``audit_lego_html.py``).
 
 Usage (repo root)::
@@ -79,7 +79,7 @@ def _parse_lego_cells(qmd: Path) -> list[dict]:
         if in_cell and CELL_END.match(line):
             in_cell = False
             code = "\n".join(buf)
-            is_lego = bool(LEGO_MARK.search(code)) or "Exports:" in code
+            is_lego = bool(LEGO_MARK.search(code))
             if not is_lego:
                 continue
             goal_m = GOAL.search(code)
@@ -133,7 +133,7 @@ def _exec_with_cell_errors(
         if in_cell and CELL_END.match(line):
             in_cell = False
             code = "\n".join(buf)
-            is_lego = bool(LEGO_MARK.search(code)) or "Exports:" in code
+            is_lego = bool(LEGO_MARK.search(code))
             m = CLASS.search(code)
             cls = m.group(1) if m else None
             key = cls or f"cell@{start_line}"
@@ -294,7 +294,7 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         return 0 if ch_pass == len(report) else 1
 
-    print("LEGO cell verification (exec + exports + HTML refs)")
+    print("LEGO cell verification (exec + outputs + HTML refs)")
     print("=" * 72)
     print(
         f"Chapters: {len(report)} | chapter PASS: {ch_pass} | "
@@ -333,7 +333,7 @@ def main() -> int:
                 ]
                 print(
                     f"  L{cell['cell_line']} {cell['class']}: {cell['status']} "
-                    f"exports={bad_exports[:3]} refs={bad_refs[:3]}"
+                    f"outputs={bad_exports[:3]} refs={bad_refs[:3]}"
                 )
 
     return 1 if failed or ch_pass != len(report) else 0

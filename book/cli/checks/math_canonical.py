@@ -49,7 +49,7 @@ PLAIN_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*([^=].*)$")
 CANONICAL_STR_CALL = re.compile(
     r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
     r"|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range|fmt_count_range"
-    r"|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
+    r"|fmt_usd_range|fmt_time|fmt_rate|fmt_fps|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
     r"|fmt_magnitude|fmt_text|fmt_display_math"
     r"|fmt_percent_range|fmt_multiple_range"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat"
@@ -125,7 +125,7 @@ IMPLICIT_INT_CAST_FMT = re.compile(
 FMT_FAMILY_USE = re.compile(
     r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_math|fmt_percent|fmt_pp|fmt_multiple"
     r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
-    r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_val|fmt_unit"
+    r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_fps|fmt_val|fmt_unit"
     r"|fmt_magnitude|fmt_text|fmt_display_math"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat"
     r"|fmt_memory_capacity"
@@ -149,7 +149,7 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 MLSYSIM_STAR_FMT_NAMES = frozenset({
     "fmt", "fmt_qty", "fmt_qty_int", "fmt_int", "fmt_usd", "fmt_eur", "fmt_percent", "fmt_pp", "fmt_multiple",
     "fmt_count", "fmt_ratio", "fmt_range", "fmt_qty_range", "fmt_time_range",
-    "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_val",
+    "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_fps", "fmt_val",
     "fmt_unit", "fmt_sci", "fmt_sci_qty", "fmt_magnitude", "fmt_text",
     "fmt_frac", "fmt_math", "fmt_display_math", "MarkdownStr", "check",
     "fmt_percent_range", "fmt_multiple_range",

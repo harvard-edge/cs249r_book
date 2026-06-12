@@ -48,6 +48,7 @@ from mlsysim.fmt import (
     fmt_water_intensity,
     fmt_range,
     fmt_rate,
+    fmt_fps,
     fmt_ratio,
     fmt_sci,
     fmt_sci_flops,
@@ -405,6 +406,22 @@ class TestFmtRate:
 
     def test_returns_markdown_str(self):
         assert isinstance(fmt_rate(1, "QPS"), MarkdownStr)
+
+
+class TestFmtFps:
+    def test_formats_frame_rate(self):
+        assert fmt_fps(30) == "30 FPS"
+        assert fmt_fps(30.3) == "30 FPS"
+        assert fmt_fps(29.5, precision=1) == "29.5 FPS"
+        assert fmt_fps(120, commas=True) == "120 FPS"
+
+    def test_rejects_negative_by_default(self):
+        with pytest.raises(ValueError, match="non-negative rate"):
+            fmt_fps(-1)
+        assert fmt_fps(-1, allow_negative=True) == "-1 FPS"
+
+    def test_returns_markdown_str(self):
+        assert isinstance(fmt_fps(30), MarkdownStr)
 
 
 class TestFmtTime:

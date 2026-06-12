@@ -144,3 +144,4 @@ def test_no_legacy_scenario_aliases_remain() -> None:
     assert not hasattr(mlsysim.Scenarios, "Doorbell")
     assert not hasattr(mlsysim.Scenarios, "AutoDrive")
     assert not hasattr(mlsysim.Scenarios, "Frontier")
+    assert not hasattr(mlsysim.reference_stats.registry, "Scenarios")

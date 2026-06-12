@@ -197,28 +197,36 @@ def _archive_artifacts(vol: str, ch_path: str, live_pdf: Path, live_tex: Path) -
 
 def _scan_tex(tex: Path) -> tuple[list[str], list[str], int, int]:
     text = tex.read_text(encoding="utf-8", errors="replace")
+    active_text = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("%")
+    )
     hits: list[str] = []
     for pat in TEX_ERROR_PATTERNS:
-        if pat.search(text):
+        if pat.search(active_text):
             hits.append(pat.pattern)
 
     imbalances: list[str] = []
     for env in MATH_ENVS:
-        begin_n = len(re.findall(rf"\\begin\{{{re.escape(env)}\}}", text))
-        end_n = len(re.findall(rf"\\end\{{{re.escape(env)}\}}", text))
+        begin_n = len(re.findall(rf"\\begin\{{{re.escape(env)}\}}", active_text))
+        end_n = len(re.findall(rf"\\end\{{{re.escape(env)}\}}", active_text))
         if begin_n != end_n:
             imbalances.append(f"{env}: begin={begin_n} end={end_n}")
 
-    display_start = len(re.findall(r"\\begin\{(?:equation|align|gather|multline|flalign|eqnarray)", text))
-    bracket_begin = len(re.findall(r"(?<!\\)\\\[", text))
-    bracket_end = len(re.findall(r"(?<!\\)\\\]", text))
+    display_start = len(
+        re.findall(
+            r"\\begin\{(?:equation|align|gather|multline|flalign|eqnarray)",
+            active_text,
+        )
+    )
+    bracket_begin = len(re.findall(r"(?<!\\)\\\[", active_text))
+    bracket_end = len(re.findall(r"(?<!\\)\\\]", active_text))
     if bracket_begin != bracket_end:
         imbalances.append(f"display brackets: [={bracket_begin} ]={bracket_end}")
 
-    inline_paren = sum(1 for ln in text.splitlines() if "\\(" in ln or "\\)" in ln)
-    inline_dollar = sum(1 for ln in text.splitlines() if re.search(r"(?<!\$)\$(?!\$)", ln))
+    inline_paren = sum(1 for ln in active_text.splitlines() if "\\(" in ln or "\\)" in ln)
+    inline_dollar = sum(1 for ln in active_text.splitlines() if re.search(r"(?<!\$)\$(?!\$)", ln))
 
-    return hits, imbalances, display_start + max(0, text.count("\\[")), inline_paren + inline_dollar
+    return hits, imbalances, display_start + max(0, active_text.count("\\[")), inline_paren + inline_dollar
 
 
 def _scan_pdf_text(pdf: Path) -> tuple[list[str], list[str]]:
@@ -453,10 +461,11 @@ def main() -> int:
         return 0
 
     targets: list[tuple[str, str]] = []
+    requested_any_vol = args.vol1 is not None or args.vol2 is not None
     if args.all:
-        if args.vol1 is not None or (not args.vol1 and not args.vol2):
+        if args.vol1 is not None or not requested_any_vol:
             targets.extend(("vol1", p) for p in CHAPTERS["vol1"])
-        if args.vol2 is not None or (not args.vol1 and not args.vol2):
+        if args.vol2 is not None or not requested_any_vol:
             targets.extend(("vol2", p) for p in CHAPTERS["vol2"])
     else:
         for vol_flag, vol in [(args.vol1, "vol1"), (args.vol2, "vol2")]:

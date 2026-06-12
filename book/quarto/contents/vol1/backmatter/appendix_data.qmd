@@ -8,9 +8,7 @@ engine: jupyter
 
 _What makes “data” a first-class systems constraint, and how do we measure when it is silently breaking our models?_
 
-In ML systems, data is not an abstract dataset—it is physical volume that must move through disks, networks, CPUs, and accelerator memory. Many expensive training runs are limited not by FLOP/s, but by I/O bandwidth, serialization overhead, and avoidable scans of irrelevant bytes. In production, the more dangerous failure mode is quieter: distributions drift, tails dominate user experience, and accuracy degrades long before average metrics look suspicious.
-
-This appendix collects the reference calculations and statistical tools for reasoning about the data path as a systems engineer. It focuses on what matters in practice: data gravity napkin math, format and serialization costs, the algebraic primitives that create pipeline blowups (especially joins), and drift metrics that compare full distributions rather than means.
+In ML systems, data is not an abstract dataset—it is physical volume that must move through disks, networks, CPUs, and accelerator memory. Many expensive training runs are limited not by FLOP/s, but by I/O bandwidth, serialization overhead, and avoidable scans of irrelevant bytes. In production, the more dangerous failure mode is quieter: distributions drift, tails dominate user experience, and accuracy degrades long before average metrics look suspicious. This appendix collects the reference calculations and statistical tools for reasoning about the data path as a systems engineer: data gravity napkin math, format and serialization costs, the algebraic primitives that create pipeline blowups, and drift metrics that compare full distributions rather than means.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -39,12 +37,24 @@ from mlsysim.core.units import *
 # │ Show:    Human-readable durations (Seconds, Minutes, Hours, Days, Months).
 # │ How:     T = Volume/Bandwidth, formatted via helper.
 # │
-# │ Imports: mlsysim.core.units (TB, PB, Gbps, byte, BITS_PER_BYTE,
-# │          Systems.Fabrics.Ethernet_{10G,100G}.bandwidth, time constants)
-# │ Exports: t_1tb_1g … t_1pb_100g (9 formatted time strings)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import TB, PB, Gbps, byte, BITS_PER_BYTE, SECONDS_PER_MINUTE, SEC_PER_HOUR, SEC_PER_DAY, DAYS_PER_MONTH
-from mlsysim.fmt import check, MarkdownStr
+from mlsysim.core.units import (
+    TB,
+    PB,
+    Gbps,
+    bit,
+    byte,
+    second,
+    minute,
+    hour,
+    day,
+    BITS_PER_BYTE,
+    SECONDS_PER_MINUTE,
+    SEC_PER_HOUR,
+    SEC_PER_DAY,
+    DAYS_PER_MONTH,
+)
+from mlsysim.fmt import check, fmt_count, fmt_time
 from mlsysim import Systems  # Ethernet fabric bandwidths
 
 class DataGravity:
@@ -63,30 +73,7 @@ class DataGravity:
     def _xfer(vol_bytes, bw_bps):
         return vol_bytes / (bw_bps / BITS_PER_BYTE)
 
-    @staticmethod
-    def _fmt_time(s):
-        if s < 2 * SECONDS_PER_MINUTE:
-            value = round(s)
-            unit = "Second" if value == 1 else "Seconds"
-            return f"{value:.0f} {unit}"
-        if s < SEC_PER_HOUR:
-            value = s / SECONDS_PER_MINUTE
-            unit = "Minute" if abs(value - 1) < 0.05 else "Minutes"
-            return f"{value:.1f} {unit}"
-        if s < SEC_PER_DAY:
-            value = s / SEC_PER_HOUR
-            unit = "Hour" if abs(value - 1) < 0.05 else "Hours"
-            return f"{value:.1f} {unit}"
-        if s < SEC_PER_DAY * DAYS_PER_MONTH:
-            value = round(s / SEC_PER_DAY)
-            unit = "Day" if value == 1 else "Days"
-            return f"{value:.0f} {unit}"
-        value = round(s / (SEC_PER_DAY * DAYS_PER_MONTH))
-        unit = "Month" if value == 1 else "Months"
-        return f"{value:.0f} {unit}"
-
     _x = _xfer.__func__
-    _f = _fmt_time.__func__
     truck_total_hours = truck_load_hours + truck_transit_hours + truck_unload_hours
     truck_total_seconds = truck_total_hours * SEC_PER_HOUR
 
@@ -95,17 +82,16 @@ class DataGravity:
     check(truck_total_hours == 48, "Truck transfer example should total two days")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    # Custom unit suffix ("Seconds"/"Minutes"/"Hours"/"Days"/"Months") → MarkdownStr per recipe Rule 1 escape-hatch
-    t_1tb_1g_str = MarkdownStr(_f(_x(tb_bytes, bw_1g)))
-    t_1tb_10g_str = MarkdownStr(_f(_x(tb_bytes, bw_10g)))
-    t_1tb_100g_str = MarkdownStr(_f(_x(tb_bytes, bw_100g)))
-    t_100tb_1g_str = MarkdownStr(_f(_x(100 * tb_bytes, bw_1g)))
-    t_100tb_10g_str = MarkdownStr(_f(_x(100 * tb_bytes, bw_10g)))
-    t_100tb_100g_str = MarkdownStr(_f(_x(100 * tb_bytes, bw_100g)))
-    t_1pb_1g_str = MarkdownStr(_f(_x(pb_bytes, bw_1g)))
-    t_1pb_10g_str = MarkdownStr(_f(_x(pb_bytes, bw_10g)))
-    t_1pb_100g_str = MarkdownStr(_f(_x(pb_bytes, bw_100g)))
-    truck_1pb_str = MarkdownStr(_f(truck_total_seconds))
+    t_1tb_1g_str = fmt_time(_x(tb_bytes, bw_1g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    t_1tb_10g_str = fmt_time(_x(tb_bytes, bw_10g) / SECONDS_PER_MINUTE, minute, precision=1, commas=False, style="word")
+    t_1tb_100g_str = fmt_time(round(_x(tb_bytes, bw_100g)), second, precision=0, commas=False, style="word")
+    t_100tb_1g_str = fmt_time(round(_x(100 * tb_bytes, bw_1g) / SEC_PER_DAY), day, precision=0, commas=False, style="word")
+    t_100tb_10g_str = fmt_time(_x(100 * tb_bytes, bw_10g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    t_100tb_100g_str = fmt_time(_x(100 * tb_bytes, bw_100g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    t_1pb_1g_str = fmt_count(round(_x(pb_bytes, bw_1g) / (SEC_PER_DAY * DAYS_PER_MONTH)), commas=False, label="month")
+    t_1pb_10g_str = fmt_time(round(_x(pb_bytes, bw_10g) / SEC_PER_DAY), day, precision=0, commas=False, style="word")
+    t_1pb_100g_str = fmt_time(_x(pb_bytes, bw_100g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    truck_1pb_str = fmt_time(truck_total_seconds / SEC_PER_DAY, day, precision=0, commas=False, style="word")
 ```
 
 With those reference points in place, the appendix begins with the physical constraints of data engineering and then moves to the statistical monitoring that keeps ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering and the operational monitoring in @sec-ml-operations.
@@ -144,9 +130,6 @@ The transfer time for moving a dataset is simply $T = D_{\text{vol}} / \text{BW}
 # │ Show:    MB/s and cycles-per-value for each format.
 # │ How:     Directly from representative benchmarks.
 # │
-# │ Imports: mlsysim.core.units (MB, second)
-# │ Exports: csv_speed_mb_per_s_str, parquet_speed_mb_per_s_str, csv_cycles_str,
-# │          parquet_cycles_str, proto_speed_mb_per_s_str, proto_cycles_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import MB, second
 from mlsysim.fmt import fmt_qty, MarkdownStr
@@ -311,9 +294,6 @@ The choice of file format determines whether a system is I/O bound or compute bo
 # │ Show:    Waste percentage and network traffic for joins.
 # │ How:     Scalar arithmetic from row/column sizes.
 # │
-# │ Imports: mlsysim.core.units (KB, byte, BYTES_INT32)
-# │ Exports: row_size_kb, int_size_bytes, waste_pct_str,
-# │          join_table_tb_str, join_network_tb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import KB, TB, byte, BYTES_INT32
 from mlsysim.fmt import fmt, check, fmt_percent, fmt_qty, MarkdownStr
@@ -363,7 +343,7 @@ Once data is flowing through our pipelines, we need mathematical tools to ensure
 
 ::: {#psp-appendix-data-statistics-matters-systems .callout-perspective title="Why statistics matters for systems"}
 
-Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
+Average latency can look fine while users still experience failures because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
 
 :::
 
@@ -379,8 +359,6 @@ Your monitoring dashboard says average latency is fine, but users are complainin
 # │ Show:    1% of 1M users = 10,000 affected users.
 # │ How:     Scalar multiplication.
 # │
-# │ Imports: mlsysim.core.units (MILLION)
-# │ Exports: n_users_str, n_unhappy_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_count, check, MarkdownStr
 
@@ -417,8 +395,6 @@ In systems, the mean is often misleading. Latency distributions are almost alway
 # │ Show:    Formatted probability and inline equation.
 # │ How:     Binomial complement: Pr(Slow) = 1 - (1 - p99)^N_req.
 # │
-# │ Imports: mlsysim.book (fmt, fmt_math)
-# │ Exports: p_slow_eq, p_slow_pct_str, p_slow_pct_math_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, fmt_percent
 
@@ -472,10 +448,6 @@ $$ \mathcal{D}_{\text{KL}}(P_t \lVert P_0) = \sum_x P_t(x) \log \frac{P_t(x)}{P_
 # │ Show:    Step-by-step formulas, intermediate terms, and final values.
 # │ How:     Elementwise log-ratios, weighted sums, PSI symmetrization.
 # │
-# │ Imports: math (log), mlsysim.book (fmt, check, fmt_math)
-# │ Exports: scenario_str, P0_vec_str, Pt_vec_str,
-# │          kl_pq_eq, kl_pq_calc_eq, kl_qp_eq, kl_qp_calc_eq,
-# │          psi_eq, psi_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt, check, fmt_math, MarkdownStr
@@ -618,7 +590,6 @@ print(KLDrift.psi_eq)
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: PSI threshold prose in this callout
 # │ Goal: PSI retraining alert threshold (0.2)
-# │ Exports: PsiThreshold.psi_threshold_str
 from mlsysim import Ops
 from mlsysim.fmt import fmt
 
@@ -659,7 +630,6 @@ A training run can consume more examples, run longer, and still stop improving i
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-appdx-data-foundations-logits-numerical-stability-13e2
 # │ Goal: Example logit value that overflows naive softmax
-# │ Exports: LogitOverflowExample.logit_val_str
 from mlsysim.fmt import fmt
 
 class LogitOverflowExample:
@@ -694,10 +664,6 @@ A small softmax calculation shows why this trick matters in practice, even for l
 # │ Show:    Naive overflow risk, shifted exponentials, stable softmax values.
 # │ How:     Subtract max logit before exponentiation; compare to naive path.
 # │
-# │ Imports: math (exp, log, log10, floor), mlsysim.book (fmt, check, fmt_math)
-# │ Exports: lse_z_str, lse_z0..2, lse_naive0..2_str, lse_a_str,
-# │          lse_shifted_str, lse_shifted0..2, lse_sexp0..2_str,
-# │          lse_sum_str, lse_result_str, lse_sm0..2_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt, check, fmt_math

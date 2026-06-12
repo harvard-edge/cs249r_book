@@ -77,9 +77,6 @@ from mlsysim.core.units import *
 # │ Show: That a 10× traffic spike causes system collapse, not just 10× latency.
 # │ How: Model queue explosion using Little's Law parameters.
 # │
-# │ Imports: (none)
-# │ Exports: bf_latency_ms_str, bf_qps_normal_str, bf_qps_spike_str,
-# │          bf_spike_factor_mult_str, bf_collapse_latency_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt, fmt_rate
@@ -137,8 +134,6 @@ class BlackFridayCalc:
 # │ Show: Mean vs. p99 latency curves, with Safe Zone and Danger Zone annotations.
 # │ How: Compute mean = 1/(1-ρ) and p99 ≈ 4.6× mean; plot on shared axes.
 # │
-# │ Imports: numpy (np), book.tools.figures.style (book_style)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -246,8 +241,6 @@ The same serving-economics pressure appears in public API prices. To grasp the s
 # │ How: Fit a log-linear trend through representative price points; scatter
 # │      remaining models; annotate each with model name.
 # │
-# │ Imports: numpy (np), book.tools.figures.style (book_style)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -397,8 +390,8 @@ Two pressures now frame the serving problem: tail latency that explodes once uti
 ***Model Serving***\index{Model Serving!definition} is the operational phase that provides model predictions to end-users or downstream systems under strict latency constraints.
 
 1.  **Significance (quantitative)**: It inverts the throughput priority ($\eta_{\text{hw}}$) of training into a latency constraint $(L_{\text{lat}})$, requiring an architectural stack designed to minimize the tail latency (p99) of individual inferences.
-2.  **Observation**: Unlike model training, which processes large, predictable batches of data, model serving must handle stochastic request patterns and unpredictable load.
-3.  **Pitfall**: A frequent misconception is that serving is "just the forward pass." In reality, it is a distributed system problem: the model execution is only one component of a stack that includes request routing, load balancing, and data transformation.
+2.  **Distinction (durable)**: Unlike model training, which processes large, predictable batches of data, model serving must handle stochastic request patterns and unpredictable load.
+3.  **Common pitfall**: A frequent misconception is that serving is "just the forward pass." In reality, it is a distributed system problem: the model execution is only one component of a stack that includes request routing, load balancing, and data transformation.
 
 :::
 
@@ -734,7 +727,7 @@ pics/pencil/.style = {
 
 :::
 
-This chapter develops the engineering principles needed to orchestrate this pipeline under production constraints. It first establishes the system fundamentals: serving architectures, server anatomy, and the protocols connecting clients to models. It then traces the request lifecycle to reveal where latency accumulates, and turns to the optimization strategies that maximize throughput under these constraints.
+The pipeline turns serving into an orchestration problem: preprocessing, model execution, postprocessing, and transport all compete for the same latency budget. Before optimizing any one stage, the system must decide whether predictions are computed ahead of time or on demand.
 
 ### Static vs. dynamic inference {#sec-model-serving-static-vs-dynamic-inference-e864}
 
@@ -760,9 +753,6 @@ Dynamic inference\index{Dynamic Inference!real-time prediction} (also called onl
 # │ Show: That static precomputation is superior for predictable inputs.
 # │ How: Compare total batch time to per-request latency for photo classification.
 # │
-# │ Imports: mlsysim.core.units (ms, second), mlsysim.book (fmt)
-# │ Exports: n_photos_str, inference_ms_str, batch_total_s_str,
-# │          dynamic_latency_budget_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_time
 
@@ -800,10 +790,6 @@ The choice between static and dynamic serving has direct economic implications. 
 # │ Show: That reducing latency by 50% can increase costs by 4x.
 # │ How: Calculate cost per million queries across different batch sizes.
 # │
-# │ Imports: mlsysim.core.units, mlsysim.book
-# │ Exports: gpu_cost_per_hour_str, latency_a_ms_str, throughput_a_rps_str,
-# │          latency_b_ms_str, throughput_b_rps_str, cost_a_str, cost_b_str,
-# │          cost_increase_str, cost_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Infrastructure
 from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
@@ -924,12 +910,10 @@ To make these architectural differences concrete, consider how a single model mu
 # │ Show: That the same model requires different formats and architectures.
 # │ How: Calculate model sizes and compare NPU vs. CPU efficiency.
 # │
-# │ Imports: mlsys, mlsysim.constants, mlsysim.book
-# │ Exports: cloud_*, mobile_*, tiny_* formatted strings
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim import Systems
-from mlsysim.fmt import MarkdownStr, check, fmt, fmt_time, fmt_qty, fmt_rate, fmt_memory, fmt_energy
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_time, fmt_qty, fmt_rate, fmt_memory, fmt_memory_capacity, fmt_energy
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetServingSpectrum:
@@ -998,14 +982,14 @@ class ResNetServingSpectrum:
     mobile_throughput_img_per_s_str = fmt_rate(mobile_throughput, 'img/s', precision=0, commas=False)
     mobile_energy_npu_mj_str = fmt_energy(mobile_energy_npu, unit=mJ, precision=1, commas=False)
     mobile_energy_cpu_mj_str = fmt_energy(mobile_energy_cpu, unit=mJ, precision=1, commas=False)
-    mobile_mem_mb_str = MarkdownStr("150 MB")
+    mobile_mem_mb_str = fmt_memory(150 * MB, unit=MB, precision=0, commas=False)
 
     tiny_model_mb_str = fmt_memory(tiny_original, unit=MB, precision=1, commas=True)
     tiny_alt_mb_str = fmt_memory(tiny_alt, unit=MB, precision=1, commas=True)
     tiny_inf_ms_str = fmt_time(tiny_inf_ms, 'millisecond', precision=0, commas=False)
-    tiny_throughput_str = MarkdownStr("8 img/s")
-    tiny_arena_kb_str = MarkdownStr("320 KB")
-    tiny_sram_kb_str = fmt_memory(s_tiny.ram, unit=KB, precision=1, commas=True)
+    tiny_throughput_str = fmt_rate(8, "img/s", precision=0, commas=False)
+    tiny_arena_kb_str = fmt_memory(320 * KB, unit=KB, precision=0, commas=False)
+    tiny_sram_kb_str = fmt_memory_capacity(s_tiny.ram, unit=s_tiny.ram.units, precision=0, commas=True)
     tiny_energy_mj_str = fmt_energy(tiny_energy, unit=mJ, precision=0, commas=False)
 ```
 
@@ -1411,9 +1395,6 @@ A concrete payload comparison shows how the serialization choice changes both wi
 # │ Show: The 10× efficiency gain of Protobuf over JSON for vector data.
 # │ How: Calculate parsing overhead and wire size for a 1000-float payload.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: serial_floats_str, json_size_str, json_parse_us_str, protobuf_size_str,
-# │          protobuf_parse_us_str, requests_per_sec_str, efficiency_gain_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory
 from mlsysim.core.units import byte, KB
@@ -1487,8 +1468,6 @@ For dynamic inference systems, the serving inversion established in @sec-model-s
 # │ Show: That p99 users can wait 40× longer than the median.
 # │ How: Calculate the ratio between mean and tail response times.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: tail_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_multiple, fmt_qty
 
@@ -1517,20 +1496,20 @@ Managing these percentile constraints requires decomposing the total allowed res
 ***Latency Budget***\index{Latency Budget!definition} is the time capital allocated to an ML inference request, strictly bounded by the end-to-end service level objective (SLO).
 
 1.  **Significance (quantitative)**: It acts as a zero-sum constraint system where any milliseconds consumed by serialization or network overhead directly reduce the latency budget $(L_{\text{lat}})$ available for model inference.
-2.  **Observation**: Unlike average latency, which hides variance, a latency budget is a hard bound that must be maintained for the slowest requests (for example, p99).
-3.  **Pitfall**: A frequent misconception is that the "model" has the entire budget. In reality, the model often has less than 50 percent of the total budget; the remainder is consumed by the request lifecycle (DNS, TLS, load balancing, serialization).
+2.  **Distinction (durable)**: Unlike average latency, which hides variance, a latency budget is a hard bound that must be maintained for the slowest requests (for example, p99).
+3.  **Common pitfall**: A frequent misconception is that the "model" has the entire budget. In reality, the model often has less than 50 percent of the total budget; the remainder is consumed by the request lifecycle (DNS, TLS, load balancing, serialization).
 
 :::
 
-Before computing a full budget, we pose the foundational latency analysis questions that every serving engineer must answer.
+Before computing a full budget, this checkpoint sets the foundational latency-analysis skills every serving engineer needs.
 
 ::: {#chk-model-serving-resnet-50-latency-analysis .callout-checkpoint title="ResNet-50 latency analysis"}
 
-Serving optimizes tail latency under load. You can answer the first question from the latency budget just introduced; the other two preview analyses developed later in this chapter.
+Serving optimizes tail latency under load. Use this checkpoint to separate pipeline, queueing, and batching effects before choosing an optimization.
 
-- [ ] **The bottleneck**: Can you identify when preprocessing or postprocessing consumes more of the latency budget than the model itself?
-- [ ] **Queuing theory**: Can you anticipate why latency spikes nonlinearly as utilization approaches 100 percent? @Sec-model-serving-queuing-theory-tail-latency-29a6 derives it.
-- [ ] **Batching trade-offs**: Can you anticipate why a larger batch raises throughput in images per second yet can degrade latency in milliseconds per request? @Sec-model-serving-throughput-optimization-18d1 works it through.
+- [ ] **Pipeline decomposition**: Identify when preprocessing or postprocessing consumes more of the latency budget than the model itself.
+- [ ] **Queue behavior**: Explain how latency changes as utilization approaches 100 percent.
+- [ ] **Batching trade-off**: Compare the throughput gain from larger batches against the latency cost per request.
 
 :::
 
@@ -1560,10 +1539,6 @@ Understanding *where* time goes requires instrumenting each phase independently.
 # │ Show: That noninference tasks (JPEG decode, resize) consume 50% of the latency budget.
 # │ How: Sum millisecond-scale components for a standard vision inference request.
 # │
-# │ Imports: (none)
-# │ Exports: l_jpeg_ms_str, l_resize_ms_str, l_norm_ms_str, l_transfer_ms_str, l_inf_ms_str,
-# │          l_post_ms_str, l_total_ms_str, p_jpeg_str, p_resize_str, p_norm_str,
-# │          p_transfer_str, p_inf_str, p_post_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time
@@ -1617,10 +1592,6 @@ class LatencyTableCalc:
 # │ Show: That optimized inference (TensorRT) makes preprocessing 63% of total latency.
 # │ How: Compare phase durations before and after model acceleration.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: preprocess_ms_str, cpu_gpu_ms_str, resnet_inference_ms_str,
-# │          tensorrt_inference_ms_str, model_10x_ms_str, total_latency_ms_str,
-# │          preprocess_pct_str, tensorrt_preprocess_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_time
 from mlsysim.physics import calc_amdahls_speedup
@@ -1690,9 +1661,6 @@ from mlsysim.fmt import fmt_int
 # │ Show: That embedding lookups consume 67% of recommendation latency.
 # │ How: Model DLRM latency across parsing, embedding, and MLP phases.
 # │
-# │ Imports: (none)
-# │ Exports: dlrm_input_ms_str, dlrm_embed_ms_str, dlrm_mlp_ms_str, dlrm_post_ms_str,
-# │          dlrm_total_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import MarkdownStr, fmt, fmt_percent, fmt_time
@@ -1753,8 +1721,6 @@ The two lighthouse cases illustrate the same general failure mode: straightforwa
 # │ Show: That a 10× model speedup produces only 1.8× end-to-end improvement.
 # │ How: Apply Amdahl's Law using the noninference latency share.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: non_model_pct_str, optimized_total_ms_str, amdahl_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_time
 
@@ -1824,8 +1790,6 @@ Beyond the model execution itself, every request pays a "tax" to the serving inf
 # │ Show: Serialization + dispatch + data copy range as a percentage of budget.
 # │ How: Sum lower/upper bounds and divide by the 5 ms budget.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: micro_tax_min_pct_str, micro_tax_max_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_percent
 
@@ -1882,8 +1846,6 @@ $$\frac{\text{Throughput}(r_2)}{\text{Throughput}(r_1)} = \left(\frac{r_1}{r_2}\
 # │ Show: The quadratic relationship between resolution and computation time.
 # │ How: Calculate theoretical slowdown for doubled resolution.
 # │
-# │ Imports: mlsysim (Datasets), mlsysim.book (fmt)
-# │ Exports: r1_str, r2_str, theoretical_slowdown_mult_str, measured_slowdown_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Datasets
 from mlsysim.fmt import fmt
@@ -1923,10 +1885,6 @@ Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} Re
 # │ How: Scale registry FLOPs and a 224×224 activation footprint by (R/224)²;
 # │      divide by total traffic (fixed weights + activation reads/writes).
 # │
-# │ Imports: mlsysim.book (fmt), mlsysim (Hardware.Cloud.V100_PCIe / V100 SXM2),
-# │          mlsysim.core.units (TFLOP, second, GB, flop, byte)
-# │ Exports: act_*_mb_str, ai_*_str, ridge_point_flops_per_byte_str,
-# │          v100_pcie_fp32_str, v100_sxm2_fp32_str, v100_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
 from mlsysim.core.units import TFLOP, second, GB
@@ -2011,8 +1969,6 @@ Different deployment contexts impose distinct resolution requirements shaped by 
 # │ Show: A 1.4× throughput improvement while maintaining high accuracy.
 # │ How: List benchmark results for adaptive vs. static high resolution.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: adaptive_throughput_improvement_mult_str, adaptive_accuracy_retention_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_percent
 
@@ -2166,8 +2122,6 @@ Serving engineers routinely face a concrete capacity decision: given a latency S
 # │ Show: The required concurrency (memory) to sustain a 1000 QPS target.
 # │ How: Apply Little's Law (N_req = lambda_qps * T_lat) using throughput and latency SLO.
 # │
-# │ Imports: mlsysim.core.units, mlsysim.book
-# │ Exports: qps_str, qps_display_str, slo_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
 
@@ -2223,8 +2177,6 @@ This relationship holds regardless of arrival distribution, service time distrib
 # │ Show: The required concurrency (memory) to sustain a 1000 QPS target.
 # │ How: Apply Little's Law (N_req = lambda_qps * T_lat) using throughput and latency SLO.
 # │
-# │ Imports: mlsysim.core.units, mlsysim.book
-# │ Exports: littles_lambda_qps_str, littles_w_ms_str, littles_w_s_str, littles_l_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
 
@@ -2278,8 +2230,6 @@ Little's Law has immediate practical implications. If an inference service avera
 # │ Show: That batch-32 adds significant wait time compared to batch-1.
 # │ How: Calculate formation delay given arrival rate and batch size.
 # │
-# │ Imports: mlsysim.core.units (second, ms), mlsysim.book (fmt)
-# │ Exports: wait_time_b1_ms_str, wait_time_b32_ms_str, lat_b1_ms_str, lat_b32_ms_str, penalty_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, check, fmt, fmt_time
 
@@ -2357,8 +2307,6 @@ This equation reveals why serving systems exhibit nonlinear behavior: small incr
 # │ Goal: Show how M/M/1 time-in-system grows as utilization approaches capacity.
 # │ How: Latency multiple = 1/(1-rho); example latency = multiple x 5 ms service.
 # │
-# │ Imports: mlsysim.fmt, mlsysim.core.units (ms)
-# │ Exports: rho_str, latency_multiple_str, example_ms_str (lists), service_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_percent, fmt_time, fmt_multiple, check
 from mlsysim.core.units import ms
@@ -2438,9 +2386,6 @@ The queuing model and tail latency analysis provide the inputs for capacity plan
 # │ Show: That 12 V100 GPUs are needed for 5000 QPS at 50 ms p99 with N+1 redundancy.
 # │ How: Apply the displayed M/M/1 p99 bound to find safe utilization and required service rate.
 # │
-# │ Imports: math, mlsysim.core.units (FP32_BITS, INT8_BITS),
-# │          mlsysim.book (fmt)
-# │ Exports: cp_* and mm1_* formatted strings
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import (
@@ -2507,9 +2452,7 @@ class CapacityPlanningCalc:
     cp_rho_safe_pct_str = fmt_percent(cp_rho_safe_value, precision=0, commas=False, style='symbol')
     mm1_p99_factor_str = fmt_ratio(mm1_p99_factor_value, precision=1, commas=False)
     cp_rho_safe_math = fmt_math(f"\\rho \\leq 1 - ({mm1_p99_factor_str} \\times {cp_service_ms_str})/" f"{cp_p99_target_ms_str} = {cp_rho_safe_str}")
-    cp_mu_required_math = fmt_math(
-        f"\\mu_{{\\text{{required}}}} = {cp_peak_qps_str} / {cp_rho_safe_str} " f"= {cp_mu_required_req_per_s_str} \\text{{ requests/s}}"
-    )
+    cp_mu_required_math = fmt_math(f"\\mu_{{\\text{{required}}}} = {cp_peak_qps_str} / {cp_rho_safe_str} = {cp_mu_required_req_per_s_str}")
     cp_headroom_pct_value = (cp_headroom_factor_value - 1) * 100
     cp_headroom_pct_str = fmt_percent(cp_headroom_pct_value / 100, precision=0, commas=False, style='symbol')
     cp_headroom_factor_str = fmt_ratio(cp_headroom_factor_value, precision=1, commas=False)
@@ -2522,7 +2465,7 @@ Applying Little's Law to ResNet-50 makes the capacity constraint concrete.
 Consider designing a ResNet-50 serving system with these requirements:
 
 - **Target p99 latency**: 50 ms
-- **Peak expected traffic**: `{python} CapacityPlanningCalc.cp_peak_qps_str` requests per second
+- **Peak expected traffic**: `{python} CapacityPlanningCalc.cp_peak_qps_str`
 - **Service time** (TensorRT FP16): 5 ms
 
 **Step 1**: Find safe utilization.
@@ -2601,8 +2544,8 @@ A model that performed well during validation may silently degrade when deployed
 ***Training-Serving Skew***\index{Training-Serving Skew!definition} is the distributional divergence between the training and inference environments caused by inconsistent logic or state.
 
 1.  **Significance (quantitative)**: It violates the consistency imperative, causing silent accuracy degradation proportional to the difference in the transformation functions $(f_{\text{train}}(x) \neq f_{\text{serve}}(x))$.
-2.  **Observation**: Unlike data drift (which is an external shift in the environment), training-serving skew is an internal failure of the engineering stack.
-3.  **Pitfall**: A frequent misconception is that skew is "found" by looking for errors. In reality, it is invisible to exceptions: the system runs perfectly and the latency is low, but the predictions are statistically wrong.
+2.  **Distinction (durable)**: Unlike data drift (which is an external shift in the environment), training-serving skew is an internal failure of the engineering stack.
+3.  **Common pitfall**: A frequent misconception is that skew is "found" by looking for errors. In reality, it is invisible to exceptions: the system runs perfectly and the latency is low, but the predictions are statistically wrong.
 
 :::
 
@@ -2631,8 +2574,8 @@ With preprocessing pipelines designed to avoid training-serving skew, the next c
 ***Cold Start***\index{Cold Start!definition} is the initialization latency incurred when instantiating a new model replica.
 
 1.  **Significance (quantitative)**: It represents the fixed cost of state hydration (loading weights, compiling graphs), which can take seconds or minutes, effectively blocking the system's ability to scale elastically in response to traffic bursts.
-2.  **Observation**: Unlike inference latency $(L_{\text{lat}})$, which is a per-request cost, cold start is a per-replica cost that occurs only during deployment or scaling events.
-3.  **Pitfall**: A frequent misconception is that cold start is "just loading weights." In reality, it includes graph compilation and memory allocation, which can often take longer than the bandwidth-limited data transfer itself $(D_{\text{vol}}/\text{BW})$.
+2.  **Distinction (durable)**: Unlike inference latency $(L_{\text{lat}})$, which is a per-request cost, cold start is a per-replica cost that occurs only during deployment or scaling events.
+3.  **Common pitfall**: A frequent misconception is that cold start is "just loading weights." In reality, it includes graph compilation and memory allocation, which can often take longer than the bandwidth-limited data transfer itself $(D_{\text{vol}}/\text{BW})$.
 
 :::
 
@@ -2654,11 +2597,9 @@ Cold start\index{Cold Start!anatomy} latency compounds from multiple sources, ea
 # │ Show: That precompiling models reduces cold start from ~35 s to ~1.5 s.
 # │ How: Sum phase durations for data transfer, CUDA initialization, and model loading.
 # │
-# │ Imports: (none)
-# │ Exports: cs_*_str formatted strings for timeline table
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import MarkdownStr, fmt_time
+from mlsysim.fmt import fmt_time, fmt_time_range
 
 class ColdStartCalc:
     """Decomposes cold start latency showing precompiled TensorRT reduces startup from ~35 s to ~1.5 s."""
@@ -2679,9 +2620,9 @@ class ColdStartCalc:
     cs_local_s_str = fmt_time(cs_local_total_value, 'second', precision=1, commas=False, approx=True)
     cs_cloud_s_str = fmt_time(cs_cloud_total_value, 'second', precision=0, commas=False, approx=True)
     cs_ssd_s_str = fmt_time(cs_ssd_value, 'second', precision=1, commas=False)
-    cs_s3_str = MarkdownStr("3-5 s")  # range for S3
-    cs_cuda_str = MarkdownStr("0.3-0.5 s")  # range for CUDA
-    cs_compile_str = MarkdownStr("15-30 s")  # range for TensorRT
+    cs_s3_str = fmt_time_range(3 * second, 5 * second, "second", precision=0, commas=False)
+    cs_cuda_str = fmt_time_range(0.3 * second, 0.5 * second, "second", precision=1, commas=False)
+    cs_compile_str = fmt_time_range(15 * second, 30 * second, "second", precision=0, commas=False)
     cs_warmup_s_str = fmt_time(cs_warmup_value, 'second', precision=1, commas=False)
     cs_runtime_overhead_s_str = fmt_time(cs_runtime_overhead_value, 'second', precision=1, commas=False)
 ```
@@ -2764,8 +2705,6 @@ When the aggregate size of all models exceeds GPU memory capacity, the serving s
 # │ How: Load the reusable model-loading scenario and PCIe Gen4 bandwidth,
 # │      then calculate transfer duration.
 # │
-# │ Imports: mlsysim public API (ReferenceStats, Hardware, units, physics, fmt)
-# │ Exports: model_size_gb_str, pcie_bw_gb_per_s_str, model_swap_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -2811,8 +2750,8 @@ Consider a ResNet-50 classifier running on a V100 GPU at batch size one: the GPU
 ***Dynamic Batching***\index{Dynamic Batching!definition} is the ML serving optimization that trades Latency for Throughput under stochastic arrival patterns.
 
 1.  **Significance (quantitative)**: By buffering requests into a batching window, the scheduler amortizes fixed overheads $(L_{\text{lat}})$ across multiple inputs, pushing the system away from the memory-bound regime $(\text{BW})$ toward the compute-bound regime $(R_{\text{peak}})$.
-2.  **Observation**: Unlike Static Batching, which is fixed during training, Dynamic Batching adaptively adjusts the batch size at Inference Time based on real-time traffic volume.
-3.  **Pitfall**: A frequent misconception is that batching "always helps." In reality, there is a latency-throughput Pareto frontier: if the batching window is too large, the increased queuing delay may violate the system's SLO before the throughput gains are realized.
+2.  **Distinction (durable)**: Unlike Static Batching, which is fixed during training, Dynamic Batching adaptively adjusts the batch size at Inference Time based on real-time traffic volume.
+3.  **Common pitfall**: A frequent misconception is that batching "always helps." In reality, there is a latency-throughput Pareto frontier: if the batching window is too large, the increased queuing delay may violate the system's SLO before the throughput gains are realized.
 
 :::
 
@@ -2836,11 +2775,8 @@ Two fixed costs dominate at small batch sizes. **Kernel launch overhead**\index{
 # │ Show: That batch-32 achieves 6.4× throughput at the cost of 7× higher latency.
 # │ How: Contrast batch-1 and batch-32 performance including window wait times.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: throughput_ratio_mult_str, batch_window_ms_str, batch32_inference_ms_str,
-# │          batch32_total_ms_str, batch1_inference_total_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, MarkdownStr, check
+from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, check
 
 class BatchThroughputCalc:
     """Quantifies the 6.4× throughput gain of batch-32 over batch-1 and its latency cost."""
@@ -2865,8 +2801,8 @@ class BatchThroughputCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Table columns (one entry per batch size)
     batch_size_str = [fmt(b, precision=0, commas=False) for b in batch_sizes]
-    inference_ms_str = [MarkdownStr(f"{inf:.1f} ms") for inf in inference_ms_value]
-    per_image_ms_str = [MarkdownStr(f"{p:.1f} ms") for p in per_image_ms_value]
+    inference_ms_str = [fmt_time(inf * ms, 'millisecond', precision=None, commas=False) for inf in inference_ms_value]
+    per_image_ms_str = [fmt_time(p * ms, 'millisecond', precision=None, commas=False) for p in per_image_ms_value]
     throughput_img_per_s_str = [fmt_rate(round(t), 'img/s', precision=0, commas=True) for t in throughput_value]
     gpu_util_str = [fmt_percent(u / 100, precision=0, commas=False, style='symbol') for u in gpu_util_pct]
     # Prose scalars (callout below)
@@ -2926,8 +2862,6 @@ Plotting the same trade-off reveals the knee where extra batching stops paying f
 # │       log-scale x-axis with an annotated optimal point.
 # │ How: Plot tabular BATCHING_DATA on dual y-axes; mark optimal with axvline.
 # │
-# │ Imports: pandas (pd), book.tools.figures.style (book_style)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -3032,8 +2966,6 @@ $$E[L_{\text{lat,wait}}] = \frac{T_{\text{window}}}{2}$$ {#eq-avg-wait}
 # │ Show: That a 20 ms window consumes 20% of a 50 ms SLO before computation.
 # │ How: Calculate average wait time assuming uniform request arrival.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: avg_wait_ms_str, budget_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_time
 
@@ -3074,11 +3006,9 @@ $$\Pr(\text{batch size} = k) = \frac{(\lambda T_{\text{window}})^k e^{-\lambda T
 # │ Goal: Show batch-size statistics under Poisson arrivals for a fixed window.
 # │ How: mean = lambda*T; std = sqrt(mean); P(0) = e^-mean; survival P(X>=2*mean).
 # │
-# │ Imports: math, mlsysim.fmt, mlsysim.core.units (ms)
-# │ Exports: qps_str, mean_str, std_str, p0_str, p_ge_str (lists), window_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, MarkdownStr, check
+from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
 from mlsysim.core.units import ms
 
 class BatchVariability:
@@ -3111,8 +3041,8 @@ class BatchVariability:
     p0_prec = [0, 0, 1, 3]  # display precision per traffic level
     pge_prec = [0, 0, 0, 1]
     qps_str = [fmt(q, precision=0, commas=False) for q in qps]
-    mean_str = [MarkdownStr(f"{m:.1f}") for m in mean_value]
-    std_str = [MarkdownStr(f"{s:.1f}") for s in std_value]
+    mean_str = [fmt(m, precision=None, commas=False) for m in mean_value]
+    std_str = [fmt(s, precision=None, commas=False) for s in std_value]
     p0_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p0_value, p0_prec)]
     p_ge_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p_ge_value, pge_prec)]
     window_ms_str = fmt_time(window_ms_value, 'millisecond', precision=0, commas=False)
@@ -3127,7 +3057,7 @@ class BatchVariability:
 | **`{python} BatchVariability.qps_str[2]` QPS** | `{python} BatchVariability.mean_str[2]` | `{python} BatchVariability.std_str[2]` | `{python} BatchVariability.p0_str[2]` |     `{python} BatchVariability.p_ge_str[2]`      |
 | **`{python} BatchVariability.qps_str[3]` QPS** | `{python} BatchVariability.mean_str[3]` | `{python} BatchVariability.std_str[3]` | `{python} BatchVariability.p0_str[3]` |     `{python} BatchVariability.p_ge_str[3]`      |
 
-: **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching, and the probability of batches exceeding twice the mean size decreases as traffic grows (from `{python} BatchVariability.p_ge_str[0]` at `{python} BatchVariability.qps_str[0]` QPS to `{python} BatchVariability.p_ge_str[3]` at `{python} BatchVariability.qps_str[3]` QPS), reflecting the law of large numbers. {#tbl-batch-variability tbl-colwidths="[24,18,18,20,20]"}
+: **Batch Size Variability**: At low traffic, batching windows frequently contain zero requests (wasted GPU cycles). At moderate traffic, batch sizes fluctuate significantly around the mean. High traffic provides more stable batching, and the probability of batches reaching at least twice the mean size decreases as traffic grows (from `{python} BatchVariability.p_ge_str[0]` at `{python} BatchVariability.qps_str[0]` QPS to `{python} BatchVariability.p_ge_str[3]` at `{python} BatchVariability.qps_str[3]` QPS), reflecting the law of large numbers. {#tbl-batch-variability tbl-colwidths="[24,18,18,20,20]"}
 
 #### Throughput maximization strategy {#sec-model-serving-throughput-maximization-strategy-27f5}
 
@@ -3150,10 +3080,6 @@ For ResNet-50 on a V100 GPU, service time approximately scales as $T_{\text{serv
 # │ Show: That batch-32 improves utilization from 11% to 79% over batch-1.
 # │ How: Contrast throughput and latency while applying Iron Law efficiency terms.
 # │
-# │ Imports: mlsysim.core.units (ms, second), mlsysim.book (fmt)
-# │ Exports: throughput_*, b1_*, b32_*, il_*, T_window_ms_str,
-# │          st_b*_str, tl_b*_str, tp_b*_str (per-batch for @tbl-batching-throughput)
-# │          service_time_value (function, used by slo-violation-calc)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_time, fmt_rate
 
@@ -3274,13 +3200,6 @@ Consider a 50 ms p95 latency SLO for ResNet-50 serving (using this mean-based ap
 # │ Show: That aggressive windows gain only ~12% throughput while adding 10 ms wait.
 # │ How: Contrast throughput and average wait for conservative vs. long windows.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: s1_window_ms_str, s1_wait_ms_str, s1_budget_ms_str,
-# │          s1_batch_str, s1_throughput_img_per_s_str,
-# │          s2_window_ms_str, s2_wait_ms_str, s2_budget_ms_str,
-# │          s2_batch_str, s2_throughput_img_per_s_str,
-# │          throughput_gain_pct_str, latency_avg_increase_ms_str,
-# │          latency_p99_increase_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_percent, fmt_time, fmt_rate
 
@@ -3373,11 +3292,6 @@ The aggressive window achieves only `{python} BatchingOptimization.throughput_ga
 # │ Show: That p99 latency can be ~1.66× higher than the mean due to batch size variance.
 # │ How: Model request arrival and batch assembly to compare mean vs. tail response times.
 # │
-# │ Imports: mlsysim.core.units (ms, second), mlsysim.book (fmt);
-# │          service_time_value from batching-analysis-calc
-# │ Exports: qps_str, T_slo_ms_str, mean_wait_ms_str, mean_batch_str,
-# │          mean_service_ms_str, mean_latency_ms_str, p99_service_ms_str,
-# │          p99_latency_ms_str, p99_ratio_mult_str, p99_batch_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_time
 
@@ -3490,9 +3404,6 @@ The batching configuration space forms a Pareto frontier\index{Pareto Frontier!t
 # │ How: avg/p99/throughput are batching-simulator outputs per (window, max-batch)
 # │      config (LOAD); the caption's throughput gain and p99 ratio are derived.
 # │
-# │ Imports: mlsysim.fmt, mlsysim.core.units (ms)
-# │ Exports: window_str, max_batch_str, avg_ms_str, p99_ms_str, throughput_str
-# │          (lists), throughput_gain_str, p99_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, fmt_multiple, check
 from mlsysim.core.units import ms
@@ -3555,12 +3466,6 @@ For ResNet-50 with 50 ms SLO and 500 QPS traffic:
 # │ Show: How allocating 30% of the SLO budget to batching yields a safe 12 ms window.
 # │ How: Calculate expected batch size from QPS and cap by memory limits.
 # │
-# │ Imports: mlsysim.core.units (ms, second), mlsysim.book (fmt)
-# │ Exports: pc_slo_ms_str, pc_qps_img_per_s_str, pc_batch_budget_ms_str,
-# │          pc_max_window_ms_str, pc_expected_batch_str,
-# │          pc_mem_limit_batch_str, pc_config_window_ms_str,
-# │          pc_config_batch_str, pc_predicted_p99_ms_str,
-# │          pc_predicted_throughput_img_per_s_str, pc_p99_batch_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt, check, fmt_time, fmt_rate
@@ -3724,8 +3629,6 @@ where $L_{\text{lat,SLO}}$ is the latency SLO, $T_{\text{service}}$ is the servi
 # │ Show: Computed window, expected batch size, and approximate service+wait latency.
 # │ How: Apply T_window = min(L_SLO - S, sqrt(S/lambda)) with one service-time assumption.
 # │
-# │ Imports: math, mlsysim.core.units (ms, second), mlsysim.fmt (fmt)
-# │ Exports: traffic_adaptive_rows
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt, check, fmt_time
@@ -3778,7 +3681,7 @@ class TrafficAdaptiveBatchingCalc:
     latency_1000_ms_str = fmt_time(rows[2][3], 'millisecond', precision=0, commas=False)
 
     qps_5000_str = fmt_rate(rows[3][0], "QPS")
-    window_5000_ms_str = fmt_time(rows[3][1], 'millisecond', precision=1, commas=False)
+    window_5000_ms_str = fmt_time(rows[3][1], 'millisecond', precision=2, commas=False)
     avg_batch_5000_str = fmt(rows[3][2], precision=1, commas=False)
     latency_5000_ms_str = fmt_time(rows[3][3], 'millisecond', precision=1, commas=False)
 ```
@@ -3860,13 +3763,9 @@ from mlsysim.fmt import fmt_int
 # │ Show: That JPEG decode dominates the energy budget, exceeding NPU inference.
 # │ How: Model latency and J per request for a complete vision pipeline.
 # │
-# │ Imports: (none)
-# │ Exports: m_cam_ms_str, m_jpeg_ms_str, m_resize_ms_str, m_npu_ms_str,
-# │          m_ui_ms_str, m_total_ms_str, m_cam_mj_str, m_jpeg_mj_str,
-# │          m_resize_mj_str, m_npu_mj_str, m_ui_mj_str, m_total_mj_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt, fmt_int, fmt_time, fmt_memory, fmt_power, fmt_energy, fmt_count, check
+from mlsysim.fmt import fmt, fmt_fps, fmt_int, fmt_time, fmt_memory, fmt_power, fmt_energy, fmt_count, check
 
 class MobileServingCalc:
     """Mobile vision pipeline: JPEG decode dominates energy; NPU handles inference at 82% utilization."""
@@ -3894,7 +3793,6 @@ class MobileServingCalc:
         "mobile pipeline sustained power should be ~60–70 mW",
     )
     inferences_per_battery_m = (battery_wh / m_total_mj).to(count).magnitude / MILLION
-    m_total_mj_display = round(m_total_mj.to(mJ).magnitude) * mJ
     sustained_power_display = round(sustained_power.to(mW).magnitude) * mW
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -3909,10 +3807,10 @@ class MobileServingCalc:
     m_resize_mj_str = fmt_energy(m_resize_mj, unit=mJ, precision=1, commas=False)
     m_npu_mj_str = fmt_energy(m_npu_mj, unit=mJ, precision=1, commas=False)
     m_ui_mj_str = fmt_energy(m_ui_mj, unit=mJ, precision=1, commas=False)
-    m_total_mj_str = fmt_energy(m_total_mj_display, unit=mJ, precision=0, commas=False)
+    m_total_mj_str = fmt_energy(m_total_mj, unit=mJ, precision=2, commas=False)
     battery_wh_str = fmt_energy(battery_wh, unit=Wh, precision=0, commas=False)
     sustained_mw_str = fmt_power(sustained_power_display, unit=mW, precision=0, commas=False)
-    fps_str = fmt_int(round(1000 / m_total_ms.to(ms).magnitude), commas=False)
+    fps_str = fmt_fps(1000 / m_total_ms.to(ms).magnitude)
     inferences_per_battery_m_str = fmt_count(
         (battery_wh / m_total_mj).to(count).magnitude,
         scale="M",
@@ -3931,14 +3829,14 @@ class MobileServingCalc:
 \renewcommand{\arraystretch}{1.25} % default is 1,
 ```
 
-| **Phase**              |                   **Duration**                  |                    **Energy**                   | **Notes**                                          |
-|:-----------------------|:-----------------------------------------------:|:-----------------------------------------------:|:---------------------------------------------------|
-| **Camera buffer read** |    `{python} MobileServingCalc.m_cam_ms_str`    |    `{python} MobileServingCalc.m_cam_mj_str`    | System API                                         |
-| **JPEG decode (CPU)**  |    `{python} MobileServingCalc.m_jpeg_ms_str`   |    `{python} MobileServingCalc.m_jpeg_mj_str`   | Single-threaded                                    |
-| **Resize + Normalize** |   `{python} MobileServingCalc.m_resize_ms_str`  |   `{python} MobileServingCalc.m_resize_mj_str`  | CPU preprocessing                                  |
-| **NPU inference**      |    `{python} MobileServingCalc.m_npu_ms_str`    |    `{python} MobileServingCalc.m_npu_mj_str`    | 82% utilization                                    |
-| **Postprocess + UI**   |     `{python} MobileServingCalc.m_ui_ms_str`    |     `{python} MobileServingCalc.m_ui_mj_str`    | Result rendering                                   |
-| **Total**              | **`{python} MobileServingCalc.m_total_ms_str`** | **`{python} MobileServingCalc.m_total_mj_str`** | `{python} MobileServingCalc.fps_str` FPS sustained |
+| **Phase**              |                   **Duration**                  |                    **Energy**                   | **Notes**                                      |
+|:-----------------------|:-----------------------------------------------:|:-----------------------------------------------:|:-----------------------------------------------|
+| **Camera buffer read** |    `{python} MobileServingCalc.m_cam_ms_str`    |    `{python} MobileServingCalc.m_cam_mj_str`    | System API                                     |
+| **JPEG decode (CPU)**  |    `{python} MobileServingCalc.m_jpeg_ms_str`   |    `{python} MobileServingCalc.m_jpeg_mj_str`   | Single-threaded                                |
+| **Resize + Normalize** |   `{python} MobileServingCalc.m_resize_ms_str`  |   `{python} MobileServingCalc.m_resize_mj_str`  | CPU preprocessing                              |
+| **NPU inference**      |    `{python} MobileServingCalc.m_npu_ms_str`    |    `{python} MobileServingCalc.m_npu_mj_str`    | 82% utilization                                |
+| **Postprocess + UI**   |     `{python} MobileServingCalc.m_ui_ms_str`    |     `{python} MobileServingCalc.m_ui_mj_str`    | Result rendering                               |
+| **Total**              | **`{python} MobileServingCalc.m_total_ms_str`** | **`{python} MobileServingCalc.m_total_mj_str`** | `{python} MobileServingCalc.fps_str` sustained |
 
 : **Mobile ResNet-50 pipeline**: Per-phase latency and energy for a single-user mobile vision inference, showing that JPEG decode on the CPU dominates the energy budget even though the NPU inference stage carries the model's compute. Optimization targets shift from throughput to energy-per-inference at the edge. {#tbl-model-serving-mobile-pipeline-breakdown tbl-colwidths="[30,20,20,30]"}
 
@@ -3959,7 +3857,7 @@ class MobileServingCalc:
 
 #### Mobile serving constraints {#sec-model-serving-mobile-serving-constraints-eb68}
 
-Unlike cloud serving where cost dominates, mobile serving faces three related constraints that shape optimization strategy. The first is an **Energy Budget**\index{Energy!budget, mobile inference} that throughput targets ignore, because each inference depletes battery. In the modeled pipeline, `{python} MobileServingCalc.m_total_mj_str` at `{python} MobileServingCalc.fps_str` FPS draws about `{python} MobileServingCalc.sustained_mw_str` for the inference path alone, before camera, display, ISP, and OS overhead add to that total in a full photo app, so the optimization target shifts from throughput to energy-per-inference. **Thermal Throttling**\index{Thermal Throttling!mobile serving} compounds this limit, since sustained high-power operation triggers thermal management: once the SoC reaches its thermal ceiling (typically 45 °C junction), the OS reduces NPU frequency by 30–50 percent, degrading both latency and throughput, which is why bursty workloads that allow cooling between bursts outperform sustained maximum throughput. **Memory Constraints**\index{Memory!constraints, mobile RAM} close the set, because mobile devices share limited RAM across applications. A model consuming 500 MB may be evicted during background operation, forcing a reload (cold start) that adds 200–500 ms of latency, and even a 150 MB footprint becomes problematic when the model must coexist with other app components. Memory-efficient quantization improves user experience through faster model restoration, and memory-mapped model loading (@sec-model-serving-loading-strategies-eb38) helps further by loading pages on demand rather than requiring the full model in memory.
+Unlike cloud serving where cost dominates, mobile serving faces three related constraints that shape optimization strategy. The first is an **Energy Budget**\index{Energy!budget, mobile inference} that throughput targets ignore, because each inference depletes battery. In the modeled pipeline, `{python} MobileServingCalc.m_total_mj_str` at `{python} MobileServingCalc.fps_str` draws about `{python} MobileServingCalc.sustained_mw_str` for the inference path alone, before camera, display, ISP, and OS overhead add to that total in a full photo app, so the optimization target shifts from throughput to energy-per-inference. **Thermal Throttling**\index{Thermal Throttling!mobile serving} compounds this limit, since sustained high-power operation triggers thermal management: once the SoC reaches its thermal ceiling (typically 45 °C junction), the OS reduces NPU frequency by 30–50 percent, degrading both latency and throughput, which is why bursty workloads that allow cooling between bursts outperform sustained maximum throughput. **Memory Constraints**\index{Memory!constraints, mobile RAM} close the set, because mobile devices share limited RAM across applications. A model consuming 500 MB may be evicted during background operation, forcing a reload (cold start) that adds 200–500 ms of latency, and even a 150 MB footprint becomes problematic when the model must coexist with other app components. Memory-efficient quantization improves user experience through faster model restoration, and memory-mapped model loading (@sec-model-serving-loading-strategies-eb38) helps further by loading pages on demand rather than requiring the full model in memory.
 
 These constraints make mobile serving optimization qualitatively different from cloud optimization. The goal is not maximum throughput but sustainable performance, maintaining acceptable latency without thermal throttling or excessive battery drain.
 
@@ -4012,8 +3910,8 @@ Generative models produce a stream of tokens rather than a single output tensor.
 ***LLM Performance Metrics***\index{LLM Performance Metrics!definition} are the two-dimensional measurements of latency for streaming autoregressive generation.
 
 1.  **Significance (quantitative)**: They decompose user-perceived latency into Time to First Token (TTFT)\index{Time to First Token!prefill phase} (governed by the compute-bound Prefill Phase) and Time Per Output Token (TPOT)\index{Time Per Output Token!decode phase} (governed by the memory-bandwidth-bound Decode Phase).
-2.  **Observation**: Unlike Fixed-Output Metrics (for example, end-to-end latency), LLM metrics measure the Fluidity of Generation, acknowledging that the user experience depends on the *rhythm* of token arrival.
-3.  **Pitfall**: A frequent misconception is that a "fast model" has a low TTFT. In reality, a model can have a fast TTFT but a sluggish TPOT (if the memory wall $(\text{BW})$ is the bottleneck), leading to a frustrating user experience where the answer starts quickly but "stutters" thereafter.
+2.  **Distinction (durable)**: Unlike Fixed-Output Metrics (for example, end-to-end latency), LLM metrics measure the Fluidity of Generation, acknowledging that the user experience depends on the *rhythm* of token arrival.
+3.  **Common pitfall**: A frequent misconception is that a "fast model" has a low TTFT. In reality, a model can have a fast TTFT but a sluggish TPOT (if the memory wall $(\text{BW})$ is the bottleneck), leading to a frustrating user experience where the answer starts quickly but "stutters" thereafter.
 
 :::
 
@@ -4075,8 +3973,6 @@ The computational intensity of managing KV caches across concurrent requests rai
 # │ Show: The power envelope of the H100 GPU.
 # │ How: Retrieve TDP from Hardware Digital Twins.
 # │
-# │ Imports: mlsysim (Hardware), mlsysim.constants (watt)
-# │ Exports: CarbonCostH100Tdp.h100_tdp_w_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
 from mlsysim.core.units import watt
@@ -4104,12 +4000,6 @@ class CarbonCostH100Tdp:
 # │ Show: That poor utilization causes about 3× higher energy consumption per token.
 # │ How: Calculate J per token based on TDP and concurrent request volume.
 # │
-# │ Imports: mlsysim (Hardware.Cloud.H100.tdp, ReferenceStats.EnergyAnchors
-# │          {SmartphoneCharge, BoilingWater})
-# │ Exports: cc_concurrent_str, cc_tokens_req_tokens_per_s_str, cc_total_tokens_per_s_str,
-# │          cc_host_overhead_w_str, cc_total_power_w_str, cc_joules_token_j_str,
-# │          cc_response_tokens_str, cc_response_joules_j_str, cc_smartphone_j_str,
-# │          cc_boiling_j_str, cc_low_util_pct_str, cc_idle_power_w_str, cc_low_util_joules_j_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import ReferenceStats
 from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty, check, fmt_percent, fmt_rate, fmt_power, fmt_energy
@@ -4148,7 +4038,7 @@ class CarbonCostCalc:
     cc_total_tokens_per_s_str = fmt_rate(round(cc_total_tokens_sec.to(count / second).magnitude), 'tokens/s', precision=0, commas=False)
     cc_host_overhead_w_str = fmt_power(cc_host_overhead, unit=watt, precision=0, commas=False)
     cc_total_power_w_str = fmt_power(cc_total_power, unit=watt, precision=0, commas=False)
-    cc_joules_token_j_str = fmt_qty(cc_joules_per_token, joule, precision=2, commas=False, per='token')
+    cc_joules_token_j_str = fmt_qty(cc_joules_per_token, joule, precision=4, commas=False, per='token')
     cc_response_tokens_str = fmt_count(cc_response_tokens_value, label="token", commas=False)
     cc_response_joules_j_str = fmt_energy(cc_response_joules, unit=joule, precision=1, commas=False)
     cc_smartphone_j_str = fmt_energy(ENERGY_SMARTPHONE_CHARGE_J, unit=joule, precision=0)
@@ -4160,7 +4050,7 @@ class CarbonCostCalc:
 
 ::: {#nbk-carbon-chat .callout-notebook title="The carbon cost of a chat"}
 
-**Problem**: How much energy does an H100-backed chat service spend per generated token and per `{python} CarbonCostCalc.cc_response_tokens_str` response?
+**Problem**: How much energy does an H100-backed chat service spend per generated token and for a response with `{python} CarbonCostCalc.cc_response_tokens_str`?
 
 As LLMs scale, joules per token becomes a first-class operational metric alongside latency. For an H100 GPU (`{python} CarbonCostH100Tdp.h100_tdp_w_str` TDP), the energy footprint follows from throughput and power:
 
@@ -4229,8 +4119,6 @@ When latency or hardware cost binds more tightly than portability, TensorRT\inde
 # │ Show: The HBM bandwidth ceiling used in the fusion savings estimate.
 # │ How: Retrieve memory bandwidth from Hardware Digital Twins.
 # │
-# │ Imports: mlsysim (Hardware), mlsysim.constants (TB, second)
-# │ Exports: LayerFusionH100Bw.h100_bw_tb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
 from mlsysim.fmt import fmt_bandwidth
@@ -4269,12 +4157,6 @@ These optimizations typically achieve 2--5$\times$ speedup over framework-native
 # │ Show: That hardware-specific engines (TensorRT) yield up to 9× speedup over eager PyTorch.
 # │ How: Compare benchmarked latencies for JIT, ONNX, and TensorRT at multiple precisions.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: rt_pytorch_ms_str, rt_torchscript_ms_str, rt_onnx_ms_str,
-# │          rt_trt_fp32_ms_str, rt_trt_fp16_ms_str, rt_trt_int8_ms_str,
-# │          rt_pytorch_speedup_mult_str, rt_torchscript_speedup_mult_str,
-# │          rt_onnx_speedup_mult_str, rt_trt_fp32_speedup_mult_str,
-# │          rt_trt_fp16_speedup_mult_str, rt_trt_int8_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_time
 
@@ -4370,13 +4252,6 @@ In practice, GPU compute pipelines and Tensor Core alignment effects limit achie
 # │ Show: That FP16 is a "free lunch" (2× speedup) while INT8 trades marginal accuracy for 3× gains.
 # │ How: Contrast ResNet-50 metrics across FP32, FP16, and INT8 precisions.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: pt_fp32_ms_str, pt_fp32_mem_mb_str, pt_fp32_acc_str,
-# │          pt_fp16_ms_str, pt_fp16_mem_mb_str, pt_fp16_acc_str,
-# │          pt_fp16_util_str, pt_int8_ms_str, pt_int8_mem_mb_str,
-# │          pt_int8_ptq_acc_str, pt_int8_qat_acc_str, pt_int8_util_str,
-# │          pt_int8_speedup_mult_str, pt_fp16_speedup_mult_str,
-# │          pt_int8_vs_fp16_speedup_mult_str, pt_int8_acc_loss_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_time, fmt_memory
 
@@ -4528,9 +4403,6 @@ Building on this zero-copy principle, Safetensors[^fn-safetensors-loading]\index
 # │      cold-start loading scenario, and the Gen3 NVMe storage registry to
 # │      compute the speedup.
 # │
-# │ Imports: mlsysim public API (units, Systems registry, fmt helpers, checks)
-# │ Exports: checkpoint_size_gb_str, pickle_load_s_str, safetensors_load_s_str,
-# │          nvme_bw_gb_per_s_str, load_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -4574,7 +4446,7 @@ class SafetensorsLoadingSpeed:
 
 **Analysis**:
 
-- **Pickle path**: PyTorch's pickle-based `torch.load` takes `{python} SafetensorsLoadingSpeed.pickle_load_s_str` in this scenario because Python has to reconstruct objects before tensors are usable.
+- **Pickle path**: The PyTorch pickle-based loader takes `{python} SafetensorsLoadingSpeed.pickle_load_s_str` in this scenario because Python has to reconstruct objects before tensors are usable.
 - **Safetensors path**: The same weights stored with Safetensors load in `{python} SafetensorsLoadingSpeed.safetensors_load_s_str`, a `{python} SafetensorsLoadingSpeed.load_speedup_mult_str` improvement.
 
 **Systems insight**: With memory-mapped Safetensors files, loading speed becomes limited mainly by the disk's read speed—for example `{python} SafetensorsLoadingSpeed.nvme_bw_gb_per_s_str` on local Gen3 NVMe—rather than by CPU parsing overhead.
@@ -4653,11 +4525,6 @@ Cost per inference\index{Cost Per Inference!serving economics} decomposes into f
 # │ Show: That GPU throughput can make T4 cheaper per inference than CPU, while V100 is justified only at high sustained traffic.
 # │ How: Calculate unit costs using AWS hourly rates and measured images-per-second.
 # │
-# │ Imports: mlsysim.core.units (SEC_PER_HOUR, MILLION), mlsysim.book (fmt)
-# │ Exports: ca_cpu_cost_str, ca_cpu_throughput_img_per_s_str, ca_cpu_cpm_usd_str,
-# │          ca_t4_cost_str, ca_t4_throughput_img_per_s_str, ca_t4_cpm_usd_str,
-# │          ca_v100_cost_str, ca_v100_throughput_img_per_s_str, ca_v100_cpm_usd_str,
-# │          ca_v100_price_increase_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_rate, fmt_usd
 
@@ -4736,9 +4603,6 @@ The GPU vs. CPU decision establishes the cost per inference, but determining how
 # │ Show: Safe utilization and final GPU count from the queuing-theory callout.
 # │ How: Recompute the same ResNet-50 scenario from shared constants.
 # │
-# │ Imports: math, mlsysim.book (fmt)
-# │ Exports: CapacityPlanningRecap.cp_rho_safe_pct_str,
-# │          CapacityPlanningRecap.cp_final_ceil_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt, fmt_count, fmt_percent
@@ -4789,9 +4653,6 @@ The dominant cost in serving a large language model\index{LLM Serving!production
 # │ How: Compute KV cache bytes = 2 × layers × d_model × seq × batch × bytes
 # │      ÷ gqa_ratio; convert to GB; plot per-batch-size using book.tools.figures.style palette.
 # │
-# │ Imports: numpy (np), book.tools.figures.style (book_style), mlsysim.constants (BYTES_FP16, byte, GB),
-# │          mlsysim (Models.Language.Llama3_70B: layers, hidden_dim, heads, kv_heads)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -4891,10 +4752,6 @@ The linear growth of the KV cache with sequence length forces a hard trade-off: 
 # │ Show: The memory ceiling and bandwidth of H100 and A100 GPUs.
 # │ How: Retrieve constants from Hardware Digital Twins.
 # │
-# │ Imports: mlsysim (Hardware), mlsysim.constants (GiB, TB, second)
-# │ Exports: LlmCaseStudyHwSpecs.h100_mem_gb_str, LlmCaseStudyHwSpecs.a100_bw_tb_per_s_str,
-# │          LlmCaseStudyHwSpecs.case_study_model_weight_gb_str,
-# │          LlmCaseStudyHwSpecs.a100_token_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.solvers import ServingModel
@@ -4944,8 +4801,6 @@ class LlmCaseStudyHwSpecs:
 # │ Show: The HBM bandwidth used in workload and token-latency calculations.
 # │ How: Retrieve memory bandwidth from Hardware Digital Twins.
 # │
-# │ Imports: mlsysim (Hardware), mlsysim.constants (TB, second)
-# │ Exports: LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
 from mlsysim.fmt import fmt_bandwidth
@@ -5013,17 +4868,6 @@ Every token generation pays a massive "energy tax" to move the model's logic fro
 # │ How: Calculate TPOT, concurrent batch size, request throughput, and $/M
 # │      tokens for 8-billion-parameter Llama 3 on H100.
 # │
-# │ Imports: mlsysim.core.units (Hardware.Cloud.H100.memory.bandwidth, TB, second, SEC_PER_HOUR, MILLION),
-# │          mlsysim.book (fmt, check)
-# │ Exports: model_weight_gb_str,
-# │          token_time_theoretical_ms_str, realized_tpot_ms_str,
-# │          decode_tokens_str, total_decode_s_str, kv_cache_gb_str,
-# │          kv_per_token_mb_str, kv_capacity_tokens_str,
-# │          tokens_per_req_str, concurrent_batch_str,
-# │          req_time_s_str, prefill_tokens_per_s_str,
-# │          prefill_req_per_s_str, decode_req_capacity_req_per_s_str,
-# │          hourly_cost_str, m_tokens_per_hour_str,
-# │          cost_per_million_tokens_usd_str, remaining_vram_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt_usd, check, fmt, fmt_count, fmt_qty, fmt_time, fmt_rate, fmt_memory
 from mlsysim.physics import transfer_time
@@ -5157,13 +5001,6 @@ Serving inverts training priorities in ways that violate intuitions from batch p
 # │ Show: That collapsing queuing wait yields system-level speedups far exceeding model-level speedups.
 # │ How: Model M/M/1 queuing wait times for 5 ms vs. 2 ms inference latencies.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: fl_utilization_high_pct_str, fl_service_slow_ms_str,
-# │          fl_wait_slow_ms_str, fl_service_fast_ms_str,
-# │          fl_utilization_new_pct_str, fl_wait_fast_ms_str,
-# │          fl_inference_gain_ms_str, fl_queuing_improvement_mult_str,
-# │          fl_total_slow_ms_str, fl_total_fast_ms_str,
-# │          fl_system_speedup_mult_str, fl_model_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_time
 
@@ -5220,11 +5057,6 @@ Engineers who optimize model inference expect proportional improvement in user-p
 # │ Show: That increasing utilization from 70% to 90% triples average latency.
 # │ How: Model M/M/1 wait times to identify the practical utilization ceiling.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: fu_util_high_pct_str, fu_util_mod_pct_str,
-# │          fu_wait_high_factor_mult_str, fu_total_high_factor_mult_str,
-# │          fu_cost_reduction_str, fu_latency_increase_mult_str,
-# │          fu_service_ms_str, fu_p99_mod_ms_str, fu_p99_high_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_time
 
@@ -5275,11 +5107,8 @@ Teams target `{python} FallacyUtilizationCalc.fu_util_high_pct_str` utilization\
 # │       resize interpolation differences between training and serving pipelines.
 # │ How: Model validation vs. production accuracy for a mismatched vision pipeline.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: fs_val_acc_str, fs_prod_acc_str, fs_acc_drop_str,
-# │          fs_resize_drop_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import MarkdownStr, fmt, fmt_percent
+from mlsysim.fmt import fmt, fmt_percent, fmt_pp, fmt_range
 
 class FallacySkewCalc:
     """Training-serving skew: 95% validation accuracy drops to 90% from preprocessing mismatches."""
@@ -5297,7 +5126,7 @@ class FallacySkewCalc:
     fs_val_acc_str = fmt_percent(fs_val_acc_pct_value / 100, precision=0, commas=False, style='symbol')
     fs_prod_acc_str = fmt_percent(fs_prod_acc_pct_value / 100, precision=0, commas=False, style='symbol')
     fs_acc_drop_str = fmt_pp(fs_acc_drop_value, precision=0, attributive=True)
-    fs_resize_drop_str = MarkdownStr("0.5–1 percentage points")
+    fs_resize_drop_str = fmt_range(fs_resize_drop_min_pct_value, fs_resize_drop_max_pct_value, precision=None, commas=False, unit="percentage points")
 ```
 
 Engineers assume identical model weights preserve validation set performance\index{Training-Serving Skew!serving accuracy fallacy}. In production, preprocessing differences silently shift inputs outside the training distribution. @Sec-model-serving-trainingserving-skew-7b99 shows *how* training-serving skew causes accuracy degradation despite identical weights: PIL vs. OpenCV resize interpolation alone can shift accuracy by `{python} FallacySkewCalc.fs_resize_drop_str`, FP64 vs. FP32 normalization produces different values, or feature computation timing changes. A model achieving `{python} FallacySkewCalc.fs_val_acc_str` validation accuracy drops to `{python} FallacySkewCalc.fs_prod_acc_str` in production from these preprocessing mismatches, a `{python} FallacySkewCalc.fs_acc_drop_str` loss invisible to latency monitoring. Standard monitoring checking exceptions and latency violations fails to detect this silent degradation. Production systems require either identical preprocessing code for training and serving, or statistical monitoring comparing input distributions to catch drift before accuracy degrades.
@@ -5318,9 +5147,6 @@ Engineers assume identical model weights preserve validation set performance\ind
 # │       a 4.6× gap invisible to mean-based monitoring.
 # │ How: M/M/1 mean vs. p99 approximation at typical serving utilization.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: tl_util_pct_str, tl_service_ms_str, tl_avg_ms_str,
-# │          tl_p99_ms_str, tl_gap_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_time
 
@@ -5364,10 +5190,6 @@ Engineers monitor average latency\index{Latency!mean, monitoring pitfall} becaus
 # │       inference time (14 ms→25 ms); padding wastes 15-30% of compute.
 # │ How: Compare throughput and inference time across two batch sizes.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: fb_batch_small_str, fb_batch_large_str, fb_throughput_gain_str,
-# │          fb_inf_small_ms_str, fb_inf_large_ms_str,
-# │          fb_padding_waste_min_str, fb_padding_waste_max_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_percent, fmt_time
 
@@ -5415,8 +5237,6 @@ Engineers maximize batch size\index{Batching!fallacy of larger batches} assuming
 # │       but served on wildlife camera images—invisible to latency monitoring.
 # │ How: Model validation vs. OOD accuracy for a calibration-mismatched system.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: fc_acc_loss_str, fc_imagenet_acc_str, fc_ood_acc_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent
 
@@ -5453,10 +5273,6 @@ Teams calibrate with training data\index{Calibration!production traffic mismatch
 # │       cold requests hit 100× latency vs. steady-state.
 # │ How: Calculate aggregate cold-start work, parallel warm time, and latency multiplier.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: cs_new_instances_str, cs_compile_time_s_str, cs_aggregate_cold_str,
-# │          cs_parallel_warm_s_str, cs_steady_latency_ms_str, cs_cold_latency_ms_str,
-# │          cs_cold_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_time
 

@@ -98,7 +98,10 @@ def test_scenario_comment_downgrades_hardware_high_confidence(tmp_path):
     qmd = _write_qmd(
         tmp_path,
         """```{python}
-# │ Exports: X.gpu_memory
+# │ Context: Example prose immediately below.
+# │ Goal: Exercise scenario-input classification.
+# │ Show: GPU-memory assumption.
+# │ How: Keep the value local to a scenario cell.
 class X:
     # ┌── 1. LOAD ─────────────────────────────────────────
     gpu_memory = 16 * GB  # scenario assumption

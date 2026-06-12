@@ -26,7 +26,7 @@ engine: jupyter
 
 _Why does storage become the invisible bottleneck that prevents accelerators from reaching their potential?_
 
-Accelerators can compute faster than storage can feed them. A high-end GPU processes data at terabytes per second internally, but individual Non-Volatile Memory Express (NVMe) drives deliver gigabytes to low tens of gigabytes per second, and distributed storage systems add latency that compounds into idle accelerators waiting for data to arrive. This mismatch is invisible in benchmarks that measure accelerator performance in isolation but dominates real workloads where training data must stream continuously, checkpoints must be saved reliably, and model weights must be loaded at serving time. The gap between what accelerators can *consume* and what storage can *deliver* shapes system architecture at every level: it forces careful attention to data formats, caching strategies, and pipeline design that would be unnecessary if storage kept pace with compute. Organizations that optimize accelerator utilization without addressing storage discover that their expensive hardware runs at a fraction of capacity because nobody planned for the data path. Data storage is a Compute-Communication co-design problem: the fastest Compute in the Fleet sits idle when the storage hierarchy cannot supply data at the rate the accelerators consume it.
+Accelerators can compute faster than storage can feed them. A high-end accelerator processes data at terabytes per second internally, but individual local drives deliver gigabytes to low tens of gigabytes per second, and distributed storage systems add latency that compounds into idle accelerators waiting for data to arrive. This mismatch is invisible in benchmarks that measure accelerator performance in isolation but dominates real workloads where training data must stream continuously, checkpoints must be saved reliably, and model weights must be loaded at serving time. The gap between what accelerators can *consume* and what storage can *deliver* shapes system architecture at every level: it forces careful attention to data formats, caching strategies, and pipeline design that would be unnecessary if storage kept pace with compute. Organizations that optimize accelerator utilization without addressing storage discover that their expensive hardware runs at a fraction of capacity because nobody planned for the data path. Data storage is a Compute-Communication co-design problem: the fastest Compute in the Fleet sits idle when the storage hierarchy cannot supply data at the rate the accelerators consume it.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -58,8 +58,6 @@ from mlsysim.core.units import *
 # │ Why: Registers this chapter with the mlsys registry and provides shared
 # │      imports for all subsequent calculation cells.
 # │
-# │ Imports: mlsysim.registry, mlsysim.constants, mlsysim.book
-# │ Exports: (none)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import memory_from_params
 from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_qty, fmt_qty_int, check, fmt_memory, fmt_bandwidth
@@ -84,11 +82,6 @@ from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_qty, fmt_qty_int, check, 
 # │          size from GPT-3 params × bytes per param; compute corpus variants
 # │          from tokens × bytes/token; derive fleet total.
 # │
-# │ Imports: mlsysim (Hardware, Models), mlsysim.core.units (*),
-# │          mlsysim.physics (calc_kv_cache_size, model_memory)
-# │ Exports: StorageFuelLineContext.h100_bw_tb_per_s_str, .nvme_bw_gb_per_s_str,
-# │          .ckpt_total_gb_str, .gpt3_params_b_str, .bw_ratio_mult_str,
-# │          .ckpt_fleet_total_pb_str, .checkpoint_count_str, ...
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.physics import model_memory
@@ -184,8 +177,6 @@ A simple shard-assignment calculation shows how this bottleneck can emerge even 
 # │ Show: contention_prob_pct ≈ 40%—inline in notebook result.
 # │ How: Pr(at least one collision) = 1 - (Shards! / (Shards^Workers * (Shards-Workers)!)).
 # │
-# │ Imports: mlsysim.book (check)
-# │ Exports: sc_n_workers_str, sc_n_shards_str, sc_collision_prob_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_count
 import math
@@ -246,8 +237,6 @@ Between 2016 and 2024, advertised accelerator Tensor Core throughput grew sharpl
 # │ How: Verified years_gpu/gpu_tflops, years_storage/storage_gbs;
 # │      book_style.setup_plot().
 # │
-# │ Imports: numpy (np), book.tools.figures.style (book_style)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Dual-axis plot: GPU TFLOP/s (236×) vs NVMe GB/s (4×) 2016–2024;
@@ -365,7 +354,6 @@ The shuffling that ML training requires adds a complication rooted in the requir
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-workload-inversion
-# │ Exports: StorageAccessPatternFacts.*
 from mlsysim import Models, Hardware
 from mlsysim.fmt import fmt, check, fmt_qty, fmt_qty_int, fmt_int, fmt_time, fmt_memory
 
@@ -398,7 +386,7 @@ The second inversion is **working set size**\index{Working Set Size}. Traditiona
 
 The exception to this uniformity is multi-task or curriculum learning\index{Curriculum Learning!data locality}, where certain subsets of the dataset are accessed more frequently during specific training phases. In curriculum learning, the trainer begins with "easy" examples and progressively introduces harder ones. This creates a temporary working set that does exhibit locality, and local caching at the NVMe tier can exploit this structure. For the majority of large-scale pretraining workloads, however, the access pattern is effectively uniform, and the storage system must be designed for full-dataset streaming rather than hot-subset caching.
 
-The third inversion is **write pattern**\index{Write Pattern}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional massive writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str` parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. These bursts are checkpoint storms\index{Checkpoint Storm} that parallel file systems must absorb without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which must complete before the training pipeline can resume.
+The third inversion is **write pattern**\index{Write Pattern}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional massive writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str` parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. These bursts are checkpoint storms\index{Checkpoint Storm} that parallel file systems must absorb without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which must complete before the training pipeline can resume. @Tbl-storage-assumptions consolidates these inversions into the procurement rule: optimize for streaming and bursts, not database-style random IOPS.
 
 | **Workload Pattern** | **Traditional Assumption** |         **ML Reality**         |
 |:---------------------|:--------------------------:|:------------------------------:|
@@ -422,10 +410,10 @@ These inversions have direct consequences for system procurement and architectur
 
 You are designing the storage subsystem for a new ML training cluster with 512 GPUs. The primary workload will train large language models on a 10 TB text dataset.
 
-1. Based on the five inversions described earlier, which storage optimization strategies from the database world would be counterproductive for this workload? Name at least three.
-2. If each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, what is the total data volume read? How does this compare to a typical database workload?
-3. The model saves a 500 GB checkpoint every 15 minutes. If checkpoint saves must complete within 30 seconds to minimize training disruption, what minimum write bandwidth is required?
-4. Given the write pattern (bursty checkpoints every 15 minutes), what percentage of time is the storage system in "write mode" vs. "read mode"?
+- [ ] **Database heuristics**: Use the five storage workload inversions to name at least three database optimization strategies that would be counterproductive for this workload.
+- [ ] **Epoch reads**: Calculate the total data volume read when each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, then compare it to a typical database workload.
+- [ ] **Checkpoint bandwidth**: Calculate the minimum write bandwidth required when the model saves a 500 GB checkpoint every 15 minutes and each save must complete within 30 seconds.
+- [ ] **Write duty cycle**: Calculate the percentage of time the storage system spends in "write mode" vs. "read mode" under bursty checkpoints every 15 minutes.
 
 :::
 
@@ -457,9 +445,6 @@ A system architect must organize storage to serve workloads that simultaneously 
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-storage-hierarchy-merged and bandwidth cliffs
-# │ Exports: StorageHierarchyTable.h100_bw_tb_per_s_str,
-# │          StorageHierarchyTable.nvme_latency_us_str,
-# │          StorageHierarchyTable.host_dram_bw_gb_per_s_str
 from mlsysim import Hardware
 from mlsysim.fmt import fmt_qty, fmt_time
 
@@ -492,13 +477,6 @@ The storage hierarchy principle (Principle \ref{pri-storage-hierarchy}) governs 
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-storage-hierarchy-merged and bandwidth cliffs
-# │ Exports: StoragePyramidContext.compressed_text_tb_str,
-# │          StoragePyramidContext.tokenized_text_tb_str,
-# │          StoragePyramidContext.hbm_host_dram_ratio_mult_str,
-# │          StoragePyramidContext.h100_bw_tb_per_s_str,
-# │          StoragePyramidContext.host_dram_bw_gb_per_s_str,
-# │          StoragePyramidContext.raid0_bw_gb_per_s_str,
-# │          StoragePyramidContext.dram_nvme_ratio_mult_str
 from mlsysim import Hardware
 from mlsysim.fmt import fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_qty, fmt_qty_int
 
@@ -557,13 +535,6 @@ The severity of that cluster-level pressure depends sharply on the data modality
 # │ Show: 168 MB/s text; 393 GB/s image; about 2,300x ratio.
 # │ How: BW = GPUs × per-GPU batch bytes / step time.
 # │
-# │ Imports: mlsysim.fmt (MarkdownStr, fmt, fmt_count, check)
-# │ Exports: TextImageBandwidth.text_bw_display_math,
-# │          TextImageBandwidth.image_bw_display_math,
-# │          TextImageBandwidth.text_bw_mb_per_s_str,
-# │          TextImageBandwidth.image_bw_gb_per_s_str,
-# │          TextImageBandwidth.ratio_rounded_mult_str,
-# │          TextImageBandwidth.image_size_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import MarkdownStr, fmt, fmt_count, check, fmt_time, fmt_bandwidth, fmt_memory
 
@@ -644,7 +615,6 @@ The descent starts where computation actually consumes bytes: HBM, the tier fast
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-tier0-hbm
-# │ Exports: HbmTierBandwidth.*
 from mlsysim import Hardware
 from mlsysim.fmt import fmt, check, fmt_qty
 
@@ -672,9 +642,6 @@ class HbmTierBandwidth:
 # │ Show: FP16 weight footprint (GB) and the Adam-state derivation.
 # │ How:  weights = N * BYTES_FP16; Adam = N * BYTES_ADAM_STATE (= FP32 * 2 states).
 # │
-# │ Imports: mlsysim (Models), mlsysim.core.units (BYTES_FP16, BYTES_FP32,
-# │          BYTES_ADAM_STATE), mlsysim.fmt (fmt, fmt_math, check)
-# │ Exports: weights_fp16_gb_str, adam_eq_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, ReferenceStats
 from mlsysim.core.units import BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE
@@ -727,7 +694,6 @@ The razor-thin margin is a defining feature of large model training. @Tbl-hbm-me
 # │       optimizer/gradient state sharded over 256 nodes.
 # │ How: Weights are split inside the node; optimizer and gradients are sharded
 # │      across both the intra-node split and the node count.
-# │ Exports: HbmMemoryBudget.*_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_percent_range, fmt_qty_range, fmt_memory, fmt_memory_capacity
 
@@ -818,10 +784,6 @@ From the data pipeline's perspective, Tier 0 is not a storage tier to be managed
 # │ Show:    64 GB/s (PCIe Gen 5), 900 GB/s (NVLink 4.0).
 # │ How:     Read Hardware.Cloud.H100.interconnect.bandwidth and Hardware.Cloud.H100.nvlink.bandwidth from constants; format GB/s.
 # │
-# │ Imports: mlsysim.core.units (Hardware.Cloud.H100.interconnect.bandwidth, Hardware.Cloud.H100.nvlink.bandwidth, GB, second);
-# │          mlsysim.fmt (fmt_bandwidth)
-# │ Exports: DRAMInterconnect.pcie5_bw_gb_per_s_str, DRAMInterconnect.nvlink_bw_gb_per_s_str,
-# │          DRAMInterconnect.pcie5_bidir_bw_gb_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_bandwidth
 
@@ -867,10 +829,6 @@ The gap between host DRAM bandwidth and HBM bandwidth is the first major cliff i
 # │ Show:    150 MB/s raw image BW; 10x HDD slowdown; 10% HDD ceiling.
 # │ How:     BW = images/s × size; HDD ratio = images/s/IOPS.
 # │
-# │ Imports: mlsysim.core.units (Hardware.Tech.Storage.NvmeGen4.bandwidth, GB, second, BILLION, THOUSAND,
-# │          MILLION)
-# │ Exports: NVMeTierCalcs.raw_bw_mb_per_s_str, .hdd_slowdown_factor_mult_str,
-# │          .hdd_util_ceiling_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth
 
@@ -906,9 +864,8 @@ class NVMeTierCalcs:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-tier2-nvme
-# │ Exports: NvmeTierContext.*
 from mlsysim import Hardware
-from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
+from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth, fmt_multiple
 
 class NvmeTierContext:
     LOCAL_NVME_DRIVES_PER_NODE_REF = 4 * count  # pedagogical: NVMe drives per node
@@ -919,6 +876,7 @@ class NvmeTierContext:
     nvme_drive_capacity = 7.68 * TB  # scenario NVMe drive capacity assumption
     tokenized_text = training_tokens * token_id_bytes
     tokenized_shard_count_val = round((tokenized_text / tokenized_shard).to("").magnitude)
+    metadata_reduction_val = (training_tokens / tokenized_shard_count_val).to(count).magnitude
     tokenized_local_stream = tokenized_text / (LOCAL_NVME_DRIVES_PER_NODE_REF * nvme_per_drive_bw)
     local_nvme_capacity = LOCAL_NVME_DRIVES_PER_NODE_REF * nvme_drive_capacity
     multimodal_images = 20 * TB  # scenario multimodal image corpus assumption
@@ -927,6 +885,7 @@ class NvmeTierContext:
     multimodal_total = multimodal_images + multimodal_text + multimodal_audio
     multimodal_excess = multimodal_total - local_nvme_capacity
     check(local_nvme_capacity.to(TB).magnitude > 25, "Four 7.68 TB drives should exceed 25 TB local capacity")
+    check(metadata_reduction_val > 100_000_000, "Shard-level metadata access should reduce token-level opens by hundreds of millions.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_per_drive_bw, unit=GB / second, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
@@ -939,6 +898,7 @@ class NvmeTierContext:
     multimodal_excess_tb_str = fmt_memory(multimodal_excess, unit=TB, precision=1, commas=False)
     tokenized_shard_count_str = fmt(tokenized_shard_count_val, precision=0)
     tokenized_shard_gb_str = fmt_memory(tokenized_shard, unit=GB, precision=0, commas=False)
+    metadata_reduction_mult_str = fmt_multiple(metadata_reduction_val, precision=0, commas=True)
 ```
 ### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
 
@@ -962,11 +922,27 @@ The second approach packs all images into a small number of large binary files (
 
 The third approach uses the tar-based archive format popularized by WebDataset. Each sample is stored as a group of related files (image, label, metadata) within a standard POSIX tar archive. The tar format supports sequential iteration without a separate index, because each file's header contains its size, allowing the reader to skip forward to the next sample. This format combines the simplicity of individual files (each sample is self-describing) with the sequential I/O efficiency of large binary files. The tar archives are also valid HyperText Transfer Protocol (HTTP) byte-range targets, making them directly streamable from object storage without local staging.
 
-For our running example, the 1.5 trillion token dataset is typically stored as a collection of 256 MB to 4 GB binary shards, each containing a contiguous sequence of tokenized text. The data loader opens a shard, reads it sequentially into a buffer, and iterates over tokens within the buffer. When the buffer is exhausted, the loader opens the next shard. The total number of `open()` calls per epoch is the number of shards (roughly `{python} NvmeTierContext.tokenized_shard_count_str` if the `{python} NvmeTierContext.tokenized_text_tb_str` serialized corpus is split into `{python} NvmeTierContext.tokenized_shard_gb_str` shards), not the number of tokens (trillions). This 10,000$\times$ to 100,000$\times$ reduction in metadata operations is what makes streaming from both local NVMe and remote storage feasible at training scale.
+For our running example, the 1.5 trillion token dataset is typically stored as a collection of 256 MB to 4 GB binary shards, each containing a contiguous sequence of tokenized text. The data loader opens a shard, reads it sequentially into a buffer, and iterates over tokens within the buffer. When the buffer is exhausted, the loader opens the next shard. The total number of `open()` calls per epoch is the number of shards (roughly `{python} NvmeTierContext.tokenized_shard_count_str` if the `{python} NvmeTierContext.tokenized_text_tb_str` serialized corpus is split into `{python} NvmeTierContext.tokenized_shard_gb_str` shards), not the number of tokens (trillions). This approximately `{python} NvmeTierContext.metadata_reduction_mult_str` reduction in metadata operations is what makes streaming from both local NVMe and remote storage feasible at training scale.
 
 At the NVMe tier, compression represents a critical trade-off between I/O bandwidth and CPU cycles. An I/O-bound pipeline, where the NVMe drives cannot keep up with accelerator demand, benefits from aggressive compression: zstd at level 9 achieves roughly 4:1 compression but decompresses at only 0.5 GB/s per CPU core. A CPU-bound pipeline, where decode and augmentation already saturate the host processor, prefers lighter compression: zstd at level 1 offers roughly 3:1 compression but decompresses at 1.5 GB/s per core. On a 28 GB/s four-drive NVMe RAID array, zstd-1 delivers an effective throughput of 84 GB/s of uncompressed data, while zstd-9 delivers 112 GB/s but requires 3$\times$ more CPU cores dedicated to decompression. The optimal compression level is therefore not a property of the data but a property of the pipeline's bottleneck, and it can change when the cluster configuration changes (adding more GPUs shifts the bottleneck toward I/O, favoring heavier compression).
 
 A standard ImageNet training pipeline makes the cost of the wrong format visible.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: ImageNet bottleneck analysis callout.
+# │ Goal: Localize the NVMe random-access latency recap used in the callout.
+from mlsysim import Hardware
+from mlsysim.core.units import microsecond
+from mlsysim.fmt import fmt_time
+
+class ImageNetNvmeLatency:
+    nvme_latency = Hardware.Tech.Storage.NvmeGen4.latency
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    nvme_latency_us_str = fmt_time(nvme_latency, microsecond, precision=0, commas=False)
+```
 
 ::: {#nbk-data-storage-imagenet-bottleneck-analysis .callout-notebook title="The ImageNet bottleneck analysis"}
 
@@ -978,7 +954,7 @@ A standard ImageNet training pipeline makes the cost of the wrong format visible
 2.  **HDD reality**: A 7200 RPM hard disk drive (HDD) delivers `{python} NVMeTierCalcs.hdd_iops_str` at random reads\index{HDD!random IOPS bottleneck}. Sustaining `{python} NVMeTierCalcs.images_per_s_str` requires `{python} NVMeTierCalcs.hdd_slowdown_factor_mult_str` more IOPS than the disk provides.
 3.  **Result**: Shuffling individual files on an HDD will starve the GPU, capping utilization at about `{python} NVMeTierCalcs.hdd_util_ceiling_pct_str` before decode, seek, and file-system overheads.
 
-**Systems insight**: The pipeline must either use NVMe (~`{python} StorageHierarchyTable.nvme_latency_us_str` random access, three orders of magnitude faster than object storage) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
+**Systems insight**: The pipeline must either use NVMe (~`{python} ImageNetNvmeLatency.nvme_latency_us_str` random access, three orders of magnitude faster than object storage) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
 
 :::
 
@@ -998,9 +974,6 @@ Local NVMe is also the primary tier for **local checkpoint staging**. When savin
 # │ Show: util_gain_pct ≈ 15%—inline in notebook result.
 # │ How: T_step_remote = T_compute + T_IO_remote; T_step_local = T_compute.
 # │
-# │ Imports: mlsysim.book (check)
-# │ Exports: lc_compute_ms_str, lc_remote_io_ms_str, lc_util_remote_str, lc_util_local_str,
-# │          lc_local_io_ms_str, lc_util_gain_str, lc_cluster_gpus_str, lc_recovered_gpus_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_time, fmt_count, fmt_usd
 
@@ -1068,8 +1041,8 @@ Beyond the single node, the workload requires a shared namespace where all worke
 ***Parallel File System (PFS)***\index{Parallel File System!definition} is a distributed storage architecture for ML training clusters that stripes data across many storage servers to provide aggregate throughput exceeding the capacity of any single device.
 
 1.  **Significance (quantitative)**: A PFS aggregates $\text{BW}_{\text{io}}$ linearly with the number of storage servers (Object Storage Servers). A Lustre cluster with 20 OSS nodes each delivering 10 GB/s provides 200 GB/s aggregate, vs. a single NAS server capped at 10 GB/s, enabling a training job to load a 10 GB striped shard in about 50 ms rather than 1 second. This aggregate bandwidth directly reduces the $D_{\text{vol}}/\text{BW}$ term in the iron law.
-2.  **Observation**: Unlike Network Attached Storage (NAS), where every I/O request routes through a single server, a PFS client receives stripe location metadata from a dedicated Metadata Server (MDS) and then reads data directly from multiple OSS nodes in parallel: the MDS and OSS paths are architecturally separated, so data bandwidth scales with OSS count while metadata operations scale with MDS count.
-3.  **Pitfall**: A frequent misconception is that a PFS has unlimited throughput if enough OSS nodes are added. In reality, a Lustre MDS handles roughly 100,000–300,000 metadata operations per second; at 10,000 workers each opening one small file, the MDS saturates in under 1 second and becomes the serialization point that idles the entire cluster regardless of how many OSS nodes are present.
+2.  **Distinction (durable)**: Unlike Network Attached Storage (NAS), where every I/O request routes through a single server, a PFS client receives stripe location metadata from a dedicated Metadata Server (MDS) and then reads data directly from multiple OSS nodes in parallel: the MDS and OSS paths are architecturally separated, so data bandwidth scales with OSS count while metadata operations scale with MDS count.
+3.  **Common pitfall**: A frequent misconception is that a PFS has unlimited throughput if enough OSS nodes are added. In reality, a Lustre MDS handles roughly 100,000–300,000 metadata operations per second; at 10,000 workers each opening one small file, the MDS saturates in under 1 second and becomes the serialization point that idles the entire cluster regardless of how many OSS nodes are present.
 
 :::
 
@@ -1092,8 +1065,8 @@ This separation creates a critical bottleneck: the small file problem. If a data
 ***Small File Problem***\index{Small File Problem!definition} is an ML data-loading pathology where millions of individually small files overwhelm the metadata server of a storage system.
 
 1.  **Significance (quantitative)**: It reduces effective I/O Bandwidth $(\text{BW}_{\text{io}})$ to a fraction of its theoretical rating because each file requires its own metadata operations (`open`, `stat`, `close`). With 10,000 workers simultaneously accessing small files, the metadata server becomes a Serialization Point that idles the entire cluster.
-2.  **Observation**: Unlike bulk data throughput (which measures bit-rate), the small file problem is a metadata latency $(L_{\text{lat}})$ issue: the bottleneck is the frequency of requests, not the size of the data.
-3.  **Pitfall**: A frequent misconception is that this is "fixed" by buying faster SSDs. In reality, it is a Format Problem\index{Format Problem}: the fix is to pack samples into large sequential containers (for example, TFRecord\index{TFRecord}, Parquet) to Amortize metadata operations across thousands of samples.
+2.  **Distinction (durable)**: Unlike bulk data throughput (which measures bit-rate), the small file problem is a metadata latency $(L_{\text{lat}})$ issue: the bottleneck is the frequency of requests, not the size of the data.
+3.  **Common pitfall**: A frequent misconception is that this is "fixed" by buying faster SSDs. In reality, it is a Format Problem\index{Format Problem}: the fix is to pack samples into large sequential containers (for example, TFRecord\index{TFRecord}, Parquet) to Amortize metadata operations across thousands of samples.
 
 :::
 
@@ -1137,9 +1110,9 @@ A related challenge is **namespace isolation**\index{Namespace Isolation}. Diffe
 
 Consider a training cluster with 512 nodes, each running 8 GPUs. The training job requires 400 GB/s of aggregate read bandwidth.
 
-1. If each Lustre OSS delivers 10 GB/s, how many OSS nodes are required?
-2. If the dataset consists of 200 million images at 150 KB each, and each `open()` call takes 50 μs on the MDS, how long would it take to open all files sequentially? What is the practical implication?
-3. If images are bundled into 4 GB tar files, how many metadata operations are needed to read the full dataset?
+- [ ] **OSS count**: Calculate the number of OSS nodes required when each Lustre OSS delivers 10 GB/s.
+- [ ] **Metadata cost**: Calculate the time required to open 200 million 150 KB image files sequentially when each `open()` call takes 50 μs on the MDS, then state the practical implication.
+- [ ] **Shard count**: Calculate the number of metadata operations needed to read the full dataset when images are bundled into 4 GB tar files.
 
 :::
 
@@ -1160,8 +1133,8 @@ Object storage targets "eleven nines"[^fn-eleven-nines-durability] of durability
 ***Erasure Coding***\index{Erasure Coding!definition} is a storage protection scheme for ML datasets and checkpoint archives that fragments an object into $k$ data and $m$ parity blocks, ensuring the original is recoverable from any $k$ remaining fragments.
 
 1.  **Significance (quantitative)**: It achieves extreme data durability (for example, "eleven nines") with significantly lower storage overhead than replication. For example, a 4+2 code provides the same protection as triple replication but at 1.5$\times$ cost instead of 3$\times$ cost.
-2.  **Observation**: Unlike replication (which stores complete copies), erasure coding uses mathematical encoding (for example, Reed-Solomon) to distribute redundant information across different failure domains (disks, racks, or sites).
-3.  **Pitfall**: A frequent misconception is that erasure coding is "free durability." In reality, it is a latency-compute trade-off\index{Latency!compute trade-off}: reconstructing data after a failure requires additional CPU cycles and increases the tail latency $(L_{\text{lat}})$ of the storage read.
+2.  **Distinction (durable)**: Unlike replication (which stores complete copies), erasure coding uses mathematical encoding (for example, Reed-Solomon) to distribute redundant information across different failure domains (disks, racks, or sites).
+3.  **Common pitfall**: A frequent misconception is that erasure coding is "free durability." In reality, it is a latency-compute trade-off\index{Latency!compute trade-off}: reconstructing data after a failure requires additional CPU cycles and increases the tail latency $(L_{\text{lat}})$ of the storage read.
 
 :::
 
@@ -1180,8 +1153,6 @@ The engineering behind erasure coding illustrates a recurring theme in storage s
 # │ Show:    $24,000/yr for S3 Standard; $120,000/yr for NVMe.
 # │ How:     100 TB × 1000 GB/TB × $/GB/month × 12 months.
 # │
-# │ Imports: mlsysim.core.units (Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate)
-# │ Exports: ObjectStorageCost.s3_annual_usd_str, .nvme_annual_usd_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class ObjectStorageCost:
@@ -1216,7 +1187,6 @@ The architecture of a streaming data loader for object storage differs from a lo
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: object-storage streaming paragraph
-# │ Exports: ObjectStreamContext.*
 from mlsysim.fmt import fmt, fmt_memory, fmt_bandwidth
 
 class ObjectStreamContext:
@@ -1258,8 +1228,6 @@ The transition from Tier 4 to Tier 5 is driven primarily by economics: data that
 # │ Show:    $4,800/year at $0.004/GB/month.
 # │ How:     100 TB × 1000 GB/TB × $0.004/GB/month × 12 months.
 # │
-# │ Imports: mlsysim units and fmt_usd
-# │ Exports: GlacierCost.glacier_annual_usd_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import GB, THOUSAND, USD, ureg
 from mlsysim.fmt import check, fmt_usd
@@ -1292,7 +1260,6 @@ Automated **lifecycle policies**\index{Lifecycle Policy} govern the transition o
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-tier5-archive
-# │ Exports: ArchiveLineageContext.*
 from mlsysim.fmt import fmt, fmt_count, fmt_memory, fmt_ratio
 
 class ArchiveLineageContext:
@@ -1326,7 +1293,7 @@ A key trade-off within streaming formats is the presence of an **index**\index{D
 
 Compression integration\index{Data Format!compression integration} also varies across formats. Parquet integrates compression at the column level, exploiting type homogeneity for high ratios. WebDataset and TFRecord typically leave compression to the individual sample: a WebDataset of images stores already-compressed JPEG files, while a text dataset might apply zstd compression per shard. This choice affects the CPU-I/O trade-off discussed in the context of NVMe reads, as per-sample decompression must be handled by the host CPU.
 
-For our running example, the 1.5 trillion token dataset is stored as roughly `{python} ObjectStreamContext.tokenized_shard_count_str` shards of approximately `{python} ObjectStreamContext.tokenized_shard_gb_str` each in a custom binary format. Each shard contains a small header (token count, vocabulary size, byte order) followed by a contiguous array of 4-byte token IDs. When staged on POSIX storage such as local NVMe or a parallel file system, the data loader memory-maps the shard and indexes directly into the token array by position, achieving near-peak read bandwidth with zero per-sample metadata overhead. When the same shards are read directly from object storage, the loader uses HTTP ranged GET streaming and an explicit local buffer rather than memory mapping.
+For our running example, the 1.5 trillion token dataset is stored as roughly `{python} ObjectStreamContext.tokenized_shard_count_str` shards of approximately `{python} ObjectStreamContext.tokenized_shard_gb_str` each in a custom binary format. Each shard contains a small header (token count, vocabulary size, byte order) followed by a contiguous array of 4-byte token IDs. When staged on POSIX storage such as local NVMe or a parallel file system, the data loader memory-maps the shard and indexes directly into the token array by position, achieving near-peak read bandwidth with zero per-sample metadata overhead. When the same shards are read directly from object storage, the loader uses HTTP ranged GET streaming and an explicit local buffer rather than memory mapping. @Tbl-data-formats compares the format choices by the access cost they impose on the storage path.
 
 | **Format**          |   **Overhead/Sample**    | **Random Access** | **Streaming** | **Compression** |
 |:--------------------|:------------------------:|:-----------------:|:-------------:|:---------------:|
@@ -1354,13 +1321,6 @@ The comparison in @tbl-data-formats sets the data-volume term in the pipeline eq
 # │ Show:    ~39.3 GB/s required; 20% stall; rendered display equation.
 # │ How:     BW = N_gpu × U × (batch × img_size) / T_step; stall = (max-comp)/max.
 # │
-# │ Imports: mlsysim.core.units (BILLION, THOUSAND)
-# │          mlsysim.fmt (fmt, check)
-# │ Exports: PipelineCalcs.req_bw_imagenet_gb_per_s_str, PipelineCalcs.data_stall_pct_str,
-# │          PipelineCalcs.t_comp_stall_str, PipelineCalcs.t_io_stall_str,
-# │          PipelineCalcs.stall_pct_display_math,
-# │          PipelineCalcs.tstep_seq_display_math, PipelineCalcs.stall_seq_display_math,
-# │          PipelineCalcs.tstep_pipe_display_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_time, fmt_bandwidth
 import math
@@ -1471,8 +1431,6 @@ Different ML workloads have dramatically different bandwidth profiles, even when
 # │ Show: Sigmoid curve; storage tech labels; stall threshold.
 # │ How: y = 100/(1+exp(-k*(log(x)-log(midpoint)))); matplotlib.
 # │
-# │ Imports: matplotlib.pyplot (plt), numpy (np)
-# │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ S-curve of utilization vs bandwidth; show stall threshold ~10 GB/s;
@@ -1653,11 +1611,6 @@ If I/O at the 99th percentile takes 500 ms and compute takes 200 ms, then $Q_{\t
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-pipelining—prefetch-depth memory cost
-# │ Exports: PrefetchDepth.compute_ms_str, .batch_mb_str, .gpus_per_node_str,
-# │          .nvme_p99_ms_str, .pfs_p99_ms_str, .obj_p99_ms_str,
-# │          .nvme_depth_math, .pfs_depth_math, .obj_depth_str,
-# │          .obj_safety_str, .obj_buf_gpu_mb_str, .obj_buf_node_gb_str,
-# │          .min_buf_node_mb_str
 import math
 from mlsysim import Systems
 from mlsysim.fmt import fmt, fmt_time, fmt_memory, fmt_math, check
@@ -1707,10 +1660,10 @@ The interaction between prefetching and the storage hierarchy creates a layered 
 
 A training cluster runs 1,024 GPUs with 128-image batches (150 KB per image after compression, 150 ms per iteration).
 
-1. Using @eq-pipeline-throughput, calculate the required aggregate storage bandwidth at 90 percent target utilization.
-2. If the parallel file system delivers 800 GB/s aggregate, is it sufficient? What if 20 percent of bandwidth is consumed by checkpoint writes?
-3. The object storage backend has P99 latency of 300 ms. What minimum prefetch buffer depth (in batches) would absorb this variance?
-4. Each decoded batch occupies 10 MB in host DRAM. What is the total prefetch buffer memory for the depth calculated in (3)?
+- [ ] **Bandwidth requirement**: Using @eq-pipeline-throughput, calculate the required aggregate storage bandwidth at 90 percent target utilization.
+- [ ] **Checkpoint contention**: Determine whether 800 GB/s aggregate parallel-file-system bandwidth is sufficient, then recalculate when checkpoint writes consume 20 percent of that bandwidth.
+- [ ] **Prefetch depth**: Calculate the minimum prefetch buffer depth in batches needed to absorb 300 ms P99 object-storage latency.
+- [ ] **Host memory**: Calculate total prefetch buffer memory when each decoded batch occupies 10 MB in host DRAM at the depth calculated in (3).
 
 :::
 
@@ -1724,8 +1677,6 @@ At 1,000 images per second per GPU and 8 GPUs per node, a single core would need
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-multi-worker—worker allocation heuristic
-# │ Exports: WorkerAllocation.gpus_per_node_str, .workers_str, .cpu_cores_str,
-# │          .remaining_cores_str
 from mlsysim import Systems
 from mlsysim.fmt import fmt, check
 
@@ -1772,7 +1723,6 @@ A more advanced approach is **locality-aware scheduling**\index{Locality-Aware S
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-data-locality
-# │ Exports: NodeStagingContext.*
 from mlsysim.fmt import fmt, fmt_time, fmt_memory
 
 class NodeStagingContext:
@@ -1816,9 +1766,6 @@ That same reproducibility requirement becomes harder when the inputs are live fe
 # │ Context: SHA-256 validation footnote in §Data versioning.
 # │ Goal: Make the 100 TB / 1,500 core-hour integrity-check estimate reproducible.
 # │ How: Dataset MB / effective per-core throughput / seconds per hour.
-# │ Exports: HashValidationCost.dataset_tb_str,
-# │          HashValidationCost.throughput_mb_per_s_str,
-# │          HashValidationCost.cpu_core_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory
 
@@ -1865,12 +1812,6 @@ Beyond pipeline orchestration, a hardware optimization eliminates one of the mos
 # │ Show:    120 μs traditional vs 30 μs GDS; 4x speedup; 75% latency reduction.
 # │ How:     Ratio of traditional to bypass latency per transfer.
 # │
-# │ Imports: mlsysim.core.units (microsecond, second); mlsysim.Systems
-# │ Exports: GDSLatency.gds_trad_us_str, .gds_bypass_us_str,
-# │          .gds_speedup_mult_str, .gds_latency_reduction_pct_str,
-# │          .gds_total_images_per_s_str, .gds_trad_cpu_seconds_str,
-# │          .gds_trad_cpu_cores_str, .gds_bypass_cpu_seconds_str,
-# │          .gds_freed_cpu_cores_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.core.units import KB, microsecond, second
@@ -1922,8 +1863,8 @@ The traditional data path for loading training data follows three hops: storage 
 ***GPUDirect Storage (GDS)***\index{GPU Direct Storage!definition} is a technology that enables a direct DMA path between NVMe storage devices and GPU memory, bypassing the host CPU and system DRAM.
 
 1.  **Significance (quantitative)**: It eliminates the "Bounce Buffer" through system memory. In the small-transfer model below, this reduces per-transfer latency by `{python} GDSLatency.gds_latency_reduction_pct_str` and makes the local transfer path `{python} GDSLatency.gds_speedup_mult_str` faster. It allows the GPU to saturate the NVMe link speed (for example, 7 GB/s) while reducing CPU utilization for I/O.
-2.  **Observation**: Unlike Traditional I/O\index{Traditional I/O}, where every byte must be processed by the CPU and stored in kernel buffers, GDS provides Direct Memory Access between the storage controller and the accelerator.
-3.  **Pitfall**: A frequent misconception is that GDS makes all storage "faster." In reality, it only accelerates Local or RDMA-attached NVMe; it does not eliminate the physical latency of network-attached file systems or object storage.
+2.  **Distinction (durable)**: Unlike Traditional I/O\index{Traditional I/O}, where every byte must be processed by the CPU and stored in kernel buffers, GDS provides Direct Memory Access between the storage controller and the accelerator.
+3.  **Common pitfall**: A frequent misconception is that GDS makes all storage "faster." In reality, it only accelerates Local or RDMA-attached NVMe; it does not eliminate the physical latency of network-attached file systems or object storage.
 
 :::
 
@@ -1961,7 +1902,6 @@ The architectural evolution from CPU-mediated I/O to direct storage access refle
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-complete-path
-# │ Exports: CompleteDataPathCheckpoint.*
 from mlsysim import Models
 from mlsysim.fmt import fmt, check, fmt_memory
 
@@ -1996,7 +1936,7 @@ At the end of the training job, the final model checkpoint is promoted from the 
 
 The total number of data copies in this lifecycle is instructive. Each training sample traverses: object storage $\to$ NVMe (staging), NVMe $\to$ host DRAM (read), host DRAM $\to$ GPU HBM (transfer). Each checkpoint traverses: GPU HBM $\to$ NVMe (local save), NVMe $\to$ parallel file system (async copy), parallel file system $\to$ object storage (long-term retention). Every copy consumes bandwidth and contributes latency. The engineering goal is to minimize copies on the critical path (the training loop) and tolerate additional copies on noncritical paths (staging and archival).
 
-The volume of data moved during a 30-day training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every 10 minutes across 256 nodes for 30 days, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling over `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs.
+The volume of data moved during a 30-day training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every 10 minutes across 256 nodes for 30 days, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs.
 
 The physical data path dictates where bytes move; the remaining question is what each movement costs.
 
@@ -2016,9 +1956,6 @@ A 100 TB training dataset can reside on any tier of the hierarchy, but the cost 
 # │ Show:    5x tier cost ratio; $9,000 egress for 100 TB.
 # │ How:     Divide per-GB monthly costs; multiply dataset size by egress rate.
 # │
-# │ Imports: mlsysim.core.units (Infrastructure.Pricing.Cloud.EgressPerGB.rate, MILLION,
-# │          Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate)
-# │ Exports: EconRatios.tier_cost_ratio_mult_str, EconRatios.egress_100tb_usd_str
 # └─────────────────────────────────────────────────────────────────────────────
 class EconRatios:
     # ┌── 1. LOAD ─────────────────────────────────────────
@@ -2045,7 +1982,6 @@ class EconRatios:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-economics tier cost list
-# │ Exports: ObjectStorageCostRecap.s3_annual_usd_str, ObjectStorageCostRecap.nvme_annual_usd_str
 
 from mlsysim.fmt import fmt_usd
 
@@ -2062,7 +1998,6 @@ class ObjectStorageCostRecap:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-economics tier cost list
-# │ Exports: GlacierCostRecap.glacier_annual_usd_str
 
 from mlsysim import GB, THOUSAND, USD, ureg
 from mlsysim.fmt import fmt_usd
@@ -2078,10 +2013,6 @@ class GlacierCostRecap:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-economics—egress, IOPS, and retrieval iceberg costs
-# │ Exports: StorageIcebergCosts.egress_10epoch_usd_str, .get_request_usd_str,
-# │          .storage_monthly_usd_str, .glacier_retrieval_usd_str,
-# │          .glacier_egress_usd_str, .file_count_str, .epochs_str,
-# │          .egress_rate_gb_str
 from mlsysim import Infrastructure
 from mlsysim.fmt import fmt, fmt_usd, fmt_count, check
 
@@ -2121,8 +2052,6 @@ class StorageIcebergCosts:
 # │ Goal: Bracket the cost ladder (HBM capital top end) and the opportunity cost
 # │       of storage-induced accelerator idle time.
 # │ How: 100 TB x HBM $/GB; 1,000-GPU x Fleet GpuHourRef x utilization shortfall.
-# │ Exports: StorageCostExtremes.hbm_storage_usd_str, idle_daily_usd_str,
-# │          idle_loss_daily_usd_str, idle_loss_run_usd_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_usd, check
 
@@ -2202,8 +2131,6 @@ The cost iceberg reveals that raw storage capacity can account for less than hal
 # │      come from Infrastructure.Pricing (S3StandardPerTbMonth,
 # │      NvmeLowPerTbMonth, EgressPerGB, Capital.H100GpuPurchaseUsd).
 # │
-# │ Imports: mlsysim registries (Infrastructure.Pricing) + fmt helpers
-# │ Exports: StreamVsStageEconomics.* (_str exports listed in OUTPUT)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_qty, fmt_usd, fmt_int, check
 
@@ -2283,7 +2210,6 @@ The cost analysis extends to the parallel file system tier, which occupies a mid
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-economics tiering prose
-# │ Exports: StorageEconomicsCorpus.tokenized_text_tb_str
 from mlsysim.fmt import fmt, fmt_memory
 
 class StorageEconomicsCorpus:
@@ -2308,20 +2234,10 @@ class StorageEconomicsCorpus:
 # │ How:     Apply per-GB monthly cost and per-GB egress rate to 1 PB; compare
 # │          to fixed on-prem annual operations cost; divide capex by net savings.
 # │
-# │ Imports: mlsysim.core.units (Infrastructure.Pricing.Cloud.EgressPerGB.rate, MILLION),
-# │          mlsysim.fmt (fmt, check, MarkdownStr)
-# │ Exports: BuildVsBuyStorageEconomics.annual_ops_usd_str,
-# │          BuildVsBuyStorageEconomics.cloud_cost_gb_month_str,
-# │          BuildVsBuyStorageEconomics.cloud_storage_annual_usd_str,
-# │          BuildVsBuyStorageEconomics.reads_per_year_str,
-# │          BuildVsBuyStorageEconomics.cloud_egress_annual_usd_str,
-# │          BuildVsBuyStorageEconomics.cloud_total_annual_usd_str,
-# │          BuildVsBuyStorageEconomics.net_annual_savings_str,
-# │          BuildVsBuyStorageEconomics.breakeven_range_str
 # └─────────────────────────────────────────────────────────────────────────────
 class BuildVsBuyStorageEconomics:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    from mlsysim.fmt import check, fmt, fmt_rate, fmt_usd, MarkdownStr, fmt_time
+    from mlsysim.fmt import check, fmt, fmt_rate, fmt_usd, fmt_time_range
 
     capex_low = 3_000_000
     capex_high = 5_000_000
@@ -2355,9 +2271,14 @@ class BuildVsBuyStorageEconomics:
     net_annual_savings_str = fmt_usd(net_annual_savings, precision=0)
     reads_per_year_str = fmt_rate(reads_per_year, "reads/year", precision=0, commas=False)
     cloud_cost_gb_month_str = fmt_usd(cloud_cost_gb_month, precision=2, commas=False, per="GB/month")
-    breakeven_low_years_str = fmt_time(breakeven_low_years, 'year', precision=1, commas=False, style='word')
-    breakeven_high_years_str = fmt_time(breakeven_high_years, 'year', precision=1, commas=False, style='word')
-    breakeven_range_str = MarkdownStr(f"{breakeven_low_years_str}--{breakeven_high_years_str}")
+    breakeven_range_str = fmt_time_range(
+        breakeven_low_years,
+        breakeven_high_years,
+        ureg.year,
+        precision=1,
+        commas=False,
+        style='word',
+    )
 ```
 
 The decision to **build vs. buy**\index{Build vs. Buy!storage} storage infrastructure hinges on the trade-off between the high capital expenditure of an on-premises parallel file system and the recurring operational expenditure of cloud object storage. A 1-petabyte Lustre deployment costs roughly \$3–5 million in hardware, plus an additional `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` per year in operational overhead for power, cooling, and engineering support. Storing 1 PB in a cloud object store at `{python} BuildVsBuyStorageEconomics.cloud_cost_gb_month_str` costs `{python} BuildVsBuyStorageEconomics.cloud_storage_annual_usd_str` per year for storage alone. However, egress fees for accessing the data dominate the total cost: reading that petabyte at `{python} BuildVsBuyStorageEconomics.reads_per_year_str` adds `{python} BuildVsBuyStorageEconomics.cloud_egress_annual_usd_str` in data transfer fees. Under these assumptions, annual cloud delivery costs `{python} BuildVsBuyStorageEconomics.cloud_total_annual_usd_str`; after subtracting `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` of on-premises operations, the net savings are `{python} BuildVsBuyStorageEconomics.net_annual_savings_str` per year. The resulting hardware break-even is roughly `{python} BuildVsBuyStorageEconomics.breakeven_range_str`, not 18 to 24 months. Reaching an 18- to 24-month payback requires a hotter workload with many more full-dataset reads per year, lower capital expense, or non-egress drivers such as checkpoint latency and shared-namespace requirements. For our running example, the `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized corpus is much smaller than 1 PB, so the local-storage case is driven more by latency, repeated experiments, and checkpoint staging than by one-year egress savings alone.
@@ -2368,8 +2289,6 @@ Hardware degradation introduces the need for a **storage refresh cycle**\index{S
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-economics tiering prose
-# │ Exports: StorageTieringCorpus.compressed_text_tb_str,
-# │          StorageTieringCorpus.tokenized_text_tb_str
 from mlsysim.fmt import fmt, fmt_qty_int, fmt_memory
 
 class StorageTieringCorpus:
@@ -2404,7 +2323,6 @@ Return to our running example to see tiering in action. The `{python} StorageTie
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Goal: Annual PFS-capacity savings from demoting idle datasets after jobs end.
 # │ How: (in-place 500 TB - steady 100 TB) x PFS $/TB-month x 12 months.
-# │ Exports: PfsTieringSavings.savings_usd_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_usd
 from mlsysim.core.units import ureg
@@ -2464,10 +2382,6 @@ While model serving dictates its own economic calculus, the training phase intro
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Checkpoint section intro — model scale and checkpoint size
-# │ Exports: CheckpointModelIntro.gpt3_params_b_str,
-# │          CheckpointModelIntro.ckpt_total_gb_str,
-# │          CheckpointModelIntro.weights_fp16_gb_str,
-# │          CheckpointModelIntro.optimizer_state_gb_str
 from mlsysim import Models, ReferenceStats
 from mlsysim.core.units import BYTES_ADAM_STATE, BYTES_FP16, GB
 from mlsysim.fmt import check, fmt_memory, fmt_params
@@ -2508,7 +2422,6 @@ A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam op
 # │ Goal: Make the 70B naive-vs-sharded checkpoint arithmetic explicit.
 # │ How: Compute FP16 weights/gradients, FP32 master weights, Adam moments, and
 # │      fabric write time at 100 GB/s.
-# │ Exports: CheckpointStormDefinition.*_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_time, fmt_memory, fmt_params, fmt_count
 
@@ -2558,8 +2471,8 @@ class CheckpointStormDefinition:
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
 
 1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model, each replica holds `{python} CheckpointStormDefinition.weights_gb_str` FP16 weights, `{python} CheckpointStormDefinition.gradients_gb_str` gradients, and `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str`, a naive checkpoint of that full per-replica state generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3, an optimizer-state-sharding scheme in which each node stores only its $1/N$ slice of the state rather than a full replica, collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
-2.  **Observation**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
-3.  **Pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
+2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
+3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
 
 :::
 
@@ -2575,7 +2488,6 @@ The severity of a checkpoint storm depends on two factors: the per-node shard si
 # │ Goal: Compute local NVMe pause, PFS async copy time, and exposed overhead.
 # │ How: ZeRO-3 shard = total checkpoint / nodes; local write uses 4 NVMe drives;
 # │      PFS copy uses aggregate PFS bandwidth shared across all nodes.
-# │ Exports: CheckpointStormCalc.*_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Systems
 from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
@@ -2629,7 +2541,6 @@ class CheckpointStormCalc:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Checkpoint storm callout — total checkpoint size recap
-# │ Exports: CheckpointTotalGbRecap.ckpt_total_gb_str
 from mlsysim import Models
 from mlsysim.fmt import fmt
 
@@ -2661,7 +2572,6 @@ In the second phase, a background process asynchronously copies the local checkp
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Checkpoint retention paragraph below — fleet totals over 30-day run
-# │ Exports: CheckpointFleetRetention.*
 from mlsysim import Models
 from mlsysim.fmt import fmt, fmt_memory
 
@@ -2704,7 +2614,6 @@ That incident turns checkpoint storage from a capacity question into a restore-d
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @chk-data-storage-checkpoint-storage-design
 # │ Goal: Prompt parameters for the checkpoint storage design exercise.
-# │ Exports: CheckpointStorageDesignPrompt.*_str
 from mlsysim.fmt import fmt, fmt_time, fmt_bandwidth
 
 class CheckpointStorageDesignPrompt:
@@ -2724,10 +2633,10 @@ class CheckpointStorageDesignPrompt:
 
 A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a 175B-parameter model checkpoint every `{python} CheckpointStorageDesignPrompt.checkpoint_interval_min_str`. Each checkpoint is `{python} CheckpointTotalGbRecap.ckpt_total_gb_str` total, distributed across all nodes.
 
-1. What is the per-node checkpoint size?
-2. If each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`, what is $T_{\text{write}}$ for the local write?
-3. If the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously, what is the per-node write bandwidth, and how long does the async copy take?
-4. Why is tiered staging (local NVMe first, then async PFS copy) faster than writing directly to PFS?
+- [ ] **Per-node state**: Calculate the per-node checkpoint size.
+- [ ] **Local write**: Calculate $T_{\text{write}}$ for the local write when each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`.
+- [ ] **Async copy**: Calculate the per-node write bandwidth and async-copy time when the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously.
+- [ ] **Tiered staging**: Explain why tiered staging (local NVMe first, then async PFS copy) is faster than writing directly to PFS.
 
 :::
 
@@ -2749,7 +2658,6 @@ With the checkpoint accounting now derived in full, the running example's storag
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @nbk-data-storage-175b-models-storage-footprint
-# │ Exports: StorageFootprintTable.*
 from mlsysim import Models
 from mlsysim.fmt import fmt, fmt_memory, fmt_qty, fmt_count, fmt_ratio
 
@@ -2888,7 +2796,6 @@ Storage design errors are among the most expensive mistakes in ML infrastructure
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-fallacies
-# │ Exports: StorageFallaciesBandwidth.*
 from mlsysim import Hardware
 from mlsysim.core.units import GB, TB, second
 from mlsysim.fmt import fmt_multiple, fmt_qty
@@ -2957,7 +2864,6 @@ The economics of the hierarchy are equally consequential. The orders-of-magnitud
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-summary takeaways
-# │ Exports: GDSLatencyRecap.gds_speedup_mult_str
 
 from mlsysim.fmt import fmt
 
@@ -2974,7 +2880,6 @@ This diagnostic perspective connects directly to how a training job is split acr
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-summary takeaways
-# │ Exports: EconRatiosRecap.tier_cost_ratio_mult_str
 
 from mlsysim.fmt import fmt_multiple
 
@@ -2991,11 +2896,10 @@ class EconRatiosRecap:
 ::: {.callout-takeaways title="Feed the accelerators or waste them"}
 
 * **HBM is the destination**: Every lower tier exists to keep GPU HBM populated. The roughly 30$\times$ aggregate bandwidth gap between HBM and object storage (and the much larger per-client gap once a single instance pulls from a shared object endpoint) drives every design decision in the ML storage hierarchy.
-* **ML workloads invert storage assumptions**: Traditional caching, IOPS optimization, and small-write durability patterns all produce the wrong answer for ML training. Throughput (GB/s) matters more than IOPS. Small files are the enemy; aggregated shards are the solution.
+* **ML workloads invert storage assumptions**: Traditional caching, IOPS optimization, and small-write durability patterns all produce the wrong answer for ML training. Throughput (GB/s) matters more than IOPS, and small files make metadata the first bottleneck; aggregated shards reduce metadata operations by orders of magnitude.
 * **The pipeline equation governs design**: Required bandwidth scales linearly with GPU count and inversely with iteration time. Use $\text{BW}_{\text{required}} = N_{\text{GPU}} \times \eta_{\text{target}} \times D_{\text{vol,batch}} / T_{\text{iteration}}$ to size every tier.
 * **Pipelining hides average latency, not tail latency**: Prefetch buffers must be sized for P99 I/O latency, not average, to prevent accelerator stalls at scale. Buffer depth of $\lceil T_{\text{I/O,p99}} / T_{\text{compute}} \rceil$ is the minimum.
 * **GPUDirect Storage eliminates CPU bottlenecks**: GDS bypasses the CPU in the data path, reducing per-transfer latency by `{python} GDSLatencyRecap.gds_speedup_mult_str` and freeing CPU cores for augmentation.
-* **Metadata, not bandwidth, is the first bottleneck**: The small file problem collapses parallel file system throughput to a fraction of rated capacity. Aggregate samples into large shards to reduce metadata operations by 10,000$\times$ or more.
 * **Checkpoint staging minimizes $T_{\text{write}}$**: Write to local NVMe first, then replicate asynchronously to shared storage. This decouples checkpoint pause time from parallel file system performance.
 * **Economics drive tiering**: The `{python} EconRatiosRecap.tier_cost_ratio_mult_str` cost difference between local NVMe and object storage (and the >3,000$\times$ span from HBM to archive) mandates a tiering strategy. Egress fees often exceed storage fees; design for total cost of data delivery, not storage cost alone.
 

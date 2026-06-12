@@ -52,7 +52,6 @@ Training produced a capable model, yet capability alone does not guarantee deplo
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: LLM scale vs smartphone and MCU memory for deployment-gap prose.
-# │ Exports: CompressionDeploymentScale.{llm_7b,llm_7b_mem,llm_175b,llm_175b_mem,smartphone_ram,mcu_ram}_str
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim import Models, Platforms
@@ -104,7 +103,6 @@ Throughout this chapter, we ground each technique in concrete systems: ResNet-50
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: INT8 weight-memory reduction for iron-law definition item.
-# │ Exports: CompressionIronLawQuant.{llm_175b,llm_175b_mem,llm_175b_mem_int8,llm_175b_fp16_int8_reduction}_str
 from mlsysim import Models
 from mlsysim.fmt import fmt, fmt_qty, check, fmt_count
 
@@ -132,12 +130,12 @@ class CompressionIronLawQuant:
 ***Model Compression***\index{Model Compression!definition} is a family of techniques that reduce a trained model's computational cost and memory footprint by eliminating redundant parameters (pruning), reducing numerical precision (quantization), or transferring learned behavior into a smaller architecture (distillation), while preserving as much predictive accuracy as possible.
 
 1.  **Significance (quantitative)**: Compression directly reduces the iron law's data-movement and compute terms. INT8 quantization of a `{python} CompressionIronLawQuant.llm_175b_str`-billion-parameter large language model (LLM) cuts weight memory from `{python} CompressionIronLawQuant.llm_175b_mem_gb_str` (FP16) to `{python} CompressionIronLawQuant.llm_175b_mem_int8_gb_str`, a `{python} CompressionIronLawQuant.llm_175b_fp16_int8_reduction_mult_str` reduction in $D_{\text{vol}}$, while dedicated low-precision matrix units can increase compute throughput when kernels and layouts use the supported INT8 path. Unstructured pruning to 50 percent sparsity theoretically halves $O$, but hardware speedup only materializes when sparsity is structured (for example, a 2:4 pattern that keeps two weights in each group of four) to match accelerator capabilities.
-2.  **Observation**: Unlike post-training compression methods such as pruning and quantization, neural architecture search discovers efficient architectures from scratch by exploring a design space. This chapter treats NAS as a related structural optimization technique: it changes the representation before training rather than compressing a finished model post hoc.
-3.  **Pitfall**: A frequent misconception is that compression techniques compose without interference. In practice, applying quantization after pruning can amplify quantization error in near-zero weight regions that pruning left behind, causing accuracy degradation that neither technique produces alone.
+2.  **Distinction (durable)**: Unlike post-training compression methods such as pruning and quantization, neural architecture search discovers efficient architectures from scratch by exploring a design space. This chapter treats NAS as a related structural optimization technique: it changes the representation before training rather than compressing a finished model post hoc.
+3.  **Common pitfall**: A frequent misconception is that compression techniques compose without interference. In practice, applying quantization after pruning can amplify quantization error in near-zero weight regions that pruning left behind, causing accuracy degradation that neither technique produces alone.
 
 :::
 
-The chapter follows the optimization stack from software to hardware. We begin with the optimization framework and deployment context that determine which techniques matter for a given target. We then examine each dimension in turn: @sec-model-compression-structural-optimization-ee93 (pruning, distillation, architecture search), @sec-model-compression-quantization-precision-cd46 (FP32 to INT8 and below), and @sec-model-compression-architectural-efficiency-8dd3 (operator fusion, sparsity exploitation, graph-level transformations). The chapter closes with practical guidance on selecting and composing these techniques for specific deployment constraints.
+The optimization stack moves from representation to numerics to execution. Deployment context determines which constraint binds first; structural methods change the computation, precision methods change the representation of each value, and architectural methods decide whether the compressed artifact actually maps to efficient hardware execution. Selection and composition follow from that constraint order rather than from a checklist of techniques.
 
 Model optimization is not a *single technique* but a *framework* with three complementary dimensions, each addressing different bottlenecks. These dimensions form a natural hierarchy: we first decide *what* computations the model should perform (representation), then *how precisely* to perform them (numerics), and finally *how efficiently* to execute them on physical hardware (implementation). Tracing the stack in @fig-3-sections from top to bottom reveals how each layer moves from pure software concerns toward hardware-level execution.
 
@@ -210,7 +208,6 @@ To understand *why* numerics matter so deeply, move from the algorithm to silico
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Horowitz energy hierarchy for quantization physics callout.
-# │ Exports: QuantizationEnergyPhysics.{energy_dram,energy_dram_per_byte,energy_flop_fp32,energy_op_int8,energy_float_add_ratio,energy_dram_read_bits,energy_dram_read_ratio,int8_energy_reduction}_str
 from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_energy_per_op, fmt_qty, fmt_time
 from mlsysim.core.units import pJ, byte, flop
 
@@ -351,25 +348,13 @@ The same memory pressure that shaped AlexNet's architecture appears in everyday 
 # │ Show: The 6-order-of-magnitude gap from Cloud to TinyML.
 # │ How: List VRAM and RAM constraints for standard hardware tiers.
 # │
-# │ Imports: mlsysim.core.units (GB, MB, KB, byte,
-# │          Platforms.Cloud.ram, Platforms.Mobile.ram, Platforms.Tiny.ram, Models.Recommendation.DLRM.model_size)
-# │ Exports: dlrm_gb_str, gpt2_gb_str, resnet_mb_str, mobilenet_mb_str, mobilenet_int8_mb_str,
-# │          dscnn_kb_str, cloud_cap_gb_str, mobile_cap_gb_str, tiny_cap_kb_str,
-# │          dlrm_mobile_fit_str, dlrm_tiny_fit_str, gpt2_tiny_fit_str,
-# │          resnet_tiny_fit_str, mobilenet_tiny_fit_str,
-# │          mobilenet_int8_tiny_fit_str, mobilenet_int8_tiny_ratio_mult_str,
-# │          dscnn_tiny_fit_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Platforms
-from mlsysim.fmt import fmt, fmt_int, MarkdownStr, fmt_multiple, fmt_qty, fmt_qty_int, fmt_memory
+from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_qty, fmt_qty_int, fmt_memory
 
-def _get_ratio(model_mem, device_mem):
-    """Return 'ok' if model fits, else 'no (N×)' with how many times it overflows."""
-    ratio = model_mem.to(byte).magnitude / device_mem.to(byte).magnitude
-    if ratio < 1:
-        return MarkdownStr("ok")
-    ratio_mult_str = fmt_multiple(ratio)
-    return MarkdownStr(f"no ({ratio_mult_str})")
+def _overflow_ratio(model_mem, device_mem):
+    """Return how many times a model exceeds a device memory envelope."""
+    return model_mem.to(byte).magnitude / device_mem.to(byte).magnitude
 
 class ModelDeviceComparison:
     """Contrast model requirements with device memory: 6-order-of-magnitude deployment gap."""
@@ -389,18 +374,19 @@ class ModelDeviceComparison:
     dscnn_mem = 500 * KB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dlrm_mobile = _get_ratio(dlrm_mem, mobile_mem)
-    dlrm_tiny = _get_ratio(dlrm_mem, tiny_mem)
-    gpt2_mobile = _get_ratio(gpt2_mem, mobile_mem)
-    gpt2_tiny = _get_ratio(gpt2_mem, tiny_mem)
-    resnet_tiny = _get_ratio(resnet_mem, tiny_mem)
-    mobilenet_tiny = _get_ratio(mobilenet_mem, tiny_mem)
-    mobilenet_int8_tiny = _get_ratio(mobilenet_int8_mem, tiny_mem)
-    mobilenet_int8_tiny_ratio = mobilenet_int8_mem.to(byte).magnitude / tiny_mem.to(byte).magnitude
+    dlrm_mobile_overflow = _overflow_ratio(dlrm_mem, mobile_mem)
+    dlrm_tiny_overflow = _overflow_ratio(dlrm_mem, tiny_mem)
+    gpt2_mobile_overflow = _overflow_ratio(gpt2_mem, mobile_mem)
+    gpt2_tiny_overflow = _overflow_ratio(gpt2_mem, tiny_mem)
+    resnet_tiny_overflow = _overflow_ratio(resnet_mem, tiny_mem)
+    mobilenet_tiny_overflow = _overflow_ratio(mobilenet_mem, tiny_mem)
+    mobilenet_int8_tiny_ratio = _overflow_ratio(mobilenet_int8_mem, tiny_mem)
+    dscnn_tiny_overflow = _overflow_ratio(dscnn_mem, tiny_mem)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # DS-CNN always fits TinyML—sanity check
-    assert _get_ratio(dscnn_mem, tiny_mem) == "ok", "DS-CNN must fit in TinyML device."
+    assert dscnn_tiny_overflow < 1, "DS-CNN must fit in TinyML device."
+    assert gpt2_mobile_overflow < 1, "GPT-2 XL should fit in mobile memory for this simplified table."
     assert 6 <= mobilenet_int8_tiny_ratio <= 8, "MobileNetV2 INT8 should exceed TinyML by about 7x."
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -414,28 +400,26 @@ class ModelDeviceComparison:
     cloud_cap_gb_str = fmt_qty_int(cloud_mem, GB, commas=False, approx=True)
     mobile_cap_gb_str = fmt_qty_int(mobile_mem, GB, commas=False, approx=True)
     tiny_cap_kb_str = fmt_qty(tiny_mem, KB, precision=1, commas=False, approx=True)
-    dlrm_mobile_fit_str = dlrm_mobile
-    dlrm_tiny_fit_str = dlrm_tiny
-    gpt2_tiny_fit_str = gpt2_tiny
-    resnet_tiny_fit_str = resnet_tiny
-    mobilenet_tiny_fit_str = mobilenet_tiny
-    mobilenet_int8_tiny_fit_str = mobilenet_int8_tiny
+    dlrm_mobile_overflow_mult_str = fmt_multiple(dlrm_mobile_overflow)
+    dlrm_tiny_overflow_mult_str = fmt_multiple(dlrm_tiny_overflow)
+    gpt2_tiny_overflow_mult_str = fmt_multiple(gpt2_tiny_overflow)
+    resnet_tiny_overflow_mult_str = fmt_multiple(resnet_tiny_overflow)
+    mobilenet_tiny_overflow_mult_str = fmt_multiple(mobilenet_tiny_overflow)
     mobilenet_int8_tiny_ratio_mult_str = fmt_multiple(mobilenet_int8_tiny_ratio, precision=1, commas=False)
-    dscnn_tiny_fit_str = MarkdownStr("ok")
 ```
 
 @Tbl-model-vs-device quantifies this mismatch using the Lighthouse models from @sec-network-architectures-lighthouse-roster-model-biographies-a763. The gap between model requirements and device capabilities explains *why* compression is not optional for resource-constrained deployment: without it, the models cannot run.
 
 As @tbl-model-vs-device makes concrete, even aggressively optimized models like MobileNetV2 at INT8 precision exceed TinyML device memory by about `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`.
 
-| **Model**              |                **Memory** **(Runtime)**                |               **Storage** **(Weights)**                | **Cloud** **(`{python} ModelDeviceComparison.cloud_cap_gb_str`)** | **Mobile** **(`{python} ModelDeviceComparison.mobile_cap_gb_str`)** | **TinyML** **(`{python} ModelDeviceComparison.tiny_cap_kb_str`)** |
-|:-----------------------|:------------------------------------------------------:|:------------------------------------------------------:|:-----------------------------------------------------------------:|:-------------------------------------------------------------------:|:-----------------------------------------------------------------:|
-| **DLRM**               |      `{python} ModelDeviceComparison.dlrm_gb_str`      |      `{python} ModelDeviceComparison.dlrm_gb_str`      |                                 ok                                |         `{python} ModelDeviceComparison.dlrm_mobile_fit_str`        |         `{python} ModelDeviceComparison.dlrm_tiny_fit_str`        |
-| **GPT-2 XL**           |      `{python} ModelDeviceComparison.gpt2_gb_str`      |      `{python} ModelDeviceComparison.gpt2_gb_str`      |                                 ok                                |                                  ok                                 |         `{python} ModelDeviceComparison.gpt2_tiny_fit_str`        |
-| **ResNet-50**          |     `{python} ModelDeviceComparison.resnet_mb_str`     |     `{python} ModelDeviceComparison.resnet_mb_str`     |                                 ok                                |                                  ok                                 |        `{python} ModelDeviceComparison.resnet_tiny_fit_str`       |
-| **MobileNetV2**        |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |                                 ok                                |                                  ok                                 |      `{python} ModelDeviceComparison.mobilenet_tiny_fit_str`      |
-| **MobileNetV2 (INT8)** | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` |                                 ok                                |                                  ok                                 |    `{python} ModelDeviceComparison.mobilenet_int8_tiny_fit_str`   |
-| **DS-CNN (KWS)**       |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |        `{python} ModelDeviceComparison.dscnn_tiny_fit_str`        |
+| **Model**              |                **Memory** **(Runtime)**                |               **Storage** **(Weights)**                | **Cloud** **(`{python} ModelDeviceComparison.cloud_cap_gb_str`)** | **Mobile** **(`{python} ModelDeviceComparison.mobile_cap_gb_str`)** |    **TinyML** **(`{python} ModelDeviceComparison.tiny_cap_kb_str`)**     |
+|:-----------------------|:------------------------------------------------------:|:------------------------------------------------------:|:-----------------------------------------------------------------:|:-------------------------------------------------------------------:|:------------------------------------------------------------------------:|
+| **DLRM**               |      `{python} ModelDeviceComparison.dlrm_gb_str`      |      `{python} ModelDeviceComparison.dlrm_gb_str`      |                                 ok                                | no (`{python} ModelDeviceComparison.dlrm_mobile_overflow_mult_str`) |    no (`{python} ModelDeviceComparison.dlrm_tiny_overflow_mult_str`)     |
+| **GPT-2 XL**           |      `{python} ModelDeviceComparison.gpt2_gb_str`      |      `{python} ModelDeviceComparison.gpt2_gb_str`      |                                 ok                                |                                  ok                                 |    no (`{python} ModelDeviceComparison.gpt2_tiny_overflow_mult_str`)     |
+| **ResNet-50**          |     `{python} ModelDeviceComparison.resnet_mb_str`     |     `{python} ModelDeviceComparison.resnet_mb_str`     |                                 ok                                |                                  ok                                 |   no (`{python} ModelDeviceComparison.resnet_tiny_overflow_mult_str`)    |
+| **MobileNetV2**        |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |                                 ok                                |                                  ok                                 |  no (`{python} ModelDeviceComparison.mobilenet_tiny_overflow_mult_str`)  |
+| **MobileNetV2 (INT8)** | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` |                                 ok                                |                                  ok                                 | no (`{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`) |
+| **DS-CNN (KWS)**       |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |                                    ok                                    |
 
 : **The Deployment Gap**: Model memory requirements compared against typical device capacities. Even MobileNetV2 quantized to INT8 exceeds the `{python} ModelDeviceComparison.tiny_cap_kb_str` TinyML envelope by `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`, while the purpose-built DS-CNN keyword spotter fits within it. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device tbl-colwidths="[20,15,15,15,15,20]"}
 
@@ -473,7 +457,7 @@ Optimization is a search for the Pareto frontier.
 
 The table reveals a pattern: techniques that preserve model structure (fusion, precision reduction) tend to be "free" or cheap, while techniques that alter structure (pruning, distillation) extract more savings but require careful tuning.
 
-Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization techniques that follow address these constraints at three successive levels of the stack. We begin with structural methods that modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. We then turn to precision techniques that reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Finally, we address architectural approaches that improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
+Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization stack follows those constraints downward. Structural methods modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. Precision techniques reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Architectural approaches improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
 
 ::: {#chk-model-compression-efficiency-frontier .callout-checkpoint title="The efficiency frontier"}
 
@@ -481,12 +465,12 @@ Optimization is about trading one resource for another.
 
 **Trade-offs**
 
-- [ ] **Accuracy vs. cost**: Do you understand why removing 50 percent of weights (Pruning) might drop accuracy by 1 percent, but reducing precision (Quantization) to INT8 might drop it by 0.5 percent while saving 4$\times$ memory?
+- [ ] **Accuracy vs. cost**: Compare a structural change and a precision change by naming which resource each saves and which quality risk it introduces.
 - [ ] **The "free lunch"**: Can you identify optimizations like Operator Fusion that improve speed without hurting accuracy?
 
 **Technique Selection**
 
-- [ ] **Pruning**: When should you prune (reduce parameters) vs. distill (train a smaller student)? (Hint: Pruning is for existing models; Distillation is for architectural changes).
+- [ ] **Pruning**: Decide when to prune an existing model versus distill a smaller student architecture.
 
 :::
 
@@ -518,8 +502,6 @@ These three techniques address the challenge through complementary approaches. P
 # │ Show: About 86% pruning with significant size reduction (14 MB to 2 MB).
 # │ How: Compute pruning fraction from before/after model sizes.
 # │
-# │ Imports: mlsysim.fmt typed formatters and check
-# │ Exports: MobileNetCompressionAnchor.pruning_pct_str, .original_size_mb_str, .pruned_size_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_qty, check
 
@@ -561,8 +543,8 @@ Pruning[^fn-pruning-lecun-1989] directly addresses memory efficiency constraints
 ***Pruning***\index{Pruning!definition} is a model-compression technique that sparsifies the parameter space by removing weights that contribute minimal information to the loss landscape.
 
 1.  **Significance (quantitative)**: It converts dense matrices into sparse structures, reducing the memory footprint and the total data volume $(D_{\text{vol}})$ by as much as 10$\times$ without significant accuracy loss.
-2.  **Observation**: Unlike quantization, which reduces the precision of every weight, pruning reduces the count of weights by identifying and eliminating redundancy.
-3.  **Pitfall**: A frequent misconception is that pruning "automatically" speeds up execution. In reality, without specialized sparse execution support, the resulting sparse matrices may actually run slower than dense ones due to irregular memory access patterns; a higher $R_{\text{peak}}$ alone does not make an irregular sparse layout efficient.
+2.  **Distinction (durable)**: Unlike quantization, which reduces the precision of every weight, pruning reduces the count of weights by identifying and eliminating redundancy.
+3.  **Common pitfall**: A frequent misconception is that pruning "automatically" speeds up execution. In reality, without specialized sparse execution support, the resulting sparse matrices may actually run slower than dense ones due to irregular memory access patterns; a higher $R_{\text{peak}}$ alone does not make an irregular sparse layout efficient.
 
 :::
 
@@ -751,7 +733,7 @@ When memory capacity is the primary constraint, as in fully connected classifier
 
 When inference latency on commodity accelerators is the bottleneck, channel pruning\index{Pruning!channel} (also called filter pruning) becomes the preferred approach. Eliminating entire channels or filters from convolutional layers reduces the depth of feature maps, which directly cuts the number of multiply-accumulate operations in subsequent layers. This reduction maps cleanly onto GPU and Tensor Processing Unit (TPU) execution patterns because the resulting model remains dense and regular, requiring no special sparse computation support. Channel pruning is therefore particularly effective for vision workloads where convolutional layers dominate computational cost.
 
-When the most aggressive efficiency gains are required and the architecture has sufficient depth to absorb the loss, layer pruning\index{Pruning!layer} removes entire layers from the network. This approach yields the largest per-operation reduction because it eliminates all computation within a layer, but it also carries the highest risk: removing a layer reduces the model's representational depth, and the remaining layers must compensate for the lost capacity. Layer pruning therefore demands careful validation to ensure the model retains sufficient capacity to capture the patterns its task requires.
+When the most aggressive efficiency gains are required and the architecture has sufficient depth to absorb the loss, layer pruning\index{Pruning!layer} removes entire layers from the network. This approach yields the largest per-operation reduction because it eliminates all computation within a layer, but it also carries the highest risk: removing a layer reduces the model's representational depth, and the remaining layers must compensate for the lost capacity. Layer pruning therefore demands careful validation to ensure the model retains sufficient capacity to capture the patterns its task requires. The side-by-side comparison in @fig-channel-layer-pruning shows why the two choices have different implementation costs.
 
 ::: {#fig-channel-layer-pruning fig-env="figure" fig-pos="htb" fig-cap="**Channel vs. Layer Pruning**: Channel pruning adjusts filter sizes within layers, while layer pruning removes entire layers and necessitates reconnection of remaining network components. These approaches reduce model size and computational cost, but require fine-tuning to mitigate performance loss due to reduced model capacity." fig-alt="Side-by-side diagrams showing channel pruning (left) and layer pruning (right). Each shows three-stage CNN with feature maps as 3D blocks connected by dashed lines. Red highlights indicate pruned channels or layers."}
 
@@ -1242,7 +1224,7 @@ Beyond the broad categories of unstructured, structured, and dynamic pruning, di
 
 ##### Iterative pruning {#sec-model-compression-iterative-pruning-ee12}
 
-Iterative pruning\index{Pruning!iterative} removes structure gradually through multiple cycles of pruning followed by fine-tuning. During each cycle, the algorithm removes a small subset of structures based on predefined importance metrics. The model then undergoes fine-tuning to adapt to these structural modifications before proceeding to the next pruning iteration. This gradual approach helps prevent sudden drops in accuracy while allowing the network to progressively adjust to reduced complexity.
+Iterative pruning\index{Pruning!iterative} removes structure gradually through multiple cycles of pruning followed by fine-tuning. During each cycle, the algorithm removes a small subset of structures based on predefined importance metrics. The model then undergoes fine-tuning to adapt to these structural modifications before proceeding to the next pruning iteration. This gradual approach helps prevent sudden drops in accuracy while allowing the network to progressively adjust to reduced complexity. The workflow in @fig-iterative-pruning makes the key mechanism visible: each prune step creates a temporary accuracy drop, and each fine-tune step tests whether the compressed structure can recover.
 
 ::: {#fig-iterative-pruning fig-env="figure" fig-pos="htb" fig-cap="**Iterative Pruning Performance**: Three rows depict successive prune-then-fine-tune cycles, each removing two of the original twenty-two channels. Accuracy drops from 0.995 to 0.971 after the first prune, recovers to 0.992 after fine-tuning, and settles at 0.991 after all three cycles, a 0.4 percent loss with 27 percent fewer channels." fig-alt="Three-row workflow showing iterative pruning. Each row displays CNN architecture, prune step with red arrow, accuracy drop box, fine-tune gears icon, and accuracy recovery. Values progress from 0.995 to 0.991 final accuracy."}
 
@@ -1916,13 +1898,13 @@ The hypothesis further reinforces the effectiveness of iterative pruning over on
 
 Despite its promise, applying LTH in practice remains computationally expensive because identifying winning tickets requires multiple cycles of pruning and retraining. Ongoing research explores whether winning subnetworks can be detected early without full training, potentially enabling more efficient sparse training. If such methods become practical, LTH could reshape model training, shifting the focus from pruning large networks after training to discovering and training only the important components from the beginning.
 
-While LTH presents a compelling theoretical perspective on pruning, practical implementations rely on established framework-level tools to integrate structured and unstructured pruning techniques.
+While LTH presents a compelling theoretical perspective on pruning, practical implementations must still produce runtime artifacts that deployment systems can exploit.
 
 #### Pruning in practice {#sec-model-compression-pruning-practice-8059}
 
-Framework pruning is only useful when it produces a deployment artifact the runtime can exploit: a smaller dense model, a structured sparse model, or a sparse format with matching kernels. In PyTorch\index{Framework Toolkit!pruning support}, the `torch.nn.utils.prune` module provides a flexible interface for pruning individual layers or entire models. It supports unstructured pruning (for example, `l1_unstructured`) and structured pruning (for example, `ln_structured`), but the key systems detail is mask handling: the original parameters are preserved, and a binary mask is multiplied element-wise during the forward pass. To realize actual memory savings for deployment, these masks must be "permanently" applied using `prune.remove(module, 'weight')`.
+Framework pruning is only useful when it produces a deployment artifact the runtime can exploit: a smaller dense model, a structured sparse model, or a sparse format with matching kernels. Training-time pruning often begins as mask application: the original tensor remains present, but a binary mask zeros selected weights during the forward pass. That mechanism can guide learning, yet by itself it does not guarantee lower latency or memory use. Deployment savings appear only after the masked structure is materialized into the artifact that the serving runtime actually loads.
 
-TensorFlow takes a different approach through the TensorFlow Model Optimization Toolkit (TF-MOT). Unlike PyTorch's post-training workflow, TF-MOT often integrates pruning into the training process itself. By using `prune_low_magnitude`, the framework gradually increases sparsity during training, allowing the model to adapt its remaining weights to the sparse structure in real-time.
+This artifact boundary separates the pruning strategies. Unstructured pruning removes individual weights and needs sparse kernels plus an appropriate storage format to translate zeros into speed. Structured pruning removes whole channels, heads, neurons, or blocks, which can reshape tensors into smaller dense operations that ordinary accelerators already execute well. Gradual pruning during fine-tuning adds a training schedule: sparsity increases over time so the remaining weights can recover accuracy as capacity is removed. The systems audit is therefore concrete: identify what is pruned, identify the runtime format, and verify that the target hardware has kernels that make the sparsity useful.
 
 These trade-offs become concrete when examining real-world deployments. Some model families reduce deployment cost through architecture rather than post-hoc pruning: MobileNet uses depthwise separable convolutions for mobile and embedded vision [@howard2017mobilenets], while EfficientNet uses compound scaling to improve the accuracy-efficiency trade-off under resource constraints [@tan2019efficientnet]. Pruning remains a separate optimization lever. BERT-style transformers[^fn-bert-pruning-scale] have been pruned by removing redundant attention heads or intermediate dimensions, while separate distillation methods such as DistilBERT and TinyBERT train smaller dense student models that retain much of BERT's performance [@sanh2019distilbert].
 
@@ -1941,8 +1923,8 @@ A large language model achieves state-of-the-art accuracy on medical question-an
 ***Knowledge Distillation***\index{Knowledge Distillation!definition}\index{Knowledge Distillation!teacher-student framework} is a model-compression technique that trains a smaller *student*\index{Knowledge Distillation!student model} model to match the behavior of a larger, pretrained *teacher*\index{Knowledge Distillation!teacher model} model.
 
 1.  **Significance (quantitative)**: Distillation moves cost from repeated inference to one-time training. A distilled student can be 2--10$\times$ smaller than the teacher while retaining much of its task accuracy; DistilBERT, for example, retains up to 97 percent of BERT's accuracy with 40 percent fewer parameters and 60 percent faster inference [@sanh2019distilbert]. This trade-off is valuable when the training cost of producing soft targets is amortized across many deployed queries.
-2.  **Observation**: Unlike pruning, which removes parameters from an existing architecture, and quantization, which lowers numerical precision, distillation trains a new dense architecture. The student inherits behavior from the teacher's output distribution or intermediate representations rather than inheriting the teacher's full parameter count or layer structure.
-3.  **Pitfall**: A frequent misconception is that distillation is lossless compression. In reality, the student is bounded by its own capacity, the quality of the teacher, and the match between the distillation data and deployment distribution; a student can faithfully reproduce teacher errors as well as teacher knowledge.
+2.  **Distinction (durable)**: Unlike pruning, which removes parameters from an existing architecture, and quantization, which lowers numerical precision, distillation trains a new dense architecture. The student inherits behavior from the teacher's output distribution or intermediate representations rather than inheriting the teacher's full parameter count or layer structure.
+3.  **Common pitfall**: A frequent misconception is that distillation is lossless compression. In reality, the student is bounded by its own capacity, the quality of the teacher, and the match between the distillation data and deployment distribution; a student can faithfully reproduce teacher errors as well as teacher knowledge.
 
 :::
 
@@ -2154,9 +2136,6 @@ Structured approximation serves a different deployment decision from pruning or 
 # │ Show: The 16× storage reduction achieved by rank-128 SVD on a 4096×4096 matrix.
 # │ How: Contrast weight counts for full vs. factored matrix representations.
 # │
-# │ Imports: mlsysim.fmt
-# │ Exports: full_mb_str, factored_mb_str, data_reduction_mult_str,
-# │          mat_dim_str, rank_k_value_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_qty, check
 
@@ -2768,9 +2747,6 @@ Quantization is often the highest-leverage optimization technique for deployment
 # │ Show: 7 billion parameters at FP16 require 14 GB, exceeding an 8 GB smartphone RAM budget.
 # │ How: Multiply parameter count by bytes per FP16 parameter.
 # │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: QuantizationMemoryAnchor.llm_7b_str, .llm_7b_mem_gb_str,
-# │          .smartphone_ram_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.fmt import fmt, fmt_qty, check
@@ -2804,8 +2780,8 @@ The framework section established the gap that compression must close: a `{pytho
 ***Quantization***\index{Quantization!definition} is a model-compression technique that reduces information fidelity by mapping high-precision continuous values to a lower-precision discrete set.
 
 1.  **Significance (quantitative)**: It reduces the memory footprint and bandwidth demand by 4$\times$ (FP32 to INT8) or more, exploiting the inherent robustness of neural networks to low-precision arithmetic.
-2.  **Observation**: Unlike pruning, which reduces the count of parameters, quantization reduces the bit depth of every parameter and activation in the system.
-3.  **Pitfall**: A frequent misconception is that quantization is just "rounding." In reality, it is a lossy mapping that requires careful range estimation and, often, quantization-aware training (QAT) to minimize its impact on accuracy.
+2.  **Distinction (durable)**: Unlike pruning, which reduces the count of parameters, quantization reduces the bit depth of every parameter and activation in the system.
+3.  **Common pitfall**: A frequent misconception is that quantization is just "rounding." In reality, it is a lossy mapping that requires careful range estimation and, often, quantization-aware training (QAT) to minimize its impact on accuracy.
 
 :::
 
@@ -2832,8 +2808,6 @@ The viability of each approach depends on how much precision a model can shed be
 # │ Show: The "Free Lunch Zone" above 4 bits and the "cliff" below it.
 # │ How: Plot model accuracy across bit-widths (FP32 to 1-bit).
 # │
-# │ Imports: numpy (np), mlsys (viz)
-# │ Exports: (figure output only)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Visualize the accuracy-vs-precision trade-off.
@@ -2891,10 +2865,6 @@ Precision is an energy decision\index{Energy Efficiency!numerical precision impa
 # │ Show:    Energy per add for FP32, FP16, INT32, INT8 (Horowitz 2014).
 # │ How:     Retrieve constants from mlsysim.core.units and format for prose.
 # │
-# │ Imports: mlsysim Hardware.Tech.Op (AddFp32.energy, AddFp16.energy,
-# │          AddInt32.energy, AddInt8.energy)
-# │ Exports: EnergyCosts.energy_add_fp32_pj_per_op_str, .energy_add_fp16_pj_per_op_str,
-# │          .energy_add_int32_pj_per_op_str, .energy_add_int8_pj_per_op_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import pJ, flop
 from mlsysim.fmt import check, fmt_energy_per_op
@@ -3032,7 +3002,6 @@ class EnergyCosts:
 #| label: energy-dividend-calc
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Contrast bit-reduction vs energy-reduction in quantization.
-# │ Exports: EnergyDividend.{energy_add_fp32,energy_add_int8,energy_dividend,energy_dram,dram_read_bits,dram_read_vs_int8_mac}_str
 from mlsysim.core.units import pJ, flop, byte
 from mlsysim.fmt import fmt, fmt_energy_per_op, fmt_multiple, fmt_qty, check
 
@@ -3117,8 +3086,6 @@ The DLRM example shows quantization as a way to make a huge memory object placea
 # │ How: Models.Tiny.DS_CNN.size_in_bytes at 4 B and 1 B per parameter,
 # │      compared against Platforms.Tiny.ram.
 # │
-# │ Imports: mlsysim registries (Models.Tiny, Platforms.Tiny) + fmt helpers
-# │ Exports: KwsQuantImperative.fp32_kb_str, .int8_kb_str, .budget_kib_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_qty, check
 from mlsysim.core.units import byte, KB, KiB
@@ -3261,9 +3228,6 @@ To make these gains concrete, consider the quantization savings when deploying a
 # │ Show: That INT4 compression enables an 8-billion-parameter model to fit on an 8 GB GPU.
 # │ How: Calculate total weight bytes for FP16 vs. INT4 precision.
 # │
-# │ Imports: mlsysim.book (fmt), mlsysim.constants (BYTES_FP16, BYTES_INT4, byte, GB)
-# │ Exports: llm_params_b_str, llm_params_b_value_str, fp16_bytes_value_str, int4_bytes_value_str,
-# │          fp16_size_gb_str, int4_size_gb_str, compression_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.fmt import fmt_int, fmt, fmt_params, fmt_qty, fmt_qty_int, check
@@ -3340,10 +3304,6 @@ Beyond storage savings, quantization also accelerates computation through hardwa
 # │ Show: That INT8 quantization yields a 4× speedup on fixed-width registers.
 # │ How: Calculate operations-per-register for 32-bit vs. 8-bit types.
 # │
-# │ Imports: mlsysim.book (fmt),
-# │          mlsysim.constants (SIMD_REGISTER_BITS, FP32_BITS, INT8_BITS)
-# │ Exports: simd_fp32_elements_value_str, simd_int8_elements_value_str, simd_gain_mult_str,
-# │          simd_register_bits_value_str, simd_fp32_bits_value_str, simd_int8_bits_value_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_qty, check
 
@@ -3527,10 +3487,6 @@ To appreciate how precision loss manifests in practice, examine the representati
 # │ Show:    FP16 TFLOP/s vs INT8 TOPS and the resulting speedup factor.
 # │ How:     Read A100 specs from mlsysim.core.units; compute ratio.
 # │
-# │ Imports: mlsysim.core.units (Hardware.Cloud.A100.compute.peak_flops, Hardware.Cloud.A100.compute.precision_flops["int8"],
-# │          Hardware.Cloud.A100.memory.bandwidth, TFLOPs, TB, second)
-# │ Exports: A100Int8Speedup.a100_fp16_tflop_per_s_str, .a100_int8_tops_str,
-# │          .a100_int8_speedup_mult_str, .bandwidth_bound_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_flop_rate, fmt_multiple, fmt_ops_rate, fmt_percent
 
@@ -3585,11 +3541,6 @@ The complementary case is bandwidth bound, where the speedup tracks the reductio
 # │ Show: That INT4 yields a 4× speedup for bandwidth-bound LLM generation.
 # │ How: Calculate attainable throughput for FP16 vs. INT4 on a 7-billion-parameter model.
 # │
-# │ Imports: mlsysim.book (fmt), mlsysim.constants (BYTES_FP16, BYTES_INT4, byte)
-# │ Exports: params_b_str, params_b_value_str, bytes_fp16_value_str, bytes_int4_value_str, device_ram_gb_str,
-# │          mem_bw_gb_per_s_str, kv_cache_gb_str, fp16_size_gb_str, fp16_total_gb_str,
-# │          fp16_latency_ms_str, fp16_tokens_per_s_str, int4_size_gb_str, int4_latency_ms_str,
-# │          int4_tokens_per_s_str, speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim.fmt import fmt_int, fmt, fmt_params, fmt_qty, fmt_qty_int, check, fmt_time, fmt_rate
@@ -3798,9 +3749,6 @@ Binary and ternary networks\index{Quantization!binary networks}\index{Quantizati
 # │ Show:    That INT8 MACs use ~20x less energy than FP32 MACs.
 # │ How:     Sum multiply + add energies for each precision; divide.
 # │
-# │ Imports: mlsysim Hardware.Tech.Op (FlopFp32.energy, OpInt8.energy,
-# │          AddFp32.energy, AddInt8.energy)
-# │ Exports: EnergyRatio.int8_fp32_energy_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 from mlsysim.physics import calc_amdahls_speedup
@@ -4032,6 +3980,8 @@ Binary/Ternary Networks Extreme Quantization};
 ```
 
 :::
+
+The roadmap is a deployment-ordering device rather than a taxonomy of numerical formats. PTQ belongs first because it changes representation with minimal training cost; QAT and mixed precision move into the production tier because they require training-loop or kernel support; INT4, binary, and ternary methods sit at the frontier because the accuracy and hardware assumptions become architecture-specific.
 
 #### Post-training quantization {#sec-model-compression-posttraining-quantization-bb5b}
 
@@ -4351,9 +4301,6 @@ Compare the two mapping diagrams side by side in @fig-calibration-ranges. Symmet
 # │ Show: How to map a floating-point range to the 8-bit integer domain.
 # │ How: Calculate scale and zero-point for a representative distribution.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: alpha_str, beta_str, range_str, steps_str, scale_str,
-# │          zero_point_str, x_val_str, x_q_str, x_recon_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_math, check, MarkdownStr
 
@@ -4395,6 +4342,7 @@ class QuantizationMathCalc:
     steps_str = fmt(int_steps, precision=0, commas=False)
     scale_str = fmt(scale, precision=4, commas=False)
     zp_quotient_str = fmt(zp_quotient, precision=2, commas=False)
+    scale_fraction_math = fmt_math(rf"\frac{{{range_str}}}{{{steps_str}}}")
     steps_math = fmt_math(f"2^{bits} - 1")
     zero_point_str = fmt_int(zero_point, commas=False)
     x_val_str = fmt_int(x_val, commas=False)
@@ -4424,7 +4372,7 @@ Suppose the activations range from $\alpha$ = `{python} QuantizationMathCalc.alp
 *   **Range**: $\beta - \alpha$ = `{python} QuantizationMathCalc.range_str`.
 *   **Steps**: `{python} QuantizationMathCalc.steps_math` = `{python} QuantizationMathCalc.steps_str`.
 *   **Scale**: $s$ = `{python} QuantizationMathCalc.range_str`/`{python} QuantizationMathCalc.steps_str` $\approx$ `{python} QuantizationMathCalc.scale_str`.
-*   **Zero-point**: $z = \text{round}(-(\alpha) / s)$ = round(-(`{python} QuantizationMathCalc.alpha_str`)/`{python} QuantizationMathCalc.scale_str`) = round(`{python} QuantizationMathCalc.zp_quotient_str`) = `{python} QuantizationMathCalc.zero_point_str`.
+*   **Zero-point**: $z = \text{round}(-(\alpha) / s)$ = round(-(`{python} QuantizationMathCalc.alpha_str`)/`{python} QuantizationMathCalc.scale_fraction_math`) = round(`{python} QuantizationMathCalc.zp_quotient_str`) = `{python} QuantizationMathCalc.zero_point_str`.
 
 Thus, the real value $0.0$ is represented by the integer `{python} QuantizationMathCalc.zero_point_str`. This ensures that zero-padding (common in CNNs) is represented exactly, preventing "quantization drift"\index{Quantization!drift} where padding introduces nonzero noise.
 
@@ -4762,12 +4710,12 @@ Precision reduction is the most impactful deployment optimization.
 
 **Quantization Modes**
 
-- [ ] **Post-training quantization (PTQ)**: Why is this the default for CNNs? (Activations are stable, error is low).
-- [ ] **Quantization-aware training (QAT)**: Why do you need QAT for MobileNet? (Compact models have less redundancy to absorb quantization noise).
+- [ ] **Post-training quantization (PTQ)**: Explain why PTQ is the first attempt for many CNN deployments.
+- [ ] **Quantization-aware training (QAT)**: Explain why compact models often require training-time exposure to quantization noise.
 
 **System Implications**
 
-- [ ] **Latency vs. throughput**: Why does INT8 improve throughput on GPUs but only latency on CPUs? (Hint: Parallelism vs. Instruction Efficiency).
+- [ ] **Latency vs. throughput**: Distinguish the hardware mechanism that turns INT8 into higher throughput from the one that turns it into lower single-request latency.
 - [ ] **Quantization payoff**: For a 7B-parameter model served from HBM, estimate the weight memory in FP16 versus INT4 and the rough decode-throughput gain, given that autoregressive decode is memory-bandwidth-bound.
 
 :::
@@ -4920,7 +4868,7 @@ x_{\text{fake}} &= (q_{\text{level}} - z) \times s
 $$
 where $z$ is the zero-point offset enabling asymmetric range representation.
 
-The following implementation demonstrates how frameworks simulate quantization during training while maintaining gradient flow. The forward pass applies quantization to both inputs and weights before convolution, mimicking INT8 inference behavior, while the implementation maintains floating-point precision throughout to allow gradients to flow during backpropagation. @Lst-qat-conv-forward demonstrates the computational graph for a quantized convolution layer, which contains fake quantization nodes for both weights and activations.
+The following pseudocode demonstrates how frameworks simulate quantization during training while maintaining gradient flow. The forward pass applies quantization to both inputs and weights before convolution, mimicking INT8 inference behavior, while the training graph maintains floating-point precision so gradients can flow during backpropagation. @Lst-qat-conv-forward demonstrates the computational graph for a quantized convolution layer, which contains fake quantization nodes for both weights and activations.
 
 ::: {#lst-qat-conv-forward lst-cap="**QAT Convolution Forward Pass**: Fake quantization nodes simulate integer quantization during training while maintaining gradient flow through the straight-through estimator."}
 
@@ -5002,22 +4950,18 @@ Test your understanding of quantization before moving to architectural efficienc
 # │          and the paragraph immediately following this cell.
 # │
 # │ Goal:    Quantify the gap between idealized and realized compression speedup.
-# │ Show:    A 6x paper speedup (2x pruning x 3x quantization) collapses to
-# │          about 1.5x on unmodified hardware.
+# │ Show:    An 8x paper speedup (2x pruning x 4x INT8 quantization) collapses
+# │          to about 1.5x on unmodified hardware.
 # │ How:     Multiply representative pruning and quantization speedups, then
 # │          compare against a measured outcome.
 # │
-# │ Imports: mlsysim.fmt typed formatters and check
-# │ Exports: TheoryPracticeSpeedup.pruning_speedup_mult_str, .quant_speedup_mult_str,
-# │          .theoretical_speedup_mult_str, .measured_speedup_mult_str,
-# │          .realized_fraction_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import check, fmt_multiple, fmt_percent
 
 class TheoryPracticeSpeedup:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     pruning_speedup = 2.0  # 50% structured pruning ideal
-    quant_speedup = 3.0  # representative INT8 execution gain after overheads
+    quant_speedup = 4.0  # theoretical INT8 memory-width reduction from FP32
     measured_speedup = 1.5  # common unmodified-hardware outcome
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -5025,7 +4969,7 @@ class TheoryPracticeSpeedup:
     realized_fraction_pct = measured_speedup / theoretical_speedup * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(theoretical_speedup == 6.0, "Expected paper speedup anchor should be 6x.")
+    check(theoretical_speedup == 8.0, "Expected paper speedup anchor should be 8x.")
     check(measured_speedup < theoretical_speedup, "Measured speedup should remain below idealized paper speedup.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -5033,7 +4977,7 @@ class TheoryPracticeSpeedup:
     quant_speedup_mult_str = fmt_multiple(quant_speedup, precision=0, commas=False)
     theoretical_speedup_mult_str = fmt_multiple(theoretical_speedup, precision=0, commas=False)
     measured_speedup_mult_str = fmt_multiple(measured_speedup, precision=1, commas=False)
-    realized_fraction_pct_str = fmt_percent(realized_fraction_pct / 100, precision=0, commas=False, style='prose')
+    realized_fraction_pct_str = fmt_percent(realized_fraction_pct / 100, precision=1, commas=False, style='prose')
 ```
 
 We have now covered two optimization dimensions: structural optimization (pruning, distillation, NAS) determines *what* to compute, and precision optimization (quantization) determines *how precisely* to compute it. Together, these techniques can reduce a model's theoretical complexity by 80 percent or more—from removing half the parameters through pruning to compressing weights from 32-bit floats to 4-bit integers through quantization.
@@ -5142,8 +5086,8 @@ Consider a typical neural network layer: convolution followed by batch normaliza
 ***Operator Fusion***\index{Operator Fusion!definition}\index{Operator Fusion!GEMM fusion}\index{Architectural Efficiency!operator fusion} is a compiler and runtime optimization that combines adjacent tensor operations into a single fused kernel so intermediate values remain in registers or on-chip memory instead of being written to and reread from accelerator global memory.
 
 1.  **Significance (quantitative)**: For $N$ unfused operations over an $M$-byte tensor, intermediate memory traffic scales as $2NM$ because each operation reads and writes global memory. Fusion reduces this to approximately $2M$ by reading the inputs once, computing the sequence locally, and writing only the final output. The savings directly reduce the $D_{\text{vol}}/\text{BW}$ term and eliminate repeated kernel launch overhead.
-2.  **Observation**: Unlike pruning, quantization, or distillation, operator fusion does not change the model's parameters, precision, or architecture. It changes the execution schedule of mathematically equivalent operations, preserving model outputs while improving latency and throughput on memory-bound workloads.
-3.  **Pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
+2.  **Distinction (durable)**: Unlike pruning, quantization, or distillation, operator fusion does not change the model's parameters, precision, or architecture. It changes the execution schedule of mathematically equivalent operations, preserving model outputs while improving latency and throughput on memory-bound workloads.
+3.  **Common pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
 
 :::
 
@@ -5208,8 +5152,6 @@ def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
 # │ Show: A 3× reduction in data movement (6 transfers to 2).
 # │ How: Calculate memory read/write counts for fused vs. unfused execution.
 # │
-# │ Imports: mlsysim.book (fmt, fmt_math)
-# │ Exports: transfer_reduction_mult_str, conv_bn_relu_mem_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_math
 
@@ -5254,7 +5196,6 @@ The same principle extends beyond CNNs. General matrix multiply (GEMM) bias-acti
 #| label: fusion-calc
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Conv-BN-ReLU bandwidth and kernel-launch savings for fusion prose.
-# │ Exports: FusionCalc.{feat_map_kb,weights_mb,bn_params_kb,unfused_conv_mb,unfused_bn_mb,unfused_relu_mb,total_unfused_mb,total_fused_mb,bandwidth_reduction_pct,unfused_time_us,fused_time_us,fusion_speedup,kernels_unfused,kernels_fused,saved_latency_ms}_str
 from mlsysim.fmt import fmt, fmt_int, fmt_qty, fmt_qty_int, check, fmt_time
 from mlsysim.core.units import microsecond
 
@@ -5319,7 +5260,6 @@ Memory bandwidth analysis quantifies these fusion benefits concretely. Consider 
 #| label: compression-v100-specs
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: V100 bandwidth and compute specs for fusion timing prose.
-# │ Exports: V100Specs.v100_bw_gb_per_s_str, V100Specs.v100_fp32_tflop_per_s_str
 from mlsysim.fmt import fmt_qty
 
 class V100Specs:
@@ -6988,8 +6928,8 @@ This decision framework provides starting points for individual technique select
 # │ Goal: Pin the 16x footprint reduction shared across this section.
 # │ How: ratio = round(full_mb / compressed_mb) from measured footprints.
 # │
-# │ Imports: mlsysim.fmt, mlsysim.core.units (MB)
-# │ Exports: full_mb_str, compressed_mb_str, compression_ratio_mult_str
+# │ Scope: chapter-anchor — BERT compression is the chapter's running
+# │        optimization-strategy example and is recalled in the summary.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_qty_int, fmt_multiple, check
 from mlsysim.core.units import MB
@@ -7255,9 +7195,6 @@ Effective profiling begins with establishing baseline measurements across releva
 # │ Show:    A 20 percent model-time fraction caps overall speedup at 1.25x.
 # │ How:     Apply Amdahl's Law with model_fraction as the accelerable share.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: AmdahlCompression.model_fraction_pct_str, .non_model_pct_str,
-# │          .max_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
@@ -7326,14 +7263,6 @@ The measurement framework should establish clear baselines before applying any o
 # │ How:     Anchor representative FP32 and INT8 measurements, then derive
 # │          drops and ratios.
 # │
-# │ Imports: mlsysim.fmt (fmt, check)
-# │ Exports: ResNet50Int8Metrics.fp32_top1_str, .int8_top1_str,
-# │          .fp32_latency_ms_str, .int8_latency_ms_str, .fp32_size_mb_str,
-# │          .int8_size_mb_str, .fp32_energy_j_str, .int8_energy_j_str,
-# │          .per_class_drop_pp_range_str,
-# │          .calibration_error_fp32_str, .calibration_error_int8_str,
-# │          .cpu_speedup_mult_str, .top1_drop_pp_str, .latency_speedup_mult_str,
-# │          .size_reduction_mult_str, .energy_improvement_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 import warnings
 from mlsysim.fmt import (
@@ -7405,7 +7334,7 @@ class ResNet50Int8Metrics:
     calibration_error_int8_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='prose')
     cpu_speedup_mult_str = fmt_multiple(cpu_speedup, precision=1, commas=False)
     top1_drop_pp_str = fmt_pp(top1_drop, precision=1, commas=False, attributive=True)
-    latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=2, commas=False)
+    latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=1, commas=False)
     size_reduction_mult_str = fmt_multiple(size_reduction, precision=0, commas=False)
     energy_improvement_mult_str = fmt_multiple(energy_improvement, precision=1, commas=False)
 ```
@@ -7446,57 +7375,30 @@ The resulting software infrastructure transforms theoretical optimization techni
 
 At the model-development layer, framework APIs are most useful for transformations that need access to training state, calibration data, or weight tensors before export. TensorFlow, PyTorch, and MXNet expose different APIs, but the systems role is the same: insert quantization behavior into the graph, mutate or mask weights for pruning, and preserve enough metadata to reproduce the optimized artifact. @Sec-ml-frameworks examines the frameworks themselves; this section only needs the compression-facing boundary.
 
-Quantization-aware training is the clearest example because it must change the training graph without changing the mathematical objective. The API inserts quantization and dequantization behavior around selected tensors, lets gradients continue to flow through the simulated low-precision path, and records the configuration needed for later conversion. @Lst-qat_example demonstrates this pattern with PyTorch's `torch.ao.quantization` API.
+Quantization-aware training is the clearest example because it must change the training graph without changing the mathematical objective. The transformation inserts quantization and dequantization behavior around selected tensors, lets gradients continue to flow through the simulated low-precision path, and records the configuration needed for later conversion. @Lst-qat_example demonstrates the mechanism without depending on a specific framework API.
 
-::: {#lst-qat_example lst-cap="**Quantization-Aware Training**: Prepares a model to be trained in lower-precision formats, ensuring that quantization errors are accounted for during training."}
+::: {#lst-qat_example lst-cap="**Quantization-Aware Training**: Mechanism-level transformation that trains through simulated low-precision behavior and exports the calibration metadata needed for deployment."}
 
-```{.python}
-import torch
-from torch.ao.quantization import (
-    QuantStub,
-    DeQuantStub,
-    get_default_qat_qconfig,
-    prepare_qat,
-)
-
-
-# Define a model with quantization support
-class QuantizedModel(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.quant = QuantStub()
-        self.conv = torch.nn.Conv2d(3, 64, 3)
-        self.dequant = DeQuantStub()
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.conv(x)
-        return self.dequant(x)
-
-
-# Prepare model for quantization-aware training
-model = QuantizedModel()
-model.qconfig = get_default_qat_qconfig("fbgemm")
-model_prepared = prepare_qat(model)
+```{.text}
+choose target precision and calibration policy
+insert quantize/dequantize boundaries around selected tensors
+train with simulated low-precision values while keeping gradient flow intact
+record scales, zero points, accumulator precision, and unsupported operations
+export the calibrated graph and metadata as one reproducible artifact
 ```
 
 :::
 
-The same framework-level pattern applies to pruning. The API owns the weight tensor, applies a mask or structured removal rule, and records which parameters were removed so that subsequent fine-tuning and export operate on the intended model. @Lst-pytorch_pruning illustrates both unstructured and structured pruning.
+The same transformation pattern applies to pruning. The optimization pass owns the weight tensor, applies a mask or structured removal rule, and records which parameters were removed so that subsequent fine-tuning and export operate on the intended model. @Lst-pytorch_pruning illustrates the artifact boundary for both unstructured and structured pruning.
 
-::: {#lst-pytorch_pruning lst-cap="**PyTorch Pruning APIs**: Applies unstructured and structured pruning techniques to reduce model complexity while maintaining performance. Adapted from PyTorch's `torch.nn.utils.prune` API."}
+::: {#lst-pytorch_pruning lst-cap="**Pruning Artifact Boundary**: Applies unstructured or structured removal rules, then records the mask and fine-tuning context needed to reproduce the compressed model."}
 
-```{.python}
-import torch
-import torch.nn.utils.prune as prune
-
-# Apply unstructured pruning
-module = torch.nn.Linear(10, 10)
-prune.l1_unstructured(module, name="weight", amount=0.3)
-# Prune 30% of weights
-
-# Apply structured pruning
-prune.ln_structured(module, name="weight", amount=0.5, n=2, dim=0)
+```{.text}
+choose pruning granularity: individual weights, channels, blocks, or attention heads
+score candidate parameters by magnitude, sensitivity, or validation loss impact
+remove or mask the selected structure according to the hardware-compatible rule
+fine-tune the compressed model against the original validation target
+export weights, masks, sparsity pattern, and calibration evidence together
 ```
 
 :::
@@ -7970,7 +7872,6 @@ Sparsity heat maps show sparsity distribution across layers (@fig-sparse-heat-ma
 % #1=y
 % #2=label
 % #3=list of 8 colors
-======================================
 \newcommand{\DrawRowColors}[3]{%
   \node[
     anchor=east,
@@ -8003,7 +7904,7 @@ Sparsity heat maps show sparsity distribution across layers (@fig-sparse-heat-ma
   font=\usefont{T1}{phv}{m}{it}\small,
   text=black!55
 ] at (\CenterX,-9.91)
-{Sparsity varies by layer type: early conv layers retain features; FC layers tolerate aggressive pruning)};
+{Sparsity varies by layer type: early conv layers retain features; FC layers tolerate aggressive pruning};
 
 %====================================================
 % COLUMN TITLE
@@ -8084,13 +7985,13 @@ node[align=left,anchor=west]{\textit{\color{black!50}Transformer layers:}\\
 
 :::
 
-Implementation tools make compression repeatable, but they do not make the trade-offs disappear. In practice, quantization is often applied after pruning or distillation to achieve compound compression benefits: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers accuracy loss. Sequential application\index{Model Compression!sequential application} can enable compression ratios of 10--50$\times$ while maintaining competitive accuracy across diverse deployment scenarios, but only if the interactions are measured rather than assumed.
+The diagnostic value is the nonuniformity, not the exact shade of any one cell. If later layers are much sparser than early feature extractors, the pruning policy is concentrating compression where representations are more redundant; if early layers darken first, the policy may be destroying low-level features before the model has enough depth to compensate.
 
-The most instructive lessons in model compression often come not from what works but from what fails. The following fallacies and pitfalls capture the most common mistakes engineers make when applying these techniques, each grounded in quantitative trade-offs.
+Implementation tools make compression repeatable, but they do not make the trade-offs disappear. In practice, quantization is often applied after pruning or distillation to achieve compound compression benefits: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers accuracy loss. Sequential application\index{Model Compression!sequential application} can enable compression ratios of 10--50$\times$ while maintaining competitive accuracy across diverse deployment scenarios, but only if the interactions are measured rather than assumed.
 
 ## Fallacies and Pitfalls {#sec-model-compression-fallacies-pitfalls-1b5e}
 
-The numerical claims that follow (specific BERT GLUE retention rates, ResNet-50 accuracy under INT8/INT4, distillation gaps between in-training and post-hoc setups) are characteristic of the magnitudes reported across the BERT, ResNet-50, and quantization-aware-training literature rather than reproductions of a single paper. Treat them as calibrated order-of-magnitude landmarks: precise values depend on architecture variant, calibration set, and target hardware, and the engineering decisions that follow survive small shifts in the exact numbers.
+The most instructive lessons in model compression often come not from what works but from what fails. The numerical claims that follow (specific BERT GLUE retention rates, ResNet-50 accuracy under INT8/INT4, distillation gaps between in-training and post-hoc setups) are characteristic of the magnitudes reported across the BERT, ResNet-50, and quantization-aware-training literature rather than reproductions of a single paper. Treat them as calibrated order-of-magnitude landmarks: precise values depend on architecture variant, calibration set, and target hardware, and the engineering decisions that follow survive small shifts in the exact numbers.
 
 ```{python}
 #| echo: false
@@ -8104,13 +8005,9 @@ The numerical claims that follow (specific BERT GLUE retention rates, ResNet-50 
 # │ Show: How pruning and quantization interact nonlinearly to affect speed and accuracy.
 # │ How: Pre-compute stats for bit-width degradation and dequantization overhead.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: int8_size_reduction_mult_str, bert_fp32_mb_str, bert_int8_mb_str,
-# │          pruning_target_str, param_removal_str, resnet_fp32_acc_str,
-# │          resnet_int8_acc_str, resnet_binary_acc_str, dequant_overhead_str,
-# │          expected_speedup_mult_str, actual_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_multiple, fmt_percent, check, MarkdownStr
+from mlsysim.core.units import MB
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FallaciesAnalysis:
@@ -8144,17 +8041,16 @@ class FallaciesAnalysis:
     actual_speedup_str = fmt_percent(actual_combined_pct / 100, precision=0, commas=False, style='prose')
     dequant_overhead_str = fmt_percent(overhead_pct / 100, precision=0, commas=False, style='prose')
 
-    # Plain string literals → MarkdownStr per recipe Rule 1 escape-hatch
-    bert_fp32_mb_str = MarkdownStr("440 MB")
-    bert_int8_mb_str = MarkdownStr("110 MB")
-    pruning_target_str = MarkdownStr("70 percent")
-    param_removal_str = MarkdownStr("40")
-    resnet_fp32_acc_str = MarkdownStr("76.2 percent")
-    resnet_int8_acc_str = MarkdownStr("76.1 percent")
-    resnet_binary_acc_str = MarkdownStr("51 percent")
+    bert_fp32_mb_str = fmt_memory(440 * MB, unit=MB, precision=0, commas=False)
+    bert_int8_mb_str = fmt_memory(110 * MB, unit=MB, precision=0, commas=False)
+    pruning_target_str = fmt_percent(0.70, precision=0, commas=False, style='prose')
+    param_removal_str = fmt(40, precision=0, commas=False)
+    resnet_fp32_acc_str = fmt_percent(0.762, precision=1, commas=False, style='prose')
+    resnet_int8_acc_str = fmt_percent(0.761, precision=1, commas=False, style='prose')
+    resnet_binary_acc_str = fmt_percent(0.51, precision=0, commas=False, style='prose')
 ```
 
-Model optimization involves counterintuitive interactions between techniques that appear independent. Engineers often assume strategies compose linearly and that theoretical metrics predict deployment performance. The following fallacies and pitfalls capture errors that waste optimization effort, degrade accuracy, or miss deployment requirements despite substantial investment.
+Model optimization involves counterintuitive interactions between techniques that appear independent. Engineers often assume strategies compose linearly and that theoretical metrics predict deployment performance, and those assumptions waste optimization effort, degrade accuracy, or miss deployment requirements despite substantial investment.
 
 **Fallacy**: *Optimization techniques can be applied independently without considering their interactions.*
 
@@ -8192,7 +8088,7 @@ Teams sometimes convert tensors to sparse formats as soon as pruning creates vis
 
 Model compression is not a bag of tricks but an engineering discipline built on three complementary dimensions: *structural optimization* determines what the model computes, *precision optimization* determines how precisely it computes, and *architectural optimization* determines how efficiently those computations execute on physical hardware. The most important lesson of this chapter is that these dimensions compose multiplicatively. Pruning alone might achieve 2$\times$ compression; quantization alone might achieve 4$\times$; but pruning, distillation, and quantization applied together can achieve `{python} BertCompression.compression_ratio_mult_str`—as BERT's compression from `{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str` demonstrates. The second lesson is equally important: theoretical compression ratios lie. A 4$\times$ reduction in parameters translates to 4$\times$ latency improvement only when the optimization aligns with the hardware's execution model. Unstructured sparsity on hardware that lacks sparse kernels achieves almost nothing; INT8 quantization on hardware without INT8 units achieves even less. Profile on target hardware, not paper metrics.
 
-Combined with the data selection techniques from @sec-data-selection, these model-centric optimizations complete the efficiency toolkit: data selection maximizes learning from available examples, while model compression minimizes resources required for deployment.
+Combined with the data selection techniques from @sec-data-selection, these model-centric optimizations complete the model-side efficiency toolkit: data selection maximizes learning from available examples, while model compression minimizes resources required for deployment. Whether those savings become real speedups still depends on the hardware and runtime that execute the compressed model.
 
 ::: {.callout-takeaways title="From benchmark winner to production model"}
 
@@ -8210,7 +8106,7 @@ The techniques in this chapter differ in almost every detail, yet one rule runs 
 
 ::: {.callout-chapter-connection title="From math to physics"}
 
-We have compressed the model's logic, shaving off every unnecessary bit. Logic, however, must eventually run on physics. @Sec-hardware-acceleration examines how GPUs, TPUs, and NPUs are designed to exploit these optimizations and execute compressed models at maximum throughput.
+We have compressed the model's logic, reducing the work the Algorithm asks the Machine to perform. Logic, however, must eventually run on physics. @Sec-hardware-acceleration examines how GPUs, TPUs, and NPUs are designed to exploit these optimizations and execute compressed models at maximum throughput.
 
 :::
 

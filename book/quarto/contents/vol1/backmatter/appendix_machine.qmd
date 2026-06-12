@@ -8,9 +8,7 @@ engine: jupyter
 
 _What reference numbers and physical laws should every ML systems engineer carry into design decisions?_
 
-In ML systems, performance failures often masquerade as software problems: a training step “mysteriously” slows down, a serving stack misses its service level agreement (SLA), or an accelerator upgrade fails to deliver the expected speedup. Many of these surprises are not bugs—they are the predictable consequences of physics (latency, bandwidth, energy) and architecture (memory hierarchy, precision, parallel scaling).
-
-This appendix collects the reference numbers and compact models that let you do quick, quantitative reasoning. It begins with a quick-reference section of “numbers to know,” then summarizes the tools used throughout the book: roofline analysis, dimensional analysis, scaling laws, and precision trade-offs.
+In ML systems, performance failures often masquerade as software problems: a training step “mysteriously” slows down, a serving stack misses its service level agreement (SLA), or an accelerator upgrade fails to deliver the expected speedup. Many of these surprises are not bugs—they are the predictable consequences of physics (latency, bandwidth, energy) and architecture (memory hierarchy, precision, parallel scaling). This appendix collects the reference numbers and compact models for quick quantitative reasoning: “numbers to know,” roofline analysis, dimensional analysis, scaling laws, and precision trade-offs.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -46,17 +44,6 @@ from mlsysim.core.units import *
 # │ How: Quantities stay attached until ratio reduction or output formatting.
 # │       Ratios remain stable across hardware generations.
 # │
-# │ Imports: mlsysim.core.units (*), mlsysim.book (fmt); energy figures via
-# │          Hardware.Tech.{Memory,Op} (energy-per-access / energy)
-# │ Exports: dram_vs_compute_ratio_mult_str, fp32_vs_int8_ratio_mult_str, fp32_vs_fp16_ratio_mult_str,
-# │          l1_vs_reg_ratio_mult_str, hbm_vs_register_ratio_mult_str, ssd_vs_register_ratio_mult_str,
-# │          network_vs_local_ratio_mult_str, gpu_bw_vs_pcie_ratio_mult_str, lat_l1_ns_str,
-# │          lat_l2_ns_str, lat_hbm_ns_str, lat_pcie_ns_str, lat_ib_ns_str,
-# │          lat_ssd_ns_str, bw_hbm_h100_tb_per_s_str, bw_pcie5_gb_per_s_str, bw_dram_gb_per_s_str,
-# │          bw_ib_gb_per_s_str, bw_nvme_gb_per_s_str, h100_fp16_tflop_per_s_str, h100_fp8_tflop_per_s_str,
-# │          a100_fp16_tflop_per_s_str, mobile_int8_tops_str, dc_mobile_ratio_mult_str,
-# │          ridge_a100_str, ridge_h100_str, hbm_vs_register_ratio_mult_str,
-# │          ssd_vs_register_ratio_mult_str, training_state_* strings
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import memory_from_params
@@ -343,7 +330,7 @@ Consider a model that achieves good accuracy, but inference takes 200 ms when th
 
 ### The roofline model {#sec-appdx-machine-foundations-roofline-model-2529}
 
-The Roofline Model [@williams2009] answers a deceptively simple question: *how fast can this workload possibly run on this hardware?* The answer depends on whether you run out of compute or memory bandwidth first.
+The Roofline Model [@williams2009] bounds how fast a workload can run on a given hardware target. The answer depends on whether you run out of compute or memory bandwidth first.
 
 Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because each loaded element is reused many times. Element-wise operations like rectified linear unit (ReLU) have low intensity because each operation loads a number, performs one computation, and writes it back. As @fig-roofline illustrates, each workload is bounded by either memory bandwidth or compute throughput, and its arithmetic intensity determines which ceiling it hits first.
 
@@ -394,7 +381,6 @@ Doubling the batch size $B$ doubles FLOPs while keeping weight loads constant—
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30
 # │ Goal: A100 ridge point; GEMM vs ReLU intensity comparison
-# │ Exports: A100RooflineExample.*_str
 from mlsysim.fmt import fmt, fmt_arithmetic_intensity, fmt_flop_rate, fmt_qty
 
 class A100RooflineExample:
@@ -448,7 +434,7 @@ Parallelization is the primary tool for scaling ML, but its limits depend on *ho
 
 #### Strong scaling (Amdahl's Law) {#sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2}
 
-**Strong scaling**\index{Strong scaling!definition} answers the question: *If I add more processors to a fixed-size problem, how much faster will it run?*
+**Strong scaling**\index{Strong scaling!definition} measures how much faster a fixed-size problem runs as processors are added.
 
 Amdahl's Law [@amdahl1967] states that the speedup is limited by the serial portion of the task.[^fn-amdahl] If a fraction $s$ of your task is serial (cannot be parallelized) and $p = 1-s$ is parallelizable, the maximum speedup with $n$ processors is:
 $$ \text{Speedup}(n) = \frac{1}{s + \frac{1-s}{n}} $$
@@ -469,8 +455,6 @@ As $n \to \infty$, the term $\frac{1-s}{n} \to 0$, and the speedup converges to 
 # │ Show: "5%" serial overhead, "95%" parallel fraction—inline in prose.
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
-# │ Imports: (none—pure scalars)
-# │ Exports: s_pct_str, p_pct_str, n_8_str, s_str, p_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt
 
@@ -512,8 +496,6 @@ To see Amdahl's Law in action, suppose `{python} AmdahlSetup.s_pct_str` of a tra
 # │ Show: "~5.9x" at 8 GPUs, "20x" max—inline in bullet-list example.
 # │ How: Amdahl formula: 1 / (s + p/n); limit as n→∞ is 1/s.
 # │
-# │ Imports: mlsysim.book (fmt)
-# │ Exports: amdahl_8_speedup_mult_str, amdahl_inf_speedup_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check
 from mlsysim.physics import calc_amdahls_speedup
@@ -549,7 +531,7 @@ No matter how many accelerators are added, this fixed workload cannot run faster
 
 #### Weak scaling (Gustafson's Law) {#sec-appdx-machine-foundations-weak-scaling-gustafsons-law-eb7e}
 
-**Weak scaling**\index{Weak scaling!definition} answers the question: *If I add more processors, how much larger of a problem can I solve in the same amount of time?*
+**Weak scaling**\index{Weak scaling!definition} measures how much larger a problem can become while holding runtime fixed as processors are added.
 
 ```{=latex}
 \newpage
@@ -575,8 +557,6 @@ Here, the parallel part of the workload grows linearly with $n$, while the seria
 # │ Show: "5%" serial overhead—inline in prose before the example.
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
-# │ Imports: (none—pure scalars)
-# │ Exports: s_g_pct_str, s_g_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt
 
@@ -612,9 +592,6 @@ Using the same `{python} GustafsonSetup.s_g_pct_str` serial overhead ($s$ = `{py
 # │ Show: "~7.65x" at 8 GPUs, "~950x" at 1000 GPUs—inline in bullet list.
 # │ How: Gustafson formula: n - s*(n-1).
 # │
-# │ Imports: mlsysim.fmt.fmt, fmt_int, check
-# │ Exports: gustafson_8_speedup_mult_str, gustafson_8_serial_str, gustafson_1000_speedup_mult_str,
-# │          n_8_g_str, n_8_g_minus_1_str, n_1000_str, n_1000_minus_1_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check
 
@@ -712,10 +689,10 @@ class TrainingTimeRef:
         f"\\text{{Total FLOPs}} = {int(Literature.Chinchilla.ComputeConstant)} \\times {sci_latex(p_params, 0)} \\times {sci_latex(d_tokens, 0)} = {sci_latex(total_flops.to(flop), 1)} \\text{{ FLOPs}}"
     )
     throughput_eq = fmt_math(
-        f"\\text{{Throughput}} = {int(n_gpus)} \\times ({sci_latex(x_flops_q.to(flop/second), 2)}) \\times {u_mfu:.2f} \\approx {sci_latex(throughput.to(flop/second), 2)} \\text{{ FLOP/s}}"
+        f"\\text{{Throughput}} = {int(n_gpus)} \\times ({sci_latex(x_flops_q.to(flop/second), 2)}) \\times {u_mfu:.2f} \\approx {sci_latex(throughput.to(flop/second), 3)} \\text{{ FLOP/s}}"
     )
     time_eq = fmt_math(
-        f"T = \\frac{{{sci_latex(total_flops.to(flop), 1)}}}{{{sci_latex(throughput.to(flop/second), 2)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}"
+        f"T = \\frac{{{sci_latex(total_flops.to(flop), 1)}}}{{{sci_latex(throughput.to(flop/second), 3)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}"
     )
 ```
 
@@ -774,10 +751,6 @@ $$ N_{\text{req}} = \lambda_{\text{arr}} \times L_{\text{lat}} $$
 # │ Show: "50" concurrent requests, "24" GPU memory cap at 1 GB/req—inline.
 # │ How: N_req = lambda_arr * L_lat; max_concurrent = gpu_mem/mem_per_req.
 # │
-# │ Imports: mlsysim.book (fmt_rate, fmt_math)
-# │ Exports: L_concurrent_str, lambda_qps_str, lambda_qps_value_str,
-# │          w_latency_ms_str, w_latency_s_str, mem_per_req_gb_str,
-# │          gpu_mem_gb_str, max_concurrent_str, eq_max_throughput
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, fmt_qty, fmt_rate, fmt_time
 
@@ -832,14 +805,8 @@ A GPU advertises 1,000 TFLOP/s, yet your kernel achieves only 30 TFLOP/s. The mi
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-latency-hierarchy, @tbl-hardware-cheatsheet, @tbl-physical-hierarchy-ref
 # │ Goal: Latency analogy, H100/TPUv5p specs, hierarchy energy/bandwidth table
-# │ Exports: ArchReferenceTables.*_str
-from mlsysim.core.units import pJ, flop
-from mlsysim.fmt import fmt_int, fmt_flop_rate, fmt_qty, fmt, MarkdownStr, fmt_bandwidth, fmt_time
-
-def _fmt_dur_val(val):
-    if abs(val - round(val)) < 1e-9:
-        return fmt_int(val, commas=False)
-    return fmt(val, precision=1, commas=False)
+from mlsysim.core.units import pJ, flop, second, minute, hour, day
+from mlsysim.fmt import fmt_flop_rate, fmt_qty, fmt_bandwidth, fmt_multiple, fmt_time
 
 class ArchReferenceTables:
     """Latency hierarchy, accelerator cheatsheet, and physical hierarchy reference."""
@@ -891,15 +858,6 @@ class ArchReferenceTables:
     tpuv5_ici = Hardware.Cloud.TPUv5p.nvlink.bandwidth
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    def duration_label(seconds):
-        if seconds < SECONDS_PER_MINUTE:
-            return f"{_fmt_dur_val(seconds)} seconds"
-        if seconds < SEC_PER_HOUR:
-            return f"{_fmt_dur_val(seconds / SECONDS_PER_MINUTE)} minutes"
-        if seconds < SEC_PER_DAY:
-            return f"{_fmt_dur_val(seconds / SEC_PER_HOUR)} hours"
-        return f"{_fmt_dur_val(seconds / SEC_PER_DAY)} days"
-
     dram_pj_str = fmt_qty(ENERGY_DRAM_ACCESS_PJ, pJ, precision=0, commas=False)
     flop_pj_str = fmt_qty(flop_energy_pj, pJ, precision=1, commas=False)
     energy_ratio_mult_str = fmt_multiple(energy_ratio_value, precision=0, commas=False)
@@ -911,14 +869,14 @@ class ArchReferenceTables:
     pcie_ns_str = fmt_time(LATENCY_PCIE_GEN5, unit=nanosecond, precision=0, commas=False)
     ib_ns_str = fmt_time(LATENCY_INFINIBAND, unit=nanosecond, precision=0, commas=False)
     ssd_ns_str = fmt_time(LATENCY_NVME_SSD, unit=nanosecond, precision=0, commas=False)
-    register_distance_str = MarkdownStr(duration_label(register_ns_value * analogy_seconds_per_ns))
-    l1_distance_str = MarkdownStr(duration_label(l1_ns_value * analogy_seconds_per_ns))
-    l2_distance_str = MarkdownStr(duration_label(l2_ns_value * analogy_seconds_per_ns))
-    hbm_distance_str = MarkdownStr(duration_label(hbm_ns_value * analogy_seconds_per_ns))
-    nvlink_distance_str = MarkdownStr(duration_label(nvlink_ns_value * analogy_seconds_per_ns))
-    pcie_distance_str = MarkdownStr(duration_label(pcie_ns_value * analogy_seconds_per_ns))
-    ib_distance_str = MarkdownStr(duration_label(ib_ns_value * analogy_seconds_per_ns))
-    ssd_distance_str = MarkdownStr(duration_label(ssd_ns_value * analogy_seconds_per_ns))
+    register_distance_str = fmt_time(register_ns_value * analogy_seconds_per_ns, second, precision=0, commas=False, style="word")
+    l1_distance_str = fmt_time(l1_ns_value * analogy_seconds_per_ns, second, precision=1, commas=False, style="word")
+    l2_distance_str = fmt_time(l2_ns_value * analogy_seconds_per_ns / SECONDS_PER_MINUTE, minute, precision=1, commas=False, style="word")
+    hbm_distance_str = fmt_time(hbm_ns_value * analogy_seconds_per_ns / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    nvlink_distance_str = fmt_time(nvlink_ns_value * analogy_seconds_per_ns / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    pcie_distance_str = fmt_time(pcie_ns_value * analogy_seconds_per_ns / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    ib_distance_str = fmt_time(ib_ns_value * analogy_seconds_per_ns / SEC_PER_DAY, day, precision=1, commas=False, style="word")
+    ssd_distance_str = fmt_time(ssd_ns_value * analogy_seconds_per_ns / SEC_PER_DAY, day, precision=1, commas=False, style="word")
 
     h100_flops_tflop_per_s_str = fmt_flop_rate(h100_flops, unit=TFLOPs / second, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
@@ -943,8 +901,8 @@ class ArchReferenceTables:
     e_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
     e_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
     e_dram_pj_str = fmt_qty(ENERGY_DRAM_ACCESS_PJ, pJ, precision=0, commas=False)
-    e_ssd_pj_str = MarkdownStr("~5,000 pJ")
-    e_net_pj_str = MarkdownStr("~10,000 pJ")
+    e_ssd_pj_str = fmt_qty(5000 * pJ, pJ, precision=0, commas=True, approx=True)
+    e_net_pj_str = fmt_qty(10000 * pJ, pJ, precision=0, commas=True, approx=True)
 ```
 
 ### Latencies every programmer should know {#sec-appdx-machine-foundations-latencies-every-programmer-know-e89f}
@@ -1088,9 +1046,6 @@ For transfers below $D_{\text{cross}}$ (for example, single-token inference), la
 # │ Show: "10 Gbps", "10 ms ping", "1 KB"—inline before the example.
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
-# │ Imports: (none—pure scalars)
-# │ Exports: bw_gbit_per_s_str, ping_ms_str, data_kb_str,
-# │          crossover_data_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_qty
 
@@ -1131,8 +1086,6 @@ Consider sending data over a `{python} BandwidthLatencySetup.bw_gbit_per_s_str` 
 # │ Show: "0.8 μs" for 1 KB packet vs "~810 ms" for 1 GB checkpoint—inline.
 # │ How: tx_time = (data_bytes * 8) / bw_bits; large_time = size/bw + ping.
 # │
-# │ Imports: mlsysim.core.units (MILLION, BILLION), mlsysim.book (fmt, fmt_math)
-# │ Exports: tx_time_us_str, large_data_gb_str, eq_large_tx, eq_large_total
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_qty, fmt_time
 

@@ -29,7 +29,11 @@ CONTENTS = REPO_ROOT / "book" / "quarto" / "contents"
 
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
-LEGO_MARK = re.compile(r"#\s*[│┌].*LEGO|#\s*\│ Exports:|#\s*Exports:")
+LEGO_MARK = re.compile(
+    r"#\s*[│┌].*LEGO"
+    r"|#\s*│\s*(?:Context|Goal|Scope|Show|How):"
+    r"|#.*\b4\.\s*OUTPUT\b"
+)
 
 STAGE_MARK = re.compile(r"#.*\b(?P<stage>LOAD|EXECUTE|GUARD|OUTPUT)\b", re.I)
 CLASS_RE = re.compile(r"^\s*class\s+([A-Za-z_]\w*)", re.M)
@@ -221,7 +225,7 @@ def _python_cells(path: Path) -> list[tuple[int, str, bool]]:
             continue
         if in_cell and CELL_END.match(line):
             code = "\n".join(buf)
-            is_lego = bool(LEGO_MARK.search(code) or "Exports:" in code)
+            is_lego = bool(LEGO_MARK.search(code))
             cells.append((start + 1, code, is_lego))
             in_cell = False
             continue

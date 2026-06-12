@@ -92,10 +92,88 @@ Use this order for future autonomous editorial cleanup workflows:
 
 ## Needs Author Attention
 
+- 2026-06-12 audit-integration decision packets from the recovered
+  progressive-disclosure/thread/paragraph-flow agents:
+  - **Volume 1 bridge order:** Recheck the closing chapter connection in
+    `vol1/data_engineering/data_engineering.qmd`. The recovered audit reported
+    that it jumps to neural computation instead of the next data-selection
+    chapter. If current chapter order still places data selection next, retarget
+    the bridge rather than letting the pedagogical sequence skip a chapter.
+  - **Volume 1 data-selection bridge:** `vol1/data_selection/data_selection.qmd`
+    currently has a chapter connection titled "From data to algorithms"
+    near line 4704, while the recovered audit found that the body points toward
+    model compression. Decide whether the bridge should point to neural
+    computation under the volume order, or whether the title/body should be
+    renamed to match the intended next chapter.
+  - **Volume 1 reflection checkpoints:** Decide whether to add connective
+    checkpoints at the data-selection decision framework transition and between
+    the MLOps loop (`vol1/ml_ops/ml_ops.qmd` near line 299) and the later
+    monitoring stack (`vol1/ml_ops/ml_ops.qmd` near line 2516). The audit
+    flagged these as strong reflection points, but the prompt content should be
+    author-approved rather than invented during cleanup.
+  - **Purpose paragraph exceptions:** Decide whether consult/reference
+    appendices are exempt from the canonical chapter-purpose closing lens.
+    Recovered findings flagged Vol I appendix purposes for missing the D.A.M
+    closing lens, and `vol1/backmatter/appendix_assumptions.qmd` line 11 still
+    names H100 in the Purpose paragraph. `vol2/backmatter/appendix_assumptions.qmd`
+    line 11 similarly names H100/InfiniBand-style specifics in the Purpose.
+  - **Volume 2 checkpoint spacing:** `vol2/inference/inference.qmd` has early
+    checkpoints through batching (current checkpoint labels near lines 152, 613,
+    714, and 1941), then long arcs through KV-cache management, sharding,
+    routing, multi-tenancy, autoscaling, global routing, and quantized serving.
+    Decide whether to add one or two connective checkpoints after the
+    KV-cache/sharding arc and before global serving/quantization.
+  - **Checkpoint form cleanup:** Decide whether legacy or exercise-style
+    checkpoint boxes should be converted to anchored self-test bullets or
+    reclassified as examples/notebook exercises. Recovered findings highlighted
+    `vol2/security_privacy/security_privacy.qmd` checkpoint boxes near lines
+    405, 1017, and 1214, plus `vol2/sustainable_ai/sustainable_ai.qmd`
+    checkpoint boxes near lines 171, 2282, 2477, 3616, 3793, and 3888.
+  - **Volume 2 conclusion reflection:** `vol2/conclusion/conclusion.qmd` has
+    learning objectives and a six-principles synthesis but no checkpoint or
+    reflection pause. Decide whether one connective checkpoint should ask
+    students to apply the six principles to one archetype.
+  - **Responsible-AI summary scope:** `vol2/responsible_ai/responsible_ai.qmd`
+    includes a Python-backed fairness-metrics note/table in the Summary region
+    near line 3033. Decide whether that material belongs in the fairness-metrics
+    body section, or whether the Summary should keep only synthesis and
+    cross-reference the worked example/table.
+- 2026-06-12 SSOT/scenario-modeling decision packet: the refreshed quantity-flow
+  and scenario-input audits exit cleanly but still produce advisory inventories.
+  Recurring sustainable-AI examples include local `cooling_kw = 2.7 * kilowatt`,
+  `hours_per_year = 8760 * hour`, air-specific heat/density constants, and
+  `heat_load = 100 * kW`. Before public release, decide which of these repeated
+  values should become documented MLSysIM registry/scenario entries and which
+  should remain local pedagogical scenario constants. No new `fmt_*` helper was
+  added in this pass; if a future helper is introduced, propagate it across all
+  applicable QMDs and rerun rendered LEGO/prose/precision checks.
+- 2026-06-12 table-exposition decision packet: the table audit found two
+  high-impact table takeaways that should be author-approved rather than
+  invented during cleanup:
+  - `vol1/backmatter/appendix_machine.qmd` `tbl-memory-current-ref`: the body
+    prose says the table captures the current memory hierarchy, but the payoff
+    immediately jumps to the compute reference table. Decide the intended
+    learner takeaway for the current-generation latency/bandwidth hierarchy
+    before expanding the caption or lead-out.
+  - `vol2/introduction/introduction.qmd` `tbl-training-compute-evolution`: the
+    first post-table prose pivots to cluster size and the following figure,
+    leaving the table's own historical-compute takeaway mostly in the caption.
+    Decide whether the table should teach the compute-growth arc, the cluster
+    scaling implication, or only set up the figure.
+- 2026-06-12 figure-visual-language decision packet: the source SVG for
+  `vol1/backmatter/appendix_dam.qmd` `fig-dam-venn` uses MIT red for the
+  neutral Data circle and center label. That conflicts with the forward-looking
+  visual-language rule that red should mark danger, limits, faults, or
+  acceleration-as-threat only; however, the same rule also says existing
+  figures are not automatically retrofitted. Decide in the dedicated visual
+  reconciliation pass whether D.A.M. taxonomy figures should keep legacy MIT
+  branding colors, move category fills to neutral tones, or use the resource
+  palette only where the axis genuinely maps to a physical resource.
 - Confirm whether the `.claude/rules` updates that live in `AIConfigs` should
   be committed separately there after the MLSysBook worktree lands. Current
-  relevant dirty rule files are `cross-references.md` and `mlsysim.md`; unrelated
-  AIConfigs scratch files are intentionally untouched.
+  relevant dirty rule files from this audit are `numbers-and-math-in-prose.md`
+  and `qmd-patterns.md`; `auto-layout.md` is also dirty in AIConfigs but is
+  unrelated to this pass and should remain untouched unless explicitly scoped.
 - Decide whether artifact-style bibliography keys such as `euaiact2024` should
   be renamed to author/year keys in a later bibliography cleanup. The
   full-bibliography key/content check has longstanding failures unrelated to

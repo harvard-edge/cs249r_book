@@ -1,7 +1,7 @@
 # LEGO Cell Contract
 
 Inline `{python}` cells in MLSysBook chapters follow a **LEGO** pattern: a small
-class computes scenario values once, exports formatted `*_str` fields, and prose
+class computes scenario values once, produces formatted `*_str` fields, and prose
 references them with `` `{python} Class.field_str` ``.
 
 This document defines how to author and review LEGO cells. It complements the
@@ -13,27 +13,26 @@ playbook (`.claude/rules/lego-verify.md`), and pre-commit checks
 
 **One cell ≈ one narrative anchor** — a callout, table, or tight paragraph
 cluster. Place the cell **immediately above** the first `{python}` reference that
-uses its exports.
+uses its output values.
 
 **Chapter-anchor exception:** When one scenario's numbers must stay consistent
 across a problem callout, a later walkthrough, and a summary bullet, mark the
 header with `# │ Scope: chapter-anchor` and a one-line rationale. Focal verify
 then allows multi-section reference span; render and cell-exec gates still apply.
-This is not the unrelated mega-class anti-pattern (different exports in
+This is not the unrelated mega-class anti-pattern (different output values in
 disconnected narratives hundreds of lines apart).
 
 ## Cell contract
 
 Each LEGO cell should include:
 
-1. **Header comment** — Context (section/callout ID), Goal, Show, How, Imports,
-   Exports (only fields used nearby).
+1. **Header comment** — Context (section/callout ID), Goal, Show, and How.
 2. **Class name** — Scenario-specific (`Gpt4ClusterMtbf`), not generic (`Calc`).
 3. **Four blocks** (when applicable): LOAD → EXECUTE → GUARD → OUTPUT.
-4. **Exports** — Formatted strings (`*_str`) via typed helpers such as `fmt_qty()`,
+4. **Output values** — Formatted strings (`*_str`) via typed helpers such as `fmt_qty()`,
    `fmt_usd()`, `fmt_percent()`, and `fmt_multiple()`. **Units and fixed glyphs
    live in OUTPUT only**; prose must not repeat units, percent signs, currency
-   symbols, or multiplier glyphs after `` `{python} *_str` ``. Multiplier exports
+   symbols, or multiplier glyphs after `` `{python} *_str` ``. Multiplier outputs
    use a semantic `mult` token, for example `speedup_mult_str` or
    `speedup_range_mult_str`.
 
@@ -44,7 +43,8 @@ Example shape:
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: A100 ridge point for the latency callout below.
-# │ Exports: A100RidgeExample.ridge_str
+# │ Show: The formatted ridge point consumed by the following prose.
+# │ How: Read the registry value and format it for inline prose.
 class A100RidgeExample:
     ridge = Hardware.Cloud.A100.ridge_fp16
     ridge_str = fmt_int(round(ridge.magnitude), commas=False)
@@ -55,7 +55,7 @@ The A100 ridge is `{python} A100RidgeExample.ridge_str` FLOP/byte.
 
 ## Do
 
-- Keep **≤ 5–8 exports** per cell when possible.
+- Keep **≤ 5–8 output values** per cell when possible.
 - Use **registry paths** for shared specs — `Hardware.Cloud.H100`, `Models.Vision.ResNet50`,
   `Systems.Reliability.Gpu.mttf_hours`, `Literature.Training.MfuHigh`, and
   `mlsysim.physics.calc_*` for architecture formulas. Reserve `mlsysim.core.units`
@@ -67,33 +67,33 @@ The A100 ridge is `{python} A100RidgeExample.ridge_str` FLOP/byte.
 
 ## Don't
 
-- **Mega-classes** — one class whose exports appear in multiple distant sections
+- **Mega-classes** — one class whose output values appear in multiple distant sections
   or unrelated callouts (anti-pattern: `TrainingDimensions` spanning forward-pass
   prose and a wave-quantization table hundreds of lines apart). **Exception:**
   `# │ Scope: chapter-anchor` when the same scenario thread intentionally reuses
-  the same exports (KWS case-study targets, a lighthouse profile + takeaway,
+  the same output values (KWS case-study targets, a lighthouse profile + takeaway,
   GPT-3 household-year anchor, build/buy TCO + summary).
 - **Cross-cell reads** — a later cell referencing `OtherClass.some_str` without
   redefining inputs in the same cell (hidden exec-order dependency).
 - **Duplicate classes** — two cells for the same story (e.g. separate table and
   prose calcs for one latency budget); merge or split by narrative beat, not by
   output type.
-- **Kitchen-sink exports** — header lists ten fields used once each across the
-  chapter; split by callout instead.
-- **Legacy constant export names** — do not mirror removed `constants.py`
+- **Kitchen-sink output sections** — a cell emits ten fields used once each across
+  the chapter; split by callout instead.
+- **Legacy constant output names** — do not mirror removed `constants.py`
   symbols (`H100_FLOPS_FP16_TENSOR_val_str`, `GPUS_PER_HOST_str`, …). Use
   scenario-descriptive names (`h100_peak_fp16_val_str`, `dgx_h100_gpus_per_node_str`)
   with registry paths on the RHS. `./binder check registry --scope sources` enforces this.
 - **Hardcoded walkthrough operands** — in callout **Problem** / **Setup** / **Step** prose that
   already uses ``{python} Class.field_str``, do not type scenario inputs or intermediate
-  numbers (`100 GPUs`, `70B × 2`, `10×`, `/365`, `\$2/GPU-hour`). Export setup inputs,
+  numbers (`100 GPUs`, `70B × 2`, `10×`, `/365`, `\$2/GPU-hour`). Provide setup inputs,
   operands, rates, and multipliers from the cell.
   `./binder check code --scope lego-prose-literals` flags common cases.
 
 **Scope boundary (judgment):** The gate targets *computational* callouts—where a
 LEGO cell derives ``{python} *_str`` from scenario inputs. Pure narrative
 (``100--1,000× more expensive than arithmetic``), teaching asides, and footnotes
-stay literal. If a number is an input to or step in worked math, export it.
+stay literal. If a number is an input to or step in worked math, compute it in the cell.
 
 ## Review checklist
 
@@ -102,9 +102,9 @@ When editing or auditing a chapter:
 | Check | Question |
 |-------|----------|
 | Locality | Is the cell within ~50–100 lines of the first ref? |
-| Span | Do all exports appear in the same callout / `##` section? |
+| Span | Do all output values appear in the same callout / `##` section? |
 | Coupling | Does any other cell read this class's attributes? |
-| Dead code | Does `lego-dead-code` report unused exports? |
+| Dead code | Does `lego-dead-code` report unused output values? |
 | Walkthrough literals | Does `lego-prose-literals` pass on touched callouts? |
 | Fmt | Do prose preview + canonical audit pass (`fmt/` workflow)? |
 
@@ -161,13 +161,13 @@ python3 book/tools/scripts/maintenance/validate_inline_refs.py --path "$CH"
 
 **Prose-unit contract (two lanes):** `lego-prose-units` / `book_check_lego_prose_units.py`
 flags domain glyphs (`FLOP/byte`, `TFLOP/s`, `g/kWh`, `GB`, …) immediately after a
-**closed** `` `{python} *_str` `` export. `fmt_prose_contract.py` flags `%`, `$`, scale,
-and `×` duplication. Open `fmt()` exports intentionally keep units in prose.
+**closed** `` `{python} *_str` `` output. `fmt_prose_contract.py` flags `%`, `$`, scale,
+and `×` duplication. Open `fmt()` outputs intentionally keep units in prose.
 See `book/tools/audit/artifacts/lego_closed_prose_audit.md`.
 
 ### Phase 2 — Naming contract
 
-Every `*_str` export must match its formatter (see `.claude/rules/lego-units.md`):
+Every `*_str` output must match its formatter (see `.claude/rules/lego-units.md`):
 
 - **Closed-fixed:** `*_w_str`, `*_gb_per_s_str` → typed fmt with pinned `unit=`
 - **Open:** generic `*_str` → `fmt()` and prose supplies unit
@@ -243,7 +243,7 @@ Spot-check certificates for substituted QMD→HTML prose; no literal `{python}`.
 
 Sign-off template: `book/tools/audit/artifacts/lego_audit_signoff.md`.
 
-### Follow-up: distance / length exports (P5)
+### Follow-up: distance / length outputs (P5)
 
 Some cells still use **open** `fmt()` for meters while prose supplies the unit:
 
