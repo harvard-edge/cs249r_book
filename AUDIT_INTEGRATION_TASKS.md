@@ -3,9 +3,10 @@
 Status: reconstructed from `/Users/VJ/GitHub/codex-session-recovery.md` and
 raw session `019eb70c-cac4-7c61-9ff3-57a12b8dea45` on 2026-06-11.
 
-Worktree: `/Users/VJ/GitHub/MLSysBook-audit-integration`
-Branch: `fix/audit-integration`
-Reference checkout: `/Users/VJ/GitHub/MLSysBook` on local `dev`
+Current checkout: `/Users/VJ/GitHub/MLSysBook`
+Current branch: `dev`
+Integrated worktree: `/Users/VJ/GitHub/MLSysBook-audit-integration`
+Integrated branch: `fix/audit-integration`
 
 ## Current Execution Sequence
 
@@ -52,7 +53,37 @@ work. The detailed backlog remains in the sections below.
 - [x] Run Binder/pre-commit checks before commits.
 - [x] Record source-of-truth/scenario-modeling recommendations for
   public-release quality decisions.
+- [x] Merge `fix/audit-integration` into local `dev`.
+- [x] Remove reader-facing durable audit labels from prose; keep durable as
+  audit vocabulary only.
+- [x] Re-check the GB/GiB policy: binary units may appear in internal
+  calculations, but reader-facing prose keeps decimal GB unless a binary unit is
+  explicitly part of the teaching point.
+- [x] Verify `fmt_fps` and scan for similar common formatter candidates while
+  preserving the rule that any new `fmt_*` type requires a corpus applicability,
+  LEGO-output, prose, and precision pass.
+- [x] Record the current TOC convention decision: keeping Introduction inside
+  Part I and Conclusion inside Part IV is acceptable when the parts represent
+  teaching arcs; separate orphan parts need meaningful headers such as
+  "Orientation" and "Synthesis" before they would be preferable.
 - [ ] Update LEGO/fmt/MLSysIM/rule guidance if recurring gaps show up.
+- [~] Run one read-only parallel chapter concept-coverage audit per Vol. I and
+  Vol. II chapter, in canonical chapter order, asking whether each chapter
+  teaches the important concepts for an introductory ML systems textbook or an
+  advanced ML systems-at-scale volume without trying to become encyclopedic.
+  - [x] Vol. I concept-coverage auditors completed for Chapters 1--16; findings
+    are queued as local edit candidates vs. authorial-decision packets.
+  - [~] Vol. II concept-coverage auditors are in progress; Chapters 1--3
+    completed read-only, Chapters 4+ pending.
+- [x] Run read-only appendix-flow audits for Vol. I and Vol. II appendices:
+  verify the appendix sequence, internal flow, and reference-vs-teaching role
+  make sense from the actual text rather than only the table of contents.
+  - [x] Vol. I appendix-flow audit completed; D·A·M capitalization was clean,
+    the Jeff Dean latency note needed a bibliography-backed source, and broader
+    D·A·M/log-space/checkpoint findings are queued for authorial review.
+  - [x] Vol. II appendix-flow audit completed; copyedit PDF appendix order was
+    aligned with canonical Vol. II appendix order, and remaining appendix
+    content findings are queued for later prose decisions.
 - [ ] Run read-only progressive-disclosure audit by chapter using cumulative
   prior-chapter context.
 - [ ] Run chapter-thread audit: Purpose, section arc, examples, summary, and
@@ -78,12 +109,42 @@ work. The detailed backlog remains in the sections below.
   voice, pedagogy, progressive-disclosure, and rule-consistency issues.
 - [ ] Begin vol1+vol2 capitalization pass after quantitative and
   disclosure-sensitive prose stabilizes.
+- [x] Check appendix acronym/framework capitalization such as D-A-M/D.A.M.R.
+  and make sure formal framework labels are treated consistently without
+  gratuitous capitalization in ordinary prose.
+- [x] Replace or justify direct raw hyperlinks in appendix notes, including the
+  Jeff Dean/interactive-latency note, preferring bibliography references when a
+  stable citable source exists.
+  - [x] Replaced the raw interactive-latency URL with a citation to
+    `@scott2012latency`; staged the entry in
+    `appendix_machine_scott_latency_ref.bib`, ran `betterbib sync --in-place`,
+    reviewed the cleaned entry, smoke-tested it with BibTeX, copied only the
+    reviewed entry into Vol. I `references.bib`, and cleaned staging artifacts.
+- [x] Remove the reader-facing `Volume II` subtitle from the Vol. II title page
+  if it appears under `Machine Learning Systems at Scale`.
+- [ ] Run a dedicated column-margin figure placement/narration audit:
+  - [ ] Verify every placed margin figure is near the narration it supports.
+  - [ ] Verify each margin figure is useful in that location, not decorative.
+  - [ ] Verify captions, alt text, and surrounding prose make the learner-facing
+    connection without over-explaining the miniature visual.
+- [ ] Run a dedicated footnote appropriateness/progressive-disclosure audit:
+  - [ ] Verify each footnote is useful where placed.
+  - [ ] Verify each footnote assumes only concepts introduced earlier in the
+    book or earlier in the same chapter.
+  - [ ] Fix local wording issues and queue authorial decisions separately.
 - [ ] Run a late-stage Volume II SVG polish pass after text/layout work,
   including the cited gray-background/soft-rendered diagrams, rectangular arrow
   cleanup, and consistency with the sharper existing SVG style.
+- [x] Redraw the Vol. II Fleet Stack, AI Triad, conclusion Fleet Stack,
+  reward-hacking loop, and layers-of-responsibility body figures as clean,
+  crisp SVGs that match the book visual language and avoid soft/gray
+  background styling.
 - [ ] Replace/update the benchmarking chapter datacenter-power image using the
   user-supplied source image at `/Users/VJ/Downloads/figure5a_full.png`, making
   sure the surrounding caption/prose accurately explain the updated figure.
+- [x] Review the continuous-batching worked analysis in the serving chapter and
+  convert it to a cleaner example/callout style if that improves the learning
+  flow and print layout.
 - [ ] Run post-text, pre-build artifact explanation audits in canonical Vol. I
   then Vol. II chapter order, preserving pedagogical sequence and progressive
   disclosure:
@@ -108,8 +169,8 @@ work. The detailed backlog remains in the sections below.
   - [ ] Build Volume II HTML locally.
   - [ ] Build Volume II PDF locally.
   - [ ] Build Volume II EPUB locally.
-- [ ] When all local gates are clean, merge `fix/audit-integration` into local
-  `dev`.
+- [ ] Run `./book/binder check all --quiet` on fresh final artifacts.
+- [ ] Run final pre-commit gates.
 - [ ] Push local `dev` to `origin/dev`.
 - [ ] Monitor the online workflow every 5--10 minutes after pushing and keep
   fixing failures until the workflow is green.
@@ -124,6 +185,16 @@ work. The detailed backlog remains in the sections below.
 - Keep `/Users/VJ/GitHub/MLSysBook` as the permanent main reference checkout.
 - Do not push unless the user explicitly asks.
 - Commit incrementally, by one logical batch or one file at a time.
+- Every commit that completes or advances a task must update this ledger in the
+  same commit, including the relevant checkbox/status and the commit message or
+  SHA once known, so review can map work directly to commits.
+- For any new or changed bibliography entry, use the BetterBib-first staging
+  workflow from `.claude/rules/bib-check.md`: create a named staging `.bib`,
+  run `betterbib sync --in-place`, review the cleaned entry against the
+  canonical source, smoke-test the staged key with BibTeX, copy only the
+  reviewed entry into the target `references.bib`, run project bib/ref checks,
+  and delete staging artifacts. Do not type or paste raw metadata directly into
+  a volume bibliography.
 - Do not blindly trust scripts, prior vol2 edits, or audit findings. Inspect
   the implementation, run the check, and verify the result.
 - Apply small mechanical fixes autonomously. Queue authorial or structural
@@ -134,6 +205,35 @@ work. The detailed backlog remains in the sections below.
   volume, or file family. Give any delegated audit the relevant `.claude/rules`
   and treat the result as evidence to verify centrally. Keep edits, rule
   conflict resolution, and commits centralized.
+
+## Current Commit Batch
+
+Planned commit message: `Fix audit follow-up diagrams and references`
+
+Tasks advanced in this batch:
+
+- Raw appendix hyperlink replaced with bibliography-backed citation through the
+  BetterBib staging workflow.
+- Vol. II title page `Volume II` subtitle removed.
+- Vol. II copyedit PDF appendix order aligned with canonical appendix order.
+- Vol. II inference continuous-batching analysis converted to a cleaner
+  callout-style worked example.
+- Vol. II Fleet Stack, AI Triad, conclusion Fleet Stack, reward-hacking loop,
+  and layers-of-responsibility SVGs redrawn and rendered locally for visual QA.
+- Vol. I concept-coverage read-only audit completed; Vol. II concept-coverage
+  read-only audit started in canonical chapter order.
+
+Focused checks run before commit:
+
+- `./book/binder check bib --path book/quarto/contents/vol1/backmatter/references.bib`
+- `./book/binder check refs --scope inline --path book/quarto/contents/vol1/backmatter/appendix_machine.qmd`
+- `./book/binder check footnotes --path book/quarto/contents/vol1/backmatter/appendix_machine.qmd`
+- XML parse of all five touched SVGs.
+- Local PNG render/visual QA with `rsvg-convert` for all five touched SVGs.
+- `./book/binder check figures` for Vol. II introduction, responsible AI, and
+  conclusion chapters.
+- `./book/binder check markup` and inline refs for Vol. II inference.
+- `git diff --check`
 
 ## LEGO + MLSysIM QA Method
 
