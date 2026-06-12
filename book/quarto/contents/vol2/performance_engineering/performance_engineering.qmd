@@ -1683,7 +1683,7 @@ The performance-engineering consequence is that Triton turns many custom fusion 
 ```{python}
 #| echo: false
 #| label: compilation-dividend
-from mlsysim.fmt import fmt_int, fmt, check, fmt_percent, fmt_rate, fmt_time
+from mlsysim.fmt import fmt_int, fmt, check, fmt_math, fmt_multiple, fmt_percent, fmt_rate, fmt_time
 
 class CompilationDividend:
     """torch.compile speedup analysis for 13B model."""
@@ -1695,13 +1695,15 @@ class CompilationDividend:
     gemm_share = 0.50  # fraction of time in GEMM
     fusion_reduction = 0.70  # element-wise time reduction from fusion
     launch_reduction = 0.80  # launch overhead reduction from compilation
+    elementwise_remaining = 1 - fusion_reduction
+    launch_remaining = 1 - launch_reduction
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     time_per_token_ms = 1000.0 / base_tps
     _tpt = round(time_per_token_ms, 2)  # 8.33—rounded for step-by-step display
     gemm_ms = _tpt * gemm_share
-    elem_ms = _tpt * elementwise_share * (1 - fusion_reduction)
-    launch_ms = _tpt * launch_share * (1 - launch_reduction)
+    elem_ms = _tpt * elementwise_share * elementwise_remaining
+    launch_ms = _tpt * launch_share * launch_remaining
     new_time_ms = gemm_ms + elem_ms + launch_ms
     new_tps = 1000.0 / new_time_ms
     new_tps_rounded = round(new_tps)
@@ -1727,6 +1729,22 @@ class CompilationDividend:
     fusion_reduction_pct_str = fmt_percent(round(fusion_reduction * 100) / 100, precision=0, commas=False, style='prose')
     launch_reduction_pct_str = fmt_percent(round(launch_reduction * 100) / 100, precision=0, commas=False, style='prose')
     addressable_share_pct_str = fmt_percent(round((elementwise_share + launch_share) * 100) / 100, precision=0, commas=False, style='prose')
+    tpt_eq_math = fmt_math(rf"1 / {fmt(base_tps, precision=0, commas=False)} = {fmt(_tpt, precision=2, commas=False)}\,\text{{ms}}")
+    gemm_eq_math = fmt_math(
+        rf"{fmt(_tpt, precision=2, commas=False)} \times {fmt(gemm_share, precision=2, commas=False)} = {fmt(gemm_ms, precision=2, commas=False)}\,\text{{ms}}"
+    )
+    elem_eq_math = fmt_math(
+        rf"{fmt(_tpt, precision=2, commas=False)} \times {fmt(elementwise_share, precision=2, commas=False)} "
+        rf"\times {fmt(elementwise_remaining, precision=2, commas=False)} = {fmt(elem_ms, precision=2, commas=False)}\,\text{{ms}}"
+    )
+    launch_eq_math = fmt_math(
+        rf"{fmt(_tpt, precision=2, commas=False)} \times {fmt(launch_share, precision=2, commas=False)} "
+        rf"\times {fmt(launch_remaining, precision=2, commas=False)} = {fmt(launch_ms, precision=2, commas=False)}\,\text{{ms}}"
+    )
+    new_time_eq_math = fmt_math(
+        rf"{fmt(gemm_ms, precision=2, commas=False)} + {fmt(elem_ms, precision=2, commas=False)} + "
+        rf"{fmt(launch_ms, precision=2, commas=False)} = {fmt(new_time_ms, precision=2, commas=False)}\,\text{{ms}}"
+    )
 ```
 
 A simple profile breakdown shows how compiler optimizations convert overhead into useful throughput.
@@ -1741,13 +1759,13 @@ Step 1: Identify the addressable overhead.
 Element-wise kernels (`{python} CompilationDividend.elementwise_share_pct_str`) and launch overhead (`{python} CompilationDividend.launch_share_pct_str`) total `{python} CompilationDividend.addressable_share_pct_str` of execution time. torch.compile fuses element-wise operations (reducing their time by approximately `{python} CompilationDividend.fusion_reduction_pct_str` due to eliminated HBM round-trips) and reduces kernel launches (eliminating most launch overhead).
 
 Step 2: Estimate postcompilation time.
-Original time per token: $1/120 =$ `{python} CompilationDividend.tpt_ms_str`.
+Original time per token: `{python} CompilationDividend.tpt_eq_math`.
 
-- GEMM time (unchanged): `{python} CompilationDividend.tpt_ms_str` $\times 0.50 =$ `{python} CompilationDividend.gemm_ms_str`
-- Element-wise time (`{python} CompilationDividend.fusion_reduction_pct_str` reduction): `{python} CompilationDividend.tpt_ms_str` $\times 0.35 \times 0.30 =$ `{python} CompilationDividend.elem_ms_str`
-- Launch overhead (`{python} CompilationDividend.launch_reduction_pct_str` reduction): `{python} CompilationDividend.tpt_ms_str` $\times 0.15 \times 0.20 =$ `{python} CompilationDividend.launch_ms_str`
+- GEMM time (unchanged): `{python} CompilationDividend.gemm_eq_math`
+- Element-wise time (`{python} CompilationDividend.fusion_reduction_pct_str` reduction): `{python} CompilationDividend.elem_eq_math`
+- Launch overhead (`{python} CompilationDividend.launch_reduction_pct_str` reduction): `{python} CompilationDividend.launch_eq_math`
 
-New time per token: `{python} CompilationDividend.gemm_ms_str` + `{python} CompilationDividend.elem_ms_str` + `{python} CompilationDividend.launch_ms_str` = `{python} CompilationDividend.new_time_ms_str`, yielding approximately `{python} CompilationDividend.new_tps_str`.
+New time per token: `{python} CompilationDividend.new_time_eq_math`, yielding approximately `{python} CompilationDividend.new_tps_str`.
 
 **Systems insight**: torch.compile delivers a `{python} CompilationDividend.speedup_mult_str` speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (`{python} CompilationDividend.gemm_share_str` of step time), indicating that further improvement requires either precision reduction or batching.
 
