@@ -39,9 +39,14 @@ work. The detailed backlog remains in the sections below.
     carbon scenario, and public scenarios that intentionally evaluate `FAIL`.
 - [x] Run rendered LEGO QA across vol1 and vol2: variable names, registry
   sourcing, `fmt` usage, execution output, precision, and prose fit.
-- [ ] Run a rendered precision appropriateness pass: verify each displayed value
+- [x] Run a rendered precision appropriateness pass: verify each displayed value
   uses the right precision for the prose role and student-facing claim, not only
   that it avoids spurious `.0` output.
+  - [x] Committed as `a6f5acfa6a`: `Fix quantitative prose precision issues`.
+    Covered the final coherence warnings in Vol. I `appendix_machine`,
+    `ml_workflow`, `nn_architectures`, and Vol. II `appendix_assumptions`,
+    `appendix_communication`, `data_storage`, `fleet_orchestration`,
+    `ops_scale`, and `security_privacy`.
 - [x] For every touched chapter, run chapter build/debug with verbose output and
   fix render errors, missing references, and missing figures.
 - [x] Run Binder/pre-commit checks before commits.
@@ -462,6 +467,16 @@ single-sourced, and aligned with the prose that consumes it.
   - [ ] Keep running notes on formatter-helper candidates discovered during
     audits; only add helpers when a repeated value kind benefits from typed
     validation/rendering rather than one-off local formatting.
+  - [ ] `deployments/year` appeared once during the debt-priority cleanup.
+    Current decision: do not add a new `fmt_rate` unit or formatter yet; use
+    `fmt_count(..., label="deployment")` plus prose "per year" unless this
+    becomes a recurring rate kind.
+  - [ ] Per-GPU-hour energy adders appeared in the ops-scale training-cost
+    example. Current decision: keep using `fmt_usd(..., per="GPU-hour")`; do
+    not add a dedicated helper unless similar energy-price adders recur.
+  - [x] Accelerator marketed capacity drift is already covered by
+    `fmt_memory_capacity`; use it for vendor-facing HBM/accelerator capacity
+    labels and reserve `fmt_memory` for physical decimal/binary conversion.
 - [ ] Specifically check area and flux patterns across both volumes.
 - [x] Evaluate or add a `fmt_fps` helper for frame-rate values, especially
   vision/camera prose where patterns like `fmt_int(round(cam_fps))` are really
@@ -618,5 +633,6 @@ single-sourced, and aligned with the prose that consumes it.
 
 ## Current Known Dirty Files
 
-- `AUDIT_INTEGRATION_TASKS.md` is intentionally untracked as the live recovery
-  ledger.
+- Generated audit artifacts under `book/tools/audit/artifacts/` are expected to
+  be dirty/untracked during this pass and should not be committed unless they
+  become part of a deliberate audit artifact update.
