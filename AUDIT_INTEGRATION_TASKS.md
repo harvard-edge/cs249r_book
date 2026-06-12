@@ -102,6 +102,8 @@ work. The detailed backlog remains in the sections below.
 - [x] Polish flagged Vol. II figure issues from PDF review:
   - [x] Make the Network Fabrics bandwidth-cliff TikZ figure use the requested
     `Vatico` face when available, with a build-safe sans fallback.
+  - [x] Normalize the bandwidth-cliff utilization labels to the same figure
+    font macro and weight as the forward/backward bar labels.
   - [x] Replace the Sustainable AI Meta carbon-footprint PNG with a clean
     vector SVG using the book palette and training/inference visual encoding.
   - [x] Remove full-canvas gray/border wrappers from the flagged GHG Protocol
