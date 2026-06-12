@@ -3017,7 +3017,6 @@ class DeviceBandwidthHierarchy:
     nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth
     nvlink_a100_per_direction = nvlink_a100 / 2
     a100_bw = Hardware.Cloud.A100.memory.bandwidth
-    a100_mem = Hardware.Cloud.A100.memory.capacity
     a100_flops_fp16 = Hardware.Cloud.A100.compute.peak_flops
 
     # Transfer times for 4 MB tensor
@@ -3045,7 +3044,6 @@ class DeviceBandwidthHierarchy:
     a100_bw_gb_per_s_str = fmt_qty(a100_bw, GB / second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_qty(a100_bw, TB / second, precision=2, commas=False)
     a100_fp16_tflop_per_s_str = fmt_qty(a100_flops_fp16, TFLOP / second, precision=0, commas=False)
-    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)
     pcie4_4mb_ms_str = fmt_time(pcie4_4mb, millisecond, precision=3, commas=False)
     nvlink_4mb_ms_str = fmt_time(nvlink_4mb, millisecond, precision=3, commas=False)
     hbm_4mb_ms_str = fmt_time(hbm_4mb, millisecond, precision=3, commas=False)
@@ -4379,12 +4377,12 @@ When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers 
 # │ Context: HBM capacity footnote immediately below.
 # │
 # │ Goal: Keep the A100 HBM capacity local to the training-step narrative.
-# │ Show: A100 HBM capacity as a binary-memory prose anchor in this chapter.
+# │ Show: A100 HBM capacity as a branded hardware-memory prose anchor.
 # │ How: Read the A100 memory capacity constant and format it for prose.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import GiB, Hardware
-from mlsysim.fmt import check, fmt_memory
+from mlsysim.fmt import check, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class HbmCapacityFootnote:
@@ -4400,10 +4398,10 @@ class HbmCapacityFootnote:
     check(a100_mem.to(GiB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GiB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
 ```
 
-[^fn-hbm-capacity-constraint]: **HBM (High Bandwidth Memory)**: Provides 2--3 TB/s bandwidth on modern GPUs, making it the memory tier that most directly feeds accelerator arithmetic. HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gib_str` capacity on an A100 sets the hard ceiling on model size: weights, activations, gradients, and optimizer state must all fit simultaneously during training. When they do not, the framework must resort to offloading, selective recomputation, or placement across devices, each adding complexity to what the programmer perceives as a single `loss.backward()` call. \index{HBM!capacity constraint}
+[^fn-hbm-capacity-constraint]: **HBM (High Bandwidth Memory)**: Provides 2--3 TB/s bandwidth on modern GPUs, making it the memory tier that most directly feeds accelerator arithmetic. HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gb_str` capacity on an A100 sets the hard ceiling on model size: weights, activations, gradients, and optimizer state must all fit simultaneously during training. When they do not, the framework must resort to offloading, selective recomputation, or placement across devices, each adding complexity to what the programmer perceives as a single `loss.backward()` call. \index{HBM!capacity constraint}
 
 5. **Autograd Recording**: Simultaneously, PyTorch's autograd engine records a `MmBackward` node on the tape, storing references to `x` and `W1` for gradient computation.
 
@@ -4663,8 +4661,8 @@ Engineers assume training framework choice is independent of deployment infrastr
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import model_memory
-from mlsysim.fmt import check, fmt_memory
-from mlsysim import Models, BYTES_FP16, GiB, Hardware
+from mlsysim.fmt import check, fmt_memory, fmt_memory_capacity
+from mlsysim import Models, BYTES_FP16, GB, GiB, Hardware
 
 class Model7BMemory:
     """7-billion-parameter FP16 weight memory to show batch-size myth under capacity constraints."""
@@ -4681,14 +4679,14 @@ class Model7BMemory:
         f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining.to(GiB).magnitude:.1f} GiB.",
     )
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_7b_fp16_gib_str = fmt_memory(fp16, binary=True, precision=2, commas=False)  # e.g. "13.04 GiB"
-    a100_remaining_7b_gib_str = fmt_memory(remaining, binary=True, precision=2, commas=False)  # e.g. "66.96 GiB"
-    a100_mem_gib_str = fmt_memory(a100_mem, binary=True, precision=0, commas=False)  # e.g. "80 GiB"
+    model_7b_fp16_gb_str = fmt_memory(fp16, unit=GB, precision=0, commas=False)
+    a100_remaining_7b_gb_str = fmt_memory(remaining, unit=GB, precision=1, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
 ```
 
 **Pitfall**: *Increasing batch size without modeling activation memory.*
 
-Engineers assume that if memory is available, larger batches always improve throughput. Larger mini-batches can amortize fixed dispatch overhead, but they also scale the activation memory that must remain live during training. A 7-billion-parameter model in FP16 consumes `{python} Model7BMemory.model_7b_fp16_gib_str`, leaving `{python} Model7BMemory.a100_remaining_7b_gib_str` on an `{python} Model7BMemory.a100_mem_gib_str` A100. Increasing batch size from 8 to 32 quadruples the batch-dependent activation footprint; transformer attention adds a large $\mathcal{O}(S^2)$ term in sequence length that makes each sample expensive. The resulting memory pressure can trigger recomputation strategies that reduce throughput by 20--30 percent despite the larger batch. Teams that blindly maximize batch size often achieve lower throughput than smaller batches that avoid these memory management pathways; @sec-model-training-minibatch-processing-4eb0 formalizes the throughput target.
+Engineers assume that if memory is available, larger batches always improve throughput. Larger mini-batches can amortize fixed dispatch overhead, but they also scale the activation memory that must remain live during training. A 7-billion-parameter model in FP16 consumes `{python} Model7BMemory.model_7b_fp16_gb_str`, leaving `{python} Model7BMemory.a100_remaining_7b_gb_str` on an `{python} Model7BMemory.a100_mem_gb_str` A100. Increasing batch size from 8 to 32 quadruples the batch-dependent activation footprint; transformer attention adds a large $\mathcal{O}(S^2)$ term in sequence length that makes each sample expensive. The resulting memory pressure can trigger recomputation strategies that reduce throughput by 20--30 percent despite the larger batch. Teams that blindly maximize batch size often achieve lower throughput than smaller batches that avoid these memory management pathways; @sec-model-training-minibatch-processing-4eb0 formalizes the throughput target.
 
 **Fallacy**: *Compilation overhead is negligible.*
 

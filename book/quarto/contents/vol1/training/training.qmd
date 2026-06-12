@@ -994,7 +994,7 @@ The choice of optimization algorithm creates specific patterns of computation an
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import check, fmt, fmt_memory, fmt_params
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Optimizer:
@@ -1037,7 +1037,7 @@ class GPT2Optimizer:
     adam_state_gb_str = fmt_memory(adam_m_fp32 + adam_v_fp32, unit=GB, precision=0, commas=False)
     total_static_fp32_gb_str = fmt_memory(total_static_fp32, unit=GB, precision=0, commas=False)
     total_static_amp_gb_str = fmt_memory(total_static_amp, unit=GB, precision=0, commas=False)
-    v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
+    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
 
 # Note: Use GPT2Optimizer.param_fp32_gb_str directly.
 ```
@@ -1061,7 +1061,7 @@ For GPT-2's `{python} GPT2Optimizer.model_params_b_str` parameters in FP32 (`{py
 - Adam State (m, v): `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.adam_bytes_value_str` bytes = `{python} GPT2Optimizer.adam_state_gb_str`
 - Total static memory: `{python} GPT2Optimizer.total_static_fp32_gb_str`
 
-This explains why GPT-2's `{python} GPT2Optimizer.total_static_fp32_gb_str` static training state alone approaches the `{python} GPT2Optimizer.v100_mem_gib_str` capacity of a V100 before activation storage is counted.
+This explains why GPT-2's `{python} GPT2Optimizer.total_static_fp32_gb_str` static training state alone approaches the `{python} GPT2Optimizer.v100_mem_capacity_gb_str` capacity of a V100 before activation storage is counted.
 
 **System Decisions Driven by Optimizer**
 
@@ -1178,7 +1178,7 @@ Here, we shift focus from *what* backpropagation computes to *what it costs* to 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_percent
+from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_memory_capacity, fmt_percent
 from mlsysim.physics import calc_activation_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1261,7 +1261,7 @@ class GPT2ActivationMemory:
     grad_gb_str = fmt_memory(grad, unit=GB, precision=0, commas=False)
     opt_gb_str = fmt_memory(opt, unit=GB, precision=0, commas=False)
     peak_gb_str = fmt_memory(peak, unit=GB, precision=1, commas=False)
-    v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
+    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
 
     ckpt_reduction_str = fmt_percent(ckpt_reduction_pct / 100, precision=0, commas=False, style="symbol")
     ckpt_act_gb_str = fmt_memory(ckpt_act, unit=GB, commas=False)
@@ -1332,7 +1332,7 @@ For GPT-2 with batch size $B$ = `{python} GPT2ActivationMemory.batch_size_str`, 
 - Optimizer state (Adam, FP32): `{python} GPT2ActivationMemory.opt_gb_str`
 - Peak memory during training: ~`{python} GPT2ActivationMemory.peak_gb_str`
 
-This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_gib_str` capacity.
+This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` capacity.
 
 **System Solutions Applied.**
 
@@ -1341,7 +1341,7 @@ This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_gib_str` ca
 3. Mixed precision: FP16 activations (already applied) vs. FP32 (would be `{python} GPT2ActivationMemory.act_fp32_gb_str`)
 4. Reduced batch size: Use batch size $B=16$ per accelerator + gradient accumulation over two steps = effective batch size $B=32$
 
-Most GPT-2 implementations use a training configuration of gradient checkpointing and batch size $B=16$ per accelerator, fitting comfortably in `{python} GPT2ActivationMemory.v100_mem_gib_str` V100s while maintaining training efficiency.
+Most GPT-2 implementations use a training configuration of gradient checkpointing and batch size $B=16$ per accelerator, fitting comfortably in `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` V100s while maintaining training efficiency.
 
 :::
 
@@ -2727,7 +2727,7 @@ The total memory scales linearly with batch size (as established in @eq-activati
 # │ How: Calculate memory footprint for ResNet-50 and GPT-3.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_params, fmt_percent
+from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_memory_capacity, fmt_params, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetMemoryScaling:
@@ -2754,7 +2754,7 @@ class ResNetMemoryScaling:
     first_conv = first_conv_h * first_conv_w * first_conv_c * BYTES_FP32
     param_mem = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32)
 
-    # Batch 32 (compare totals in GiB against nominal A100 capacity)
+    # Batch 32 (compare totals against nominal A100 capacity)
     total_mem_b32 = act_b32 + grad_b32 + param_mem
     pct_a100 = (total_mem_b32 / a100_mem).to("").magnitude
 
@@ -2773,12 +2773,12 @@ class ResNetMemoryScaling:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
 
-    total_gb_b32_gib_str = fmt_memory(total_mem_b32, unit=GiB, precision=1, commas=False)
+    total_mem_b32_gb_str = fmt_memory(total_mem_b32, unit=GB, precision=1, commas=False)
     pct_a100_str = fmt_percent(pct_a100, precision=1, commas=False, style='symbol')
 
     act_gb_b64_str = fmt_memory(act_b64, unit=GB, precision=0, commas=False)
     grad_gb_b64_str = fmt_memory(grad_b64, unit=GB, precision=0, commas=False)
-    total_gb_b64_gib_str = fmt_memory(total_mem_b64, unit=GiB, precision=1, commas=False)
+    total_mem_b64_gb_str = fmt_memory(total_mem_b64, unit=GB, precision=1, commas=False)
 
     gpt3_fp32_gb_str = fmt_memory(gpt3_fp32, unit=GB, precision=0, commas=False)
     gpt3_fp16_gb_str = fmt_memory(gpt3_fp16, unit=GB, precision=0, commas=False)
@@ -2806,7 +2806,7 @@ class ResNetMemoryScaling:
     act_gb_b32_str = fmt_memory(act_b32, unit=GB, precision=0, commas=False)
     grad_gb_b32_str = fmt_memory(grad_b32, unit=GB, precision=0, commas=False)
     param_mb_str = fmt_memory(param_mem, unit=MB, precision=1, commas=False)
-    a100_mem_gib_str = fmt_memory(a100_mem, unit=GiB, precision=0, commas=False)
+    a100_mem_capacity_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
     bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
     gpu_mem_range_min_gb_str = fmt_memory(gpu_mem_range_min, unit=GB, precision=0, commas=False)
     gpu_mem_range_max_gb_str = fmt_memory(gpu_mem_range_max, unit=GB, precision=0, commas=False)
@@ -2816,12 +2816,12 @@ class ResNetMemoryScaling:
     bwd_filters_value_str = fmt(bwd_filters, precision=0, commas=False)
     bwd_total_grad_gb_str = fmt_memory(bwd_total_grad, unit=GB, precision=1, commas=False)
 
-# Note: Use ResNetMemoryScaling.total_gb_b32_gib_str directly.
+# Note: Use ResNetMemoryScaling.total_mem_b32_gb_str directly.
 ```
 
-Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at `{python} ResNetMemoryScaling.resnet_input_dim_str` $\times$ `{python} ResNetMemoryScaling.resnet_input_dim_str` resolution with a batch size of `{python} ResNetMemoryScaling.resnet_batch_32_str`. The initial convolutional layer produces activation maps of dimension `{python} ResNetMemoryScaling.resnet_conv1_h_str` $\times$ `{python} ResNetMemoryScaling.resnet_conv1_width_str` $\times$ `{python} ResNetMemoryScaling.resnet_conv1_c_str`; per image at single-precision (`{python} ResNetMemoryScaling.bytes_fp32_value_str` bytes), this requires approximately `{python} ResNetMemoryScaling.resnet_conv1_mb_str`. As the network progresses through `{python} ResNetMemoryScaling.resnet_layers_str`, the cumulative memory demands grow substantially: the complete forward pass activations total approximately `{python} ResNetMemoryScaling.act_gb_b32_str`, the backward pass adds another `{python} ResNetMemoryScaling.grad_gb_b32_str` of activation working set (empirical total, not stored parameter gradients), and model parameters consume `{python} ResNetMemoryScaling.param_mb_str`. This `{python} ResNetMemoryScaling.total_gb_b32_gib_str` total represents about `{python} ResNetMemoryScaling.pct_a100_str` of an A100 GPU's `{python} ResNetMemoryScaling.a100_mem_gib_str` memory capacity for a single batch.
+Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at `{python} ResNetMemoryScaling.resnet_input_dim_str` $\times$ `{python} ResNetMemoryScaling.resnet_input_dim_str` resolution with a batch size of `{python} ResNetMemoryScaling.resnet_batch_32_str`. The initial convolutional layer produces activation maps of dimension `{python} ResNetMemoryScaling.resnet_conv1_h_str` $\times$ `{python} ResNetMemoryScaling.resnet_conv1_width_str` $\times$ `{python} ResNetMemoryScaling.resnet_conv1_c_str`; per image at single-precision (`{python} ResNetMemoryScaling.bytes_fp32_value_str` bytes), this requires approximately `{python} ResNetMemoryScaling.resnet_conv1_mb_str`. As the network progresses through `{python} ResNetMemoryScaling.resnet_layers_str`, the cumulative memory demands grow substantially: the complete forward pass activations total approximately `{python} ResNetMemoryScaling.act_gb_b32_str`, the backward pass adds another `{python} ResNetMemoryScaling.grad_gb_b32_str` of activation working set (empirical total, not stored parameter gradients), and model parameters consume `{python} ResNetMemoryScaling.param_mb_str`. This `{python} ResNetMemoryScaling.total_mem_b32_gb_str` total represents about `{python} ResNetMemoryScaling.pct_a100_str` of an A100 GPU's `{python} ResNetMemoryScaling.a100_mem_capacity_gb_str` memory capacity for a single batch.
 
-The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to `{python} ResNetMemoryScaling.resnet_batch_64_str` increases forward activation memory to `{python} ResNetMemoryScaling.act_gb_b64_str` and the backward activation working set to `{python} ResNetMemoryScaling.grad_gb_b64_str`, totaling `{python} ResNetMemoryScaling.total_gb_b64_gib_str` and reducing the memory headroom available for deeper models, larger inputs, and optimizer state. Training larger models at the scale of GPT-3 (`{python} ResNetMemoryScaling.gpt3_params_b_str` parameters, representing current large language models) requires approximately `{python} ResNetMemoryScaling.gpt3_fp32_gb_str` just for parameters in FP32 (`{python} ResNetMemoryScaling.gpt3_fp16_gb_str` in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
+The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to `{python} ResNetMemoryScaling.resnet_batch_64_str` increases forward activation memory to `{python} ResNetMemoryScaling.act_gb_b64_str` and the backward activation working set to `{python} ResNetMemoryScaling.grad_gb_b64_str`, totaling `{python} ResNetMemoryScaling.total_mem_b64_gb_str` and reducing the memory headroom available for deeper models, larger inputs, and optimizer state. Training larger models at the scale of GPT-3 (`{python} ResNetMemoryScaling.gpt3_params_b_str` parameters, representing current large language models) requires approximately `{python} ResNetMemoryScaling.gpt3_fp32_gb_str` just for parameters in FP32 (`{python} ResNetMemoryScaling.gpt3_fp16_gb_str` in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
 
 GPUs typically provide `{python} ResNetMemoryScaling.gpu_mem_range_min_gb_str`--`{python} ResNetMemoryScaling.gpu_mem_range_max_gb_str` of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. Two techniques address this constraint directly: activation checkpointing\index{Activation Checkpointing!recomputation trade-off} trades recomputation for reduced activation storage, and mixed-precision training halves memory per value by using FP16 instead of FP32. Both are examined in detail in @sec-model-training-pipeline-optimizations-cd9d; here, the key insight is that memory capacity, not compute throughput, often determines the maximum feasible batch size and model depth. Practitioners frequently start with large batch sizes during initial development on smaller networks, then adjust downward when scaling to deeper architectures or memory-constrained hardware.
 
@@ -3935,7 +3935,7 @@ from mlsysim import Hardware, Models
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: GPT-2 FP32 vs FP16 vs checkpointed training memory in callout below.
-from mlsysim.fmt import fmt, check, fmt_memory, fmt_params
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_memory_capacity, fmt_params
 from mlsysim.physics import calc_activation_memory
 
 class MixedPrecisionMemory:
@@ -4011,7 +4011,7 @@ class MixedPrecisionMemory:
     ckpt_total_gb_str = fmt_memory(total_ckpt, unit=GB, commas=False)
     ckpt_total_b32_gb_str = fmt_memory(total_ckpt_b32, unit=GB, precision=1, commas=False)
     contrast_batch_size_str = fmt(contrast_batch_size, precision=0, commas=False)
-    v100_capacity_gib_str = fmt_memory(v100_capacity, unit=GiB, precision=0, commas=False)
+    v100_capacity_gb_str = fmt_memory_capacity(v100_capacity, unit=GiB, precision=0, commas=False)
 ```
 
 ::: {#nbk-training-gpt-2-mixed-precision-memory .callout-notebook title="GPT-2 mixed precision memory savings"}
@@ -4037,7 +4037,7 @@ class MixedPrecisionMemory:
 **Mixed precision + gradient checkpointing**:
 
 - Activations reduced to ~`{python} MixedPrecisionMemory.ckpt_act_gb_str` (recompute during backward)
-- Total: ~`{python} MixedPrecisionMemory.ckpt_total_gb_str` → fits in `{python} MixedPrecisionMemory.v100_capacity_gib_str` V100
+- Total: ~`{python} MixedPrecisionMemory.ckpt_total_gb_str` → fits in `{python} MixedPrecisionMemory.v100_capacity_gb_str` V100
 
 **Systems insight**: Mixed precision halves the parameter and gradient footprint; gradient checkpointing then trades a backward-pass recompute for an additional activation-memory cut. Together they bring GPT-2 XL at batch size `{python} MixedPrecisionMemory.mp_batch_size_str` within V100 capacity, turning an out-of-memory configuration into a trainable one. The relief is bounded, because activations grow linearly with batch size: at batch `{python} MixedPrecisionMemory.contrast_batch_size_str`, the same recipe still requires ~`{python} MixedPrecisionMemory.ckpt_total_b32_gb_str`, beyond any single accelerator, which is where the scaling techniques later in this chapter take over.
 
@@ -4847,7 +4847,7 @@ Both techniques improve scalability by reducing the memory required before addin
 # │ How: Calculate costs for naive large clusters vs. small clusters with accumulation.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_usd, fmt, fmt_count, check, MarkdownStr, fmt_memory
+from mlsysim.fmt import fmt_usd, fmt, fmt_count, check, MarkdownStr, fmt_memory, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GradientAccumulation:
@@ -4903,7 +4903,7 @@ class GradientAccumulation:
     comm_reduction_pct_str = fmt_percent(comm_reduction_pct / 100, precision=0, commas=False, style='symbol')
     accum_steps_str = fmt_count(accum_steps, commas=False, label="step")
     accum_steps_count_str = fmt(accum_steps, precision=0, commas=False)
-    v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
+    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
     local_grad_eqn_str = MarkdownStr(
         rf"\frac{{1}}{{{accum_steps}}}\sum_{{j=1}}^{{{accum_steps}}} "
         rf"\left[\frac{{1}}{{{micro_batch}}}\sum_{{k=1}}^{{{micro_batch}}} "
@@ -4924,7 +4924,7 @@ GPT-2's training configuration demonstrates the essential role of gradient accum
 
 **Memory Constraints**
 
-- V100 `{python} GradientAccumulation.v100_mem_gib_str` with gradient checkpointing: Can fit batch size $B=16$ (as shown in activation memory example)
+- V100 `{python} GradientAccumulation.v100_mem_capacity_gb_str` with gradient checkpointing: Can fit batch size $B=16$ (as shown in activation memory example)
 - Desired effective batch size $B=512$ (optimal for transformer convergence)
 - Problem: 512 ÷ 16 = `{python} GradientAccumulation.gpus_naive_str` needed just for batch size
 
@@ -5047,7 +5047,7 @@ To answer that question, let us walk through the memory-feasibility path for GPT
 # │ How: Calculate memory footprint across three distinct optimization tiers.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_memory
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_memory_capacity
 from mlsysim.physics import calc_activation_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5132,7 +5132,7 @@ class GPT2WalkthroughCalc:
     total_fp32_gb_str = fmt_memory(total_fp32, unit=GB, precision=1, commas=False)
     total_amp_gb_str = fmt_memory(total_amp, unit=GB, precision=1, commas=False)
     total_ckpt_gb_str = fmt_memory(total_ckpt, unit=GB, commas=False)
-    v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
+    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(memory_reduction, precision=1, commas=False)
     amp_reduction_pct_str = fmt_percent(amp_reduction, precision=1, commas=False, style='symbol')
     recompute_overhead_pct_str = fmt_percent(recompute_overhead_pct / 100, precision=0, commas=False, style='symbol')
@@ -5151,7 +5151,7 @@ class GPT2WalkthroughCalc:
 
 **Step 1**: Establish the baseline memory footprint.
 
-The trace starts with GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: small enough to discuss on one V100, but large enough that the first failure is immediate and unambiguous. This walkthrough uses batch size 4, the same configuration as the mixed-precision callout earlier; @tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized), which exceed a single GPU even after optimization. At batch size 4, the FP32 baseline requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the Machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_gib_str` V100 before throughput matters.
+The trace starts with GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: small enough to discuss on one V100, but large enough that the first failure is immediate and unambiguous. This walkthrough uses batch size 4, the same configuration as the mixed-precision callout earlier; @tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized), which exceed a single GPU even after optimization. At batch size 4, the FP32 baseline requires `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the Machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_capacity_gb_str` V100 before throughput matters.
 
 **Step 2**: Apply mixed precision.
 
@@ -5393,7 +5393,7 @@ from mlsysim import Hardware, Models
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Recap optimized GPT-2 memory and V100 capacity for scaling intro.
-from mlsysim.fmt import fmt_memory, check
+from mlsysim.fmt import fmt_memory, fmt_memory_capacity, check
 from mlsysim.physics import calc_activation_memory
 
 class GPT2SummaryScalingRecap:
@@ -5441,11 +5441,10 @@ class GPT2SummaryScalingRecap:
     b_total_mem_gb_str = fmt_memory(b_total_mem, unit=GB, precision=1, commas=False)
     o_total_mem_gb_str = fmt_memory(o_total_mem, unit=GB, precision=1, commas=False)
     o_total_mem_b4_gb_str = fmt_memory(o_total_mem_b4, unit=GB, commas=False)
-    v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
-    v100_mem_gb_str = fmt_memory(v100_mem, unit=GB, precision=1, commas=False)
+    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
 ```
 
-The single-device optimization toolkit (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated this at batch size 4, bringing a 1.5-billion-parameter model to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str` and within reach of a single V100 GPU (`{python} GPT2SummaryScalingRecap.v100_mem_gib_str`, about `{python} GPT2SummaryScalingRecap.v100_mem_gb_str`). The same toolkit has limits that batch size makes visible: at batch 32, memory falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str`, a substantial reduction that still exceeds what any single accelerator provides. Some models still will not fit\index{Scaling!single-device limitations}, no matter how aggressively these techniques are applied. A 70-billion-parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on higher-capacity variants like the H100 NVL (94 GB) and H200 (141 GB) once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
+The single-device optimization toolkit (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated this at batch size 4, bringing a 1.5-billion-parameter model to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str` and within reach of a single V100 GPU (`{python} GPT2SummaryScalingRecap.v100_mem_capacity_gb_str`). The same toolkit has limits that batch size makes visible: at batch 32, memory falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str`, a substantial reduction that still exceeds what any single accelerator provides. Some models still will not fit\index{Scaling!single-device limitations}, no matter how aggressively these techniques are applied. A 70-billion-parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on higher-capacity variants like the H100 NVL (94 GB) and H200 (141 GB) once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
 
 ::: {.column-margin}
 ![](images/svg/vol1_training_margin_004.svg){width="100%" fig-alt="80 GB GPU capacity threshold with 70B FP16 weights above it."}

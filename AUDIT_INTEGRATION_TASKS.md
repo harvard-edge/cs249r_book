@@ -59,9 +59,15 @@ work. The detailed backlog remains in the sections below.
 - [x] Re-check the GB/GiB policy: binary units may appear in internal
   calculations, but reader-facing prose keeps decimal GB unless a binary unit is
   explicitly part of the teaching point.
+  - [x] Cleaned concrete reader-facing leaks in Vol. I `training`,
+    Vol. I `frameworks`, and Vol. II `appendix_assumptions`: hardware capacity
+    displays now use `fmt_memory_capacity(..., unit=GiB)` for branded GB
+    labels, and derived memory totals use decimal `fmt_memory(..., unit=GB)`.
 - [x] Verify `fmt_fps` and scan for similar common formatter candidates while
   preserving the rule that any new `fmt_*` type requires a corpus applicability,
   LEGO-output, prose, and precision pass.
+  - [x] Confirmed `fmt_fps` exists in `mlsysim.fmt`, has tests, and the
+    previously flagged `cam_fps_str` export uses it.
 - [x] Record the current TOC convention decision: keeping Introduction inside
   Part I and Conclusion inside Part IV is acceptable when the parts represent
   teaching arcs; separate orphan parts need meaningful headers such as
@@ -188,13 +194,18 @@ Authorial-decision packets to preserve rather than silently resolve:
     `responsible_ai`, and `conclusion`. The partial render still reports
     expected unresolved cross-references to omitted chapters; full-volume gates
     remain pending.
-- [ ] Run late-stage LEGO prose-boundary cleanup:
+- [~] Run late-stage LEGO prose-boundary cleanup:
+  - [x] Checked the flagged GPT-3 "at least" duration case: the LEGO export now
+    computes only the rounded duration, while the table prose supplies the
+    narrative lower-bound qualifier.
   - [ ] Remove prose-bearing LEGO exports such as `MarkdownStr("at least ...")`;
     LEGO cells should compute and format quantities, while surrounding prose
     supplies narrative qualifiers.
   - [ ] Revisit current and prior LEGO cells for similar prose leakage once the
     quantitative edits stabilize.
-- [ ] Run late-stage LEGO header-comment cleanup:
+- [~] Run late-stage LEGO header-comment cleanup:
+  - [x] Scanned Vol. I and Vol. II QMD headers for stale `Imports:`/`Exports:`
+    inventory lines; none remain in the chapter source.
   - [ ] Replace import/export inventory comments with concise context, goal, and
     how/derivation notes.
   - [ ] Keep "Show" phrasing approximate and narrative-facing rather than
@@ -326,6 +337,36 @@ Authorial-decision packets to preserve rather than silently resolve:
 
 ## Last Commit Batch
 
+Next commit message: `Fix memory capacity display units`
+
+Tasks advanced in this batch:
+
+- Applied the branded-memory-capacity display policy to the concrete
+  reader-facing GiB leaks found in Vol. I `training`, Vol. I `frameworks`, and
+  Vol. II `appendix_assumptions`.
+- Verified `fmt_fps` is present, tested, and used by the flagged camera FPS
+  export.
+- Verified the flagged GPT-3 "at least" case keeps the qualifier in prose
+  rather than embedding it in a LEGO `MarkdownStr`.
+- Verified no stale LEGO `Imports:`/`Exports:` header inventory lines remain in
+  Vol. I or Vol. II QMD source.
+- Focused checks passed: `lego-prose-units`, `lego-prose-literals`,
+  `lego-dead-code`, `math canonical`, `math prose-contract`, `numbers`,
+  `refs --scope inline`, `markup`, `prose`, `punctuation`, `git diff --check`,
+  a partial Vol. I PDF render for `training,frameworks`, and a partial Vol. II
+  PDF render for `appendix_assumptions`.
+
+## Previous Commit Batch
+
+Committed as `8b588a394f`: `Integrate vol2 governance concept fixes`
+
+Tasks advanced in this batch:
+
+- Integrated the first Vol. II late-governance/conclusion concept-audit fix
+  packet and rendered the touched Vol. II chapters in PDF context.
+
+## Earlier Commit Batch
+
 Committed as `ac5f179cf6`: `Complete concept audit ledger`
 
 Tasks advanced in this batch:
@@ -334,7 +375,7 @@ Tasks advanced in this batch:
 - Added the compact concept-audit integration queue and the standing review
   patterns from user feedback.
 
-## Previous Commit Batch
+## Earlier Commit Batch 2
 
 Committed as `b403e2cd3a`: `Record vol2 concept audit progress`
 
@@ -343,7 +384,7 @@ Tasks advanced in this batch:
 - Recorded Vol. II concept-audit progress through the first late-stage batch
   before the remaining chapter agents completed.
 
-## Earlier Commit Batch
+## Earlier Commit Batch 3
 
 Committed as `ca7a783f9b`: `Record benchmarking image verification`
 
@@ -355,7 +396,7 @@ Tasks advanced in this batch:
 - Marked the benchmarking image replacement/update task complete without
   unnecessary binary churn.
 
-## Earlier Commit Batch 2
+## Earlier Commit Batch 4
 
 Committed as `c8af0fa6ac`: `Fix audit follow-up diagrams and references`
 
