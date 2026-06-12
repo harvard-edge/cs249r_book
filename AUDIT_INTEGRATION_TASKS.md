@@ -187,6 +187,17 @@ Authorial-decision packets to preserve rather than silently resolve:
   quantization caveats, explainability vs. interpretability, conservation of
   complexity; Vol. II least privilege, PUE metric, and related
   body-like governance/sustainability notes.
+
+Spelling/SECID decision packet:
+
+- Preserve the `pretraining` vs. `pre-training` spelling conflict as an
+  authorial/style-sheet decision rather than silently normalizing it in this
+  audit batch.
+- Recommend dropping the SECID hex-suffix sweep unless explicitly requested;
+  the audit found it would create broad mechanical churn with little reader
+  value relative to the production-risk fixes completed here.
+- Preserve remaining spelling/compound edge cases for a dedicated copyedit
+  packet rather than mixing them into LEGO, artifact, or final-build commits.
 - [x] Run read-only progressive-disclosure audit by chapter using cumulative
   prior-chapter context.
 - [x] Run chapter-thread audit: Purpose, section arc, examples, summary, and
@@ -195,7 +206,7 @@ Authorial-decision packets to preserve rather than silently resolve:
   logically, and avoids dangling single-sentence fragments unless intentional.
 - [x] Flag opportunities for student reflection questions/connective prompts
   without inventing new authorial content unilaterally.
-- [~] Integrate accepted progressive-disclosure/thread/flow fixes.
+- [x] Integrate accepted progressive-disclosure/thread/flow fixes.
   - [x] Integrated first Vol. II late-governance/conclusion concept-audit fix
     packet:
     - Security/Privacy: added compact threat-model fields, LLM tool/RAG
@@ -276,7 +287,7 @@ Authorial-decision packets to preserve rather than silently resolve:
     prose boundaries`.
   - [x] `python3 book/tools/audit/book_check_lego_prose_literals.py --strict`
     now passes across all 82 QMD files.
-- [~] Run late-stage LEGO header-comment cleanup:
+- [x] Run late-stage LEGO header-comment cleanup:
   - [x] Scanned Vol. I and Vol. II QMD headers for stale `Imports:`/`Exports:`
     inventory lines; none remain in the chapter source.
   - [x] Removed stale formatter comments that still described already-migrated
@@ -452,21 +463,21 @@ Authorial-decision packets to preserve rather than silently resolve:
     `.claude/workflows/audit.js`; the skill covers `lego`, `figures`,
     `tables`, `equations`, `algorithms`, and `listings` in canonical chapter
     order with progressive-disclosure constraints.
-- [ ] Final local release gates:
-  - [ ] Build Volume I HTML locally.
-  - [ ] Build Volume I PDF locally.
-  - [ ] Build Volume I EPUB locally.
-  - [ ] Build Volume II HTML locally.
-  - [ ] Build Volume II PDF locally.
-  - [ ] Build Volume II EPUB locally.
-- [ ] Run `./book/binder check all --quiet` on fresh final artifacts.
-- [ ] Run final pre-commit gates.
+- [x] Final local release gates:
+  - [x] Build Volume I HTML locally.
+  - [x] Build Volume I PDF locally.
+  - [x] Build Volume I EPUB locally.
+  - [x] Build Volume II HTML locally.
+  - [x] Build Volume II PDF locally.
+  - [x] Build Volume II EPUB locally.
+- [x] Run `./book/binder check all --quiet` on fresh final artifacts.
+- [x] Run final pre-commit gates.
 - [ ] Push local `dev` to `origin/dev`.
 - [ ] Monitor the online workflow every 5--10 minutes after pushing and keep
   fixing failures until the workflow is green.
-- [ ] Final volume-level render/debug gates for vol1+vol2 with zero missing
+- [x] Final volume-level render/debug gates for vol1+vol2 with zero missing
   refs, missing figures, or build errors.
-- [ ] Collect authorial, spelling, and SECID decision packets.
+- [x] Collect authorial, spelling, and SECID decision packets.
 
 ## Operating Rules
 
@@ -1202,7 +1213,7 @@ single-sourced, and aligned with the prose that consumes it.
 
 - [ ] Queue drastic restructures, Purpose/LO rewrites, definition-callout
   changes, and authorial content for user review.
-- [ ] Collect authorial/spelling/SECID decisions.
+- [x] Collect authorial/spelling/SECID decisions.
 - [ ] Preserve the pretraining vs. pre-training conflict as a decision item
   until the user rules.
 - [ ] Recommend dropping the SECID hex-suffix sweep unless explicitly requested.
