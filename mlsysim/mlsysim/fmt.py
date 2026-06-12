@@ -1477,6 +1477,44 @@ def fmt_rate(
     )
 
 
+def fmt_fps(
+    value,
+    *,
+    precision=0,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+    allow_negative=False,
+):
+    """Format frames per second for vision/video workloads."""
+    v = _numeric_magnitude(value)
+    if v < 0 and not allow_negative:
+        raise ValueError(
+            f"fmt_fps expects a non-negative rate, got {v}. Pass "
+            f"allow_negative=True if a signed frame-rate delta is genuinely intended."
+        )
+    if precision == 0:
+        return fmt_int(
+            v,
+            commas=commas,
+            suffix=" FPS",
+            approx=approx,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+        )
+    return fmt_rate(
+        v,
+        "FPS",
+        precision=precision,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        allow_negative=allow_negative,
+    )
+
+
 def fmt_ratio(value, precision=1, commas=False, allow_negative=False):
     """
     Format a **dimensionless ratio** as a bare number (no unit, no glyph).

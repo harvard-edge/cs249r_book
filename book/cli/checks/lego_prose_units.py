@@ -40,7 +40,7 @@ CLASS = re.compile(r"^class\s+(\w+)", re.M)
 CLOSED_DOMAIN_FMT = re.compile(
     r"^\s*(?P<name>\w+_str)\s*=\s*"
     r"(?:fmt_qty|fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|"
-    r"fmt_latency|fmt_percent|fmt_rate|fmt_usd|fmt_eur|fmt_time|fmt_tokens|fmt_params|"
+    r"fmt_latency|fmt_percent|fmt_rate|fmt_fps|fmt_usd|fmt_eur|fmt_time|fmt_tokens|fmt_params|"
     r"fmt_area|fmt_heat_flux|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
     r"fmt_energy_per_byte|fmt_energy_per_bit|fmt_energy_per_flop|fmt_energy_per_op|"
     r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_throughput|"
@@ -66,7 +66,7 @@ PROSE_UNIT_AFTER_REF = re.compile(
     r"GB|MB|KB|GiB|TiB|TB|"
     r"mm²|mm\^2|cm²|cm\^2|m²|m\^2|W/cm²|W/cm\^2|"
     r"seconds?|secs?|minutes?|mins?|hours?|hrs?|weeks?|months?|years?|"
-    r"percent|GPUs?|QPS|FLOPS|TFLOP/?s|PFLOP/?s|GFLOP/?s|"
+    r"percent|GPUs?|QPS|FPS|FLOPS|TFLOP/?s|PFLOP/?s|GFLOP/?s|"
     r"flights?|tokens?|images?|nodes?|servers?|"
     r"USD|\$|%|×|x\b|tonnes?|metric tons?)",
     re.I,
@@ -103,7 +103,8 @@ _FMT_UNITS: dict[str, frozenset[str]] = {
     "fmt_percent": frozenset({"percent", "%"}),
     "fmt_usd": frozenset({"$", "usd"}),
     "fmt_eur": frozenset({"eur"}),
-    "fmt_rate": frozenset({"qps", "tflop/s", "tflops/s", "gb/s", "tb/s", "km/h"}),
+    "fmt_rate": frozenset({"qps", "fps", "tflop/s", "tflops/s", "gb/s", "tb/s", "km/h"}),
+    "fmt_fps": frozenset({"fps"}),
     "fmt_flop_rate": frozenset({"flop/s", "flops/s", "tflop/s", "tflops/s", "pflop/s", "pflops/s", "gflop/s"}),
     "fmt_flops": frozenset({"flop", "flops", "kflop", "mflop", "gflop", "tflop", "pflop"}),
     "fmt_ops_rate": frozenset({"ops/s", "tops", "tops/s"}),

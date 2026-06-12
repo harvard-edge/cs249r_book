@@ -76,6 +76,9 @@ work. The detailed backlog remains in the sections below.
 - [ ] Run a late-stage Volume II SVG polish pass after text/layout work,
   including the cited gray-background/soft-rendered diagrams, rectangular arrow
   cleanup, and consistency with the sharper existing SVG style.
+- [ ] Replace/update the benchmarking chapter datacenter-power image using the
+  user-supplied source image at `/Users/VJ/Downloads/figure5a_full.png`, making
+  sure the surrounding caption/prose accurately explain the updated figure.
 - [ ] Run post-text, pre-build artifact explanation audits in canonical Vol. I
   then Vol. II chapter order, preserving pedagogical sequence and progressive
   disclosure:
@@ -456,8 +459,11 @@ single-sourced, and aligned with the prose that consumes it.
   standalone external scripts.
 - [ ] Inventory uses of `fmt(` and `fmt_int`.
 - [ ] Look for repeated unit-bearing patterns that need custom `fmt_` helpers.
+  - [ ] Keep running notes on formatter-helper candidates discovered during
+    audits; only add helpers when a repeated value kind benefits from typed
+    validation/rendering rather than one-off local formatting.
 - [ ] Specifically check area and flux patterns across both volumes.
-- [ ] Evaluate or add a `fmt_fps` helper for frame-rate values, especially
+- [x] Evaluate or add a `fmt_fps` helper for frame-rate values, especially
   vision/camera prose where patterns like `fmt_int(round(cam_fps))` are really
   formatting frames per second.
 - [ ] If a new formatter is added, apply it uniformly across vol1 and vol2.
