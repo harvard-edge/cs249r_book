@@ -37,11 +37,11 @@ Traditional software fails *loudly*: exceptions crash processes, type errors hal
 ::: {.callout-learning-objectives}
 
 - Classify robustness challenges into environmental shifts, input-level attacks, and system-level faults
-- Explain how software faults can amplify or masquerade as all three categories using quantitative reliability metrics
-- Evaluate adversarial attack techniques (gradient-based, optimization-based, transfer-based, physical-world) and implement defense strategies including adversarial training, certified defenses, and input sanitization
-- Construct data-poisoning defenses (anomaly detection, statistical validation, robust training) to protect ML pipelines from malicious data manipulation
-- Apply statistical methods (MMD, PSI, KS tests) to detect distribution shifts and adapt via continuous learning, retraining, or ensembles
-- Integrate robustness principles across algorithmic and system dimensions while evaluating trade-offs between accuracy, computational overhead, energy consumption, and resilience guarantees
+- Explain how software faults amplify or masquerade as model failures using quantitative reliability metrics
+- Evaluate adversarial attack techniques and select defenses such as adversarial training, certification, and input sanitization
+- Construct data-poisoning defenses using anomaly detection, statistical validation, and robust training
+- Apply drift metrics (MMD, PSI, KS) to choose monitoring, investigation, or retraining responses
+- Integrate robustness across model and system dimensions while budgeting accuracy, compute, energy, and resilience trade-offs
 
 :::
 
@@ -907,6 +907,8 @@ where $p_i$ represents the proportion of observations in bin $i$ for the baselin
 
 :::
 
+: **PSI Interpretation Thresholds**: Common Population Stability Index ranges and the recommended monitoring action at each tier. {#tbl-robust-ai-psi-thresholds}
+
 | **PSI Value**               | **Interpretation** | **Recommended Action** |
 |:----------------------------|:------------------:|:----------------------:|
 | $\text{PSI} < 0.1$          |  Negligible shift  |  Continue monitoring   |
@@ -914,11 +916,9 @@ where $p_i$ represents the proportion of observations in bin $i$ for the baselin
 | $0.2 \le \text{PSI} < 0.25$ |   Moderate shift   |  Consider retraining   |
 | **$\text{PSI} \ge 0.25$**   |    Major shift     |    Retrain required    |
 
-: **PSI Interpretation Thresholds**: Common Population Stability Index ranges and the recommended monitoring action at each tier. {#tbl-robust-ai-psi-thresholds}
-
 Several implementation choices determine whether PSI is sensitive enough to be useful. Bin selection significantly affects PSI sensitivity. For categorical features, each category forms a natural bin. For continuous features, equal-width bins (10--20 bins typical) or quantile-based bins provide different trade-offs: equal-width bins preserve the absolute scale of the feature space, while quantile bins ensure adequate sample sizes in each bin but may mask shifts in the tails. Production systems often use ten bins with a minimum of 5 percent of observations per bin to ensure statistical stability.
 
-When a bin has zero observations in either distribution, adding a small smoothing constant (typically $\epsilon = 10^{-8}$) prevents undefined logarithms while minimally affecting the PSI value. As @fig-distribution-shift-detector shows, monitoring PSI over time reveals when a model drifts from stable (Green Zone) into warning (Orange) and critical (Red Zone) regions, triggering automated retraining.
+When a bin has zero observations in either distribution, adding a small smoothing constant (typically $\epsilon = 10^{-8}$) prevents undefined logarithms while minimally affecting the PSI value. As @fig-distribution-shift-detector shows, monitoring PSI over time reveals when a model drifts from stable (Green Zone) into warning (Orange) and critical (Red Zone) regions, triggering an escalation path that may lead to retraining after performance correlation.
 
 ::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**The Distribution Shift Detector**: Monitoring Population Stability Index (PSI) over a year. The model remains stable through week 24, enters the orange warning zone at week 25 as user behavior shifts, and breaches the red critical threshold at week 32. Automated retraining restores model stability at week 41." fig-alt="Line plot of weekly PSI over 52 weeks with green, orange, and red zones. Drift crosses the critical threshold at week 32, and retraining restores stability at week 41."}
 
@@ -1052,13 +1052,13 @@ where $p_{\text{mix}} = \frac{1}{2}(p_{\text{base}} + p_{\text{curr}})$ is the m
 
 For drift monitoring in production, @tbl-kl-divergence-thresholds gives practical thresholds for interpreting KL divergence values.
 
+: **KL Divergence Threshold Reference**: Practical thresholds for interpreting KL divergence values during drift monitoring. Values below 0.05 indicate minimal divergence; 0.05 to 0.1 indicates moderate divergence that warrants investigation; values at or above 0.1 indicate significant divergence that typically triggers retraining workflows. {#tbl-kl-divergence-thresholds}
+
 | **$\mathcal{D}_{\text{KL}}$ Value**          |   **Interpretation**   |
 |:---------------------------------------------|:----------------------:|
 | **$\mathcal{D}_{\text{KL}} < 0.05$**         |   Minimal divergence   |
 | **$0.05 \le \mathcal{D}_{\text{KL}} < 0.1$** |  Moderate divergence   |
 | **$\mathcal{D}_{\text{KL}} \ge 0.1$**        | Significant divergence |
-
-: **KL Divergence Threshold Reference**: Practical thresholds for interpreting KL divergence values during drift monitoring. Values below 0.05 indicate minimal divergence; 0.05 to 0.1 indicates moderate divergence that warrants investigation; values at or above 0.1 indicate significant divergence that typically triggers retraining workflows. {#tbl-kl-divergence-thresholds}
 
 For practical computation, kernel density estimation (KDE) with Gaussian kernels provides smooth density approximations suitable for integration, though computational cost scales as $\mathcal{O}(n^2)$ for $n$ samples, making sampling necessary for large datasets.
 
@@ -1195,6 +1195,8 @@ class CountryPSIDecomposition:
 
 @Tbl-psi-country-example compares the baseline (training) distribution and current (production) distribution for the top 5 countries.
 
+: **Country-Feature PSI Decomposition**: Per-country contribution to the total PSI for the user country feature in a production fraud-detection model. The "Other" bucket drives most of the divergence (`{python} CountryPSIDecomposition.other_contrib_str` of the `{python} CountryPSIDecomposition.psi_total_str` total), reflecting growth of non-USA/UK/Germany/France traffic over six months in production. {#tbl-psi-country-example}
+
 | **Country** |                 **Baseline ($p_i$)**                |                 **Current ($q_i$)**                 |                   **$p_i - q_i$**                   |                    **$\ln(p_i/q_i)$**                   |                    **Contribution**                    |
 |:------------|:---------------------------------------------------:|:---------------------------------------------------:|:---------------------------------------------------:|:-------------------------------------------------------:|:------------------------------------------------------:|
 | USA         |   `{python} CountryPSIDecomposition.usa_base_str`   |   `{python} CountryPSIDecomposition.usa_curr_str`   |   `{python} CountryPSIDecomposition.usa_diff_str`   |   `{python} CountryPSIDecomposition.usa_logratio_str`   |   `{python} CountryPSIDecomposition.usa_contrib_str`   |
@@ -1202,8 +1204,6 @@ class CountryPSIDecomposition:
 | Germany     | `{python} CountryPSIDecomposition.germany_base_str` | `{python} CountryPSIDecomposition.germany_curr_str` | `{python} CountryPSIDecomposition.germany_diff_str` | `{python} CountryPSIDecomposition.germany_logratio_str` | `{python} CountryPSIDecomposition.germany_contrib_str` |
 | France      |  `{python} CountryPSIDecomposition.france_base_str` |  `{python} CountryPSIDecomposition.france_curr_str` |  `{python} CountryPSIDecomposition.france_diff_str` |  `{python} CountryPSIDecomposition.france_logratio_str` | `{python} CountryPSIDecomposition.france_contrib_str`  |
 | Other       |  `{python} CountryPSIDecomposition.other_base_str`  |  `{python} CountryPSIDecomposition.other_curr_str`  |  `{python} CountryPSIDecomposition.other_diff_str`  |  `{python} CountryPSIDecomposition.other_logratio_str`  |  `{python} CountryPSIDecomposition.other_contrib_str`  |
-
-: **Country-Feature PSI Decomposition**: Per-country contribution to the total PSI for the user country feature in a production fraud-detection model. The "Other" bucket drives most of the divergence (`{python} CountryPSIDecomposition.other_contrib_str` of the `{python} CountryPSIDecomposition.psi_total_str` total), reflecting growth of non-USA/UK/Germany/France traffic over six months in production. {#tbl-psi-country-example}
 
 Summing the per-country contributions gives `{python} CountryPSIDecomposition.psi_sum_math`.
 
@@ -1304,13 +1304,13 @@ Since the observed statistic 0.089 exceeds the critical value `{python} Continuo
 
 @Tbl-retraining-decision-matrix combines the quantitative evidence.
 
+: **Retraining Decision Matrix**: Combined quantitative evidence (PSI, KL divergence, KS test) compared against thresholds and the resulting action level. Drift signals below the practical threshold but with statistical significance call for monitoring at increased frequency rather than immediate retraining. {#tbl-retraining-decision-matrix}
+
 | **Metric**                             |                    **Value**                     |  **Threshold**  | **Action Level** |
 |:---------------------------------------|:------------------------------------------------:|:---------------:|:----------------:|
 | **PSI (country)**                      | `{python} CountryPSIDecomposition.psi_total_str` |     $< 0.1$     |     Monitor      |
 | **$\mathcal{D}_{\text{KL}}$ (amount)** |    `{python} ContinuousDriftAnalysis.kl_str`     |     $< 0.1$     |     Monitor      |
 | **KS test**                            |                   $p < 0.001$                    | $\alpha = 0.05$ |   Significant    |
-
-: **Retraining Decision Matrix**: Combined quantitative evidence (PSI, KL divergence, KS test) compared against thresholds and the resulting action level. Drift signals below the practical threshold but with statistical significance call for monitoring at increased frequency rather than immediate retraining. {#tbl-retraining-decision-matrix}
 
 Decision: Continue monitoring with increased frequency (weekly instead of monthly). If PSI or KL divergence exceeds 0.1 in the next monitoring cycle, or if model performance metrics (precision, recall) degrade by more than 5 percent, initiate retraining. The example stops at a monitoring decision; the general framework turns that same logic into a repeatable retraining gate.
 
@@ -1480,6 +1480,8 @@ Physical-world attackers face the hardest constraint: the perturbation must surv
 
 The point of @tbl-attack_types is defense selection, not vocabulary. A model that fails a white-box PGD test has no credible worst-case robustness claim; an API-facing model must budget for surrogate transfer and probing; a safety-critical vision system must test the full sensor loop rather than only saved images. The rows therefore identify what the attacker uses to cross the decision boundary: gradients, optimization, surrogate transfer, or physical sensor manipulation.
 
+: **Adversarial Attack Categories**: Attack mechanisms determine defense selection: gradient and optimization attacks require robustness against explicit decision-boundary crossing, transfer attacks test black-box exposure, and physical attacks require evaluation through the deployed sensor loop. {#tbl-attack_types tbl-colwidths="[15,18,67]"}
+
 | **Category**     | **Method**      | **Mechanism**                                             |
 |:-----------------|:----------------|:----------------------------------------------------------|
 | **Gradient**     | FGSM            | Perturbs inputs along the loss gradient                   |
@@ -1491,8 +1493,6 @@ The point of @tbl-attack_types is defense selection, not vocabulary. A model tha
 | **Transfer**     | Transferability | Adversarial examples transfer across models (black-box)   |
 | **Physical**     | Patches         | Printed patches fool detectors in the real world          |
 |                  | 3D Objects      | Sculpted objects deceive sensors in deployment            |
-
-: **Adversarial Attack Categories**: Attack mechanisms determine defense selection: gradient and optimization attacks require robustness against explicit decision-boundary crossing, transfer attacks test black-box exposure, and physical attacks require evaluation through the deployed sensor loop. {#tbl-attack_types tbl-colwidths="[15,18,67]"}
 
 The defense cannot be chosen generically. Adversarial training raises the cost of gradient-based attacks, input transformation disrupts some small perturbations before inference, ensembles make transfer less reliable, and physical evaluation exposes failures that digital tests miss. The reason this defense budget matters is that adversarial attacks extend far beyond the basic misclassification that @fig-adversarial-googlenet illustrates, where an imperceptible perturbation flips GoogLeNet's prediction on an otherwise unchanged image. That single-image failure is only the entry point; the same principle scales into physical, transferable, and systemic attacks that create risks across deployment domains.
 
@@ -2250,29 +2250,26 @@ The clean-accuracy cost depends on the threat model and defense. For strong Imag
 
 Hyperparameter tuning grows significantly more complex when balancing robustness and performance objectives. Validation procedures must evaluate both clean and adversarial performance using multiple attack methods, and deployment infrastructure must support the additional computational requirements, including GPU memory for gradient computation and storage for adversarial example caches.
 
-::: {#lst-adversarial-training lst-cap="**Adversarial Training Implementation**: Practical adversarial training using FGSM to generate adversarial examples during training, mixing clean and perturbed data to improve model robustness against gradient-based attacks."}
+::: {#lst-adversarial-training lst-cap="**Adversarial Training Pseudocode**: Framework-neutral adversarial training using FGSM-style perturbations during training, mixing clean and perturbed data to improve robustness against gradient-based attacks."}
 
-```{.python}
-def adversarial_training_step(model, data, labels, epsilon=0.1):
-    # Generate adversarial examples using FGSM
-    attack_data = data.detach().clone().requires_grad_(True)
-    attack_logits = model(attack_data)
-    attack_loss = F.cross_entropy(attack_logits, labels)
-    input_grad = torch.autograd.grad(attack_loss, attack_data)[0]
+```{.text}
+function adversarial_training_step(model, clean_batch, labels, epsilon):
+    logits = model(clean_batch)
+    clean_loss = loss(logits, labels)
 
-    # Create adversarial perturbation and mix with clean data
-    adv_data = attack_data + epsilon * input_grad.sign()
-    adv_data = torch.clamp(adv_data, 0, 1).detach()
+    input_gradient = gradient(clean_loss, clean_batch)
+    perturbation = epsilon * sign(input_gradient)
+    adversarial_batch = clip(clean_batch + perturbation, valid_input_range)
 
-    mixed_data = torch.cat([data, adv_data], dim=0)
-    mixed_labels = torch.cat([labels, labels], dim=0)
+    mixed_batch = concatenate(clean_batch, adversarial_batch)
+    mixed_labels = concatenate(labels, labels)
 
-    return F.cross_entropy(model(mixed_data), mixed_labels)
+    return loss(model(mixed_batch), mixed_labels)
 ```
 
 :::
 
-The implementation in @lst-adversarial-training generates adversarial examples on-the-fly during training by computing gradients with respect to a detached input clone, applying the sign function to extract the perturbation direction, and mixing the resulting adversarial examples with clean training data through `torch.cat`. Using `torch.autograd.grad` for the attack step avoids accumulating parameter gradients before the final training loss is computed. The `torch.clamp()` operation ensures pixel values remain valid, while the final concatenation doubles the effective batch size by combining clean and adversarial examples. This approach requires careful tuning of the perturbation budget $\epsilon$; optimized variants can reduce adversarial-training overhead by reusing gradient computations [@shafahi2019adversarial].
+The implementation in @lst-adversarial-training generates adversarial examples on-the-fly during training by differentiating the loss with respect to the input, applying the sign function to extract a perturbation direction, and mixing the resulting adversarial examples with clean training data. Clipping preserves the valid input range, while concatenation doubles the effective batch size by combining clean and adversarial examples. This approach requires careful tuning of the perturbation budget $\epsilon$; optimized variants can reduce adversarial-training overhead by reusing gradient computations [@shafahi2019adversarial].
 
 Once adversarial examples are part of the training loop, deployment must coordinate robustness techniques with MLOps pipelines, monitoring strategies, and distributed training infrastructure that synchronizes updates across multiple nodes. The remaining strategies move the spending point rather than eliminating the cost. Defensive distillation\index{Defensive Distillation} [@papernot2016] spends it during training by teaching a student model from the teacher's soft labels, which can smooth decision behavior but must still be evaluated against stronger attacks. Input preprocessing spends it at serving time: image denoising, JPEG compression, random resizing, padding, and random transformations try to erase perturbations before the model sees them. Ensembles spend it through redundancy, combining models with different architectures, training data, or preprocessing paths so that a perturbation that fools one member is less likely to fool all of them.
 

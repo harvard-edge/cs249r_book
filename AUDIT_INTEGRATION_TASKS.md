@@ -161,7 +161,33 @@ Authorial-decision packets to preserve rather than silently resolve:
   logically, and avoids dangling single-sentence fragments unless intentional.
 - [ ] Flag opportunities for student reflection questions/connective prompts
   without inventing new authorial content unilaterally.
-- [ ] Integrate accepted progressive-disclosure/thread/flow fixes.
+- [~] Integrate accepted progressive-disclosure/thread/flow fixes.
+  - [x] Integrated first Vol. II late-governance/conclusion concept-audit fix
+    packet:
+    - Security/Privacy: added compact threat-model fields, LLM tool/RAG
+      boundary framing, ML artifact provenance/release-chain framing, and
+      incident-response evidence requirements.
+    - Robust AI: shortened overlong learning objectives, moved table captions
+      before tables, resolved PSI alert vs. retraining wording, and converted
+      the adversarial-training listing to framework-neutral literal
+      pseudocode.
+    - Sustainable AI: moved the dominant lifecycle-term decision procedure
+      earlier, shortened learning objectives, and promoted average vs.
+      marginal emissions into body prose.
+    - Responsible AI: added sensitive-attribute governance choices, validation
+      evidence by risk class, monitoring-without-ownership fallacy/pitfall, and
+      accountability summary closure.
+    - Conclusion: softened GPT-4/Llama 3 training-infrastructure overclaims,
+      standardized Llama 3 naming, narrowed tensor-parallel/MoE communication
+      language, softened optical/brain synthesis, and added the closing
+      constraint-following diagnostic.
+  - [x] Focused checks passed for the first Vol. II concept-fix packet:
+    `refs --scope inline`, `markup`, `prose`, `punctuation`, `numbers`,
+    `structure`, `tables`, `listings`, `git diff --check`, and a five-chapter
+    Vol. II PDF render for `security_privacy`, `robust_ai`, `sustainable_ai`,
+    `responsible_ai`, and `conclusion`. The partial render still reports
+    expected unresolved cross-references to omitted chapters; full-volume gates
+    remain pending.
 - [ ] Run late-stage LEGO prose-boundary cleanup:
   - [ ] Remove prose-bearing LEGO exports such as `MarkdownStr("at least ...")`;
     LEGO cells should compute and format quantities, while surrounding prose
@@ -300,6 +326,16 @@ Authorial-decision packets to preserve rather than silently resolve:
 
 ## Last Commit Batch
 
+Committed as `ac5f179cf6`: `Complete concept audit ledger`
+
+Tasks advanced in this batch:
+
+- Marked the Vol. I and Vol. II per-chapter concept-coverage audit complete.
+- Added the compact concept-audit integration queue and the standing review
+  patterns from user feedback.
+
+## Previous Commit Batch
+
 Committed as `b403e2cd3a`: `Record vol2 concept audit progress`
 
 Tasks advanced in this batch:
@@ -307,7 +343,7 @@ Tasks advanced in this batch:
 - Recorded Vol. II concept-audit progress through the first late-stage batch
   before the remaining chapter agents completed.
 
-## Previous Commit Batch
+## Earlier Commit Batch
 
 Committed as `ca7a783f9b`: `Record benchmarking image verification`
 
@@ -319,7 +355,7 @@ Tasks advanced in this batch:
 - Marked the benchmarking image replacement/update task complete without
   unnecessary binary churn.
 
-## Earlier Commit Batch
+## Earlier Commit Batch 2
 
 Committed as `c8af0fa6ac`: `Fix audit follow-up diagrams and references`
 
