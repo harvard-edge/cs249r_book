@@ -119,7 +119,7 @@ This book is dedicated to the engineering of this fleet: mastering the physics, 
 # │          Gpt4TrainingScenario.hw_name_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Scenarios, Systems
-from mlsysim.fmt import fmt, fmt_int, check, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt, fmt_count, fmt_int, check, MarkdownStr, fmt_time
 from mlsysim.physics import calc_mtbf_cluster
 
 class Gpt4TrainingScenario:
@@ -145,7 +145,9 @@ class Gpt4TrainingScenario:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt4_gpus_str = fmt_count(num_gpus, label="GPU")
+    gpt4_gpus_approx_str = fmt_count(num_gpus, label="GPU", approx=True)
     gpt4_days_str = fmt_time(gpu_days, 'day', precision=0, style='word')
+    gpt4_days_approx_str = fmt_time(gpu_days, 'day', precision=0, style='word', approx=True)
     hours_per_day_str = fmt_int(HOURS_PER_DAY)
     cluster_fail_day_str = fmt_int(cluster_failures_per_day)
     mtbf_hours_str = fmt_time(cluster_mtbf_hours, 'hour', precision=0, commas=True, style='word')
@@ -169,9 +171,9 @@ Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4Trai
 
 **Math**:
 
-1. **System MTBF**\index{MTBF!system}: For $N$ independent GPUs, $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}} / N =$ `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` divided by `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\approx$ `{python} Gpt4TrainingScenario.mtbf_hours_str`.
-2. **Daily failure rate**\index{Failure Rate!daily}: `{python} Gpt4TrainingScenario.hours_per_day_str` hours / `{python} Gpt4TrainingScenario.mtbf_hours_str` $\approx$ `{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day.
-3. **Total annual failures**\index{Failure Rate!annualized count}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` $\times$ (`{python} Gpt4TrainingScenario.hours_per_year_str` divided by `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str`) $\approx$ `{python} Gpt4TrainingScenario.annual_fails_str` failures per year.
+1. **System MTBF**\index{MTBF!system}: The system MTBF is the component MTBF divided by the number of independent GPUs. With this scenario's values, `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` divided by `{python} Gpt4TrainingScenario.gpt4_gpus_str` is about `{python} Gpt4TrainingScenario.mtbf_hours_str`.
+2. **Daily failure rate**\index{Failure Rate!daily}: `{python} Gpt4TrainingScenario.hours_per_day_str` hours divided by `{python} Gpt4TrainingScenario.mtbf_hours_str` is about `{python} Gpt4TrainingScenario.cluster_fail_day_str` failures per day.
+3. **Total annual failures**\index{Failure Rate!annualized count}: `{python} Gpt4TrainingScenario.gpt4_gpus_str` times (`{python} Gpt4TrainingScenario.hours_per_year_str` divided by `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str`) is about `{python} Gpt4TrainingScenario.annual_fails_str` failures per year.
 
 **Systems insight**: In this regime, the system is always in a state of partial failure. Traditional software recovery (manual restart) collapses; the system must be architected for fault tolerance as a first-class citizen. Hardware can no longer be treated as a reliable abstraction; it is a probabilistic resource that requires constant, automated state preservation (checkpointing).
 
@@ -195,7 +197,49 @@ The recovery machinery that defined the Llama 3 run exists because cluster sizes
 
 Compute requirements have grown exponentially. AlexNet trained on two GTX 580 GPUs for approximately 5--6 days [@krizhevsky2012imagenet]. BERT required 64 Tensor Processing Unit (TPU)[^fn-tpu-systolic] chips for 4 days, roughly 6,144 chip hours [@devlin2018bert].
 
-[^fn-tpu-systolic]: **Tensor Processing Unit (TPU)**: Google's custom ASIC, built around a $256{\times}256$ systolic array\index{TPU!systolic array} that trades GPU flexibility for 15--30$\times$ better performance-per-watt on matrix-heavy ML workloads. The fleet-scale consequence is *what* matters here: TPU v4 pods reach 1.1 exaFLOP/s aggregate, but their dedicated ICI interconnect (4,800 Gb/s per chip) is *what* makes them a single distributed computer rather than a collection of fast chips. Without that interconnect, BERT's 64-chip training would have been communication-bound long before it was compute-bound.
+```{python}
+#| echo: false
+#| label: tpuv4-pod-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TPU V4 POD SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol2-introduction-scale-moment
+# │ Scope: chapter-anchor — TPU pod envelope appears in the early TPU footnote
+# │        and later infrastructure-scale paragraph.
+# │
+# │ Goal: Source TPU v4 pod chip count and aggregate peak compute from MLSysIM.
+# │ Show: 4,096 TPU v4 chips; ~1.1 EFLOP/s aggregate peak.
+# │ How: Systems.Pods.TPUv4_4096.chips × Hardware.Cloud.TPUv4.compute.peak_flops.
+# │
+# │ Imports: mlsysim.core.units (EFLOP, second), mlsysim.fmt
+# │ Exports: TpuV4PodScenario.tpuv4_pod_chips_str,
+# │          TpuV4PodScenario.tpuv4_pod_peak_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Systems
+from mlsysim.fmt import fmt_count, fmt_flop_rate, check
+
+class TpuV4PodScenario:
+    """TPU v4 pod envelope sourced from the systems and hardware registries."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    pod = Systems.Pods.TPUv4_4096
+    chip = Hardware.Cloud.TPUv4
+    chips = pod.chips
+    per_chip_peak_q = chip.compute.peak_flops
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    aggregate_peak_q = chips * per_chip_peak_q
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(chips == 4096, f"TPU v4 pod should contain 4096 chips, got {chips}")
+    check(1.0 < aggregate_peak_q.to(EFLOP / second).magnitude < 1.2, "TPU v4 pod peak should be ~1.1 EFLOP/s")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tpuv4_pod_chips_str = fmt_count(chips, label="chip")
+    tpuv4_pod_peak_str = fmt_flop_rate(aggregate_peak_q, unit=EFLOP / second, precision=1, commas=False)
+```
+
+[^fn-tpu-systolic]: **Tensor Processing Unit (TPU)**: Google's custom ASIC, built around a $256{\times}256$ systolic array\index{TPU!systolic array} that trades GPU flexibility for 15--30$\times$ better performance-per-watt on matrix-heavy ML workloads. The fleet-scale consequence is *what* matters here: TPU v4 pods reach `{python} TpuV4PodScenario.tpuv4_pod_peak_str` aggregate, but their dedicated ICI interconnect (4,800 Gb/s per chip) is *what* makes them a single distributed computer rather than a collection of fast chips. Without that interconnect, BERT's 64-chip training would have been communication-bound long before it was compute-bound.
 
 ```{python}
 #| echo: false
@@ -206,14 +250,19 @@ Compute requirements have grown exponentially. AlexNet trained on two GTX 580 GP
 # │ Context: @sec-vol2-introduction-scale-moment
 # │
 # │ Goal: Provide GPT-3 training compute and model size statistics.
-# │ Show: ~175B parameters; ~3.14e23 FLOPs.
-# │ How: pulling constants from mlsysim.core.units.
+# │ Show: ~175B parameters; ~3.14e23 FLOPs; V100 peak lower-bound days.
+# │ How: pulling model constants from MLSysIM and deriving the V100 lower bound
+# │      from training FLOPs / (accelerators × V100 peak FLOP/s).
 # │
-# │ Imports: mlsysim.core.units (Models.Language.GPT3.parameters, Models.Language.GPT3.training_ops, GB,
-# │          param, BILLION, BYTES_FP32), mlsysim.book (sci, check)
-# │ Exports: gpt3_params_b_str, gpt3_training_ops_str, gpt3_gradient_gb_str
+# │ Imports: mlsysim.core.units (Models.Language.GPT3.parameters, Models.Language.GPT3.training_ops,
+# │          Hardware.Cloud.V100.compute.peak_flops, GB, param, BILLION,
+# │          BYTES_FP32), mlsysim.book (sci, check)
+# │ Exports: gpt3_params_b_str, gpt3_training_ops_str, gpt3_gradient_gb_str,
+# │          gpt3_accelerators_str, gpt3_v100_peak_min_days_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_sci_flops, check, fmt_memory, fmt_params
+from math import ceil
+from mlsysim import Hardware
+from mlsysim.fmt import fmt, fmt_count, fmt_sci_flops, check, fmt_memory, fmt_params, fmt_time, MarkdownStr
 
 class Gpt3TrainingScenario:
     """GPT-3 training and model statistics."""
@@ -222,29 +271,36 @@ class Gpt3TrainingScenario:
     params_q = Models.Language.GPT3.parameters
     params = params_q.to(param).magnitude
     ops = Models.Language.GPT3.training_ops.to(Models.Language.GPT3.training_ops.units).magnitude
+    training_accelerators_q = Models.Language.GPT3.training_accelerators_ref
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params / BILLION
     gradient_q = params * BYTES_FP32  # FP32 gradients
+    training_accelerators = training_accelerators_q.to(count).magnitude
+    v100_peak_min_days_q = (Models.Language.GPT3.training_ops / (training_accelerators * Hardware.Cloud.V100.compute.peak_flops)).to(day)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
+    check(training_accelerators == 1024, f"GPT-3 training reference should be 1024 accelerators, got {training_accelerators}")
+    check(v100_peak_min_days_q.magnitude > 28, "V100 peak lower bound should exceed 28 days")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt_params(params_q, scale="B", precision=0, commas=False)
     gpt3_training_ops_str = fmt_sci_flops(ops * flop)
     gpt3_gradient_gb_str = fmt_memory(gradient_q, unit=GB, precision=0, commas=False)
+    gpt3_accelerators_str = fmt_count(training_accelerators, label="V100 GPU", plural_label="V100 GPUs")
+    gpt3_v100_peak_min_days_str = MarkdownStr(f"at least {fmt_time(ceil(v100_peak_min_days_q.magnitude), day, precision=0, style='word')}")
 ```
 
 GPT-3 consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_str` during training on V100 GPUs in a Microsoft high-bandwidth cluster [@brown2020language]. The surrounding Microsoft infrastructure for this era reached roughly 10,000 GPUs, which is the cluster-size anchor used in @fig-cluster-size-explosion [@patterson2021carbon]. PaLM trained on 6,144 TPU v4 chips for roughly 60 days, consuming approximately $10^{24}$ FLOPs [@chowdhery2022palm]. OpenAI's GPT-4 report did not disclose model size, training hardware, or training compute, so the GPT-4-class scenario in this section should be read as illustrative rather than a published configuration [@openai2023gpt4]. These examples sit within the rapid training-compute growth trend\index{Training!compute evolution} documented by earlier compute-trend studies [@amodei2018ai; @sevilla2022].
 
-| **Model**                | **Year** |        **GPUs/TPUs**        |    **Training Time**    | **Estimated FLOPs** |
-|:-------------------------|:--------:|:---------------------------:|:-----------------------:|:-------------------:|
-| **AlexNet**              |   2012   |            2 GPUs           |        5--6 days        |      ~$10^{18}$     |
-| **BERT-Large**           |   2018   |           64 TPUs           |          4 days         |      ~$10^{20}$     |
-| **GPT-3**                |   2020   | ~1,024 V100 GPUs (run est.) |       ~30--34 days      |      ~$10^{23}$     |
-| **PaLM**                 |   2022   |          6,144 TPUs         |         ~60 days        |      ~$10^{24}$     |
-| **GPT-4-class scenario** |   2023   | ~25,000 GPUs (illustrative) | ~90 days (illustrative) | ~$10^{25}$ scenario |
+| **Model**                | **Year** |                            **GPUs/TPUs**                            |                          **Training Time**                          |                  **Estimated FLOPs**                  |
+|:-------------------------|:--------:|:-------------------------------------------------------------------:|:-------------------------------------------------------------------:|:-----------------------------------------------------:|
+| **AlexNet**              |   2012   |                                2 GPUs                               |                              5--6 days                              |                       ~$10^{18}$                      |
+| **BERT-Large**           |   2018   |                               64 TPUs                               |                                4 days                               |                       ~$10^{20}$                      |
+| **GPT-3**                |   2020   |   `{python} Gpt3TrainingScenario.gpt3_accelerators_str` (run est.)  |     `{python} Gpt3TrainingScenario.gpt3_v100_peak_min_days_str`     | `{python} Gpt3TrainingScenario.gpt3_training_ops_str` |
+| **PaLM**                 |   2022   |                              6,144 TPUs                             |                               ~60 days                              |                       ~$10^{24}$                      |
+| **GPT-4-class scenario** |   2023   | `{python} Gpt4TrainingScenario.gpt4_gpus_approx_str` (illustrative) | `{python} Gpt4TrainingScenario.gpt4_days_approx_str` (illustrative) |                  ~$10^{25}$ scenario                  |
 
 : **Training Compute Evolution**: Growth in hardware scale and training duration across published landmarks and an illustrative GPT-4-class scenario, showing why distributed systems become central as training budgets move from $10^{18}$-scale to the largest training runs. {#tbl-training-compute-evolution}
 
@@ -444,7 +500,7 @@ class InfiniBandScenario:
     ib_ndr_gb_per_s_str = fmt_qty(ndr, GB / second, precision=0, commas=False)
 ```
 
-These scale-induced challenges have driven infrastructure investment by large AI organizations. Meta's Research SuperCluster (RSC), announced in 2022, contained 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbit_per_s_str` InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain 4,096 chips with 1.1 exaFLOP/s of aggregate compute capacity. Microsoft's Azure AI infrastructure has spanned multiple data centers with tens of thousands of GPUs dedicated to AI workloads. The scale of the models dictates the scale of the infrastructure. @Sec-appdx-comm-foundations-alpha-beta catalogs these interconnect bandwidth constants and feeds them into the $\alpha$-$\beta$ communication model, which lets a reader turn a link's bandwidth and latency into a predicted transfer cost.
+These scale-induced challenges have driven infrastructure investment by large AI organizations. Meta's Research SuperCluster (RSC), announced in 2022, contained 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbit_per_s_str` InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain `{python} TpuV4PodScenario.tpuv4_pod_chips_str` with `{python} TpuV4PodScenario.tpuv4_pod_peak_str` of aggregate compute capacity. Microsoft's Azure AI infrastructure has spanned multiple data centers with tens of thousands of GPUs dedicated to AI workloads. The scale of the models dictates the scale of the infrastructure. @Sec-appdx-comm-foundations-alpha-beta catalogs these interconnect bandwidth constants and feeds them into the $\alpha$-$\beta$ communication model, which lets a reader turn a link's bandwidth and latency into a predicted transfer cost.
 
 [^fn-infiniband-rdma-v2]: **InfiniBand (IB)**: Born in 1999 from the merger of Intel's NGIO and the Compaq/IBM Future I/O initiatives, InfiniBand was originally designed to replace the PCI bus. Its defining feature for ML is RDMA (Remote Direct Memory Access)\index{InfiniBand!RDMA}, which bypasses the OS kernel to transfer data directly between application memory on different machines at microsecond-scale latency. HDR IB provides about `{python} InfiniBandScenario.ib_hdr_gb_per_s_str` line-rate bandwidth per link; NDR reaches about `{python} InfiniBandScenario.ib_ndr_gb_per_s_str`. This bandwidth gap compared with common Ethernet links determines whether large-model training is compute-bound or communication-bound.
 
@@ -2026,7 +2082,9 @@ class LinearScalingFallacy:
     realized_speedup_mult_str = fmt_multiple(realized_speedup, precision=1, commas=True)
 ```
 
-The **Linear Scaling Fallacy**\index{Linear Scaling Fallacy} occurs when teams extrapolate resource requirements using power-law relationships without accounting for coordination overhead. $\mathcal{L}(X) = A_{\mathcal{L}} X^{-\alpha_{\text{scale}}} + C_{\mathcal{L}}$ works within validated ranges but fails at the boundaries. A team training 100B-parameter models by extrapolating from 10B-parameter experiments might predict a `{python} LinearScalingFallacy.ideal_speedup_mult_str` improvement but achieve only `{python} LinearScalingFallacy.realized_speedup_mult_str` if coordination and communication overhead consumes `{python} LinearScalingFallacy.coord_overhead_pct_str` of the scaled step time. Production systems designed assuming linear scaling have experienced 2--3$\times$ cost overruns when empirical performance deviated from power-law predictions beyond validated thresholds.
+The **Linear Scaling Fallacy**\index{Linear Scaling Fallacy} occurs when teams extrapolate resource requirements using power-law relationships without accounting for coordination overhead. $\mathcal{L}(X) = A_{\mathcal{L}} X^{-\alpha_{\text{scale}}} + C_{\mathcal{L}}$ works within validated ranges but fails at the boundaries.
+A team training 100B-parameter models by extrapolating from 10B-parameter experiments might predict a `{python} LinearScalingFallacy.ideal_speedup_mult_str` improvement but achieve only `{python} LinearScalingFallacy.realized_speedup_mult_str` if coordination and communication overhead consumes `{python} LinearScalingFallacy.coord_overhead_pct_str` of the scaled step time.
+Production systems designed assuming linear scaling have experienced 2--3$\times$ cost overruns when empirical performance deviated from power-law predictions beyond validated thresholds.
 
 ## Summary {#sec-vol2-intro-summary-66bb}
 
