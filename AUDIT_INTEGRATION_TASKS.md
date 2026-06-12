@@ -72,7 +72,12 @@ work. The detailed backlog remains in the sections below.
   Part I and Conclusion inside Part IV is acceptable when the parts represent
   teaching arcs; separate orphan parts need meaningful headers such as
   "Orientation" and "Synthesis" before they would be preferable.
-- [ ] Update LEGO/fmt/MLSysIM/rule guidance if recurring gaps show up.
+- [x] Update LEGO/fmt/MLSysIM/rule guidance if recurring gaps show up.
+  - [x] Verified `.claude/rules/bib-check.md` contains the BetterBib-first
+    staging workflow for every new or changed bibliography entry.
+  - [x] Verified `.claude/skills/audit-book-artifacts/SKILL.md` records the
+    LEGO/fmt prose-boundary rules, formatter-gap policy, and artifact audit
+    commands for future `/audit <type>` use.
 - [x] Run one read-only parallel chapter concept-coverage audit per Vol. I and
   Vol. II chapter, in canonical chapter order, asking whether each chapter
   teaches the important concepts for an introductory ML systems textbook or an
@@ -273,10 +278,15 @@ Authorial-decision packets to preserve rather than silently resolve:
   - [ ] Algorithms: verify pseudocode/rendered algorithm steps match the prose
     claim, prerequisites have been introduced, and the caption/lead-in explain
     the algorithm at textbook depth.
-- [ ] Codify reusable `.claude` audit guidance/commands for these artifact
+- [x] Codify reusable `.claude` audit guidance/commands for these artifact
   types so future work can invoke `/audit <type>`-style checks grounded in
   rendering, value/precision validation, prose relevance, SSOT rules, and
   chapter-order progressive disclosure.
+  - [x] Verified `AIConfigs` commit `7cade0b` adds
+    `.claude/skills/audit-book-artifacts/SKILL.md` and
+    `.claude/workflows/audit.js`; the skill covers `lego`, `figures`,
+    `tables`, `equations`, `algorithms`, and `listings` in canonical chapter
+    order with progressive-disclosure constraints.
 - [ ] Final local release gates:
   - [ ] Build Volume I HTML locally.
   - [ ] Build Volume I PDF locally.
@@ -295,8 +305,10 @@ Authorial-decision packets to preserve rather than silently resolve:
 
 ## Operating Rules
 
-- Follow `.claude/rules` before editing. `.claude/_rules` is absent in this
-  checkout; `.claude/rules` is the active rule source.
+- Follow `.claude/rules` before editing. In this checkout, `.claude` is an
+  ignored local symlink to
+  `/Users/VJ/GitHub/AIConfigs/projects/MLSysBook/.claude`, which is the active
+  rule source; `.claude/_rules` is absent.
 - Keep `/Users/VJ/GitHub/MLSysBook` as the permanent main reference checkout.
 - Do not push unless the user explicitly asks.
 - Commit incrementally, by one logical batch or one file at a time.
@@ -340,7 +352,7 @@ Authorial-decision packets to preserve rather than silently resolve:
 
 ## Last Commit Batch
 
-Next commit message: `Clean stale MarkdownStr formatter comments`
+Committed as `c1a76e5aa1`: `Clean stale MarkdownStr formatter comments`
 
 Tasks advanced in this batch:
 
