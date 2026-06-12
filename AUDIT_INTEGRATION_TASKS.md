@@ -475,7 +475,7 @@ Spelling/SECID decision packet:
 - [x] Push local `dev` to `origin/dev`.
   - [x] Initial push succeeded for `0102c9f1af`:
     `a6b548774f..0102c9f1af dev -> dev`.
-- [~] Monitor the online workflow every 5--10 minutes after pushing and keep
+- [x] Monitor the online workflow every 5--10 minutes after pushing and keep
   fixing failures until the workflow is green.
   - [x] First online monitoring pass found `📚 Book · ✅ Validate (Dev)` failed
     in `Pre-commit Checks` because GitHub's Python rejected a nested f-string
@@ -488,7 +488,13 @@ Spelling/SECID decision packet:
     `pre-commit run --files book/cli/commands/layout.py`, refreshed Vol. I and
     Vol. II PDF builds in the protected checkout, and reran
     `./book/binder check all --quiet`.
-  - [ ] Push the CI fix and monitor the follow-up workflow to green.
+  - [x] Pushed the CI fix as `323081aa38` and monitored the follow-up workflow
+    to green: Codespell `27430557490`, `📚 Book · ✅ Validate (Dev)`
+    `27430557485`, and CodeQL `27430556376`/`27430556465` all completed
+    successfully.
+  - [x] Confirmed the downstream `📚 Book · 👁️ Preview (Dev)` workflow
+    `27432403153` also completed successfully after the automated contributors
+    update advanced `origin/dev` to `0fdb059c2e`.
 - [x] Final volume-level render/debug gates for vol1+vol2 with zero missing
   refs, missing figures, or build errors.
 - [x] Collect authorial, spelling, and SECID decision packets.
