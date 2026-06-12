@@ -164,13 +164,26 @@ Authorial-decision packets to preserve rather than silently resolve:
   and causal/measurement-validity section.
 - Whether the Conclusion should keep future-looking optical/biological
   efficiency material or close primarily on architectural synthesis.
-- [ ] Run read-only progressive-disclosure audit by chapter using cumulative
+- Whether war-story/debugging callouts should keep compact diagnostic labels
+  (`Context`, `Failure mode`, `Diagnosis`, `Systems lesson`) as a deliberate
+  teaching format, or be converted to narrative prose/table form wherever they
+  appear.
+- Whether Vol. I appendices should keep the current Algorithm/Data/Machine/
+  Assumptions order, or move Machine or Assumptions earlier so hardware
+  constants and machine foundations precede examples that rely on them.
+- Whether Vol. II storage should treat retrieval/vector-index and synthetic
+  data as first-class chapter contract items or only as bridge material after
+  the training/checkpoint fuel-line arc.
+- Whether Vol. II Responsible AI should move the fairness worked example and
+  table out of the Summary into the fairness body section, leaving Summary as
+  pure synthesis.
+- [x] Run read-only progressive-disclosure audit by chapter using cumulative
   prior-chapter context.
-- [ ] Run chapter-thread audit: Purpose, section arc, examples, summary, and
+- [x] Run chapter-thread audit: Purpose, section arc, examples, summary, and
   golden-thread callbacks all point to the same central teaching claim.
-- [ ] Run chapter paragraph-flow audit: every paragraph makes a point, connects
+- [x] Run chapter paragraph-flow audit: every paragraph makes a point, connects
   logically, and avoids dangling single-sentence fragments unless intentional.
-- [ ] Flag opportunities for student reflection questions/connective prompts
+- [x] Flag opportunities for student reflection questions/connective prompts
   without inventing new authorial content unilaterally.
 - [~] Integrate accepted progressive-disclosure/thread/flow fixes.
   - [x] Integrated first Vol. II late-governance/conclusion concept-audit fix
@@ -199,6 +212,42 @@ Authorial-decision packets to preserve rather than silently resolve:
     `responsible_ai`, and `conclusion`. The partial render still reports
     expected unresolved cross-references to omitted chapters; full-volume gates
     remain pending.
+  - [x] Integrated the first progressive-disclosure/thread/flow fix packet
+    from the four read-only agents (`Schrodinger`, `Hubble`, `Bohr`, `Kepler`):
+    - Vol. I early chapters: removed premature architecture and named-hardware
+      specificity from Introduction, ML Systems, ML Workflow, Data Engineering,
+      Data Selection, and Model Compression where the local lesson only needed
+      the D.A.M. constraint or a reference accelerator.
+    - Vol. I prose flow: converted bold-starter body lists in NN Computation,
+      NN Architectures, Frameworks, Model Serving, and ML Workflow into causal
+      prose; strengthened the Framework Platform Analysis opener and the
+      Benchmarking fallacies transition.
+    - Vol. I MLOps: converted feature-store, triggered-retraining, and schema
+      validation listings from product/API examples into framework-neutral
+      contracts and decision logic.
+    - Vol. II prose flow: replaced section self-announcements in Introduction,
+      Compute Infrastructure, Data Storage, Distributed Training, Performance
+      Engineering, Inference, Edge Intelligence, Ops Scale, Robust AI, and
+      Sustainable AI with causal bridges tied to the current system constraint.
+    - Decision-packeted rather than silently edited: war-story/debugging label
+      policy, appendix ordering, retrieval/synthetic-storage chapter contract,
+      additional reflection prompts, and moving the Responsible AI summary
+      worked example.
+  - [x] Focused checks passed for this packet: `lego-dead-code`,
+    `math prose-contract`, `refs --scope inline`, `prose`, `markup`,
+    `punctuation`, `numbers`, and `git diff --check` across all touched
+    chapters.
+  - [x] Chapter PDF verifier passed for all touched chapters in this packet:
+    Vol. I `introduction`, `ml_systems`, `ml_workflow`, `data_engineering`,
+    `nn_computation`, `nn_architectures`, `frameworks`, `data_selection`,
+    `model_compression`, `hw_acceleration`, `benchmarking`, `model_serving`,
+    and `ml_ops`; Vol. II `introduction`, `compute_infrastructure`,
+    `data_storage`, `distributed_training`, `performance_engineering`,
+    `inference`, `edge_intelligence`, `ops_scale`, `robust_ai`, and
+    `sustainable_ai`.
+  - [x] `pre-commit run --files $(git diff --name-only)` passed after
+    autoformatting and the dead LEGO export cleanup. Commit batch:
+    `Integrate progressive audit prose fixes`.
 - [~] Run late-stage LEGO prose-boundary cleanup:
   - [x] Checked the flagged GPT-3 "at least" duration case: the LEGO export now
     computes only the rounded duration, while the table prose supplies the

@@ -792,30 +792,28 @@ Training-serving skew\index{Training-Serving Skew!silent accuracy degradation}\i
 
 A practical example illustrates how training-serving skew manifests in production systems. Consider a recommendation system that shows 8 percent accuracy degradation one month after deployment with no model-code changes. Feature distribution comparison reveals that `user_session_length` has a mean of 45 minutes in training but 12 minutes in serving. The root cause is feature-definition skew: the offline training pipeline computes wall-clock duration from the first event to the last event in a session, while the online serving path counts only foreground-active time after idle gaps are removed. As a result, the model learned thresholds tied to a feature definition that production never actually serves.
 
-Feature stores (building on the data pipelines from @sec-data-engineering) address this problem by computing features once and serving them consistently to both training and serving pipelines. @Lst-feature-store-consistency demonstrates how Feast\index{Feast!feature retrieval} enables unified feature retrieval for both historical training data and online serving, eliminating the divergent code paths that cause skew.
+Feature stores (building on the data pipelines from @sec-data-engineering) address this problem by computing features once and serving them consistently to both training and serving pipelines. @Lst-feature-store-consistency demonstrates the invariant: training retrieves point-in-time historical features, serving retrieves current online features, and both calls resolve to the same versioned feature definition rather than duplicated code paths.
 
 ::: {#lst-feature-store-consistency lst-cap="**Feature Store Consistency**: Unified feature retrieval eliminates training-serving skew by ensuring both pipelines access identical feature computations, reducing accuracy degradation by 5–15 percent in production systems."}
 
 ```{.python}
-from feast import FeatureStore
+feature_definitions = registry.load(version="2026-06-01")
 
-fs = FeatureStore(
-    repo_path="."
-)  # Initialize feature store connection
+training_features = feature_definitions.materialize_historical(
+    entities=training_entities,
+    at_event_time=True,
+    names=["user.session_length", "user.purchase_history"],
+)
 
-# Training: pull historical features with point-in-time correctness
-# training_entities: DataFrame with entity keys (e.g., user_id) and
-# event timestamps
-training_df = fs.get_historical_features(
-    entity_df=training_entities,
-    features=["user:session_length", "user:purchase_history"],
-).to_df()
+serving_features = feature_definitions.lookup_online(
+    entities=[{"user_id": 12345}],
+    names=["user.session_length", "user.purchase_history"],
+)
 
-# Serving: pull online features using same feature definitions
-# Guarantees identical computation logic as training
-online_features = fs.get_online_features(
-    entity_rows=[{"user_id": 12345}],
-    features=["user:session_length", "user:purchase_history"],
+assert training_features.schema == serving_features.schema
+assert (
+    training_features.definition_hash
+    == serving_features.definition_hash
 )
 ```
 
@@ -1271,22 +1269,26 @@ class RetrainingAnchor:
     daily_decay_str = fmt_percent(daily_decay_pct / 100, precision=0, commas=False, style='symbol')
 ```
 
-Triggered retraining\index{Retraining!triggered updates} ties the retraining decision to observed degradation. It optimizes compute cost by retraining only when monitoring detects performance loss or drift beyond thresholds, but it requires robust telemetry and careful calibration to avoid false positives or missed degradation. @Lst-ops-triggered-retraining illustrates a configuration that initiates retraining based on accuracy drops, feature drift, or prediction distribution shifts. Concretely, for a fraud detection model with a `{python} RetrainingAnchor.daily_decay_str` daily decay rate, daily retraining is the economic "sweet spot" where retraining cost matches the loss from stale predictions.
+Triggered retraining\index{Retraining!triggered updates} ties the retraining decision to observed degradation. It optimizes compute cost by retraining only when monitoring detects performance loss or drift beyond thresholds, but it requires robust telemetry and careful calibration to avoid false positives or missed degradation. @Lst-ops-triggered-retraining expresses the trigger as a decision function rather than a deployment-specific configuration file: retrain when the measured loss from staleness exceeds the cost and risk of a new training run. Concretely, for a fraud detection model with a `{python} RetrainingAnchor.daily_decay_str` daily decay rate, daily retraining is the economic "sweet spot" where retraining cost matches the loss from stale predictions.
 
-::: {#lst-ops-triggered-retraining lst-cap="**Triggered Retraining Configuration**: This example defines three trigger conditions for automatic retraining (accuracy degradation, feature drift measured by PSI, and prediction distribution shift) with configurable thresholds and time windows."}
+::: {#lst-ops-triggered-retraining lst-cap="**Triggered Retraining Decision**: The decision combines quality loss, feature drift, prediction shift, and retraining cost so automatic retraining fires only when the expected benefit exceeds the operational risk."}
 
-```{.yaml}
-# Example triggered retraining configuration
-triggers:
-  - metric: accuracy
-    threshold: 0.05  # 5 percentage-point accuracy drop
-    window: 7d
-  - metric: feature_drift_psi
-    threshold: 0.2
-    features: [user_age_bucket, purchase_amount_bin]
-  - metric: prediction_distribution_shift
-    threshold: 0.1
-    window: 24h
+```{.python}
+quality_loss = baseline_accuracy - current_accuracy
+feature_drift = max(population_stability_index(features))
+prediction_shift = distribution_distance(
+    baseline_predictions, live_predictions
+)
+
+benefit = estimate_value_recovered(
+    quality_loss=quality_loss,
+    feature_drift=feature_drift,
+    prediction_shift=prediction_shift,
+)
+risk = retraining_cost + validation_cost + rollout_risk
+
+if benefit > risk and validation_data_is_fresh():
+    schedule_retraining_run()
 ```
 
 :::
@@ -2368,22 +2370,16 @@ Proactive alerting mechanisms notify teams when anomalies or threshold violation
 
 Model and infrastructure monitoring tracks outputs. By the time output metrics degrade, however, the underlying problem may have existed for days or weeks. Data quality monitoring\index{Data Quality!proactive monitoring}\index{Data Quality Monitoring!input validation} catches issues before they propagate through the system. In production ML, monitoring inputs is often more important than monitoring outputs because data issues cause the majority of model degradation. The first guardrail is executable input validation: schema expectations reject malformed batches before inference, turning a data-quality assumption into a testable contract.
 
-::: {#lst-ops-schema-validation lst-cap="**Input Data Validation with Great Expectations**: Schema validation rules check column existence, data types, null values, and statistical bounds to catch data quality issues before they propagate to model inference."}
+::: {#lst-ops-schema-validation lst-cap="**Input Data Validation**: Schema validation rules check column existence, data types, null values, and statistical bounds to catch data quality issues before they propagate to model inference."}
 
 ```{.python}
-# Example using Great Expectations
-expect_column_to_exist(column="user_id")
-expect_column_values_to_be_of_type(
-    column="timestamp", type_="datetime"
-)
-expect_column_values_to_not_be_null(column="feature_a")
+schema.require_column("user_id")
+schema.require_type("timestamp", "datetime")
+schema.require_non_null("feature_a")
 
-# Statistical bounds catch value anomalies
-expect_column_values_to_be_between(
-    column="age", min_value=0, max_value=120
-)
-expect_column_mean_to_be_between(
-    column="purchase_amount", min_value=10, max_value=1000
+schema.require_range("age", min_value=0, max_value=120)
+schema.require_mean_between(
+    "purchase_amount", min_value=10, max_value=1000
 )
 ```
 
@@ -2391,7 +2387,7 @@ expect_column_mean_to_be_between(
 
 ##### Input data validation {#sec-ml-operations-input-data-validation-8471}
 
-Schema\index{Schema Validation!structural data checks}[^fn-schema-validation-ml] validation catches structural problems before they reach the model. @Lst-ops-schema-validation demonstrates common validation rules using Great Expectations\index{Great Expectations!schema validation}, including column existence checks, type enforcement, null detection, and statistical bounds.
+Schema\index{Schema Validation!structural data checks}[^fn-schema-validation-ml] validation catches structural problems before they reach the model. @Lst-ops-schema-validation demonstrates common validation rules, including column existence checks, type enforcement, null detection, and statistical bounds.
 
 [^fn-schema-validation-ml]: **Schema Validation**\index{Schema Validation!data quality}: The rules in @lst-ops-schema-validation prevent silent data contract violations, such as a feature column changing from an integer to a float or a new category appearing that was absent during training. Without this input-level guardrail, downstream model monitoring cannot distinguish a data quality error from a true performance regression, masking the root cause. A single schema mismatch in a critical feature can invalidate over 90 percent of a prediction batch.
 

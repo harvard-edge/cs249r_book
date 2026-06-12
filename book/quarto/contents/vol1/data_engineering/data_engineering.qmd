@@ -198,7 +198,7 @@ $$ \text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Da
 # │ How: Calculate required bandwidth for ResNet-50 inference at peak TFLOP/s.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_rate, fmt_percent, fmt_flop_rate
+from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_rate, fmt_percent
 from mlsysim.core.units import GB, MB, second, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -245,14 +245,13 @@ class FeedingProblem:
     disk_bw_mb_per_s_str = fmt_qty(disk_bw, MB / second, precision=0, commas=False)
     feeding_tax_pct_str = fmt_percent(feeding_tax_pct / 100, precision=1, commas=False, style='symbol')
     img_per_s_str = fmt_rate(round(img_per_sec), 'img/s', precision=0, commas=True)
-    accelerator_peak_tflop_per_s_str = fmt_flop_rate(h.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
 ```
 
 ### The feeding problem: Flow rate and the "feeding tax" {#sec-data-engineering-feeding-problem}
 
 Data gravity establishes the cost of moving the entire mass; **The Feeding Problem**\index{Feeding Problem!definition} establishes the cost of delivering it. In the Hennessy & Patterson tradition, we analyze this as a **Flow Rate**\index{Flow Rate!definition} problem: the struggle to saturate a high-throughput "Machine" from a low-bandwidth "Data" source.
 
-According to the iron law, the system is only as fast as its slowest term. If an A100 running ResNet-50 can process `{python} FeedingProblem.img_per_s_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mb_per_s_str`, the expensive silicon sits idle. This A100 example is a point-in-time hardware anchor for the flow-rate calculation; @sec-hardware-acceleration explains the accelerator details. We quantify this as **The Feeding Tax**\index{Feeding Tax!definition}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. Feeding the `{python} FeedingProblem.accelerator_peak_tflop_per_s_str` accelerator in this example often requires `{python} FeedingProblem.req_bw_gb_per_s_str` transfer rates, forcing the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
+According to the iron law, the system is only as fast as its slowest term. If a high-throughput accelerator running an image model can process `{python} FeedingProblem.img_per_s_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mb_per_s_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!definition}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the accelerator spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. Feeding the reference accelerator in this example often requires `{python} FeedingProblem.req_bw_gb_per_s_str` transfer rates, forcing the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa.
 
 These physical properties also carry an energy cost: as data moves farther from the processor, movement increasingly dominates the budget.
 
@@ -334,7 +333,7 @@ These principles operate at the level of individual files and batches. At data c
 
 ::: {#nbk-data-engineering-physics-data-gravity .callout-notebook title="The physics of data gravity"}
 
-**Problem**: A `{python} DataGravity.dataset_pb_str` training dataset resides in a US East data center, while a Tensor Processing Unit (TPU) pod is available in US West. Is it faster to move the data or to move the compute?
+**Problem**: A `{python} DataGravity.dataset_pb_str` training dataset resides in a US East data center, while a remote accelerator pod is available in US West. Is it faster to move the data or to move the compute?
 
 **Physics**:
 
@@ -3974,7 +3973,7 @@ class StorageBandwidth:
     s3_workers = int(round((required_bw / s3_bw).to("").magnitude))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(required_bw > 3.0 * GB / second, f"A100 storage budget should be multiple GB/s, got {required_bw_value:.1f}.")
+    check(required_bw > 3.0 * GB / second, f"Reference accelerator storage budget should be multiple GB/s, got {required_bw_value:.1f}.")
     check(sata_utilization_pct < 20, f"SATA utilization should be poor in this scenario, got {sata_utilization_pct}%.")
     check(s3_workers >= 30, f"S3 worker count unexpectedly low: {s3_workers}.")
 
@@ -3998,15 +3997,15 @@ Designing for high-throughput training starts by matching storage throughput to 
 
 ::: {#nbk-data-engineering-storage-bandwidth-budget .callout-notebook title="Storage bandwidth budget"}
 
-**Problem**: What storage configuration keeps an NVIDIA A100 from being data-starved while training ResNet-50? The A100 is a concrete reference accelerator for this budget; @sec-hardware-acceleration explains the device family, while this example uses it to size the data path.
+**Problem**: What storage configuration keeps a reference accelerator from being data-starved while training ResNet-50? @Sec-hardware-acceleration explains the device family later; here, the point is how a compute ceiling becomes a data-path budget.
 
-Start with the compute ceiling. An NVIDIA A100 can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about four GFLOPs for each forward pass, and including the backward training pass raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. The training chapter derives that backward-pass machinery; here, the combined per-image cost is the input to the storage budget. Dividing accelerator peak by model cost gives an upper bound of `{python} StorageBandwidth.max_img_per_s_str`.
+Start with the compute ceiling. The reference accelerator can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about four GFLOPs for each forward pass, and including the backward training pass raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. The training chapter derives that backward-pass machinery; here, the combined per-image cost is the input to the storage budget. Dividing accelerator peak by model cost gives an upper bound of `{python} StorageBandwidth.max_img_per_s_str`.
 
 That compute ceiling becomes a storage requirement once each image must arrive from disk or object storage. With `{python} StorageBandwidth.image_size_kb_str` JPEG-compressed images, the data path must supply
 
 `{python} StorageBandwidth.max_img_per_s_str` $\times$ `{python} StorageBandwidth.image_size_kb_str` per image $\approx$ `{python} StorageBandwidth.required_bw_gb_per_s_str`.
 
-The storage options now have a concrete target: saturating this single A100 requires `{python} StorageBandwidth.required_bw_gb_per_s_str` of sustained bandwidth.
+The storage options now have a concrete target: saturating this accelerator requires `{python} StorageBandwidth.required_bw_gb_per_s_str` of sustained bandwidth.
 
 *   S3 Standard delivers about `{python} StorageBandwidth.s3_bw_mb_per_s_str` per thread, so the pipeline needs `{python} StorageBandwidth.s3_workers_str` before software overhead.
 *   SATA SSDs deliver about `{python} StorageBandwidth.sata_bw_mb_per_s_str` sequentially, making them a bottleneck for this accelerator.
