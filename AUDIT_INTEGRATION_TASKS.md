@@ -472,9 +472,23 @@ Spelling/SECID decision packet:
   - [x] Build Volume II EPUB locally.
 - [x] Run `./book/binder check all --quiet` on fresh final artifacts.
 - [x] Run final pre-commit gates.
-- [ ] Push local `dev` to `origin/dev`.
-- [ ] Monitor the online workflow every 5--10 minutes after pushing and keep
+- [x] Push local `dev` to `origin/dev`.
+  - [x] Initial push succeeded for `0102c9f1af`:
+    `a6b548774f..0102c9f1af dev -> dev`.
+- [~] Monitor the online workflow every 5--10 minutes after pushing and keep
   fixing failures until the workflow is green.
+  - [x] First online monitoring pass found `📚 Book · ✅ Validate (Dev)` failed
+    in `Pre-commit Checks` because GitHub's Python rejected a nested f-string
+    expression with a backslash in `book/cli/commands/layout.py`.
+  - [x] Rewrote the callout block-reference construction to compute the title
+    suffix outside the f-string, making the CLI compatible with Python 3.11 as
+    well as the local Python 3.14 environment.
+  - [x] Verified the CI fix locally with `python3.11 -m py_compile
+    book/cli/commands/layout.py`, `python3.11 ./book/binder help`,
+    `pre-commit run --files book/cli/commands/layout.py`, refreshed Vol. I and
+    Vol. II PDF builds in the protected checkout, and reran
+    `./book/binder check all --quiet`.
+  - [ ] Push the CI fix and monitor the follow-up workflow to green.
 - [x] Final volume-level render/debug gates for vol1+vol2 with zero missing
   refs, missing figures, or build errors.
 - [x] Collect authorial, spelling, and SECID decision packets.

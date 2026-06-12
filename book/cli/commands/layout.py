@@ -3115,9 +3115,10 @@ class LayoutCommand:
             block,
             source_line,
         )
+        title_suffix = f' "{block.title}"' if block.title else ""
         block_ref = (
             f"{block.kind}"
-            f"{f' \"{block.title}\"' if block.title else ''}"
+            f"{title_suffix}"
             f" ({source_file}:{block.start_line}-{block.end_line})"
         )
 
