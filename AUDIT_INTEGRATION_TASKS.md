@@ -284,10 +284,11 @@ Authorial-decision packets to preserve rather than silently resolve:
   - [x] Re-scanned `book/quarto/contents` for `Imports:`/`Exports:` inventory
     boilerplate during the late LEGO cleanup batch; no chapter-source matches
     remain. Commit batch: `Clean late LEGO prose boundaries`.
-  - [ ] Replace any future import/export inventory comments with concise
-    context, goal, and how/derivation notes.
-  - [ ] Keep "Show" phrasing approximate and narrative-facing rather than
-    pinning exact values that may distract future reviewers or LLM passes.
+  - [x] Recorded the forward rule: replace any future import/export inventory
+    comments with concise context, goal, and how/derivation notes.
+  - [x] Recorded the forward rule: keep "Show" phrasing approximate and
+    narrative-facing rather than pinning exact values that may distract future
+    reviewers or LLM passes.
 - [x] After prose-changing work stabilizes, reread all `.claude/rules` and run
   an explicit prose-style compliance pass over touched prose, fixing style,
   voice, pedagogy, progressive-disclosure, and rule-consistency issues.
@@ -491,6 +492,9 @@ Authorial-decision packets to preserve rather than silently resolve:
     exists.
   - Watch for date-sensitive or product-specific claims and either source-check
     them or frame them explicitly as scenarios/point-in-time examples.
+  - Keep every chapter-opening Purpose as one paragraph, and verify that the
+    opening spread keeps Purpose on page 1 with learning objectives starting at
+    the top of the next page.
   - Keep LEGO cells computational: calculations, typed units, and formatted
     quantities belong in LEGO; narrative qualifiers belong in prose.
   - Avoid import/export inventory comments in LEGO cells; prefer concise
@@ -503,6 +507,12 @@ Authorial-decision packets to preserve rather than silently resolve:
     clean diagrams; avoid gray-background soft-rendered figures.
   - Ensure figures, tables, equations, algorithms, captions, and nearby prose
     explain the learner-facing point without over-explaining every detail.
+  - Check margin figures and footnotes against chapter-order progressive
+    disclosure: they should use only concepts already introduced or clearly
+    defined at the point where they appear.
+  - Treat capitalization as a semantic signal. Capitalize formal named
+    frameworks, principles, laws, and artifacts consistently, but do not promote
+    ordinary descriptive phrases to Title Case merely because they are important.
   - Run audits in canonical Vol. I then Vol. II chapter order so progressive
     disclosure and prior-context assumptions remain visible.
 - Do not blindly trust scripts, prior vol2 edits, or audit findings. Inspect
