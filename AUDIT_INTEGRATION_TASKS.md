@@ -110,6 +110,13 @@ work. The detailed backlog remains in the sections below.
     vector SVG using the book palette and training/inference visual encoding.
   - [x] Remove full-canvas gray/border wrappers from the flagged GHG Protocol
     SVG family and the matching Sustainable AI SVG wrapper cases.
+  - [x] Audit all 350 Vol. II SVG figures for repeated font-family mismatch
+    issues; normalize every text-bearing SVG to the `.claude/rules` root
+    Helvetica stack, remove hidden CSS font-family overrides, preserve only
+    intentional monospace code/observability labels, and verify all SVGs render
+    cleanly through contact-sheet inspection.
+  - [x] Center the Inference `batching-strategies.svg` content within its
+    viewport.
 
 ### Concept-Audit Integration Queue
 
