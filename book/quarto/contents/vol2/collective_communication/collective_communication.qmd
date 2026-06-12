@@ -1710,11 +1710,13 @@ These three phases confine most traffic within each node before crossing the slo
 
 ### In-network reduction: SHARP and beyond {#sec-communication-sharp}
 
+The contrast in @fig-sharp-innetwork shows the next step: move the reduction work from endpoint GPUs into the switch ASIC so packets are aggregated while they traverse the fabric.
+
 ::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-Network Reduction (SHARP)**: Side-by-side comparison split by a vertical divider. The left side shows a traditional tree AllReduce performing reduction at intermediate GPUs, incurring multiple store-and-forward delays. The right side shows SHARP offloading the reduction to the network switch ASIC, allowing partial sums to be aggregated at line rate as packets traverse the switch. This eliminates GPU memory traffic and store-and-forward latency, significantly accelerating small-to-medium message collectives." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
 ![](images/svg/sharp-innetwork.svg){width=100%}
 :::
 
-Hierarchical AllReduce reduces the volume of cross-node traffic, but the aggregation still requires multiple network round-trips. As @fig-sharp-innetwork contrasts, an alternative approach eliminates round-trips entirely by performing the reduction inside the network switch itself. NVIDIA's **Scalable Hierarchical Aggregation and Reduction Protocol (SHARP)**[^fn-sharp-innetwork] implements this idea: instead of gradients traveling to a destination GPU for summation, the InfiniBand switch aggregates partial sums as data packets pass through it.
+Hierarchical AllReduce reduces the volume of cross-node traffic, but the aggregation still requires multiple network round-trips. NVIDIA's **Scalable Hierarchical Aggregation and Reduction Protocol (SHARP)**[^fn-sharp-innetwork] implements this idea: instead of gradients traveling to a destination GPU for summation, the InfiniBand switch aggregates partial sums as data packets pass through it.
 
 [^fn-sharp-innetwork]: **SHARP (Scalable Hierarchical Aggregation and Reduction Protocol)**\index{SHARP!in-network reduction}: In-network computing on Quantum InfiniBand switches that performs reduction operations (such as sum, min, and max) as packets traverse an aggregation tree [@graham2020]. Graham et al. report substantially higher reduction bandwidth than host-based algorithms and describe switch-resource limits on outstanding aggregation groups and trees, which can create contention when many collectives compete for the same in-network resources.
 
@@ -1735,6 +1737,8 @@ Communication libraries like NCCL perform **topology detection**\index{Topology 
 The topology detection process begins with hardware enumeration. NCCL queries the PCIe bus to discover GPU placement, NVLink connectivity between GPUs, and NIC-to-PCIe-switch affinity. From this information, it constructs an internal graph where nodes represent GPUs and edges represent physical links with annotated bandwidth and latency. A graph search algorithm then finds communication paths that maximize aggregate bandwidth while minimizing the number of cross-domain hops (transitions between NVLink, PCIe, and InfiniBand domains). This topology-aware path selection is what allows NCCL to approach theoretical peak bandwidth on well-configured systems, while topology-unaware implementations can leave a large fraction of bandwidth unused.
 
 #### Torus topology (TPU pods) {#sec-collective-communication-torus-topology-tpu-pods-68b2}
+
+The dimension-ordered reduction in @fig-torus-reduction shows why torus fabrics use the physical mesh directly instead of pretending the pod is a flat all-to-all network.
 
 ::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-Ordered Reduction on Torus Topology**: In a 2D torus mesh (a simplified representation of 3D TPU pods), AllReduce is decomposed into two sequential steps along the X and Y dimensions. By reducing along one dimension at a time, the system minimizes network diameter and avoids link contention, ensuring that each direct neighbor link operates at full bandwidth." fig-alt="2D grid diagram of nodes in a torus topology. Arrows show sequential reduction along X-axis rings, then Y-axis rings."}
 ![](images/svg/torus-reduction.svg){width=100%}
