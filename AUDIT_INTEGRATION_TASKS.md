@@ -198,16 +198,19 @@ Authorial-decision packets to preserve rather than silently resolve:
   - [x] Checked the flagged GPT-3 "at least" duration case: the LEGO export now
     computes only the rounded duration, while the table prose supplies the
     narrative lower-bound qualifier.
-  - [ ] Remove prose-bearing LEGO exports such as `MarkdownStr("at least ...")`;
-    LEGO cells should compute and format quantities, while surrounding prose
-    supplies narrative qualifiers.
+  - [x] Removed the current obvious prose-bearing `MarkdownStr` export in
+    Vol. I `appendix_data`: the KL-drift scenario prose now lives in Markdown,
+    while LEGO exports typed percentage strings and structural math/vector
+    strings only.
   - [ ] Revisit current and prior LEGO cells for similar prose leakage once the
     quantitative edits stabilize.
 - [~] Run late-stage LEGO header-comment cleanup:
   - [x] Scanned Vol. I and Vol. II QMD headers for stale `Imports:`/`Exports:`
     inventory lines; none remain in the chapter source.
-  - [ ] Replace import/export inventory comments with concise context, goal, and
-    how/derivation notes.
+  - [x] Removed stale formatter comments that still described already-migrated
+    typed formatter outputs as `MarkdownStr` escape hatches.
+  - [ ] Replace any remaining import/export inventory comments with concise
+    context, goal, and how/derivation notes.
   - [ ] Keep "Show" phrasing approximate and narrative-facing rather than
     pinning exact values that may distract future reviewers or LLM passes.
 - [ ] After prose-changing work stabilizes, reread all `.claude/rules` and run
@@ -337,7 +340,32 @@ Authorial-decision packets to preserve rather than silently resolve:
 
 ## Last Commit Batch
 
-Next commit message: `Fix memory capacity display units`
+Next commit message: `Clean stale MarkdownStr formatter comments`
+
+Tasks advanced in this batch:
+
+- Removed stale `MarkdownStr` escape-hatch comments and unused imports from the
+  touched Vol. I and Vol. II QMD files where typed formatters already own unit,
+  percent, count, multiplier, time, currency, memory, and scientific-notation
+  display.
+- Moved Vol. I `appendix_data` KL-drift scenario prose out of LEGO and into the
+  surrounding worked-example Markdown; the LEGO cell now exports typed percent
+  values plus structural vectors/equations.
+- Replaced an ad hoc `MarkdownStr(f"{elements:.1e}")` attention-memory output
+  in Vol. I `nn_architectures` with `fmt_sci`.
+
+Focused checks passed for this batch:
+
+- `lego-prose-literals`, `lego-dead-code`, `math prose-contract`, `numbers`,
+  `refs --scope inline`, `markup`, `prose`, `punctuation`, `git diff --check`,
+  partial Vol. I PDF render for the touched chapters, and partial Vol. II PDF
+  render for the touched chapters. The partial renders reported expected
+  unresolved cross-references to omitted chapters; the full-volume gates remain
+  pending.
+
+## Previous Commit Batch
+
+Committed as `5ce80f1e18`: `Fix memory capacity display units`
 
 Tasks advanced in this batch:
 
@@ -356,7 +384,7 @@ Tasks advanced in this batch:
   a partial Vol. I PDF render for `training,frameworks`, and a partial Vol. II
   PDF render for `appendix_assumptions`.
 
-## Previous Commit Batch
+## Earlier Commit Batch
 
 Committed as `8b588a394f`: `Integrate vol2 governance concept fixes`
 
@@ -365,7 +393,7 @@ Tasks advanced in this batch:
 - Integrated the first Vol. II late-governance/conclusion concept-audit fix
   packet and rendered the touched Vol. II chapters in PDF context.
 
-## Earlier Commit Batch
+## Earlier Commit Batch 2
 
 Committed as `ac5f179cf6`: `Complete concept audit ledger`
 
@@ -375,7 +403,7 @@ Tasks advanced in this batch:
 - Added the compact concept-audit integration queue and the standing review
   patterns from user feedback.
 
-## Earlier Commit Batch 2
+## Earlier Commit Batch 3
 
 Committed as `b403e2cd3a`: `Record vol2 concept audit progress`
 
@@ -384,7 +412,7 @@ Tasks advanced in this batch:
 - Recorded Vol. II concept-audit progress through the first late-stage batch
   before the remaining chapter agents completed.
 
-## Earlier Commit Batch 3
+## Earlier Commit Batch 4
 
 Committed as `ca7a783f9b`: `Record benchmarking image verification`
 
@@ -396,7 +424,7 @@ Tasks advanced in this batch:
 - Marked the benchmarking image replacement/update task complete without
   unnecessary binary churn.
 
-## Earlier Commit Batch 4
+## Earlier Commit Batch 5
 
 Committed as `c8af0fa6ac`: `Fix audit follow-up diagrams and references`
 
@@ -741,7 +769,13 @@ single-sourced, and aligned with the prose that consumes it.
   edits.
 - [ ] Ensure output strings and variable names follow the established style
   everywhere.
-- [ ] Fix pending `MarkdownStr` cleanup where values should use typed formatters.
+- [~] Fix pending `MarkdownStr` cleanup where values should use typed formatters.
+  - [x] Current focused pass removed stale `MarkdownStr` escape-hatch comments,
+    dropped unused imports, moved KL-drift prose out of LEGO, and replaced an
+    ad hoc attention-element scientific-notation string with `fmt_sci`.
+  - [ ] Continue distinguishing legitimate structural `MarkdownStr` uses
+    (labels, formulas, table sentinels, registry names) from numeric values
+    that should use typed formatters.
 - [x] Verify any `all_ai_models` cleanup from the old session is complete.
 
 ## B. Formatter Layer
