@@ -3,10 +3,10 @@
 Status: reconstructed from `/Users/VJ/GitHub/codex-session-recovery.md` and
 raw session `019eb70c-cac4-7c61-9ff3-57a12b8dea45` on 2026-06-11.
 
-Current checkout: `/Users/VJ/GitHub/MLSysBook`
-Current branch: `dev`
-Integrated worktree: `/Users/VJ/GitHub/MLSysBook-audit-integration`
-Integrated branch: `fix/audit-integration`
+Current checkout: `/Users/VJ/GitHub/MLSysBook-audit-final`
+Current branch: `fix/audit-final`
+Protected reference checkout: `/Users/VJ/GitHub/MLSysBook`
+Reference branch: `dev`
 
 ## Current Execution Sequence
 
@@ -177,6 +177,16 @@ Authorial-decision packets to preserve rather than silently resolve:
 - Whether Vol. II Responsible AI should move the fairness worked example and
   table out of the Summary into the fairness body section, leaving Summary as
   pure synthesis.
+- Whether the Vol. I Benchmarking Pareto-frontier thumbnail should become an
+  approved reusable margin schema, be promoted to a numbered body figure, or be
+  removed; it is locally aligned with the Pareto prose, but an auditor flagged
+  it as outside the current margin-device kit.
+- Whether overlong but substantively useful footnotes should be trimmed in
+  place or promoted to body/callout treatment: Vol. I active-learning budget,
+  TPU efficiency, labeling economics, distillation dark knowledge,
+  quantization caveats, explainability vs. interpretability, conservation of
+  complexity; Vol. II least privilege, PUE metric, and related
+  body-like governance/sustainability notes.
 - [x] Run read-only progressive-disclosure audit by chapter using cumulative
   prior-chapter context.
 - [x] Run chapter-thread audit: Purpose, section arc, examples, summary, and
@@ -285,16 +295,37 @@ Authorial-decision packets to preserve rather than silently resolve:
     reviewed entry into Vol. I `references.bib`, and cleaned staging artifacts.
 - [x] Remove the reader-facing `Volume II` subtitle from the Vol. II title page
   if it appears under `Machine Learning Systems at Scale`.
-- [ ] Run a dedicated column-margin figure placement/narration audit:
-  - [ ] Verify every placed margin figure is near the narration it supports.
-  - [ ] Verify each margin figure is useful in that location, not decorative.
-  - [ ] Verify captions, alt text, and surrounding prose make the learner-facing
+- [x] Run a dedicated column-margin figure placement/narration audit:
+  - [x] Verify every placed margin figure is near the narration it supports.
+  - [x] Verify each margin figure is useful in that location, not decorative.
+  - [x] Verify captions, alt text, and surrounding prose make the learner-facing
     connection without over-explaining the miniature visual.
-- [ ] Run a dedicated footnote appropriateness/progressive-disclosure audit:
-  - [ ] Verify each footnote is useful where placed.
-  - [ ] Verify each footnote assumes only concepts introduced earlier in the
+  - [x] Integrated high-confidence Vol. I placement fixes in `training`,
+    `data_selection`, `nn_computation`, and `responsible_engr`.
+  - [x] Integrated high-confidence Vol. II margin fixes in `inference`,
+    `sustainable_ai`, `fault_tolerance`, `fleet_orchestration`, `ops_scale`,
+    `security_privacy`, and `conclusion`.
+  - [x] Removed the redundant Vol. II KV-cache margin ladder beside the
+    numbered `@fig-kv-cache-wall` body figure.
+  - [x] Queued the Pareto-frontier margin-device question as an authorial
+    decision instead of deleting a locally aligned visual.
+- [x] Run a dedicated footnote appropriateness/progressive-disclosure audit:
+  - [x] Verify each footnote is useful where placed.
+  - [x] Verify each footnote assumes only concepts introduced earlier in the
     book or earlier in the same chapter.
-  - [ ] Fix local wording issues and queue authorial decisions separately.
+  - [x] Fix local wording issues and queue authorial decisions separately.
+  - [x] Integrated local self-containedness fixes for cold acronyms and future
+    mechanisms in Vol. I `appendix_machine`, `data_selection`, and
+    `model_serving`, and Vol. II `introduction`, `performance_engineering`,
+    `security_privacy`, `robust_ai`, and `responsible_ai`.
+  - [x] Replaced raw bootloader project URLs in the Vol. II Security/Privacy
+    footnote with bibliography-backed citations after staging entries in a
+    dedicated `.bib`, running BetterBib, rejecting an unrelated metadata swap,
+    smoke-testing with BibTeX, copying only reviewed entries into Vol. II
+    `references.bib`, and deleting staging artifacts after checks passed.
+  - [x] Queued overlong/body-like footnotes as authorial decisions where a
+    safe local edit would change the teaching instrument rather than merely
+    fix progressive disclosure.
 - [ ] Run a late-stage Volume II SVG polish pass after text/layout work,
   including the cited gray-background/soft-rendered diagrams, rectangular arrow
   cleanup, and consistency with the sharper existing SVG style.
@@ -372,6 +403,9 @@ Authorial-decision packets to preserve rather than silently resolve:
   and delete staging artifacts. Do not type or paste raw metadata directly into
   a volume bibliography.
 - Standing review patterns from user feedback:
+  - Put every new or changed bibliography entry through a dedicated staging
+    `.bib` file and BetterBib before copying the reviewed entry into the real
+    volume bibliography.
   - Replace raw URLs with bibliography-backed references when a stable source
     exists.
   - Watch for date-sensitive or product-specific claims and either source-check
@@ -388,6 +422,8 @@ Authorial-decision packets to preserve rather than silently resolve:
     clean diagrams; avoid gray-background soft-rendered figures.
   - Ensure figures, tables, equations, algorithms, captions, and nearby prose
     explain the learner-facing point without over-explaining every detail.
+  - Run audits in canonical Vol. I then Vol. II chapter order so progressive
+    disclosure and prior-context assumptions remain visible.
 - Do not blindly trust scripts, prior vol2 edits, or audit findings. Inspect
   the implementation, run the check, and verify the result.
 - Apply small mechanical fixes autonomously. Queue authorial or structural
@@ -400,6 +436,59 @@ Authorial-decision packets to preserve rather than silently resolve:
   conflict resolution, and commits centralized.
 
 ## Last Commit Batch
+
+Commit batch: `Fix margin and footnote audit findings`
+
+Tasks advanced in this batch:
+
+- Integrated read-only margin audits from `Russell` (Vol. I) and `Hegel` (Vol.
+  II), including verified placement fixes, objective alt-text revisions, and
+  removal of the redundant KV-cache margin thumbnail next to the numbered body
+  figure.
+- Integrated read-only footnote audits from `Pascal` (Vol. I) and `Franklin`
+  (Vol. II), focusing on self-contained acronym/forward-mechanism fixes and
+  local note trimming where the edit did not change the teaching instrument.
+- Added Vol. II bibliography references for U-Boot and coreboot through the
+  mandatory BetterBib-first staging workflow; manually rejected BetterBib's
+  unrelated coreboot metadata swap before merging reviewed entries.
+- Updated the rendered chapter PDF audit artifacts after all touched chapters
+  passed PDF+TeX verification.
+- Preserved the Pareto-margin schema question and overlong footnote promotion
+  questions as authorial-decision packets instead of silently resolving them.
+
+Focused checks passed for this batch:
+
+- `binder check bib` for Vol. II references, `refs --scope inline` for both
+  volumes, `markup`, `prose`, `punctuation`, `numbers`, `figures`, `images`,
+  `labels`, `footnotes`, raw content-URL scans, `git diff --check`, and
+  chapter PDF verifier for the touched Vol. I and Vol. II chapters.
+
+## Previous Commit Batch
+
+Committed as `d4b65cc7fb`: `Integrate progressive audit prose fixes`
+
+Tasks advanced in this batch:
+
+- Integrated the first progressive-disclosure/thread/flow fix packet from the
+  four read-only agents (`Schrodinger`, `Hubble`, `Bohr`, `Kepler`).
+- Removed premature architecture, model-family, and named-hardware specificity
+  from early Vol. I prose where the local teaching claim only needed the
+  D.A.M. constraint or a reference accelerator.
+- Converted several bold-starter body lists and product/API listings into
+  causal prose or framework-neutral contracts.
+- Replaced Vol. II section self-announcements with causal bridges tied to the
+  current system constraint.
+- Preserved authorial-decision packets instead of silently resolving structural
+  policy questions.
+
+Focused checks passed for this batch:
+
+- `lego-dead-code`, `math prose-contract`, `refs --scope inline`, `prose`,
+  `markup`, `punctuation`, `numbers`, `git diff --check`, touched-chapter PDF
+  verification for Vol. I and Vol. II, and `pre-commit run --files $(git diff
+  --name-only)` after autoformatting and dead LEGO export cleanup.
+
+## Previous Commit Batch
 
 Committed as `c1a76e5aa1`: `Clean stale MarkdownStr formatter comments`
 

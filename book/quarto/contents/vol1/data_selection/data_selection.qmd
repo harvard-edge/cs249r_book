@@ -47,6 +47,10 @@ The highest-impact optimization in machine learning operates upstream, before a 
 
 :::
 
+## Data Selection Fundamentals {#sec-data-selection-data-selection-fundamentals-e839}
+
+Data selection gives a clean, well-engineered dataset a systems objective: keep the examples that contribute the most learning per unit of compute cost. The data engineering infrastructure (@sec-data-engineering) established the pipelines for collecting, cleaning, and preparing data, producing well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples, directly shrinking the total operations $(O)$ term in the iron law\index{Iron Law!total operations reduction via data selection} (Principle \ref{pri-iron-law}). The distinction matters: quality asks whether data is correct, while value asks whether correct data is worth the compute spent processing it.
+
 ::: {.column-margin}
 ```{=latex}
 \vspace*{-18mm}
@@ -55,10 +59,6 @@ The highest-impact optimization in machine learning operates upstream, before a 
 
 *Compute supply can outrun high-quality data supply.*
 :::
-
-## Data Selection Fundamentals {#sec-data-selection-data-selection-fundamentals-e839}
-
-Data selection gives a clean, well-engineered dataset a systems objective: keep the examples that contribute the most learning per unit of compute cost. The data engineering infrastructure (@sec-data-engineering) established the pipelines for collecting, cleaning, and preparing data, producing well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples, directly shrinking the total operations $(O)$ term in the iron law\index{Iron Law!total operations reduction via data selection} (Principle \ref{pri-iron-law}). The distinction matters: quality asks whether data is correct, while value asks whether correct data is worth the compute spent processing it.
 
 For decades, the dominant strategy was straightforward: more data, better models. Scaling laws\index{Scaling Laws!data-compute asymmetry}[^fn-scaling-laws-origin] [@kaplan2020scaling; @hoffmann2022chinchilla] confirmed that model performance improves predictably with dataset size, and teams responded rationally by scraping more web pages, labeling more images, and generating more synthetic examples. A critical asymmetry has since emerged. Accelerator fleets can expand usable compute faster than the supply of novel, high-quality human-generated text and images. Much of the easily accessible public web has already been incorporated into large training corpora, and expert labeling capacity grows slowly. This asymmetry, which this chapter calls the **Data Wall**\index{Data Wall!definition}[^fn-data-wall-scaling], has inverted the optimization priority from "get more data" to "get more from existing data." This chapter develops that inversion into an engineering discipline: the static and dynamic methods that choose which examples to train on, the self-supervised and synthetic approaches that manufacture value when labeled data runs short, and the cost models and decision frameworks that determine when selection is worth the effort.
 
@@ -2317,12 +2317,6 @@ The return on investment is substantial for labeling, marginal per-task compute,
 
 The cost structure explains *why* the fine-tuning paradigm dominates production ML. The pretraining cost is high but amortized across many downstream applications, while fine-tuning cost remains low on a per-task basis.
 
-::: {.column-margin}
-![](images/svg/vol1_data_selection_margin_002.svg){width="100%" fig-alt="One red source node at left fans out through arrows to several blue downstream task nodes at right."}
-
-*One pretraining corpus defect propagates into many downstream tasks.*
-:::
-
 Contrast the two bar charts in @fig-amortization-comparison to see this cost structure in action. Training from scratch (left) incurs the full cost for each task independently. The foundation model approach (right) pays a large upfront pretraining cost but then fine-tunes each task at a fraction of the per-task cost.
 
 ::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires `{python} FoundationCostAmortization.cost_scratch_per_task_str` per task (`{python} FoundationCostAmortization.cost_scratch_total_str` total for `{python} FoundationCostAmortization.n_tasks_str` tasks). The foundation model approach (right) pays `{python} FoundationCostAmortization.cost_pretrain_value_str` upfront for pretraining but reduces each subsequent task to just `{python} FoundationCostAmortization.cost_finetune_value_str`. At `{python} FoundationCostAmortization.n_tasks_str` tasks the totals are comparable (`{python} FoundationCostAmortization.cost_scratch_total_str` vs. `{python} FoundationCostAmortization.cost_foundation_total_str`), but the per-task marginal cost drops by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`, and the crossover favoring the foundation model occurs around `{python} FoundationCostAmortization.crossover_tasks_str` tasks." fig-alt="Two bar charts side by side. Left (train from scratch) shows equal per-task GPU-hour bars totaling the scratch-training cost. Right (foundation model) shows one tall pretraining bar followed by short fine-tuning bars per task."}
@@ -2403,6 +2397,12 @@ plt.close()
 The amortization economics favor self-supervised learning broadly, though different SSL methods occupy different points on the cost-efficiency frontier. SimCLR-style contrastive learning\index{Contrastive Learning!batch-based methods} [@chen2020simclr] benefits from very large batches (4,096+ samples) and yields excellent downstream performance with minimal labeled data. MoCo [@he2020] instead uses a queue-based dictionary and momentum encoder to decouple the number of negatives from the mini-batch, reducing the need for such large batches while preserving strong transfer performance. Masked modeling methods work with smaller batches at the cost of more training iterations. Generative pretraining follows empirical power-law scaling with data, parameters, and compute, making it attractive for foundation models where pretraining cost is amortized across thousands of tasks. These methods rely on architecture families introduced in @sec-network-architectures; what matters for data selection is the shared conclusion: self-supervised pretraining can substantially increase the value of limited labeled data. Instead of labeling every task-specific example from scratch, practitioners fine-tune on hundreds or thousands of labeled samples while inheriting knowledge distilled from large unlabeled corpora.
 
 The multiplicative advantage of SSL creates the **foundation model paradigm**\index{Foundation Model!definition}\index{Self-Supervised Learning!foundation model paradigm}[^fn-foundation-model-risk] [@bommasani2021opportunities] that defines modern ML systems. The data selection principles discussed throughout this chapter (coreset selection, curriculum learning, active learning) remain relevant within the foundation model paradigm. Pretraining corpus curation applies the same deduplication and quality filtering techniques at web scale, and fine-tuning data selection determines which labeled examples maximize downstream task performance.
+
+::: {.column-margin}
+![](images/svg/vol1_data_selection_margin_002.svg){width="100%" fig-alt="One red source node at left fans out through arrows to several blue downstream task nodes at right."}
+
+*One pretraining corpus defect propagates into many downstream tasks.*
+:::
 
 [^fn-foundation-model-risk]: [offset=-70mm]**Foundation Model**\index{Foundation Model!homogenization risk}: The name emphasizes that these models serve as a shared base for many downstream tasks, but this creates a single point of failure. Defects in the foundation model's pretraining data (biases, factual errors, memorized private content) propagate to every application built upon it. From a systems perspective, this homogenization risk means that data selection quality during pretraining has an outsized blast radius: a curation error that would affect one task in the train-from-scratch paradigm now affects thousands of downstream deployments.
 
@@ -2504,7 +2504,7 @@ The choice among generative approaches is a cost-fidelity decision. Generative A
 
 Synthetic data's greatest limitation is the **domain gap**\index{Domain Gap!synthetic vs. real data},[^fn-domain-gap-shift] the statistical difference between generated and real-world data, as illustrated in @fig-domain-gap. A model trained only on synthetic data learns a decision boundary optimized for the wrong distribution, potentially performing well on synthetic test data while failing on real deployment data.
 
-[^fn-domain-gap-shift]: **Domain Gap**: The statistical divergence between synthetic and real data distributions, measurable via Maximum Mean Discrepancy (MMD) or Frechet Inception Distance (FID). Research on visual domain adaptation showed that classifiers trained on one visual domain (webcam images) can lose 20--40 percent accuracy when applied to another (DSLR photos of the same objects). For synthetic data in ML systems, this gap represents a direct accuracy penalty on the serving path: a model trained on simulator-generated images may report high validation accuracy on synthetic test data while failing silently on real deployment data, creating exactly the kind of training-serving skew that is hardest to detect in production. \index{Domain Gap!training-serving skew}
+[^fn-domain-gap-shift]: **Domain Gap**: The statistical divergence between synthetic and real data distributions, measurable with distribution-distance metrics such as Maximum Mean Discrepancy (MMD) or Frechet Inception Distance (FID). Research on visual domain adaptation showed that classifiers trained on one visual domain (webcam images) can lose 20--40 percent accuracy when applied to another (DSLR photos of the same objects). For synthetic data in ML systems, this gap represents a direct accuracy penalty on the serving path: a model trained on simulator-generated images may report high validation accuracy on synthetic test data while failing silently on real deployment data, creating exactly the kind of training-serving skew that is hardest to detect in production. \index{Domain Gap!training-serving skew}
 
 Two complementary strategies address this distribution mismatch. Domain randomization\index{Domain Randomization!bridging synthetic-real gap}[^fn-domain-randomization-sim] takes an aggressive approach: rather than trying to match the real world precisely, it trains on wildly varied synthetic data by randomizing lighting, textures, backgrounds, and camera parameters during generation.
 
@@ -3116,13 +3116,7 @@ class RandomAccessPenalty:
 
 High-efficiency systems mitigate this penalty through several techniques. Small proxy models (a 10-million-parameter "student" scoring on behalf of a 7-billion-parameter "teacher") reduce selection cost by an order of magnitude while preserving ranking quality. Because proxy scoring is a pure inference workload, the inference runtime can execute it in lower-precision formats (INT8 or FP8) or dispatch it to inference-optimized runtimes, keeping the scoring pass well within the budget imposed by the selection inequality while the subsequent training pass retains the higher precision required for stable gradient updates. Embedding indices such as FAISS\index{Vector Index!embedding-based selection}[^fn-faiss-selection] reduce selection from full linear scans to index-dependent approximate nearest-neighbor searches, often sublinear in practice. Both approaches share a common principle: decoupling selection from training enables independent optimization.
 
-[^fn-faiss-selection]: [offset=-70mm] **FAISS (Facebook AI Similarity Search)**: Provides GPU-accelerated approximate nearest-neighbor search using inverted file indices (IVF), product quantization (PQ), and hierarchical navigable small world graphs (HNSW). A single GPU can search billions of vectors in milliseconds, transforming selection from $\mathcal{O}(N)$ linear scans into approximate nearest-neighbor searches that are often sublinear in practice. For data selection pipelines, FAISS enables three critical operations at billion-scale: $k$-nearest-neighbor retrieval for coreset selection, embedding-based deduplication, and stratified clustering for balanced sampling. Without this infrastructure, embedding-based selection would be computationally intractable at web scale. \index{FAISS!selection infrastructure}
-
-::: {.column-margin}
-![](images/svg/vol1_data_selection_margin_003.svg){width="100%" fig-alt="A threshold curve with a dashed red marker labeled e equals R; the region beyond the threshold is the over-echo zone."}
-
-*Data echoing helps only until the pipeline ratio threshold; beyond it, diversity falls.*
-:::
+[^fn-faiss-selection]: [offset=-70mm] **FAISS (Facebook AI Similarity Search)**: Provides GPU-accelerated approximate nearest-neighbor search using several approximate index families rather than exact full scans. A single GPU can search billions of vectors in milliseconds, transforming selection from $\mathcal{O}(N)$ linear scans into approximate nearest-neighbor searches that are often sublinear in practice. For data selection pipelines, FAISS enables three critical operations at billion-scale: $k$-nearest-neighbor retrieval for coreset selection, embedding-based deduplication, and stratified clustering for balanced sampling. Without this infrastructure, embedding-based selection would be computationally intractable at web scale. \index{FAISS!selection infrastructure}
 
 Data loaders\index{Data Loading!shard-based sequential I/O} also require architectural adaptation. Sharded dataset formats package many samples into sequentially readable chunks; WebDataset and FFCV are concrete examples. Shuffle buffers\index{Shuffle Buffer!approximate random sampling} are a Data-Machine co-design: the loader reads large sequential shards into memory and samples randomly within the buffer, preserving sequential I/O throughput while achieving the statistical benefits of random sampling. In multi-accelerator training, each worker maintains its own shuffle buffer over a non-overlapping shard, so the randomization is local rather than global; rare classes or boundary cases that appear in only a few shards receive uneven coverage across workers unless the coreset is first stratified and shards are balanced before distribution.
 
@@ -3142,6 +3136,12 @@ R = \frac{T_{\text{data pipeline}}}{T_{\text{GPU training}}}
 $$
 
 If $R > 1$ (data pipeline is the bottleneck), an echo factor $e < R$ partially recovers idle GPU cycles, while $e \geq R$ can fully use GPU capacity if echoed samples remain statistically useful. Increasing $e$ beyond $R$ no longer improves utilization and can reduce sample diversity. If $R < 1$ (GPU is the bottleneck), data echoing provides no benefit. A realistic scenario makes these trade-offs concrete.
+
+::: {.column-margin}
+![](images/svg/vol1_data_selection_margin_003.svg){width="100%" fig-alt="A threshold curve with a dashed red marker labeled e equals R; the region beyond the threshold is the over-echo zone."}
+
+*Data echoing helps only until the pipeline ratio threshold; beyond it, diversity falls.*
+:::
 
 ```{python}
 #| echo: false
