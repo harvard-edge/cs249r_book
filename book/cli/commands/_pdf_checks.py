@@ -69,6 +69,7 @@ class PdfValidationResult:
     pdf_path: Path
     issues: list[PdfIssue] = field(default_factory=list)
     checks: list[PdfCheckItem] = field(default_factory=list)
+    margin_geometry: object | None = None
 
     @property
     def ok(self) -> bool:
@@ -271,6 +272,33 @@ def verify_pdf(
     return issues
 
 
+def scan_margin_geometry_summary(pdf_path: Path):
+    """Return the Binder-native margin geometry summary, or ``None``.
+
+    ``None`` means PyMuPDF is unavailable or the scan failed; callers should
+    treat that as skipped rather than as a clean geometry result.
+    """
+    try:
+        try:
+            from cli.checks.margin_geometry import scan_pdf
+        except ImportError:
+            from book.cli.checks.margin_geometry import scan_pdf
+    except ImportError:
+        return None
+    try:
+        return scan_pdf(pdf_path)
+    except Exception:
+        return None
+
+
+def scan_margin_geometry(pdf_path: Path):
+    """Return ``(overlaps, overflows)`` from rendered margin geometry."""
+    summary = scan_margin_geometry_summary(pdf_path)
+    if summary is None:
+        return None
+    return summary.overlaps, summary.overflows
+
+
 def verify_volume_pdf(
     quarto_dir: Path,
     volume: str,
@@ -280,6 +308,12 @@ def verify_volume_pdf(
     """Verify the default built PDF for ``volume`` (``vol1`` or ``vol2``)."""
     pdf_path = default_pdf_path(quarto_dir, volume)
     issues = verify_pdf(pdf_path, log_path=log_path)
+    geom_summary = scan_margin_geometry_summary(pdf_path) if pdf_path.is_file() else None
+    geom = (
+        (geom_summary.overlaps, geom_summary.overflows)
+        if geom_summary is not None
+        else None
+    )
 
     checks = [
         PdfCheckItem("artifact", "PDF artifact exists", pdf_path.is_file()),
@@ -323,6 +357,18 @@ def verify_volume_pdf(
             skipped=log_path is None,
             is_warning=True,
         ),
+        PdfCheckItem(
+            "margin-geometry",
+            (
+                f"Margin geometry: {geom[0]} overlap(s), {geom[1]} overflow "
+                "(PyMuPDF; run `binder layout overlaps` to localize)"
+                if geom is not None
+                else "Margin geometry scan (PyMuPDF unavailable)"
+            ),
+            geom is None or geom[0] == 0,
+            skipped=geom is None,
+            is_warning=True,
+        ),
     ]
 
     return PdfValidationResult(
@@ -330,6 +376,7 @@ def verify_volume_pdf(
         pdf_path=pdf_path,
         issues=issues,
         checks=checks,
+        margin_geometry=geom_summary,
     )
 
 

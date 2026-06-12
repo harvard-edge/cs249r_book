@@ -197,7 +197,7 @@ Requires Python 3.10+ and project dependencies (Rich, etc.). Run `./book/binder 
 
 New or migrated Binder checks should show concrete bad/good examples in two places:
 
-1. The checker module docstring, so an implementer or LLM can open the code and immediately see the intended pattern.
+1. The checker module docstring, so an implementer or automated repair pass can open the code and immediately see the intended pattern.
 2. The CLI documentation, so authors can understand the failure without reverse-engineering the regex.
 
 `./book/binder check cli` catches command-surface drift:
@@ -226,12 +226,12 @@ Binder check output is designed to be actionable from the terminal and from `--j
 | Field | Meaning |
 |-------|---------|
 | `file` + `line` | The exact source location to edit. |
-| `code` | Stable error code, useful for documentation and LLM repair prompts. |
+| `code` | Stable error code, useful for documentation and automated repair prompts. |
 | `message` | Short diagnosis of the problem. |
 | `context` | The offending source snippet; human output labels this as `source:`. |
 | `suggestion` | Optional canonical rewrite guidance; human output labels this as `fix:`. |
 
-For automated repair or LLM review, prefer:
+For automated repair or structured review, prefer:
 
 ```bash
 ./book/binder check math --scope multiplier-style --path book/quarto/contents/vol1/training/training.qmd --json --quiet
@@ -326,10 +326,88 @@ Canonical namespace for repairs and housekeeping. `maintain` is an alias for `fi
 
 | Command | Purpose |
 |---------|---------|
+| `layout --vol1\|--vol2` | High-level auto-layout planner: build/reuse the volume PDF, scan main-flow whitespace and margin geometry, and emit one strategy-routed plan. |
 | `layout check <pdf>` | Flag pages with excessive bottom whitespace and likely next-page culprits. |
 | `layout margins <pdf>` | Gate margin figures/notes that overflow into the footer or off the page. |
 | `layout collisions <pdf>` | Find body content that invades running header/footer bands. |
 | `layout tables --vol1\|--vol2` | Render only source tables using production PDF geometry, emit JSON/CSV metrics, and create contact sheets for fast visual review. |
+
+Recommended release-polish entrypoint:
+
+```bash
+./book/binder build pdf --vol1 --layout
+./book/binder build pdf --vol2 --layout
+```
+
+Use `./book/binder layout --vol1 --no-build` when the PDF was already built.
+
+#### Auto-layout contract for structured repair
+
+Use the high-level planner unless debugging one scanner. It is the stable
+machine contract:
+
+```bash
+./book/binder layout --vol1 --no-build --json /tmp/layout-plan.json
+```
+
+The JSON plan has:
+
+| Field | Meaning |
+|-------|---------|
+| `volume`, `pdf`, `pages_scanned`, `page_count` | Render target metadata. |
+| `workflow.next_phase` | The phase to repair first: `1-main-flow`, `2-margin-calibration`, or `clean`. |
+| `workflow.phase_order` | The required order: main prose flow first, margin calibration second. |
+| `counts.by_phase` | Split between prose-flow and margin-calibration findings. |
+| `counts.by_channel` | Split between `main-flow` and `margin-geometry`. |
+| `counts.by_strategy` | Routing count by repair strategy. |
+| `items[]` | Ordered work queue, back-to-front within chapters where page shifts matter. |
+
+Each `items[]` row has the common fields `phase`, `channel`, `strategy`,
+`confidence`, `automatable`, `deferred`, `ready`, `chapter`, `sheet`, `label`,
+`source_file`, `source_line`, `section`, and `suggested_fix`. Main-flow rows
+also include `gap_pct`, `culprit`, and `detail`; margin rows include `issue`,
+`side`, `snippet`, and rendered geometry detail.
+
+Route by `channel` and `strategy`, not by free-form prose:
+
+| Strategy | Channel | Meaning |
+|----------|---------|---------|
+| `callout-tcbbreak` | `main-flow` | High-confidence callout gap. Insert or move `{=latex}` `\tcbbreak` at the semantic boundary named in `suggested_fix`, then rebuild. |
+| `source-flow-callout-adjacent` | `main-flow` | Rendered symptom is a callout/box, but source localization landed outside the callout. Inspect adjacent table/listing/lead-in/heading before editing the callout. |
+| `table-source-flow`, `figure-source-flow`, `paragraph-source-flow` | `main-flow` | Move source flow first; use sizing/spacing only after a rebuild confirms source-flow did not solve it. |
+| `margin-offset` | `margin-geometry` | Apply or adjust a footnote/sidenote `[offset=...]`. |
+| `margin-vspace` | `margin-geometry` | Apply or adjust in-block `.column-margin` `\vspace*{...}`. |
+| `margin-stack-solve` | `margin-geometry` | Multi-object margin packing problem; solve offsets/vspace together or send to visual review. |
+| `accept-*` | either | Structural whitespace; do not edit unless a human explicitly asks. |
+| `manual-review`, `margin-geometry-review`, `callout-localize` | either | Low-confidence source mapping; inspect visually before applying. |
+
+Safe automation loop:
+
+1. Build or reuse the PDF: `build pdf --volN --layout` or `layout --volN --no-build`.
+2. Work only on rows where `phase == workflow.next_phase`.
+3. Apply only rows where `ready=true`, `automatable=true`, and `confidence=high`.
+4. Rebuild the volume PDF.
+5. Re-run the planner and repeat until no ready rows remain in the current phase.
+6. When `workflow.next_phase` becomes `2-margin-calibration`, turn on the margin guides/debug frames for visual calibration before accepting margin edits.
+7. Leave low-confidence rows as plan output for visual review.
+
+Phase 1 repairs main prose flow: callout splits, source-flow moves around
+tables/figures, paragraph adjustments, and structural accepts. Do not tune
+margin offsets while Phase 1 has active rows; those values are unstable until
+the prose page breaks stop moving.
+
+Phase 2 repairs margin geometry after prose flow is stable. For margin rows,
+turn on the LaTeX guides in `book/quarto/tex/header-includes.tex` by changing
+`\MarginDebugfalse` to `\MarginDebugtrue`, rebuild the affected PDF, inspect the
+red margin-note frames, then restore `\MarginDebugfalse` before committing.
+Use `[offset=...]` for footnote/sidenote rows and in-block `.column-margin`
+`\vspace*{...}` for margin figure/caption rows.
+
+Low-level commands still expose `layout_strategy`:
+
+- `layout check --csv` for main-flow whitespace only.
+- Native `layout margins --csv` for margin geometry only.
+- `layout collisions` for header/footer band debugging.
 
 ---
 
