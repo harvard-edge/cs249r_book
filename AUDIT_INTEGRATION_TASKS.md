@@ -67,16 +67,15 @@ work. The detailed backlog remains in the sections below.
   teaching arcs; separate orphan parts need meaningful headers such as
   "Orientation" and "Synthesis" before they would be preferable.
 - [ ] Update LEGO/fmt/MLSysIM/rule guidance if recurring gaps show up.
-- [~] Run one read-only parallel chapter concept-coverage audit per Vol. I and
+- [x] Run one read-only parallel chapter concept-coverage audit per Vol. I and
   Vol. II chapter, in canonical chapter order, asking whether each chapter
   teaches the important concepts for an introductory ML systems textbook or an
   advanced ML systems-at-scale volume without trying to become encyclopedic.
   - [x] Vol. I concept-coverage auditors completed for Chapters 1--16; findings
     are queued as local edit candidates vs. authorial-decision packets.
-  - [~] Vol. II concept-coverage auditors are in progress; Chapters 1--3
-    completed read-only and closed in commit `c8af0fa6ac`; Chapters 4--6
-    completed read-only after that commit; Chapters 7--12 are running in
-    canonical order.
+  - [x] Vol. II concept-coverage auditors completed for Chapters 1--16 plus the
+    conclusion; findings are queued below as local edit candidates vs.
+    authorial-decision packets.
 - [x] Run read-only appendix-flow audits for Vol. I and Vol. II appendices:
   verify the appendix sequence, internal flow, and reference-vs-teaching role
   make sense from the actual text rather than only the table of contents.
@@ -86,6 +85,74 @@ work. The detailed backlog remains in the sections below.
   - [x] Vol. II appendix-flow audit completed; copyedit PDF appendix order was
     aligned with canonical Vol. II appendix order, and remaining appendix
     content findings are queued for later prose decisions.
+
+### Concept-Audit Integration Queue
+
+Vol. I concept coverage completed read-only for Chapters 1--16. Local edit
+themes to integrate where they are clearly supported by existing chapter
+context:
+
+- Chapter 1--4: tighten early FLOP/s, weight, lifecycle, reliability,
+  dataset-split, adversarial-ingestion, and provenance scaffolding without
+  teaching later hardware/quantization too early.
+- Chapter 5--8: add or refine tensor-layout, calibration, RNG/determinism,
+  export validation, checkpoint-state, and workflow/MLOps callbacks where they
+  strengthen the current teaching claim.
+- Chapter 9--12: improve sampling/manifest/dedup language, compression
+  distinctions, profiling/device-residency bridges, and benchmarking
+  statistical-power/cost-normalized framing.
+- Chapter 13--16: strengthen ingress contracts, ML-quality SLOs, retirement
+  lifecycle, risk-tiering, human review capacity, and conclusion closure, while
+  keeping advanced Volume II previews scoped as previews.
+
+Vol. II concept coverage completed read-only for Chapters 1--16 plus
+Conclusion. Local edit candidates:
+
+- Chapters 1--3: introduce C³ earlier, rebalance scaling/serving coverage,
+  clarify power-wall placement, define injection bandwidth, bridge collectives
+  before AllReduce detail, and source or soften time-sensitive hardware claims.
+- Chapters 4--6: add storage publication/restore/control-plane framing,
+  clarify scaling/process-group/collective ordering concepts, bridge early
+  α-β/ring calculations, and keep tool/API catalog material scoped.
+- Chapters 7--9: add RTO/RPO and serving-headroom framing, scheduler
+  control-plane/resource-lifecycle language, storage-aware placement, robust
+  performance-experiment discipline, and fix local terminology/table/caption
+  issues.
+- Chapters 10--12: strengthen admission-control, version/cache invalidation,
+  edge-cloud decision framing, privacy-control stack, ML ops control-plane,
+  quality SLO/error-budget framing, and exact-claim citation/scenario wording.
+- Chapter 13 Security/Privacy: add compact asset/boundary/adversary/control,
+  ML artifact supply-chain, LLM tool/RAG boundary, incident-response, and
+  validation framing while avoiding a DP mini-chapter rewrite.
+- Chapter 14 Robust AI: shorten long learning objectives, fix table caption
+  placement, resolve drift-response tension, add calibration/selective
+  prediction and robust release-gate framing where compact, and avoid expanding
+  into an incident catalog.
+- Chapter 15 Sustainable AI: move the dominant-lifecycle-term decision
+  procedure earlier, promote average-vs-marginal emissions into body prose,
+  consolidate repeated lifecycle/PUE explanations, and keep policy content
+  tied to systems control planes.
+- Chapter 16 Responsible AI: add sensitive-attribute governance choices,
+  validation evidence by risk class, sociotechnical accountability in summary,
+  and a monitoring-without-remediation pitfall; source-check current legal
+  claims before publication.
+- Conclusion: remove/soften GPT-4 training-infrastructure overclaims, narrow
+  TP/MoE traffic language, reduce uncited future-facing optical/brain material
+  into synthesis, standardize Llama 3 naming, and add a compact closing method
+  for following constraints across C³ and the fleet stack.
+
+Authorial-decision packets to preserve rather than silently resolve:
+
+- Whether each overfull late chapter should remain a survey or be tightened
+  around a single systems decision procedure.
+- Whether DP accountant depth belongs in Security/Privacy body text or an
+  appendix/notebook-depth lane.
+- Whether semantic/generative robustness and LLM/agent safety need dedicated
+  sections or only bridges to adjacent chapters.
+- Whether Responsible AI should introduce a formal risk-management lifecycle
+  and causal/measurement-validity section.
+- Whether the Conclusion should keep future-looking optical/biological
+  efficiency material or close primarily on architectural synthesis.
 - [ ] Run read-only progressive-disclosure audit by chapter using cumulative
   prior-chapter context.
 - [ ] Run chapter-thread audit: Purpose, section arc, examples, summary, and
@@ -203,6 +270,23 @@ work. The detailed backlog remains in the sections below.
   reviewed entry into the target `references.bib`, run project bib/ref checks,
   and delete staging artifacts. Do not type or paste raw metadata directly into
   a volume bibliography.
+- Standing review patterns from user feedback:
+  - Replace raw URLs with bibliography-backed references when a stable source
+    exists.
+  - Watch for date-sensitive or product-specific claims and either source-check
+    them or frame them explicitly as scenarios/point-in-time examples.
+  - Keep LEGO cells computational: calculations, typed units, and formatted
+    quantities belong in LEGO; narrative qualifiers belong in prose.
+  - Avoid import/export inventory comments in LEGO cells; prefer concise
+    context, goal, and derivation comments.
+  - Use reader-facing decimal units such as GB unless binary units are the
+    teaching point; internal calculations may use binary units when appropriate.
+  - Track repeated formatter shapes such as FPS and add new `fmt_*` helpers only
+    with a corpus applicability, output, prose, and precision pass.
+  - Keep SVGs crisp, white/transparent, and visually consistent with existing
+    clean diagrams; avoid gray-background soft-rendered figures.
+  - Ensure figures, tables, equations, algorithms, captions, and nearby prose
+    explain the learner-facing point without over-explaining every detail.
 - Do not blindly trust scripts, prior vol2 edits, or audit findings. Inspect
   the implementation, run the check, and verify the result.
 - Apply small mechanical fixes autonomously. Queue authorial or structural
@@ -216,6 +300,15 @@ work. The detailed backlog remains in the sections below.
 
 ## Last Commit Batch
 
+Committed as `b403e2cd3a`: `Record vol2 concept audit progress`
+
+Tasks advanced in this batch:
+
+- Recorded Vol. II concept-audit progress through the first late-stage batch
+  before the remaining chapter agents completed.
+
+## Previous Commit Batch
+
 Committed as `ca7a783f9b`: `Record benchmarking image verification`
 
 Tasks advanced in this batch:
@@ -226,7 +319,7 @@ Tasks advanced in this batch:
 - Marked the benchmarking image replacement/update task complete without
   unnecessary binary churn.
 
-## Previous Commit Batch
+## Earlier Commit Batch
 
 Committed as `c8af0fa6ac`: `Fix audit follow-up diagrams and references`
 
