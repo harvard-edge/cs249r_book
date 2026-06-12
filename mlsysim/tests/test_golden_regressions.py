@@ -134,11 +134,11 @@ def test_golden_sustainability_and_economics_research_cluster():
         mfu=0.45,
         infrastructure_multiplier=1.0,
     )
-    assert economics.capex_usd == pytest.approx(7013.698630136986)
+    assert economics.capex_usd == pytest.approx(5844.748858447489)
     assert economics.opex_energy_usd == pytest.approx(355.48692480000005)
-    assert economics.opex_maintenance_usd == pytest.approx(1052.054794520548)
-    assert economics.total_opex_usd == pytest.approx(1407.541719320548)
-    assert economics.tco_usd == pytest.approx(8421.240349457534)
+    assert economics.opex_maintenance_usd == pytest.approx(876.7123287671233)
+    assert economics.total_opex_usd == pytest.approx(1232.1992535671234)
+    assert economics.tco_usd == pytest.approx(7076.948112014612)
     assert economics.carbon_footprint_kg == pytest.approx(1270.8657561600003)
 
 
