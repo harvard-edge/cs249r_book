@@ -30,3 +30,9 @@ class ResizeObserverStub {
   disconnect() {}
 }
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+
+// jsdom doesn't implement scrollIntoView; components that keep an active row in
+// view (e.g. CommandPalette) call it, and tests spy on it.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function () {};
+}
