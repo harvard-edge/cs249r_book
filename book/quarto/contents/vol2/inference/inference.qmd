@@ -1088,40 +1088,15 @@ Consider a vision classification service with the following requirements:
 
 For a single replica with Poisson arrivals at $\lambda_{\text{arr}} =$ `{python} DynamicBatchingResNet50.per_replica_qps_str`:
 
-**Option A: No batching (batch=1)**
+The three choices in @tbl-dynamic-batching-resnet50-policy differ only in how much latency budget they convert into batch size:
 
-- Service time: `{python} DynamicBatchingResNet50.svc_b1_ms_str` per request
-- Utilization: `{python} DynamicBatchingResNet50.rho_a_eq_math` (impossible, system is overloaded)
+| **Policy**  | **Batching window**                                 | **Expected batch**                                   | **Per-request compute**                             | **Utilization**                                  | **Latency outcome**                                               |
+|:------------|:----------------------------------------------------|:-----------------------------------------------------|:----------------------------------------------------|:-------------------------------------------------|:------------------------------------------------------------------|
+| No batching | 0 ms                                                | 1 request                                            | `{python} DynamicBatchingResNet50.svc_b1_ms_str`    | `{python} DynamicBatchingResNet50.rho_a_eq_math` | Overloaded; cannot meet demand                                    |
+| Dynamic B   | `{python} DynamicBatchingResNet50.twindow_b_ms_str` | `{python} DynamicBatchingResNet50.eb_b_str` requests | `{python} DynamicBatchingResNet50.per_req_b_ms_str` | `{python} DynamicBatchingResNet50.rho_b_eq_math` | ~`{python} DynamicBatchingResNet50.lat_b_ms_str` mean, ~30 ms P99 |
+| Dynamic C   | `{python} DynamicBatchingResNet50.twindow_c_ms_str` | `{python} DynamicBatchingResNet50.eb_c_str` requests | `{python} DynamicBatchingResNet50.per_req_c_ms_str` | `{python} DynamicBatchingResNet50.rho_c_eq_math` | ~`{python} DynamicBatchingResNet50.lat_c_ms_str` mean, ~42 ms P99 |
 
-This configuration *cannot* meet demand. Batching is required.
-
-**Option B: Dynamic batching** with $B_{\text{max}}=$ `{python} DynamicBatchingResNet50.bmax_b_str`, $T_{\text{window}}=$ `{python} DynamicBatchingResNet50.twindow_b_ms_str`
-
-Expected requests per window: `{python} DynamicBatchingResNet50.eb_b_eq_math`
-
-With `{python} DynamicBatchingResNet50.eb_b_str` requests per batch:
-
-- Inference time: approximately `{python} DynamicBatchingResNet50.inf_b_ms_str` (interpolating between batch=1 and batch=32)
-- Per-request compute: `{python} DynamicBatchingResNet50.inf_b_ms_str`/`{python} DynamicBatchingResNet50.eb_b_str` = `{python} DynamicBatchingResNet50.per_req_b_ms_str`
-- Maximum batch delay: `{python} DynamicBatchingResNet50.twindow_b_ms_str`
-- Expected total latency: ~`{python} DynamicBatchingResNet50.lat_b_ms_str` mean, ~30 ms P99
-
-Utilization: `{python} DynamicBatchingResNet50.rho_b_eq_math` (sustainable)
-
-**Option C: Dynamic batching** with $B_{\text{max}}=$ `{python} DynamicBatchingResNet50.bmax_c_str`, $T_{\text{window}}=$ `{python} DynamicBatchingResNet50.twindow_c_ms_str`
-
-Expected requests per window: `{python} DynamicBatchingResNet50.eb_c_eq_math`
-
-With `{python} DynamicBatchingResNet50.eb_c_str` requests per batch:
-
-- Inference time: approximately `{python} DynamicBatchingResNet50.inf_c_ms_str`
-- Per-request compute: `{python} DynamicBatchingResNet50.inf_c_ms_str`/`{python} DynamicBatchingResNet50.eb_c_str` = `{python} DynamicBatchingResNet50.per_req_c_ms_str`
-- Maximum batch delay: `{python} DynamicBatchingResNet50.twindow_c_ms_str`
-- Expected total latency: ~`{python} DynamicBatchingResNet50.lat_c_ms_str` mean, ~42 ms P99
-
-Utilization: `{python} DynamicBatchingResNet50.rho_c_eq_math` (comfortable)
-
-**Trade-off**: Option C achieves about `{python} DynamicBatchingResNet50.capacity_gain_pct_str` higher per-replica capacity, or `{python} DynamicBatchingResNet50.util_drop_pct_str` lower utilization, at the cost of higher average latency (`{python} DynamicBatchingResNet50.lat_c_ms_str` vs. `{python} DynamicBatchingResNet50.lat_b_ms_str`). Both meet the `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99 SLO.
+: **Dynamic batching policy comparison**: Option C achieves about `{python} DynamicBatchingResNet50.capacity_gain_pct_str` higher per-replica capacity, or `{python} DynamicBatchingResNet50.util_drop_pct_str` lower utilization, at the cost of higher average latency. Both dynamic batching policies meet the `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99 SLO. {#tbl-dynamic-batching-resnet50-policy}
 
 **Systems insight**: Dynamic batching is useful only when the latency budget has slack. The serving policy converts unused latency headroom into higher throughput, but the same window would violate an already tight SLO.
 
@@ -4613,6 +4588,8 @@ GPU memory contention is the most severe: a tenant with unexpectedly long sequen
 
 ::: {#nbk-inference-quantifying-noisy-neighbor-impact .callout-notebook title="Quantifying noisy neighbor impact"}
 
+**Problem**: Quantify how one tenant's burst changes latency for every tenant in an unprotected shared pool.
+
 ```{python}
 #| echo: false
 #| label: noisy-neighbor-quota-scenario
@@ -4691,9 +4668,11 @@ Tenant 3 bursts to `{python} NoisyNeighborImpact.tenant_burst_qps_str` (5$\times
 
 : **Noisy neighbor without isolation (unprotected pool)**: All tenants violate their latency SLO when one tenant bursts. {#tbl-inference-noisy-neighbor-no-isolation tbl-colwidths="[26,20,24,30]"}
 
+**Systems insight**: Shared capacity raises utilization only if the serving system also enforces isolation. Without quotas, the effective SLO becomes the worst burst any tenant can generate.
+
 :::
 
-::: {#nbk-inference-noisy-neighbor-quotas .callout-notebook title="Noisy neighbor with per-tenant quotas"}
+::: {#exmp-inference-noisy-neighbor-quotas .callout-example title="Noisy neighbor with per-tenant quotas"}
 
 Enabling per-tenant quotas contains the impact to the offending tenant alone (@tbl-inference-noisy-neighbor-quotas):
 
@@ -4705,6 +4684,8 @@ Enabling per-tenant quotas contains the impact to the offending tenant alone (@t
 | **Tenants 4-10** |        `{python} NoisyNeighborImpact.tenant_base_qps_num_str` each         | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
 
 : **Noisy neighbor with per-tenant quotas**: Per-tenant QPS, p99 latency, and SLO status after enabling per-tenant resource quotas in the same workload. {#tbl-inference-noisy-neighbor-quotas}
+
+**Systems insight**: Quotas turn a platform-wide failure into a local admission-control decision: the bursting tenant is throttled, while protected tenants keep their latency contract.
 
 :::
 

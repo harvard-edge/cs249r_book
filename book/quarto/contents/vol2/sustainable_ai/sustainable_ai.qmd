@@ -1424,7 +1424,6 @@ class MatMulEnergyAnalysis:
     ai_large_eq_math = fmt_math(rf"\text{{AI}} = {n_large}/6 = {ai_large:.0f}")
     comp_large_eq_math = fmt_math(rf"2 \times 10^9 \times {e_compute:.0f} \text{{ pJ}} = {comp_large_pj/1e9:.0f}")
     mem_large_eq_math = fmt_math(rf"3 \times 10^6 \times {bytes_fp32:.0f} \times {e_move:.0f} \text{{ pJ}} = {mem_large_pj/1e9:.2f}")
-    vec_bytes_eq_math = fmt_math((rf"3N_{{\text{{vec}}}} \times {bytes_fp32:.0f} = {vec_bytes:,.0f}").replace(",", "{,}"))
     ai_vec_eq_math = fmt_math(rf"\text{{AI}} = {n_vec}/{vec_bytes:.0f} = {ai_vec:.3f}")
     comp_vec_eq_math = fmt_math(rf"{n_vec} \times {e_compute:.0f} \text{{ pJ}} = {comp_vec_pj/1e9:.5f}")
     mem_vec_eq_math = fmt_math(rf"{vec_bytes:.0f} \times {e_move:.0f} \text{{ pJ}} = {mem_vec_pj/1e9:.5f}")
@@ -1451,29 +1450,15 @@ Consider matrix multiplication $C = A \times B$ for $N_{\text{mat}}{\times}N_{\t
 - Bytes: $3N_{\text{mat}}^2 \times 4$ bytes (read matrices $A$ and $B$, write matrix $C$, each FP32 = 4 bytes)
 - Arithmetic intensity: $\text{AI} = \frac{2N_{\text{mat}}^3}{12N_{\text{mat}}^2} = \frac{N_{\text{mat}}}{6}$ FLOP/byte
 
-**Step 2**: Determine energy-limiting factor.
-For small matrices ($N_{\text{mat}}$ = `{python} MatMulEnergyAnalysis.n_small_str`):
+**Step 2**: Determine the energy-limiting factor. @Tbl-matmul-energy-bottleneck-comparison compares the three regimes directly.
 
-- `{python} MatMulEnergyAnalysis.ai_small_eq_math` FLOP/byte (at crossover)
-- Compute energy: `{python} MatMulEnergyAnalysis.comp_small_eq_math` mJ
-- Memory energy: `{python} MatMulEnergyAnalysis.mem_small_eq_math` mJ
-- Balanced: both compute and memory contribute equally
+| **Workload**                                                                 | **Arithmetic intensity**                                   | **Compute energy**                                    | **Memory energy**                                    | **Optimization priority**           |
+|:-----------------------------------------------------------------------------|:-----------------------------------------------------------|:------------------------------------------------------|:-----------------------------------------------------|:------------------------------------|
+| Small matrix ($N_{\text{mat}}=$ `{python} MatMulEnergyAnalysis.n_small_str`) | `{python} MatMulEnergyAnalysis.ai_small_eq_math` FLOP/byte | `{python} MatMulEnergyAnalysis.comp_small_eq_math` mJ | `{python} MatMulEnergyAnalysis.mem_small_eq_math` mJ | Balanced at the crossover           |
+| Large matrix ($N_{\text{mat}} = 1000$)                                       | `{python} MatMulEnergyAnalysis.ai_large_eq_math` FLOP/byte | `{python} MatMulEnergyAnalysis.comp_large_eq_math` mJ | `{python} MatMulEnergyAnalysis.mem_large_eq_math` mJ | Improve compute efficiency          |
+| Vector addition ($N_{\text{vec}} = 1000$)                                    | `{python} MatMulEnergyAnalysis.ai_vec_eq_math` FLOP/byte   | `{python} MatMulEnergyAnalysis.comp_vec_eq_math` mJ   | `{python} MatMulEnergyAnalysis.mem_vec_eq_math` mJ   | Reduce data movement through fusion |
 
-For large matrices ($N_{\text{mat}} = 1000$):
-
-- `{python} MatMulEnergyAnalysis.ai_large_eq_math` FLOP/byte (compute-bound)
-- Compute energy: `{python} MatMulEnergyAnalysis.comp_large_eq_math` mJ (dominates)
-- Memory energy: `{python} MatMulEnergyAnalysis.mem_large_eq_math` mJ (negligible)
-- Optimization priority: Focus on compute efficiency
-
-For element-wise operations ($N_{\text{vec}} = 1000$, vector addition):
-
-- FLOPs: $N_{\text{vec}} = 1000$ (one addition per element)
-- Bytes: `{python} MatMulEnergyAnalysis.vec_bytes_eq_math` bytes (read two vectors, write one)
-- `{python} MatMulEnergyAnalysis.ai_vec_eq_math` FLOP/byte (memory-bound)
-- Compute energy: `{python} MatMulEnergyAnalysis.comp_vec_eq_math` mJ (negligible)
-- Memory energy: `{python} MatMulEnergyAnalysis.mem_vec_eq_math` mJ (dominates)
-- Optimization priority: Reduce data movement through fusion
+: **Energy bottleneck comparison**: The same energy model classifies small dense work, large dense work, and element-wise work by their dominant energy term. {#tbl-matmul-energy-bottleneck-comparison}
 
 **Systems insight**: Energy optimization follows the same bottleneck logic as latency optimization. Dense matrix multiply rewards efficient arithmetic; element-wise work rewards reducing memory movement.
 
