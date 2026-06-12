@@ -1311,30 +1311,13 @@ However, scripting imposes constraints on what Python constructs are supported. 
 
 The TorchScript IR represents operations using the `aten` namespace for core tensor operations, the `prim` namespace for primitives and control flow, static types for every value, and static single-assignment\index{Single Static Assignment!compiler IR} (SSA) form, where each variable is assigned exactly once to simplify compiler analysis. This IR enables optimizations independent of Python: operator fusion combines adjacent operations into single kernels, constant folding evaluates constant expressions at compile time, dead code elimination removes unused operations, and memory optimization reuses buffers when possible. @Tbl-tracing-vs-scripting summarizes the key trade-offs between these two approaches.
 
-#### Modern compilation: torch.compile {#sec-ml-frameworks-modern-compilation-torchcompile-d025}
+#### Modern compilation: Graph-capture JIT {#sec-ml-frameworks-modern-compilation-torchcompile-d025}
 
 The previous approaches force a choice: write flexible code (eager execution) or fast code (static graphs). Modern JIT compilation attempts to eliminate this trade-off by automatically compiling eager code into optimized graphs\index{Graph Compilation!eager-mode capture} with minimal developer intervention.
 
-PyTorch 2.0's `torch.compile` [@ansel2024] represents this approach: developers write natural Python code that executes eagerly during development, but the framework automatically captures and compiles hot paths into optimized kernels for production. @Lst-torch-compile-intro shows the basic usage pattern:
+Graph-capture JIT systems follow the same architectural pattern across frameworks. The first execution observes tensor operations, records a graph region guarded by assumptions about shapes, dtypes, layouts, and control flow, lowers that region into an intermediate representation, applies fusion and layout optimizations, and caches executable code for later calls that satisfy the same guards. Unsupported Python code does not disappear; it forms a graph boundary where execution returns to the eager runtime. PyTorch 2.0's `torch.compile` [@ansel2024] is a concrete instance of this pattern, but the systems idea is broader than the API: compilation pays only when captured regions are long enough and stable enough to amortize capture, lowering, code generation, and cache-management costs.
 
-::: {#lst-torch-compile-intro lst-cap="**torch.compile**: PyTorch 2.0's compiler captures execution on first call, compiles an optimized kernel, then reuses compiled code for subsequent calls with matching shapes."}
-
-```{.python}
-@torch.compile
-def forward(x):
-    return x * 2 + 1
-
-
-# First call: captures execution, compiles optimized kernel (~100 ms)
-result1 = forward(torch.tensor([1.0]))
-
-# Reuse compiled code (same shape avoids recompilation)
-forward(torch.tensor([2.0]))
-```
-
-:::
-
-The compilation overhead in these examples (approximately 100 ms to compile the first time, microseconds to reuse) illustrates why torch.compile is so effective. The deeper question is *why* compilation helps so much. The answer lies in understanding the physics of software overhead. Dispatch costs that seem negligible for a single operation---a few microseconds here and there---compound dramatically across the thousands of operations in a forward pass. A simple fusion estimate makes the overhead concrete.
+This explains why compilation helps so much when it works. Dispatch costs that seem negligible for a single operation---a few microseconds here and there---compound dramatically across the thousands of operations in a forward pass. A simple fusion estimate makes the overhead concrete.
 
 ```{python}
 #| echo: false
@@ -1514,128 +1497,19 @@ plt.close()
 
 :::
 
-Automating this fusion is the design goal behind PyTorch 2.0's `torch.compile`[^fn-torch-compile-hybrid], which captures eager code and compiles it into fused kernels without requiring users to write custom CUDA.[^fn-cuda-dispatch-overhead]
+Automating this fusion is the design goal behind graph-capture compilers such as PyTorch 2.0's `torch.compile`[^fn-torch-compile-hybrid]. They capture eager tensor regions and compile them into fused kernels without requiring engineers to write custom CUDA.[^fn-cuda-dispatch-overhead]
 
-[^fn-torch-compile-hybrid]: **`torch.compile`**: It enables this automatic fusion by intercepting Python bytecode (via TorchDynamo) to extract a computational graph from unmodified eager code. This graph is then compiled into optimized kernels, trading a one-time compilation delay for a permanent 1.3--2$\times$ throughput gain on transformer models by reducing kernel launch overhead. \index{torch.compile!hybrid execution}
+[^fn-torch-compile-hybrid]: **`torch.compile`**: It is a 2020s PyTorch implementation of graph-capture JIT compilation: bytecode interception extracts tensor regions from eager programs, an intermediate representation carries those regions to compiler backends, and cached generated code is reused while guard conditions continue to hold. \index{torch.compile!hybrid execution}
 
 [^fn-cuda-dispatch-overhead]: **CUDA (Compute Unified Device Architecture)**: NVIDIA's parallel computing platform (2007) serving as the foundational layer between high-level Python operations and GPU silicon. When PyTorch executes `torch.matmul(A, W)`, the call traverses the framework's dispatcher, selects a cuBLAS kernel, and launches it on the GPU. Each launch incurs 5--20 $\mu$s of CPU-side overhead. For small operations, this dispatch overhead $(L_{\text{lat}})$ exceeds the useful compute time, which is why compilation (fusing $N_{\text{ops}}$ operations into one kernel launch) yields speedups proportional to the reduction in launch count rather than the reduction in arithmetic. \index{CUDA!dispatch overhead}
 
-##### Architecture: Three-stage compilation pipeline {.unnumbered}
+The durable engineering questions are therefore conceptual, not API-specific. A capture compiler needs a frontend that identifies graph regions in an eager program, an intermediate representation that separates the captured computation from Python, and a backend that lowers the region to hardware-specific code. It also needs a guard system: the compiled artifact is valid only while assumptions about tensor rank, dtype, layout, and control-flow path remain true. When a guard fails, the runtime must recompile or fall back to eager execution.
 
-torch.compile consists of three coordinated components, each handling a distinct phase of the compilation process:
+Graph breaks mark the boundary where compilation stops applying. Data-dependent Python control flow, unsupported library calls, I/O, custom Python objects, and highly variable shapes all shorten compiled regions. Each break reintroduces dispatch overhead and may require tensors to move between compiled code and the eager runtime. This is why graph-break analysis belongs in performance engineering: the relevant metric is not whether compilation is enabled, but how much of the hot path remains inside long, stable compiled regions.
 
-1. **TorchDynamo**\index{TorchDynamo!graph capture} (graph capture): Intercepts Python bytecode execution using CPython's PEP 523 frame evaluation API, the interpreter hook that lets a tool take control when a Python frame is evaluated. Unlike `torch.jit.trace`, which records a single execution path and silently ignores alternative branches, TorchDynamo also captures operations during execution but inserts *graph breaks* when it encounters unsupported code (print statements, arbitrary Python), ensuring correctness rather than silent failure. The current graph is finalized for compilation, unsupported code executes eagerly, and a new graph begins after.
+Backends occupy different points on the flexibility-performance spectrum. A general JIT backend optimizes ordinary training and serving workloads with moderate compilation cost; a specialized inference backend can apply deeper fusion, precision lowering, and autotuning when the deployment target is fixed; an ahead-of-time mobile or embedded runtime removes even more flexibility to gain footprint and predictability. The same rule governs all of them: the narrower the target and the more stable the graph, the more optimization the compiler can safely perform.
 
-2. **FX Graph**\index{FX Graph!intermediate representation} (intermediate representation): Operations captured by TorchDynamo are converted to FX graph format, PyTorch's node-based directed acyclic graph where each node represents an operation with explicit inputs and outputs. The FX graph serves as PyTorch's analog to LLVM IR: a standardized representation that separates frontend (Python code capture) from backend (hardware-specific code generation). This design allows different backends such as TorchInductor, Open Neural Network Exchange (ONNX) Runtime, and TensorRT to consume FX graphs and enables optimization passes such as dead code elimination, constant folding, and pattern matching for fusion opportunities.
-
-3. **TorchInductor**[^fn-torchinductor-codegen] (code generation): The default backend that compiles FX graphs to optimized machine code. For CUDA GPUs, TorchInductor generates Triton\index{Triton!GPU kernel language}[^fn-triton-kernel-language] kernels, a Python-based GPU kernel language that compiles to Parallel Thread Execution (PTX)[^fn-ptx-portability]. For CPUs, it generates C++ code with vectorization instructions (AVX2, AVX-512). TorchInductor applies three key optimizations: kernel fusion (combining operations to reduce memory traffic), memory layout optimization (choosing tensor layouts that minimize access overhead), and autotuning (measuring performance across implementation variants to select the fastest).
-
-[^fn-torchinductor-codegen]: **TorchInductor**: The use of Triton to generate GPU code is a deliberate trade-off that prioritizes fast JIT compilation speed over achieving maximum hardware performance. This makes on-the-fly optimization practical for an eager-execution framework, even if the resulting kernels are 5–20 percent slower than highly optimized, hand-written CUDA. \index{TorchInductor!code generation}
-
-[^fn-ptx-portability]: **PTX**: An intermediate representation (IR) from NVIDIA that serves as a stable compilation target for high-level GPU languages like Triton. This allows TorchInductor to generate portable code, as the NVIDIA driver—not the framework—is responsible for the final translation to hardware-specific machine code (SASS). This forward compatibility, however, can result in performance that is 10–15 percent slower than kernels hand-tuned for a specific GPU architecture. \index{PTX!compilation portability}
-
-[^fn-triton-kernel-language]: **Triton**: TorchInductor generates Triton because its Python-like syntax provides a simpler, more stable compilation target than raw CUDA, making automated code generation tractable. This abstraction allows the compiler to handle complex GPU details like memory coalescing automatically, a requirement for performing kernel fusion. The accepted trade-off is achieving 80–95 percent of hand-tuned CUDA performance in exchange for enabling the compiler to effectively autotune kernels and reduce development time from weeks to hours. \index{Triton!performance trade-off}
-
-The generated code is cached on disk. The first execution therefore pays the full compilation path: TorchDynamo intercepts bytecode and records operations into an FX graph, TorchInductor compiles the graph (5--30 seconds for transformer models), and the compiled code is cached and executed. Subsequent runs with the same input shapes dispatch directly to compiled code with microseconds of overhead; if input shapes change, TorchInductor must recompile for the new shapes, and PyTorch maintains separate compiled versions for each unique shape configuration.
-
-##### Graph breaks: Causes and detection {.unnumbered}
-
-Graph breaks mark the boundary where compilation stops applying: unsupported code returns execution to eager mode and reintroduces the dispatch overhead that compilation was meant to amortize. Diagnosing them therefore belongs in performance analysis rather than only in debugging.
-
-Data-dependent control flow is a common break because it requires tensor values unavailable at compile time, as shown in @lst-graph-break-control-flow. This is the same `if x.sum() > 0` construct that silently mis-traced under TorchScript tracing in @lst-tracing-silent-failure; under `torch.compile`, the compiler stops at an honest graph break rather than baking in one branch and returning a wrong answer.
-
-::: {#lst-graph-break-control-flow lst-cap="**Graph Break from Control Flow**: Python data-dependent conditionals commonly force a graph break unless expressed with supported graph control-flow operators such as `torch.cond`, splitting execution into separate compiled regions."}
-
-```{.python}
-@torch.compile
-def conditional_compute(x):
-    if x.sum() > 0:  # Graph break: tensor value needed
-        return x * 2
-    else:
-        return x * 3
-
-
-# Creates two compiled regions: operations before and after the if
-# statement
-# The if statement itself executes eagerly
-```
-
-:::
-
-TorchDynamo creates a graph break: operations before the `if` statement are compiled, the `if` statement executes eagerly (evaluating which branch to take), and the chosen branch is compiled as a separate region. Unsupported operations---I/O such as `print` and file access, custom Python objects, calls to non-PyTorch libraries---break the graph the same way, and every break pays the same marshalling cost: tensors move from compiled code back to Python (possibly copying from GPU to CPU), the eager operation executes, and results are marshalled into the next compiled region. Shape variation is the third trigger, through the recompilation mechanism described earlier: a function whose input shapes differ on every call, such as slicing to a runtime-dependent length, forces a fresh compilation for each unique shape.
-
-Diagnosis is direct: running with the `TORCH_LOGS=graph_breaks` environment variable set prints each break's location and reason during execution. Minimizing graph breaks is key to performance: move unsupported operations outside compiled regions, replace data-dependent control flow with conditional execution (`torch.where`), or accept eager execution for inherently dynamic sections.
-
-##### Compilation modes and backends {.unnumbered}
-
-As a project matures from prototyping to production, engineers progressively increase compilation aggressiveness\index{Graph Compilation!compilation modes}. The decision is a trade between compilation time and runtime aggressiveness, summarized in @tbl-compile-modes.
-
-| **Mode**          | **Compilation cost**                  | **Runtime effect**                                                                                           | **Use when**                                                               |
-|:------------------|:--------------------------------------|:-------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------|
-| `default`         | Fast (5--30 s for transformer models) | Moderate optimization                                                                                        | Development and training, where compilation amortizes over many iterations |
-| `reduce-overhead` | Moderate                              | CUDA graphs replay captured command sequences, cutting launch overhead; 20--40% throughput gain over default | Inference serving with fixed input shapes                                  |
-| `max-autotune`    | Minutes to hours for large models     | Benchmarks implementation variants per operation; 10--30% gain over default                                  | Production training that runs for days                                     |
-
-: **torch.compile Mode Selection**: Each mode trades one-time compilation cost for runtime aggressiveness. The progression---default for development, reduce-overhead for inference, max-autotune for long training runs---mirrors the Compilation Continuum principle we formalize later. {#tbl-compile-modes tbl-colwidths="[16,21,38,25]"}
-
-The compilation mode controls *how aggressively* to optimize; the backend controls *what target* to optimize for. TorchInductor (the default) generates Triton kernels for CUDA and C++ for CPU, providing the best general-purpose performance for both training and inference. When cross-platform deployment is required, the ONNX Runtime backend\index{ONNX Runtime!compilation backend} exports the FX graph to ONNX format, enabling execution on CPUs, GPUs, mobile, and edge devices---though limited ONNX operation coverage may cause more graph breaks. For maximum inference throughput on NVIDIA GPUs, the TensorRT backend\index{TensorRT!inference compiler} compiles to NVIDIA's inference engine with deeper layer fusion, lower-precision kernels, and kernel autotuning, often achieving 1.5--2$\times$ speedup over TorchInductor. The trade-off is clear: each backend narrows the target to unlock deeper optimization, echoing the flexibility-vs.-performance axis that distinguishes eager from graph execution.
-
-##### Practical example: Measuring speedup {.unnumbered}
-
-Compilation decisions depend on measuring execution rather than launch latency or first-run compilation. @Lst-torch-compile-benchmark implements the required GPU benchmarking discipline: CUDA synchronization, warmup iterations to exclude compilation time, and enough repetitions to amortize measurement overhead.
-
-::: {#lst-torch-compile-benchmark lst-cap="**Benchmarking torch.compile**: Properly measuring speedup requires CUDA synchronization, warmup to exclude compilation time, and sufficient iterations to amortize measurement overhead."}
-
-```{.python}
-import torch
-import time
-
-
-def forward(x, w):
-    return torch.matmul(x, w).relu()
-
-
-x = torch.randn(1024, 1024, device="cuda")
-w = torch.randn(1024, 512, device="cuda")
-
-# Eager mode benchmark
-torch.cuda.synchronize()  # Ensure GPU operations complete
-start = time.time()
-for _ in range(100):
-    y = forward(x, w)
-    torch.cuda.synchronize()  # Wait for GPU kernel completion
-eager_time = time.time() - start
-
-# Compiled mode benchmark
-forward_compiled = torch.compile(forward)
-forward_compiled(x, w)  # Warmup: trigger compilation
-torch.cuda.synchronize()
-
-start = time.time()
-for _ in range(100):
-    y = forward_compiled(x, w)
-    torch.cuda.synchronize()
-compiled_time = time.time() - start
-
-print(f"Speedup: {eager_time/compiled_time:.2f}$\times$ ")
-# Typical: 2-5x speedup for matrix operations
-```
-
-:::
-
-The measurement discipline has three parts. Use `torch.cuda.synchronize()` because CUDA operations are asynchronous; without synchronization, timing measures only kernel launch time, not execution time. Warm up compilation by calling once before timing to exclude compilation from measurements. Run 100+ iterations to amortize measurement overhead.
-
-##### Systems implications {.unnumbered}
-
-First execution includes compilation time: 5--10 s for small models, 30--60 s for BERT-base transformers, 5--10 min for GPT-3 scale models. This overhead is amortized across training (compile once, train for thousands of iterations) but impacts development iteration time. Compiled kernels are cached on disk; subsequent runs skip compilation.
-
-Compilation itself consumes transient memory, from hundreds of MB to roughly 2 GB at peak during code generation, but runtime memory stays close to eager levels (typically 90--110 percent): kernel fusion saves intermediates while compiled code may allocate temporary buffers.
-
-Debugging also changes character under compilation: errors produce stack traces pointing to generated code, not source Python. The practical strategy is to remove `@torch.compile`, debug in eager execution, then re-enable compilation once the fix is verified.
-
-##### When to use torch.compile {.unnumbered}
-
-The decision follows directly from the compilation cost model. Long training runs amortize compilation overhead across hundreds of iterations, and stable architectures with fixed control flow minimize graph breaks---making training the strongest use case. Inference is equally compelling: a deployed model compiles once at startup and serves thousands of requests, where `mode='reduce-overhead'` minimizes per-request overhead. Compilation should be deferred, however, during rapid prototyping, where the overhead slows iteration time and the architecture has not yet stabilized. Models with frequent graph breaks or dynamic shape changes prevent effective compilation, and debugging is harder in compiled mode because error locations point to generated code rather than source Python. The practical strategy is to develop in eager mode, stabilize the architecture, then enable compilation for training and deployment.
+The resulting workflow is a systems decision. Rapid prototyping favors eager execution because architecture changes and guard failures make recompilation cost visible. Long training runs and high-volume inference amortize compilation cost over many executions, provided the model has stable shapes and limited graph breaks. Debugging usually starts in eager mode because errors map directly to source code; compilation is reintroduced after the model behavior is correct and the performance bottleneck is measurable.
 
 ##### Comparison of execution models {.unnumbered}
 
@@ -1807,7 +1681,7 @@ $$ {#eq-compile-breakeven}
 
 Evaluating @eq-compile-breakeven with the ResNet-50 table values gives approximately `{python} CompilationBenchmark.resnet_breakeven_images_str`. For ImageNet (1.28M training images), compilation pays off within the first epoch.
 
-For production inference ($N_{\text{dev}} \approx 0$, $N_{\text{prod}} \rightarrow \infty$), teams should maximize compilation. With no development iterations and potentially millions of requests, every optimization matters. Using `mode='max-autotune'` despite hour-long compilation is worthwhile because the cost is amortized over the deployment lifetime.
+For production inference ($N_{\text{dev}} \approx 0$, $N_{\text{prod}} \rightarrow \infty$), teams should maximize compilation. With no development iterations and potentially millions of requests, every optimization matters. Aggressive autotuning can be worthwhile even when compilation takes much longer, because the cost is amortized over the deployment lifetime.
 
 These three regimes create distinct regions in the compilation decision space. @Fig-compilation-continuum maps out these regions so engineers can identify where each strategy wins. Watch for the crossover points: the steep eager line (highest per-execution cost) eventually overtakes JIT's moderate slope, while the gentlest compiled line (lowest per-execution cost but largest upfront investment) wins only after millions of executions. The slopes reveal per-execution cost; the vertical offsets reveal compilation overhead. A project's position on the x-axis determines which line it should be on.
 
