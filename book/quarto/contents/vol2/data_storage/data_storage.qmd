@@ -422,10 +422,10 @@ These inversions have direct consequences for system procurement and architectur
 
 You are designing the storage subsystem for a new ML training cluster with 512 GPUs. The primary workload will train large language models on a 10 TB text dataset.
 
-1. Based on the five inversions described earlier, which storage optimization strategies from the database world would be counterproductive for this workload? Name at least three.
-2. If each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, what is the total data volume read? How does this compare to a typical database workload?
-3. The model saves a 500 GB checkpoint every 15 minutes. If checkpoint saves must complete within 30 seconds to minimize training disruption, what minimum write bandwidth is required?
-4. Given the write pattern (bursty checkpoints every 15 minutes), what percentage of time is the storage system in "write mode" vs. "read mode"?
+- [ ] **Database heuristics**: Based on the five inversions described earlier, which storage optimization strategies from the database world would be counterproductive for this workload? Name at least three.
+- [ ] **Epoch reads**: If each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, what is the total data volume read? How does this compare to a typical database workload?
+- [ ] **Checkpoint bandwidth**: The model saves a 500 GB checkpoint every 15 minutes. If checkpoint saves must complete within 30 seconds to minimize training disruption, what minimum write bandwidth is required?
+- [ ] **Write duty cycle**: Given the write pattern (bursty checkpoints every 15 minutes), what percentage of time is the storage system in "write mode" vs. "read mode"?
 
 :::
 
@@ -1088,8 +1088,8 @@ Beyond the single node, the workload requires a shared namespace where all worke
 ***Parallel File System (PFS)***\index{Parallel File System!definition} is a distributed storage architecture for ML training clusters that stripes data across many storage servers to provide aggregate throughput exceeding the capacity of any single device.
 
 1.  **Significance (quantitative)**: A PFS aggregates $\text{BW}_{\text{io}}$ linearly with the number of storage servers (Object Storage Servers). A Lustre cluster with 20 OSS nodes each delivering 10 GB/s provides 200 GB/s aggregate, vs. a single NAS server capped at 10 GB/s, enabling a training job to load a 10 GB striped shard in about 50 ms rather than 1 second. This aggregate bandwidth directly reduces the $D_{\text{vol}}/\text{BW}$ term in the iron law.
-2.  **Observation**: Unlike Network Attached Storage (NAS), where every I/O request routes through a single server, a PFS client receives stripe location metadata from a dedicated Metadata Server (MDS) and then reads data directly from multiple OSS nodes in parallel: the MDS and OSS paths are architecturally separated, so data bandwidth scales with OSS count while metadata operations scale with MDS count.
-3.  **Pitfall**: A frequent misconception is that a PFS has unlimited throughput if enough OSS nodes are added. In reality, a Lustre MDS handles roughly 100,000–300,000 metadata operations per second; at 10,000 workers each opening one small file, the MDS saturates in under 1 second and becomes the serialization point that idles the entire cluster regardless of how many OSS nodes are present.
+2.  **Distinction (durable)**: Unlike Network Attached Storage (NAS), where every I/O request routes through a single server, a PFS client receives stripe location metadata from a dedicated Metadata Server (MDS) and then reads data directly from multiple OSS nodes in parallel: the MDS and OSS paths are architecturally separated, so data bandwidth scales with OSS count while metadata operations scale with MDS count.
+3.  **Common pitfall**: A frequent misconception is that a PFS has unlimited throughput if enough OSS nodes are added. In reality, a Lustre MDS handles roughly 100,000–300,000 metadata operations per second; at 10,000 workers each opening one small file, the MDS saturates in under 1 second and becomes the serialization point that idles the entire cluster regardless of how many OSS nodes are present.
 
 :::
 
@@ -1112,8 +1112,8 @@ This separation creates a critical bottleneck: the small file problem. If a data
 ***Small File Problem***\index{Small File Problem!definition} is an ML data-loading pathology where millions of individually small files overwhelm the metadata server of a storage system.
 
 1.  **Significance (quantitative)**: It reduces effective I/O Bandwidth $(\text{BW}_{\text{io}})$ to a fraction of its theoretical rating because each file requires its own metadata operations (`open`, `stat`, `close`). With 10,000 workers simultaneously accessing small files, the metadata server becomes a Serialization Point that idles the entire cluster.
-2.  **Observation**: Unlike bulk data throughput (which measures bit-rate), the small file problem is a metadata latency $(L_{\text{lat}})$ issue: the bottleneck is the frequency of requests, not the size of the data.
-3.  **Pitfall**: A frequent misconception is that this is "fixed" by buying faster SSDs. In reality, it is a Format Problem\index{Format Problem}: the fix is to pack samples into large sequential containers (for example, TFRecord\index{TFRecord}, Parquet) to Amortize metadata operations across thousands of samples.
+2.  **Distinction (durable)**: Unlike bulk data throughput (which measures bit-rate), the small file problem is a metadata latency $(L_{\text{lat}})$ issue: the bottleneck is the frequency of requests, not the size of the data.
+3.  **Common pitfall**: A frequent misconception is that this is "fixed" by buying faster SSDs. In reality, it is a Format Problem\index{Format Problem}: the fix is to pack samples into large sequential containers (for example, TFRecord\index{TFRecord}, Parquet) to Amortize metadata operations across thousands of samples.
 
 :::
 
@@ -1157,9 +1157,9 @@ A related challenge is **namespace isolation**\index{Namespace Isolation}. Diffe
 
 Consider a training cluster with 512 nodes, each running 8 GPUs. The training job requires 400 GB/s of aggregate read bandwidth.
 
-1. If each Lustre OSS delivers 10 GB/s, how many OSS nodes are required?
-2. If the dataset consists of 200 million images at 150 KB each, and each `open()` call takes 50 μs on the MDS, how long would it take to open all files sequentially? What is the practical implication?
-3. If images are bundled into 4 GB tar files, how many metadata operations are needed to read the full dataset?
+- [ ] **OSS count**: If each Lustre OSS delivers 10 GB/s, how many OSS nodes are required?
+- [ ] **Metadata cost**: If the dataset consists of 200 million images at 150 KB each, and each `open()` call takes 50 μs on the MDS, how long would it take to open all files sequentially? What is the practical implication?
+- [ ] **Shard count**: If images are bundled into 4 GB tar files, how many metadata operations are needed to read the full dataset?
 
 :::
 
@@ -1180,8 +1180,8 @@ Object storage targets "eleven nines"[^fn-eleven-nines-durability] of durability
 ***Erasure Coding***\index{Erasure Coding!definition} is a storage protection scheme for ML datasets and checkpoint archives that fragments an object into $k$ data and $m$ parity blocks, ensuring the original is recoverable from any $k$ remaining fragments.
 
 1.  **Significance (quantitative)**: It achieves extreme data durability (for example, "eleven nines") with significantly lower storage overhead than replication. For example, a 4+2 code provides the same protection as triple replication but at 1.5$\times$ cost instead of 3$\times$ cost.
-2.  **Observation**: Unlike replication (which stores complete copies), erasure coding uses mathematical encoding (for example, Reed-Solomon) to distribute redundant information across different failure domains (disks, racks, or sites).
-3.  **Pitfall**: A frequent misconception is that erasure coding is "free durability." In reality, it is a latency-compute trade-off\index{Latency!compute trade-off}: reconstructing data after a failure requires additional CPU cycles and increases the tail latency $(L_{\text{lat}})$ of the storage read.
+2.  **Distinction (durable)**: Unlike replication (which stores complete copies), erasure coding uses mathematical encoding (for example, Reed-Solomon) to distribute redundant information across different failure domains (disks, racks, or sites).
+3.  **Common pitfall**: A frequent misconception is that erasure coding is "free durability." In reality, it is a latency-compute trade-off\index{Latency!compute trade-off}: reconstructing data after a failure requires additional CPU cycles and increases the tail latency $(L_{\text{lat}})$ of the storage read.
 
 :::
 
@@ -1727,10 +1727,10 @@ The interaction between prefetching and the storage hierarchy creates a layered 
 
 A training cluster runs 1,024 GPUs with 128-image batches (150 KB per image after compression, 150 ms per iteration).
 
-1. Using @eq-pipeline-throughput, calculate the required aggregate storage bandwidth at 90 percent target utilization.
-2. If the parallel file system delivers 800 GB/s aggregate, is it sufficient? What if 20 percent of bandwidth is consumed by checkpoint writes?
-3. The object storage backend has P99 latency of 300 ms. What minimum prefetch buffer depth (in batches) would absorb this variance?
-4. Each decoded batch occupies 10 MB in host DRAM. What is the total prefetch buffer memory for the depth calculated in (3)?
+- [ ] **Bandwidth requirement**: Using @eq-pipeline-throughput, calculate the required aggregate storage bandwidth at 90 percent target utilization.
+- [ ] **Checkpoint contention**: If the parallel file system delivers 800 GB/s aggregate, is it sufficient? What if 20 percent of bandwidth is consumed by checkpoint writes?
+- [ ] **Prefetch depth**: The object storage backend has P99 latency of 300 ms. What minimum prefetch buffer depth (in batches) would absorb this variance?
+- [ ] **Host memory**: Each decoded batch occupies 10 MB in host DRAM. What is the total prefetch buffer memory for the depth calculated in (3)?
 
 :::
 
@@ -1942,8 +1942,8 @@ The traditional data path for loading training data follows three hops: storage 
 ***GPUDirect Storage (GDS)***\index{GPU Direct Storage!definition} is a technology that enables a direct DMA path between NVMe storage devices and GPU memory, bypassing the host CPU and system DRAM.
 
 1.  **Significance (quantitative)**: It eliminates the "Bounce Buffer" through system memory. In the small-transfer model below, this reduces per-transfer latency by `{python} GDSLatency.gds_latency_reduction_pct_str` and makes the local transfer path `{python} GDSLatency.gds_speedup_mult_str` faster. It allows the GPU to saturate the NVMe link speed (for example, 7 GB/s) while reducing CPU utilization for I/O.
-2.  **Observation**: Unlike Traditional I/O\index{Traditional I/O}, where every byte must be processed by the CPU and stored in kernel buffers, GDS provides Direct Memory Access between the storage controller and the accelerator.
-3.  **Pitfall**: A frequent misconception is that GDS makes all storage "faster." In reality, it only accelerates Local or RDMA-attached NVMe; it does not eliminate the physical latency of network-attached file systems or object storage.
+2.  **Distinction (durable)**: Unlike Traditional I/O\index{Traditional I/O}, where every byte must be processed by the CPU and stored in kernel buffers, GDS provides Direct Memory Access between the storage controller and the accelerator.
+3.  **Common pitfall**: A frequent misconception is that GDS makes all storage "faster." In reality, it only accelerates Local or RDMA-attached NVMe; it does not eliminate the physical latency of network-attached file systems or object storage.
 
 :::
 
@@ -2578,8 +2578,8 @@ class CheckpointStormDefinition:
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
 
 1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = R \times \text{per-replica state} / \text{BW}_{\text{fabric}}$, where $R$ is the number of replicas writing at once. For a `{python} CheckpointStormDefinition.params_b_str`-parameter model, each replica holds `{python} CheckpointStormDefinition.weights_gb_str` FP16 weights, `{python} CheckpointStormDefinition.gradients_gb_str` gradients, and `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str`, a naive checkpoint of that full per-replica state generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous writes. At 100 GB/s fabric bandwidth, that write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall per checkpoint event. ZeRO-3, an optimizer-state-sharding scheme in which each node stores only its $1/N$ slice of the state rather than a full replica, collapses the written state to roughly `{python} CheckpointStormDefinition.zero3_total_tb_str` total (`{python} CheckpointStormDefinition.weights_gb_str` weights + `{python} CheckpointStormDefinition.gradients_gb_str` gradients + `{python} CheckpointStormDefinition.optimizer_state_gb_str` optimizer state, split across `{python} CheckpointStormDefinition.replicas_str`), bringing $T_{\text{write}}$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. This stall is the checkpoint $T_{\text{write}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
-2.  **Observation**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
-3.  **Pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
+2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
+3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
 
 :::
 
@@ -2744,10 +2744,10 @@ class CheckpointStorageDesignPrompt:
 
 A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a 175B-parameter model checkpoint every `{python} CheckpointStorageDesignPrompt.checkpoint_interval_min_str`. Each checkpoint is `{python} CheckpointTotalGbRecap.ckpt_total_gb_str` total, distributed across all nodes.
 
-1. What is the per-node checkpoint size?
-2. If each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`, what is $T_{\text{write}}$ for the local write?
-3. If the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously, what is the per-node write bandwidth, and how long does the async copy take?
-4. Why is tiered staging (local NVMe first, then async PFS copy) faster than writing directly to PFS?
+- [ ] **Per-node state**: What is the per-node checkpoint size?
+- [ ] **Local write**: If each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`, what is $T_{\text{write}}$ for the local write?
+- [ ] **Async copy**: If the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously, what is the per-node write bandwidth, and how long does the async copy take?
+- [ ] **Tiered staging**: Why is tiered staging (local NVMe first, then async PFS copy) faster than writing directly to PFS?
 
 :::
 

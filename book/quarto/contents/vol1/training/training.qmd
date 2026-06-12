@@ -152,8 +152,8 @@ A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios
 ***Machine Learning Training Systems***\index{Training Systems!definition}\index{Training!systems} are software-hardware systems that execute the iterative optimization loop (forward pass, loss computation, backward pass, and parameter update) to minimize a loss function over a training dataset.
 
 1.  **Significance (quantitative)**: Training memory cost is `{python} TrainingScenarios.adam_training_memory_mult_str` the inference memory cost per parameter when using the Adaptive Moment Estimation (Adam) optimizer: a `{python} TrainingScenarios.adam_example_params_b_str`-parameter model requires `{python} TrainingScenarios.adam_inference_gb_str` (FP16 weights) + `{python} TrainingScenarios.adam_grad_gb_str` (FP16 gradients) + `{python} TrainingScenarios.adam_moments_gb_str` (Adam first and second moments in FP32) = `{python} TrainingScenarios.adam_training_state_gb_str` at least, before accounting for activation storage. This multiplier is the primary reason a model that runs inference on one GPU requires multiple GPUs for training.
-2.  **Observation**: Unlike inference systems, which execute a single forward pass and discard intermediate activations, training systems must retain all intermediate activations from the forward pass for use during the backward pass, creating a memory footprint that grows linearly with model depth and batch size.
-3.  **Pitfall**: A frequent misconception is that training failures are compute problems. The most common training failure is out-of-memory (OOM) error, which is a memory management problem: the activation tensors from all $N_L$ layers accumulate during the forward pass and must coexist in GPU memory simultaneously, causing OOM before the first gradient is computed.
+2.  **Distinction (durable)**: Unlike inference systems, which execute a single forward pass and discard intermediate activations, training systems must retain all intermediate activations from the forward pass for use during the backward pass, creating a memory footprint that grows linearly with model depth and batch size.
+3.  **Common pitfall**: A frequent misconception is that training failures are compute problems. The most common training failure is out-of-memory (OOM) error, which is a memory management problem: the activation tensors from all $N_L$ layers accumulate during the forward pass and must coexist in GPU memory simultaneously, causing OOM before the first gradient is computed.
 
 :::
 
@@ -229,8 +229,8 @@ $$T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$$ {#eq-tr
 The simplification is valid when the pipeline is correctly staged: at training scale with large batches, data movement $(D_{\text{vol}}/\text{BW})$ is overlapped with compute via prefetching pipelines, and communication overhead $(L_{\text{lat}})$ is absorbed by gradient overlap strategies, leaving hardware utilization as the dominant remaining lever. When pipelines are poorly staged, $D_{\text{vol}}/\text{BW}$ resurfaces as the bottleneck and the simplified form no longer applies.
 
 1.  **Significance (quantitative)**: The three factors identify three distinct optimization levers: $O$ (reducible by algorithmic changes, fewer training tokens, or model-compression methods such as pruning and distillation, which @sec-model-compression defines), $R_{\text{peak}}$ (improved by hardware and lower-precision tensor cores), and $\eta_{\text{hw}}$ (the utilization fraction and primary engineering target; GPT-3 training achieved $\eta_{\text{hw}} \approx 0.45$ [@narayanan2021], and well-tuned large training systems often target higher sustained utilization).
-2.  **Observation**: Unlike the general iron law, which models all three cost terms $(D_{\text{vol}}/\text{BW}, O/(R_{\text{peak}} \cdot \eta_{\text{hw}}), L_{\text{lat}})$, this simplified form assumes data movement and communication are not the binding constraint, an assumption that breaks for small-batch workloads or bandwidth-limited deployments.
-3.  **Pitfall**: A frequent misconception is that $\eta_{\text{hw}}$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\eta_{\text{hw}}$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
+2.  **Distinction (durable)**: Unlike the general iron law, which models all three cost terms $(D_{\text{vol}}/\text{BW}, O/(R_{\text{peak}} \cdot \eta_{\text{hw}}), L_{\text{lat}})$, this simplified form assumes data movement and communication are not the binding constraint, an assumption that breaks for small-batch workloads or bandwidth-limited deployments.
+3.  **Common pitfall**: A frequent misconception is that $\eta_{\text{hw}}$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\eta_{\text{hw}}$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
 
 :::
 
@@ -263,13 +263,13 @@ Training speed is governed by the utilization of hardware peaks.
 
 **The Utilization Gap**
 
-- [ ] **Peak vs. real**: Why is 100 percent accelerator utilization impossible? (Memory bandwidth stalls, kernel launch overhead, communication latencies).
-- [ ] **Batch size physics**: Why does increasing batch size generally improve hardware utilization? (It increases arithmetic intensity, moving operations from memory-bound to compute bound. We formalize this as *Model FLOPs Utilization* in @sec-model-training-identifying-bottlenecks-f57f.)
+- [ ] **Peak vs. real**: Why is 100 percent accelerator utilization impossible?
+- [ ] **Batch size physics**: Why does increasing batch size generally improve hardware utilization?
 - [ ] **Order of magnitude**: A frontier run needs on the order of $10^{23}$ FLOPs at a utilization $\eta_{\text{hw}}$ well below 1. Estimate which lever shortens wall-clock time more, doubling $R_{\text{peak}}$ or doubling $\eta_{\text{hw}}$, and why the iron law says the two are not interchangeable in practice.
 
 **Precision Economics**
 
-- [ ] **Mixed precision**: How does FP16/BF16 double throughput? (Tensor Cores run 2$\times$ faster, and memory bandwidth effectively doubles).
+- [ ] **Mixed precision**: How does FP16/BF16 double throughput?
 
 :::
 
@@ -857,8 +857,8 @@ Mini-batch gradient descent\index{Mini-Batch Processing!accelerator efficiency} 
 ***Batch Processing***\index{Batch Processing!definition} is the aggregation of multiple training examples into a single tensor operation to amortize fixed per-step overhead (kernel launch, optimizer update) across $B$ examples, shifting the workload from memory bandwidth bound to compute bound as $B$ increases.
 
 1.  **Significance (quantitative)**: Throughput increases with batch size up to the critical batch size\index{Critical Batch Size!throughput-convergence limit}, beyond which additional examples provide diminishing gradient quality without proportional convergence benefit. For ResNet-50 on ImageNet, empirical studies find the critical batch size near $B \approx 8{,}192$: at this batch size, throughput approaches $R_{\text{peak}}$ while validation accuracy is preserved; larger batches require learning rate scaling (linear rule: $\eta \propto B$) to compensate for reduced update frequency.
-2.  **Observation**: Unlike stochastic gradient descent ($B=1$), which updates parameters after every example with maximum noise, mini-batch processing averages gradients over $B$ examples, reducing the gradient noise (standard deviation of the mean gradient) by $1/\sqrt{B}$—lowering the data-movement volume $D_{\text{vol}}$ per effective update while giving the hardware enough parallel work to reach compute-bound utilization.
-3.  **Pitfall**: A frequent misconception is that linear learning rate scaling (multiplying $\eta$ by $B/B_0$) works at any batch size. The linear rule holds only up to the critical batch size; beyond it, the noise reduction from larger batches no longer compensates for the reduced number of updates per epoch, and validation accuracy degrades even with perfectly scaled learning rates.
+2.  **Distinction (durable)**: Unlike stochastic gradient descent ($B=1$), which updates parameters after every example with maximum noise, mini-batch processing averages gradients over $B$ examples, reducing the gradient noise (standard deviation of the mean gradient) by $1/\sqrt{B}$—lowering the data-movement volume $D_{\text{vol}}$ per effective update while giving the hardware enough parallel work to reach compute-bound utilization.
+3.  **Common pitfall**: A frequent misconception is that linear learning rate scaling (multiplying $\eta$ by $B/B_0$) works at any batch size. The linear rule holds only up to the critical batch size; beyond it, the noise reduction from larger batches no longer compensates for the reduced number of updates per epoch, and validation accuracy degrades even with perfectly scaled learning rates.
 
 :::
 
@@ -1484,7 +1484,7 @@ $$
 
 Operations with high arithmetic intensity are compute bound: their performance is limited by the processor's computational throughput. Operations with low arithmetic intensity are memory bound: they spend more time moving data than computing. @Sec-appdx-machine-foundations-roofline-model-2529 gives the formal definition of the roofline model and shows how to compute a hardware's ridge point[^fn-ridge-point-precision].
 
-[^fn-ridge-point-precision]: **Ridge Point and Precision**: The roofline ridge point—the arithmetic intensity threshold sepa&shy;ra&shy;ting memory-bound from compute-bound ope&shy;ra&shy;tions—shifts with numerical precision. On an A100 80 GB, dense TF32 Tensor Cores deliver about 156 TFLOP/s against roughly 2 TB/s HBM bandwidth, giving a ridge point near 78 FLOP/byte. Dense FP16/BF16 Tensor Cores deliver about 312 TFLOP/s at the same bandwidth, raising the ridge point near 156 FLOP/byte. Switching from TF32 to BF16 mixed precision can therefore change which optimization technique yields returns, making precision selection inseparable from roofline analysis. \index{Ridge Point!precision dependence}
+[^fn-ridge-point-precision]: **Ridge Point and Precision**: The roofline ridge point—the arithmetic intensity threshold sepa&shy;ra&shy;ting memory-bound from compute-bound ope&shy;ra&shy;tions—shifts with numerical precision. On the same accelerator, a lower-precision Tensor Core path can expose much more arithmetic throughput at roughly the same memory bandwidth, raising the ridge point substantially. Switching from TF32-style execution to BF16 mixed precision can therefore change which optimization technique yields returns, making precision selection inseparable from roofline analysis. \index{Ridge Point!precision dependence}
 
 Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieves $\mathcal{O}(n)$ FLOP/byte (compute bound), while activation functions operate at just `{python} ArithmeticIntensityScenarios.ai_act_fp16_str` (memory bound), explaining why optimization strategies must differ between these operation types.
 
@@ -1679,77 +1679,11 @@ class AttentionIntensity:
 # Note: Use AttentionIntensity.attn_intensity_str directly.
 ```
 
-```{python}
-#| echo: false
-#| label: a100-h_h100-hardware-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ A100 / H100 HARDWARE SPECIFICATIONS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: §Arithmetic Intensity ridge point discussion (~line 1620),
-# │          §Throughput Scaling (~line 3538), §FP8 Precision (~line 3565),
-# │          §Bandwidth bottleneck (~line 3576), §Hardware decision table
-# │          (~line 3625), §Carbon footprint (~line 5091).
-# │
-# │ Goal: Provide A100 and H100 TFLOP/s, bandwidth, ridge point, and TDP
-# │       specifications for Roofline analysis and mixed-precision sections.
-# │ Show: Peak throughput at each precision, memory bandwidth, ridge points.
-# │ How:  Read hardware specs from Hardware twins; compute ridge points.
-# │
-# │ Imports: Hardware (Cloud.A100, Cloud.H100), mlsysim.constants (TFLOPs,
-# │          PFLOPs, TB, GB, second, flop, byte, watt),
-# │          mlsysim.book (domain formatters)
-# │ Exports: AcceleratorSpecs.{a100,h_h100}_*_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate, fmt_multiple, fmt_qty
-
-class AcceleratorSpecs:
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
-    _a100 = Hardware.Cloud.A100
-    _h_h100 = Hardware.Cloud.H100
-
-    # ┌── 2. EXECUTE (A100) ────────────────────────────────────────────────────
-    a100_flops_fp16 = _a100.compute.peak_flops
-    a100_flops_fp32 = _a100.compute.precision_flops["fp32"]
-    a100_bw = _a100.memory.bandwidth
-    a100_ridge = _a100.ridge_point()
-
-    # ┌── 2. EXECUTE (H100) ────────────────────────────────────────────────────
-    h100_flops_fp16 = _h_h100.compute.peak_flops
-    h100_flops_fp32_cuda = _h_h100.compute.precision_flops["fp32_cuda"]
-    h100_flops_fp8 = _h_h100.compute.precision_flops["fp8"]
-    h100_bw = _h_h100.memory.bandwidth
-    h100_ridge = _h_h100.ridge_point()
-    a100_fp16_speedup = (a100_flops_fp16 / a100_flops_fp32).to("").magnitude
-    h100_fp8_speedup_vs_fp16 = (h100_flops_fp8 / h100_flops_fp16).to("").magnitude
-    h100_fp8_speedup_vs_fp32 = (h100_flops_fp8 / h100_flops_fp32_cuda).to("").magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────────
-    check(15 <= a100_fp16_speedup <= 17, f"A100 FP16:FP32 peak ratio should be about 16x, got {a100_fp16_speedup:.1f}")
-    check(1.9 <= h100_fp8_speedup_vs_fp16 <= 2.1, f"H100 FP8:FP16 peak ratio should be about 2x, got {h100_fp8_speedup_vs_fp16:.1f}")
-
-    # ┌── 4. OUTPUT (A100) ─────────────────────────────────────────────────────
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_flops_fp16, unit=TFLOP / second, precision=0, commas=False)
-    a100_fp32_tflop_per_s_str = fmt_flop_rate(a100_flops_fp32, unit=TFLOP / second, precision=1, commas=False)
-    a100_bw_gb_per_s_str = fmt_bandwidth(a100_bw, unit=GB / second, precision=0, commas=True)
-    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
-    a100_ridge_flops_per_byte_str = fmt_arithmetic_intensity(a100_ridge, commas=False)
-
-    # ┌── 4. OUTPUT (H100) ─────────────────────────────────────────────────────
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_flops_fp16, unit=TFLOP / second, precision=0, commas=False)
-    h100_fp8_tflop_per_s_str = fmt_flop_rate(h100_flops_fp8, unit=TFLOP / second, precision=0, commas=True)
-    h100_fp8_pflop_per_s_str = fmt_flop_rate(h100_flops_fp8, unit=PFLOP / second, precision=2, commas=False)
-    h100_fp16_pflop_per_s_str = fmt_flop_rate(h100_flops_fp16, unit=PFLOP / second, precision=2, commas=False)
-    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-    h100_ridge_flops_per_byte_str = fmt_arithmetic_intensity(h100_ridge, commas=False)
-    a100_fp16_speedup_mult_str = fmt_multiple(a100_fp16_speedup, precision=0, commas=False)
-    h100_fp8_speedup_vs_fp16_mult_str = fmt_multiple(round(h100_fp8_speedup_vs_fp16), commas=False, precision=0)
-```
-
 To build intuition for these relationships, study the roofline diagram in @fig-training-roofline, the standard diagnostic tool for understanding hardware utilization. The ridge point marks the "knee" where the sloped memory-bound region meets the flat compute-bound ceiling. Operations falling left of this point, including attention softmax\index{Attention!softmax arithmetic intensity}, are starved for data: the accelerator could compute faster, but memory bandwidth cannot deliver operands quickly enough. Operations to the right are compute bound: adding more memory bandwidth would not help because the arithmetic units themselves limit throughput. Notice how GPT-2's training operations distribute across this landscape.
 
 Consider a GPT-2 attention layer\index{Arithmetic Intensity!attention layer} that materializes the $S{\times}S$ attention-score matrix. For each head, the $QK^\top$ product costs approximately $2S^2d_{\text{head}}$ FLOPs, while writing the FP16 score matrix and reading it back for softmax traffic moves about $4S^2$ bytes. The arithmetic intensity of this materialized score path is therefore $d_{\text{head}}/2$. For GPT-2 Small ($d_{\text{model}}=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $d_{\text{head}}=$ `{python} AttentionIntensity.head_dim_str`), this yields `{python} AttentionIntensity.attn_intensity_str`, below the A100's ridge point, making standard materialized attention memory bound. Scaling the hidden dimension raises projection intensity, but it does not remove the $\mathcal{O}(S^2)$ score-matrix traffic that FlashAttention targets.
 
-Accelerators have characteristic hardware ridge points where operations transition from memory-bound to compute bound. The A100 with `{python} AcceleratorSpecs.a100_fp16_tflop_per_s_str` FP16 Tensor Core and `{python} AcceleratorSpecs.a100_bw_tb_per_s_str` bandwidth has a ridge point of `{python} AcceleratorSpecs.a100_ridge_flops_per_byte_str`. The H100 SXM with `{python} AcceleratorSpecs.h100_fp16_tflop_per_s_str` FP16 Tensor Core and `{python} AcceleratorSpecs.h100_bw_tb_per_s_str` bandwidth has a ridge point of approximately `{python} AcceleratorSpecs.h100_ridge_flops_per_byte_str`. Operations below the ridge point are memory bound; above are compute bound.
+Accelerators have characteristic hardware ridge points where operations transition from memory-bound to compute bound. A representative data-center accelerator has a ridge point high enough that low-intensity operations such as materialized attention softmax remain memory bound even when large matrix multiplications are compute bound. Operations below the ridge point are memory bound; above it, they are compute bound.
 
 ::: {#psp-training-peak-flops-vs-sustained-performance .callout-perspective title="Peak FLOP/s vs. sustained performance"}
 
@@ -3347,8 +3281,8 @@ class MFUExampleCalc:
 ***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the efficiency metric $\text{MFU} = O_{\text{model}} / (R_{\text{peak}} \cdot T_{\text{step}})$, where $O_{\text{model}}$ is the useful per-step model FLOP count (forward plus backward, excluding rematerialization) and $T_{\text{step}}$ is the measured wall-clock time per training step, expressing what fraction of peak hardware throughput is doing useful model computation.
 
 1.  **Significance (quantitative)**: MFU is the $\eta_{\text{hw}}$ term in the iron law made concrete. For a `{python} MFUExampleCalc.params_b_str`-parameter transformer processing `{python} MFUExampleCalc.tokens_per_step_str` per step on an A100 (`{python} MFUExampleCalc.a100_tflop_per_s_str` FP16/BF16 Tensor Core peak), a `{python} MFUExampleCalc.step_time_s_str` step gives useful model FLOPs divided by the available peak-rate FLOP budget of approximately `{python} MFUExampleCalc.mfu_str` (`{python} MFUExampleCalc.mfu_pct_str`), meaning `{python} MFUExampleCalc.lost_pct_str` of peak compute is lost to memory stalls, communication, and scheduling overhead. Production systems typically reach 30–50 percent MFU; values below 30 percent indicate a specific addressable bottleneck.
-2.  **Observation**: Unlike hardware utilization reported by profilers (which counts all cycles where the compute units are active, including gradient checkpointing recomputation and padding FLOPs), MFU counts only the FLOPs that directly advance the model toward convergence—providing a hardware-agnostic efficiency score that is comparable across different accelerator generations.
-3.  **Pitfall**: A frequent misconception is that 100 percent MFU is achievable. Memory bandwidth is always a finite resource: even a perfectly compute-bound kernel must load weights from DRAM, and the resulting stalls impose a ceiling well below 100 percent. The practical upper bound for most transformer training runs is 55–65 percent MFU, achievable only with FlashAttention and carefully tuned batch sizes.
+2.  **Distinction (durable)**: Unlike hardware utilization reported by profilers (which counts all cycles where the compute units are active, including gradient checkpointing recomputation and padding FLOPs), MFU counts only the FLOPs that directly advance the model toward convergence—providing a hardware-agnostic efficiency score that is comparable across different accelerator generations.
+3.  **Common pitfall**: A frequent misconception is that 100 percent MFU is achievable. Memory bandwidth is always a finite resource: even a perfectly compute-bound kernel must load weights from DRAM, and the resulting stalls impose a ceiling well below 100 percent. The practical upper bound for most transformer training runs is 55–65 percent MFU, achievable only with FlashAttention and carefully tuned batch sizes.
 
 :::
 

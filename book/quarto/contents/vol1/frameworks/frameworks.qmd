@@ -98,8 +98,8 @@ Precision matters: a definition that captures all three responsibilities separat
 ***Machine Learning Frameworks***\index{ML Framework!definition} are software systems that translate high-level mathematical model definitions into hardware-optimized execution plans by managing the computational graph, automatic differentiation, kernel dispatch, and memory allocation across the hardware hierarchy.
 
 1.  **Significance (quantitative)**: Frameworks directly determine the system efficiency $(\eta_{\text{hw}})$ term in the iron law. Compiler-backed operator fusion, for example, eliminates intermediate memory writes between consecutive elementwise operations: fusing a matrix multiplication, bias add, and rectified linear unit (ReLU) into a single kernel reduces the total data movement $(D_{\text{vol}})$ by 2--3$\times$ compared with three separate kernel launches. The model has not changed; the framework has changed how the same math reaches hardware.
-2.  **Observation**: Unlike a numerical library such as NumPy, which executes each operation immediately (eager evaluation), an ML framework can defer execution to analyze the full computational graph and apply global optimizations: operator fusion, memory layout transformations, and parallel scheduling. These optimizations are impossible when operations are evaluated one at a time.
-3.  **Pitfall**: A frequent misconception is that frameworks are interchangeable API wrappers. Framework choice determines which compiler paths are available: PyTorch can recover graph-level optimization from eager code through `torch.compile()`, PyTorch's compiler path for eager programs, while TensorFlow and JAX commonly rely on XLA-backed compilation paths, with XLA serving as the graph compiler that lowers operations to target hardware. Moving from eager execution to a compiler path commonly changes throughput by 1.2--3$\times$ on supported workloads, but the exact gain depends on model structure, shapes, and operator support.
+2.  **Distinction (durable)**: Unlike a numerical library such as NumPy, which executes each operation immediately (eager evaluation), an ML framework can defer execution to analyze the full computational graph and apply global optimizations: operator fusion, memory layout transformations, and parallel scheduling. These optimizations are impossible when operations are evaluated one at a time.
+3.  **Common pitfall**: A frequent misconception is that frameworks are interchangeable API wrappers. Framework choice determines which compiler paths are available: PyTorch can recover graph-level optimization from eager code through `torch.compile()`, PyTorch's compiler path for eager programs, while TensorFlow and JAX commonly rely on XLA-backed compilation paths, with XLA serving as the graph compiler that lowers operations to target hardware. Moving from eager execution to a compiler path commonly changes throughput by 1.2--3$\times$ on supported workloads, but the exact gain depends on model structure, shapes, and operator support.
 
 :::
 
@@ -191,85 +191,7 @@ Consider two engineers writing the same neural network. The first debugs interac
 
 ### Why execution strategy matters: The memory wall {#sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8}
 
-```{python}
-#| echo: false
-from mlsysim import *
-from mlsysim.core.units import *
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ A100 SPECS FOR MEMORY WALL DISCUSSION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8—
-# │          opening paragraph of "Why Execution Strategy Matters: The Memory Wall"
-# │
-# │ Goal: Quantify the compute-vs-bandwidth gap on the A100 (312 TFLOP/s vs 2.04 TB/s
-# │       = 153 FLOP/byte ridge point) to show why element-wise ops hit <1% utilization.
-# │ Show: "312 TFLOP/s … 2.04 TB/s"—inline in Memory Wall opening paragraph;
-# │       a100_bw_tb_per_s_str also reused in Device Bandwidth Hierarchy (line ~2615).
-# │ How: Hardware.Cloud.A100 attributes → m_as(TFLOPs/second) and m_as(TB/second);
-# │      ridge_point() → m_as(flop/byte) for the invariant check.
-# │
-# │ Note: PERSISTENT—MemoryWallSpecs.a100_bw_tb_per_s_str reused at line ~2615
-# │       (Device and Memory Management section prose).
-# │
-# │ Imports: mlsysim.core.units (TFLOPs, TB, second, flop, byte), mlsysim.book (fmt, check)
-# │ Exports: MemoryWallSpecs.a100_fp16_tflop_per_s_str, MemoryWallSpecs.a100_bw_tb_per_s_str,
-# │          MemoryWallSpecs.relu_peak_util_pct_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.fmt import fmt, fmt_percent, fmt_qty, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class MemoryWallSpecs:
-    """
-    Namespace for A100 Memory Wall Specs.
-    Scenario: Demonstrating the 150x gap between compute and bandwidth.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gpu = Hardware.Cloud.A100
-
-    flops_fp16_q = gpu.compute.peak_flops
-    bw_q = gpu.memory.bandwidth
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Arithmetic Intensity "Ridge Point" (FLOP/byte)
-    ridge_point_q = gpu.ridge_point().to(flop / byte)
-    ridge_point = ridge_point_q.magnitude
-    relu_bytes_per_element = 2 * BYTES_FP16
-    relu_arithmetic_intensity = (1 * flop / relu_bytes_per_element).to(flop / byte)
-    relu_peak_util = (relu_arithmetic_intensity / ridge_point_q).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ridge_point >= 100, f"A100 ridge point ({ridge_point:.1f}) is too low to claim a 'Memory Wall'.")
-    check(relu_peak_util < 0.01, "Element-wise ReLU should use less than 1 percent of A100 peak FLOP/s.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_fp16_tflop_per_s_str = fmt_qty(flops_fp16_q, TFLOP / second, precision=0, commas=False)
-    a100_bw_tb_per_s_str = fmt_qty(bw_q, TB / second, precision=2, commas=False)
-    relu_peak_util_pct_str = fmt_percent(relu_peak_util, precision=1, commas=False, style="prose")
-
-# Note: Use MemoryWallSpecs.a100_fp16_tflop_per_s_str directly.
-```
-
-```{python}
-#| echo: false
-#| label: a100-blas-memory-wall-recap
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Memory Wall / execution strategy section.
-# │ Exports: A100BLASMemoryWallRecap.dense_tflop_per_s_str
-class A100BLASMemoryWallRecap:
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gpu = Hardware.Cloud.A100
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    dense_flops_q = gpu.compute.peak_flops
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    dense_tflop_per_s_str = fmt_qty(dense_flops_q, TFLOP / second, precision=0, commas=False)
-```
-
-To understand why execution strategy matters so much, return to the memory wall\index{Memory Wall!execution strategy impact} introduced in @sec-ml-systems\index{Memory Wall!framework execution}: processor arithmetic has grown faster than memory bandwidth. Modern GPUs can perform arithmetic far faster than they can fetch data. On an A100 GPU with `{python} A100BLASMemoryWallRecap.dense_tflop_per_s_str` of compute and `{python} MemoryWallSpecs.a100_bw_tb_per_s_str` of memory bandwidth, element-wise operations like ReLU achieve about `{python} MemoryWallSpecs.relu_peak_util_pct_str` of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. @Sec-appdx-machine-foundations-roofline-model-2529 formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
+To understand why execution strategy matters so much, return to the memory wall\index{Memory Wall!execution strategy impact} introduced in @sec-ml-systems\index{Memory Wall!framework execution}: processor arithmetic has grown faster than memory bandwidth. Modern accelerators can perform arithmetic far faster than they can fetch data. Element-wise operations like ReLU use only a tiny fraction of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. @Sec-appdx-machine-foundations-roofline-model-2529 formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
 
 The memory wall creates a critical classification: operations are either **compute-bound**\index{Compute-Bound!operation classification} (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound**\index{Memory-Bound!operation classification} (limited by data movement, like activation functions and normalization). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory bound, though the large matrix multiplications that dominate total compute time can be compute bound.
 
@@ -2162,12 +2084,12 @@ The choice of execution mode determines both developer velocity and model perfor
 
 **Debuggability vs. Speed**
 
-- [ ] **Eager mode (Python-first)**: Why does executing ops one-by-one make debugging easy but optimization hard? (Hint: The compiler cannot see the "future" ops to fuse them).
-- [ ] **Graph mode (compiler-first)**: Why does building a static graph enable kernel fusion? (Merging Conv+ReLU saves memory bandwidth).
+- [ ] **Eager mode (Python-first)**: Why does executing ops one-by-one make debugging easy but optimization hard?
+- [ ] **Graph mode (compiler-first)**: Why does building a static graph enable kernel fusion?
 
 **The Modern Compromise**
 
-- [ ] **JIT compilation**: How does `torch.compile` bridge the gap? (It captures the graph just in time to optimize, while falling back to Python for dynamic parts).
+- [ ] **JIT compilation**: How does `torch.compile` bridge the gap?
 
 :::
 
@@ -2825,12 +2747,12 @@ Training is *inherently more expensive* than inference because of Automatic Diff
 
 **Computational Reality**
 
-- [ ] **Reverse mode AD**: Why is this the only viable method for neural networks? (Because we have one loss scalar and $10^9$ parameters. Forward mode would require $10^9$ passes).
-- [ ] **The activation tax**: Do you understand why training memory scales linearly with depth? (We must stash forward activations to compute backward gradients).
+- [ ] **Reverse mode AD**: Why is this the only viable method for neural networks?
+- [ ] **The activation tax**: Can you explain why training memory scales linearly with depth?
 
 **Optimization Mechanics**
 
-- [ ] **Gradient checkpointing**: How does recomputing activations save memory? (We discard the stash and regenerate it on demand).
+- [ ] **Gradient checkpointing**: How does recomputing activations save memory?
 
 :::
 
@@ -2938,8 +2860,8 @@ class TensorFootprint:
 ***Tensors***\index{Tensor!definition} are $n$-dimensional arrays with explicit shape, data type, and memory layout metadata that allow ML frameworks to map mathematical operations directly onto hardware vector units without intermediate data transformation.
 
 1.  **Significance (quantitative)**: Tensor memory footprint is fully deterministic from its metadata: a contiguous FP32 tensor of shape $[1024, 1024]$ occupies $1024{\times}1024{\times}4 = 4{,}194{,}304$ bytes (about `{python} TensorFootprint.tensor_1024_fp32_mb_str`). Noncontiguous layouts (for example, from a transpose operation) require explicit `.contiguous()` calls before certain CUDA kernels can execute, adding a memory-copy cost that can dominate the data movement term $(D_{\text{vol}}/\text{BW})$ for tensors under 1 MB.
-2.  **Observation**: Unlike a Python list or generic NumPy array, a framework tensor carries device placement metadata (CPU vs. GPU), dtype (FP32, BF16, INT8), and stride information that enables zero-copy view operations and CUDA kernel dispatch without any runtime type checking or data movement.
-3.  **Pitfall**: A frequent misconception is that tensor operations are always in-place. Framework tensor operations return new tensors by default, allocating fresh GPU memory for each intermediate result. In a long computation graph, these intermediate allocations accumulate and can exhaust GPU memory before any weights are updated.
+2.  **Distinction (durable)**: Unlike a Python list or generic NumPy array, a framework tensor carries device placement metadata (CPU vs. GPU), dtype (FP32, BF16, INT8), and stride information that enables zero-copy view operations and CUDA kernel dispatch without any runtime type checking or data movement.
+3.  **Common pitfall**: A frequent misconception is that tensor operations are always in-place. Framework tensor operations return new tensors by default, allocating fresh GPU memory for each intermediate result. In a long computation graph, these intermediate allocations accumulate and can exhaust GPU memory before any weights are updated.
 
 :::
 

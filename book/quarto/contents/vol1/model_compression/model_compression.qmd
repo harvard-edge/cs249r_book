@@ -132,12 +132,12 @@ class CompressionIronLawQuant:
 ***Model Compression***\index{Model Compression!definition} is a family of techniques that reduce a trained model's computational cost and memory footprint by eliminating redundant parameters (pruning), reducing numerical precision (quantization), or transferring learned behavior into a smaller architecture (distillation), while preserving as much predictive accuracy as possible.
 
 1.  **Significance (quantitative)**: Compression directly reduces the iron law's data-movement and compute terms. INT8 quantization of a `{python} CompressionIronLawQuant.llm_175b_str`-billion-parameter large language model (LLM) cuts weight memory from `{python} CompressionIronLawQuant.llm_175b_mem_gb_str` (FP16) to `{python} CompressionIronLawQuant.llm_175b_mem_int8_gb_str`, a `{python} CompressionIronLawQuant.llm_175b_fp16_int8_reduction_mult_str` reduction in $D_{\text{vol}}$, while dedicated low-precision matrix units can increase compute throughput when kernels and layouts use the supported INT8 path. Unstructured pruning to 50 percent sparsity theoretically halves $O$, but hardware speedup only materializes when sparsity is structured (for example, a 2:4 pattern that keeps two weights in each group of four) to match accelerator capabilities.
-2.  **Observation**: Unlike post-training compression methods such as pruning and quantization, neural architecture search discovers efficient architectures from scratch by exploring a design space. This chapter treats NAS as a related structural optimization technique: it changes the representation before training rather than compressing a finished model post hoc.
-3.  **Pitfall**: A frequent misconception is that compression techniques compose without interference. In practice, applying quantization after pruning can amplify quantization error in near-zero weight regions that pruning left behind, causing accuracy degradation that neither technique produces alone.
+2.  **Distinction (durable)**: Unlike post-training compression methods such as pruning and quantization, neural architecture search discovers efficient architectures from scratch by exploring a design space. This chapter treats NAS as a related structural optimization technique: it changes the representation before training rather than compressing a finished model post hoc.
+3.  **Common pitfall**: A frequent misconception is that compression techniques compose without interference. In practice, applying quantization after pruning can amplify quantization error in near-zero weight regions that pruning left behind, causing accuracy degradation that neither technique produces alone.
 
 :::
 
-The chapter follows the optimization stack from software to hardware. We begin with the optimization framework and deployment context that determine which techniques matter for a given target. We then examine each dimension in turn: @sec-model-compression-structural-optimization-ee93 (pruning, distillation, architecture search), @sec-model-compression-quantization-precision-cd46 (FP32 to INT8 and below), and @sec-model-compression-architectural-efficiency-8dd3 (operator fusion, sparsity exploitation, graph-level transformations). The chapter closes with practical guidance on selecting and composing these techniques for specific deployment constraints.
+The optimization stack moves from representation to numerics to execution. Deployment context determines which constraint binds first; structural methods change the computation, precision methods change the representation of each value, and architectural methods decide whether the compressed artifact actually maps to efficient hardware execution. Selection and composition follow from that constraint order rather than from a checklist of techniques.
 
 Model optimization is not a *single technique* but a *framework* with three complementary dimensions, each addressing different bottlenecks. These dimensions form a natural hierarchy: we first decide *what* computations the model should perform (representation), then *how precisely* to perform them (numerics), and finally *how efficiently* to execute them on physical hardware (implementation). Tracing the stack in @fig-3-sections from top to bottom reveals how each layer moves from pure software concerns toward hardware-level execution.
 
@@ -473,7 +473,7 @@ Optimization is a search for the Pareto frontier.
 
 The table reveals a pattern: techniques that preserve model structure (fusion, precision reduction) tend to be "free" or cheap, while techniques that alter structure (pruning, distillation) extract more savings but require careful tuning.
 
-Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization techniques that follow address these constraints at three successive levels of the stack. We begin with structural methods that modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. We then turn to precision techniques that reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Finally, we address architectural approaches that improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
+Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization stack follows those constraints downward. Structural methods modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. Precision techniques reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Architectural approaches improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
 
 ::: {#chk-model-compression-efficiency-frontier .callout-checkpoint title="The efficiency frontier"}
 
@@ -561,8 +561,8 @@ Pruning[^fn-pruning-lecun-1989] directly addresses memory efficiency constraints
 ***Pruning***\index{Pruning!definition} is a model-compression technique that sparsifies the parameter space by removing weights that contribute minimal information to the loss landscape.
 
 1.  **Significance (quantitative)**: It converts dense matrices into sparse structures, reducing the memory footprint and the total data volume $(D_{\text{vol}})$ by as much as 10$\times$ without significant accuracy loss.
-2.  **Observation**: Unlike quantization, which reduces the precision of every weight, pruning reduces the count of weights by identifying and eliminating redundancy.
-3.  **Pitfall**: A frequent misconception is that pruning "automatically" speeds up execution. In reality, without specialized sparse execution support, the resulting sparse matrices may actually run slower than dense ones due to irregular memory access patterns; a higher $R_{\text{peak}}$ alone does not make an irregular sparse layout efficient.
+2.  **Distinction (durable)**: Unlike quantization, which reduces the precision of every weight, pruning reduces the count of weights by identifying and eliminating redundancy.
+3.  **Common pitfall**: A frequent misconception is that pruning "automatically" speeds up execution. In reality, without specialized sparse execution support, the resulting sparse matrices may actually run slower than dense ones due to irregular memory access patterns; a higher $R_{\text{peak}}$ alone does not make an irregular sparse layout efficient.
 
 :::
 
@@ -1941,8 +1941,8 @@ A large language model achieves state-of-the-art accuracy on medical question-an
 ***Knowledge Distillation***\index{Knowledge Distillation!definition}\index{Knowledge Distillation!teacher-student framework} is a model-compression technique that trains a smaller *student*\index{Knowledge Distillation!student model} model to match the behavior of a larger, pretrained *teacher*\index{Knowledge Distillation!teacher model} model.
 
 1.  **Significance (quantitative)**: Distillation moves cost from repeated inference to one-time training. A distilled student can be 2--10$\times$ smaller than the teacher while retaining much of its task accuracy; DistilBERT, for example, retains up to 97 percent of BERT's accuracy with 40 percent fewer parameters and 60 percent faster inference [@sanh2019distilbert]. This trade-off is valuable when the training cost of producing soft targets is amortized across many deployed queries.
-2.  **Observation**: Unlike pruning, which removes parameters from an existing architecture, and quantization, which lowers numerical precision, distillation trains a new dense architecture. The student inherits behavior from the teacher's output distribution or intermediate representations rather than inheriting the teacher's full parameter count or layer structure.
-3.  **Pitfall**: A frequent misconception is that distillation is lossless compression. In reality, the student is bounded by its own capacity, the quality of the teacher, and the match between the distillation data and deployment distribution; a student can faithfully reproduce teacher errors as well as teacher knowledge.
+2.  **Distinction (durable)**: Unlike pruning, which removes parameters from an existing architecture, and quantization, which lowers numerical precision, distillation trains a new dense architecture. The student inherits behavior from the teacher's output distribution or intermediate representations rather than inheriting the teacher's full parameter count or layer structure.
+3.  **Common pitfall**: A frequent misconception is that distillation is lossless compression. In reality, the student is bounded by its own capacity, the quality of the teacher, and the match between the distillation data and deployment distribution; a student can faithfully reproduce teacher errors as well as teacher knowledge.
 
 :::
 
@@ -2804,8 +2804,8 @@ The framework section established the gap that compression must close: a `{pytho
 ***Quantization***\index{Quantization!definition} is a model-compression technique that reduces information fidelity by mapping high-precision continuous values to a lower-precision discrete set.
 
 1.  **Significance (quantitative)**: It reduces the memory footprint and bandwidth demand by 4$\times$ (FP32 to INT8) or more, exploiting the inherent robustness of neural networks to low-precision arithmetic.
-2.  **Observation**: Unlike pruning, which reduces the count of parameters, quantization reduces the bit depth of every parameter and activation in the system.
-3.  **Pitfall**: A frequent misconception is that quantization is just "rounding." In reality, it is a lossy mapping that requires careful range estimation and, often, quantization-aware training (QAT) to minimize its impact on accuracy.
+2.  **Distinction (durable)**: Unlike pruning, which reduces the count of parameters, quantization reduces the bit depth of every parameter and activation in the system.
+3.  **Common pitfall**: A frequent misconception is that quantization is just "rounding." In reality, it is a lossy mapping that requires careful range estimation and, often, quantization-aware training (QAT) to minimize its impact on accuracy.
 
 :::
 
@@ -5143,8 +5143,8 @@ Consider a typical neural network layer: convolution followed by batch normaliza
 ***Operator Fusion***\index{Operator Fusion!definition}\index{Operator Fusion!GEMM fusion}\index{Architectural Efficiency!operator fusion} is a compiler and runtime optimization that combines adjacent tensor operations into a single fused kernel so intermediate values remain in registers or on-chip memory instead of being written to and reread from accelerator global memory.
 
 1.  **Significance (quantitative)**: For $N$ unfused operations over an $M$-byte tensor, intermediate memory traffic scales as $2NM$ because each operation reads and writes global memory. Fusion reduces this to approximately $2M$ by reading the inputs once, computing the sequence locally, and writing only the final output. The savings directly reduce the $D_{\text{vol}}/\text{BW}$ term and eliminate repeated kernel launch overhead.
-2.  **Observation**: Unlike pruning, quantization, or distillation, operator fusion does not change the model's parameters, precision, or architecture. It changes the execution schedule of mathematically equivalent operations, preserving model outputs while improving latency and throughput on memory-bound workloads.
-3.  **Pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
+2.  **Distinction (durable)**: Unlike pruning, quantization, or distillation, operator fusion does not change the model's parameters, precision, or architecture. It changes the execution schedule of mathematically equivalent operations, preserving model outputs while improving latency and throughput on memory-bound workloads.
+3.  **Common pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
 
 :::
 
@@ -7449,57 +7449,30 @@ The resulting software infrastructure transforms theoretical optimization techni
 
 At the model-development layer, framework APIs are most useful for transformations that need access to training state, calibration data, or weight tensors before export. TensorFlow, PyTorch, and MXNet expose different APIs, but the systems role is the same: insert quantization behavior into the graph, mutate or mask weights for pruning, and preserve enough metadata to reproduce the optimized artifact. @Sec-ml-frameworks examines the frameworks themselves; this section only needs the compression-facing boundary.
 
-Quantization-aware training is the clearest example because it must change the training graph without changing the mathematical objective. The API inserts quantization and dequantization behavior around selected tensors, lets gradients continue to flow through the simulated low-precision path, and records the configuration needed for later conversion. @Lst-qat_example demonstrates this pattern with PyTorch's `torch.ao.quantization` API.
+Quantization-aware training is the clearest example because it must change the training graph without changing the mathematical objective. The transformation inserts quantization and dequantization behavior around selected tensors, lets gradients continue to flow through the simulated low-precision path, and records the configuration needed for later conversion. @Lst-qat_example demonstrates the mechanism without depending on a specific framework API.
 
-::: {#lst-qat_example lst-cap="**Quantization-Aware Training**: Prepares a model to be trained in lower-precision formats, ensuring that quantization errors are accounted for during training."}
+::: {#lst-qat_example lst-cap="**Quantization-Aware Training**: Mechanism-level transformation that trains through simulated low-precision behavior and exports the calibration metadata needed for deployment."}
 
-```{.python}
-import torch
-from torch.ao.quantization import (
-    QuantStub,
-    DeQuantStub,
-    get_default_qat_qconfig,
-    prepare_qat,
-)
-
-
-# Define a model with quantization support
-class QuantizedModel(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.quant = QuantStub()
-        self.conv = torch.nn.Conv2d(3, 64, 3)
-        self.dequant = DeQuantStub()
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.conv(x)
-        return self.dequant(x)
-
-
-# Prepare model for quantization-aware training
-model = QuantizedModel()
-model.qconfig = get_default_qat_qconfig("fbgemm")
-model_prepared = prepare_qat(model)
+```{.text}
+choose target precision and calibration policy
+insert quantize/dequantize boundaries around selected tensors
+train with simulated low-precision values while keeping gradient flow intact
+record scales, zero points, accumulator precision, and unsupported operations
+export the calibrated graph and metadata as one reproducible artifact
 ```
 
 :::
 
-The same framework-level pattern applies to pruning. The API owns the weight tensor, applies a mask or structured removal rule, and records which parameters were removed so that subsequent fine-tuning and export operate on the intended model. @Lst-pytorch_pruning illustrates both unstructured and structured pruning.
+The same transformation pattern applies to pruning. The optimization pass owns the weight tensor, applies a mask or structured removal rule, and records which parameters were removed so that subsequent fine-tuning and export operate on the intended model. @Lst-pytorch_pruning illustrates the artifact boundary for both unstructured and structured pruning.
 
-::: {#lst-pytorch_pruning lst-cap="**PyTorch Pruning APIs**: Applies unstructured and structured pruning techniques to reduce model complexity while maintaining performance. Adapted from PyTorch's `torch.nn.utils.prune` API."}
+::: {#lst-pytorch_pruning lst-cap="**Pruning Artifact Boundary**: Applies unstructured or structured removal rules, then records the mask and fine-tuning context needed to reproduce the compressed model."}
 
-```{.python}
-import torch
-import torch.nn.utils.prune as prune
-
-# Apply unstructured pruning
-module = torch.nn.Linear(10, 10)
-prune.l1_unstructured(module, name="weight", amount=0.3)
-# Prune 30% of weights
-
-# Apply structured pruning
-prune.ln_structured(module, name="weight", amount=0.5, n=2, dim=0)
+```{.text}
+choose pruning granularity: individual weights, channels, blocks, or attention heads
+score candidate parameters by magnitude, sensitivity, or validation loss impact
+remove or mask the selected structure according to the hardware-compatible rule
+fine-tune the compressed model against the original validation target
+export weights, masks, sparsity pattern, and calibration evidence together
 ```
 
 :::
