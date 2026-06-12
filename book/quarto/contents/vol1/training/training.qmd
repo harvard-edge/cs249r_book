@@ -587,7 +587,7 @@ class TrainingHardware:
     v100_mem_gb_str = fmt_memory(v100.memory.capacity, unit=GB, precision=1, commas=False)
 ```
 
-**Systems insight**: A V100 GPU (`{python} TrainingHardware.v100_fp16_tflop_per_s_str` peak with Tensor Cores, `{python} TrainingHardware.v100_fp32_tflop_per_s_str` without) would require `{python} GPT2Compute.v100_time_s_str` for the modeled attention-plus-FFN training-step estimate at 100 percent utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220 ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
+**Systems insight**: A V100 GPU (`{python} TrainingHardware.v100_fp16_tflop_per_s_str` peak with Tensor Cores, `{python} TrainingHardware.v100_fp32_tflop_per_s_str` without) would require `{python} GPT2Compute.v100_time_s_str` for the modeled attention-plus-FFN training-step estimate at 100 percent utilization (theoretical peak; practical throughput would be lower). Reaching a 180 to 220 ms training step is therefore already a multi-accelerator lower-bound problem: ideal arithmetic alone requires roughly 12 to 15 V100s, and practical systems need additional headroom for utilization losses, communication, and pipeline overhead.
 
 :::
 
@@ -1359,7 +1359,7 @@ For GPT-2 with batch size $B$ = `{python} GPT2ActivationMemory.batch_size_str`, 
 
 - Attention activations: $B \times S \times d \times 4$ (Q, K, V, output) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.hidden_dim_str` $\times$ $4 \times 2$ bytes (FP16) = `{python} GPT2ActivationMemory.attn_act_mb_str`
 - FFN activations: $B \times S \times (4d)$ (intermediate expansion) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.ffn_dim_str` $\times$ 2 bytes = `{python} GPT2ActivationMemory.ffn_act_mb_str`
-- Attention scores: $5 \times N_{\text{heads}} \times S^2 \times B$ bytes for the $S{\times}S$ score, softmax, and dropout buffers across $N_{\text{heads}}$ = `{python} GPT2ActivationMemory.heads_str` heads = `{python} GPT2ActivationMemory.attn_scores_mb_str`—the dominant term, quadratic in sequence length, and exactly what selective recomputation discards
+- Attention scores: $5 \times N_{\text{heads}} \times S^2 \times B$ bytes for the $S{\times}S$ score, softmax, and dropout buffers. With `{python} GPT2ActivationMemory.heads_str` heads, this term reaches `{python} GPT2ActivationMemory.attn_scores_mb_str` per layer—the dominant term, quadratic in sequence length, and exactly what selective recomputation discards
 - Layer norm states: Minimal (~`{python} GPT2ActivationMemory.layernorm_mb_str` per layer)
 - Total per layer: ~`{python} GPT2ActivationMemory.per_layer_mb_str` (attention + FFN + attention scores + layer norm states)
 
@@ -2373,7 +2373,9 @@ Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where th
 # │          pcie_gen3_gb_per_s_str, transfer_ms_str, n_cpu_workers_str,
 # │          parallel_tokenization_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth, MarkdownStr
+from mlsysim import Hardware, Models
+from mlsysim.core.units import GB, KB, THOUSAND, byte, flop, millisecond, second
+from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth, fmt_math, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2DataPipeline:
@@ -2390,10 +2392,8 @@ class GPT2DataPipeline:
     dataset = Models.Language.GPT2.training_dataset_size
     bpe_vocab = 50_257
     f_access = 0.1
-    gpu_forward_ms = 80
     utilization_pct = 95
-    throughput_samples = 380
-    n_v100_gpus = 8
+    n_v100_gpus = 32
 
     pcie_bw = Hardware.Cloud.V100.interconnect.bandwidth
     # Same Gen4 device as the sequential figure quoted beside it (2026-06-07:
@@ -2409,6 +2409,26 @@ class GPT2DataPipeline:
     transfer_time = (batch_bytes / pcie_bw).to(second)
 
     parallel_token_ms = tokenization_ms / workers
+    hidden_dim = Models.Language.GPT2.hidden_dim
+    layers = Models.Language.GPT2.layers
+    heads = Models.Language.GPT2.heads
+    head_dim = hidden_dim // heads
+    macs_qkv = 3 * (batch_size * seq_len * hidden_dim * hidden_dim)
+    flops_qkv = 2 * macs_qkv
+    macs_score = batch_size * heads * seq_len * seq_len * head_dim
+    flops_score = 2 * macs_score
+    flops_attn_pair = 2 * flops_score
+    macs_out_proj = batch_size * seq_len * hidden_dim * hidden_dim
+    flops_out_proj = 2 * macs_out_proj
+    macs_ffn = 2 * (batch_size * seq_len * hidden_dim * (4 * hidden_dim))
+    flops_ffn = 2 * macs_ffn
+    flops_layer_fwd = flops_qkv + flops_attn_pair + flops_out_proj + flops_ffn
+    flops_step_total = flops_layer_fwd * layers * 3
+    gpt2_step_flops = flops_step_total * flop
+    cluster_peak = n_v100_gpus * Hardware.Cloud.V100.compute.peak_flops
+    ideal_step_time = gpt2_step_flops / cluster_peak
+    effective_step_time = ideal_step_time / (utilization_pct / 100)
+    throughput_samples = batch_size / effective_step_time.to(second).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     tokens_per_batch_str = fmt_count(tokens_per_batch, scale="K", precision=1, commas=False, label="token")
@@ -2427,8 +2447,8 @@ class GPT2DataPipeline:
     f_access_str = fmt(f_access, precision=1, commas=False)
     utilization_pct_str = fmt_percent(utilization_pct / 100, precision=0, commas=False, style='prose')
     throughput_samples_str = fmt_int(throughput_samples, commas=False)
-    n_v100_gpus_str = fmt_count(n_v100_gpus, commas=False, label="GPU")
-    gpu_forward_ms_str = fmt_time(gpu_forward_ms * millisecond, millisecond, precision=0, commas=False)
+    n_v100_gpus_str = fmt(n_v100_gpus, precision=0, commas=False)
+    accelerator_step_ms_str = fmt_time(effective_step_time, millisecond, precision=1, commas=False)
 
 # Note: Use GPT2DataPipeline.tokenization_ms_str directly.
 ```
@@ -2456,11 +2476,11 @@ class StorageBandwidthNvme:
 **Stage trace**:
 
 1. **Raw text storage**: The OpenWebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from an NVMe SSD can reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`, but language-model training samples across documents, so the effective random-access bandwidth falls to roughly `{python} GPT2DataPipeline.random_access_gb_per_s_str` when the effective-access factor is about `{python} GPT2DataPipeline.f_access_str`.
-2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} with a `{python} GPT2DataPipeline.bpe_vocab_str` vocabulary converts raw text into subword token IDs, so a word such as "unbreakable" becomes the sequence ["un", "break", "able"]. With batch size `{python} GPT2DataPipeline.b_assign_math` and sequence length `{python} GPT2DataPipeline.s_assign_math`, each training step needs `{python} GPT2DataPipeline.tokens_per_batch_str`; at `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core, one core spends `{python} GPT2DataPipeline.tokenization_ms_str` preparing a batch.
-3. **Batching and padding**: The pipeline pads sequences to a uniform length and packs them into a `[32, 1024]` int64 tensor of `{python} GPT2DataPipeline.batch_kb_str` per batch.
+2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} with a `{python} GPT2DataPipeline.bpe_vocab_str` vocabulary converts raw text into subword token IDs, so a word such as "unbreakable" becomes the sequence ["un", "break", "able"]. With global batch size `{python} GPT2DataPipeline.b_assign_math` across the cluster and sequence length `{python} GPT2DataPipeline.s_assign_math`, each training step needs `{python} GPT2DataPipeline.tokens_per_batch_str`; at `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core, one core spends `{python} GPT2DataPipeline.tokenization_ms_str` preparing a batch.
+3. **Batching and padding**: The pipeline pads sequences to a uniform length and packs them into an int64 tensor with 32 sequences by 1,024 tokens, for `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Moving that tensor across a Gen3 x16 link with `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` of theoretical bandwidth takes only `{python} GPT2DataPipeline.transfer_ms_str`, so optimizing the copy would not materially improve this pipeline.
 
-**Systems insight**: At GPT-2 scale, storage and PCIe movement are not the binding terms; CPU tokenization is already close to the `{python} GPT2DataPipeline.gpu_forward_ms_str` accelerator forward pass. The useful intervention is to parallelize and overlap tokenization: `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers reduce the tokenization service time to about `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching prepares the next batch during the current accelerator step. The result is accelerator utilization above `{python} GPT2DataPipeline.utilization_pct_str` and throughput of `{python} GPT2DataPipeline.throughput_samples_str` samples per second on `{python} GPT2DataPipeline.n_v100_gpus_str` $\times$ V100.
+**Systems insight**: At GPT-2 scale, storage and PCIe movement are not the binding terms; CPU tokenization is already close to the `{python} GPT2DataPipeline.accelerator_step_ms_str` accelerator training step. The useful intervention is to parallelize and overlap tokenization: `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers reduce the tokenization service time to about `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching prepares the next batch during the current accelerator step. The result is accelerator utilization above `{python} GPT2DataPipeline.utilization_pct_str` and a cluster-wide throughput of `{python} GPT2DataPipeline.throughput_samples_str` global samples per second on `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
 
 :::
 
@@ -2942,7 +2962,7 @@ The memory scaling patterns reveal critical hardware utilization trade-offs. Dou
 
 GPUs typically provide `{python} ResNetMemoryScaling.gpu_mem_range_min_gb_str`--`{python} ResNetMemoryScaling.gpu_mem_range_max_gb_str` of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. Two techniques address this constraint directly: activation checkpointing\index{Activation Checkpointing!recomputation trade-off} trades recomputation for reduced activation storage, and mixed-precision training halves memory per value by using FP16 instead of FP32. Both are examined in detail in @sec-model-training-pipeline-optimizations-cd9d; here, the key insight is that memory capacity, not compute throughput, often determines the maximum feasible batch size and model depth. Practitioners frequently start with large batch sizes during initial development on smaller networks, then adjust downward when scaling to deeper architectures or memory-constrained hardware.
 
-The backward pass\index{Backward Pass!gradient computation}\index{Backward Pass!memory operations} reverses this flow, computing gradients at approximately twice the forward pass cost (as established in @sec-model-training-backpropagation-mechanics-0b64). The per-layer memory costs accumulate rapidly across the full network: deeper in ResNet-50, mid-network convolutional layers use `{python} ResNetMemoryScaling.mid_layer_filters_value_str` filters, quadrupling per-layer memory and computation requirements relative to the initial `{python} ResNetMemoryScaling.bwd_filters_value_str`-filter layer. Across `{python} ResNetMemoryScaling.resnet_layers_str`, peak backward-pass working set can reach approximately `{python} ResNetMemoryScaling.bwd_total_grad_gb_str` before accounting for optimizer state and parameter updates. Each layer's backward step depends on gradients from the layer above, so the GPU processes layers sequentially; activation buffers for the current layer are freed as soon as that layer's backward step finishes, but peak memory is set by the widest layer in the chain.
+The backward pass\index{Backward Pass!gradient computation}\index{Backward Pass!memory operations} reverses this flow, computing gradients at approximately twice the forward pass cost (as established in @sec-model-training-backpropagation-mechanics-0b64). The per-layer memory costs accumulate rapidly across the full network: deeper in ResNet-50, mid-network convolutional layers use `{python} ResNetMemoryScaling.mid_layer_filters_value_str` filters rather than the initial `{python} ResNetMemoryScaling.bwd_filters_value_str`, but smaller spatial maps offset some activation memory while convolutional work depends on kernel size and both input and output channels. Across `{python} ResNetMemoryScaling.resnet_layers_str`, peak backward-pass working set can reach approximately `{python} ResNetMemoryScaling.bwd_total_grad_gb_str` before accounting for optimizer state and parameter updates. Each layer's backward step depends on gradients from the layer above, so the GPU processes layers sequentially; activation buffers for the current layer are freed as soon as that layer's backward step finishes, but peak memory is set by the widest layer in the chain.
 
 ### Parameter updates and optimizers {#sec-model-training-parameter-updates-optimizers-b1a4}
 
@@ -4209,7 +4229,7 @@ class MixedPrecisionLossScaling:
     fp32_cost_usd = 50_000
     fp16_cost_usd = 28_000
     savings_usd = fp32_cost_usd - fp16_cost_usd
-    savings_days = 6
+    savings_days = (fp32_weeks - fp16_weeks) * 7
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     loss_scale_eqn_str = fmt_math(f"2^{{{loss_scale_exp}}}")
@@ -4222,7 +4242,7 @@ class MixedPrecisionLossScaling:
     fp32_cost_str = fmt_usd(fp32_cost_usd, precision=0, commas=True)
     fp16_cost_str = fmt_usd(fp16_cost_usd, precision=0, commas=True)
     savings_cost_str = fmt_usd(savings_usd, precision=0, commas=True)
-    savings_days_str = fmt_time(savings_days, 'day', precision=0, commas=False, style='word')
+    savings_days_str = fmt_time(savings_days, 'day', precision=1, commas=False, style='word')
 ```
 
 Three implementation details make mixed precision viable. *Loss scaling* multiplies the loss by a factor (typically starting at `{python} MixedPrecisionLossScaling.loss_scale_eqn_str` and dynamically halved when overflow is detected) so that small gradients land in FP16's representable range. Attention-layer gradients can span `{python} MixedPrecisionLossScaling.grad_range_min_eqn_str` to `{python} MixedPrecisionLossScaling.grad_range_max_eqn_str`, and without scaling the smallest of these would underflow to zero. *FP32 master weights* are then required for the optimizer update: a small learning rate (`{python} MixedPrecisionLossScaling.small_lr_str`) multiplied by an FP16 gradient can round to zero, but FP32 accumulation preserves these tiny updates. *Selective FP32 computation* covers the two operations that cannot tolerate FP16—LayerNorm, where variance computation needs high precision, and Softmax, where the exponential needs the full FP32 range—while every other operation runs in FP16.
@@ -5623,9 +5643,10 @@ class GPT2SummaryScalingRecap:
     o_total_mem_gb_str = fmt_memory(o_total_mem, unit=GB, precision=1, commas=False)
     o_total_mem_b4_gb_str = fmt_memory(o_total_mem_b4, unit=GB, commas=False)
     v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
+    v100_mem_gb_str = fmt_memory(v100_mem, unit=GB, precision=1, commas=False)
 ```
 
-The single-device optimization toolkit (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated this at batch size 4, bringing a 1.5-billion-parameter model to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str` and within reach of a single V100 GPU (`{python} GPT2SummaryScalingRecap.v100_mem_gib_str`). The same toolkit has limits that batch size makes visible: at batch 32, memory falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str`, a substantial reduction that still exceeds what any single accelerator provides. Some models still will not fit\index{Scaling!single-device limitations}, no matter how aggressively these techniques are applied. A 70-billion-parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on higher-capacity variants like the H100 NVL (94 GB) and H200 (141 GB) once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
+The single-device optimization toolkit (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated this at batch size 4, bringing a 1.5-billion-parameter model to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str` and within reach of a single V100 GPU (`{python} GPT2SummaryScalingRecap.v100_mem_gib_str`, about `{python} GPT2SummaryScalingRecap.v100_mem_gb_str`). The same toolkit has limits that batch size makes visible: at batch 32, memory falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str`, a substantial reduction that still exceeds what any single accelerator provides. Some models still will not fit\index{Scaling!single-device limitations}, no matter how aggressively these techniques are applied. A 70-billion-parameter model requires about 140 GB for FP16 weights alone, which exceeds the 80 GB configurations of A100 and H100 SXM accelerators and leaves little or no room even on higher-capacity variants like the H100 NVL (94 GB) and H200 (141 GB) once gradients, optimizer state, and activations are included. Even when a model does fit, training on a single device may take years rather than weeks.
 
 ::: {.column-margin}
 ![](images/svg/vol1_training_margin_004.svg){width="100%" fig-alt="80 GB GPU capacity threshold with 70B FP16 weights above it."}
@@ -6733,8 +6754,10 @@ class FallaciesPitfallsSetup:
     fp_model_20b_params = 20 * Bparam  # scenario assumption
     fp_model_7b_params = Models.Language.Llama2_7B.parameters
     fp_model_20b_fp16 = 20 * 2 * GB  # 2 bytes per param in FP16
+    fp_model_20b_grad = 20 * 2 * GB  # FP16 gradients
+    fp_model_20b_master = 20 * 4 * GB  # FP32 master weights
     fp_model_20b_optim = 20 * 4 * 2 * GB  # Adam: 2 states * 4 bytes each
-    fp_model_20b_total = fp_model_20b_fp16 + fp_model_20b_optim
+    fp_model_20b_total = fp_model_20b_fp16 + fp_model_20b_grad + fp_model_20b_master + fp_model_20b_optim
     fp_data_threshold_m = 100  # million examples
     fp_overfit_degrade_min = 5
     fp_overfit_degrade_max = 10
@@ -6794,6 +6817,8 @@ class FallaciesPitfallsSetup:
     fp_model_7b_params_str = fmt_params(fp_model_7b_params, precision=0)
     fp_model_20b_total_gb_str = fmt_memory(fp_model_20b_total, unit=GB, precision=0, commas=False)
     fp_model_20b_fp16_gb_str = fmt_memory(fp_model_20b_fp16, unit=GB, precision=0, commas=False)
+    fp_model_20b_grad_gb_str = fmt_memory(fp_model_20b_grad, unit=GB, precision=0, commas=False)
+    fp_model_20b_master_gb_str = fmt_memory(fp_model_20b_master, unit=GB, precision=0, commas=False)
     fp_model_20b_optim_gb_str = fmt_memory(fp_model_20b_optim, unit=GB, precision=0, commas=False)
     fp_data_threshold_m_str = fmt_count(
         fp_data_threshold_m * MILLION,
@@ -6841,7 +6866,7 @@ The systematic approach developed throughout this chapter (quantifying costs thr
 
 **Fallacy**: *Larger models always yield better performance.*
 
-Teams treat scale as a monotonic lever: if a 7B-parameter model works well, a 20B-parameter model must work better. In practice, scaling model capacity without proportionally increasing data causes severe overfitting\index{Overfitting!model scaling failure}. A `{python} FallaciesPitfallsSetup.fp_model_20b_params_str` model requires approximately `{python} FallaciesPitfallsSetup.fp_model_20b_total_gb_str` memory (`{python} FallaciesPitfallsSetup.fp_model_20b_fp16_gb_str` parameters in FP16 + `{python} FallaciesPitfallsSetup.fp_model_20b_optim_gb_str` optimizer states) yet delivers *worse* accuracy than a `{python} FallaciesPitfallsSetup.fp_model_7b_params_str` model when trained on datasets under `{python} FallaciesPitfallsSetup.fp_data_threshold_m_str` training examples. Beyond critical thresholds, doubling model size while holding data constant typically degrades validation accuracy by `{python} FallaciesPitfallsSetup.fp_overfit_degrade_min_str`--`{python} FallaciesPitfallsSetup.fp_overfit_degrade_max_str` due to overfitting. Model capacity must match dataset size, as established in @sec-model-training-mathematical-foundations-d894. Teams that pursue scale without commensurate data budgets waste months of compute on models that underperform smaller variants.
+Teams treat scale as a monotonic lever: if a 7B-parameter model works well, a 20B-parameter model must work better. In practice, scaling model capacity without proportionally increasing data causes severe overfitting\index{Overfitting!model scaling failure}. A `{python} FallaciesPitfallsSetup.fp_model_20b_params_str` model requires approximately `{python} FallaciesPitfallsSetup.fp_model_20b_total_gb_str` of nonactivation training state (`{python} FallaciesPitfallsSetup.fp_model_20b_fp16_gb_str` FP16 parameters + `{python} FallaciesPitfallsSetup.fp_model_20b_grad_gb_str` FP16 gradients + `{python} FallaciesPitfallsSetup.fp_model_20b_master_gb_str` FP32 master weights + `{python} FallaciesPitfallsSetup.fp_model_20b_optim_gb_str` Adam states) yet delivers *worse* accuracy than a `{python} FallaciesPitfallsSetup.fp_model_7b_params_str` model when trained on datasets under `{python} FallaciesPitfallsSetup.fp_data_threshold_m_str` training examples. Beyond critical thresholds, doubling model size while holding data constant typically degrades validation accuracy by `{python} FallaciesPitfallsSetup.fp_overfit_degrade_min_str`--`{python} FallaciesPitfallsSetup.fp_overfit_degrade_max_str` due to overfitting. Model capacity must match dataset size, as established in @sec-model-training-mathematical-foundations-d894. Teams that pursue scale without commensurate data budgets waste months of compute on models that underperform smaller variants.
 
 **Pitfall**: *Assuming distributed training automatically accelerates development.*
 
