@@ -99,6 +99,13 @@ work. The detailed backlog remains in the sections below.
 - [x] Suppress the HTML landing-page `Welcome` sections from PDF front matter
   without removing the web landing pages; verified at the generated LaTeX
   boundary that the landing-page section commands no longer appear.
+- [x] Polish flagged Vol. II figure issues from PDF review:
+  - [x] Make the Network Fabrics bandwidth-cliff TikZ figure use the requested
+    `Vatico` face when available, with a build-safe sans fallback.
+  - [x] Replace the Sustainable AI Meta carbon-footprint PNG with a clean
+    vector SVG using the book palette and training/inference visual encoding.
+  - [x] Remove full-canvas gray/border wrappers from the flagged GHG Protocol
+    SVG family and the matching Sustainable AI SVG wrapper cases.
 
 ### Concept-Audit Integration Queue
 
