@@ -129,7 +129,7 @@ Machine learning systems face a core engineering trade-off: **representational p
 
 :::
 
-Five architectural families define neural computation, each optimized for different data characteristics. @Tbl-architecture-families maps each family to its data domain, core innovation, and dominant system bottleneck.
+Five architectural families define neural computation, each optimized for different data characteristics. @Tbl-architecture-families maps each family to its data domain, core innovation, and dominant system bottleneck. The bottleneck column is the decision column: CNNs concentrate reusable spatial work into compute throughput, MLPs stress memory bandwidth, RNNs expose sequential dependencies, and transformers and DLRMs push memory capacity through attention state or embedding tables.
 
 Each architectural choice creates distinct computational signatures that propagate through every level of the implementation stack.
 
@@ -2049,7 +2049,7 @@ The core operation in a basic RNN can be expressed mathematically as @eq-rnn:
 $$
 \mathbf{h}_t = f(\mathbf{W}_{\text{hh}}\mathbf{h}_{t-1} + \mathbf{W}_{\text{hx}}\mathbf{x}_t + \mathbf{b}_h)
 $$ {#eq-rnn}
-where $\mathbf{h}_t$ denotes the hidden state at time $t$, $\mathbf{x}_t$ denotes the input at time $t$, $\mathbf{W}_{\text{hh}}$ contains the recurrent weights, and $\mathbf{W}_{\text{hx}}$ contains the input weights. Compare the left and right panels of @fig-rnn: the left panel shows the compact recurrent loop, while the right panel unfolds it across time steps, making explicit the temporal dependencies that this recurrence creates.
+where $\mathbf{h}_t$ denotes the hidden state at time $t$, $\mathbf{x}_t$ denotes the input at time $t$, $\mathbf{W}_{\text{hh}}$ contains the recurrent weights, $\mathbf{W}_{\text{hx}}$ contains the input weights, $\mathbf{b}_h$ is the hidden-state bias vector, and $f$ is the activation function. Compare the left and right panels of @fig-rnn: the left panel shows the compact recurrent loop, while the right panel unfolds it across time steps, making explicit the temporal dependencies that this recurrence creates.
 
 ::: {#fig-rnn fig-env="figure" fig-pos="htb" fig-cap="**Recurrent Neural Network Unfolding**: Left panel shows the compact recurrent loop; right panel unfolds this across time steps. Three weight matrices are shared across all steps: $\mathbf{W}_{\text{hx}}$ (input-to-hidden), $\mathbf{W}_{\text{hh}}$ (hidden-to-hidden), and $\mathbf{W}_{\text{yh}}$ (hidden-to-output). This weight sharing keeps parameter count constant at $\mathcal{O}(d_{\text{hidden}}^2)$ regardless of sequence length. For a 128-dimensional hidden state, each time step requires 16,384 MACs for recurrent connections plus 12,800 for input projection." fig-alt="Left: single green hidden node with a hidden-to-hidden self-loop. Right: unfolded across three time steps showing purple inputs, green hidden states, and orange outputs. Arrows show shared input-to-hidden, hidden-to-hidden, and hidden-to-output weights across all steps."}
 
@@ -2188,6 +2188,8 @@ class RNNCompute:
     total_str = fmt(macs_total, precision=0, commas=True)
 ```
 
+@Lst-rnn_layer_step demonstrates the single-time-step mechanism using framework-level matrix operations: combine the previous hidden state with the current input, add the bias, and apply the activation to produce the next hidden state. The code is intentionally local to one step because the systems cost is not the step itself, but the dependency chain that prevents parallel execution across time.
+
 ::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications, $\mathbf{h}_{t-1}\mathbf{W}_{\text{hh}}$ and $\mathbf{x}_t\mathbf{W}_{\text{hx}}$, per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
 
 ```{.python}
@@ -2202,7 +2204,7 @@ def rnn_layer_step(x_t, h_prev, W_hh, W_hx, b):
 
 :::
 
-@Lst-rnn_layer_step demonstrates the operation using high-level matrix operations found in deep learning frameworks. The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_hx` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
+The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_hx` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
 
 The simple recurrence $\mathbf{h}_t = \tanh(\mathbf{W}_{\text{hh}} \mathbf{h}_{t-1} + \mathbf{W}_{\text{hx}} \mathbf{x}_t + \mathbf{b})$ conceals a computational structure with unique challenges: sequential dependencies that prevent parallelization, memory access patterns that differ from feedforward networks, and state management requirements that affect system design.
 

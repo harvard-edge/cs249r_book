@@ -107,7 +107,7 @@ Distributed training (@sec-distributed-training-systems), collective communicati
 
 ### The iron law of ML performance {#sec-performance-engineering-efficiency-frontier}
 
-The memory wall is one term in a larger budget. The iron law of ML system performance\index{Iron Law} decomposes execution time into three competing costs:
+The memory wall is one term in a larger budget. @Eq-iron-law-perf states the iron law of ML system performance\index{Iron Law}, decomposing execution time into three competing costs:
 
 $$
 T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}
@@ -377,6 +377,8 @@ class WideningGap:
     ridge_ratio_mult_str = fmt_multiple(round(ridge_ratio), precision=0, commas=False)
 ```
 
+@Tbl-widening-gap quantifies how the hardware balance shifts across accelerator generations. The key column is the ridge point: as compute grows faster than bandwidth, more operators need higher arithmetic intensity just to remain compute-bound.
+
 | **GPU**  | **Year** |             **Peak FP16 (TFLOP/s)**              |              **HBM BW (TB/s)**              |      **Ridge Point (FLOP/byte)**      |
 |:---------|:--------:|:------------------------------------------------:|:-------------------------------------------:|:-------------------------------------:|
 | **V100** |   2017   | `{python} WideningGap.v100_peak_tflop_per_s_str` | `{python} WideningGap.v100_bw_tb_per_s_str` | `{python} WideningGap.v100_ridge_str` |
@@ -386,7 +388,7 @@ class WideningGap:
 
 : **The Widening Memory Wall**: Compute throughput has increased `{python} WideningGap.compute_growth_mult_str` from V100 to B200 over seven years, while memory bandwidth has increased only `{python} WideningGap.bw_growth_mult_str`. The ridge point has roughly doubled overall (V100 to B200), pulling more workloads into the memory-bound regime over time, though the per-generation movement is not monotonic (B200 sits slightly below H100). {#tbl-widening-gap}
 
-@Tbl-widening-gap quantifies this trend. For the FP16/BF16 table as written, the ridge point increased from `{python} WideningGap.v100_ridge_str` FLOP/byte on the V100 to `{python} WideningGap.b200_ridge_str` FLOP/byte on the B200, about a `{python} WideningGap.ridge_ratio_mult_str` increase. An operation with arithmetic intensity of 200 FLOP/byte was compute-bound on the V100 and A100, but memory-bound on the H100 and B200. Performance engineering techniques targeting memory efficiency, fusion, precision, and tiling therefore become more important as the ridge point rises, not less. The durable lesson is not that one named kernel lasts forever, but that reducing exposed memory traffic becomes more valuable when compute grows faster than bandwidth.
+For the FP16/BF16 table as written, the ridge point increased from `{python} WideningGap.v100_ridge_str` FLOP/byte on the V100 to `{python} WideningGap.b200_ridge_str` FLOP/byte on the B200, about a `{python} WideningGap.ridge_ratio_mult_str` increase. An operation with arithmetic intensity of 200 FLOP/byte was compute-bound on the V100 and A100, but memory-bound on the H100 and B200. Performance engineering techniques targeting memory efficiency, fusion, precision, and tiling therefore become more important as the ridge point rises, not less. The durable lesson is not that one named kernel lasts forever, but that reducing exposed memory traffic becomes more valuable when compute grows faster than bandwidth.
 
 ### The roofline model {#sec-performance-engineering-roofline}
 
@@ -713,6 +715,8 @@ Element-wise operations tell the opposite story. A Gaussian Error Linear Unit (G
 
 Autoregressive LLM decoding at batch size one represents the extreme case. Each decoding step reads the entire weight matrix (gigabytes of data) to produce a single output token. With a hidden dimension of 4096 and batch size 1, the arithmetic intensity is approximately `{python} WorkloadIntensityCalc.decode_intensity_str`, deep in the memory-bound regime. The arithmetic intensity explains why LLM token generation achieves a tiny fraction of peak FLOP/s: the GPU spends nearly all its time reading weights, not multiplying them.
 
+@Tbl-arithmetic-intensity reveals the central pattern behind these examples: batched GEMM can reach the compute-bound regime, but attention, element-wise work, and batch-1 decode sit below the ridge point and are governed by bytes moved rather than FLOPs advertised.
+
 | **Operation**                      |                  **Arithmetic Intensity**                  | **H100 FP16 Regime** | **Primary Bottleneck** |
 |:-----------------------------------|:----------------------------------------------------------:|:--------------------:|:----------------------:|
 | **GEMM ($4096{\times}4096$)**      | ~`{python} WorkloadIntensityCalc.gemm_intensity_table_str` |    Compute-bound     | Tensor core throughput |
@@ -722,7 +726,7 @@ Autoregressive LLM decoding at batch size one represents the extreme case. Each 
 
 : **Arithmetic Intensity of Common ML Operations**: Many transformer inference operations, aside from large batched GEMMs, fall below the H100's ridge point and are therefore memory-bound. Performance engineering focuses on reducing the memory traffic of these operations. {#tbl-arithmetic-intensity}
 
-@Tbl-arithmetic-intensity reveals the central insight: the majority of operations in a transformer inference pipeline are memory-bound. Training workloads with large batch sizes shift more operations into the compute-bound regime because GEMM dimensions scale with batch size. Inference, however, especially autoregressive generation, is dominated by memory-bound operations. The techniques in the rest of this chapter, including fusion, tiling, reduced precision, and algorithmic shortcuts, all target the same fundamental problem: reducing bytes moved per operation.
+The majority of operations in a transformer inference pipeline are memory-bound. Training workloads with large batch sizes shift more operations into the compute-bound regime because GEMM dimensions scale with batch size. Inference, however, especially autoregressive generation, is dominated by memory-bound operations. The techniques in the rest of this chapter, including fusion, tiling, reduced precision, and algorithmic shortcuts, all target the same fundamental problem: reducing bytes moved per operation.
 
 The memory-bound nature of inference also explains a common source of confusion: GPU benchmarks reporting peak TFLOP/s often fail to predict real inference performance. Two GPUs with different TFLOP/s but identical memory bandwidth will achieve virtually identical LLM decode throughput at batch size 1, because decode is entirely memory bound. The correct metric for comparing GPUs for LLM inference is not FLOP/s but rather the combination of memory bandwidth and memory capacity. Bandwidth determines the token generation rate, and capacity determines the maximum batch size (and therefore throughput). Only at large batch sizes, where decode approaches the compute-bound regime, do the FLOP/s differences between GPUs translate into throughput differences.
 

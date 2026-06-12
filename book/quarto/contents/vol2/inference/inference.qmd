@@ -599,7 +599,7 @@ The hierarchy matters because each level changes a different metric and fails at
 ![](images/svg/serving-hierarchy.svg)
 :::
 
-Each level has distinct optimization levers. @Tbl-serving-hierarchy maps these levels to their primary targets and techniques:
+Each level has distinct optimization levers. @Tbl-serving-hierarchy maps these levels to their primary targets and techniques. The decision rule is level-specific: request-level changes reduce per-request latency, replica-level changes raise utilization, service-level changes add aggregate capacity, and platform-level changes improve fleet efficiency across tenants.
 
 | **Level**    | **Optimization Target** | **Key Techniques**                     |
 |:-------------|:-----------------------:|:---------------------------------------|
@@ -846,7 +846,7 @@ The knee occurs where the variable compute cost $(B \times T_{\text{var}})$ star
 
 :::
 
-Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: **Little's Law**\index{Little's Law!capacity planning}[^fn-littles-law], which relates concurrency, throughput, and latency in any stable system. @Tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
+Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: **Little's Law**\index{Little's Law!capacity planning}[^fn-littles-law], which relates concurrency, throughput, and latency in any stable system. @Tbl-batching-by-model summarizes how these batching characteristics vary across model architectures. Batching choice follows the binding bottleneck: compute for vision models, memory capacity or bandwidth for LLM prefill and decode, embedding lookup for recommendation systems, and real-time latency for speech.
 
 [^fn-littles-law]: **Little's Law**: From queuing theory, $Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$, so concurrency equals arrival rate times latency. For a serving fleet, this defines the capacity envelope: if a GPU can handle 32 concurrent requests and each takes 100 ms, the maximum arrival rate is 320 req/s. Beyond this, queues grow rapidly as utilization approaches 1, and tail latency $(L_{\text{lat}})$ explodes.
 
@@ -1185,7 +1185,7 @@ where $S_{\text{max}} = \max_i(S_i)$ and $c_{\text{decode}}$ is the compute cost
 
 $$O_{\text{useful}} = \sum_{i=1}^{B} S_i \times c_{\text{decode}}$$
 
-The **waste ratio**\index{Waste Ratio} quantifies the inefficiency:
+@Eq-waste-ratio defines the **waste ratio**\index{Waste Ratio} that quantifies the inefficiency:
 
 $$W = 1 - \frac{O_{\text{useful}}}{O_{\text{traditional}}} = 1 - \frac{\sum_{i=1}^{B} S_i}{B \times S_{\text{max}}} = 1 - \frac{\bar{S}}{S_{\text{max}}}$$ {#eq-waste-ratio}
 
@@ -3932,7 +3932,7 @@ A foundational result in load balancing theory [@mitzenmacher2001] shows that qu
 
 [^fn-balls-bins-routing]: **Balls-into-Bins (Power of Two Choices)**\index{Power of Two Choices!routing}: With random placement, maximum bin load is $\Theta(\log R / \log \log R)$; with two random choices and greedy selection, it drops to $\Theta(\log \log R)$. For a 1,000-server inference fleet, this reduces worst-case queue depth from roughly 5 to roughly 2, cutting P99 tail latency by nearly half while adding only the overhead of a single extra queue-length probe per request.
 
-The procedure is deliberately small, but the load signal must match the serving workload. For a homogeneous vision fleet, current queue length may be enough. For an LLM fleet, active tokens, estimated remaining decode work, and KV-cache pressure better approximate the work a replica has already accepted. @Algo-power-two-choices-routing states a representative routing loop: probe two replicas, compare normalized work, and route without polling the whole fleet. @Eq-two-choices-max-queue formalizes why this small change matters, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
+The procedure is deliberately small, but the load signal must match the serving workload. For a homogeneous vision fleet, current queue length may be enough. For an LLM fleet, active tokens, estimated remaining decode work, and KV-cache pressure better approximate the work a replica has already accepted. @Algo-power-two-choices-routing states a representative routing loop: probe two replicas, compare normalized work, and route without polling the whole fleet.
 
 ```pseudocode
 #| label: algo-power-two-choices-routing
@@ -3953,7 +3953,7 @@ The procedure is deliberately small, but the load signal must match the serving 
 \end{algorithm}
 ```
 
-The two probes and the one state update per request are $\mathcal{O}(1)$ coordination rather than an all-replica scan, and the tail-latency win materializes only when the load signal reflects true work: in LLM serving, request count alone can hide a 10-token request behind a 500-token one, while active-token and KV-cache signals expose the risk.
+The two probes and the one state update per request are $\mathcal{O}(1)$ coordination rather than an all-replica scan, and the tail-latency win materializes only when the load signal reflects true work: in LLM serving, request count alone can hide a 10-token request behind a 500-token one, while active-token and KV-cache signals expose the risk. The queue-length bound in @eq-two-choices-max-queue formalizes why this small change matters, reducing maximum queue length from $\mathcal{O}(\log R / \log \log R)$ to $\mathcal{O}(\log \log R)$:
 
 $$E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log R)$$ {#eq-two-choices-max-queue}
 
@@ -5352,7 +5352,7 @@ QuaRot rotates the weight and activation spaces with an orthogonal Hadamard tran
 
 [^fn-quarot-hadamard]: **Hadamard rotation in QuaRot**\index{QuaRot!Hadamard rotation}: QuaRot transforms activations as $X' = X \cdot H$ and weights as $W' = H^T \cdot W$, where $H$ is an orthogonal Hadamard matrix, computed structurally without being stored. Orthogonality preserves $X W = X' W'^{\,T}$, so the layer output is unchanged. The outlier-spreading effect is concrete: a vector $[1000, 1, 1, 1]$ with one extreme value becomes roughly $[502, 500, 500, 500]$ after the transform, so no single coordinate dominates the quantization range.
 
-@Tbl-quarot-vs-smoothquant contrasts QuaRot's\index{QuaRot} rotation-based approach with SmoothQuant's\index{SmoothQuant} migration:
+@Tbl-quarot-vs-smoothquant contrasts QuaRot's\index{QuaRot} rotation-based approach with SmoothQuant's\index{SmoothQuant} migration. The operating trade-off is calibration and runtime cost: SmoothQuant avoids runtime overhead after calibration but stops at W8A8, while QuaRot reaches W4A4 by paying an inline rotation cost.
 
 | **Aspect**            | **SmoothQuant** |         **QuaRot**        |
 |:----------------------|:---------------:|:-------------------------:|

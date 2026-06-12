@@ -2055,7 +2055,7 @@ The request lifecycle concludes with postprocessing\index{Postprocessing!logits 
 
 #### From logits to predictions {#sec-model-serving-logits-predictions-09df}
 
-Classification models output logits\index{Logits!classification output} or probabilities across classes. Converting these raw outputs to predictions involves several steps. The simplest is argmax selection\index{Argmax!prediction selection}, which returns the highest-probability class. Thresholding\index{Thresholding!confidence cutoff} applies a confidence cutoff, returning predictions only when the model is sufficiently certain. Top-$k$ extraction returns multiple high-probability classes with their scores, useful when applications need ranked alternatives. Calibration adjusts raw probabilities to better reflect true likelihoods—a step that adds computation but is essential when downstream systems make decisions based on confidence scores.
+Classification models output logits\index{Logits!classification output} or probabilities across classes. Converting these raw outputs to predictions involves several steps. The simplest is argmax selection\index{Argmax!prediction selection}, which returns the highest-probability class. Thresholding\index{Thresholding!confidence cutoff} applies a confidence cutoff, returning predictions only when the model is sufficiently certain. Top-$k$ extraction returns multiple high-probability classes with their scores, useful when applications need ranked alternatives. Calibration adjusts raw probabilities to better reflect true likelihoods, a step that adds computation but is essential when downstream systems make decisions based on confidence scores. For ResNet-50 image classification, @lst-resnet-postprocessing shows the full postprocessing path from raw logits to an API-ready response, including probability normalization, top-$k$ extraction, label lookup, and response formatting.
 
 ::: {#lst-resnet-postprocessing lst-cap="**ResNet-50 Postprocessing**: Transforms raw logits to calibrated probabilities, extracts top-$k$ predictions, and formats the API response."}
 
@@ -2092,7 +2092,7 @@ response = {
 
 :::
 
-For ResNet-50 image classification, typical postprocessing includes transforming logits to probabilities, extracting top predictions, and formatting responses. @Lst-resnet-postprocessing shows a complete postprocessing pipeline with timing annotations, demonstrating each step from raw logits to API-ready response. Total postprocessing time is approximately 0.1 ms, negligible compared to preprocessing and inference.
+For this example, total postprocessing time is approximately 0.1 ms, negligible compared to preprocessing and inference.
 
 Each step adds latency but improves response utility. Calibration in particular can add significant computation but is necessary when downstream systems make decisions based on confidence scores.
 
@@ -2286,9 +2286,9 @@ This equation reveals the "cost of throughput." Increasing $B$ to saturate the G
 
 ### The utilization-latency relationship {#sec-model-serving-utilizationlatency-relationship-a2f0}
 
-Little's Law describes average system behavior, but it does not reveal *how* latency changes as load approaches capacity. To answer the critical question of *how* much spare capacity a serving system needs, we turn to the M/M/1 queue model.[^fn-mm1-erlang-serving] For a system with Poisson arrivals\index{Poisson Process!queuing model} and exponential service times, the average time in system follows:
+Little's Law describes average system behavior, but it does not reveal *how* latency changes as load approaches capacity. To answer the critical question of *how* much spare capacity a serving system needs, we turn to the M/M/1 queue model.[^fn-mm1-erlang-serving] For a system with Poisson arrivals\index{Poisson Process!queuing model} and exponential service times, @eq-mm1-wait gives the average time in system:
 $$T_{\text{lat}} = \frac{1}{\mu - \lambda} = \frac{\text{service time}}{1 - \rho}$$ {#eq-mm1-wait}
-where $\mu$ is the service rate (requests per second the server can handle), and $\rho = \lambda/\mu$ is the utilization\index{Utilization!latency relationship} (fraction of time the server is busy).
+where $\lambda$ is the arrival rate, $\mu$ is the service rate (requests per second the server can handle), and $\rho = \lambda/\mu$ is the utilization\index{Utilization!latency relationship} (fraction of time the server is busy).
 
 [^fn-mm1-erlang-serving]: **M/M/1 Queue**\index{M/M/1 Queue!wait time formula}\index{M/M/1 Queue!Erlang origin}: Queuing theory originated with Agner Krarup Erlang's 1909 analysis of the Copenhagen Telephone Exchange, where call arrivals genuinely were memoryless (Poisson). The M/M/1 model's exponential service time assumption fit telephony well but overpredicts variance for ML inference, where fixed-architecture forward passes produce near-constant service times. This mismatch is useful: M/M/1 overestimates wait times by roughly 2$\times$ compared to the more realistic M/D/1, providing a built-in safety margin for capacity planning.
 
@@ -2844,7 +2844,7 @@ Note: Times shown are pure inference time, excluding queue wait. @Sec-model-serv
 
 The table reveals the throughput-latency trade-off in stark terms: larger batches dramatically improve hardware efficiency but increase per-request latency. In practice, the optimal batch size depends on both the latency Service Level Objective (SLO) and the arrival rate of requests. The question facing every serving engineer is therefore quantitative: determining the largest batch size that still meets a given latency SLO. At batch size 8 with a 5 ms batching window, for example, the worst-case user latency is about 14 ms (5 ms wait plus 9 ms inference), comfortably below a 20 ms SLO budget. That earns nearly 3$\times$ higher service throughput than batch-1 serving on the same hardware, provided sustained load is high enough to fill the batching window.
 
-Plotting the same trade-off reveals the knee where extra batching stops paying for its latency cost.
+Plotting the same trade-off in @fig-throughput-latency-knee reveals the knee where extra batching stops paying for its latency cost: throughput is already flattening while latency begins to spike, so batching beyond that point trades modest capacity gains for queueing delay.
 
 ::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: Batch size vs. throughput (blue) and latency (orange). Throughput increases with batch size as hardware utilization improves, but eventually saturates. Latency remains relatively flat until the knee, after which it spikes due to queuing. Values are representative and depend on model/hardware." fig-alt="Dual-axis line chart. Blue line (throughput) rises and plateaus. Orange line (latency) stays low then spikes upward. A vertical line marks the optimal point where throughput is high before latency explodes."}
 

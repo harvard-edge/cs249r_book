@@ -3125,6 +3125,8 @@ y_gpu = y_regular.to("cuda", non_blocking=True)  # Still blocks
 
 The `non_blocking=True` flag enables asynchronous transfers that return immediately without waiting for completion. This works only when the source tensor uses pinned memory\index{Pinned Memory!DMA transfers} (page-locked memory that enables DMA transfers\index{DMA Transfer!GPU copy engine}). Without pinned memory, the transfer blocks even when `non_blocking=True` is specified, because the GPU's copy engine cannot initiate a DMA transfer from pageable host memory.
 
+The same synchronization pattern appears when model stages overlap across microbatches. @Lst-pipeline-parallelism-streams shows each stage running on its own stream, with events enforcing only the producer-consumer dependencies needed for correctness.
+
 ::: {#lst-pipeline-parallelism-streams lst-cap="**Stage Overlap with Streams**: Overlap multiple model stages across microbatches using streams and events for inter-stage synchronization."}
 
 ```{.python}
@@ -3779,7 +3781,7 @@ This principle extends to parameter freezing\index{Parameter Freezing!transfer l
 
 ### Hierarchical composition and serialization {#sec-ml-frameworks-nn-module-hierarchical-composition-6c13}
 
-Complex models compose from reusable submodules\index{nn.Module!hierarchical composition}, creating a tree structure. A ResNet is not implemented as a monolithic block of operations but as a hierarchy: the root module contains a sequence of residual blocks, each block contains convolution layers and normalization layers, and each layer contains parameter tensors. This hierarchical composition must support two critical operations: *recursive parameter collection* for training and *state serialization*\index{Model Serialization!state dictionary pattern} for checkpointing and deployment.
+Complex models compose from reusable submodules\index{nn.Module!hierarchical composition}, creating a tree structure. A ResNet is not implemented as a monolithic block of operations but as a hierarchy: the root module contains a sequence of residual blocks, each block contains convolution layers and normalization layers, and each layer contains parameter tensors. This hierarchical composition must support two critical operations made concrete in @lst-nested_modules: *recursive parameter collection* for training and *state serialization*\index{Model Serialization!state dictionary pattern} for checkpointing and deployment.
 
 ::: {#lst-nested_modules lst-cap="**Nested Module Composition**: Hierarchical module composition enables recursive parameter collection and flat state serialization across the module tree."}
 
@@ -4515,6 +4517,8 @@ class TrainingStepCalc:
 | **Backward (2$\times$ forward)** |                           ~`{python} TrainingStepCalc.train_bwd_mflop_str`                          |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
 
 : **Per-Operation Roofline Analysis**: FLOPs, memory traffic, and arithmetic intensity for each operation in a two-layer MLP training step. MatMul operations have much higher arithmetic intensity than element-wise operations, while ReLU and cross-entropy are memory-bound; on high-end GPUs, small MatMuls may still fall below the ridge point (the intensity at which compute rather than memory bandwidth becomes the limit), which is why this training step remains overhead- and memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[29,29,20,22]"}
+
+The arithmetic-intensity column is the diagnostic column. Matrix multiplications reuse operands enough to move toward the compute roof, while ReLU and cross-entropy move too little work per byte to escape the memory and launch-overhead regime. This is why fusion and dispatch reduction matter even when the model is written in high-level tensor code.
 
 ```{python}
 #| echo: false

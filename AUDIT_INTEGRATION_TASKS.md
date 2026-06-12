@@ -345,19 +345,57 @@ Authorial-decision packets to preserve rather than silently resolve:
 - [x] Review the continuous-batching worked analysis in the serving chapter and
   convert it to a cleaner example/callout style if that improves the learning
   flow and print layout.
-- [ ] Run post-text, pre-build artifact explanation audits in canonical Vol. I
+- [x] Run post-text, pre-build artifact explanation audits in canonical Vol. I
   then Vol. II chapter order, preserving pedagogical sequence and progressive
   disclosure:
-  - [ ] Figures: verify rendered object accuracy, caption accuracy, and enough
+  - [x] Build deterministic float inventory from `scan_floats.py` before
+    judging prose quality: main chapters contain 468 figures, 477 tables, 213
+    equations, 14 algorithms, and 118 listings; appendices add 9 figures, 96
+    tables, and 28 equations.
+  - [x] Launch read-only parallel audits scoped by volume and artifact family:
+    Vol. I figures/tables, Vol. I equations/algorithms/listings, Vol. II
+    figures/tables, Vol. II equations/algorithms/listings, plus Vol. I and
+    Vol. II appendix artifact passes. Edits, rule reconciliation, and commits
+    remain centralized in this worktree.
+  - [x] Figures: verify rendered object accuracy, caption accuracy, and enough
     surrounding prose explanation for a learner to connect what is shown to the
     chapter claim without over-explaining every visual detail.
-  - [ ] Tables: verify columns/rows/units/caption match the rendered content and
+  - [x] Tables: verify columns/rows/units/caption match the rendered content and
     surrounding prose explains the table's instructional purpose.
-  - [ ] Equations: verify symbols, units, precision, derivation context, and
+  - [x] Equations: verify symbols, units, precision, derivation context, and
     surrounding prose connect the equation to the current teaching step.
-  - [ ] Algorithms: verify pseudocode/rendered algorithm steps match the prose
+  - [x] Algorithms: verify pseudocode/rendered algorithm steps match the prose
     claim, prerequisites have been introduced, and the caption/lead-in explain
     the algorithm at textbook depth.
+  - [x] Listings: verify code blocks have immediate body-prose orientation,
+    mechanism/design-choice explanation, and a lead-out where the caption or
+    code comments had been doing too much teaching.
+  - [x] Integrated high-confidence artifact fixes from read-only agents:
+    local lead-in/citation/lead-out repairs for figures, tables, equations,
+    algorithms, and listings in Vol. I, Vol. II, and appendices; no authorial
+    restructuring decisions were silently resolved.
+  - [x] Repaired the Vol. I appendix roofline figure color language by moving
+    the compute-bound ceiling from red to orange, preserving red for danger or
+    failure semantics.
+  - [x] Verified every agent-flagged artifact label has a body-prose reference
+    before or immediately with the float definition after edits.
+  - [x] Focused checks passed: `refs --scope inline`, `figures`, `tables`,
+    `math --scope canonical`, `math --scope prose-contract`, `markup`,
+    `prose`, `punctuation`, `numbers`, `labels`, and `git diff --check`.
+  - [x] Sequential chapter PDF verifier passed for touched Vol. I chapters and
+    appendices: `data_engineering`, `nn_computation`, `nn_architectures`,
+    `frameworks`, `training`, `data_selection`, `model_compression`,
+    `model_serving`, `ml_ops`, `appendix_algorithm`, and `appendix_machine`.
+  - [x] Sequential chapter PDF verifier passed for touched Vol. II chapters and
+    appendices accepted by the verifier: `introduction`, `data_storage`,
+    `fault_tolerance`, `performance_engineering`, `inference`,
+    `edge_intelligence`, `ops_scale`, `security_privacy`,
+    `appendix_communication`, `appendix_fleet`, and `appendix_reliability`.
+  - [x] Direct Binder PDF build passed for Vol. II `appendix_inference`, which
+    is present in the volume config but omitted from
+    `chapter_pdf_verify.py`'s hard-coded Vol. II appendix list; isolated PDF
+    text scan found only expected unresolved section refs from partial
+    rendering, not local float/render errors.
 - [x] Codify reusable `.claude` audit guidance/commands for these artifact
   types so future work can invoke `/audit <type>`-style checks grounded in
   rendering, value/precision validation, prose relevance, SSOT rules, and
@@ -434,8 +472,37 @@ Authorial-decision packets to preserve rather than silently resolve:
   volume, or file family. Give any delegated audit the relevant `.claude/rules`
   and treat the result as evidence to verify centrally. Keep edits, rule
   conflict resolution, and commits centralized.
+- Do not parallelize Binder/Quarto build or chapter PDF verification commands
+  that mutate shared `book/quarto/_quarto.yml` and `book/quarto/index.qmd`
+  symlinks. Run those sequentially by volume/chapter set; parallel build runs
+  can corrupt temporary Quarto sessions and produce invalid failure ledgers.
 
 ## Last Commit Batch
+
+Commit batch: `Fix artifact exposition bridges`
+
+Tasks advanced in this batch:
+
+- Completed the post-text artifact explanation audit for figures, tables,
+  equations, algorithms, and listings across Vol. I, Vol. II, and appendices.
+- Integrated only high-confidence local repairs: pre-float citations, body-prose
+  takeaways, symbol definitions, listing orientation, table decision rules, and
+  the Vol. I appendix roofline color correction.
+- Updated the chapter PDF audit artifacts after clean sequential verification
+  replaced the invalid parallel-build failure statuses.
+- Recorded the build-sequencing rule that Binder/Quarto PDF builds must not be
+  parallelized because they mutate shared config/index symlinks.
+
+Focused checks passed for this batch:
+
+- Float-label order verification for every agent-flagged artifact, `refs
+  --scope inline`, `figures`, `tables`, `math --scope canonical`, `math --scope
+  prose-contract`, `markup`, `prose`, `punctuation`, `numbers`, `labels`,
+  `git diff --check`, sequential chapter PDF verification for all touched
+  verifier-supported Vol. I and Vol. II chapters/appendices, and direct Binder
+  PDF build plus text scan for Vol. II `appendix_inference`.
+
+## Previous Commit Batch
 
 Commit batch: `Fix margin and footnote audit findings`
 
