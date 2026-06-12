@@ -306,8 +306,15 @@ Authorial-decision packets to preserve rather than silently resolve:
     were replacing rhetorical `durable` wording with `core`/`systems lesson`
     phrasing while leaving real storage/checkpoint durability intact. Commit
     batch: `Run final prose rules pass`.
-- [ ] Begin vol1+vol2 capitalization pass after quantitative and
+- [x] Begin vol1+vol2 capitalization pass after quantitative and
   disclosure-sensitive prose stabilizes.
+  - [x] Volume-level capitalization checks passed: `headers --scope case` and
+    `prose --scope concept-caps` for both Vol. I and Vol. II.
+  - [x] Ran manual candidate sweeps for high-risk named concepts and framework
+    spellings; normalized stale `D-A-M`/`D.A.M` forms to `D·A·M` in source
+    text, alt text, quiz metadata, and concept metadata.
+  - [x] Removed remaining rhetorical "durable lesson" wording while preserving
+    real storage/checkpoint durability terminology.
 - [x] Check appendix acronym/framework capitalization such as D-A-M/D.A.M.R.
   and make sure formal framework labels are treated consistently without
   gratuitous capitalization in ordinary prose.
