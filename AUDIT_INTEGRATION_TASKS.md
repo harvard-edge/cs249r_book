@@ -288,9 +288,23 @@ Authorial-decision packets to preserve rather than silently resolve:
     context, goal, and how/derivation notes.
   - [ ] Keep "Show" phrasing approximate and narrative-facing rather than
     pinning exact values that may distract future reviewers or LLM passes.
-- [ ] After prose-changing work stabilizes, reread all `.claude/rules` and run
+- [x] After prose-changing work stabilizes, reread all `.claude/rules` and run
   an explicit prose-style compliance pass over touched prose, fixing style,
   voice, pedagogy, progressive-disclosure, and rule-consistency issues.
+  - [x] Followed `book-prose.md` routing guardrail rather than bulk-loading all
+    rule files at once; reread the relevant prose/editing rules:
+    `README.md`, `book-prose.md`, `prose-craft.md`, `capitalization.md`,
+    `numbers-and-math-in-prose.md`, `emphasis.md`, `abbreviations.md`,
+    `spelling-compounds.md`, `cross-references.md`, `callouts.md`, and
+    `footnotes.md`.
+  - [x] Branch-wide QMD style gates passed on the current diff: `prose`,
+    `punctuation`, `numbers`, `math`, `refs`, `footnotes`, `index`,
+    `markup`, `headers`, and `structure`.
+  - [x] Manual diff scans checked added QMD prose for high-risk AI/prose
+    patterns, binary units, and prose-reference casing; the only edits needed
+    were replacing rhetorical `durable` wording with `core`/`systems lesson`
+    phrasing while leaving real storage/checkpoint durability intact. Commit
+    batch: `Run final prose rules pass`.
 - [ ] Begin vol1+vol2 capitalization pass after quantitative and
   disclosure-sensitive prose stabilizes.
 - [x] Check appendix acronym/framework capitalization such as D-A-M/D.A.M.R.
@@ -1204,6 +1218,11 @@ single-sourced, and aligned with the prose that consumes it.
     `numbers`, and `git diff --check`. `code --all-scopes` also had all
     executable LEGO/code scopes passing; only the opt-in rendered HTML audit
     warned that `book/quarto/_build/html-audit` has not been built yet.
+  - [x] Final prose rules pass checks passed branch-wide for touched QMDs:
+    `prose`, `punctuation`, `numbers`, `math`, `refs`, `footnotes`, `index`,
+    `markup`, `headers`, `structure`, positive-added `durable` scan, binary
+    unit added-line scan, prose-reference casing scan, and `git diff --check`.
+    Commit batch: `Run final prose rules pass`.
 - [ ] Run pre-commit before each commit.
 - [ ] Commit incrementally by file or coherent batch.
 - [ ] Final gate: vol1 and vol2 volume-level render/debug checks are clean.
