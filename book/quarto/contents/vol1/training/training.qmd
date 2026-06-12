@@ -2315,6 +2315,8 @@ class GPT2DataPipeline:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     tokens_per_batch_str = fmt_count(tokens_per_batch, scale="K", precision=1, commas=False, label="token")
+    batch_size_seq_str = fmt_count(batch_size, label="sequence", commas=False)
+    seq_len_token_str = fmt_count(seq_len, label="token", commas=True)
     b_assign_math = fmt_math(f"B={batch_size}")
     s_assign_math = fmt_math(f"S={seq_len}")
     token_rate_tokens_per_s_str = fmt_rate(token_rate, "tokens/s", scale="K", precision=0, commas=False)
@@ -2359,7 +2361,7 @@ class StorageBandwidthNvme:
 
 1. **Raw text storage**: The OpenWebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from an NVMe SSD can reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`, but language-model training samples across documents, so the effective random-access bandwidth falls to roughly `{python} GPT2DataPipeline.random_access_gb_per_s_str` when the effective-access factor is about `{python} GPT2DataPipeline.f_access_str`.
 2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} with a `{python} GPT2DataPipeline.bpe_vocab_str` vocabulary converts raw text into subword token IDs, so a word such as "unbreakable" becomes the sequence ["un", "break", "able"]. With global batch size `{python} GPT2DataPipeline.b_assign_math` across the cluster and sequence length `{python} GPT2DataPipeline.s_assign_math`, each training step needs `{python} GPT2DataPipeline.tokens_per_batch_str`; at `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core, one core spends `{python} GPT2DataPipeline.tokenization_ms_str` preparing a batch.
-3. **Batching and padding**: The pipeline pads sequences to a uniform length and packs them into an int64 tensor with 32 sequences by 1,024 tokens, for `{python} GPT2DataPipeline.batch_kb_str` per batch.
+3. **Batching and padding**: The pipeline pads sequences to a uniform length and packs them into an int64 tensor with `{python} GPT2DataPipeline.batch_size_seq_str` by `{python} GPT2DataPipeline.seq_len_token_str`, for `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Moving that tensor across a Gen3 x16 link with `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` of theoretical bandwidth takes only `{python} GPT2DataPipeline.transfer_ms_str`, so optimizing the copy would not materially improve this pipeline.
 
 **Systems insight**: At GPT-2 scale, storage and PCIe movement are not the binding terms; CPU tokenization is already close to the `{python} GPT2DataPipeline.accelerator_step_ms_str` accelerator training step. The useful intervention is to parallelize and overlap tokenization: `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers reduce the tokenization service time to about `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching prepares the next batch during the current accelerator step. The result is accelerator utilization above `{python} GPT2DataPipeline.utilization_pct_str` and a cluster-wide throughput of `{python} GPT2DataPipeline.throughput_samples_str` global samples per second on `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
@@ -3108,6 +3110,8 @@ class LlamaTraining:
     ub_num_gpus_str = fmt_count(num_gpus, label="GPU")
     ub_rental_rate_str = fmt_usd(rental_rate, precision=0, commas=False, per="hr")
     ub_purchase_price_str = fmt_usd(purchase_price, precision=0, commas=True)
+    ub_training_factor_str = fmt(scaling_factor, precision=0, commas=False)
+    ub_forward_flops_per_param_token_str = fmt(2, precision=0, commas=False)
 
     # Pre-composed math expressions (avoids Pandoc \(...\) + {python} parsing failure)
     ub_compute_math = fmt_math(
@@ -3130,7 +3134,7 @@ class LlamaTraining:
 **Math**:
 
 1.  **Workload**: Llama 2 70B model (`{python} LlamaTraining.ub_params_b_str` parameters, `{python} LlamaTraining.ub_tokens_t_str` tokens).
-2.  **Compute required**: `{python} LlamaTraining.ub_compute_math` FLOPs. The leading factor of 6 follows from the chapter's accounting: about 2 FLOPs per parameter per token in the forward pass (two FLOPs per multiply-accumulate), tripled once the backward pass, which costs roughly twice the forward pass, is included.
+2.  **Compute required**: `{python} LlamaTraining.ub_compute_math` FLOPs. The leading factor of `{python} LlamaTraining.ub_training_factor_str` follows from the chapter's accounting: about `{python} LlamaTraining.ub_forward_flops_per_param_token_str` FLOPs per parameter per token in the forward pass (two FLOPs per multiply-accumulate), tripled once the backward pass, which costs roughly twice the forward pass, is included.
 3.  **Hardware**: NVIDIA H100 (Peak: `{python} LlamaTraining.ub_peak_tflop_per_s_str` FP16). Assumed Utilization: `{python} LlamaTraining.ub_utilization_pct_str` (`{python} LlamaTraining.ub_effective_tflop_per_s_str`).
 4.  **Time**: `{python} LlamaTraining.ub_time_math` seconds ≈ `{python} LlamaTraining.ub_years_str` (on one GPU).
 5.  **Cluster**: On `{python} LlamaTraining.ub_num_gpus_str` → `{python} LlamaTraining.ub_cluster_days_str`.

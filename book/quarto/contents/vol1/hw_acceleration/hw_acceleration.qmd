@@ -2213,7 +2213,7 @@ node[right]{Data};
 # │ How: Calculate tile count and memory reuse factors.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TilingPrinciple:
@@ -5900,6 +5900,9 @@ class FeasibilityAssessment:
     # Compute check: video at 30 FPS
     fps_target = 30
     latency_target = 50 * millisecond  # scenario assumption
+    roofline_peak = 2 * (TFLOP / second)  # scenario assumption
+    roofline_bandwidth = 200 * (GB / second)  # scenario assumption
+    roofline_kernel_ai = 10 * (flop / byte)  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Memory: does the model fit?
@@ -5912,10 +5915,12 @@ class FeasibilityAssessment:
 
     # Step 3: Compute: real-time frame budget
     frame_budget = (1 / fps_target) * second
+    roofline_ridge = roofline_peak / roofline_bandwidth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(headroom > 0 * GB, f"Model ({model_7b_memory.to(GB).magnitude}GB) doesn't fit on GPU ({gpu_memory.to(GB).magnitude}GB)!")
     check(token_latency > 0 * millisecond, "Token latency must be positive.")
+    check(abs(roofline_ridge.to(flop / byte).magnitude - 10) < 1e-9, "Roofline checkpoint should put a 10 FLOP/byte kernel at the ridge point.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_7b_gb_str = fmt_memory(model_7b_memory, unit=GB, precision=0, commas=False)
@@ -5925,6 +5930,9 @@ class FeasibilityAssessment:
     frame_budget_ms_str = fmt_time(frame_budget, 'millisecond', precision=1, commas=False)
     params_7b_billion_str = fmt_params(params_7b, scale="billion", precision=0, commas=False, scale_style="word", attributive=True)
     gpu_mem_gb_str = fmt_memory(gpu_memory, unit=GB, precision=0, commas=False)
+    roofline_peak_tflop_per_s_str = fmt_flop_rate(roofline_peak, unit=TFLOP / second, precision=0, commas=False)
+    roofline_bandwidth_gb_per_s_str = fmt_bandwidth(roofline_bandwidth, unit=GB / second, precision=0, commas=False)
+    roofline_kernel_ai_str = fmt_arithmetic_intensity(roofline_kernel_ai, unit=flop / byte, precision=0, commas=False)
 ```
 
 The fallacies above reduce to a concrete procurement test.
@@ -5936,7 +5944,7 @@ Before procuring hardware, validate all three hard constraints.
 - [ ] **Memory capacity**: Compute $M_{\text{req}} = \text{Weights} + \text{KV Cache} + \text{Activation Buffer}$ and verify $M_{\text{req}} < M_{\text{device}}$ for a `{python} FeasibilityAssessment.params_7b_billion_str`-parameter Llama model with `{python} FeasibilityAssessment.model_7b_gb_str` FP16 weights on a `{python} FeasibilityAssessment.gpu_mem_gb_str` GPU.
 - [ ] **Bandwidth**: Compute $T_{\text{token}} = D_{\text{vol}} / \text{BW}$ for a 70-billion-parameter model (`{python} FeasibilityAssessment.model_70b_gb_str`) on `{python} FeasibilityAssessment.mem_bw_tb_per_s_str` memory bandwidth, then compare the result with a `{python} FeasibilityAssessment.latency_target_ms_str` latency target.
 - [ ] **Compute**: Compute $T_{\text{process}} = O / (R_{\text{peak}} \cdot \eta_{\text{hw}})$ and compare it with the throughput target. Processing video at 30 FPS requires completing inference within `{python} FeasibilityAssessment.frame_budget_ms_str`.
-- [ ] **Roofline placement**: For an accelerator at roughly 2 TFLOP/s peak and 200 GB/s bandwidth, estimate the ridge-point arithmetic intensity, then place a 10 FLOP/byte kernel against it: is it compute- or memory-bound, and would a faster clock help it at all?
+- [ ] **Roofline placement**: For an accelerator at roughly `{python} FeasibilityAssessment.roofline_peak_tflop_per_s_str` peak and `{python} FeasibilityAssessment.roofline_bandwidth_gb_per_s_str` bandwidth, estimate the ridge-point arithmetic intensity, then place a `{python} FeasibilityAssessment.roofline_kernel_ai_str` kernel against it: is it compute- or memory-bound, and would a faster clock help it at all?
 
 :::
 

@@ -258,7 +258,7 @@ Authorial-decision packets to preserve rather than silently resolve:
   - [x] `pre-commit run --files $(git diff --name-only)` passed after
     autoformatting and the dead LEGO export cleanup. Commit batch:
     `Integrate progressive audit prose fixes`.
-- [~] Run late-stage LEGO prose-boundary cleanup:
+- [x] Run late-stage LEGO prose-boundary cleanup:
   - [x] Checked the flagged GPT-3 "at least" duration case: the LEGO export now
     computes only the rounded duration, while the table prose supplies the
     narrative lower-bound qualifier.
@@ -266,14 +266,25 @@ Authorial-decision packets to preserve rather than silently resolve:
     Vol. I `appendix_data`: the KL-drift scenario prose now lives in Markdown,
     while LEGO exports typed percentage strings and structural math/vector
     strings only.
-  - [ ] Revisit current and prior LEGO cells for similar prose leakage once the
-    quantitative edits stabilize.
+  - [x] Revisited the strict prose-literal findings after quantitative edits:
+    moved remaining computational literals in `benchmarking`,
+    `hw_acceleration`, `model_compression`, `training`,
+    `collective_communication`, `data_storage`, `network_fabrics`,
+    `responsible_ai`, and `security_privacy` into local LEGO outputs with
+    typed formatters, and rewrote the one `inference` conceptual range so it no
+    longer pretends to be a computed value. Commit batch: `Clean late LEGO
+    prose boundaries`.
+  - [x] `python3 book/tools/audit/book_check_lego_prose_literals.py --strict`
+    now passes across all 82 QMD files.
 - [~] Run late-stage LEGO header-comment cleanup:
   - [x] Scanned Vol. I and Vol. II QMD headers for stale `Imports:`/`Exports:`
     inventory lines; none remain in the chapter source.
   - [x] Removed stale formatter comments that still described already-migrated
     typed formatter outputs as `MarkdownStr` escape hatches.
-  - [ ] Replace any remaining import/export inventory comments with concise
+  - [x] Re-scanned `book/quarto/contents` for `Imports:`/`Exports:` inventory
+    boilerplate during the late LEGO cleanup batch; no chapter-source matches
+    remain. Commit batch: `Clean late LEGO prose boundaries`.
+  - [ ] Replace any future import/export inventory comments with concise
     context, goal, and how/derivation notes.
   - [ ] Keep "Show" phrasing approximate and narrative-facing rather than
     pinning exact values that may distract future reviewers or LLM passes.
@@ -1186,6 +1197,13 @@ single-sourced, and aligned with the prose that consumes it.
   the chapter-opener task.
 - [ ] Run relevant checks before commits, including math/code/registry/prose
   scopes as appropriate.
+  - [x] Late LEGO prose-boundary cleanup checks passed: strict
+    `book_check_lego_prose_literals.py --strict`, curated
+    `./book/binder check code --quiet`, `registry --scope sources`, path-scoped
+    `math`, `refs --scope inline`, `prose`, `markup`, `punctuation`,
+    `numbers`, and `git diff --check`. `code --all-scopes` also had all
+    executable LEGO/code scopes passing; only the opt-in rendered HTML audit
+    warned that `book/quarto/_build/html-audit` has not been built yet.
 - [ ] Run pre-commit before each commit.
 - [ ] Commit incrementally by file or coherent batch.
 - [ ] Final gate: vol1 and vol2 volume-level render/debug checks are clean.

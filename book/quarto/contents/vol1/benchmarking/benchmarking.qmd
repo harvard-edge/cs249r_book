@@ -1763,29 +1763,48 @@ Thermal throttling on a 3--5 W thermal design power (TDP) envelope can begin wit
 # │ Goal: Pin the Snapdragon 8 Gen 3 advertised peak NPU throughput to the registry.
 # └───────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.core.units import TOPS
-from mlsysim.fmt import fmt_ops_rate, check
+from mlsysim.core.units import TOPS, milliwatt, second, watt
+from mlsysim.fmt import check, fmt_ops_rate, fmt_percent, fmt_power, fmt_qty_range, fmt_time
 
 class SnapdragonPeak:
     """Advertised marketing-peak NPU throughput for the peak-vs-sustained contrast."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     peak = Hardware.Mobile.Snapdragon8Gen3.compute.peak_flops
+    sustained = 20 * TOPS  # scenario assumption: sustained thermal-throttled NPU throughput
+    min_sustained_duration = 30 * second  # scenario assumption: minimum sustained benchmark window
+    idle_power = 50 * milliwatt  # scenario assumption: idle device draw
+    active_power = 2 * watt  # scenario assumption: active inference draw
+    duty_cycle = 0.01  # scenario assumption: inference active share
+    tdp_low = 3 * watt  # scenario assumption: mobile edge thermal envelope lower bound
+    tdp_high = 5 * watt  # scenario assumption: mobile edge thermal envelope upper bound
+
+    # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────
+    effective_power = idle_power * (1 - duty_cycle) + active_power * duty_cycle
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(44 <= peak.to(TOPS).magnitude <= 46, "Snapdragon 8 Gen 3 peak should be ~45 TOPS.")
+    check(sustained < peak, "Sustained throughput should be below advertised peak.")
+    check(idle_power < effective_power < active_power, "Duty-cycle power should sit between idle and active power.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     snapdragon_peak_tops_str = fmt_ops_rate(peak, unit=TOPS, precision=0, commas=False)
+    snapdragon_sustained_tops_str = fmt_ops_rate(sustained, unit=TOPS, precision=0, commas=False)
+    min_sustained_duration_str = fmt_time(min_sustained_duration, second, precision=0, commas=False)
+    idle_power_mw_str = fmt_power(idle_power, unit=milliwatt, precision=0, commas=False)
+    active_power_w_str = fmt_power(active_power, unit=watt, precision=0, commas=False)
+    duty_cycle_pct_str = fmt_percent(duty_cycle, precision=0, commas=False, style="prose")
+    effective_power_mw_str = fmt_power(effective_power, unit=milliwatt, precision=1, commas=False, approx=True)
+    mobile_tdp_range_str = fmt_qty_range(tdp_low, tdp_high, watt, precision=0, commas=False)
 ```
 
 ::: {#psp-benchmarking-edge-benchmark-reality-check .callout-perspective title="Edge benchmark reality check"}
 
 When evaluating edge hardware claims, four factors determine whether vendor numbers translate to real-world performance:
 
-1. **Peak vs. sustained**: Snapdragon 8 Gen 3 advertises `{python} SnapdragonPeak.snapdragon_peak_tops_str` peak but delivers 20 TOPS sustained under thermal throttling. Always benchmark under sustained workloads (>30 seconds minimum).
-2. **Power at idle vs. active**: A device consuming 50 mW idle and 2 W active may report "2 W" for marketing, but if the application runs inference 1 percent of the time, effective power draw is ~70 mW, not 2 W.
-3. **Thermal envelope**: Edge devices typically target 3–5 W thermal design power (TDP). Exceeding this triggers throttling within seconds. Benchmark reports omitting thermal conditions are incomplete.
+1. **Peak vs. sustained**: Snapdragon 8 Gen 3 advertises `{python} SnapdragonPeak.snapdragon_peak_tops_str` peak but delivers `{python} SnapdragonPeak.snapdragon_sustained_tops_str` sustained under thermal throttling. Always benchmark under sustained workloads longer than `{python} SnapdragonPeak.min_sustained_duration_str`.
+2. **Power at idle vs. active**: A device consuming `{python} SnapdragonPeak.idle_power_mw_str` idle and `{python} SnapdragonPeak.active_power_w_str` active may report the active draw for marketing, but if the application runs inference `{python} SnapdragonPeak.duty_cycle_pct_str` of the time, effective power draw is `{python} SnapdragonPeak.effective_power_mw_str`, not `{python} SnapdragonPeak.active_power_w_str`.
+3. **Thermal envelope**: Edge devices typically target `{python} SnapdragonPeak.mobile_tdp_range_str` thermal design power (TDP). Exceeding this triggers throttling within seconds. Benchmark reports omitting thermal conditions are incomplete.
 4. **End-to-end vs. accelerator-only**: NPU benchmarks often exclude data transfer overhead. Moving image data from camera to NPU and back can exceed inference time for small models.
 
 :::

@@ -1397,8 +1397,8 @@ Nevertheless, the crossover formula remains the essential mental model for under
 #| echo: false
 #| label: ring-vs-tree-calc
 import math
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_qty, fmt_time
-from mlsysim.core.units import GB, MB, microsecond, second
+from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_qty, fmt_qty_range, fmt_time
+from mlsysim.core.units import BYTES_FP16, GB, MB, microsecond, param, second
 from mlsysim.physics import (
     calc_ring_allreduce_time,
     calc_ring_allreduce_latency_steps,
@@ -1415,6 +1415,10 @@ class RingVsTree:
     M = M_mb * MB
     alpha = alpha_us * microsecond
     beta = beta_gbs * GB / second
+    ddp_bucket = 10 * MB  # scenario assumption: mid-size DDP bucket
+    fused_bucket_low = 50 * MB  # scenario assumption: lower bound for fused multi-layer bucket
+    fused_bucket_high = 300 * MB  # scenario assumption: representative upper range for fused buckets
+    llama_70b = Models.Language.Llama2_70B
     # ┌── 2. EXECUTE ───────────────────────────────────────
     log2N = int(math.log2(N))
     # Latency terms come from exact closed forms (the guards pin them exactly);
@@ -1426,6 +1430,7 @@ class RingVsTree:
     tree_bw = calc_tree_allreduce_time(M, N, beta, 0 * second).to(microsecond)
     tree_lat = (2 * log2N * alpha).to(microsecond)
     crossover = calc_ring_tree_crossover_size(N, alpha, beta)
+    full_bf16_gradient = llama_70b.parameters.to(param).magnitude * BYTES_FP16 * GB / 1e9
     tree_win_margin_pct = ((ring_total - tree_total) / ring_total).to_base_units().magnitude * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ring_lat == 1260 * microsecond, f"Ring lat = {ring_lat.to(microsecond).magnitude}")
@@ -1444,6 +1449,10 @@ class RingVsTree:
     tree_total_us_str = fmt_time(tree_total, unit=microsecond, precision=0)
     crossover_mb_str = fmt_qty(crossover, MB, precision=1, commas=False)
     M_mb_str = fmt_qty(M, MB, precision=0, commas=False)
+    ddp_bucket_mb_str = fmt_qty(ddp_bucket, MB, precision=0, commas=False)
+    fused_bucket_range_str = fmt_qty_range(fused_bucket_low, fused_bucket_high, MB, precision=0, commas=False)
+    full_bf16_gradient_gb_str = fmt_qty(full_bf16_gradient, GB, precision=0, commas=False)
+    llama_70b_param_str = fmt_count(llama_70b.parameters.to(param).magnitude, scale="B", precision=0, commas=False, label="parameter")
     N_str = fmt(N, precision=0, commas=False)
     tree_win_margin_pct_str = fmt_percent(round(tree_win_margin_pct) / 100, precision=0, commas=False, style='prose')
     # Formula-substitution math spans: the operands (N-1, log2N, 2.log2N, M, beta,
@@ -1488,7 +1497,7 @@ Tree wins, but only by `{python} RingVsTree.tree_win_margin_pct_str`. For this `
 
 **Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The log-aware crossover estimate predicts $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N = 64 \times 10\ \mu\text{s} \times 10\ \text{GB/s} / 6 \approx$ `{python} RingVsTree.crossover_mb_str`. At 1 MB, we are just below crossover, so Tree wins. At 10 MB, Ring would dominate.
 
-The crossover point sits inside the range that DDP and FSDP workloads traverse during normal training. A 1 MB message corresponds to gradients from a single feed-forward layer in a smaller transformer, or an MoE token-routing payload—Tree territory. A 10 MB DDP gradient bucket from a mid-size transformer layer sits near the crossover. A fused DDP bucket covering multiple layers reaches 50–several hundred MB; a full BF16 gradient tensor for a 70B-parameter model reaches 140 GB—both firmly in Ring territory. Most real training workloads sweep through this entire range as bucket sizes are tuned, and the crossover analysis sets the algorithmic boundary that separates bucket-level Tree operations from full-model Ring synchronizations.
+The crossover point sits inside the range that DDP and FSDP workloads traverse during normal training. A `{python} RingVsTree.M_mb_str` message corresponds to gradients from a single feed-forward layer in a smaller transformer, or an MoE token-routing payload—Tree territory. A `{python} RingVsTree.ddp_bucket_mb_str` DDP gradient bucket from a mid-size transformer layer sits near the crossover. A fused DDP bucket covering multiple layers reaches `{python} RingVsTree.fused_bucket_range_str`; a full BF16 gradient tensor for a `{python} RingVsTree.llama_70b_param_str` model reaches `{python} RingVsTree.full_bf16_gradient_gb_str`—both firmly in Ring territory. Most real training workloads sweep through this entire range as bucket sizes are tuned, and the crossover analysis sets the algorithmic boundary that separates bucket-level Tree operations from full-model Ring synchronizations.
 
 :::
 
