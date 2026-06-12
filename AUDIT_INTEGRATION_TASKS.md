@@ -74,7 +74,9 @@ work. The detailed backlog remains in the sections below.
   - [x] Vol. I concept-coverage auditors completed for Chapters 1--16; findings
     are queued as local edit candidates vs. authorial-decision packets.
   - [~] Vol. II concept-coverage auditors are in progress; Chapters 1--3
-    completed read-only, Chapters 4+ pending.
+    completed read-only and closed in commit `c8af0fa6ac`; Chapters 4--6
+    completed read-only after that commit; Chapters 7--12 are running in
+    canonical order.
 - [x] Run read-only appendix-flow audits for Vol. I and Vol. II appendices:
   verify the appendix sequence, internal flow, and reference-vs-teaching role
   make sense from the actual text rather than only the table of contents.
@@ -213,6 +215,18 @@ work. The detailed backlog remains in the sections below.
   conflict resolution, and commits centralized.
 
 ## Last Commit Batch
+
+Committed as `ca7a783f9b`: `Record benchmarking image verification`
+
+Tasks advanced in this batch:
+
+- Verified that the user-supplied benchmarking datacenter-power image at
+  `/Users/VJ/Downloads/figure5a_full.png` is byte-identical to the current
+  chapter asset.
+- Marked the benchmarking image replacement/update task complete without
+  unnecessary binary churn.
+
+## Previous Commit Batch
 
 Committed as `c8af0fa6ac`: `Fix audit follow-up diagrams and references`
 
