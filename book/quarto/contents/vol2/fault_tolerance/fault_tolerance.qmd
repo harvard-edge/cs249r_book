@@ -688,11 +688,11 @@ Fail-stop failures are the easiest class to handle because detection is straight
 
 Detection time $T_{\text{detect}}$ typically involves heartbeat mechanisms where each GPU rank periodically signals liveness to a coordinator. If no heartbeat arrives within the timeout period $T_{\text{timeout}}$, the coordinator declares failure. Setting $T_{\text{timeout}}$ requires balancing false positive rate against detection latency. False positives declare healthy workers failed due to transient delays, while slow detection wastes compute during the detection window—a cost that scales linearly with the number of GPUs blocked in the collective.
 
-For a heartbeat interval of $H$ seconds and expected network delay variance $\sigma_d$, @eq-timeout-calculation defines the timeout heuristic:
+For a heartbeat interval of $H$ seconds and network-delay standard deviation $\sigma_d$ in seconds, @eq-timeout-calculation defines the timeout heuristic:
 
 $$ T_{\text{timeout}} = H + k\sigma_d $$ {#eq-timeout-calculation}
 
-where $k$ typically ranges from three to five to achieve low false positive rates while maintaining reasonable detection speed. ML training clusters built on dedicated high-bandwidth fabrics (InfiniBand, NVLink) exhibit very low baseline jitter, so $\sigma_d$ is functionally small under normal conditions. The practical difficulty is distinguishing a genuinely dead rank from one that is temporarily slow—for example, a GPU lagging because it is writing a large checkpoint to attached storage while the collective is already waiting. Tuning $T_{\text{timeout}}$ too tightly causes checkpoint writes to trigger false failure declarations; tuning it too loosely extends the window during which every other rank in the AllReduce collective is blocked idle.
+Here, $k$ is a dimensionless safety multiplier that typically ranges from three to five to achieve low false positive rates while maintaining reasonable detection speed. ML training clusters built on dedicated high-bandwidth fabrics (InfiniBand, NVLink) exhibit very low baseline jitter, so $\sigma_d$ is functionally small under normal conditions. The practical difficulty is distinguishing a genuinely dead rank from one that is temporarily slow—for example, a GPU lagging because it is writing a large checkpoint to attached storage while the collective is already waiting. Tuning $T_{\text{timeout}}$ too tightly causes checkpoint writes to trigger false failure declarations; tuning it too loosely extends the window during which every other rank in the AllReduce collective is blocked idle.
 
 #### Byzantine failures {#sec-fault-tolerance-reliability-reliability-byzantine-failures-8a24}
 
@@ -2386,7 +2386,7 @@ Synchronous checkpointing pauses training while the checkpoint writes. Even with
 
 $$ f_{\text{ckpt}} = \frac{T_{\text{write}}}{\tau_{\text{ckpt}}} + \frac{T_{\text{pause}}}{\tau_{\text{ckpt}}} $$ {#eq-checkpoint-overhead}
 
-where $T_{\text{pause}}$ represents any training pause beyond the checkpoint write time. This includes memory allocation, coordination, and serialization.
+Here, $f_{\text{ckpt}}$ is the dimensionless fraction of time lost to checkpointing, $T_{\text{write}}$ is checkpoint write time, $\tau_{\text{ckpt}}$ is the checkpoint interval, and $T_{\text{pause}}$ is any training pause beyond the checkpoint write itself. This includes memory allocation, coordination, and serialization.
 
 #### The "stop-the-world" cost {#sec-fault-tolerance-reliability-stoptheworld-cost-beaa}
 
@@ -2862,7 +2862,7 @@ Each component presents distinct optimization opportunities, and the dominant te
 
 Detection is the first line of defense, governed by a fundamental trade-off between speed and false positive rate. A timeout that is *too aggressive* mistakes temporary network jitter for a node failure, triggering an unnecessary and expensive restart. A timeout that is *too conservative* allows the entire cluster to sit idle while a dead node holds up synchronization.
 
-Heartbeat monitoring is the standard mechanism: each worker periodically sends "I am alive" signals to a central coordinator or monitoring service. Missing heartbeats trigger failure classification. The heartbeat interval $H$ and timeout $T_{\text{timeout}}$ control the trade-off. In high-scale clusters, heartbeat arrival times often follow a heavy-tailed distribution due to network congestion, necessitating adaptive timeouts rather than static thresholds. Production systems typically use $T_{\text{timeout}} = H + k\sigma_d$ where $k$ ranges from 3 to 5 and $\sigma_d$ is the observed network delay variance.
+Heartbeat monitoring is the standard mechanism: each worker periodically sends "I am alive" signals to a central coordinator or monitoring service. Missing heartbeats trigger failure classification. The heartbeat interval $H$ and timeout $T_{\text{timeout}}$ control the trade-off. In high-scale clusters, heartbeat arrival times often follow a heavy-tailed distribution due to network congestion, necessitating adaptive timeouts rather than static thresholds. Production systems typically use $T_{\text{timeout}} = H + k\sigma_d$ where $k$ ranges from 3 to 5 and $\sigma_d$ is the observed standard deviation of network delay.
 
 Collective communication timeouts provide a second detection layer. During synchronous training, collective operations (AllReduce, Broadcast) are blocking: if a single rank fails silently (a frozen GPU driver, for instance) every other rank in the communicator hangs indefinitely waiting for data that will never arrive. NCCL[^fn-nccl-timeout-tradeoff] provides configurable transport and RAS timeout parameters for this purpose, while higher-level frameworks may impose process-group operation timeouts. These settings are often set conservatively to avoid crashing jobs during legitimate periods of slow communication, which unfortunately extends $T_{\text{detect}}$.
 
