@@ -1155,7 +1155,7 @@ vLLM implements continuous batching with several key mechanisms. Iteration-level
 
 vLLM implements a virtual memory mechanism similar to an operating system's swap. When memory is exhausted, the scheduler identifies low-priority requests (for example, those most recently started) and swaps their KV cache blocks from GPU HBM to CPU DRAM. These requests are paused until memory becomes available, at which point they are swapped back in and resumed. This mechanism ensures system stability under heavy load at the cost of increased latency for preempted requests.
 
-**Typical performance** (Llama-2 70B on 8$\times$ A100):
+**Typical performance**: @Tbl-inference-continuous-batching-throughput reports the throughput and utilization improvement for Llama-2 70B on 8$\times$ A100:
 
 | **Batching Strategy**       | **Throughput (tokens/s)** | **GPU Utilization** |
 |:----------------------------|:-------------------------:|:-------------------:|
@@ -3245,6 +3245,8 @@ Pipeline parallelism is appropriate for inference in three scenarios:
 
 : **Pipeline vs. Tensor Parallelism**: Each strategy has distinct trade-offs in latency, throughput, and implementation complexity. {#tbl-pipeline-tensor-comparison}
 
+The decision rule is latency first, topology second. Tensor parallelism is the right default when single-request latency matters and NVLink-class bandwidth is available; pipeline parallelism is a throughput tool for relaxed-latency workloads or placements where only point-to-point stage communication is affordable.
+
 ### Expert parallelism for MoE models {#sec-inference-scale-expert-parallelism-moe-models-55f6}
 
 Mixture-of-experts (MoE) models, such as DeepSeek-V3 or Mixtral, introduce unique serving challenges beyond those of dense models. In an MoE transformer layer, the feed-forward network (FFN) is replaced by multiple parallel "expert" sub-networks and a lightweight router that selects a subset of experts for each token.
@@ -3896,6 +3898,8 @@ The choice of sharding strategy depends on model architecture and deployment pri
 | **Implementation effort** |         High        |          Low          |       Moderate      |         High        |
 
 : **Sharding Strategy Selection Guide**: Match strategy to deployment priorities and constraints. {#tbl-sharding-selection}
+
+Strategy selection starts from the deployment bottleneck. Use tensor parallelism when latency dominates and the interconnect can sustain frequent collectives, pipeline parallelism when throughput matters more than per-request latency, expert parallelism when MoE routing defines the model structure, and embedding sharding when large sparse tables dominate capacity.
 
 Once we have constructed these massively sharded, multi-GPU replicas, dozens of them must run in parallel to handle global traffic. The challenge shifts from the internal mechanics of a single replica to the traffic control layer that routes millions of user queries across the fleet.
 
@@ -4723,7 +4727,7 @@ The fastest response comes from batch size scaling\index{Scaling!batch size}, wh
 | **Batch size**                |  Increases  | Unchanged |         Instant          |
 | **Vertical (better GPU)**     |  Unchanged  | Nonlinear | Very slow (redeployment) |
 
-: **Scaling Dimension Tradeoffs**: Each scaling approach has different characteristics. {#tbl-scaling-dimensions}
+: **Scaling Dimension Tradeoffs**: Horizontal scaling preserves per-request latency but waits on provisioning, batch-size scaling reacts immediately by trading latency for throughput, and vertical scaling changes the hardware envelope but requires redeployment. {#tbl-scaling-dimensions}
 
 ### The cold start problem {#sec-inference-scale-cold-start-problem-ecf9}
 

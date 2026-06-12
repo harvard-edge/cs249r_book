@@ -147,6 +147,19 @@ Use this order for future autonomous editorial cleanup workflows:
   should remain local pedagogical scenario constants. No new `fmt_*` helper was
   added in this pass; if a future helper is introduced, propagate it across all
   applicable QMDs and rerun rendered LEGO/prose/precision checks.
+- 2026-06-12 table-exposition decision packet: the table audit found two
+  high-impact table takeaways that should be author-approved rather than
+  invented during cleanup:
+  - `vol1/backmatter/appendix_machine.qmd` `tbl-memory-current-ref`: the body
+    prose says the table captures the current memory hierarchy, but the payoff
+    immediately jumps to the compute reference table. Decide the intended
+    learner takeaway for the current-generation latency/bandwidth hierarchy
+    before expanding the caption or lead-out.
+  - `vol2/introduction/introduction.qmd` `tbl-training-compute-evolution`: the
+    first post-table prose pivots to cluster size and the following figure,
+    leaving the table's own historical-compute takeaway mostly in the caption.
+    Decide whether the table should teach the compute-growth arc, the cluster
+    scaling implication, or only set up the figure.
 - Confirm whether the `.claude/rules` updates that live in `AIConfigs` should
   be committed separately there after the MLSysBook worktree lands. Current
   relevant dirty rule files from this audit are `numbers-and-math-in-prose.md`
