@@ -160,6 +160,15 @@ Use this order for future autonomous editorial cleanup workflows:
     leaving the table's own historical-compute takeaway mostly in the caption.
     Decide whether the table should teach the compute-growth arc, the cluster
     scaling implication, or only set up the figure.
+- 2026-06-12 figure-visual-language decision packet: the source SVG for
+  `vol1/backmatter/appendix_dam.qmd` `fig-dam-venn` uses MIT red for the
+  neutral Data circle and center label. That conflicts with the forward-looking
+  visual-language rule that red should mark danger, limits, faults, or
+  acceleration-as-threat only; however, the same rule also says existing
+  figures are not automatically retrofitted. Decide in the dedicated visual
+  reconciliation pass whether D.A.M. taxonomy figures should keep legacy MIT
+  branding colors, move category fills to neutral tones, or use the resource
+  palette only where the axis genuinely maps to a physical resource.
 - Confirm whether the `.claude/rules` updates that live in `AIConfigs` should
   be committed separately there after the MLSysBook worktree lands. Current
   relevant dirty rule files from this audit are `numbers-and-math-in-prose.md`
