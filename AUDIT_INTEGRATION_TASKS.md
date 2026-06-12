@@ -139,9 +139,15 @@ work. The detailed backlog remains in the sections below.
   reward-hacking loop, and layers-of-responsibility body figures as clean,
   crisp SVGs that match the book visual language and avoid soft/gray
   background styling.
-- [ ] Replace/update the benchmarking chapter datacenter-power image using the
+- [x] Replace/update the benchmarking chapter datacenter-power image using the
   user-supplied source image at `/Users/VJ/Downloads/figure5a_full.png`, making
   sure the surrounding caption/prose accurately explain the updated figure.
+  - [x] Verified the repo asset
+    `book/quarto/contents/vol1/benchmarking/images/png/mlperf_power_datacenter.png`
+    is byte-identical to the supplied image (`sha256`
+    `4911034de27a5f768b8d0103f124b6a252d7e98c144608589034986c764b6bbc`), so
+    no image-copy churn was needed. Focused figure and image checks passed for
+    the benchmarking chapter.
 - [x] Review the continuous-batching worked analysis in the serving chapter and
   convert it to a cleaner example/callout style if that improves the learning
   flow and print layout.
@@ -206,9 +212,9 @@ work. The detailed backlog remains in the sections below.
   and treat the result as evidence to verify centrally. Keep edits, rule
   conflict resolution, and commits centralized.
 
-## Current Commit Batch
+## Last Commit Batch
 
-Planned commit message: `Fix audit follow-up diagrams and references`
+Committed as `c8af0fa6ac`: `Fix audit follow-up diagrams and references`
 
 Tasks advanced in this batch:
 
