@@ -422,10 +422,10 @@ These inversions have direct consequences for system procurement and architectur
 
 You are designing the storage subsystem for a new ML training cluster with 512 GPUs. The primary workload will train large language models on a 10 TB text dataset.
 
-- [ ] **Database heuristics**: Based on the five inversions described earlier, which storage optimization strategies from the database world would be counterproductive for this workload? Name at least three.
-- [ ] **Epoch reads**: If each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, what is the total data volume read? How does this compare to a typical database workload?
-- [ ] **Checkpoint bandwidth**: The model saves a 500 GB checkpoint every 15 minutes. If checkpoint saves must complete within 30 seconds to minimize training disruption, what minimum write bandwidth is required?
-- [ ] **Write duty cycle**: Given the write pattern (bursty checkpoints every 15 minutes), what percentage of time is the storage system in "write mode" vs. "read mode"?
+- [ ] **Database heuristics**: Use the five storage workload inversions to name at least three database optimization strategies that would be counterproductive for this workload.
+- [ ] **Epoch reads**: Calculate the total data volume read when each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, then compare it to a typical database workload.
+- [ ] **Checkpoint bandwidth**: Calculate the minimum write bandwidth required when the model saves a 500 GB checkpoint every 15 minutes and each save must complete within 30 seconds.
+- [ ] **Write duty cycle**: Calculate the percentage of time the storage system spends in "write mode" vs. "read mode" under bursty checkpoints every 15 minutes.
 
 :::
 
@@ -1157,9 +1157,9 @@ A related challenge is **namespace isolation**\index{Namespace Isolation}. Diffe
 
 Consider a training cluster with 512 nodes, each running 8 GPUs. The training job requires 400 GB/s of aggregate read bandwidth.
 
-- [ ] **OSS count**: If each Lustre OSS delivers 10 GB/s, how many OSS nodes are required?
-- [ ] **Metadata cost**: If the dataset consists of 200 million images at 150 KB each, and each `open()` call takes 50 μs on the MDS, how long would it take to open all files sequentially? What is the practical implication?
-- [ ] **Shard count**: If images are bundled into 4 GB tar files, how many metadata operations are needed to read the full dataset?
+- [ ] **OSS count**: Calculate the number of OSS nodes required when each Lustre OSS delivers 10 GB/s.
+- [ ] **Metadata cost**: Calculate the time required to open 200 million 150 KB image files sequentially when each `open()` call takes 50 μs on the MDS, then state the practical implication.
+- [ ] **Shard count**: Calculate the number of metadata operations needed to read the full dataset when images are bundled into 4 GB tar files.
 
 :::
 
@@ -1728,9 +1728,9 @@ The interaction between prefetching and the storage hierarchy creates a layered 
 A training cluster runs 1,024 GPUs with 128-image batches (150 KB per image after compression, 150 ms per iteration).
 
 - [ ] **Bandwidth requirement**: Using @eq-pipeline-throughput, calculate the required aggregate storage bandwidth at 90 percent target utilization.
-- [ ] **Checkpoint contention**: If the parallel file system delivers 800 GB/s aggregate, is it sufficient? What if 20 percent of bandwidth is consumed by checkpoint writes?
-- [ ] **Prefetch depth**: The object storage backend has P99 latency of 300 ms. What minimum prefetch buffer depth (in batches) would absorb this variance?
-- [ ] **Host memory**: Each decoded batch occupies 10 MB in host DRAM. What is the total prefetch buffer memory for the depth calculated in (3)?
+- [ ] **Checkpoint contention**: Determine whether 800 GB/s aggregate parallel-file-system bandwidth is sufficient, then recalculate when checkpoint writes consume 20 percent of that bandwidth.
+- [ ] **Prefetch depth**: Calculate the minimum prefetch buffer depth in batches needed to absorb 300 ms P99 object-storage latency.
+- [ ] **Host memory**: Calculate total prefetch buffer memory when each decoded batch occupies 10 MB in host DRAM at the depth calculated in (3).
 
 :::
 
@@ -2341,7 +2341,7 @@ class StorageEconomicsCorpus:
 # └─────────────────────────────────────────────────────────────────────────────
 class BuildVsBuyStorageEconomics:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    from mlsysim.fmt import check, fmt, fmt_rate, fmt_usd, MarkdownStr, fmt_time
+    from mlsysim.fmt import check, fmt, fmt_rate, fmt_usd, fmt_time_range
 
     capex_low = 3_000_000
     capex_high = 5_000_000
@@ -2375,9 +2375,14 @@ class BuildVsBuyStorageEconomics:
     net_annual_savings_str = fmt_usd(net_annual_savings, precision=0)
     reads_per_year_str = fmt_rate(reads_per_year, "reads/year", precision=0, commas=False)
     cloud_cost_gb_month_str = fmt_usd(cloud_cost_gb_month, precision=2, commas=False, per="GB/month")
-    breakeven_low_years_str = fmt_time(breakeven_low_years, 'year', precision=1, commas=False, style='word')
-    breakeven_high_years_str = fmt_time(breakeven_high_years, 'year', precision=1, commas=False, style='word')
-    breakeven_range_str = MarkdownStr(f"{breakeven_low_years_str}--{breakeven_high_years_str}")
+    breakeven_range_str = fmt_time_range(
+        breakeven_low_years,
+        breakeven_high_years,
+        ureg.year,
+        precision=1,
+        commas=False,
+        style='word',
+    )
 ```
 
 The decision to **build vs. buy**\index{Build vs. Buy!storage} storage infrastructure hinges on the trade-off between the high capital expenditure of an on-premises parallel file system and the recurring operational expenditure of cloud object storage. A 1-petabyte Lustre deployment costs roughly \$3–5 million in hardware, plus an additional `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` per year in operational overhead for power, cooling, and engineering support. Storing 1 PB in a cloud object store at `{python} BuildVsBuyStorageEconomics.cloud_cost_gb_month_str` costs `{python} BuildVsBuyStorageEconomics.cloud_storage_annual_usd_str` per year for storage alone. However, egress fees for accessing the data dominate the total cost: reading that petabyte at `{python} BuildVsBuyStorageEconomics.reads_per_year_str` adds `{python} BuildVsBuyStorageEconomics.cloud_egress_annual_usd_str` in data transfer fees. Under these assumptions, annual cloud delivery costs `{python} BuildVsBuyStorageEconomics.cloud_total_annual_usd_str`; after subtracting `{python} BuildVsBuyStorageEconomics.annual_ops_usd_str` of on-premises operations, the net savings are `{python} BuildVsBuyStorageEconomics.net_annual_savings_str` per year. The resulting hardware break-even is roughly `{python} BuildVsBuyStorageEconomics.breakeven_range_str`, not 18 to 24 months. Reaching an 18- to 24-month payback requires a hotter workload with many more full-dataset reads per year, lower capital expense, or non-egress drivers such as checkpoint latency and shared-namespace requirements. For our running example, the `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized corpus is much smaller than 1 PB, so the local-storage case is driven more by latency, repeated experiments, and checkpoint staging than by one-year egress savings alone.
@@ -2744,10 +2749,10 @@ class CheckpointStorageDesignPrompt:
 
 A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a 175B-parameter model checkpoint every `{python} CheckpointStorageDesignPrompt.checkpoint_interval_min_str`. Each checkpoint is `{python} CheckpointTotalGbRecap.ckpt_total_gb_str` total, distributed across all nodes.
 
-- [ ] **Per-node state**: What is the per-node checkpoint size?
-- [ ] **Local write**: If each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`, what is $T_{\text{write}}$ for the local write?
-- [ ] **Async copy**: If the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously, what is the per-node write bandwidth, and how long does the async copy take?
-- [ ] **Tiered staging**: Why is tiered staging (local NVMe first, then async PFS copy) faster than writing directly to PFS?
+- [ ] **Per-node state**: Calculate the per-node checkpoint size.
+- [ ] **Local write**: Calculate $T_{\text{write}}$ for the local write when each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`.
+- [ ] **Async copy**: Calculate the per-node write bandwidth and async-copy time when the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously.
+- [ ] **Tiered staging**: Explain why tiered staging (local NVMe first, then async PFS copy) is faster than writing directly to PFS.
 
 :::
 

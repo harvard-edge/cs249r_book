@@ -553,9 +553,9 @@ The trade-off is a severe penalty upon failure. If a network switch drops a sing
 
 Consider a 2,048-GPU training cluster that will run both large language model training (gradient messages of several gigabytes) and reinforcement learning (frequent small control messages).
 
-- [ ] **Protocol fit**: Which protocol would you recommend, and why? Consider that large messages are bandwidth-dominated while small messages are latency-dominated.
-- [ ] **RoCE requirements**: If you chose RoCE, what additional infrastructure would be needed compared to InfiniBand?
-- [ ] **Shared fabric**: How would your answer change if the cluster also needed to serve inference traffic to external users over the same physical network?
+- [ ] **Protocol fit**: Recommend a protocol and justify the choice under bandwidth-dominated large messages and latency-dominated small messages.
+- [ ] **RoCE requirements**: Specify the additional infrastructure RoCE needs compared to InfiniBand.
+- [ ] **Shared fabric**: Reevaluate the protocol choice when the cluster also serves inference traffic to external users over the same physical network.
 
 :::
 
@@ -798,7 +798,32 @@ plt.close()
 ```{python}
 #| echo: false
 #| label: allreduce-bottleneck
-from mlsysim.fmt import fmt, fmt_count, fmt_int, fmt_math, fmt_params, fmt_percent, fmt_qty, fmt_time, sci_latex
+from mlsysim import (
+    Models,
+    Hardware,
+    Systems,
+    flop,
+    byte,
+    param,
+    second,
+    ms,
+    millisecond,
+    microsecond,
+    GB,
+)
+from mlsysim.fmt import (
+    fmt,
+    fmt_count,
+    fmt_display_math,
+    fmt_int,
+    fmt_math,
+    fmt_magnitude,
+    fmt_params,
+    fmt_percent,
+    fmt_qty,
+    fmt_time,
+    sci_latex,
+)
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ALLREDUCE BOTTLENECK ANALYSIS
@@ -823,7 +848,6 @@ class AllReduceBottleneck:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim import Models, Hardware
     from mlsysim.physics import calc_ring_allreduce_time
 
     FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
@@ -859,20 +883,22 @@ class AllReduceBottleneck:
     check(t_comm_70b > t_comm_small * 40, "70B comm should be >40x GPT-2-scale comm")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    t_comp_display = f"{t_comp.to(ms).magnitude:.0f}"
     flops_per_sample_math = fmt_math(sci_latex(flops_per_sample_base.to(flop).magnitude))
     compute_phase_ms_str = fmt_time(round(t_comp.to(ms).magnitude) * ms, millisecond, precision=0, commas=False)
-    t_comm_small_display = f"{t_comm_small.to(ms).magnitude:.0f}"
-    t_comm_70b_display = f"{t_comm_70b.to(ms).magnitude:.0f}"
-    comm_frac_small_pct = f"{comm_frac_small * 100:.1f}"
+    t_comp_ms_value_str = fmt_magnitude(t_comp, unit=ms, precision=None, commas=False)
+    t_comm_small_ms_value_str = fmt_magnitude(t_comm_small, unit=ms, precision=None, commas=False)
+    t_comm_70b_ms_value_str = fmt_magnitude(t_comm_70b, unit=ms, precision=None, commas=False)
+    comm_frac_small_pct_value_str = fmt_percent(comm_frac_small, precision=1, style="number")
+    alpha_us_value_str = fmt_magnitude(FABRIC_ALPHA_NDR, unit=microsecond, precision=1, commas=False)
+    beta_gb_per_s_value_str = fmt_magnitude(ib_ndr.bandwidth, unit=GB / second, precision=0, commas=False)
 
     # Math strings
-    alpha_math = fmt_math(f"\\alpha = {FABRIC_ALPHA_NDR.to(microsecond).magnitude:.1f} \\;\\mu\\text{{s}}")
-    beta_math = fmt_math(f"\\beta = {ib_ndr.bandwidth.to(GB/second).magnitude:.0f} \\;\\text{{GB/s}}")
-    t_comp_display_math = fmt_display_math(f" T_{{\\text{{compute}}}} = {t_comp_display} \\text{{ ms}} ")
-    t_ring_small_math = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_small_display} \\text{{ ms}}")
-    comm_frac_display_math = fmt_display_math(f" \\text{{Comm. fraction}} = {comm_frac_small_pct} \\% ")
-    t_ring_70b_display_math = fmt_display_math(f" T_{{\\text{{ring}}}} \\approx {t_comm_70b_display} \\text{{ ms}} ")
+    alpha_math = fmt_math(f"\\alpha = {alpha_us_value_str} \\;\\mu\\text{{s}}")
+    beta_math = fmt_math(f"\\beta = {beta_gb_per_s_value_str} \\;\\text{{GB/s}}")
+    t_comp_display_math = fmt_display_math(f" T_{{\\text{{compute}}}} = {t_comp_ms_value_str} \\text{{ ms}} ")
+    t_ring_small_math = fmt_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_small_ms_value_str} \\text{{ ms}}")
+    comm_frac_display_math = fmt_display_math(f" \\text{{Comm. fraction}} = {comm_frac_small_pct_value_str} \\% ")
+    t_ring_70b_display_math = fmt_display_math(f" T_{{\\text{{ring}}}} \\approx {t_comm_70b_ms_value_str} \\text{{ ms}} ")
 
     num_gpus_str = fmt_int(num_gpus, commas=False)
     params_small_billion_str = fmt_params(
@@ -1225,10 +1251,10 @@ This oversubscription calculation turns the topology definition into a design ru
 
 Verify your understanding of hierarchical switch fabrics:
 
-- [ ] **Radix and scale**: In a **Radix-64** two-tier fat-tree, what is the maximum number of GPUs you can connect without core switches?
-- [ ] **Non-blocking ratio**: Why does a Non-blocking fabric require a 1:1 subscription ratio at every tier of the network?
-- [ ] **Tier vs. latency**: If you move from a two-tier to a three-tier fat-tree, how does the **$\alpha$ (startup latency)** of a message change?
-- [ ] **Aggregate vs. bisection**: Explain the difference between aggregate bandwidth and $\text{BW}_{\text{bisect}}$. Which one matters for AllReduce?
+- [ ] **Radix and scale**: Compute the maximum number of GPUs a **Radix-64** two-tier fat-tree can connect without core switches.
+- [ ] **Non-blocking ratio**: Explain why a Non-blocking fabric requires a 1:1 subscription ratio at every tier of the network.
+- [ ] **Tier vs. latency**: Determine how **$\alpha$ (startup latency)** changes when moving from a two-tier to a three-tier fat-tree.
+- [ ] **Aggregate vs. bisection**: Distinguish aggregate bandwidth from $\text{BW}_{\text{bisect}}$ and identify the metric that matters for AllReduce.
 
 :::
 
@@ -1337,10 +1363,10 @@ For our cluster of `{python} NetworkRailRecap.n_gpus_str` spanning `{python} Net
 
 Verify your understanding of workload-specific network design:
 
-- [ ] **Rail beneficiary**: Which dimension of 3D Parallelism (TP, PP, or DP) is the primary beneficiary of a **Rail-Optimized** design?
-- [ ] **Switch hops**: Why does a rail-optimized network reduce the number of switch hops for gradient exchanges compared to a standard fat-tree?
-- [ ] **Traffic isolation**: What is the "Traffic Isolation" benefit: why do we want all GPU 0s on one rail and all GPU 1s on another?
-- [ ] **Core switch need**: True or False: A rail-optimized network eliminates the need for high-bandwidth core switches connecting different rails.
+- [ ] **Rail beneficiary**: Identify the dimension of 3D Parallelism (TP, PP, or DP) that benefits most from a **Rail-Optimized** design.
+- [ ] **Switch hops**: Explain why a rail-optimized network reduces the number of switch hops for gradient exchanges compared to a standard fat-tree.
+- [ ] **Traffic isolation**: Explain the "Traffic Isolation" benefit of placing all GPU 0s on one rail and all GPU 1s on another.
+- [ ] **Core switch need**: Classify the claim as true or false: a rail-optimized network eliminates the need for high-bandwidth core switches connecting different rails.
 
 :::
 
@@ -1364,9 +1390,9 @@ The trade-offs between these topologies become stark when quantified for a large
 
 The choice of network topology dictates the upper bound of training efficiency. Consider three workloads:
 
-- [ ] **AllReduce bandwidth**: For a standard data-parallel job dominated by AllReduce, which topology maximizes $\text{BW}_{\text{bisect}}$?
-- [ ] **MoE traffic**: For a Mixture-of-Experts model with AllToAll-dominant, bursty, sparse communication, which topology minimizes hop count while maintaining congestion control?
-- [ ] **Mesh locality**: For a 2D mesh computation (a physics simulation or specific parallel strategy), which topology offers the best locality by mapping physical neighbor links directly to hardware?
+- [ ] **AllReduce bandwidth**: Select the topology that maximizes $\text{BW}_{\text{bisect}}$ for a standard data-parallel job dominated by AllReduce.
+- [ ] **MoE traffic**: Select the topology that minimizes hop count while maintaining congestion control for a Mixture-of-Experts model with AllToAll-dominant, bursty, sparse communication.
+- [ ] **Mesh locality**: Select the topology that offers the best locality for a 2D mesh computation by mapping physical neighbor links directly to hardware.
 
 :::
 
@@ -1376,9 +1402,9 @@ Bisection analysis alone assumes a single workload type. In practice, clusters s
 
 You are designing the network for a new ML cluster that will run two primary workloads: (1) training a 175B-parameter language model using 3D parallelism (tensor, pipeline, and data parallelism), and (2) serving a Mixture-of-Experts model that relies heavily on AllToAll communication to route tokens to the correct experts.
 
-- [ ] **Training topology**: The training workload's tensor parallelism operates within groups of 8 GPUs, while data parallelism operates across all nodes. Which topology (fat-tree, rail-optimized, or hybrid) best matches this communication pattern, and why?
-- [ ] **MoE topology**: The MoE serving workload generates unpredictable AllToAll traffic where any GPU may need to communicate with any other. How does this change your topology choice compared to the training workload?
-- [ ] **Oversubscription risk**: If budget constraints force you to accept 2:1 oversubscription at the spine layer, which workload suffers more, and what scheduling strategy could mitigate the impact?
+- [ ] **Training topology**: Select the topology (fat-tree, rail-optimized, or hybrid) that best matches tensor parallelism within groups of 8 GPUs and data parallelism across all nodes, then justify the choice.
+- [ ] **MoE topology**: Revise the topology choice for unpredictable AllToAll traffic where any GPU may need to communicate with any other GPU.
+- [ ] **Oversubscription risk**: Identify which workload suffers more under 2:1 spine-layer oversubscription and propose a scheduling strategy to mitigate the impact.
 
 :::
 
@@ -1849,9 +1875,9 @@ The diagnostic sequence preserves the chapter's layer model: application symptom
 
 **Scenario**: Your 175B model training job has been running for 3 days on 512 GPUs. You notice that the iteration time has gradually increased from 4.2 seconds to 4.8 seconds (a 14 percent slowdown). The GPU utilization reported by `nvidia-smi` has dropped from 92 percent to 85 percent.
 
-- [ ] **First diagnostic**: What is the first diagnostic step you would take, and which tool would confirm whether the bottleneck is communication-bound or compute-bound? Cite the evidence that distinguishes the two.
-- [ ] **Physical layer**: You run `ib_write_bw` between all node pairs and find that one pair achieves only 24 GB/s instead of the expected 48 GB/s. What physical-layer causes could explain a 50 percent bandwidth drop, and how would you verify using switch counters?
-- [ ] **Collective impact**: If the degraded link is in the Ring AllReduce path, estimate the impact on overall AllReduce time. Would switching to a Tree AllReduce algorithm help, and why or why not?
+- [ ] **First diagnostic**: Choose the first diagnostic step, name the tool that confirms whether the bottleneck is communication-bound or compute-bound, and cite the evidence that distinguishes the two.
+- [ ] **Physical layer**: Identify physical-layer causes that could explain a 50 percent bandwidth drop when `ib_write_bw` finds one node pair at 24 GB/s instead of the expected 48 GB/s, and verify them using switch counters.
+- [ ] **Collective impact**: Estimate the impact on overall AllReduce time when the degraded link lies in the Ring AllReduce path, then evaluate whether switching to a Tree AllReduce algorithm helps.
 
 :::
 

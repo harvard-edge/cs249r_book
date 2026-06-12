@@ -360,7 +360,7 @@ $$\text{Power} \propto C \times V^2 \times f \quad \text{where } V \propto f \im
 ```{python}
 #| echo: false
 #| label: power-wall-throttling
-from mlsysim.fmt import fmt_rate, fmt_time
+from mlsysim.fmt import fmt_fps, fmt_time
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ POWER WALL: MOBILE THERMAL THROTTLING SCENARIO
@@ -393,8 +393,8 @@ class ThrottlingScenario:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    fps_start_str = fmt_rate(fps_start, 'FPS', precision=0, commas=False)
-    fps_throttled_str = fmt_rate(fps_throttled, 'FPS', precision=0, commas=False)
+    fps_start_str = fmt_fps(fps_start)
+    fps_throttled_str = fmt_fps(fps_throttled)
     duration_min_str = fmt_time(duration_min, "minute", precision=0, commas=False, style="word")
 ```
 
@@ -795,82 +795,27 @@ Analytical tools alone remain abstract until grounded in real silicon. The next 
 
 Physical constraints translate latency-vs-throughput trade-offs\index{Latency vs. Throughput!trade-offs} into engineering decisions through concrete numbers. @Tbl-latency-numbers provides order-of-magnitude latencies\index{Latency!decision thresholds} that should inform every deployment decision—spanning eight orders of magnitude from nanosecond compute operations to hundreds of milliseconds for cross-region network calls. Detailed hardware latencies and bandwidth constraints are covered in @sec-hardware-acceleration. The key decision rule is simple: an operation with latency $> X$ *cannot* appear on the critical path of a system whose latency budget is $X$ ms.[^fn-critical-path-ml]
 
-```{python}
-#| echo: false
-#| label: latency-constants
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LATENCY NUMBERS FOR ML SYSTEM DESIGN
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-latency-numbers in @sec-ml-systems-system-balance-hardware-96ab
-# │
-# │ Goal: Populate the 14-row latency reference table spanning compute, memory,
-# │       network, and ML operation categories.
-# │ Show: The 8-order-of-magnitude gap from nanosecond register access to
-# │       hundreds-of-milliseconds cross-region network RTT.
-# │ How: Assign representative string constants derived from hardware specs and
-# │       published measurements; no arithmetic required.
-# │
-# │ Imports: (none—display string constants only)
-# │ Exports: LatencyConstants.lat_compute_str, LatencyConstants.lat_npu_str,
-# │          LatencyConstants.lat_llm_str, LatencyConstants.lat_l1_str,
-# │          LatencyConstants.lat_hbm_str, LatencyConstants.lat_dram_str,
-# │          LatencyConstants.lat_net_dc_str, LatencyConstants.lat_net_region_str,
-# │          LatencyConstants.lat_net_cross_str, LatencyConstants.lat_kws_str,
-# │          LatencyConstants.lat_face_str, LatencyConstants.lat_gpt4_str,
-# │          LatencyConstants.lat_train_str
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import MarkdownStr
-
-# ┌── LEGO ───────────────────────────────────────────────
-class LatencyConstants:
-    """Namespace for Latency Constants."""
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    # Custom unit suffixes → MarkdownStr per recipe Rule 1 escape-hatch
-    lat_compute_str = MarkdownStr("~1 ns")  # GPU matrix multiply (per op)
-    lat_npu_str = MarkdownStr("5–20 ms")  # NPU inference (MobileNetV2)
-    lat_llm_str = MarkdownStr("20–100 ms")  # LLM token generation
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    lat_l1_str = MarkdownStr("~1 ns")  # L1 cache hit
-    lat_hbm_str = MarkdownStr("20–50 ns")  # HBM read (GPU)
-    lat_dram_str = MarkdownStr("50–100 ns")  # DRAM read (mobile)
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    lat_net_dc_str = MarkdownStr("0.5 ms")  # same datacenter
-    lat_net_region_str = MarkdownStr("1–5 ms")  # same region
-    lat_net_cross_str = MarkdownStr("50–150 ms")  # cross-region
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    lat_kws_str = MarkdownStr("100 μs")  # wake-word detection (TinyML)
-    lat_face_str = MarkdownStr("10–30 ms")  # face detection (mobile)
-    lat_gpt4_str = MarkdownStr("200–500 ms")  # GPT-4 first token
-    lat_train_str = MarkdownStr("200–400 ms")  # ResNet-50 training step
-```
-
 These latencies, organized by category in @tbl-latency-numbers, span eight orders of magnitude.
 
-| **Operation**                    |                  **Latency**                   | **Deployment Implication**         |
-|:---------------------------------|:----------------------------------------------:|:-----------------------------------|
-| **Compute**                      |                                                |                                    |
-| **GPU matrix multiply (per op)** |  `{python} LatencyConstants.lat_compute_str`   | Compute is rarely the bottleneck   |
-| **NPU inference (MobileNetV2)**  |    `{python} LatencyConstants.lat_npu_str`     | Mobile can do real-time vision     |
-| **LLM token generation**         |    `{python} LatencyConstants.lat_llm_str`     | Perceived as "typing speed"        |
-| **Memory**                       |                                                |                                    |
-| **L1 cache hit**                 |     `{python} LatencyConstants.lat_l1_str`     | Keep hot data in registers         |
-| **HBM read (GPU)**               |    `{python} LatencyConstants.lat_hbm_str`     | 20--50$\times$ slower than compute |
-| **DRAM read (mobile)**           |    `{python} LatencyConstants.lat_dram_str`    | Memory bound on most devices       |
-| **Network**                      |                                                |                                    |
-| **Same data center**             |   `{python} LatencyConstants.lat_net_dc_str`   | Microservices feasible             |
-| **Same region**                  | `{python} LatencyConstants.lat_net_region_str` | Edge servers viable                |
-| **Cross-region**                 | `{python} LatencyConstants.lat_net_cross_str`  | Batch processing only              |
-| **ML Operations**                |                                                |                                    |
-| **Wake-word detection (TinyML)** |    `{python} LatencyConstants.lat_kws_str`     | Always-on feasible at <1 mW        |
-| **Face detection (mobile)**      |    `{python} LatencyConstants.lat_face_str`    | Real-time at 30 FPS                |
-| **GPT-4 first token**            |    `{python} LatencyConstants.lat_gpt4_str`    | User notices delay                 |
-| **ResNet-50 training step**      |   `{python} LatencyConstants.lat_train_str`    | Throughput-optimized               |
+| **Operation**                    | **Latency** | **Deployment Implication**         |
+|:---------------------------------|:-----------:|:-----------------------------------|
+| **Compute**                      |             |                                    |
+| **GPU matrix multiply (per op)** |    ~1 ns    | Compute is rarely the bottleneck   |
+| **NPU inference (MobileNetV2)**  |   5–20 ms   | Mobile can do real-time vision     |
+| **LLM token generation**         |  20–100 ms  | Perceived as "typing speed"        |
+| **Memory**                       |             |                                    |
+| **L1 cache hit**                 |    ~1 ns    | Keep hot data in registers         |
+| **HBM read (GPU)**               |   20–50 ns  | 20--50$\times$ slower than compute |
+| **DRAM read (mobile)**           |  50–100 ns  | Memory bound on most devices       |
+| **Network**                      |             |                                    |
+| **Same data center**             |    0.5 ms   | Microservices feasible             |
+| **Same region**                  |    1–5 ms   | Edge servers viable                |
+| **Cross-region**                 |  50–150 ms  | Batch processing only              |
+| **ML Operations**                |             |                                    |
+| **Wake-word detection (TinyML)** |    100 μs   | Always-on feasible at <1 mW        |
+| **Face detection (mobile)**      |   10–30 ms  | Real-time at 30 FPS                |
+| **GPT-4 first token**            |  200–500 ms | User notices delay                 |
+| **ResNet-50 training step**      |  200–400 ms | Throughput-optimized               |
 
 : **Latency Numbers for ML System Design**\index{Latency!numbers, deployment constraints}\index{Memory Hierarchy!latency comparison}: Order-of-magnitude latencies across compute, memory, network, and ML operations that determine deployment feasibility. Spanning eight orders of magnitude, from nanosecond compute operations to hundreds of milliseconds for cross-region network calls, these physical constraints shape architectural decisions. For a comprehensive quick-reference including energy ratios and scaling rules, see @sec-appdx-machine-foundations-numbers-know-b531. {#tbl-latency-numbers}
 
@@ -1792,8 +1737,8 @@ Economics drive this architecture as much as latency. Attempting to process voic
 # │ How: Calculate total annual cloud cost, GPU-days required, peak datacenter
 # │       count (with 3× peak multiplier), and raw audio bandwidth (TB/s).
 # │
-# │ Imports: mlsysim.core.units (BILLION, TRILLION, SEC_PER_HOUR, HOURS_PER_DAY,
-# │          BITS_PER_BYTE, MS_PER_SEC, byte, KB)
+# │ Imports: mlsysim.core.units (BILLION, SEC_PER_HOUR, HOURS_PER_DAY,
+# │          BITS_PER_BYTE, MS_PER_SEC, byte, KB, TB, milliwatt, second)
 # │ Exports: VoiceAssistantWall.ww_devices_b_str,
 # │          VoiceAssistantWall.ww_cloud_cost_str,
 # │          VoiceAssistantWall.ww_total_cost_str,
@@ -1808,7 +1753,8 @@ Economics drive this architecture as much as latency. Attempting to process voic
 # │          VoiceAssistantWall.vi_audio_kb_per_s_str,
 # │          VoiceAssistantWall.vi_total_audio_tb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, fmt_count, fmt_time, check, MarkdownStr, fmt_qty
+from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, fmt_count, fmt_time, check, fmt_qty, fmt_qty_range
+from mlsysim.core.units import BILLION, SEC_PER_HOUR, HOURS_PER_DAY, BITS_PER_BYTE, MS_PER_SEC, byte, KB, TB, milliwatt, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VoiceAssistantWall:
@@ -1862,8 +1808,13 @@ class VoiceAssistantWall:
     ww_devices_b_str = fmt_count(ww_devices_b * BILLION, scale="B", precision=0, commas=False)
     ww_cloud_cost_str = fmt_usd(ww_cloud_cost_per_device, precision=2, commas=False, per="device/year")
     ww_total_cost_str = fmt_usd(ww_total_cloud_cost, precision=0, commas=True, per="year")
-    # Multi-value range → MarkdownStr per recipe Rule 1 escape-hatch
-    ww_edge_power_range_str = MarkdownStr(f"{ww_edge_power_min_mw}--{ww_edge_power_max_mw} mW")
+    ww_edge_power_range_str = fmt_qty_range(
+        ww_edge_power_min_mw * milliwatt,
+        ww_edge_power_max_mw * milliwatt,
+        milliwatt,
+        precision=(1, 0),
+        commas=False,
+    )
     ww_edge_cost_str = fmt_usd(ww_edge_cost_per_year, precision=2, commas=False, per="device/year")
 
     # Infrastructure Strings
@@ -2061,7 +2012,7 @@ The benefits of lower bandwidth usage and reduced latency become stark when we e
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
 from mlsysim.physics import calc_monthly_egress_cost
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_qty, fmt_rate
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_qty, fmt_rate, fmt_fps
 from mlsysim.core.units import USD, GB, MB, KB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2111,7 +2062,7 @@ class BandwidthBottleneck:
     metadata_reduction_mult_str = fmt_multiple(metadata_reduction, precision=0, commas=True)
 
     num_cameras_str = fmt(num_cameras, precision=0, commas=False)
-    bb_fps_str = fmt_rate(fps.to("Hz").magnitude, "FPS", precision=0, commas=False)
+    bb_fps_str = fmt_fps(fps.to("Hz").magnitude)
     egress_cost_str = fmt_usd(Infrastructure.Pricing.Cloud.EgressPerGB.rate.to(USD / GB).magnitude, precision=2, commas=False, per="GB")
     video_width_str = fmt(width, precision=0, commas=False)
     video_height_str = fmt(height, precision=0, commas=False)
@@ -2304,7 +2255,7 @@ The locality crossover is easiest to see by comparing a single high-rate sensor 
 # │          DataLocalityInvariant.remote_ms_str,
 # │          DataLocalityInvariant.net_bw_mbit_per_s_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, MarkdownStr, fmt_bandwidth, fmt_qty, fmt_time, fmt_rate
+from mlsysim.fmt import fmt, check, MarkdownStr, fmt_bandwidth, fmt_qty, fmt_time, fmt_fps
 from mlsysim.core.units import (
     VIDEO_4K_WIDTH,
     VIDEO_4K_HEIGHT,
@@ -2349,7 +2300,7 @@ class DataLocalityInvariant:
     remote_ms_str = fmt_time(remote_total_ms, millisecond, precision=0)
     net_bw_mbit_per_s_str = fmt_bandwidth(net_bw, unit=megabit / second, precision=0, commas=False)
     frame_label_str = MarkdownStr("4K")
-    fps_str = fmt_rate(fps, "FPS", precision=0, commas=False)
+    fps_str = fmt_fps(fps)
 ```
 
 ::: {#nbk-ml-systems-napkin-math-locality-crossover .callout-notebook title="The locality crossover"}
@@ -2399,7 +2350,7 @@ A realistic retail deployment shows how those constraints turn into throughput, 
 # │          .req_tops_equiv_str, .headroom_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_ops_rate, fmt_rate, fmt_ratio
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_ops_rate, fmt_rate, fmt_ratio, fmt_fps
 from mlsysim.core.units import GFLOPs, TOPS, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2422,7 +2373,7 @@ class EdgeSizingThroughput:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     stores_str = fmt(stores, precision=0, commas=False)
     cameras_per_store_str = fmt_rate(cameras_per_store, "cameras/store", precision=0, commas=False)
-    fps_str = fmt_rate(fps, "FPS", precision=0, commas=False)
+    fps_str = fmt_fps(fps)
     headroom_factor_str = fmt_ratio(headroom, precision=0, commas=False)
     inf_per_sec_str = fmt_rate(inf_per_sec, "inferences/s", precision=0, commas=False)
     yolo_gflop_per_inference_str = fmt_flops(yolo_flops, unit=GFLOPs, precision=1, per="inference")
@@ -2829,7 +2780,7 @@ The distinction matters for engineering decisions: the battery tax is a budget p
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import ReferenceStats
-from mlsysim.fmt import fmt_percent, fmt, check, fmt_rate, fmt_qty, fmt_multiple, fmt_time, fmt_temperature, fmt_temperature_rate
+from mlsysim.fmt import fmt_percent, fmt, check, fmt_fps, fmt_qty, fmt_multiple, fmt_time, fmt_temperature, fmt_temperature_rate
 from mlsysim.core.units import watt, second, ureg
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2863,8 +2814,8 @@ class ThermalQuantCalc:
     temp_rise_s_str = fmt_temperature_rate(temp_rise, precision=0, commas=False)
     trip_time_s_str = fmt_time(trip_time, second, precision=0, commas=False)
     trip_temp_str = fmt_temperature(trip_temp, precision=0, commas=False)
-    fps_before_str = fmt_rate(fps_before, 'FPS', precision=0, commas=False)
-    fps_after_str = fmt_rate(fps_after, 'FPS', precision=0, commas=False)
+    fps_before_str = fmt_fps(fps_before)
+    fps_after_str = fmt_fps(fps_after)
 ```
 
 ::: {#nbk-ml-systems-thermal-wall .callout-notebook title="The thermal wall"}
@@ -3374,88 +3325,22 @@ Deployment decisions require seeing latency-vs-throughput paradigm trade-offs\in
 
 @Tbl-big_vs_tiny provides this comparison across fourteen dimensions, from compute power and latency to cost and deployment speed.
 
-```{python}
-#| echo: false
-#| label: paradigms-table
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PARADIGMS TABLE: CLOUD VS EDGE VS MOBILE VS TINYML
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-big_vs_tiny -- 14-dimension paradigm comparison
-# │
-# │ Goal: Synthesize the four deployment paradigms into a single reference table.
-# │ Show: Dimensional constraints (latency, compute, energy) across tiers.
-# │ How: List representative values for Cloud, Mobile, Edge, and TinyML.
-# │      orders-of-magnitude differences that drive paradigm selection.
-# │
-# │ Imports: (none—pure display constants)
-# │ Exports: ParadigmsTable.cloud_lat_str, ParadigmsTable.edge_lat_str,
-# │          ParadigmsTable.mobile_lat_str, ParadigmsTable.tiny_lat_str,
-# │          ParadigmsTable.cloud_comp_str, ParadigmsTable.edge_comp_str,
-# │          ParadigmsTable.mobile_comp_str, ParadigmsTable.tiny_comp_str,
-# │          ParadigmsTable.cloud_stor_str, ParadigmsTable.edge_stor_str,
-# │          ParadigmsTable.mobile_stor_str, ParadigmsTable.tiny_stor_str,
-# │          ParadigmsTable.cloud_pwr_str, ParadigmsTable.edge_pwr_str,
-# │          ParadigmsTable.mobile_pwr_str, ParadigmsTable.tiny_pwr_str,
-# │          ParadigmsTable.cloud_cost_str, ParadigmsTable.edge_cost_str,
-# │          ParadigmsTable.mobile_cost_str, ParadigmsTable.tiny_cost_str
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import MarkdownStr
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ParadigmsTable:
-    """Namespace for Paradigms Table."""
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    # Descriptive prose strings → MarkdownStr per recipe Rule 1 escape-hatch
-    # —Latency (network + inference time) ---
-    cloud_lat_str = MarkdownStr("100 ms–1000 ms+")  # cloud round-trip
-    edge_lat_str = MarkdownStr("10–100 ms")  # local network + inference
-    mobile_lat_str = MarkdownStr("5–50 ms")  # on-device inference
-    tiny_lat_str = MarkdownStr("1–10 ms")  # MCU response time
-
-    # —Compute capability ---
-    cloud_comp_str = MarkdownStr("Very High (Multiple GPUs/TPUs)")  # kW-class accelerators
-    edge_comp_str = MarkdownStr("High (Edge GPUs)")  # tens to hundreds of watts
-    mobile_comp_str = MarkdownStr("Moderate (Mobile NPUs/GPUs)")  # 1–10 W NPUs
-    tiny_comp_str = MarkdownStr("Very Low (MCU/tiny processors)")  # mW-class MCUs
-
-    # —Storage capacity ---
-    cloud_stor_str = MarkdownStr("Unlimited (petabytes+)")  # elastic cloud storage
-    edge_stor_str = MarkdownStr("Large (terabytes)")  # local SSDs
-    mobile_stor_str = MarkdownStr("Moderate (gigabytes)")  # phone flash
-    tiny_stor_str = MarkdownStr("Very Limited (kilobytes–megabytes)")  # SRAM/flash
-
-    # —Energy consumption ---
-    cloud_pwr_str = MarkdownStr("Very High (kW–MW range)")  # data center scale
-    edge_pwr_str = MarkdownStr("High (hundreds of watts)")  # edge server scale
-    mobile_pwr_str = MarkdownStr("Moderate (1–10 W)")  # phone TDP
-    tiny_pwr_str = MarkdownStr("Very Low (mW range)")  # energy harvesting
-
-    # —Cost structure ---
-    cloud_cost_str = MarkdownStr(r"High (\$1000s+/month)")  # usage-based cloud
-    edge_cost_str = MarkdownStr(r"Moderate (\$100s–\$1000s)")  # hardware capex
-    mobile_cost_str = MarkdownStr(r"Moderate (\$200–\$1000+ device)")  # handset hardware
-    tiny_cost_str = MarkdownStr(r"Very Low (\$1–\$10)")  # MCU unit cost
-```
-
-| **Aspect**                 | **Cloud ML**                             | **Edge ML**                             | **Mobile ML**                             | **TinyML**                                            |
-|:---------------------------|:-----------------------------------------|:----------------------------------------|:------------------------------------------|:------------------------------------------------------|
-| **Processing Location**    | Centralized cloud servers (Data Centers) | Local edge devices (gateways, servers)  | Smartphones and tablets                   | Ultra-low-power microcontrollers and embedded systems |
-| **Latency**                | `{python} ParadigmsTable.cloud_lat_str`  | `{python} ParadigmsTable.edge_lat_str`  | `{python} ParadigmsTable.mobile_lat_str`  | `{python} ParadigmsTable.tiny_lat_str`                |
-| **Compute Power**          | `{python} ParadigmsTable.cloud_comp_str` | `{python} ParadigmsTable.edge_comp_str` | `{python} ParadigmsTable.mobile_comp_str` | `{python} ParadigmsTable.tiny_comp_str`               |
-| **Storage Capacity**       | `{python} ParadigmsTable.cloud_stor_str` | `{python} ParadigmsTable.edge_stor_str` | `{python} ParadigmsTable.mobile_stor_str` | `{python} ParadigmsTable.tiny_stor_str`               |
-| **Energy Consumption**     | `{python} ParadigmsTable.cloud_pwr_str`  | `{python} ParadigmsTable.edge_pwr_str`  | `{python} ParadigmsTable.mobile_pwr_str`  | `{python} ParadigmsTable.tiny_pwr_str`                |
-| **Scalability**            | Excellent (virtually unlimited)          | Good (limited by edge hardware)         | Moderate (per-device scaling)             | Limited (fixed hardware)                              |
-| **Data Privacy**           | Basic-Moderate (Data leaves device)      | High (Data stays in local network)      | High (Data stays on phone)                | Very High (Raw data can remain local)                 |
-| **Connectivity Required**  | Constant high-bandwidth                  | Intermittent                            | Optional                                  | None                                                  |
-| **Offline Capability**     | None                                     | Good                                    | Excellent                                 | Complete                                              |
-| **Real-time Processing**   | Dependent on network                     | Good                                    | Very Good                                 | Excellent                                             |
-| **Cost**                   | `{python} ParadigmsTable.cloud_cost_str` | `{python} ParadigmsTable.edge_cost_str` | `{python} ParadigmsTable.mobile_cost_str` | `{python} ParadigmsTable.tiny_cost_str`               |
-| **Hardware Requirements**  | Cloud infrastructure                     | Edge servers/gateways                   | Modern smartphones                        | MCUs/embedded systems                                 |
-| **Development Complexity** | High (cloud expertise needed)            | Moderate-High (edge+networking)         | Moderate (mobile SDKs)                    | High (embedded expertise)                             |
-| **Deployment Speed**       | Fast                                     | Moderate                                | Fast                                      | Slow                                                  |
+| **Aspect**                 | **Cloud ML**                             | **Edge ML**                            | **Mobile ML**                   | **TinyML**                                            |
+|:---------------------------|:-----------------------------------------|:---------------------------------------|:--------------------------------|:------------------------------------------------------|
+| **Processing Location**    | Centralized cloud servers (Data Centers) | Local edge devices (gateways, servers) | Smartphones and tablets         | Ultra-low-power microcontrollers and embedded systems |
+| **Latency**                | 100 ms–1000 ms+                          | 10–100 ms                              | 5–50 ms                         | 1–10 ms                                               |
+| **Compute Power**          | Very High (Multiple GPUs/TPUs)           | High (Edge GPUs)                       | Moderate (Mobile NPUs/GPUs)     | Very Low (MCU/tiny processors)                        |
+| **Storage Capacity**       | Unlimited (petabytes+)                   | Large (terabytes)                      | Moderate (gigabytes)            | Very Limited (kilobytes–megabytes)                    |
+| **Energy Consumption**     | Very High (kW–MW range)                  | High (hundreds of watts)               | Moderate (1–10 W)               | Very Low (mW range)                                   |
+| **Scalability**            | Excellent (virtually unlimited)          | Good (limited by edge hardware)        | Moderate (per-device scaling)   | Limited (fixed hardware)                              |
+| **Data Privacy**           | Basic-Moderate (Data leaves device)      | High (Data stays in local network)     | High (Data stays on phone)      | Very High (Raw data can remain local)                 |
+| **Connectivity Required**  | Constant high-bandwidth                  | Intermittent                           | Optional                        | None                                                  |
+| **Offline Capability**     | None                                     | Good                                   | Excellent                       | Complete                                              |
+| **Real-time Processing**   | Dependent on network                     | Good                                   | Very Good                       | Excellent                                             |
+| **Cost**                   | High (\$1000s+/month)                    | Moderate (\$100s–\$1000s)              | Moderate (\$200–\$1000+ device) | Very Low (\$1–\$10)                                   |
+| **Hardware Requirements**  | Cloud infrastructure                     | Edge servers/gateways                  | Modern smartphones              | MCUs/embedded systems                                 |
+| **Development Complexity** | High (cloud expertise needed)            | Moderate-High (edge+networking)        | Moderate (mobile SDKs)          | High (embedded expertise)                             |
+| **Deployment Speed**       | Fast                                     | Moderate                               | Fast                            | Slow                                                  |
 
 : **Fourteen-Dimension Paradigm Comparison**\index{Scalability!paradigm comparison}\index{Offline Capability!paradigm comparison}: A comprehensive side-by-side comparison across fourteen dimensions that matter for deployment decisions. Note the inverse relationship between compute power and privacy: Cloud ML provides the strongest compute but weaker privacy guarantees, while TinyML provides the strongest privacy but the weakest compute. This table serves as the primary reference for system architects evaluating deployment options. {#tbl-big_vs_tiny}
 
@@ -3685,7 +3570,7 @@ A safety-critical braking example makes the sequencing concrete, because latency
 # │ Exports: BrakingDistance.speed_kmh_str, BrakingDistance.distance_m_str,
 # │          BrakingDistance.latency_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_time, fmt_length, fmt_rate
+from mlsysim.fmt import check, fmt, fmt_time, fmt_length, fmt_rate, fmt_fps
 from mlsysim.core.units import ms, second, meter
 
 class BrakingDistance:
@@ -3703,7 +3588,7 @@ class BrakingDistance:
     distance_m_str = fmt_length(distance_m * meter, unit=meter, precision=1, commas=False)
     latency_str = fmt_time(latency_ms, ms, precision=0, commas=False)
     detection_gflop_str = fmt(detection_gflop, precision=0, commas=False)
-    detection_fps_str = fmt_rate(detection_fps, "FPS", precision=0, commas=False)
+    detection_fps_str = fmt_fps(detection_fps)
     sustained_gflops_str = fmt(sustained_gflop_s, precision=0, commas=False)
 ```
 

@@ -355,21 +355,16 @@ The same memory pressure that shaped AlexNet's architecture appears in everyday 
 # │          Platforms.Cloud.ram, Platforms.Mobile.ram, Platforms.Tiny.ram, Models.Recommendation.DLRM.model_size)
 # │ Exports: dlrm_gb_str, gpt2_gb_str, resnet_mb_str, mobilenet_mb_str, mobilenet_int8_mb_str,
 # │          dscnn_kb_str, cloud_cap_gb_str, mobile_cap_gb_str, tiny_cap_kb_str,
-# │          dlrm_mobile_fit_str, dlrm_tiny_fit_str, gpt2_tiny_fit_str,
-# │          resnet_tiny_fit_str, mobilenet_tiny_fit_str,
-# │          mobilenet_int8_tiny_fit_str, mobilenet_int8_tiny_ratio_mult_str,
-# │          dscnn_tiny_fit_str
+# │          dlrm_mobile_overflow_mult_str, dlrm_tiny_overflow_mult_str,
+# │          gpt2_tiny_overflow_mult_str, resnet_tiny_overflow_mult_str,
+# │          mobilenet_tiny_overflow_mult_str, mobilenet_int8_tiny_ratio_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Platforms
-from mlsysim.fmt import fmt, fmt_int, MarkdownStr, fmt_multiple, fmt_qty, fmt_qty_int, fmt_memory
+from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_qty, fmt_qty_int, fmt_memory
 
-def _get_ratio(model_mem, device_mem):
-    """Return 'ok' if model fits, else 'no (N×)' with how many times it overflows."""
-    ratio = model_mem.to(byte).magnitude / device_mem.to(byte).magnitude
-    if ratio < 1:
-        return MarkdownStr("ok")
-    ratio_mult_str = fmt_multiple(ratio)
-    return MarkdownStr(f"no ({ratio_mult_str})")
+def _overflow_ratio(model_mem, device_mem):
+    """Return how many times a model exceeds a device memory envelope."""
+    return model_mem.to(byte).magnitude / device_mem.to(byte).magnitude
 
 class ModelDeviceComparison:
     """Contrast model requirements with device memory: 6-order-of-magnitude deployment gap."""
@@ -389,18 +384,19 @@ class ModelDeviceComparison:
     dscnn_mem = 500 * KB  # scenario assumption
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dlrm_mobile = _get_ratio(dlrm_mem, mobile_mem)
-    dlrm_tiny = _get_ratio(dlrm_mem, tiny_mem)
-    gpt2_mobile = _get_ratio(gpt2_mem, mobile_mem)
-    gpt2_tiny = _get_ratio(gpt2_mem, tiny_mem)
-    resnet_tiny = _get_ratio(resnet_mem, tiny_mem)
-    mobilenet_tiny = _get_ratio(mobilenet_mem, tiny_mem)
-    mobilenet_int8_tiny = _get_ratio(mobilenet_int8_mem, tiny_mem)
-    mobilenet_int8_tiny_ratio = mobilenet_int8_mem.to(byte).magnitude / tiny_mem.to(byte).magnitude
+    dlrm_mobile_overflow = _overflow_ratio(dlrm_mem, mobile_mem)
+    dlrm_tiny_overflow = _overflow_ratio(dlrm_mem, tiny_mem)
+    gpt2_mobile_overflow = _overflow_ratio(gpt2_mem, mobile_mem)
+    gpt2_tiny_overflow = _overflow_ratio(gpt2_mem, tiny_mem)
+    resnet_tiny_overflow = _overflow_ratio(resnet_mem, tiny_mem)
+    mobilenet_tiny_overflow = _overflow_ratio(mobilenet_mem, tiny_mem)
+    mobilenet_int8_tiny_ratio = _overflow_ratio(mobilenet_int8_mem, tiny_mem)
+    dscnn_tiny_overflow = _overflow_ratio(dscnn_mem, tiny_mem)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # DS-CNN always fits TinyML—sanity check
-    assert _get_ratio(dscnn_mem, tiny_mem) == "ok", "DS-CNN must fit in TinyML device."
+    assert dscnn_tiny_overflow < 1, "DS-CNN must fit in TinyML device."
+    assert gpt2_mobile_overflow < 1, "GPT-2 XL should fit in mobile memory for this simplified table."
     assert 6 <= mobilenet_int8_tiny_ratio <= 8, "MobileNetV2 INT8 should exceed TinyML by about 7x."
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -414,28 +410,26 @@ class ModelDeviceComparison:
     cloud_cap_gb_str = fmt_qty_int(cloud_mem, GB, commas=False, approx=True)
     mobile_cap_gb_str = fmt_qty_int(mobile_mem, GB, commas=False, approx=True)
     tiny_cap_kb_str = fmt_qty(tiny_mem, KB, precision=1, commas=False, approx=True)
-    dlrm_mobile_fit_str = dlrm_mobile
-    dlrm_tiny_fit_str = dlrm_tiny
-    gpt2_tiny_fit_str = gpt2_tiny
-    resnet_tiny_fit_str = resnet_tiny
-    mobilenet_tiny_fit_str = mobilenet_tiny
-    mobilenet_int8_tiny_fit_str = mobilenet_int8_tiny
+    dlrm_mobile_overflow_mult_str = fmt_multiple(dlrm_mobile_overflow)
+    dlrm_tiny_overflow_mult_str = fmt_multiple(dlrm_tiny_overflow)
+    gpt2_tiny_overflow_mult_str = fmt_multiple(gpt2_tiny_overflow)
+    resnet_tiny_overflow_mult_str = fmt_multiple(resnet_tiny_overflow)
+    mobilenet_tiny_overflow_mult_str = fmt_multiple(mobilenet_tiny_overflow)
     mobilenet_int8_tiny_ratio_mult_str = fmt_multiple(mobilenet_int8_tiny_ratio, precision=1, commas=False)
-    dscnn_tiny_fit_str = MarkdownStr("ok")
 ```
 
 @Tbl-model-vs-device quantifies this mismatch using the Lighthouse models from @sec-network-architectures-lighthouse-roster-model-biographies-a763. The gap between model requirements and device capabilities explains *why* compression is not optional for resource-constrained deployment: without it, the models cannot run.
 
 As @tbl-model-vs-device makes concrete, even aggressively optimized models like MobileNetV2 at INT8 precision exceed TinyML device memory by about `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`.
 
-| **Model**              |                **Memory** **(Runtime)**                |               **Storage** **(Weights)**                | **Cloud** **(`{python} ModelDeviceComparison.cloud_cap_gb_str`)** | **Mobile** **(`{python} ModelDeviceComparison.mobile_cap_gb_str`)** | **TinyML** **(`{python} ModelDeviceComparison.tiny_cap_kb_str`)** |
-|:-----------------------|:------------------------------------------------------:|:------------------------------------------------------:|:-----------------------------------------------------------------:|:-------------------------------------------------------------------:|:-----------------------------------------------------------------:|
-| **DLRM**               |      `{python} ModelDeviceComparison.dlrm_gb_str`      |      `{python} ModelDeviceComparison.dlrm_gb_str`      |                                 ok                                |         `{python} ModelDeviceComparison.dlrm_mobile_fit_str`        |         `{python} ModelDeviceComparison.dlrm_tiny_fit_str`        |
-| **GPT-2 XL**           |      `{python} ModelDeviceComparison.gpt2_gb_str`      |      `{python} ModelDeviceComparison.gpt2_gb_str`      |                                 ok                                |                                  ok                                 |         `{python} ModelDeviceComparison.gpt2_tiny_fit_str`        |
-| **ResNet-50**          |     `{python} ModelDeviceComparison.resnet_mb_str`     |     `{python} ModelDeviceComparison.resnet_mb_str`     |                                 ok                                |                                  ok                                 |        `{python} ModelDeviceComparison.resnet_tiny_fit_str`       |
-| **MobileNetV2**        |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |                                 ok                                |                                  ok                                 |      `{python} ModelDeviceComparison.mobilenet_tiny_fit_str`      |
-| **MobileNetV2 (INT8)** | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` |                                 ok                                |                                  ok                                 |    `{python} ModelDeviceComparison.mobilenet_int8_tiny_fit_str`   |
-| **DS-CNN (KWS)**       |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |        `{python} ModelDeviceComparison.dscnn_tiny_fit_str`        |
+| **Model**              |                **Memory** **(Runtime)**                |               **Storage** **(Weights)**                | **Cloud** **(`{python} ModelDeviceComparison.cloud_cap_gb_str`)** | **Mobile** **(`{python} ModelDeviceComparison.mobile_cap_gb_str`)** |    **TinyML** **(`{python} ModelDeviceComparison.tiny_cap_kb_str`)**     |
+|:-----------------------|:------------------------------------------------------:|:------------------------------------------------------:|:-----------------------------------------------------------------:|:-------------------------------------------------------------------:|:------------------------------------------------------------------------:|
+| **DLRM**               |      `{python} ModelDeviceComparison.dlrm_gb_str`      |      `{python} ModelDeviceComparison.dlrm_gb_str`      |                                 ok                                | no (`{python} ModelDeviceComparison.dlrm_mobile_overflow_mult_str`) |    no (`{python} ModelDeviceComparison.dlrm_tiny_overflow_mult_str`)     |
+| **GPT-2 XL**           |      `{python} ModelDeviceComparison.gpt2_gb_str`      |      `{python} ModelDeviceComparison.gpt2_gb_str`      |                                 ok                                |                                  ok                                 |    no (`{python} ModelDeviceComparison.gpt2_tiny_overflow_mult_str`)     |
+| **ResNet-50**          |     `{python} ModelDeviceComparison.resnet_mb_str`     |     `{python} ModelDeviceComparison.resnet_mb_str`     |                                 ok                                |                                  ok                                 |   no (`{python} ModelDeviceComparison.resnet_tiny_overflow_mult_str`)    |
+| **MobileNetV2**        |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |                                 ok                                |                                  ok                                 |  no (`{python} ModelDeviceComparison.mobilenet_tiny_overflow_mult_str`)  |
+| **MobileNetV2 (INT8)** | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` |                                 ok                                |                                  ok                                 | no (`{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`) |
+| **DS-CNN (KWS)**       |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |                                    ok                                    |
 
 : **The Deployment Gap**: Model memory requirements compared against typical device capacities. Even MobileNetV2 quantized to INT8 exceeds the `{python} ModelDeviceComparison.tiny_cap_kb_str` TinyML envelope by `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`, while the purpose-built DS-CNN keyword spotter fits within it. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device tbl-colwidths="[20,15,15,15,15,20]"}
 
@@ -8168,7 +8162,7 @@ Teams sometimes convert tensors to sparse formats as soon as pruning creates vis
 
 Model compression is not a bag of tricks but an engineering discipline built on three complementary dimensions: *structural optimization* determines what the model computes, *precision optimization* determines how precisely it computes, and *architectural optimization* determines how efficiently those computations execute on physical hardware. The most important lesson of this chapter is that these dimensions compose multiplicatively. Pruning alone might achieve 2$\times$ compression; quantization alone might achieve 4$\times$; but pruning, distillation, and quantization applied together can achieve `{python} BertCompression.compression_ratio_mult_str`—as BERT's compression from `{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str` demonstrates. The second lesson is equally important: theoretical compression ratios lie. A 4$\times$ reduction in parameters translates to 4$\times$ latency improvement only when the optimization aligns with the hardware's execution model. Unstructured sparsity on hardware that lacks sparse kernels achieves almost nothing; INT8 quantization on hardware without INT8 units achieves even less. Profile on target hardware, not paper metrics.
 
-Combined with the data selection techniques from @sec-data-selection, these model-centric optimizations complete the efficiency toolkit: data selection maximizes learning from available examples, while model compression minimizes resources required for deployment.
+Combined with the data selection techniques from @sec-data-selection, these model-centric optimizations complete the model-side efficiency toolkit: data selection maximizes learning from available examples, while model compression minimizes resources required for deployment. Whether those savings become real speedups still depends on the hardware and runtime that execute the compressed model.
 
 ::: {.callout-takeaways title="From benchmark winner to production model"}
 
@@ -8186,7 +8180,7 @@ The techniques in this chapter differ in almost every detail, yet one rule runs 
 
 ::: {.callout-chapter-connection title="From math to physics"}
 
-We have compressed the model's logic, shaving off every unnecessary bit. Logic, however, must eventually run on physics. @Sec-hardware-acceleration examines how GPUs, TPUs, and NPUs are designed to exploit these optimizations and execute compressed models at maximum throughput.
+We have compressed the model's logic, reducing the work the Algorithm asks the Machine to perform. Logic, however, must eventually run on physics. @Sec-hardware-acceleration examines how GPUs, TPUs, and NPUs are designed to exploit these optimizations and execute compressed models at maximum throughput.
 
 :::
 
