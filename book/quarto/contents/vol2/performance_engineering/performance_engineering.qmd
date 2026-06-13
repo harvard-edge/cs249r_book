@@ -36,13 +36,13 @@ Model compression reduces the size of what we compute. Performance engineering r
 
 ::: {.callout-learning-objectives}
 
-- Apply the Roofline Model to diagnose whether an ML workload is compute-bound or memory-bound on a given accelerator
-- Explain how Operator Fusion and Tiling (FlashAttention) overcome HBM bandwidth limitations by keeping intermediate data in on-chip SRAM
-- Evaluate inference-side block-wise quantization (LLM.int8(), GPTQ, AWQ) and INT8/INT4 precision choices under bandwidth, compute, and quality constraints
-- Apply Graph Compilation frameworks (torch.compile, Accelerated Linear Algebra (XLA), TensorRT) to automate operator fusion, memory planning, and kernel selection
-- Explain how Speculative Decoding changes autoregressive decode arithmetic intensity and where acceptance-rate and batching constraints limit speedup
-- Explain how Mixture of Experts (MoE) decouples model capacity from active compute while introducing routing, memory, and AllToAll bottlenecks
-- Diagnose performance bottlenecks using System Profiling tools (Nsight Systems, PyTorch Profiler) and roofline plots
+- Apply roofline analysis to classify ML kernels as compute-bound, memory-bound, or launch-limited on target accelerators
+- Analyze prefill, decode, and batch-size regimes to predict latency-throughput behavior in LLM serving
+- Design fusion, tiling, and CUDA graph strategies that reduce HBM traffic and launch overhead
+- Select precision, compilation, and runtime optimizations from bandwidth, quality, and deployment constraints
+- Evaluate speculative decoding and MoE routing using acceptance rates, batching limits, and AllToAll costs
+- Diagnose serving bottlenecks with profilers, roofline plots, and fleet-efficiency metrics
+- Synthesize a 70B serving optimization plan across compute, communication, coordination, and quality trade-offs
 
 :::
 
@@ -2735,13 +2735,11 @@ This iterative mindset also determines which skills endure as hardware evolves. 
 
 ::: {.callout-takeaways title="Match the software to the silicon"}
 
-* **The memory wall defines performance engineering**: Most transformer operations are memory-bound, with arithmetic intensity far below the hardware ridge point. Performance engineering is primarily about reducing bytes moved, not operations computed.
-* **Operator fusion and tiling**: FlashAttention eliminates redundant HBM traffic by keeping intermediate results in on-chip SRAM and avoiding the quadratic attention intermediates that dominate long-context memory use.
-* **Precision engineering**: Reducing numerical representation (FP8, INT4) doubles effective bandwidth, but requires careful handling of outlier features (LLM.int8(), GPTQ, AWQ) and dynamic scaling for training stability.
-* **Graph compilation**: Graph compilers (torch.compile, XLA, TensorRT) automate known optimizations across the entire model graph, but cannot discover algorithmic innovations like FlashAttention or speculative decoding.
-* **Speculative decoding**: Trading abundant compute for scarce bandwidth, parallel verification of draft tokens reduces latency for memory-bound decode without changing precision or batch size.
-* **Mixture of experts**: Enables parameter scaling without proportional compute scaling, but introduces AllToAll communication patterns and load balancing challenges that require careful system engineering.
-* **Always profile before optimizing**: The dominant bottleneck is often not where intuition suggests, and applying the wrong optimization wastes engineering effort while leaving the actual bottleneck untouched.
+* **Bytes usually bind**: On H100-class accelerators, the chapter's roofline recap places most transformer work below the FP16 ridge point of `{python} RooflineSummaryRecap.h100_fp16_ridge_str`, so useful speedups come first from reducing HBM traffic, keeping intermediates in SRAM, and spending compute only when it moves the active bottleneck.
+* **Fusion makes locality real**: Operator fusion, CUDA graphs, and FlashAttention are not just kernel tricks; they remove launch overhead and materialized attention state. In the 8K example, tiled attention cuts stored intermediate state by `{python} FlashAttentionSummaryRecap.savings_mult_str`, turning memory pressure into usable throughput.
+* **Precision buys bandwidth with risk**: FP8, INT8, and INT4 increase effective bandwidth and batch capacity only when outliers, scale factors, and quality checks are managed. Quantization is a systems contract between numerical format, kernel implementation, serving memory, and acceptable model behavior.
+* **Algorithms can move the roofline**: Speculative decoding and mixture-of-experts change how much useful work each target-model pass performs, but they introduce acceptance-rate, routing, AllToAll, and load-balancing constraints. The win is real only after communication and scheduler costs are measured.
+* **Profiling is every step**: The 70B case study shows optimization as bottleneck displacement: INT4 changes batch size, batch size changes arithmetic intensity, and the next limit moves. Fleet performance engineering means measure, optimize the binding term, then measure again before believing the speedup.
 
 :::
 

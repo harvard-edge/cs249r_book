@@ -36,13 +36,13 @@ Distributed training appears simple: split the work across machines and combine 
 
 ::: {.callout-learning-objectives}
 
-- Apply the fleet law to diagnose when a workload is compute-bound, memory-bound, or communication-bound
-- Implement data parallelism using gradient synchronization and AllReduce to achieve 85--95 percent efficiency in the linear scaling regime
-- Apply memory-efficient data parallelism (ZeRO, FSDP) to shard optimizer states and parameters, quantifying the communication trade-off
-- Design tensor parallelism strategies for transformer layers by partitioning matrix operations to exploit high-bandwidth intra-node interconnects
-- Construct pipeline parallelism schedules with microbatching to minimize bubble overhead and maximize fleet utilization
-- Select synchronization models (BSP, SSP, asynchronous) based on staleness, straggler tolerance, throughput, and convergence trade-offs for cluster heterogeneity
-- Architect hybrid 3D parallelism configurations that combine data, tensor, and pipeline strategies to train Archetype A (GPT-4/Llama-3) models
+- Apply the fleet law to diagnose compute-, memory-, communication-, or coordination-bound distributed training regimes
+- Calculate scaling efficiency, critical batch limits, and synchronization overhead for data-parallel training jobs
+- Design memory-sharding plans that trade accelerator capacity for additional communication
+- Map tensor, pipeline, expert, and data parallelism onto hardware bandwidth tiers and model structure
+- Construct microbatch pipeline schedules that minimize bubbles while preserving throughput and convergence stability
+- Select synchronization and low-precision policies using staleness, straggler tolerance, numerical stability, and cluster heterogeneity
+- Synthesize hybrid parallelism configurations for frontier, recommendation, alignment, or federated training constraints
 
 :::
 
@@ -3379,14 +3379,14 @@ The operating point in the 3D Parallelism Cube shifts depending on the system's 
 
 The parallelism strategies explored throughout this chapter (data, tensor, pipeline, and expert) provide the conceptual toolkit for partitioning any training workload across a cluster. The key insight is that these strategies are not mutually exclusive alternatives but complementary dimensions of a unified optimization space. Systems such as Megatron-LM achieve efficient scaling precisely because they combine multiple strategies, using tensor parallelism within nodes, pipeline parallelism across node groups, data parallelism for throughput, and expert parallelism for capacity scaling.
 
-::: {.callout-takeaways title="Parallelism is a loop transformation"}
+::: {.callout-takeaways title="Parallelism relocates the tax"}
 
-* **Communication-computation ratio is the ceiling**: Distributed training is governed by an extended Amdahl's Law. Speedup is limited by the sequential nature of synchronization (AllReduce) relative to the parallel work of computation.
-* **Data parallelism is the common starting point, but hits the batch trap**: Scaling replicas improves throughput linearly until the "critical batch size" is reached, beyond which larger batches yield diminishing returns in convergence.
-* **Tensor parallelism is node-local**: Because it partitions matrix operations, it requires the `{python} DistTrainSummaryRecap.nvlink_a100_gb_per_s_str`-`{python} DistTrainSummaryRecap.nvlink_h100_gb_per_s_str` bandwidth of NVLink. Scaling it across racks on standard Ethernet will stall the fleet.
-* **Pipeline parallelism minimizes bandwidth, but adds "bubbles"**: Splitting depth across nodes allows for massive models, but efficiency depends on microbatching $(m \gg p)$ to minimize idle time during fill and drain phases.
-* **Memory-efficient DP (ZeRO/FSDP) scales linear memory**: By sharding optimizer states, gradients, and parameters, ZeRO-3 allows 100B+ models to fit on accelerator fleets that would otherwise require complex model parallelism.
-* **The linear scaling rule requires warmup**: Multiplying batch size $B$ by $k$ allows for multiplying learning rate by $k$, but only with a linear warmup period to maintain stability during the high-gradient-noise initial phase.
+* **Splitting work moves the bottleneck**: Distributed training does not make the underlying computation smaller; it converts memory pressure into communication volume, synchronization delay, or idle pipeline time. The winning strategy is the split that sends overhead to the least binding part of the fleet.
+* **Data parallelism ends at convergence**: Replicas scale throughput cleanly only while larger global batches still improve optimization. Past the critical batch size, AllReduce cost and reduced gradient noise turn "more workers" into slower or less stable learning unless schedules, warmup, and accumulation change.
+* **Sharding buys memory with messages**: ZeRO and FSDP make 100B+ parameter models feasible by partitioning optimizer state, gradients, and parameters. The price is a stricter communication schedule of ReduceScatter and AllGather operations that must be overlapped or hidden.
+* **Tensor parallelism belongs near NVLink**: Tensor parallelism splits matrix operations inside layers, so it needs the high-bandwidth intra-node fabric that A100 and H100 NVLink provide. Stretching that traffic across racks turns a memory-capacity solution into a communication bottleneck.
+* **Pipeline parallelism trades bytes for bubbles**: Layer staging reduces communication frequency, but fill and drain slots leave accelerators idle. Microbatching with $m \gg p$ is the mechanism that turns model depth into throughput rather than pipeline slack.
+* **The 3D cube is a hardware map**: Real frontier training combines data, tensor, pipeline, expert, and sharded parallelism because no single axis fits the model and the fleet. Logical groups must map to HBM, NVLink, InfiniBand, and failure domains together.
 
 :::
 

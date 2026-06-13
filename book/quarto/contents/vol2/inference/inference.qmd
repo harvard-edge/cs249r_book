@@ -36,13 +36,13 @@ Training a model is a one-time expense; serving it is perpetual. A model trained
 
 ::: {.callout-learning-objectives}
 
-- Quantify why serving cost can dominate training cost over a model's lifetime using the total cost of serving equation
-- Design batching strategies for each model class: static batching for vision, continuous batching for LLMs, feature-parallel batching for recommenders
-- Apply the serving hierarchy framework (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
-- Compare model sharding strategies (tensor parallelism, pipeline parallelism, expert parallelism, embedding sharding) by their communication patterns and latency-memory trade-offs
-- Analyze load balancing algorithms using queuing theory to explain why power-of-two-choices achieves exponentially better performance than random assignment
-- Identify KV-cache memory challenges in LLM serving and explain how continuous batching and memory management sustain high GPU utilization
-- Design autoscaling policies that account for GPU cold start latency and balance cost optimization with SLO guarantees
+- Quantify lifetime serving cost from request volume, token mix, accelerator price, utilization, and latency targets
+- Select batching and scheduling policies for vision, LLM, recommender, and streaming workloads
+- Analyze attention-cache capacity, fragmentation, and decode-time policies for memory-bound language-model serving
+- Compare sharding, disaggregation, and quantized serving designs using communication, memory, and quality constraints
+- Evaluate routing, load balancing, and isolation controls against tail latency and noisy-neighbor risks
+- Design autoscaling and multi-region failover policies that balance cold starts, cost, and SLO compliance
+- Synthesize serving architectures that manage C³ trade-offs across request, replica, service, and platform layers
 
 :::
 
@@ -5962,12 +5962,11 @@ The engineer who internalizes the prefill/decode split, who understands why wast
 
 ::: {.callout-takeaways title="Serving inverts every assumption"}
 
-* **The inference wall**: Serving cost can dominate training cost by 100$\times$ or more over a model's lifetime, making inference efficiency a primary driver of ML economics.
-* **Prefill vs. decode**: LLM serving is split into two regimes: compute-bound prefill (input processing) and memory-bandwidth-bound decode (token generation). Optimizing decode requires high-bandwidth memory, careful KV-cache placement, and scheduling policies that keep bandwidth useful without violating inter-token latency.
-* **Batching is not universal**: There is no "optimal" batch size for all models. Vision models scale with batch size; recommendation models scale with feature-parallel shards; LLMs scale via continuous, iteration-level management.
-* **Power of two choices**: Simple, randomized load balancing achieves exponentially better queue balance ($\mathcal{O}(\log \log R)$) with minimal overhead, making it a useful primitive for large-scale deployment.
-* **Statefulness is the challenge**: Unlike stateless vision models, LLM serving\index{Inference!stateful serving} is inherently stateful due to the KV cache. This requires sticky routing, prefix caching, and sophisticated memory paging (PagedAttention) to prevent fragmentation.
-* **Distribution is a tax**: Every step of distribution\index{Inference!distribution tax} (network round-trips, serialization, and coordination) adds a "serving tax" that must be explicitly budgeted within the milliseconds allowed for a user response.
+* **Serving cost compounds forever**: Training is paid once, but inference OpEx accrues on every request; for high-traffic production systems it can dominate by 100$\times$ or more over a model's lifetime. Milliseconds, memory fragments, and utilization points are financial levers, not local optimizations.
+* **Tail latency governs architecture**: Inference systems optimize under P99 SLOs, so batching, sharding, caching, and autoscaling must raise utilization without spending the user-visible deadline. Aggregate throughput is necessary but insufficient when a slow request can break downstream services.
+* **Decode turns memory into capacity**: LLM prefill is compute-bound, while autoregressive decode rereads weights and expands private KV state token by token. Continuous batching, PagedAttention, prefix reuse, and KV compression matter because they convert scarce HBM bandwidth and memory into admitted requests.
+* **Model class sets the primitive**: Vision models benefit from predictable static or dynamic batches, recommenders from feature-parallel embedding sharding, and LLMs from iteration-level scheduling. A fleet scheduler must match the workload shape instead of applying one universal batch-size rule.
+* **Distribution always sends a bill**: Tensor parallelism, expert routing, global load balancing, multi-tenancy, and failover all buy capacity or isolation by adding communication and coordination. Production serving works only when that tax is explicitly budgeted inside latency, cost, and reliability envelopes.
 
 :::
 

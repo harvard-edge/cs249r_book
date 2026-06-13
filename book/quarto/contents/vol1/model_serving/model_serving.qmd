@@ -37,13 +37,13 @@ Training and serving demand opposite physics. Training maximizes throughput (sam
 
 ::: {.callout-learning-objectives}
 
-- Explain the inversion from throughput optimization to latency minimization that distinguishes serving from training
-- Decompose request latency into preprocessing, inference, and postprocessing phases to identify bottlenecks using the latency budget framework
-- Apply queuing theory (Little's Law, M/M/1 models) and capacity planning to meet percentile latency SLOs
-- Identify sources of training-serving skew and cold start latency, and select appropriate prevention and mitigation strategies
-- Select batching and runtime strategies based on traffic patterns (Server, SingleStream, MultiStream, Offline), latency constraints, and cost requirements
-- Evaluate memory-bandwidth and KV-cache constraints unique to LLM serving (TTFT/TPOT, continuous batching, PagedAttention)
-- Evaluate deployment trade-offs across precision, runtime selection, and infrastructure cost
+- Explain serving inversion from training throughput to per-request latency, headroom, and tail behavior
+- Decompose request latency across serialization, preprocessing, inference, queuing, postprocessing, and network overhead
+- Apply queueing laws and simple queue models to plan capacity against percentile latency targets
+- Diagnose training-serving skew and cold starts from mismatched preprocessing, model loading, or cache behavior
+- Select batching, load shedding, autoscaling, and runtime strategies for traffic patterns and latency budgets
+- Evaluate LLM serving bottlenecks using token latency, KV-cache memory, and continuous batching constraints
+- Calculate cost per inference from precision, hardware utilization, replica count, and runtime throughput
 
 :::
 
@@ -5320,13 +5320,13 @@ The serving principles established here (queuing theory for capacity planning, p
 
 ::: {.callout-takeaways title="Inverting every training priority"}
 
-* **Serving inverts training priorities**: Training optimizes throughput (samples/hour); serving optimizes latency (ms/request). Different objectives require different system designs.
-* **Queuing theory governs capacity planning**: At 80 percent utilization, average time in system is 5$\times$ service time; at 90 percent, it reaches 10$\times$. Small load increases cause disproportionate latency spikes.
-* **Preprocessing dominates optimized systems**: When model inference is fast (5 ms), preprocessing (image decode, tokenization) consumes 45–70 percent of total latency. Optimize the pipeline, not just the model.
-* **Batching strategy depends on traffic pattern**: Poisson arrivals (web APIs) use dynamic batching; streaming sensors use synchronized batches; mobile apps eliminate batching entirely.
-* **Training-serving skew can degrade accuracy undetected**: Different preprocessing between training and serving (for example, resize interpolation, normalization order) shifts inputs outside the training distribution, causing accuracy degradation that conventional monitoring cannot detect. Use identical code paths.
-* **LLM serving is memory-bandwidth bound**: Token generation reads the model weights from VRAM per token, making decode latency primarily limited by memory bandwidth rather than compute when batching does not change the bound. KV cache management via PagedAttention and continuous batching is a major throughput lever, with reported and scenario-dependent gains over naive serving.
-* **Precision and runtime selection directly determine infrastructure cost**: INT8 inference achieves ~3$\times$ higher throughput than FP32, translating directly to proportionally fewer GPUs. Runtime optimization (TensorRT, ONNX Runtime) provides an additional 2--5$\times$ speedup over framework-native serving, making these choices as impactful as model architecture decisions.
+* **Serving is latency economics**: Training rewards throughput over long runs, but serving spends a fixed per-request budget across serialization, preprocessing, queuing, inference, postprocessing, and the network. Optimizing only model latency misses the stages users actually wait on.
+* **Utilization turns into waiting**: Queuing theory makes capacity planning nonlinear: at 80 percent utilization, average time in system is 5$\times$ service time; at 90 percent, it reaches 10$\times$. Cost-efficient headroom keeps modest traffic surges from becoming SLO failures.
+* **Fast models reveal pipeline taxes**: Once inference falls to roughly 5 ms, image decode, tokenization, and other preprocessing can consume 45–70 percent of total latency. The binding optimization becomes the request path, not the neural network kernel.
+* **Batching follows traffic, not habit**: Poisson web arrivals can use dynamic batching, synchronized sensors need aligned batches, and single-user mobile workloads often cannot batch at all. The right batching window converts slack into throughput without spending the latency budget.
+* **Skew breaks accuracy without errors**: Resize methods, normalization order, calibration data, or feature definitions that differ between training and serving shift live inputs outside the learned distribution. Reusing identical code paths and monitoring production slices prevents silent degradation.
+* **LLM serving is memory management**: Decode often reads weights from VRAM per token, so TPOT is bandwidth-bound unless batching changes the constraint. KV-cache layout, PagedAttention, continuous batching, precision, and runtime choice determine both concurrency and cost per token.
+* **Runtime choices become infrastructure bills**: Precision, graph compilation, operator fusion, and serving runtime translate directly into replica count and cost per inference. INT8 can deliver about 3$\times$ FP32 throughput, while TensorRT or ONNX Runtime often adds 2--5$\times$ over framework-native serving.
 
 :::
 
