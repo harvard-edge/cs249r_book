@@ -1093,7 +1093,7 @@ These checks are additive: each new registry entry or physics module automatical
 \section{Usage \& Case Studies}
 \label{sec:usage}
 
-\mlsysim is designed for three audiences: students developing quantitative reasoning skills, instructors preparing demonstrations, and researchers evaluating design trade-offs. We present two representative use cases per persona, each illustrating how solvers compose to answer questions that span multiple walls. For a "Cookbook" of exciting, runnable code examples demonstrating how users define hardware, perform algebraic design-space sweeps, and invoke SLA-driven hardware synthesis programmatically in Python, see the Appendix (Listings~\ref{lst:speculative},~\ref{lst:appendix-sweep},~\ref{lst:appendix-compose},~\ref{lst:appendix-data},~\ref{lst:appendix-synthesis}, and~\ref{lst:appendix-speculative}).
+\mlsysim is designed for three audiences: students developing quantitative reasoning skills, instructors preparing demonstrations, and researchers evaluating design trade-offs. We present two representative use cases per persona, each illustrating how solvers compose to answer questions that span multiple walls. For a "Cookbook" of exciting, runnable code examples demonstrating how users define hardware, perform algebraic design-space sweeps, and invoke SLA-driven hardware synthesis programmatically in Python, see the Appendix (Listings~\ref{lst:speculative},~\ref{lst:appendix-sweep},~\ref{lst:appendix-compose},~\ref{lst:appendix-data},~\ref{lst:appendix-synthesis},~\ref{lst:appendix-speculative},~\ref{lst:appendix-scorecard},~\ref{lst:appendix-optimizer}, and~\ref{lst:appendix-edge}).
 
 \subsection{Student Use Cases}
 
@@ -1693,6 +1693,64 @@ print(f"Speculative ITL: {spec_result.itl.to('ms'):.2f}")
 # Speculative ITL: 20.53 millisecond
 print(f"Speedup: {(base_result.itl / spec_result.itl).magnitude:.2f}x")
 # Speedup: 2.10x
+\end{lstlisting}
+
+\subsubsection{Scenario F: The Full-Stack Scorecard (Tier 2)}
+\emph{Scenario:} Rather than invoking individual solvers, you want the single ``will it run, is it fast enough, and what does it cost'' verdict for a deployment. An executable \texttt{Scenario} binds a workload to a target system and its SLA and operating context; \texttt{evaluate()} runs the three-level pipeline (Feasibility, Performance, Macro) in one call and short-circuits at the first failing level.
+
+\begin{lstlisting}[language=Python, caption={\textbf{Three-Level Scorecard (Tier 2).} \texttt{Scenario.evaluate()} composes the resolver chain automatically and returns a \texttt{SystemEvaluation}: Level~1 checks memory feasibility, Level~2 reports latency against the SLA, and Level~3 reports cost and carbon.}, label={lst:appendix-scorecard}, float=t]
+import mlsysim
+
+# A pre-built executable scenario: chatbot serving with an SLA + grid context
+evaluation = mlsysim.Scenarios.ChatbotServing.evaluate()
+print(evaluation.scorecard())
+# Level 1: Feasibility [PASS]  Model fits in memory (16.1 GB / 85.9 GB)
+# Level 2: Performance [PASS]  Latency: 5.60 ms  (Target: 500 ms)
+# Level 3: Macro       [PASS]  Annual Carbon: 2946.3 kg | TCO: $10,407
+print(evaluation.passed_all)  # True
+\end{lstlisting}
+
+\subsubsection{Scenario G: Automated Parallelism Search (Tier 3)}
+\emph{Scenario:} You have a fixed cluster and a large model and want the framework to \emph{find} the best 3D-parallelism split rather than specifying it by hand. The Tier~3 \texttt{ParallelismOptimizer} sweeps power-of-two $\text{TP}\times\text{PP}\times\text{DP}$ factorizations, screens each for per-GPU memory feasibility (weights, gradients, and optimizer state), and ranks the survivors by MFU.
+
+\begin{lstlisting}[language=Python, caption={\textbf{Parallelism Optimizer (Tier 3).} The optimizer enumerates valid TP/PP/DP factorizations of the cluster, discards configurations whose per-GPU training state exceeds HBM, and returns the highest-MFU survivor with its ranked candidate list.}, label={lst:appendix-optimizer}, float=t]
+import mlsysim
+from mlsysim.solvers import ParallelismOptimizer
+
+fleet = mlsysim.Systems.Clusters.Research_256   # 256x H100
+result = ParallelismOptimizer().solve(
+    mlsysim.Models.Language.Llama3_70B, fleet,
+    batch_size=2048, precision="fp16", efficiency=0.5,
+)
+print(result.best_config)             # {'tp': 8, 'pp': 2, 'dp': 16}
+print(f"MFU: {result.best_mfu:.3f}")  # MFU: 0.315
+for c in result.top_candidates[:3]:
+    print(c["config"], f'{c["mfu"]:.3f}')
+# {'tp': 8, 'pp': 2, 'dp': 16} 0.315
+# {'tp': 4, 'pp': 4, 'dp': 16} 0.274
+# {'tp': 8, 'pp': 4, 'dp': 8} 0.272
+\end{lstlisting}
+
+\subsubsection{Scenario H: From Datacenter to Microcontroller (Tier 1)}
+\emph{Scenario:} The same dimensionally strict engine that sizes an H100 fleet also sizes a microcontroller. A single \texttt{Engine.solve} call evaluates a small vision model across edge and TinyML silicon spanning four orders of magnitude in power, reading feasibility, bottleneck regime, latency, and per-inference energy straight from the registry.
+
+\begin{lstlisting}[language=Python, caption={\textbf{Edge and TinyML Deployment (Tier 1).} The identical \texttt{Engine.solve} call evaluates milliwatt-class devices: a LeNet variant fits in the ESP32-S3's on-chip SRAM, while MobileNet variants run on a Jetson Orin Nano and a Coral Edge TPU. Energy is per inference.}, label={lst:appendix-edge}, float=t]
+from mlsysim.engine.engine import Engine
+from mlsysim.hardware.registry import Hardware
+from mlsysim.models.registry import Models
+
+deployments = [
+    (Models.Vision.LeNet1,               Hardware.Tiny.ESP32_S3),
+    (Models.Vision.MobileNetV2,          Hardware.Edge.JetsonOrinNano),
+    (Models.Vision.MobileNetV2_Alpha0_5, Hardware.Edge.Coral),
+]
+for model, hw in deployments:
+    perf = Engine.solve(model, hw, batch_size=1, precision="int8")
+    print(f"{hw.name:24s} {perf.bottleneck}-bound  "
+          f"{perf.latency.to('ms'):.2f}  {perf.energy.to('mJ'):.2f}")
+# ESP32-S3 (AI)            Compute-bound  1.03 millisecond  0.13 millijoule
+# NVIDIA Jetson Orin Nano  Memory-bound   0.80 millisecond  3.66 millijoule
+# Google Coral Edge TPU    Memory-bound   1.28 millisecond  0.77 millijoule
 \end{lstlisting}
 
 \end{document}
