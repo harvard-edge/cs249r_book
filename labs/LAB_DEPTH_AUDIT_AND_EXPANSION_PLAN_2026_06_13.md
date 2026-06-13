@@ -2,6 +2,10 @@
 
 This audit covers the `codex/labs` worktree after merging local `dev` into the branch.
 
+Companion analysis:
+
+- `LAB_PART_STORYLINE_DEPTH_BLUEPRINT_2026_06_13.md` extends this audit with a chapter-by-chapter within-part storyline blueprint and the additional support primitives needed to implement deeper lab parts.
+
 Current branch state:
 
 - Worktree: `/Users/VJ/GitHub/MLSysBook-labs`

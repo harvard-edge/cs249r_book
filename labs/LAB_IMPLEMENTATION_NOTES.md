@@ -80,6 +80,46 @@ Tests or checks run:
 Follow-up:
 - Implement Phase 1 of the depth plan: shared storyline metadata, renderer tabs, Math Peek/source helpers, ledger HUD, and tests that understand shared-renderer metadata.
 
+### 2026-06-13 - Part Storyline Depth Blueprint
+
+Lab:
+- All Volume I and Volume II labs, analysis layer only.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/LAB_PART_STORYLINE_DEPTH_BLUEPRINT_2026_06_13.md`
+- `labs/LAB_DEPTH_AUDIT_AND_EXPANSION_PLAN_2026_06_13.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Extended the depth audit from a structural checklist into a chapter-by-chapter teaching blueprint.
+- Defined the within-part narrative contract: scenario, prediction, experiment, evidence, source model, reflection, and checkpoint.
+- Mapped all Volume I and Volume II labs to deeper Part A-D storylines, including subpieces of student work inside each part.
+- Identified new support primitives needed for implementation: `LabStoryline`, `PartStory`, `PartBeat`, `TrackPartLens`, `EvidenceContract`, `MathPeekSpec`, and synthesis/checkpoint helpers.
+
+MLSysIM facts/APIs needed:
+- This pass did not add facts or APIs.
+- The blueprint identifies where future implementation should route formulas and quantitative evidence through MLSysIM solvers or typed lab metadata.
+
+Notebook-local constants removed:
+- None. This was a planning and analysis pass.
+
+Reusable component or modality improved:
+- Proposed a typed storyline registry and renderer-driven part tabs so shared-renderer labs can become deep without duplicating notebook code.
+- Proposed tests that validate part beat roles instead of relying only on literal notebook function names.
+
+Plan updates needed in other labs:
+- Before expanding individual notebooks, implement the storyline metadata layer and renderer hooks.
+- Use the blueprint as the source for Part D additions, Math Peek coverage, and report checkpoint fields.
+
+Tests or checks run:
+- Documentation-only pass; no runtime tests required after the prior merge/audit verification.
+
+Follow-up:
+- Start with a small implementation slice: add the typed storyline schema plus one shared-renderer Volume II lab, likely V2-01, as the pilot.
+
 ### 2026-06-05 - Full Volume I/II Browser Pilot And Workflow Scaffolding
 
 Lab:
