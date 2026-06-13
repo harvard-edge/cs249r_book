@@ -89,3 +89,68 @@ def test_interconnect_direction_convention():
     for dev in ("V100", "A100", "H200", "B200", "TPUv5p"):
         nv = getattr(Hardware.Cloud, dev).nvlink
         assert nv.direction == "bidirectional_total", dev
+
+
+def _all_hardware_nodes():
+    """Every HardwareNode across the accelerator categories (Tech holds
+    tech-classes, not nodes, so it is excluded)."""
+    nodes = []
+    for cat in ("Cloud", "Edge", "Mobile", "Tiny", "Workstation"):
+        reg = getattr(Hardware, cat, None)
+        if reg is None:
+            continue
+        for attr in dir(reg):
+            if attr.startswith("_"):
+                continue
+            obj = getattr(reg, attr)
+            if isinstance(obj, HardwareNode):
+                nodes.append(obj)
+    return nodes
+
+
+def test_precision_keys_use_canonical_vocabulary():
+    """Guard against the 'canonical precision aliased away' trap (F1, 2026-06).
+
+    Engine.solve maps a user precision through resolve_precision() to a
+    PRECISION_MAP key, looks that key up in compute.precision_flops, and falls
+    through to peak_flops (the FP16 dense rate) when the key is absent. That
+    fall-through is correct ONLY for fp16/bf16 (peak == FP16 dense); for any
+    other precision it silently substitutes the FP16 rate.
+
+    H100/H200 once stored FP32 under 'fp32_cuda' (not 'fp32'), so
+    Engine.solve(..., precision='fp32') used 989 TFLOP/s instead of the stored
+    67 — a ~15x overestimate, reachable by no precision string. This fails if a
+    chip stores an off-vocabulary alias of a canonical precision (e.g.
+    'fp32_cuda') without also exposing the canonical key. Genuinely-extra labels
+    that are NOT a PRECISION_MAP precision (fp16_sparse, fp4, fp4_sparse) are
+    unreachable-but-harmless and intentionally not flagged."""
+    from mlsysim.core.units import PRECISION_MAP
+    safe_fallthrough = {"fp16", "bf16"}  # correctly fall through to FP16 peak
+    offenders = []
+    for node in _all_hardware_nodes():
+        pf = getattr(node.compute, "precision_flops", None) or {}
+        keys = set(pf)
+        for p in PRECISION_MAP:
+            if p in safe_fallthrough:
+                continue
+            aliases = sorted(k for k in keys if k != p and k.startswith(p))
+            if aliases and p not in keys:
+                offenders.append(f"{node.name}: stores {aliases} but no reachable '{p}' key")
+    assert not offenders, (
+        "Off-vocabulary precision aliases shadow a canonical PRECISION_MAP key, "
+        "so Engine.solve silently falls through to the FP16 peak:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_h100_h200_fp32_resolves_to_cuda_core_rate_not_fp16_peak():
+    """Regression for F1: precision='fp32' on H100/H200 must reach the stored
+    non-tensor FP32 rate (67 TFLOP/s), not fall through to peak_flops (989)."""
+    from mlsysim.core.units import resolve_precision
+    key, _ = resolve_precision("fp32")
+    for dev in ("H100", "H200"):
+        node = getattr(Hardware.Cloud, dev)
+        pf = node.compute.precision_flops
+        assert key in pf, f"{dev}: '{key}' is not a precision_flops key"
+        assert pf[key].m_as("TFLOP/s") == pytest.approx(67.0), dev
+        assert pf[key].m_as("TFLOP/s") != node.compute.peak_flops.m_as("TFLOP/s"), dev

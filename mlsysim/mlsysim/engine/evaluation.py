@@ -186,10 +186,19 @@ class SystemEvaluator:
             # Fleet-level MFU compounds two losses: per-node software efficiency
             # (node MFU) and the distributed tax (communication + bubbles).
             effective_mfu = dist_res.node_profile.mfu * dist_res.scaling_efficiency
+            # The distributed path does not run a memory-feasibility check here:
+            # correctly sizing per-accelerator training memory needs the ZeRO
+            # stage and gradient-accumulation (microbatch) assumptions this entry
+            # point does not thread through to the model. Report SKIPPED rather
+            # than a no-op PASS, so the scorecard never claims "will run" without
+            # having checked. To evaluate it, thread zero_stage +
+            # gradient_accumulation_steps into evaluate() and call
+            # TrainingMemoryModel for the distributed feasibility lens.
             feasibility = EvaluationLevel(
                 level_name="Feasibility",
-                status="PASS",
-                summary="Distributed Model Check Passed",
+                status="SKIPPED",
+                summary="Memory feasibility not evaluated for the distributed path "
+                        "(requires ZeRO/accumulation assumptions; size it with TrainingMemoryModel)",
                 metrics={}
             )
             performance = EvaluationLevel(
