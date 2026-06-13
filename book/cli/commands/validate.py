@@ -3632,7 +3632,7 @@ class ValidateCommand:
     # Chapter-opener cover images are decorative and not cross-referenced
     # by convention. They carry fig-alt for accessibility but no #fig-
     # label. Skip them in the label-required check.
-    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif)")
+    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif|webp)")
 
     def _run_figure_label_required(self, root: Path) -> ValidationRunResult:
         """Flag `![](...)` markdown image figures with no `{#fig-X}` label.
