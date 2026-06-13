@@ -88,15 +88,15 @@ $$E[T(B)] = E[W(B)] + \frac{B}{2\lambda_{\text{arr}}} + T_{\text{svc}}(B)$$
 
 For an M/G/1 queue with batch arrivals (treating each batch as a single "super-request"), the Pollaczek-Khinchine formula gives the expected waiting time:
 
-$$E[W] = \frac{\lambda_{\text{arr}} \cdot E[T_{\text{svc}}^2]}{2(1 - \rho)}$$
+$$E[W] = \frac{\lambda_{\text{arr}} \cdot E[T_{\text{svc}}^2]}{2(1 - \rho_{\text{serv}})}$$
 
-where $\rho = \lambda_{\text{arr}} \cdot E[T_{\text{svc}}] / B$ is the server utilization (arrival rate times service time per request). The second moment $E[T_{\text{svc}}^2]$ captures service time variability.
+where $\rho_{\text{serv}} = \lambda_{\text{arr}} \cdot E[T_{\text{svc}}] / B$ is the server utilization (arrival rate times service time per request). The second moment $E[T_{\text{svc}}^2]$ captures service time variability.
 
 For our linear service time model with deterministic service (variance zero within a batch):
 
 $$E[W(B)] = \frac{\lambda_{\text{arr}} \cdot T_{\text{svc}}(B)^2}{2B(1 - \lambda_{\text{arr}} \cdot T_{\text{svc}}(B)/B)}$$
 
-For production sizing, teams often first enforce a utilization headroom target rather than solving the full latency minimization problem. With $T_{\text{svc}}(B)=T_{\text{fixed}}+t_{\text{req}} B$, the constraint $\rho=\lambda_{\text{arr}} T_{\text{svc}}(B)/B \leq \rho_{\text{target}}$ gives @eq-optimal-batch-approx:
+For production sizing, teams often first enforce a utilization headroom target rather than solving the full latency minimization problem. With $T_{\text{svc}}(B)=T_{\text{fixed}}+t_{\text{req}} B$, the constraint $\rho_{\text{serv}}=\lambda_{\text{arr}} T_{\text{svc}}(B)/B \leq \rho_{\text{target}}$ gives @eq-optimal-batch-approx:
 
 $$B_{\min}(\rho_{\text{target}}) = \frac{\lambda_{\text{arr}} T_{\text{fixed}}}{\rho_{\text{target}} - \lambda_{\text{arr}} t_{\text{req}}}$$ {#eq-optimal-batch-approx}
 
@@ -174,13 +174,13 @@ Rounding up gives $B=8$ as the smallest batch size that meets the target utiliza
 
 @Tbl-batch-size-comparison quantifies the trade-offs across batch sizes from 1 to 32:
 
-| **Size $B$** | **$T_{\text{svc}}(B)$ (ms)** | **req/s** |    **$\rho$**   | **E[W] (ms)** | **$B/(2\lambda_{\text{arr}})$ (ms)** | **E[T] (ms)** |
-|:-------------|:----------------------------:|:---------:|:---------------:|:-------------:|:------------------------------------:|:-------------:|
-| **1**        |             50.5             |    19.8   | 505% (unstable) |    $\infty$   |                 5.0                  |    $\infty$   |
-| **4**        |             52.0             |    76.9   | 130% (unstable) |    $\infty$   |                 20.0                 |    $\infty$   |
-| **8**        |             54.0             |   148.1   |      67.5%      |      56.1     |                 40.0                 |     150.1     |
-| **16**       |             58.0             |   275.9   |      36.3%      |      16.5     |                 80.0                 |     154.5     |
-| **32**       |             66.0             |   484.8   |      20.6%      |      8.6      |                160.0                 |     234.6     |
+| **Size $B$** | **$T_{\text{svc}}(B)$ (ms)** | **req/s** | **$\rho_{\text{serv}}$** | **E[W] (ms)** | **$B/(2\lambda_{\text{arr}})$ (ms)** | **E[T] (ms)** |
+|:-------------|:----------------------------:|:---------:|:------------------------:|:-------------:|:------------------------------------:|:-------------:|
+| **1**        |             50.5             |    19.8   |     505% (unstable)      |    $\infty$   |                 5.0                  |    $\infty$   |
+| **4**        |             52.0             |    76.9   |     130% (unstable)      |    $\infty$   |                 20.0                 |    $\infty$   |
+| **8**        |             54.0             |   148.1   |          67.5%           |      56.1     |                 40.0                 |     150.1     |
+| **16**       |             58.0             |   275.9   |          36.3%           |      16.5     |                 80.0                 |     154.5     |
+| **32**       |             66.0             |   484.8   |          20.6%           |      8.6      |                160.0                 |     234.6     |
 
 : **Batch Size Impact on GPT-3 Serving Performance**: Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100 percent). After including batch-accumulation delay, the latency minimum in this simple model occurs near $B=8$; $B=16$ has nearly the same mean latency with lower utilization, while $B=32$ leaves more headroom but pays a large accumulation-delay penalty. {#tbl-batch-size-comparison}
 
@@ -237,7 +237,7 @@ class GPT3ServingResults:
 
 2. **Batch size 8 achieves stability**\index{Batch Size!8 achieves stability}: At `{python} GPT3ServingResults.b8_util_pct_str` utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms_str`), as @fig-queuing-hockey-stick illustrates.
 
-::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The Queuing Hockey Stick**: Relationship between system utilization $\rho$ and queue length (M/M/1 queue length $\rho/(1-\rho)$). Three zones are shaded: a Safe Zone ($\rho < 0.7$), a Caution band (0.7--0.85), and a Danger Zone ($\rho > 0.85$) where queue depth grows unboundedly. Production systems typically target $\rho \leq 0.7$ to maintain latency headroom." fig-alt="Plot of Queue Length (requests) vs. Utilization rho from 0 to 1. The curve is flat until rho around 0.7, bends upward through a caution band (0.7 to 0.85), then rises sharply in a Danger Zone toward saturation at rho=1."}
+::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The Queuing Hockey Stick**: Relationship between system utilization $\rho_{\text{serv}}$ and queue length (M/M/1 queue length $\rho_{\text{serv}}/(1-\rho_{\text{serv}})$). Three zones are shaded: a Safe Zone ($\rho_{\text{serv}} < 0.7$), a Caution band (0.7--0.85), and a Danger Zone ($\rho_{\text{serv}} > 0.85$) where queue depth grows unboundedly. Production systems typically target $\rho_{\text{serv}} \leq 0.7$ to maintain latency headroom." fig-alt="Plot of queue length in requests versus serving utilization rho_serv from 0 to 1. The curve is flat until rho_serv around 0.7, bends upward through a caution band from 0.7 to 0.85, then rises sharply in a danger zone toward saturation at rho_serv equals 1."}
 ![](images/svg/queuing-hockey-stick.svg)
 :::
 
@@ -272,7 +272,7 @@ class LittlesLawVerify:
     in_service = batch_size * utilization
     in_queue = n_req - in_service
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(15 < n_req < 16, f"N_req should be ~15.5, got {n_req:.2f}")
+    check(15 < n_req < 16, f"Q_req should be ~15.5, got {n_req:.2f}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     batch_size_str = fmt_int(batch_size, commas=False)
     expected_total_ms_str = fmt_time(expected_total_latency, 'millisecond', precision=1, commas=False)
@@ -342,8 +342,8 @@ $$B = \max\{B : T_{\text{P99}}(B) \leq \text{SLO}\}$$
 |:------------------------------|:----------------------------------------|:-------------------------:|
 | $B < B_{\min}$                | Increase batch size or add replicas     |     System is unstable    |
 | $T_{\text{P99}} > \text{SLO}$ | Reduce batch size or add replicas       |   Latency exceeds target  |
-| $\rho < 0.5$                  | Consider reducing replicas to save cost | System is overprovisioned |
-| $\rho > 0.85$                 | Add replicas for headroom               |  Approaching instability  |
+| $\rho_{\text{serv}} < 0.5$    | Consider reducing replicas to save cost | System is overprovisioned |
+| $\rho_{\text{serv}} > 0.85$   | Add replicas for headroom               |  Approaching instability  |
 
 : **Batch Size Decision Framework**: Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
 
@@ -377,11 +377,11 @@ Autoregressive generation without caching requires $\mathcal{O}(t^2)$ computatio
 
 The cache size grows with context as calculated by @eq-kv-cache-size:
 
-$$\text{KV cache size} = 2 \times N_{\text{layers}} \times d \times S \times B \times s_{\text{elem}}$$ {#eq-kv-cache-size}
+$$M_{\text{KV}} = 2 \times N_L \times d \times S \times B \times s_{\text{elem}}$$ {#eq-kv-cache-size}
 
 where:
 
-- $N_{\text{layers}}$ = number of layers
+- $N_L$ = number of layers
 - $d$ = hidden dimension
 - $S$ = sequence length
 - $B$ = batch size
@@ -392,11 +392,11 @@ where:
 
 ::: {.callout-takeaways title="Serving performance is bounded by queues and memory"}
 
-* **Utilization has a hard ceiling**: As utilization $\rho$ approaches 1, queue depth and latency grow without bound. Production serving targets $\rho \leq 0.7$ to preserve latency headroom; the remaining 30 percent is not waste but the buffer that keeps tail latency finite.
+* **Utilization has a hard ceiling**: As utilization $\rho_{\text{serv}}$ approaches 1, queue depth and latency grow without bound. Production serving targets $\rho_{\text{serv}} \leq 0.7$ to preserve latency headroom; the remaining 30 percent is not waste but the buffer that keeps tail latency finite.
 
 * **Batch size has an optimum, not a maximum**: Larger batches raise throughput but add batch-accumulation delay, producing a latency knee rather than monotonic improvement. Beyond the knee, doubling the batch can buy only 10--20 percent more throughput at the cost of doubled latency.
 
-* **Little's Law ties the system together**: $L = \lambda W$ relates the number of in-flight requests to the arrival rate and time-in-system, giving a one-line consistency check on any serving measurement.
+* **Little's Law ties the system together**: $Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$ relates the number of in-flight requests to the arrival rate and time-in-system, giving a one-line consistency check on any serving measurement.
 
 * **The KV cache is the binding constraint**: Cache memory scales linearly with sequence length and batch size and routinely exceeds the model weights, capping concurrent capacity. Naive allocation wastes 60--80 percent to fragmentation, which is why production systems manage it with a virtual-memory scheme.
 
