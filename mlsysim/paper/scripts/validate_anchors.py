@@ -40,9 +40,9 @@ REPORTED = {
     "a4_mfu": 0.46,              # PaLM full-scale MFU
     "a5_params_b": 70,           # Chinchilla actual (70B)
     "a6_carbon_t": 552,          # Patterson et al. tonnes CO2
-    "a7_tp": 8,                  # Meta Llama 3 parallelism
-    "a7_pp": 4,
-    "a7_dp": 512,
+    "a7_tp": 8,                  # Meta Llama 3 parallelism backbone (TP=8, PP=16)
+    "a7_pp": 16,
+    "a7_dp": 128,
 }
 
 
@@ -199,9 +199,9 @@ def anchor4_palm():
 
 
 def anchor5_chinchilla():
-    """Chinchilla scaling law: optimal P* for C = 5e23 FLOPs."""
+    """Chinchilla scaling law: optimal P* for Chinchilla's C = 5.88e23 FLOPs."""
     solver = ScalingModel()
-    res = solver.solve(compute_budget=Q_("5e23 flop"))
+    res = solver.solve(compute_budget=Q_("5.88e23 flop"))
     p_opt_b = res.optimal_parameters.to("Gcount").magnitude
 
     error_pct = abs(p_opt_b - REPORTED["a5_params_b"]) / REPORTED["a5_params_b"] * 100
@@ -263,11 +263,11 @@ def anchor7_parallelism():
 PAPER_CLAIMS = {
     "Anchor 1": {"key_value": 37500, "key_name": "throughput (s/s)", "reported": 38200},
     "Anchor 2": {"key_value": 43, "key_name": "ITL (ms)", "reported": "40-50"},
-    "Anchor 3": {"key_value": 40.0, "key_name": "MFU (%)", "reported": "38-43"},
-    "Anchor 4": {"key_value": 45, "key_name": "MFU (%)", "reported": 46},
-    "Anchor 5": {"key_value": 65, "key_name": "P* (B params)", "reported": 70},
+    "Anchor 3": {"key_value": 39.1, "key_name": "MFU (%)", "reported": "38-43"},
+    "Anchor 4": {"key_value": 43, "key_name": "MFU (%)", "reported": 46},
+    "Anchor 5": {"key_value": 70, "key_name": "P* (B params)", "reported": 70},
     "Anchor 6": {"key_value": 552, "key_name": "CO2 (tonnes)", "reported": 552},
-    "Anchor 7": {"key_value": "TP=8,PP=4,DP=512", "key_name": "parallelism", "reported": "TP=8,PP=4,DP=512"},
+    "Anchor 7": {"key_value": "TP=8,PP=16,DP=128", "key_name": "parallelism", "reported": "TP=8,PP=16,CP=16"},
 }
 
 KEY_EXTRACTORS = {
