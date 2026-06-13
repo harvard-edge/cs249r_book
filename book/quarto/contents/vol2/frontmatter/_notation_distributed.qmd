@@ -35,6 +35,19 @@ $$T(n) = \alpha + \frac{n}{\beta}$$
 | **$n$**      | **Message Size**       | bytes    | Size of the payload (for example, gradient tensor).                             |
 | **$n^*$**    | **Crossover Point**    | bytes    | $n^* = \alpha \cdot \beta$. Below $n^*$: latency-bound. Above: bandwidth-bound. |
 
+### The LogGP extension {#sec-notation-loggp}
+
+LogGP refines the $\alpha$-$\beta$ model by separating network latency, processor overhead, and long-message injection gaps. The standard names are short, but the book uses descriptive subscripts for the highest-collision term.
+
+| **Symbol**               | **Definition**                | **Unit**     | **Notes**                                                                               |
+|:-------------------------|:------------------------------|:-------------|:----------------------------------------------------------------------------------------|
+| **$T_{\text{long}}(n)$** | **LogGP Long-Message Time**   | seconds      | Transfer time for an $n$-byte long message. Reuses $n$ from the $\alpha$-$\beta$ model. |
+| **$L_{\text{LogGP}}$**   | **LogGP Network Latency**     | seconds      | Standard LogGP latency parameter; subscript avoids bare $L$ collisions.                 |
+| **$o_{\text{send}}$**    | **Sender Overhead**           | seconds      | Processor/NIC overhead to initiate a message.                                           |
+| **$o_{\text{recv}}$**    | **Receiver Overhead**         | seconds      | Processor/NIC overhead to complete a message.                                           |
+| **$g$**                  | **Message Injection Gap**     | seconds      | Minimum interval between consecutive message injections.                                |
+| **$G$**                  | **Long-Message Gap per Byte** | seconds/byte | Per-byte long-message gap; distinct from $\beta$ link bandwidth.                        |
+
 ### Scaling efficiency {#sec-notation-scaling}
 
 $$\eta_{\text{scaling}} = \frac{T_1}{N \times T_N} \leq 1$$
@@ -64,6 +77,7 @@ The formula uses *system-wide* MTBF (the failure interval for the whole job), no
 | **$R_{\text{system}}(t)$** | **Reliability Function**        | Probability   | Probability of no failure across the whole system before time $t$.                                                                                                                                                                                                                      |
 | **$\lambda$**              | **Per-Component Failure Rate**  | failures/hour | Per-component failure rate; the system-wide rate is $N\lambda$ under independent, identical components. The industry-standard reporting unit is FIT (failures per $10^9$ device-hours): $\lambda_{\text{hour}} = \text{FIT} \times 10^{-9}$. *(Not sensitivity—context disambiguates.)* |
 | **$\text{MTBF}$**          | **Mean Time Between Failures**  | hours         | Average time between consecutive failures. $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}} / N$.                                                                                                                                                                          |
+| **$\text{MTTF}$**          | **Mean Time To Failure**        | hours         | Component lifetime metric derived from FIT rates. Distinct from system-level $\text{MTBF}$ when repair/replacement cycles are modeled.                                                                                                                                                  |
 | **$\text{MTTR}$**          | **Mean Time To Repair**         | hours         | Average recovery time after a failure.                                                                                                                                                                                                                                                  |
 | **$\tau_{\text{opt}}$**    | **Optimal Checkpoint Interval** | seconds       | Young-Daly formula. Minimizes total wasted time.                                                                                                                                                                                                                                        |
 | **$T_{\text{write}}$**     | **Checkpoint Write Time**       | seconds       | Time to persist model state to storage.                                                                                                                                                                                                                                                 |
@@ -74,13 +88,44 @@ The formula uses *system-wide* MTBF (the failure interval for the whole job), no
 
 $$N_{\text{total}} = d \times p \times t$$
 
-| **Symbol**             | **Definition**           | **Unit** | **Notes**                                                                              |
-|:-----------------------|:-------------------------|:---------|:---------------------------------------------------------------------------------------|
-| **$N_{\text{total}}$** | **Total Device Count**   | Integer  | Product of the three parallelism dimensions. The total accelerators across the job.    |
-| **$d$**                | **Data Parallelism**     | Integer  | Number of model replicas. *(Also hidden dimension—context disambiguates.)*             |
-| **$p$**                | **Pipeline Parallelism** | Integer  | Number of pipeline stages (model depth partitioning).                                  |
-| **$t$**                | **Tensor Parallelism**   | Integer  | Degree of intra-layer partitioning (model width). *(Also time—context disambiguates.)* |
-| **$M$**                | **Gradient Size**        | bytes    | Total size of gradient or model state to communicate.                                  |
+| **Symbol**             | **Definition**                         | **Unit**      | **Notes**                                                                                        |
+|:-----------------------|:---------------------------------------|:--------------|:-------------------------------------------------------------------------------------------------|
+| **$N_{\text{total}}$** | **Total Device Count**                 | Integer       | Product of the three parallelism dimensions. The total accelerators across the job.              |
+| **$d$**                | **Data Parallelism**                   | Integer       | Number of model replicas. *(Also hidden dimension—context disambiguates.)*                       |
+| **$p$**                | **Physical Pipeline Stages**           | Integer       | Number of physical pipeline stages in model-depth partitioning.                                  |
+| **$t$**                | **Tensor Parallelism**                 | Integer       | Degree of intra-layer partitioning (model width). *(Also time—context disambiguates.)*           |
+| **$m$**                | **Microbatch Count**                   | Integer       | Number of microbatches used to fill and drain the pipeline.                                      |
+| **$b_{\text{pipe}}$**  | **Pipeline Bubble Fraction**           | Dimensionless | Fraction of pipeline GPU-time spent idle; avoids bare $b$.                                       |
+| **$V$**                | **Virtual Pipeline Stages per Device** | Integer       | Number of interleaved virtual chunks assigned to each physical pipeline stage.                   |
+| **$M$**                | **Message Payload Size**               | bytes         | Total size of a gradient, model-state, activation, or compressed message payload to communicate. |
+
+### Fleet capacity factors {#sec-notation-fleet-capacity}
+
+Fleet-scale capacity calculations compound local model efficiency, scaling efficiency, and operational goodput.
+
+| **Symbol**                  | **Definition**                   | **Unit**      | **Notes**                                                                                                                     |
+|:----------------------------|:---------------------------------|:--------------|:------------------------------------------------------------------------------------------------------------------------------|
+| **$f_{\text{compute}}$**    | **Useful Compute-Time Fraction** | Dimensionless | $(T_{\text{compute}}/N)/T_{\text{step}}(N)$. Measures how much step time is useful local arithmetic after distribution.       |
+| **$f_{\text{overhead}}$**   | **Overhead Fraction**            | Dimensionless | Fraction of wall time lost to pipeline bubbles, checkpoints, failure recovery, maintenance, or other nonproductive overheads. |
+| **$\eta_{\text{goodput}}$** | **Goodput Ratio**                | Dimensionless | Fraction of allocated wall time that produces useful training work; often $\eta_{\text{goodput}} = 1 - f_{\text{overhead}}$.  |
+| **$R_{\text{eff}}$**        | **Effective Fleet Throughput**   | FLOP/s        | $R_{\text{eff}} = (N R_{\text{peak}}) \times \text{MFU} \times \eta_{\text{scaling}} \times \eta_{\text{goodput}}$.           |
+
+### Compression economics {#sec-notation-compression-economics}
+
+Compression models compare codec overhead against the communication time saved by reducing the payload.
+
+| **Symbol**                   | **Definition**                    | **Unit** | **Notes**                                                                               |
+|:-----------------------------|:----------------------------------|:---------|:----------------------------------------------------------------------------------------|
+| **$T_{\text{transfer}}(x)$** | **Transfer Time for Payload $x$** | seconds  | Communication time for an $x$-byte payload under the relevant link or collective model. |
+| **$T_{\text{compressed}}$**  | **Compressed Communication Time** | seconds  | Total time after encode, transfer of $M/r_{\text{comp}}$, and decode.                   |
+| **$T_{\text{encode}}$**      | **Codec Encode Time**             | seconds  | Local compression overhead before transfer.                                             |
+| **$T_{\text{decode}}$**      | **Codec Decode Time**             | seconds  | Local decompression overhead after transfer.                                            |
+
+### Serving memory at scale {#sec-notation-serving-memory-scale}
+
+| **Symbol**          | **Definition**      | **Unit** | **Notes**                                             |
+|:--------------------|:--------------------|:---------|:------------------------------------------------------|
+| **$M_{\text{KV}}$** | **KV-Cache Memory** | bytes    | Key-value cache footprint for autoregressive serving. |
 
 ### Additional collision points {#sec-notation-distributed-collisions}
 
