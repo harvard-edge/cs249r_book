@@ -117,6 +117,9 @@ work. The detailed backlog remains in the sections below.
     cleanly through contact-sheet inspection.
   - [x] Center the Inference `batching-strategies.svg` content within its
     viewport.
+  - [x] Update `.claude/rules/figure-svg.md` with the SVG audit lessons on root
+    font inheritance, intentional monospace exceptions, rendered contact-sheet
+    QA, centered viewBoxes, and non-semantic gray wrapper removal.
 
 ### Concept-Audit Integration Queue
 
