@@ -521,6 +521,13 @@ class TopologyModel(ForwardModel):
         oversubscription = fabric.oversubscription_ratio
 
         effective_bw = (link_bw * beta / oversubscription).to("GB/s")
+        # bisection_bw is reported relative to a non-blocking fat-tree reference
+        # cut of N/2 links (beta=1.0): it is `beta * (N/2)` link-equivalents.
+        # So a ring (beta=2/N) reports 1 link-equivalent here even though its
+        # physical mid-cut severs 2 links, and a 3D torus reports N^(2/3) vs its
+        # 2*N^(2/3) physical cut. The dimensionless `beta` (bisection_bw_fraction)
+        # is the apples-to-apples cross-topology metric; the absolute figure
+        # follows this fat-tree-normalized convention by design.
         bisection_bw = (link_bw * beta * num_nodes / 2 / oversubscription).to("GB/s")
 
         # Average hops
@@ -632,16 +639,31 @@ class ParallelismOptimizer(BaseOptimizer):
                 dp = n_gpus // (tp * pp)
 
                 try:
-                    # Memory feasibility: per-GPU model shard must fit in HBM.
-                    # TP shards weights across tp GPUs; PP shards layers across pp stages.
-                    # Gradients and optimizer states are sharded across DP ranks (ZeRO-1+).
-                    # Conservative check: weights + gradients per GPU < 90% HBM capacity.
+                    # Memory feasibility: per-GPU training state must fit in HBM.
+                    # TP shards weights across tp GPUs; PP shards layers across pp
+                    # stages. The state is weights + gradients (same width) + Adam
+                    # optimizer state (FP32 master + moments, ~12 B/param =
+                    # ~6x the FP16 weight bytes), sharded by model parallelism to
+                    # match the zero_stage=0 convention DistributedModel.solve uses
+                    # below. Activations are intentionally EXCLUDED: this optimizer
+                    # searches the parallelism split, not the microbatch /
+                    # gradient-accumulation that sizes activations, so it cannot
+                    # bound that term without exploding at the full global batch.
+                    # (The previous gate counted only weights+gradients and so
+                    # admitted configs that OOM the instant optimizer state is
+                    # allocated — the dominant training-memory term for Adam.)
                     per_gpu_weights = model.size_in_bytes() / tp / pp
-                    per_gpu_grads = per_gpu_weights  # gradients same size as weights
-                    per_gpu_mem = per_gpu_weights + per_gpu_grads
+                    per_gpu_grads = per_gpu_weights  # gradients same width as weights
+                    try:
+                        from .. import calibration as cal
+                        n_params = model.parameters.to(ureg.count).magnitude
+                        per_gpu_opt = (n_params * cal.TRAINING_OPTIMIZER_BYTES_ADAM / (tp * pp)) * ureg.byte
+                    except Exception:
+                        per_gpu_opt = per_gpu_weights * 6.0  # Adam ~6x FP16 weight bytes
+                    per_gpu_mem = per_gpu_weights + per_gpu_grads + per_gpu_opt
                     gpu_capacity = fleet.node.accelerator.memory.capacity
                     if per_gpu_mem > gpu_capacity * 0.9:
-                        continue  # Infeasible: model shard doesn't fit in GPU memory
+                        continue  # Infeasible: training state does not fit in GPU memory
 
                     # Evaluate this config
                     res = dist_model.solve(
