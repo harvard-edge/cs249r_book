@@ -125,6 +125,43 @@ class EdgeInferenceBenchmarks:
     list = entries  # parity with the Registry `.list` convention
 
 
+# ---------------------------------------------------------------------------
+# Kaplan et al. (2020) test-loss power laws for @fig-model-scaling. Each law is
+# a published closed-form fit L = (X / x_c)^(-alpha) over the studied range, so
+# the figure regenerates from these constants instead of a traced raster. The
+# constants are the ones printed on the source figure (Kaplan et al. 2020).
+# ---------------------------------------------------------------------------
+_KAPLAN_SCALING_PROVENANCE = Provenance(
+    kind=ProvenanceKind.LITERATURE,
+    ref="Kaplan et al. (2020), Scaling Laws for Neural Language Models",
+    url="https://arxiv.org/abs/2001.08361",
+    verified="2026-06-13",
+)
+
+# (axis, x_c, alpha, x_min, x_max)  -- L = (X / x_c)^(-alpha) on [x_min, x_max]
+_KAPLAN_SCALING_ROWS = (
+    ("compute", 2.3e8, 0.050, 1e-9, 1e1),   # C_min, PF-days (non-embedding)
+    ("data", 5.4e13, 0.095, 1e8, 1e10),     # D, tokens
+    ("params", 8.8e13, 0.076, 1e3, 1e9),    # N, non-embedding parameters
+)
+
+
+class KaplanScalingLaws:
+    """Kaplan et al. (2020) test-loss power laws vs compute, data, parameters.
+
+    Source: see ``provenance``. Consumed by @fig-model-scaling. Each entry is a
+    dict ``{"axis", "x_c", "alpha", "x_min", "x_max"}`` giving the published fit
+    ``L = (X / x_c)^(-alpha)`` over the studied range ``[x_min, x_max]``.
+    """
+
+    provenance = _KAPLAN_SCALING_PROVENANCE
+    entries = tuple(
+        {"axis": k, "x_c": xc, "alpha": a, "x_min": lo, "x_max": hi}
+        for (k, xc, a, lo, hi) in _KAPLAN_SCALING_ROWS
+    )
+    list = entries  # parity with the Registry `.list` convention
+
+
 class Literature(Registry):
     """Registry namespace for Literature."""
     Training = Training
@@ -138,3 +175,4 @@ class Literature(Registry):
     ResponsibleAIOverhead = ResponsibleAIOverhead
     ComputeTrend = ComputeTrend
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
+    KaplanScalingLaws = KaplanScalingLaws
