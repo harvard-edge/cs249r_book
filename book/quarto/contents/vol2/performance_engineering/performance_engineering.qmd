@@ -26,7 +26,7 @@ engine: jupyter
 
 _How do we make billion-parameter models run on millisecond timescales?_
 
-Model compression reduces the size of what we compute. Performance engineering reshapes *how* we compute to match the physics of the hardware. The distinction matters: a quantized model loaded naively into a GPU kernel that reads every weight from off-chip memory wastes the very bandwidth savings that quantization was designed to provide. Real performance comes from understanding the full path a tensor travels, from registers through SRAM to HBM and back, and then engineering each step to eliminate wasted movement. This chapter develops the system-level optimization techniques that bridge the gap between a theoretically efficient model and a production artifact that saturates hardware. The levers are operator fusion and tiling strategies that keep data in fast SRAM, precision formats that double effective bandwidth, compilation frameworks that automate kernel selection, and algorithmic innovations like speculative decoding and sparse expert routing that change the performance equation. Together, they transform a model that should be fast into one that is fast, often by an order of magnitude. That order of magnitude comes entirely from the Compute term of the C³ taxonomy: performance engineering extracts more useful work from the cycles the Fleet already owns.
+Model compression reduces the size of the model's computation. Performance engineering reshapes that computation to match the physics of the hardware. The distinction matters: a quantized model loaded naively into an accelerator kernel that reads every weight from off-chip memory wastes the very bandwidth savings that quantization was designed to provide. Real performance comes from understanding the full path a tensor travels, from registers through on-chip memory to high-bandwidth memory and back, and then engineering each step to eliminate wasted movement. This chapter develops the system-level optimization techniques that bridge the gap between a theoretically efficient model and a production artifact that saturates hardware. The levers are operator fusion and tiling strategies that keep data in fast local memory, precision formats that double effective bandwidth, compilation frameworks that automate kernel selection, and algorithmic innovations like speculative decoding and sparse expert routing that change the performance equation. Together, they transform a model that should be fast into one that is fast, often by an order of magnitude. That order of magnitude comes entirely from the compute term of the C³ taxonomy: performance engineering extracts more useful work from the cycles the fleet already owns.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -129,7 +129,7 @@ The inherited iron law decomposes execution time into three terms. The compute f
 
 Standard model compression (pruning, quantization, distillation) shrinks the model's intrinsic work, performing fewer operations on smaller data. System optimization, the focus of this chapter, shrinks the gap between that work and the hardware's peak by moving the same terms through implementation rather than model change: keeping data in fast memory, packing each transfer more densely, and removing software overhead.
 
-Several levers map directly to those terms. When memory traffic dominates, operator fusion and tiling reduce the exposed data-volume term by eliminating intermediate HBM round-trips. A fused sequence that keeps its intermediates in SRAM can shrink the exposed memory-access term dramatically, often by 10--30$\times$ for attention computation. Precision engineering attacks the same numerator from a different angle: FP8, INT4, and KV-cache compression represent each value in fewer bytes, so the same physical bandwidth carries more useful model state.
+Several levers map directly to those terms. When memory traffic dominates, operator fusion and tiling reduce the exposed data-volume term by eliminating intermediate HBM round-trips. A fused sequence that keeps its intermediates in SRAM can shrink the exposed memory-access term dramatically, often by 10--30$\times$ for attention computation. Precision engineering attacks the same numerator from a different angle: FP8, INT4, and KV-cache compression (storing the per-token attention keys and values in fewer bytes) represent each value in fewer bytes, so the same physical bandwidth carries more useful model state.
 
 Other levers change the overhead or compute terms. Graph compilation, including torch.compile, XLA, and TensorRT, reduces overhead by eliminating kernel launch gaps, fusing operations, and optimizing memory allocation across the graph. Communication-computation overlap makes distributed communication concurrent with useful work, removing it from the critical path when $T_{\text{comm}}(N) - T_{\text{overlap}} \leq T_{\text{compute}}/N$ (that is, communication finishes before the next layer's computation completes). This inequality is the exposed-time test, not a new law: overlap helps only when useful computation is large enough to cover the communication. Algorithmic innovations such as speculative decoding and mixture-of-experts (MoE) change the compute term itself by making the model perform a different computation that preserves the output contract at lower exposed cost.
 
@@ -396,13 +396,13 @@ For the FP16/BF16 table as written, the ridge point increased from `{python} Wid
 
 [^fn-roofline-ridge]: **Ridge Point**\index{Roofline Model!ridge point}: The intersection of the memory-bound and compute-bound lines on a Roofline plot. It represents the minimum arithmetic intensity required to reach peak hardware performance $(R_{\text{peak}})$. For an H100 GPU (FP16), the ridge point is roughly 295 FLOP/byte; if an operator's intensity is below this "ridge," it will never saturate the Tensor Cores, regardless of how much compute is available.
 
-[^fn-roofline-origin]: **Roofline Model**\index{Roofline Model!origin}: The original framing targets multicore CPUs, but the same ceiling diagram applies to accelerators: two numbers (peak FLOP/s and peak bandwidth) define the entire performance envelope. This same simplicity informs GPU purchasing decisions for ML inference, where the ridge point determines whether a workload benefits from faster compute or faster memory.
+[^fn-roofline-origin]: **Roofline Model**\index{Roofline Model!performance engineering}: The original framing targets multicore CPUs, but the same ceiling diagram applies to accelerators: two numbers (peak FLOP/s and peak bandwidth) define the entire performance envelope. This same simplicity informs GPU purchasing decisions for ML inference, where the ridge point determines whether a workload benefits from faster compute or faster memory.
 
 ::: {#dfn-performance-engineering-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
 
-***Arithmetic Intensity***\index{Arithmetic Intensity!definition} $(I)$ is the ML workload ratio of floating-point operations performed to the number of bytes transferred from memory (FLOP per byte).
+***Arithmetic Intensity***\index{Arithmetic Intensity!performance engineering} $(I)$ is the ML workload ratio of floating-point operations performed to the number of bytes transferred from memory (FLOP per byte).
 
-1.  **Significance (quantitative)**: It characterizes the Computational Density of a workload. It is the independent variable in the Roofline Model, determining whether a system operates in the Bandwidth-Bound ($\text{BW}$) or Compute-Bound\index{Compute-Bound} ($R_{\text{peak}}$) regime.
+1.  **Significance (quantitative)**: It characterizes the computational density of a workload. It is the independent variable in the Roofline Model, determining whether a system operates in the bandwidth-bound ($\text{BW}$) or compute-bound\index{Compute-Bound} ($R_{\text{peak}}$) regime.
 2.  **Distinction**: Unlike peak throughput (a hardware property), arithmetic intensity is an algorithmic property that measures how effectively a workload reuses data once it is loaded into the processor.
 3.  **Common pitfall**: A frequent misconception is that arithmetic intensity is fixed for a model. In reality, it varies by Implementation: techniques like operator fusion increase arithmetic intensity by keeping data in local registers, while increasing batch size increases arithmetic intensity for layers with high parameter reuse.
 
@@ -918,7 +918,7 @@ Consider the simple sequence of operations $Y = \text{LayerNorm}(\text{GELU}(XW 
 
 ::: {#psp-performance-engineering-analogy-short-order-cook .callout-perspective title="Analogy: The short-order cook"}
 
-Imagine a kitchen where one chef chops vegetables, puts them in the fridge (HBM), then another chef takes them out to boil them, puts them back in the fridge, and a third chef takes them out to plate them. This is an **unfused execution**\index{Unfused Execution}: the bottleneck is not the cooking but the constant walking to the fridge.
+Imagine a kitchen where one chef chops vegetables, puts them in the fridge (HBM), then another chef takes them out to boil them, puts them back in the fridge, and a third chef takes them out to plate them. This is unfused execution\index{Unfused Execution}: the bottleneck is not the cooking but the constant walking to the fridge.
 
 Operator fusion assigns the recipe to a single chef who keeps the ingredients on their cutting board (SRAM/Registers) and performs all three steps consecutively without ever returning to the fridge until the final dish is ready.
 
@@ -1089,7 +1089,7 @@ class FlashAttentionSavings:
     flash_head_traffic_mb_str = fmt_qty(flash_attn_bytes_per_head, MB, precision=1, commas=False)
 ```
 
-FlashAttention\index{FlashAttention} [@dao2022] reformulates attention using **tiling**\index{Tiling}. Instead of materializing the full $S{\times}S$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads tiles of $Q$, $K$, and $V$, computes partial attention scores, and maintains running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
+FlashAttention\index{FlashAttention} [@dao2022] reformulates attention using tiling\index{Tiling}. Instead of materializing the full $S{\times}S$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads tiles of $Q$, $K$, and $V$, computes partial attention scores, and maintains running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
 
 ::: {.column-margin}
 ![](images/svg/performance_engineering_flash_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in blue. The naive attention rung is about 35 GB of materialized HBM state; the FlashAttention rung is about 537 MB. The gap is roughly 65 times."}
@@ -1328,7 +1328,7 @@ The storage cost for block-wise quantization is minimal. Storing one FP32 scale 
 
 ::: {#lhs-performance-engineering-archetype-c-federated-mobilenet-tinyml-survival .callout-lighthouse title="Archetype C (Federated MobileNet): TinyML survival"}
 
-For Archetype C (Federated MobileNet), quantization is *a prerequisite for survival*, not *an optimization*. On a microcontroller with only 512 KB of SRAM, an FP16 model is physically impossible to load. **Binary Neural Networks (BNN)**\index{Binary Neural Network} and **1-bit Quantization**\index{1-bit Quantization} push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the weight memory footprint by 16$\times$ relative to FP16 (32$\times$ relative to FP32) and the energy per operation by up to 100$\times$, enabling intelligence on devices that operate on harvested energy (microwatts).
+For Archetype C (Federated MobileNet), quantization is *a prerequisite for survival*, not *an optimization*. On a microcontroller with only 512 KB of SRAM, an FP16 model is physically impossible to load. Binary neural networks (BNNs)\index{Binary Neural Network!edge quantization} and 1-bit quantization\index{1-bit Quantization!edge quantization} push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the weight memory footprint by 16$\times$ relative to FP16 (32$\times$ relative to FP32) and the energy per operation by up to 100$\times$, enabling intelligence on devices that operate on harvested energy (microwatts).
 
 :::
 
@@ -1516,7 +1516,7 @@ TorchDynamo operates at the Python bytecode level[^fn-torchdynamo-bytecode], a d
 
 [^fn-torchdynamo-bytecode]: **TorchDynamo Bytecode Interception**\index{TorchDynamo!bytecode tracing}: By hooking CPython's frame evaluation function (`PEP 523`, added in Python 3.6), TorchDynamo captures the computation graph at the lowest level of the Python interpreter, below any source-level abstractions. This is why it can trace through decorators, closures, and third-party libraries that defeated earlier tracing approaches. The trade-off is tight coupling to CPython internals: TorchDynamo must be updated for each new Python version, and it cannot run on alternative interpreters like PyPy.
 
-Previous tracing methods (torch.jit.trace, torch.fx) operated at the Python source or abstract syntax tree (AST) level, requiring users to avoid unsupported Python constructs. TorchDynamo intercepts the bytecode interpreter itself, capturing a computational graph without requiring the user to modify their model code. When TorchDynamo encounters Python constructs it cannot trace (data-dependent control flow, unsupported operations), it inserts a *graph break*\index{Graph Break} that splits the trace into multiple subgraphs, each compiled independently. The goal is to capture as large a subgraph as possible while gracefully handling dynamic Python behavior.
+Previous tracing methods (torch.jit.trace, torch.fx) operated at the Python source or abstract syntax tree (AST) level, requiring users to avoid unsupported Python constructs. TorchDynamo intercepts the bytecode interpreter itself, capturing a computational graph without requiring the user to modify their model code. When TorchDynamo encounters Python constructs it cannot trace (data-dependent control flow, unsupported operations), it inserts a **graph break**\index{Graph Break!definition} that splits the trace into multiple subgraphs, each compiled independently. The goal is to capture as large a subgraph as possible while gracefully handling dynamic Python behavior.
 
 TorchInductor generates optimized Triton kernels (for GPU) or C++/OpenMP code (for CPU) from the captured graph. Triton is a domain-specific language for writing GPU kernels in Python-like syntax, abstracting away thread block management and memory coalescing while still exposing tiling and fusion decisions. TorchInductor automatically fuses element-wise operations, reduces memory traffic by combining operations that share inputs, and selects tile sizes through autotuning.
 
@@ -1837,7 +1837,7 @@ Speculative decoding pays off when the draft model is cheap and its proposed tok
 
 ### Mixture of experts {#sec-performance-engineering-moe}
 
-A 1-trillion parameter dense model delivers superior reasoning capabilities, but its latency and compute costs are prohibitive for most serving budgets. The **Mixture of Experts (MoE)**\index{Mixture of Experts}\index{MoE} architecture resolves this tension by training a massive model but activating only a small, relevant fraction of it for any given token. By routing inputs to specialized sub-networks, MoE breaks the iron link between model size and inference cost.
+A 1-trillion parameter dense model delivers superior reasoning capabilities, but its latency and compute costs are prohibitive for most serving budgets. The Mixture-of-Experts (MoE)\index{MoE!performance engineering} architecture resolves this tension by training a massive model but activating only a small, relevant fraction of it for any given token. By routing inputs to specialized sub-networks, MoE breaks the iron link between model size and inference cost.
 
 For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication. Sparse activation improves the iron law budget only when inactive experts stay off the critical path and the router avoids creating a new AllToAll or load-imbalance bottleneck.
 
@@ -2413,7 +2413,7 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 
 ::: {#dfn-performance-engineering-model-flops-utilization-mfu .callout-definition title="Model FLOPs utilization (MFU)"}
 
-***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition}, introduced in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488, is the fraction of the hardware's theoretical peak throughput ($R_{\text{peak}}$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The new content here is its fleet-scale behavior: how the per-node figure aggregates across thousands of accelerators and how the scaling tax pulls it down.
+***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!fleet-scale behavior}, introduced in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488, is the fraction of the hardware's theoretical peak throughput ($R_{\text{peak}}$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The new content here is its fleet-scale behavior: how the per-node figure aggregates across thousands of accelerators and how the scaling tax pulls it down.
 
 1.  **Significance (quantitative)**: At fleet scale, MFU aggregates across all nodes: communication overhead, load imbalance, and pipeline bubbles each compound the utilization loss, so fleet MFU is consistently below single-node MFU. It is the primary diagnostic for whether hardware investment is translating into model progress, and a 1 percent improvement in MFU across a 10,000-GPU cluster reduces cost by the equivalent of 100 GPUs.
 2.  **Distinction**: Unlike Hardware Utilization\index{Hardware Utilization} (which reports how often the accelerator is "busy"), MFU reports how much of that activity contributes to Model Convergence or inference, excluding waste FLOPs from recomputation, padding, and gradient checkpointing overhead.
@@ -2488,7 +2488,7 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 *   **Local node baseline**\index{Model FLOPs Utilization!local node baseline}: A single 8-GPU node achieves `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU.
 *   **Fleet performance**\index{Model FLOPs Utilization!fleet performance}: At `{python} FleetEfficiencyCalc.fleet_nodes_str`, the step time increases to `{python} FleetEfficiencyCalc.fleet_t_step_ms_str`, dropping MFU to `{python} FleetEfficiencyCalc.fleet_global_mfu_str`.
 
-**Systems insight**: The `{python} FleetEfficiencyCalc.fleet_scaling_tax_str` scaling tax represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**\index{Scaling!regression}, typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
+**Systems insight**: The `{python} FleetEfficiencyCalc.fleet_scaling_tax_str` scaling tax represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a scaling regression\index{Scaling!regression}, typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
 
 ::::
 
@@ -2504,7 +2504,7 @@ Those same measurements also explain why benchmark numbers cannot be copied dire
 
 ::: {#psp-performance-engineering-hero-run-tax .callout-perspective title="Benchmark vs. reality: The hero run tax"}
 
-Industry benchmarks like **MLPerf**\index{MLPerf} are often "hero runs"—highly tuned configurations where logging is disabled, safety checks are bypassed, and the hardware is freshly rebooted.
+Industry benchmarks like MLPerf\index{MLPerf} are often "hero runs"—highly tuned configurations where logging is disabled, safety checks are bypassed, and the hardware is freshly rebooted.
 
 In production, achieved MFU typically sits 10--20 percent lower than these hero numbers. Essential operational overhead consumes the difference:
 
@@ -2627,7 +2627,7 @@ Postoptimization metrics:
 
 With the throughput target met, the team focuses on further reducing ITL for the best user experience. Speculative decoding with a 1.5B draft model (AWQ INT4 quantized to 0.75 GB) is deployed on the same GPUs. The draft model generates 5 candidate tokens in 4 ms (benefiting from the INT4 quantization applied in Round 1). The target model verifies the candidate block in approximately 32 ms, comparable to one optimized autoregressive decode step.
 
-Under the standard geometric-acceptance model, where each draft token is independently accepted with probability $\alpha$ and one bonus token always follows the last accepted one, the expected accepted tokens per round for $k$ draft tokens is $(1 - \alpha^{k+1})/(1 - \alpha)$. At $\alpha = 0.78$ and $k = 5$, this gives $(1 - 0.78^{6})/(1 - 0.78) \approx 3.5$ tokens per round. The effective ITL becomes:
+Under the standard geometric-acceptance model, where each draft token is independently accepted with probability $p_{\text{acc}}$ and one bonus token always follows the last accepted one, the expected accepted tokens per round for $k$ draft tokens is $(1 - p_{\text{acc}}^{k+1})/(1 - p_{\text{acc}})$. At $p_{\text{acc}} = 0.78$ and $k = 5$, this gives $(1 - 0.78^{6})/(1 - 0.78) \approx 3.5$ tokens per round. The effective ITL becomes:
 
 $$
 \text{ITL}_{\text{effective}} = \frac{4 + 32}{3.5} \approx 10.3 \text{ ms per token}
