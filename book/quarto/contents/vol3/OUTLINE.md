@@ -9,11 +9,15 @@ chapters that are taught as problems, not answers.*
 ## Part I — The Inference-Time Frontier
 
 **1. From Trained Models to Acting Systems** `introduction/`
-The thesis chapter and the feasibility probe. Capability moved into training-time compute (Volume II);
-the frontier now moves into inference-time compute, and an agent is what spending that compute at
-runtime looks like as a system.
-- *Anchor:* the bitter lesson and scaling laws, continued one axis further (train-time → test-time compute).
-- *Out of scope:* what agents "will become"; any product's definition of "agent."
+The thesis chapter and the feasibility probe. *Machine Learning Systems at Scale* already names the
+inference-time-compute shift (its three-scaling-regimes figure, its serving-side test-time-compute
+section), so this chapter cannot stop there. Its thesis is the next altitude: a system that spends
+inference-time compute in a loop with state and tools becomes an **actor**, and the engineering unit
+becomes the **trajectory**, not the served request.
+- *Anchor:* the bitter lesson and scaling laws, carried to the actor regime; the trajectory as the
+  new unit of cost, reliability, and design.
+- *Out of scope:* what agents "will become"; any product's definition of "agent"; re-announcing the
+  companion volume's serving-side treatment of test-time compute.
 
 **2. The Control Loop** `control_loop/`
 Strip the hype and an agent is an old structure: perceive, decide, act, observe, over state and an
@@ -45,11 +49,13 @@ interface is durable and is what gets taught.
 - *Anchor:* the action interface as a contract between policy and environment.
 - *Out of scope:* any specific tool-calling protocol or schema standard by name.
 
-**6. Orchestration and Multi-Agent Systems** `orchestration/`
+**6. Multi-Agent Coordination** `multi_agent/`
 Many agents is distributed systems with stochastic nodes. Coordination, consistency, failure
 detection, and recovery are fifty-year-old problems wearing new clothes; the novelty is that the
-nodes are nondeterministic.
-- *Anchor:* distributed-systems coordination under nondeterministic participants.
+nodes are nondeterministic. (Named "coordination," not "orchestration," so it does not collide with
+the companion volume's fleet-orchestration chapter, which schedules accelerators.)
+- *Anchor:* distributed-systems coordination under nondeterministic participants; the coordination
+  tax (more agents does not buy linear capability).
 - *Out of scope:* specific multi-agent frameworks and their role taxonomies.
 
 ## Part III — Reliability and Economics
@@ -84,11 +90,15 @@ than policy fashion: how to keep an autonomous loop observable, interruptible, a
 - *Out of scope:* current policy debates and governance frameworks by name.
 
 **11. Security of Autonomous Systems** `security/`
-The action boundary is a new attack surface. Injection through tools and inputs becomes a systems
-vulnerability class, not a prompt-engineering footnote; taught as threat model and mitigation
-structure.
-- *Anchor:* the action surface as a securable boundary, with a durable threat-model framing.
-- *Out of scope:* specific exploits-of-the-week against specific products.
+The action boundary is a new attack surface. *Machine Learning Systems at Scale* already covers
+injection, tool permissions, and side effects as part of securing ML systems, so this chapter must
+sit *above* that: the autonomous loop itself as a threat model, where compounding actions and
+persistent state turn a single injection into a trajectory-long compromise. Taught as threat model
+and mitigation structure, never as a repeat of the companion volume's treatment.
+- *Anchor:* the autonomous loop as a securable system, with a durable threat-model framing that
+  extends (does not duplicate) the companion volume's action-boundary coverage.
+- *Out of scope:* specific exploits-of-the-week against specific products; re-deriving the injection
+  basics the companion volume already teaches.
 
 **12. The Durable Core of Autonomy** `conclusion/`
 Distill, do not repeat. What the practices of the book collapse into as durable principle, and an
