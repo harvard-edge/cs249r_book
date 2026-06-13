@@ -42,7 +42,7 @@ Distributed training appears simple: split the work across machines and combine 
 - Map tensor, pipeline, expert, and data parallelism onto hardware bandwidth tiers and model structure
 - Construct microbatch pipeline schedules that minimize bubbles while preserving throughput and convergence stability
 - Select synchronization and low-precision policies using staleness, straggler tolerance, numerical stability, and cluster heterogeneity
-- Synthesize hybrid parallelism configurations for frontier, recommendation, alignment, or federated training constraints
+- Synthesize hybrid parallelism configurations for frontier, recommendation, and alignment training constraints
 
 :::
 
@@ -2166,10 +2166,13 @@ Tensor parallelism takes a fundamentally different approach: instead of assignin
 #| echo: false
 class TensorParallelBandwidth:
     from mlsysim.core.units import GB, second
-    from mlsysim.fmt import fmt_bandwidth
+    from mlsysim.fmt import fmt_bandwidth, fmt_multiple
 
     nvlink_h100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_perdir_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, unit=GB / second, precision=0, commas=False)
     ib_ndr_gb_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
+    _nvlink_ib_gap = (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to_base_units().magnitude
+    nvlink_ib_gap_mult_str = fmt_multiple(_nvlink_ib_gap, precision=0, commas=False)
     pipeline_ib_lo_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
     pipeline_ib_hi_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
     pipeline_ib_lo_gb_per_s_str = fmt_bandwidth(pipeline_ib_lo_bw, unit=GB / second, precision=0, commas=False)
@@ -2182,7 +2185,7 @@ class TensorParallelBandwidth:
 
 1.  **Significance (quantitative)**: Megatron-LM style tensor parallelism places two AllReduce operations per transformer block—one after attention and one after the MLP—with each collective reducing an activation tensor of size $B_{\text{batch}} \times S \times d_{\text{model}} \times 2$ bytes in BF16. A ring AllReduce moves roughly $2(t-1)/t$ times that payload per GPU. At degree $t=8$ on NVLink with `{python} TensorParallelBandwidth.nvlink_h100_gb_per_s_str` bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (`{python} TensorParallelBandwidth.ib_ndr_gb_per_s_str`) takes 2–10 ms per layer—with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
 2.  **Distinction**: Unlike pipeline parallelism, which communicates only at layer boundaries and transfers small activation slices, tensor parallelism synchronizes within every layer via AllReduce, making it sensitive to the per-operation latency of the interconnect and restricting it to within-node NVLink fabrics in practice.
-3.  **Common pitfall**: A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately `{python} TensorParallelBandwidth.nvlink_h100_gb_per_s_str` bidirectional bandwidth; InfiniBand NDR delivers `{python} TensorParallelBandwidth.ib_ndr_gb_per_s_str`—an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
+3.  **Common pitfall**: A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately `{python} TensorParallelBandwidth.nvlink_h100_gb_per_s_str` bidirectional, or `{python} TensorParallelBandwidth.nvlink_h100_perdir_gb_per_s_str` per direction; InfiniBand NDR delivers `{python} TensorParallelBandwidth.ib_ndr_gb_per_s_str` per port—a `{python} TensorParallelBandwidth.nvlink_ib_gap_mult_str` per-direction gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
 
 :::
 
