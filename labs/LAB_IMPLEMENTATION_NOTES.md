@@ -30,6 +30,56 @@ Follow-up:
 
 ## Notes
 
+### 2026-06-13 - Dev Merge, Runtime Audit, And Depth Expansion Plan
+
+Lab:
+- All Volume I and Volume II labs, with merge conflicts resolved in MLSysIM compression and hardware tests.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `mlsysim/mlsysim/engine/solvers/compression.py`
+- `mlsysim/mlsysim/engine/results.py`
+- `mlsysim/tests/test_hardware.py`
+- `mlsysim/tests/test_compression_candidates.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/LAB_DEPTH_AUDIT_AND_EXPANSION_PLAN_2026_06_13.md`
+
+What changed:
+- Merged local `dev` into `codex/labs`.
+- Preserved the lab branch's compression candidate/sweep API while aligning imports with the refactored `mlsysim.solvers` public path.
+- Preserved both the lab-track Oura/RoboTaxi hardware checks and the newer H100 registry-backed die-area/unit-cost checks from `dev`.
+- Added `CompressionCandidate` and `CompressionSweepResult` to the explicit `mlsysim.engine.results` export surface.
+- Audited the labs for runtime viability and instructional depth, then recorded a phased expansion plan.
+
+MLSysIM facts/APIs needed:
+- No new facts were added in this pass.
+- Follow-up work should continue moving notebook-local hardware/model constants into MLSysIM or typed lab metadata when they are reused.
+
+Notebook-local constants removed:
+- None in this pass. The merge/audit focused on compatibility, runtime checks, and depth planning.
+
+Reusable component or modality improved:
+- Identified `render_system_design_lab()` as the highest-leverage upgrade point for 14 shared Volume II labs.
+- Identified a need for shared storyline metadata, Math Peek/source-model helpers, prediction gates, synthesis panels, and static-test-visible lab structure.
+
+Plan updates needed in other labs:
+- Use `labs/LAB_DEPTH_AUDIT_AND_EXPANSION_PLAN_2026_06_13.md` as the implementation roadmap.
+- Prioritize shared Volume II renderer/storyline upgrades before hand-editing individual shared-shell labs.
+- Convert V1-02 through V1-09 from inline partial migrations to explicit part/synthesis structures.
+- Add Math Peek/source-model sections to V1-01, V1-13 through V1-16, and V2-06.
+
+Tests or checks run:
+- `python3 -m py_compile` on labs and MLSysIM Python files.
+- `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_hardware.py mlsysim/tests/test_compression_candidates.py mlsysim/tests/test_solver_module_exports.py -q` -> 17 passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_track_profiles.py labs/tests/test_lab_variants.py labs/tests/test_report_contract.py labs/tests/test_ui_helpers.py labs/tests/test_track_arcs.py -q` -> 43 passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q` -> 121 failed, 1372 passed, 99 skipped, 180 xfailed. Failures cluster around instructional/protocol depth.
+- Representative browser smoke on V1-10, V2-01, V2-10, V2-17 plus dashboard/catalog -> 4/4 labs and 2/2 HTML pages passed.
+
+Follow-up:
+- Implement Phase 1 of the depth plan: shared storyline metadata, renderer tabs, Math Peek/source helpers, ledger HUD, and tests that understand shared-renderer metadata.
+
 ### 2026-06-05 - Full Volume I/II Browser Pilot And Workflow Scaffolding
 
 Lab:
