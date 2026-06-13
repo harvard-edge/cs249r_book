@@ -149,12 +149,12 @@ $n^* = \alpha \times \beta =$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\tim
 The $\alpha$-$\beta$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP model**\index{LogGP model} [@alexandrov1995] extends LogP with a long-message gap parameter:
 
 - **$g$ (gap)**: The minimum interval between consecutive message injections at the sender. This models the NIC's injection rate limit.
-- **$o$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
+- **$o_{\text{send}}$, $o_{\text{recv}}$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
 
-For a long message of $k$ bytes, LogGP models transfer time as approximately:
-$$T_{\text{long}} \approx o_s + L + (k - 1)G + o_r$$
+For a long message of $n$ bytes, LogGP models transfer time as approximately:
+$$T_{\text{long}}(n) \approx o_{\text{send}} + L_{\text{LogGP}} + (n - 1)G + o_{\text{recv}}$$
 
-where $G$ is the gap per byte for long messages and $g$ controls the minimum interval between consecutive message injections. Informal alpha-beta-style approximations can be useful for ML profiling, but the standard LogGP model keeps these gap parameters distinct from a simple bandwidth term.
+where $L_{\text{LogGP}}$ is the network latency, $o_{\text{send}}$ and $o_{\text{recv}}$ are sender and receiver overheads, $G$ is the gap per byte for long messages, and $g$ controls the minimum interval between consecutive message injections. Informal alpha-beta-style approximations can be useful for ML profiling, but the standard LogGP model keeps these gap parameters distinct from a simple bandwidth term.
 
 In most ML training scenarios, the $\alpha$-$\beta$ model is sufficient because gradient tensors are large enough that pipelining effects are secondary to raw bandwidth. The LogGP model becomes important when analyzing the overhead of many small control messages or when modeling the interaction between communication and computation overlap---situations that arise in fine-grained pipeline parallelism and asynchronous gradient updates.
 
@@ -380,7 +380,7 @@ Pipeline parallelism splits a model across multiple GPUs so that each GPU holds 
 
 In a pipeline with $p$ stages and $m$ microbatches, @eq-pipeline-bubble defines the **bubble fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
 
-$$ b = \frac{p - 1}{p - 1 + m} $$ {#eq-pipeline-bubble}
+$$ b_{\text{pipe}} = \frac{p - 1}{p - 1 + m} $$ {#eq-pipeline-bubble}
 
 This formula applies to both GPipe (where all forward passes complete before any backward pass begins) and 1F1B (one-forward-one-backward interleaving). The 1F1B schedule has the same asymptotic bubble fraction but uses less peak memory because it retires microbatches earlier.
 
@@ -459,15 +459,15 @@ Gradient compression promises to reduce communication volume by 10--1000$\times$
 
 ### The compression equation {#sec-appdx-comm-foundations-compression-equation}
 
-Gradient compression replaces the original $M$-byte gradient with a compressed representation of size $M/C$, where $C$ is the compression ratio. @Eq-compression-total expresses the total time with compression:
+Gradient compression replaces the original $M$-byte gradient with a compressed representation of size $M/r_{\text{comp}}$, where $r_{\text{comp}}$ is the compression ratio. @Eq-compression-total expresses the total time with compression:
 
-$$ T_{\text{compressed}} = T_{\text{encode}} + T_{\text{transfer}}\!\left(\frac{M}{C}\right) + T_{\text{decode}} $$ {#eq-compression-total}
+$$ T_{\text{compressed}} = T_{\text{encode}} + T_{\text{transfer}}\!\left(\frac{M}{r_{\text{comp}}}\right) + T_{\text{decode}} $$ {#eq-compression-total}
 
 Compression is beneficial when $T_{\text{compressed}} < T_{\text{transfer}}(M)$. Rearranging this inequality yields the break-even condition in @eq-compression-breakeven:
 
-$$ T_{\text{encode}} + T_{\text{decode}} < T_{\text{transfer}}(M) - T_{\text{transfer}}\!\left(\frac{M}{C}\right) $$ {#eq-compression-breakeven}
+$$ T_{\text{encode}} + T_{\text{decode}} < T_{\text{transfer}}(M) - T_{\text{transfer}}\!\left(\frac{M}{r_{\text{comp}}}\right) $$ {#eq-compression-breakeven}
 
-In the bandwidth-dominated regime ($M \gg n^*$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{transfer}}(M) \times (1 - 1/C)$. For high compression ratios ($C \gg 1$), this approaches $T_{\text{transfer}}(M)$---meaning compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
+In the bandwidth-dominated regime ($M \gg n^*$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{transfer}}(M) \times (1 - 1/r_{\text{comp}})$. For high compression ratios ($r_{\text{comp}} \gg 1$), this approaches $T_{\text{transfer}}(M)$---meaning compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
 
 ```{python}
 #| echo: false
@@ -545,14 +545,14 @@ class CommCompression:
 
 @Tbl-compression-breakeven shows how the break-even codec overhead varies with compression ratio and uncompressed AllReduce time. Higher compression ratios tolerate larger codec overheads.
 
-| **Compression Ratio ($C$)** |    **AllReduce = 10 ms (Max Codec Overhead)**   |    **AllReduce = 40 ms (Max Codec Overhead)**   |   **AllReduce = 100 ms (Max Codec Overhead)**    |
-|:----------------------------|:-----------------------------------------------:|:-----------------------------------------------:|:------------------------------------------------:|
-| **4$\times$**               |  `{python} CommCompression.breakeven_4_10_str`  |  `{python} CommCompression.breakeven_4_40_str`  |  `{python} CommCompression.breakeven_4_100_str`  |
-| **16$\times$**              |  `{python} CommCompression.breakeven_16_10_str` |  `{python} CommCompression.breakeven_16_40_str` | `{python} CommCompression.breakeven_16_100_str`  |
-| **64$\times$**              |  `{python} CommCompression.breakeven_64_10_str` |  `{python} CommCompression.breakeven_64_40_str` | `{python} CommCompression.breakeven_64_100_str`  |
-| **256$\times$**             | `{python} CommCompression.breakeven_256_10_str` | `{python} CommCompression.breakeven_256_40_str` | `{python} CommCompression.breakeven_256_100_str` |
+| **Compression Ratio ($r_{\text{comp}}$)** |    **AllReduce = 10 ms (Max Codec Overhead)**   |    **AllReduce = 40 ms (Max Codec Overhead)**   |   **AllReduce = 100 ms (Max Codec Overhead)**    |
+|:------------------------------------------|:-----------------------------------------------:|:-----------------------------------------------:|:------------------------------------------------:|
+| **4$\times$**                             |  `{python} CommCompression.breakeven_4_10_str`  |  `{python} CommCompression.breakeven_4_40_str`  |  `{python} CommCompression.breakeven_4_100_str`  |
+| **16$\times$**                            |  `{python} CommCompression.breakeven_16_10_str` |  `{python} CommCompression.breakeven_16_40_str` | `{python} CommCompression.breakeven_16_100_str`  |
+| **64$\times$**                            |  `{python} CommCompression.breakeven_64_10_str` |  `{python} CommCompression.breakeven_64_40_str` | `{python} CommCompression.breakeven_64_100_str`  |
+| **256$\times$**                           | `{python} CommCompression.breakeven_256_10_str` | `{python} CommCompression.breakeven_256_40_str` | `{python} CommCompression.breakeven_256_100_str` |
 
-: **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as $T_{\text{transfer}}(M) \times (1 - 1/C)$. At high compression ratios, nearly the entire uncompressed AllReduce time is available as codec budget. {#tbl-compression-breakeven}
+: **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as $T_{\text{transfer}}(M) \times (1 - 1/r_{\text{comp}})$. At high compression ratios, nearly the entire uncompressed AllReduce time is available as codec budget. {#tbl-compression-breakeven}
 
 ## Summary {.unnumbered}
 
@@ -561,7 +561,7 @@ class CommCompression:
 * **The $\alpha$-$\beta$ model**: The model ($T(n) = \alpha + n/\beta$) decomposes every network transfer into a fixed startup cost and a payload-proportional bandwidth cost. The crossover message size $n^* = \alpha \times \beta$ determines which cost dominates.
 * **Ring-based collectives**: AllReduce, AllGather, ReduceScatter, and AllToAll achieve bandwidth-optimal communication with a $(N-1)/N$ factor, but their latency term grows linearly with GPU count. Tree-based algorithms trade bandwidth for logarithmic latency scaling.
 * **Algorithm selection**: Message size relative to $n^*$ determines the algorithm: ring for large messages (gradients), tree for small messages (barriers), and hierarchical two-level schemes for multi-node clusters.
-* **Pipeline bubble fraction**: $b = (p-1)/(p-1+m)$ is the fundamental overhead of pipeline parallelism. The practical rule $m \geq 4p$ keeps bubbles below 20 percent, and interleaved scheduling with $V$ virtual stages makes the bubble reduction approach $V$ when the microbatch term dominates.
+* **Pipeline bubble fraction**: $b_{\text{pipe}} = (p-1)/(p-1+m)$ is the fundamental overhead of pipeline parallelism. The practical rule $m \geq 4p$ keeps bubbles below 20 percent, and interleaved scheduling with $V$ virtual stages makes the bubble reduction approach $V$ when the microbatch term dominates.
 * **Gradient compression**: Gradient compression is profitable when the codec overhead (encode + decode) is less than the communication time saved. At high compression ratios in the bandwidth-dominated regime, nearly the entire uncompressed AllReduce time is available as overhead budget---but convergence impact must always be validated.
 * **Four parameters predict communication cost**: The point-to-point and collective communication models in this appendix derive from two hardware parameters ($\alpha$ and $\beta$) and two workload parameters (message payload $n$ or $M$, plus participant count $N$ for collectives). Measuring these quantities for a cluster yields a complete first-order prediction of distributed training overhead, with pipeline and compression sections introducing additional parameters as noted earlier.
 
