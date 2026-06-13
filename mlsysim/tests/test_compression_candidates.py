@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 
 from mlsysim.engine.results import CompressionCandidate, CompressionSweepResult
-from mlsysim.engine.solver import CompressionModel
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
+from mlsysim.solvers import CompressionModel
 
 
 def test_candidate_records_feasible_source_traced_int8_oura():

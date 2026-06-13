@@ -242,13 +242,30 @@ export default function EcosystemBar() {
   const dropdownHoverBg = isDark ? '#3a3a3a' : '#f8f9fa';
   const dividerColor = isDark ? '#454d55' : '#dee2e6';
 
-  // Load Bootstrap Icons font
+  // Load Bootstrap Icons font.
+  // SRI integrity pins the CSS bytes — if jsDelivr ever serves modified
+  // content, the browser rejects the stylesheet rather than applying it.
+  // crossorigin="anonymous" is required for integrity to be enforced on
+  // cross-origin resources. If the bootstrap-icons version is ever bumped,
+  // recompute the hash:
+  //   curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A
   useEffect(() => {
     if (document.getElementById("bi-css")) return;
     const link = document.createElement("link");
     link.id = "bi-css";
     link.rel = "stylesheet";
     link.href = "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css";
+    link.integrity = "sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+";
+    link.crossOrigin = "anonymous";
+    // Surface SRI/network failures in devtools — without this the browser
+    // silently blocks the stylesheet and the only symptom is missing icons.
+    link.onerror = () => {
+      console.error(
+        "[EcosystemBar] Failed to load Bootstrap Icons CSS from jsDelivr.",
+        "If you just bumped the version, recompute the SRI hash with:",
+        "curl -sL", link.href, "| openssl dgst -sha384 -binary | openssl base64 -A",
+      );
+    };
     document.head.appendChild(link);
   }, []);
 

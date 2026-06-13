@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "book" / "tools" / "scripts"))
-
-from lint_lego_units import lint_file, main  # noqa: E402
+from book.cli.checks.lego_units import lint_file, main
 
 
 def _write_qmd(tmp_path: Path, rel: str, body: str) -> Path:

@@ -1,6 +1,6 @@
 """Parameters for analytical solvers and the roofline engine.
 
-These values tune ``mlsysim.engine.solver`` models and ``mlsysim.engine.engine.Engine``
+These values tune ``mlsysim.engine.solvers`` models and ``mlsysim.engine.engine.Engine``
 when callers omit explicit arguments. Use ``Literature.*``, ``Systems.*``, and
 ``Infrastructure.*`` for sourced domain reference values.
 """
@@ -17,7 +17,12 @@ MFU_FLASH_ATTENTION = 0.75
 MFU_FLASH_ATTENTION_CAP = 0.85
 MFU_FFN_CAP = 0.60
 MFU_CONV_CAP = 0.55
-HFU_MFU_RATIO = 1.1
+# 2026-06-10 audit: HFU_MFU_RATIO (1.1) deleted. HFU is now computed from
+# actual hardware ops (engine.py): hfu == mfu without recomputation, 4/3 × mfu
+# with full recompute — per PaLM App. B / Korthikanti et al. (2022). The old
+# fixed 1.1 fabricated phantom utilization and matched no published pair.
+# EfficiencyModel's SM-occupancy heuristic kept its numerics under its own name:
+SM_OCCUPANCY_HEADROOM = 1.1  # heuristic: occupancy ceiling ≈ 1.1 × base efficiency
 TOKENS_PER_REASONING_STEP = 50
 REFERENCE_MFU_SUSTAINED = 0.40
 DP_SGD_SLOWDOWN_COEFFICIENT = 2.0
@@ -61,3 +66,7 @@ TRAINING_OPTIMIZER_BYTES_SGD = 4.0    # FP32 master
 # Fallback bandwidths for undefined hardware attributes
 FALLBACK_STORAGE_BANDWIDTH_GB_S = 1.0
 FALLBACK_INTERCONNECT_BANDWIDTH_GB_S = 100.0
+# Engine offload path: host link when hardware.interconnect is unset
+# (PCIe Gen5 x16 ~= 64 GB/s per direction). Distinct from the generic
+# interconnect fallback above, which models node-to-node links.
+FALLBACK_PCIE_BANDWIDTH_GB_S = 64.0

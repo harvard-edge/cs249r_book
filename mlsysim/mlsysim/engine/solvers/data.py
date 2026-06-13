@@ -1,68 +1,20 @@
 """Data-ingestion and preprocessing pipeline solvers.
 
-These implementations live outside ``engine.solver`` so the public import
-module can stay small while domain logic remains easier to review.
+Domain implementations behind ``mlsysim.solvers`` (the public import
+path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
 """
 
-# ruff: noqa: F401
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, List, Optional, Type
 
-from ..engine import Engine, PerformanceProfile
 from ..results import (
-    SolverResult,
-    DistributedResult,
-    ReliabilityResult,
-    CheckpointResult,
-    SustainabilityResult,
-    ServingResult,
-    TrainingMemoryResult,
-    ServingCapacityResult,
-    MoERoutingResult,
-    ContinuousBatchingResult,
-    WeightStreamingResult,
-    TailLatencyResult,
-    EconomicsResult,
     DataResult,
-    TopologyResult,
-    EfficiencyResult,
     TransformationResult,
-    ScalingResult,
-    CompressionResult,
-    SynthesisResult,
-    OrchestrationResult,
-    InferenceScalingResult,
-    SensitivityResult,
-    ResponsibleEngineeringResult,
-    ParallelismOptimizerResult,
-    BatchingOptimizerResult,
-    PlacementOptimizerResult,
 )
-from ...physics import (
-    calc_ring_allreduce_time,
-    calc_hierarchical_allreduce_time,
-    calc_all_to_all_time,
-    calc_bottleneck,
-    calc_mtbf_cluster,
-    calc_mtbf_node,
-    calc_young_daly_interval,
-    calc_failure_probability,
-    calc_pipeline_bubble,
-)
-from ...core.constants import ureg, Q_, resolve_precision
-from ...infrastructure.registry import Infrastructure
-from ...literature.registry import Literature
-from ...systems.reliability import Reliability
-from .. import calibration as cal
+from ...core.units import Q_
 from ...core.types import Quantity
-from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
 from ...hardware.types import HardwareNode
-from ...systems.types import Fleet, NetworkFabric, Node
-from ...infrastructure.types import Datacenter
-from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
-from .utils import _inter_node_latency, _intra_node_latency
+from .base import ForwardModel
 
 class DataModel(ForwardModel):
     """
@@ -93,7 +45,7 @@ class DataModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        DataResult
             Pipeline metrics including utilization and stall probability.
         """
         # 1. Resolve Hardware Supply
@@ -115,6 +67,8 @@ class DataModel(ForwardModel):
             bottleneck, supply_bw = "Unknown", Q_("0 GB/s")
         demand_bw = workload_data_rate.to("GB/s")
 
+        # Utilization > 1.0 means demand exceeds the slowest link's supply: the
+        # accelerator stalls waiting for data (the data wall binds).
         utilization = (demand_bw / supply_bw).magnitude if supply_bw.magnitude > 0 else float('inf')
         is_stalled = utilization > 1.0
 
@@ -164,7 +118,7 @@ class TransformationModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        TransformationResult
             Transform time, bottleneck status, and accelerator utilization.
         """
         # T_transform = (B × S_sample) / C_throughput
@@ -174,7 +128,10 @@ class TransformationModel(ForwardModel):
         accel_time = accelerator_step_time.to("ms")
         is_bottleneck = transform_time.magnitude > accel_time.magnitude
 
-        # Accelerator utilization: fraction of time the accelerator is active
+        # Accelerator utilization: fraction of time the accelerator is active.
+        # Assumes perfect pipelining (prefetch overlaps CPU work with the
+        # accelerator step), so the steady-state step time is the max of the two
+        # stages, not their sum.
         total_step_time = max(transform_time.magnitude, accel_time.magnitude)
         accelerator_utilization = accel_time.magnitude / total_step_time if total_step_time > 0 else 0.0
 

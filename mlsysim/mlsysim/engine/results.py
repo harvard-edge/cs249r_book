@@ -12,6 +12,47 @@ from typing import Any, Dict, Optional, List
 from pydantic import BaseModel, ConfigDict, Field
 from ..core.types import Quantity
 
+# Explicit public surface: result classes only. Without this, the
+# `from .results import *` in engine/__init__.py would also leak the imported
+# helper names (Any, Dict, BaseModel, Quantity, ...) into mlsysim.engine.
+__all__ = [
+    "SolverResult",
+    # Supply layer
+    "DistributedResult",
+    "ReliabilityResult",
+    "CheckpointResult",
+    "SustainabilityResult",
+    "ServingResult",
+    "TrainingMemoryResult",
+    "ServingCapacityResult",
+    "MoERoutingResult",
+    "ContinuousBatchingResult",
+    "WeightStreamingResult",
+    "TailLatencyResult",
+    "EconomicsResult",
+    "DataResult",
+    "OffloadResult",
+    "TopologyResult",
+    "EfficiencyResult",
+    "TransformationResult",
+    # Demand layer
+    "ScalingResult",
+    "CompressionResult",
+    "CompressionCandidate",
+    "CompressionSweepResult",
+    "SynthesisResult",
+    # Consequence layer
+    "OrchestrationResult",
+    "InferenceScalingResult",
+    "SensitivityResult",
+    "ResponsibleEngineeringResult",
+    # Search & optimization
+    "OptimizerResult",
+    "ParallelismOptimizerResult",
+    "BatchingOptimizerResult",
+    "PlacementOptimizerResult",
+]
+
 
 class SolverResult(BaseModel):
     """Base class for all model and solver results."""

@@ -1,68 +1,26 @@
 """Single-node, network-roofline, efficiency, and inverse-design solvers.
 
-These implementations live outside ``engine.solver`` so the public import
-module can stay small while domain logic remains easier to review.
+Domain implementations behind ``mlsysim.solvers`` (the public import
+path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
 """
 
-# ruff: noqa: F401
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, List, Optional, Type
 
 from ..engine import Engine, PerformanceProfile
 from ..results import (
-    SolverResult,
-    DistributedResult,
-    ReliabilityResult,
-    CheckpointResult,
-    SustainabilityResult,
-    ServingResult,
-    TrainingMemoryResult,
-    ServingCapacityResult,
-    MoERoutingResult,
-    ContinuousBatchingResult,
-    WeightStreamingResult,
-    TailLatencyResult,
-    EconomicsResult,
-    DataResult,
-    TopologyResult,
     EfficiencyResult,
-    TransformationResult,
-    ScalingResult,
-    CompressionResult,
     SynthesisResult,
-    OrchestrationResult,
-    InferenceScalingResult,
     SensitivityResult,
-    ResponsibleEngineeringResult,
-    ParallelismOptimizerResult,
-    BatchingOptimizerResult,
-    PlacementOptimizerResult,
 )
-from ...physics import (
-    calc_ring_allreduce_time,
-    calc_hierarchical_allreduce_time,
-    calc_all_to_all_time,
-    calc_bottleneck,
-    calc_mtbf_cluster,
-    calc_mtbf_node,
-    calc_young_daly_interval,
-    calc_failure_probability,
-    calc_pipeline_bubble,
-)
-from ...core.constants import ureg, Q_, resolve_precision
-from ...infrastructure.registry import Infrastructure
+from ...core.units import ureg, Q_, resolve_precision
 from ...literature.registry import Literature
-from ...systems.reliability import Reliability
 from .. import calibration as cal
 from ...core.types import Quantity
-from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
+from ...models.types import Workload
 from ...hardware.types import HardwareNode
-from ...systems.types import Fleet, NetworkFabric, Node
-from ...infrastructure.types import Datacenter
-from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
-from .utils import _inter_node_latency, _intra_node_latency
+from ...systems.types import Fleet
+from .base import BaseSolver, ForwardModel
 
 class SingleNodeModel(ForwardModel):
     """
@@ -85,7 +43,33 @@ class SingleNodeModel(ForwardModel):
 
     def solve(self, model: Workload, hardware: HardwareNode, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5, raise_errors: bool = False, **kwargs) -> PerformanceProfile:
         """
-        Calculates the performance profile for a single hardware node.
+        Calculate the Roofline performance profile for a single hardware node.
+
+        Thin wrapper that delegates to ``Engine.solve`` (the core Roofline
+        implementation in ``engine/engine.py``), exposing it through the
+        resolver interface so it can participate in pipelines.
+
+        Parameters
+        ----------
+        model : Workload
+            The workload to profile.
+        hardware : HardwareNode
+            The accelerator node (compute, memory, interconnect specs).
+        batch_size : int
+            Samples per forward pass (>= 1).
+        precision : str
+            Numerical precision ('fp32', 'fp16', 'int8', ...); sets bytes
+            per parameter and selects the hardware's precision FLOPS entry.
+        efficiency : float
+            Software efficiency factor in (0, 1] applied to peak FLOPS.
+        raise_errors : bool
+            If True, raise ``OOMError`` on memory infeasibility instead of
+            returning a profile with ``feasible=False``.
+
+        Returns
+        -------
+        PerformanceProfile
+            Latency breakdown, throughput, bottleneck, MFU, and memory footprint.
         """
         return Engine.solve(model, hardware, batch_size=batch_size, precision=precision, efficiency=efficiency, raise_errors=raise_errors, **kwargs)
 
@@ -107,7 +91,39 @@ class NetworkRooflineModel(ForwardModel):
 
     def solve(self, model: Workload, fleet: Fleet, precision: str = "fp16", efficiency: float = 0.5) -> PerformanceProfile:
         """
-        Solves for the distributed performance bound.
+        Solve for the fleet-scale performance bound (network roofline).
+
+        Models one data-parallel training step as two independent ceilings —
+        compute and gradient synchronization — and takes the slower as the
+        binding latency (no overlap is assumed, so this is a lower-bound
+        model). The conventions used:
+
+        - communication intensity ``CI = training_ops / sync_bytes``
+          [FLOP/byte], with ``training_ops = 6 * P`` FLOPs per sample
+          (Kaplan/Chinchilla forward+backward convention) and
+          ``sync_bytes = 2 * P * bytes_per_param`` (ring all-reduce moves
+          roughly 2x the gradient volume);
+        - network ridge ``= fleet_peak_FLOPS / bisection_BW`` [FLOP/byte],
+          the CI above which the fleet is compute-bound.
+
+        Parameters
+        ----------
+        model : Workload
+            Workload with a parameter count (required).
+        fleet : Fleet
+            The cluster; supplies total accelerators, per-accelerator FLOPS,
+            and fabric bandwidth / oversubscription ratio.
+        precision : str
+            Numerical precision; sets bytes per parameter and the FLOPS entry.
+        efficiency : float
+            Software efficiency factor in (0, 1] applied to fleet peak FLOPS.
+
+        Returns
+        -------
+        PerformanceProfile
+            ``latency_compute`` holds the compute ceiling, ``latency_memory``
+            the network ceiling (both in ms); ``bottleneck`` is 'Network' or
+            'Compute'; ``arithmetic_intensity`` carries CI.
         """
         from ...core._validation import validate_range
         validate_range(efficiency, 1e-9, 1.0, "efficiency")
@@ -151,9 +167,12 @@ class NetworkRooflineModel(ForwardModel):
         is_network_bound = network_time > compute_time
         latency = max(compute_time.to("ms").magnitude, network_time.to("ms").magnitude) * ureg.ms
 
+        # MFU follows from the binding ceiling: useful FLOPs delivered per step
+        # over fleet peak. This model counts only model FLOPs (no recomputation
+        # is modeled), so HFU equals MFU by definition (PaLM App. B).
         achieved_rate = (training_ops / latency.to("s")).to(total_flops.units)
         mfu = min((achieved_rate / total_flops).to_base_units().magnitude, 1.0)
-        hfu = min(mfu * cal.HFU_MFU_RATIO, 1.0)
+        hfu = mfu
         throughput = (1 / latency.to("s")).to("1/s")
 
         return PerformanceProfile(
@@ -220,7 +239,7 @@ class EfficiencyModel(ForwardModel):
 
         Returns
         -------
-        Dict[str, Any]
+        EfficiencyResult
             MFU estimate, achievable FLOPS, and overhead breakdown.
         """
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
@@ -254,7 +273,7 @@ class EfficiencyModel(ForwardModel):
         # Overhead breakdown: decompose (1 - eta) into meaningful components.
         # Total overhead = 1 - eta, split into occupancy loss and memory stall.
         total_overhead = 1.0 - eta
-        occupancy_loss = 1.0 - min(efficiency * cal.HFU_MFU_RATIO, 1.0)  # SM occupancy overhead
+        occupancy_loss = 1.0 - min(efficiency * cal.SM_OCCUPANCY_HEADROOM, 1.0)  # SM occupancy overhead
         # Memory stall absorbs the remainder: time spent waiting on data movement.
         memory_stall = max(0.0, total_overhead - occupancy_loss)
 
@@ -288,36 +307,67 @@ class SensitivitySolver(BaseSolver):
               precision: str = "fp16", perturbation_pct: float = 10.0,
               efficiency: float = 0.5) -> SensitivityResult:
         """
-        Solves for sensitivities and identifies the binding constraint.
-        """
-        from copy import deepcopy
-        from ...hardware.types import ComputeCore
+        Solve for parameter sensitivities and identify the binding constraint.
 
+        Numerically perturbs each hardware parameter (peak FLOPS, memory
+        bandwidth, memory capacity) by ``perturbation_pct`` and re-solves the
+        single-node Roofline. Each sensitivity is the normalized latency
+        response ``(T_perturbed - T_base) / T_base`` (dimensionless; negative
+        means the upgrade helps). The binding constraint is the parameter with
+        the largest absolute sensitivity — the resource whose improvement
+        moves latency the most.
+
+        Parameters
+        ----------
+        model : Workload
+            The workload to analyze.
+        hardware : HardwareNode
+            The baseline hardware configuration.
+        precision : str
+            Numerical precision used for both baseline and perturbed solves.
+        perturbation_pct : float
+            Perturbation size in percent (default 10.0, i.e. a 1.1x upgrade).
+        efficiency : float
+            Software efficiency factor in (0, 1].
+
+        Returns
+        -------
+        SensitivityResult
+            Per-parameter sensitivities, the binding constraint name, and the
+            baseline latency.
+        """
         baseline = Engine.solve(model, hardware, precision=precision, efficiency=efficiency)
         t_base = baseline.latency.to("ms").magnitude
         factor = 1.0 + perturbation_pct / 100.0
         sensitivities = {}
 
-        hw_flops = deepcopy(hardware)
-        hw_flops.compute = ComputeCore(
-            peak_flops=hardware.compute.peak_flops * factor,
-            precision_flops={k: v * factor for k, v in hardware.compute.precision_flops.items()}
-        )
+        # Registry hardware entries are frozen shared singletons, so each
+        # perturbation builds a modified COPY via model_copy(update=...) rather
+        # than assigning to the node (2026-06-06; the old deepcopy-then-assign
+        # pattern relied on mutability that frozen=True now forbids).
+        hw_flops = hardware.model_copy(update={
+            "compute": hardware.compute.model_copy(update={
+                "peak_flops": hardware.compute.peak_flops * factor,
+                "precision_flops": {k: v * factor for k, v in hardware.compute.precision_flops.items()},
+            })
+        })
         t_flops = Engine.solve(model, hw_flops, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["peak_flops"] = (t_flops - t_base) / t_base if t_base > 0 else 0.0
 
-        hw_bw = deepcopy(hardware)
-        hw_bw.memory = deepcopy(hardware.memory)
-        hw_bw.memory.bandwidth = hardware.memory.bandwidth * factor
+        hw_bw = hardware.model_copy(update={
+            "memory": hardware.memory.model_copy(update={"bandwidth": hardware.memory.bandwidth * factor})
+        })
         t_bw = Engine.solve(model, hw_bw, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_bandwidth"] = (t_bw - t_base) / t_base if t_base > 0 else 0.0
 
-        hw_mem = deepcopy(hardware)
-        hw_mem.memory = deepcopy(hardware.memory)
-        hw_mem.memory.capacity = hardware.memory.capacity * factor
+        hw_mem = hardware.model_copy(update={
+            "memory": hardware.memory.model_copy(update={"capacity": hardware.memory.capacity * factor})
+        })
         t_mem = Engine.solve(model, hw_mem, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_capacity"] = (t_mem - t_base) / t_base if t_base > 0 else 0.0
 
+        # The binding constraint is the parameter whose upgrade moves latency
+        # most (abs() because improvements show up as negative sensitivities).
         binding = max(sensitivities, key=lambda k: abs(sensitivities[k]))
 
         return SensitivityResult(
@@ -344,7 +394,37 @@ class SynthesisSolver(BaseSolver):
     def solve(self, model: Workload, target_latency: Quantity,
               precision: str = "fp16", efficiency: float = 0.5) -> SynthesisResult:
         """
-        Synthesizes hardware requirements from an SLA target.
+        Synthesize minimum hardware requirements from a latency SLA.
+
+        Inverts the Roofline model: instead of asking "how fast does this
+        hardware run the model?", asks "what hardware would run the model in
+        ``target_latency``?". Assumes a single full pass that streams every
+        weight once (batch size 1, no weight reuse), so:
+
+        - ``required_bw = weight_bytes / T_target`` [GB/s] — the bandwidth
+          needed if the workload is memory-bound;
+        - ``required_flops = total_ops / (T_target * efficiency)`` [TFLOP/s]
+          — the compute rate needed if it is compute-bound;
+        - ``compute_memory_ratio = required_flops / required_bw`` [FLOP/byte]
+          — the hardware balance point a matching part should sit near.
+
+        Parameters
+        ----------
+        model : Workload
+            The workload to serve; sets weight bytes and operation count.
+        target_latency : Quantity
+            The SLA latency target (any time unit; converted to seconds).
+        precision : str
+            Numerical precision; sets bytes per parameter.
+        efficiency : float
+            Expected software efficiency in (0, 1]; lower values inflate the
+            required FLOPS to compensate.
+
+        Returns
+        -------
+        SynthesisResult
+            Required bandwidth, FLOPS, memory capacity, and the
+            compute:memory balance ratio.
         """
         precision, bpp = resolve_precision(precision)
         weight_bytes = model.size_in_bytes(bpp)

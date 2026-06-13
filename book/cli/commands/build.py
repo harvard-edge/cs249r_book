@@ -274,29 +274,29 @@ class BuildCommand:
         result = verify_volume_pdf(quarto_dir, volume, log_path=log_path)
         console.print(format_checklist(result))
 
-        # Warn-only geometric margin-overflow scan. Non-blocking: a margin
-        # figure/note running off the page is layout polish, surfaced here but
-        # not failing the build. The blocking gate is `binder layout margins`.
-        try:
-            from cli.commands.layout import scan_margin_overflow
-            margin_findings = scan_margin_overflow(result.pdf_path)
-        except Exception:
-            margin_findings = None
-        if margin_findings:
+        # Warn-only rendered geometry detail. The summary is computed inside
+        # verify_volume_pdf, so this reports the same Binder-native geometry
+        # check instead of running the older pdfplumber margin heuristic.
+        geom = getattr(result, "margin_geometry", None)
+        if geom is not None and getattr(geom, "findings", None):
             console.print()
             console.print(
-                f"  [yellow]⚠ margin overflow[/yellow] [dim]({len(margin_findings)} "
-                f"margin figure/note(s) run off the page — non-blocking)[/dim]"
+                f"  [yellow]⚠ margin geometry[/yellow] [dim]("
+                f"{len(geom.findings)} rendered margin finding(s) — "
+                f"non-blocking in build validation)[/dim]"
             )
-            for mf in sorted(margin_findings, key=lambda r: -r.over_pts)[:10]:
-                loc = mf.source_file + (f":{mf.source_line}" if mf.source_line else "")
+            issue_rank = {"overlap": 0, "overflow-bottom": 1, "overflow-top": 2}
+            for finding in sorted(
+                geom.findings,
+                key=lambda f: (issue_rank.get(f.issue, 9), f.page),
+            )[:10]:
                 console.print(
-                    f"    [dim]p.{mf.label} {mf.chapter}: {mf.over_pts:.0f}pt "
-                    f"({mf.signal}) {loc}[/dim]"
+                    f"    [dim]sheet {finding.page}: {finding.issue} "
+                    f"{finding.side} — {finding.detail}[/dim]"
                 )
             console.print(
-                f"    [dim]→ `binder layout margins {result.pdf_path}` to gate; "
-                f"fix per figure-margin.md §7.[/dim]"
+                f"    [dim]→ `binder layout overlaps {result.pdf_path}` to localize; "
+                f"`binder layout margins {result.pdf_path}` is the strict gate.[/dim]"
             )
 
         if not result.ok:

@@ -107,9 +107,9 @@ def clean(ax):
     ax.set_yticks([])
 
 
-def make_ladder(chapter, name, tiers, *, domain="memory", wall=False, style="bars"):
+def make_ladder(chapter, name, tiers, *, domain="memory", wall=False, style="bars", color=None):
     fig, ax = new_fig("hierarchy-ladder")
-    ladder(ax, tiers, domain=domain, wall=wall, style=style)
+    ladder(ax, tiers, domain=domain, wall=wall, style=style, color=color)
     write(fig, chapter, name)
 
 
@@ -684,7 +684,7 @@ def ml_systems_edge_bandwidth_ladder(candidate=None):
 
 def training_activation_memory_ladder(candidate=None):
     from mlsysim import Hardware, Models
-    from mlsysim.core.constants import GB
+    from mlsysim.core.units import GB
     from mlsysim.physics import calc_activation_memory
 
     gpt2 = Models.Language.GPT2
@@ -693,6 +693,7 @@ def training_activation_memory_ladder(candidate=None):
         seq_len=1024,
         batch_size=8,
         hidden_dim=gpt2.hidden_dim,
+        n_heads=gpt2.heads,
         precision_bytes=2,
         strategy="none",
     ).m_as(GB)
@@ -1040,7 +1041,7 @@ def nn_computation_paradigm_ops_ladder(candidate=None):
 
 def nn_computation_training_energy_ladder(candidate=None):
     from mlsysim import Hardware, Infrastructure, Models
-    from mlsysim.core.constants import HOURS_PER_DAY, THOUSAND, watt
+    from mlsysim.core.units import HOURS_PER_DAY, THOUSAND, watt
 
     lenet_kwh = 3 * HOURS_PER_DAY * 0.75
     a100_kw = Hardware.Cloud.A100.tdp.m_as(watt) / THOUSAND
@@ -1067,7 +1068,7 @@ def nn_computation_activation_logic_ladder(candidate=None):
 
 def nn_computation_mnist_roofline(candidate=None):
     from mlsysim import Hardware
-    from mlsysim.core.constants import KB, THOUSAND, byte, flop
+    from mlsysim.core.units import KB, THOUSAND, byte, flop
 
     mnist_dims = [784, 128, 64, 10]
     batch_size = 32
@@ -1090,7 +1091,7 @@ def nn_computation_mnist_roofline(candidate=None):
 
 def frameworks_training_memory_ladder(candidate=None):
     from mlsysim import Models
-    from mlsysim.core.constants import BYTES_FP32, GB
+    from mlsysim.core.units import BYTES_FP32, GB
 
     infer_gb = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32).m_as(GB)
     training_mid_gb = 12.5
@@ -1155,7 +1156,7 @@ def data_selection_echo_threshold(candidate=None):
 
 def model_serving_model_load_slo(candidate=None):
     from mlsysim import Hardware
-    from mlsysim.core.constants import GB, ms, second
+    from mlsysim.core.units import GB, ms, second
 
     slo_ms = 50.0
     load_ms = (10.0 / Hardware.Cloud.A100.interconnect.bandwidth.m_as(GB / second) * second).m_as(ms)
@@ -1252,9 +1253,10 @@ def edge_intelligence_forgetting(candidate=None):
     ax.plot(t, old_task, color=RED, lw=1.45)
     ax.plot([1], [new_task[-1]], "o", color=DATA, ms=3.2)
     ax.plot([1], [old_task[-1]], "o", color=RED, ms=3.2)
-    ax.text(0.30, 0.73, "old", ha="center", va="center", color=RED, fontsize=4.9, fontweight="bold")
-    ax.text(0.72, 0.71, "new", ha="center", va="center", color=DATA, fontsize=4.9, fontweight="bold")
-    ax.text(0.50, 0.20, "forget", ha="center", va="center", color=RED, fontsize=4.8)
+    label_box = dict(facecolor="white", edgecolor="none", boxstyle="round,pad=0.12", alpha=0.94)
+    ax.text(0.24, 0.83, "old", ha="center", va="center", color=RED, fontsize=4.9, fontweight="bold", bbox=label_box)
+    ax.text(0.78, 0.88, "new", ha="center", va="center", color=DATA, fontsize=4.9, fontweight="bold", bbox=label_box)
+    ax.text(0.52, 0.12, "forget", ha="center", va="center", color=RED, fontsize=4.8, bbox=label_box)
     write(fig, "vol2/edge_intelligence", "vol2_edge_intelligence_margin_003")
 
 
@@ -1287,6 +1289,7 @@ def fault_tolerance_replica_downtime(candidate=None):
         "vol2_fault_tolerance_margin_004",
         [("1 repl 3.65d", 87.6), ("2 repl 52.6m", 0.8767), ("3 repl 31.5s", 0.00875)],
         domain="time",
+        color=MEM,
         wall=False,
     )
 
@@ -2305,12 +2308,12 @@ def generate() -> None:
     make_ladder("vol2/distributed_training", "distributed_training_memory_budget", [("Optimizer 2100 GB", 2100), ("Gradients 350", 350), ("Weights 350", 350)], domain="memory")
     distributed_training_pipeline_bubble_tax()
     distributed_training_young_daly_checkpoint_curve()
-    make_ladder("vol2/edge_intelligence", "edge_intelligence_bandwidth_ladder", [("HBM3 3.35 TB/s", 3350), ("Mobile 100 GB/s", 100)], domain="bandwidth", wall=False)
+    make_ladder("vol2/edge_intelligence", "edge_intelligence_bandwidth_ladder", [("HBM3 3.35 TB/s", 3350), ("Mobile 100 GB/s", 100)], domain="bandwidth", color=MEM, wall=True)
     make_ladder("vol2/edge_intelligence", "edge_intelligence_device_memory_ladder", [("Phone 8 GB", 8000), ("IoT 1 GB", 1000), ("MCU 4 MB", 4), ("SRAM 520 KB", 0.52)], domain="memory")
     edge_intelligence_straggler_cutoff_strip()
-    make_ladder("vol2/fault_tolerance", "fault_tolerance_mtbf_ladder", [("1 GPU 50K h", 50000), ("1K 50 h", 50), ("10K 5 h", 5)], domain="time")
+    make_ladder("vol2/fault_tolerance", "fault_tolerance_mtbf_ladder", [("1 GPU 50K h", 50000), ("1K 50 h", 50), ("10K 5 h", 5)], domain="time", color=MEM)
     make_blast("vol2/fault_tolerance", "fault_tolerance_blast", n=5)
-    make_ladder("vol2/fault_tolerance", "fault_tolerance_detection_ladder", [("SDC ~2h", 7200), ("partition 180s", 180), ("GPU hang 120s", 120), ("crash 30s", 30)], domain="time")
+    make_ladder("vol2/fault_tolerance", "fault_tolerance_detection_ladder", [("SDC ~2h", 7200), ("partition 180s", 180), ("GPU hang 120s", 120), ("crash 30s", 30)], domain="time", color=MEM)
     fault_tolerance_kv_live_state_ladder()
     make_knee("vol2/fleet_orchestration", "fleet_orchestration_util_knee", knee_frac=0.70)
     fleet_orchestration_priority_inversion()
@@ -2319,7 +2322,7 @@ def generate() -> None:
     make_blast("vol2/fleet_orchestration", "fleet_orchestration_preempt_cascade", n=5)
     make_ironbar("vol2/inference", "inference_serving_cost_dominance", [("CapEx", 0.15, GRID), ("OpEx", 0.85, COMP)], dom=1, style="trio")
     make_knee("vol2/inference", "inference_batching_knee", knee_frac=0.68)
-    make_ladder("vol2/inference", "inference_logic_wall_ladder", [("reasoning 12.8 s", 12.8), ("fast 0.1 s", 0.1)], domain="time")
+    make_ladder("vol2/inference", "inference_logic_wall_ladder", [("reasoning 12.8 s", 12.8), ("fast 0.1 s", 0.1)], domain="time", color=MEM)
     kv_cache_ladder()
     inference_quantization_capacity_ladder()
     make_roofline_points(

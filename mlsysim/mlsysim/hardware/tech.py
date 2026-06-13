@@ -19,7 +19,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..core.constants import ureg
+from ..core.units import ureg
 from ..core.types import Quantity, Metadata, require_dimensionality, require_unit_family
 from ..core.registry import Registry
 from ..core.loader import load_collection
@@ -106,7 +106,7 @@ class OpEnergy(BaseModel):
     @field_validator("energy", mode="after")
     @classmethod
     def _validate_energy(cls, v):
-        return require_dimensionality(v, ureg.joule, "energy")
+        return require_unit_family(v, ureg.joule / ureg.flop, "energy", "operation")
 
 
 class EffectiveComputeEnergy(BaseModel):

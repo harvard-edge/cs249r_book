@@ -17,6 +17,9 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(v) for v in value]
     if isinstance(value, tuple):
         return [_json_safe(v) for v in value]
+    # Duck-typed Pint Quantity check (avoids importing the registry here);
+    # serialize as the compact pretty string ("3.35 TB/s") so the unit travels
+    # with the number in JSON output.
     if hasattr(value, "magnitude") and hasattr(value, "units"):
         return f"{value:~P}"
     return value
@@ -104,13 +107,29 @@ def render_scorecard(eval_obj, output_format: str):
     """Renders the unified 3-lens SystemEvaluation scorecard."""
 
     def _format_metric(k: str, v: Any) -> str:
-        """Formats a physical quantity or scalar into a human-readable string for CLI rendering."""
+        """Format a scalar metric for CLI rendering, with a unit chosen by key.
+
+        Units are matched on exact word/suffix boundaries of the snake_case
+        key (e.g. ``step_latency`` -> " ms") rather than substring containment,
+        so a key like ``memory_utilization`` can never pick up a " GB" suffix.
+        Keys whose unit is not recognized render as a bare number — matching
+        the metric dicts built in ``engine/evaluation.py``, where e.g.
+        ``scaling_efficiency`` and ``memory_utilization`` are dimensionless.
+        """
+        def _word_match(key: str, word: str) -> bool:
+            parts = key.lower().split("_")
+            return word in parts
+
         if isinstance(v, float):
+            if _word_match(k, "mfu"):
+                return f"{v:.1%}"
             val = f"{v:,.2f}"
-            if "latency" in k.lower(): val += " ms"
-            elif "throughput" in k.lower(): val += " / s"
-            elif "memory" in k.lower() and "gb" in k.lower(): val += " GB"
-            elif "mfu" in k.lower(): val = f"{v:.1%}"
+            if _word_match(k, "latency"):
+                val += " ms"
+            elif _word_match(k, "throughput"):
+                val += " / s"
+            elif _word_match(k, "memory") and _word_match(k, "gb"):
+                val += " GB"
             return val
         return f"{v}"
 

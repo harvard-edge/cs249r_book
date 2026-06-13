@@ -8,26 +8,28 @@ engine: jupyter
 
 _When an ML system fails, where should you look first: the data path, the algorithm, or the machine?_
 
-In production, “it’s slow” and “it’s wrong” are rarely informative symptoms. A serving stack can miss its latency Service Level Objective (SLO) because the accelerator is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). Without a taxonomy, teams often optimize the wrong thing—buying faster accelerators to fix a slow input pipeline, or rewriting kernels when the model is simply too large for the latency budget.
+In production, "it is slow" and "it is wrong" are rarely informative symptoms. A serving stack can miss its latency objective because the accelerator is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). Without a taxonomy, teams often optimize the wrong thing, buying faster accelerators to fix a slow input pipeline or rewriting kernels when the model is simply too large for the latency budget. This appendix provides a compact diagnostic framework, Data, Algorithm, and Machine, and shows how to map symptoms and measurements to the term of the iron law that dominates. D·A·M is the first-response checklist before committing to deeper optimization.
 
-This appendix provides a compact diagnostic framework—**Data · Algorithm · Machine (D·A·M)**\index{D·A·M Taxonomy!appendix refresher}—and shows how to map symptoms and measurements to the term of the iron law that dominates. It serves as a “first response” checklist before committing to deeper optimization.
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+
+- Classify an ML system bottleneck by its dominant Data, Algorithm, or Machine axis, while recognizing cross-axis interactions
+- Map optimization techniques to their Data-Algorithm-Machine intersection zone to understand which axes they span
+- Apply the iron law equation to quantitatively diagnose performance problems
+- Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
+- Select appropriate profiling tools and optimization strategies for each Data-Algorithm-Machine axis
+- Evaluate system health using Data-Algorithm-Machine scorecard metrics (I/O Overhead, Active Params, MFU)
+
+:::
 
 ## How to Use This Appendix {.unnumbered}
 
 This appendix is designed as a reference. Start with the scorecard-style metrics, form a hypothesis about which axis dominates, and then pick the tool that can confirm (or falsify) that hypothesis. Conventions used here follow the book-wide notation (for example, we reserve $B$ for batch size and use $\text{BW}$ for bandwidth).
 
 When training is slow, check accelerator utilization, data wait time, and Model FLOPs Utilization (MFU), then map each to its Data, Algorithm, or Machine axis. When serving misses a Service Level Objective (SLO), identify whether the regime is latency-bound (overhead), memory-bound (weight/KV movement), or compute bound. When cost is exploding, use the D·A·M rubric to ensure that effort targets the dominant term, not a nonbottleneck.
-
-::: {.callout-learning-objectives}
-
-- Classify an ML system bottleneck by its dominant Data, Algorithm, or Machine axis, while recognizing cross-axis interactions
-- Map optimization techniques to their D·A·M intersection zone to understand which axes they span
-- Apply the iron law equation to quantitatively diagnose performance problems
-- Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
-- Select appropriate profiling tools and optimization strategies for each D·A·M axis
-- Evaluate system health using the D·A·M Scorecard metrics (I/O Overhead, Active Params, MFU)
-
-:::
 
 The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, the diagnostic task is to identify *where the flow is blocked*. This taxonomy helps practitioners isolate the dominant bottleneck among three collectively exhaustive axes[^fn-mece], while recognizing that real systems often involve boundary cases where two or more axes interact.
 
@@ -198,13 +200,13 @@ These three cases illustrate clean, single-axis bottlenecks. Production incident
 
 Identifying the root cause of performance bottlenecks requires systematic elimination. @Tbl-dam-troubleshooting provides a diagnostic matrix for common failure modes observed in production deployments.
 
-| **Symptom**                     | **Likely D·A·M Culprit** | **Diagnostic Question**                                            | **Recommended Action**                                 |
-|:--------------------------------|:-------------------------|:-------------------------------------------------------------------|:-------------------------------------------------------|
-| **Low Accelerator Utilization** | **Data**                 | Is the data loader keeping up with the accelerator?                | Implement prefetching and use binary formats.          |
-| **High Latency (P99)**          | **Algorithm**            | Is the model depth or width exceeding the latency budget?          | Apply quantization (INT8) or structured pruning.       |
-| **High Training Cost**          | **Machine**              | Is the hardware utilization ($\eta_{\text{hw}}$) below 30 percent? | Optimize CUDA kernels or use spot instances.           |
-| **Silent Accuracy Drift**       | **Data**                 | Has the statistical distribution ($P_t$) shifted from $P_0$?       | Trigger retraining and update active learning filters. |
-| **Out-of-Memory (OOM)**         | **Algorithm/Machine**    | Does the model state fit in available VRAM?                        | Use gradient checkpointing or reduce batch size.       |
+| **Symptom**                     | **Likely D·A·M Culprit** | **Diagnostic Question**                                      | **Recommended Action**                                 |
+|:--------------------------------|:-------------------------|:-------------------------------------------------------------|:-------------------------------------------------------|
+| **Low Accelerator Utilization** | **Data**                 | Is the data loader keeping up with the accelerator?          | Implement prefetching and use binary formats.          |
+| **High Latency (P99)**          | **Algorithm**            | Is the model depth or width exceeding the latency budget?    | Apply quantization (INT8) or structured pruning.       |
+| **High Training Cost**          | **Machine**              | Is the hardware utilization ($\eta_{\text{hw}}$) below 30%?  | Optimize CUDA kernels or use spot instances.           |
+| **Silent Accuracy Drift**       | **Data**                 | Has the statistical distribution ($P_t$) shifted from $P_0$? | Trigger retraining and update active learning filters. |
+| **Out-of-Memory (OOM)**         | **Algorithm/Machine**    | Does the model state fit in available VRAM?                  | Use gradient checkpointing or reduce batch size.       |
 
 : **D·A·M Diagnostic Matrix**: Root cause identification and remediation strategies for common ML systems failures. Each row connects a user-visible symptom to the D·A·M axis most likely responsible, reducing the search space before a profiler is needed. {#tbl-dam-troubleshooting tbl-colwidths="[25,21,29,25]"}
 
@@ -230,11 +232,11 @@ To move beyond qualitative guessing, the efficiency ratios in @tbl-dam-scorecard
 
 [^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: The ratio of achieved model FLOP/s to the hardware's theoretical peak FLOP/s, introduced in the PaLM paper [@chowdhery2022palm]. Unlike raw accelerator utilization (which counts any work the accelerator performs), MFU measures only *useful* model computation rate, excluding overhead like gradient synchronization and memory management. @Sec-benchmarking covers MFU in depth.
 
-| **Axis**      | **Metric**        |                       **Definition**                      |  **Failing Grade**  |    **Passing Grade**    |
-|:--------------|:------------------|:---------------------------------------------------------:|:-------------------:|:-----------------------:|
-| **Data**      | **I/O Overhead**  |   $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$  |    $>$ 10 percent   |      $<$ 1 percent      |
-| **Algorithm** | **Active Params** |    $\frac{\text{Nonzero Params}}{\text{Total Params}}$    | 100 percent (Dense) | $<$ 50 percent (Sparse) |
-| **Machine**   | **MFU**           | $\frac{\text{Achieved model FLOP/s}}{\text{Peak FLOP/s}}$ |    $<$ 30 percent   |      $>$ 50 percent     |
+| **Axis**      | **Metric**        |                       **Definition**                      | **Failing Grade** | **Passing Grade** |
+|:--------------|:------------------|:---------------------------------------------------------:|:-----------------:|:-----------------:|
+| **Data**      | **I/O Overhead**  |   $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$  |      $>$ 10%      |       $<$ 1%      |
+| **Algorithm** | **Active Params** |    $\frac{\text{Nonzero Params}}{\text{Total Params}}$    |    100% (Dense)   |  $<$ 50% (Sparse) |
+| **Machine**   | **MFU**           | $\frac{\text{Achieved model FLOP/s}}{\text{Peak FLOP/s}}$ |      $<$ 30%      |      $>$ 50%      |
 
 : **The D·A·M Efficiency Rubric**: These three numbers characterize any ML system's maturity. A system that passes all three thresholds has exhausted its easy optimizations; further gains require architectural changes or hardware upgrades. {#tbl-dam-scorecard tbl-colwidths="[25,25,25,25]"}
 
@@ -248,9 +250,9 @@ Systems engineering requires distinguishing between *growth trajectories* and *f
 
 Scaling laws[^fn-scaling-laws] are empirical power laws that predict *how fast* model performance improves as we increase resources. The two landmark results are Kaplan Scaling [@kaplan2020scaling], which showed that performance improves predictably with parameter count ($P$), data ($D$), and total operations ($O$), and Chinchilla Scaling [@hoffmann2022chinchilla], which refined this insight by defining the *optimal ratio* of these resources (for example, $D \approx 20P$ tokens per parameter).
 
-[^fn-scaling-laws]: **Scaling Laws**: Empirical relationships, typically power laws of the form $\mathcal{L}(x) \propto x^{-\alpha}$, that predict model loss as a function of dataset size, parameter count, or compute budget. @kaplan2020scaling studied these relationships for neural language models at OpenAI; @hoffmann2022chinchilla later refined the compute-optimal training tradeoff with the Chinchilla result. @Sec-model-training discusses scaling laws in detail.
+[^fn-scaling-laws]: **Scaling Laws**: Empirical relationships, typically power laws of the form $\mathcal{L}(x) \propto x^{-\alpha}$, that predict model loss as a function of dataset size, parameter count, or compute budget. @kaplan2020scaling studied these relationships for neural language models at OpenAI; @hoffmann2022chinchilla later refined the compute-optimal training trade-off with the Chinchilla result. @Sec-model-training discusses scaling laws in detail.
 
-As economic guides, these laws summarize the tradeoff this way: "If I double my compute budget, my error rate should drop by $X$ percent." They assume the information is there to be learned.
+As economic guides, these laws summarize the trade-off this way: "If I double my compute budget, my error rate should drop by $X$ percent." They assume the information is there to be learned.
 
 ### Information roofline (the destination) {#sec-appdx-dam-taxonomy-information-roofline-destination-6426}
 
@@ -270,7 +272,7 @@ The D·A·M taxonomy provides a systematic framework for diagnosing ML systems b
 
 * **Every bottleneck lives in one of three places**: Data, Algorithm, or Machine. Identify the dominant axis before optimizing.
 * **Profile arithmetic intensity before optimizing**: Arithmetic intensity determines whether the regime is Data-bound or Machine-bound.
-* **Diagnose the D·A·M axis before proposing solutions**: Optimizing the wrong term yields zero improvement.
-* **Grade the system with the D·A·M scorecard**: Use I/O Overhead < 1 percent, Active Params < 50 percent, and MFU > 50 percent before investing in optimizations.
+* **Diagnose the binding axis first**: Optimizing the wrong term yields zero improvement.
+* **Grade with the scorecard**: Use I/O Overhead < 1 percent, Active Params < 50 percent, and MFU > 50 percent before investing in optimizations.
 
 :::

@@ -260,7 +260,9 @@ _HAS_SINGLE = {
     "B": re.compile(r"(?<![A-Za-z\\])B(?![A-Za-z])"),
     "D": re.compile(r"(?<![A-Za-z\\])D(?![A-Za-z])"),
     "P": re.compile(r"(?<![A-Za-z\\])P(?![A-Za-z])"),
-    "L": re.compile(r"(?<![A-Za-z\\])L(?![A-Za-z])"),
+    # L also excludes a preceding "_" so subscript uses like $N_L$ (table-registered
+    # Number of Layers) are not misread as bare-L latency (2026-06-06, vol2 notation pass).
+    "L": re.compile(r"(?<![A-Za-z\\_])L(?![A-Za-z])"),
     "d": re.compile(r"(?<![A-Za-z\\])d(?![A-Za-z])"),
     "N": re.compile(r"(?<![A-Za-z\\])N(?![A-Za-z])"),
 }

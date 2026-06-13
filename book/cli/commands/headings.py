@@ -47,15 +47,15 @@ console = Console()
 ACRONYMS = set("""
 AI ML AIOps MLOps DevOps ClinAIOps MLSys
 GPU GPUs CPU CPUs TPU TPUs NPU DSP ASIC FPGA SoC MCU HBM DRAM SRAM ROM EPROM NVRAM VRAM
-NVMe PCIe PCI NVLink NVSwitch DMA MMIO RDMA CUDA ROCm OpenCL OpenMP MPI NCCL RCCL OpenACC
+NVMe PCIe PCI NVLink NVSwitch GPUDirect DMA MMIO RDMA CUDA ROCm OpenCL OpenMP MPI NCCL RCCL OpenACC
 CNN CNNs RNN RNNs LSTM GRU MLP MLPs NN DNN LLM LLMs BLAS cuBLAS cuDNN GEMM MAC MACs SIMD SIMT VLIW RISC CISC BatchNorm LayerNorm GroupNorm ReLU GELU SiLU PReLU LeakyReLU Sigmoid Softmax Tanh
 FLOPs FLOP TFLOPs PFLOPs FLOPS TFLOPS PFLOPS TOPS IOPS MIPS FP32 FP16 FP8 FP4 BF16 INT8 INT4 TF32 FP64
 GB TB KB MB PB EB GiB TiB KiB MiB Gbps Mbps Tbps ns μs ms kHz MHz GHz THz Hz Wh kWh MWh W kW MW
 IO OS RTOS VM JVM JIT AOT RPC REST RESTful HTTP HTTPS TCP UDP IP DNS CDN TLS SSL SSH gRPC IPC UX UI
 API APIs SDK CLI IDE GUI SLA SLAs SLI SLO SLOs RAID SSD HDD EEPROM SRE QA KPI
 US UK EU USA FAA FDA IRB NHTSA DARPA NSF NIH IEEE ACM OSDI NSDI NeurIPS ICML ICLR CVPR ECCV ICCV ACL EMNLP NAACL KDD SIGMOD SIGCOMM SOSP FAST ATC HotOS MICRO ISCA HPCA SC
-ImageNet BERT GPT PaLM T5 BART ViT CLIP ResNet AlexNet MobileNet MobileNets EfficientNet VGG Inception YOLO DLRM BLOOM Gemini Claude Mistral Qwen Kaplan Chinchilla LLaMA Llama
-PyTorch TensorFlow JAX NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang Michelangelo FBLearner Vertex Kubeflow Sagemaker
+ImageNet BERT GPT PaLM T5 BART ViT CLIP ResNet AlexNet GoogLeNet MobileNet MobileNets EfficientNet VGG Inception YOLO DLRM BLOOM Gemini Claude Mistral Qwen Kaplan Chinchilla LLaMA Llama
+PyTorch TensorFlow JAX NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM MLflow OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang Michelangelo FBLearner Vertex Kubeflow Sagemaker
 AllReduce AllGather ReduceScatter AllToAll Broadcast Scatter Gather FlashAttention PagedAttention RoPE ALiBi MoE KV
 MLPerf MLCommons LAPACK LINPACK D·A·M DAM C³ C^3 CCC C3
 TinyML AutoML AutoAugment RandAugment NAS
@@ -95,7 +95,9 @@ SKIP_HEADINGS = {
     "1-bit Adam: Compression-aware optimization",
 }
 
-DAM_AXES = {"Data", "Algorithm", "Machine", "Computation", "Communication", "Coordination"}
+# "Compute" added 2026-06: the C³ first axis was unified from "Computation"
+# to "Compute" (the c3-taxonomy figure / part-principles / prose-triad form).
+DAM_AXES = {"Data", "Algorithm", "Machine", "Compute", "Computation", "Communication", "Coordination"}
 
 # Concept terms from §10.3 that stay lowercase even at heading sentence start.
 CONCEPT_TERMS_LOWER = {

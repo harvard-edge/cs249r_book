@@ -17,11 +17,15 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
-INPUT = Path.home() / "Desktop/MIT_Press_Feedback/11_au_queries/data/au_queries.json"
-RESPONSE_DOC = Path("/Users/VJ/GitHub/MLSysBook-release-audit/book/tools/scripts/mit_press/AU_QUERY_RESPONSES.md")
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers"
+try:
+    from .paths import DATA_ROOT, LEDGER_DIR, REPO_ROOT
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import DATA_ROOT, LEDGER_DIR, REPO_ROOT
+
+INPUT = DATA_ROOT / "11_au_queries/data/au_queries.json"
+RESPONSE_DOC = REPO_ROOT / "book/tools/scripts/mit_press/AU_QUERY_RESPONSES.md"
+OUT_DIR = LEDGER_DIR
 
 CATEGORY_PATTERNS: list[tuple[str, str, str]] = [
     # (category_id, label, regex applied case-insensitively to content)

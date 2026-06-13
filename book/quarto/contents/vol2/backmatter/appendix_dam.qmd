@@ -2,15 +2,28 @@
 engine: jupyter
 ---
 
-# Single-Machine Foundations (D·A·M) {#sec-appdx-dam-taxonomy}
+# D·A·M Foundations {#sec-appdx-dam-taxonomy}
 
 ## Purpose {.unnumbered}
 
-_Before engineering the fleet, we must master the single machine. Where do you look first when a single node fails: the data path, the algorithm, or the machine?_
+_When a single node fails, which axis is binding first: the data path, the algorithm, or the machine?_
 
-In production, "it is slow" and "it is wrong" are rarely informative symptoms. A serving stack can miss its latency Service Level Objective (SLO) because the GPU is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). The $C^3$ Taxonomy (@sec-appdx-c3-taxonomy) extends these diagnostics to the distributed fleet, but it relies on a firm foundation of single-node performance. Without understanding the D·A·M taxonomy, teams often optimize the wrong thing—buying faster GPUs to fix a slow input pipeline, or rewriting kernels when the model is simply too large for the latency budget.
+In production, "it is slow" and "it is wrong" are rarely informative symptoms. A serving stack can miss its latency objective because the accelerator is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). The C³ taxonomy extends these diagnostics to the distributed fleet, but it relies on a firm foundation of single-node performance. Without understanding D·A·M, teams often optimize the wrong thing, buying faster accelerators to fix a slow input pipeline or rewriting kernels when the model is simply too large for the latency budget. This appendix provides a compact diagnostic framework, Data, Algorithm, and Machine, and maps single-machine symptoms and measurements to the term of the iron law that dominates. In C³ terms, this single-machine refresher is the node-level base that fleet-scale compute, communication, and coordination build on.
 
-This appendix provides a compact diagnostic framework—**Data · Algorithm · Machine (D·A·M)**\index{D·A·M Taxonomy!appendix refresher}—and shows how to map single-machine symptoms and measurements to the term of the iron law that dominates. It serves as a foundational checklist before fleet-scale optimization.
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+
+- Classify single-machine bottlenecks by dominant Data, Algorithm, or Machine axis while recognizing mixed causes
+- Map optimization techniques to their Data-Algorithm-Machine intersection zone to understand which axes they span
+- Apply the iron law equation to quantitatively diagnose performance problems
+- Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
+- Select appropriate profiling tools and optimization strategies for each Data-Algorithm-Machine axis
+- Evaluate system health using Data-Algorithm-Machine scorecard metrics (I/O Overhead, Active Params, MFU)
+
+:::
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -21,9 +34,9 @@ When training is slow on a single GPU, check utilization, data wait time, and MF
 ```{python}
 #| echo: false
 from mlsysim import *
-from mlsysim.core.constants import *
-#| label: appendix-dam-setup
-from mlsysim.fmt import fmt, fmt_frac, check
+from mlsysim.core.units import *
+
+from mlsysim.fmt import fmt, fmt_frac, check, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 # Scenarios: GPU Utilization, Iron Law Analysis, Scaling Discrepancy
@@ -63,36 +76,24 @@ class DAMTaxonomy:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Exercise 2 logic
     ex2_flops_per_pass = calc_transformer_decode_flops(ex2_params)
-    ex2_achieved_rate = (ex2_flops_per_pass / ex2_latency).to(TFLOP/second)
+    ex2_achieved_rate = (ex2_flops_per_pass / ex2_latency).to(TFLOP / second)
     ex2_util = (ex2_achieved_rate / h100_fp16_peak).to("").magnitude * 100
     ex2_model_size = ex2_params.to(param).magnitude * 2 * byte
-    h100_ridge_flop_per_byte = (h100_fp16_peak / h100_hbm_bandwidth).to(flop/byte).magnitude
+    h100_ridge_q = h100_fp16_peak / h100_hbm_bandwidth
+    h100_ridge_flop_per_byte = h100_ridge_q.to(flop / byte).magnitude
 
     # Step 2: Exercise 3 logic
     ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     from mlsysim.fmt import check
+
     check(ex2_util < 10, f"Batch-1 utilization ({ex2_util:.1f}%) unexpectedly high.")
     check(290 < h100_ridge_flop_per_byte < 300, f"H100 ridge point changed: {h100_ridge_flop_per_byte:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt
-    h100_ridge_str = fmt(h100_ridge_flop_per_byte, precision=1, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity(h100_ridge_q, precision=1, commas=False)
 ```
-
-With that usage pattern in mind, the appendix focuses on the following diagnostic habits:
-
-::: {.callout-learning-objectives}
-
-- Classify single-machine bottlenecks by dominant Data, Algorithm, or Machine axis while recognizing mixed causes
-- Map optimization techniques to their D·A·M intersection zone to understand which axes they span
-- Apply the iron law equation to quantitatively diagnose performance problems
-- Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
-- Select appropriate profiling tools and optimization strategies for each D·A·M axis
-- Evaluate system health using the D·A·M Scorecard metrics (I/O Overhead, Active Params, MFU)
-
-:::
 
 The Data · Algorithm · Machine (D·A·M) taxonomy is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes[^fn-mece-v2], while recognizing that real systems can involve mixed causes or interactions between axes.
 
@@ -141,10 +142,12 @@ This overlap view still leaves one practical question: whether a workload is wai
 
 [^fn-intensity-v2]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($R_{\text{peak}}/\text{BW}$).
 
+The symptoms below are different views of the same ridge-point comparison: a workload whose arithmetic intensity sits left of $R_{\text{peak}}/\text{BW}$ cannot keep the accelerator fed, so starvation appears as low utilization, batch-1 latency sensitivity, or a direct intensity measurement.
+
 *   **Low GPU utilization** ($<$ 80 percent): The workload is likely data bound (or CPU bound). The accelerator is starving.
 *   **High GPU utilization** ($>$ 95 percent): The workload is likely machine bound. The accelerator is fully saturated.
 *   **If batch size is 1**: The workload is likely latency bound (algorithm overhead dominates).
-*   **If arithmetic intensity is below the ridge point** (about `{python} DAMTaxonomy.h100_ridge_str` FLOP/byte on H100): The workload is likely memory bound (Data/Machine boundary).
+*   **If arithmetic intensity is below the ridge point** (about `{python} DAMTaxonomy.h100_ridge_str` on H100): The workload is likely memory bound (Data/Machine boundary).
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
 
@@ -178,9 +181,9 @@ The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance agai
 
 | **Axis**      |           **Metric**           |                                  **Definition**                                  | **Failing Grade**  | **Passing Grade**  |
 |:--------------|:------------------------------:|:--------------------------------------------------------------------------------:|:------------------:|:------------------:|
-| **Data**      |        **I/O Overhead**        |              $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$              |   $>$ 10 percent   |   $<$ 1 percent    |
+| **Data**      |        **I/O Overhead**        |              $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$              |      $>$ 10%       |       $<$ 1%       |
 | **Algorithm** | **Compression/Sparsity Ratio** | $\frac{\text{Effective or active parameters}}{\text{Dense baseline parameters}}$ | Workload-dependent | Workload-dependent |
-| **Machine**   |            **MFU**             |            $\frac{\text{achieved model FLOP/s}}{\text{peak FLOP/s}}$             |   $<$ 30 percent   |   $>$ 50 percent   |
+| **Machine**   |            **MFU**             |            $\frac{\text{achieved model FLOP/s}}{\text{peak FLOP/s}}$             |      $<$ 30%       |      $>$ 50%       |
 
 : **The D·A·M Efficiency Rubric**: Use these three numbers to characterize single-machine maturity. {#tbl-v2-dam-scorecard tbl-colwidths="[13,24,33,15,15]"}
 
@@ -204,7 +207,7 @@ These single-node grades become most useful when they are carried forward into d
 
 While D·A·M diagnoses the *components* of a single node, the $C^3$ Taxonomy (@sec-appdx-c3-taxonomy) diagnoses the *interactions* of the fleet.
 
-1.  **Computation ($C_1$)** inherits the Algorithm and Machine axes, but adds the loss of scaling efficiency.
+1.  **Compute ($C_1$)** inherits the Algorithm and Machine axes, but adds the loss of scaling efficiency.
 2.  **Communication ($C_2$)** inherits the **Data** axis, but is governed by the speed of light and network topology rather than just local I/O.
 3.  **Coordination ($C_3$)** is the "at scale" tie-in that has no single-node equivalent. It represents the coordination tax—the time spent on synchronization, checkpoints, and failure recovery that only emerges at fleet scale.
 
@@ -219,6 +222,6 @@ The D·A·M taxonomy provides the diagnostic baseline for every ML systems analy
 * **Identify the dominant axis**: Decide whether Data, Algorithm, or Machine is the binding constraint before proposing any optimization.
 * **Profile arithmetic intensity**: Arithmetic intensity quantitatively distinguishes between Data-bound and Machine-bound regimes.
 * **Use the iron law**: The iron law transforms vague symptoms into specific term-based bottlenecks.
-* **Grade with the D·A·M scorecard**: The D·A·M Scorecard standardizes "good" performance before moving to fleet scale.
+* **Grade with the scorecard**: The Data-Algorithm-Machine scorecard standardizes "good" performance before moving to fleet scale.
 
 :::

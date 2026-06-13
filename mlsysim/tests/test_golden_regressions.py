@@ -1,8 +1,8 @@
 import pytest
 
 import mlsysim
-from mlsysim.core.constants import Q_
-from mlsysim.engine.solver import (
+from mlsysim.core.units import Q_
+from mlsysim.engine.solvers import (
     DistributedModel,
     EconomicsModel,
     ServingModel,
@@ -57,10 +57,13 @@ def test_golden_training_memory_llama3_8b_h100():
     assert result.weights.m_as("GB") == pytest.approx(16.060000000000002)
     assert result.gradients.m_as("GB") == pytest.approx(16.060000000000002)
     assert result.optimizer_state.m_as("GB") == pytest.approx(96.36)
-    assert result.activations.m_as("GB") == pytest.approx(21.47483648)
+    # 2026-06-06 audit: re-pinned to the Korthikanti-exact selective bound
+    # (34*s*b*h FP16 bytes per layer). The previous 21.47 GB came from a
+    # 10-coefficient model with doubled FP16 bytes that matched no source.
+    assert result.activations.m_as("GB") == pytest.approx(36.507222016)
     assert result.communication_buffers.m_as("GB") == pytest.approx(0.803)
-    assert result.total_memory.m_as("GB") == pytest.approx(150.75783648)
-    assert result.memory_utilization == pytest.approx(1.7550522051751614)
+    assert result.total_memory.m_as("GB") == pytest.approx(165.790222016)
+    assert result.memory_utilization == pytest.approx(1.9300522051751614)
 
 
 def test_golden_serving_llama3_8b_h100():
@@ -99,13 +102,18 @@ def test_golden_distributed_llama3_8b_research_cluster():
     )
 
     assert result.parallelism == {"dp": 8, "tp": 8, "pp": 4, "ep": 1}
-    assert result.step_latency_total.m_as("ms") == pytest.approx(4282.2171449090065)
-    assert result.communication_latency.m_as("ms") == pytest.approx(271.3768817511111)
-    assert result.dp_communication_latency.m_as("ms") == pytest.approx(3.9104722222222223)
-    assert result.tp_communication_latency.m_as("ms") == pytest.approx(267.4664095288889)
+    # 2026-06-10 audit: re-pinned after the interconnect direction-convention
+    # fix. Nodes now feed NVLink's PER-DIRECTION rate (450 GB/s on H100) into
+    # the collective beta terms instead of the 900 GB/s bidirectional total,
+    # so intra-node-bound communication latencies roughly doubled (they were
+    # ~2x optimistic before). findings_provenance.md M1.
+    assert result.step_latency_total.m_as("ms") == pytest.approx(4553.363026660118)
+    assert result.communication_latency.m_as("ms") == pytest.approx(542.5227635022222)
+    assert result.dp_communication_latency.m_as("ms") == pytest.approx(7.813944444444444)
+    assert result.tp_communication_latency.m_as("ms") == pytest.approx(534.7088190577778)
     assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(546.9327631578948)
-    assert result.effective_throughput.m_as("1/s") == pytest.approx(7652.110785403969)
-    assert result.scaling_efficiency == pytest.approx(0.8089051495480867)
+    assert result.effective_throughput.m_as("1/s") == pytest.approx(7196.439161152336)
+    assert result.scaling_efficiency == pytest.approx(0.760736071277139)
     assert result.bubble_fraction == pytest.approx(0.15789473684210525)
 
 
@@ -126,9 +134,54 @@ def test_golden_sustainability_and_economics_research_cluster():
         mfu=0.45,
         infrastructure_multiplier=1.0,
     )
-    assert economics.capex_usd == pytest.approx(7013.698630136986)
+    assert economics.capex_usd == pytest.approx(5844.748858447489)
     assert economics.opex_energy_usd == pytest.approx(355.48692480000005)
-    assert economics.opex_maintenance_usd == pytest.approx(1052.054794520548)
-    assert economics.total_opex_usd == pytest.approx(1407.541719320548)
-    assert economics.tco_usd == pytest.approx(8421.240349457534)
+    assert economics.opex_maintenance_usd == pytest.approx(876.7123287671233)
+    assert economics.total_opex_usd == pytest.approx(1232.1992535671234)
+    assert economics.tco_usd == pytest.approx(7076.948112014612)
     assert economics.carbon_footprint_kg == pytest.approx(1270.8657561600003)
+
+
+def test_golden_engine_utilization_and_energy_resnet50_a100():
+    """2026-06-10 audit (B6): absolute pins for mfu/hfu/energy — previously
+    only bounds/orderings were asserted, so a recompute-inflated MFU, a
+    phantom HFU ratio, or a double-counted energy term passed the suite."""
+    from mlsysim import Models, Hardware
+    from mlsysim.engine.engine import Engine
+
+    p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
+    assert p.mfu == pytest.approx(0.024217670095535795, rel=1e-9)
+    assert p.hfu == pytest.approx(p.mfu, rel=1e-12)  # no recompute -> identical
+    assert p.energy.m_as("J") == pytest.approx(0.06879405314319488, rel=1e-9)
+    assert p.overhead_dominated is True
+
+    # Batch-traffic heuristic (weights x (1 + 0.1 x B)) pinned at batch 32:
+    # intensity was previously pinned only implicitly at batch=1.
+    p32 = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=32)
+    assert p32.arithmetic_intensity.magnitude == pytest.approx(610.1190476190476, rel=1e-9)
+
+
+def test_golden_engine_non_transformer_training_memory():
+    """2026-06-10 audit (B3): non-Transformer training fallback = weights +
+    gradients + Adam state (12 B/param), not the old 3x-weights heuristic
+    that understated mixed-precision Adam ~2.7x. ResNet-50 fp16:
+    25.6e6 params x (2 + 2 + 12) B = 0.4096 GB."""
+    from mlsysim import Models, Hardware
+    from mlsysim.engine.engine import Engine
+
+    p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100,
+                     batch_size=8, is_training=True)
+    assert p.memory_footprint.m_as("GB") == pytest.approx(0.4096, rel=1e-6)
+
+
+def test_reference_hardware_tflops_matches_registry():
+    """2026-06-10 audit (discipline): cal.REFERENCE_HARDWARE_TFLOPS is a
+    convenience scalar duplicating the H100 SXM FP16 dense peak. Cross-pin it
+    to the registry so the two sources cannot drift apart silently."""
+    from mlsysim import Hardware
+    from mlsysim.engine import calibration as cal
+
+    # H100's default peak_flops IS the FP16 dense figure (989 TFLOP/s);
+    # fp16 has no explicit precision_flops entry on this device.
+    h100_fp16_tflops = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOP/s")
+    assert cal.REFERENCE_HARDWARE_TFLOPS == pytest.approx(h100_fp16_tflops, rel=1e-9)

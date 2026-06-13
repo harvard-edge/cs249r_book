@@ -112,6 +112,7 @@ there is a migration plan and a removal date.
 
 ```bash
 ./binder build pdf --vol1          # Build Volume I PDF
+./binder build pdf --vol1 --layout # Build Volume I PDF, then emit auto-layout plan
 ./binder build html --vol2         # Build Volume II website
 ./binder build pdf intro           # Single chapter PDF
 ./binder reset pdf --vol1          # Reset Volume I PDF YAML after scoped builds
@@ -119,6 +120,34 @@ there is a migration plan and a removal date.
 ./binder preview                   # Live dev server (full book)
 ./binder preview intro             # Live dev server (single chapter)
 ```
+
+### Layout (PDF auto-layout)
+
+Layout is a rendered-PDF workflow. Keep the high-level planner and the
+low-level scanners separate:
+
+```bash
+./binder layout --vol1                     # Build PDF, then emit one layout plan
+./binder layout --vol1 --no-build          # Reuse existing PDF for the plan
+./binder layout --vol1 --no-build --json /tmp/layout-plan.json
+./binder layout check <pdf> --csv          # Main-flow whitespace scanner only
+./binder layout margins <pdf> --csv        # Native margin-geometry scanner only
+```
+
+Implementation contract:
+
+- `commands/layout.py` owns both the high-level planner and the scanner
+  primitives. Avoid one-off scripts for layout repair logic.
+- The planner emits rows with `phase`, `channel`, `strategy`, `confidence`,
+  `automatable`, `deferred`, `ready`, source coordinates, and `suggested_fix`.
+- `1-main-flow` is always repaired before `2-margin-calibration`; margin rows
+  can be reported while main flow is unstable, but they are deferred.
+- `main-flow` strategies cover callouts, tables, figures, paragraphs, and
+  structural accepts.
+- `margin-geometry` strategies cover footnote `[offset=...]`, in-block
+  `.column-margin` `\vspace*`, and margin stack solving.
+- Source-writing should be explicit and iterative: plan, apply only ready
+  high-confidence rows in the active phase, rebuild, re-plan.
 
 ### Check (Validation)
 
@@ -202,7 +231,7 @@ Structural exceptions, all documented inline in `.pre-commit-config.yaml`:
 
 - **Format-vs-content split** (`book-check-tables` runs `binder check tables` for content; `book-check-tables-format` runs `binder format tables --check` for whitespace) — these are different binder commands.
 
-No inline bash scripts. One CLI, one validation framework, one error format. Retired-hook history lives in `.pre-commit-history.md` so the live config is not a graveyard.
+No inline bash scripts. One CLI, one validation framework, one error format. Retired-hook context belongs in the commit or PR that removes the hook, not in a repo-side graveyard file.
 
 ## Adding a new check
 
@@ -210,7 +239,7 @@ The flow that a future maintainer should mimic:
 
 1. **Implement the runner** in `book/cli/commands/validate.py` as `_run_<scope>(self, root: Path) -> ValidationRunResult`. For per-file regex checks, walk `self._qmd_files(root)`. For graph / corpus checks, build the model once and emit `ValidationIssue` entries. If the logic is reusable or more than a few lines, put it in `book/cli/checks/` and have the runner adapt those structured results to Binder's `ValidationIssue` format.
 2. **Register the scope** by adding a `Scope("<name>", "_run_<scope>", default=...)` entry to the right group in the `GROUPS` dict at the top of the file. Mark `default=False` if the scope still fails on dev or is intentionally opt-in.
-3. **Document examples in the code and CLI docs**: every new check module should include bad/good source examples in its module docstring, one example per error code. User-facing scopes should also add the same examples to [`book/docs/BINDER.md`](../docs/BINDER.md) or the relevant Binder doc page. The goal is that a maintainer, author, or LLM can open either the checker or CLI docs and immediately see what mistake it is looking for and what the canonical fix looks like.
+3. **Document examples in the code and CLI docs**: every new check module should include bad/good source examples in its module docstring, one example per error code. User-facing scopes should also add the same examples to [`book/docs/BINDER.md`](../docs/BINDER.md) or the relevant Binder doc page. The goal is that a maintainer, author, or automated repair pass can open either the checker or CLI docs and immediately see what mistake it is looking for and what the canonical fix looks like.
 4. **Surface any new flags** in the argparse block in `ValidateCommand.run()`, and dispatch them in `_run_group` if the runner needs them as kwargs.
 5. **Stop.** Pre-commit picks up the new scope automatically because the existing `book-check-<group>` hook already runs every default-True scope in the group. You only add a new pre-commit hook for a brand-new group, or to pass a scope-specific flag (the vol1 / format-check exceptions above).
 

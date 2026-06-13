@@ -375,8 +375,8 @@
       }
     },
     {
-      "section_id": "#sec-distributed-training-advanced-primitives",
-      "section_title": "Advanced Training Primitives",
+      "section_id": "#sec-distributed-training-fp8",
+      "section_title": "FP8 for Distributed Training",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
@@ -486,8 +486,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Blackwell-era accelerators offer roughly double the previous NVLink bandwidth per GPU and introduce denser intra-rack domains (NVL72). Explain how these hardware changes shift the optimal 3D parallelism mix for a 400B-parameter model, and identify the new bottleneck.",
-            "answer": "Faster and wider NVLink domains let the tensor-parallel group grow past the previous 8-GPU ceiling (toward TP=16 or TP=32 inside a rack), which both reduces per-stage memory and cuts pipeline depth because more of the model fits in the fast domain. Shorter pipelines shrink the bubble and raise MFU. Larger TP groups also let the team shift optimizer-state sharding from DP-wide ZeRO to TP-wide tensor sharding, further reducing DP's gradient-AllReduce volume. The bottleneck shifts upward: with more capacity absorbed inside the rack, the binding constraint moves to the inter-rack and inter-pod fabric, making optical networks and cross-pod topology the next optimization front. The practical consequence is that hardware generations do not just relax old constraints — they move the location of the binding constraint, changing which team (kernel, collective, fabric) makes the next throughput improvement.",
+            "question": "Blackwell-era accelerators offer roughly double the previous NVLink bandwidth per GPU and introduce faster die-to-die interconnects. Explain how these hardware changes shift the optimal 3D parallelism mix for a 400B-parameter model, and identify the new bottleneck.",
+            "answer": "Faster and wider NVLink domains let the tensor-parallel group grow past the previous 8-GPU ceiling to span multiple nodes, which both reduces per-stage memory and cuts pipeline depth because more of the model fits in the fast domain. Shorter pipelines shrink the bubble and raise MFU. The bottleneck shifts upward: with more capacity absorbed locally, the binding constraint moves to the inter-rack and inter-pod fabric, making rail-optimized topologies and all-to-all optimization the next front. The practical consequence is that hardware generations do not just relax old constraints — they move the location of the binding constraint, changing which team (kernel, collective, fabric) makes the next throughput improvement.",
             "learning_objective": "Analyze how next-generation interconnect changes shift the optimal 3D parallelism mix and relocate the binding system constraint"
           }
         ]
@@ -637,9 +637,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Compare why model parallelism and pipeline parallelism require more explicit framework support than ordinary data parallelism, and give one concrete example of an API surface each exposes that DDP does not.",
-            "answer": "Data parallelism operates on the existing computation graph — replicate it, reduce gradients at the end — so the wrapper does not need to know where tensors live. Model and pipeline parallelism alter the computation graph itself: the model's layers must live on specific devices, and activations must move between devices in a specific order. That structural knowledge cannot be inferred from a black-box forward() call. Concrete examples: model parallelism exposes an explicit device_mesh or tensor-layout API (for example, torch.distributed.tensor.DTensor's placement spec, or Megatron's ColumnParallelLinear / RowParallelLinear layer classes) that the engineer uses to state which slice of each weight matrix lives on which device; pipeline parallelism exposes a pipeline-schedule API (for example, PyTorch's PipelineStage and 1F1B or interleaved schedule builders) that decides how microbatches flow forward and backward through stages. Both abstractions surface hardware and communication structure that a DDP wrapper hides. The practical consequence is that model-parallel code is less portable across frameworks and requires the engineer to think in terms of the cluster's topology, not just the model's mathematical form.",
-            "learning_objective": "Compare the abstraction demands of data-parallel APIs with explicit model- and pipeline-parallel APIs"
+            "question": "Explain why model parallelism and pipeline parallelism require more explicit framework abstractions than ordinary data parallelism, and what structural knowledge the engineer must provide to use them.",
+            "answer": "Data parallelism operates on the existing computation graph by wrapping it and reducing gradients at the end, so the framework does not need to know where individual tensors live. Model and pipeline parallelism alter the graph itself: the framework must manage cross-device tensor placement and the sequential flow between partitions. To use these abstractions, the engineer must provide explicit device assignments, such as specifying which layers reside on which devices for pipeline parallelism, or replacing standard layers with column-parallel and row-parallel variants for tensor parallelism. The practical consequence is that the engineer must reason about pipeline bubbles, load balancing, and the physical cluster topology, rather than hiding the cluster behind an opaque wrapper.",
+            "learning_objective": "Compare the abstraction demands of data-parallel wrappers with the explicit structural knowledge required by model- and pipeline-parallel frameworks"
           },
           {
             "question_type": "MCQ",
@@ -690,7 +690,7 @@
           {
             "question_type": "SHORT",
             "question": "A team takes the hyperparameters (learning rate, warmup, momentum, weight decay) that worked on an 8-GPU run with global batch 512 and applies them unchanged to a 256-GPU run with global batch 16,384. Why is this unsafe, and what should they change?",
-            "answer": "Scaling out 32$\\times$ grows the global batch by the same factor, which changes three things at once: per-step gradient noise shrinks as 1/√batch, so the optimizer sees less stochastic exploration; the total number of parameter updates per epoch falls by 32$\\times$, so each update must cover proportionally more of the loss surface; and the per-step communication regime shifts from compute-bound to communication-bound, which can change the effective step cadence. Without retuning, the model undertravels in weight space per epoch and can diverge early. The default remediation is linear learning-rate scaling (multiply by 32) paired with an extended warmup (typically 1–10 percent of total steps) so Adam moments build up before the full scaled rate applies. If the new batch pushes past the critical batch size, linear scaling needs to be replaced or dampened (square-root scaling, LAMB-style layer-wise adaptation) and weight decay may need adjustment. The practical consequence is that 'same model, more GPUs' never means 'same hyperparameters, more GPUs' — optimization must be revalidated at the target scale.",
+            "answer": "Scaling out 32$\\times$ grows the global batch by the same factor, which changes three things at once: per-step gradient noise shrinks as $1/\\sqrt{\\text{batch}}$, so the optimizer sees less stochastic exploration; the total number of parameter updates per epoch falls by 32$\\times$, so each update must cover proportionally more of the loss surface; and the per-step communication regime shifts from compute-bound to communication-bound, which can change the effective step cadence. Without retuning, the model undertravels in weight space per epoch and can diverge early. The default remediation is linear learning-rate scaling (multiply by 32) paired with an extended warmup (typically 1–10 percent of total steps) so Adam moments build up before the full scaled rate applies. If the new batch pushes past the critical batch size, linear scaling needs to be replaced or dampened (square-root scaling, LAMB-style layer-wise adaptation) and weight decay may need adjustment. The practical consequence is that 'same model, more GPUs' never means 'same hyperparameters, more GPUs' — optimization must be revalidated at the target scale.",
             "learning_objective": "Explain why optimizer settings must be revalidated when scaling a run to a much larger cluster"
           },
           {

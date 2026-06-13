@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from book.cli.checks.lego_prose_literals import check_file as check_prose_literals
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "book" / "tools" / "audit"))
 
@@ -55,7 +57,10 @@ def test_flags_fmt_count_precision_zero_boilerplate(tmp_path: Path):
     qmd = _write_qmd(
         tmp_path,
         """```{python}
-# │ Exports: X.params_str
+# │ Context: Example prose immediately below.
+# │ Goal: Exercise scaled-count precision policy.
+# │ Show: Parameter-count display value.
+# │ How: Format a count-like scalar.
 class X:
     params_str = fmt_count(params, scale="B", precision=0, commas=False)
 ```""",
@@ -67,7 +72,10 @@ def test_flags_formatted_string_reused_as_float(tmp_path: Path):
     qmd = _write_qmd(
         tmp_path,
         """```{python}
-# │ Exports: X.t_str
+# │ Context: Example prose immediately below.
+# │ Goal: Exercise formatted-string reuse detection.
+# │ Show: Transfer-time display value.
+# │ How: Reuse a formatted string in arithmetic.
 class X:
     bandwidth_str = fmt(bandwidth_gbs, precision=0)
     seconds = payload_gb / float(bandwidth_str)
@@ -75,3 +83,34 @@ class X:
 ```""",
     )
     assert "QF007" in _rules(qmd)
+
+
+def test_prose_literals_flags_inline_code_suppression(tmp_path: Path):
+    inline_marker = "lego" + "-ok: illustrative input"
+    qmd = _write_qmd(
+        tmp_path,
+        f"""```{{python}}
+class X:
+    latency = 0.5  # {inline_marker}
+```""",
+    )
+    issues = check_prose_literals(qmd)
+    assert any("inline LEGO suppression" in labels for _, _, labels in issues)
+
+
+def test_prose_literals_allows_block_suppression_marker(tmp_path: Path):
+    qmd = _write_qmd(
+        tmp_path,
+        """::: {#exmp-demo .callout-example}
+```{python}
+class X:
+    value = 1
+```
+<!-- lego-ok-block: narrative exception queued for review -->
+This passage uses 70 percent as a qualitative range.
+<!-- end lego-ok-block -->
+:::
+""",
+    )
+    issues = check_prose_literals(qmd, strict=True)
+    assert not any("inline LEGO suppression" in labels for _, _, labels in issues)

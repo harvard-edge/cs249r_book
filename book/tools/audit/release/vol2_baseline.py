@@ -6,9 +6,8 @@ author. This script just records the inventory of HIGH/MEDIUM/LOW
 figures per volume and chapter so the coverage report can quote the
 baseline numbers without re-running the audit.
 
-Source: ``book/quarto/_build/figure_triage_priorities.json`` lives in
-the user's primary worktree, not in this audit worktree (the ``_build``
-directory is git-ignored), so we read it via absolute path.
+Source: ``book/quarto/_build/figure_triage_priorities.json`` lives under the
+current repo checkout's generated build directory.
 
 Output: ``ledgers/vol2-figure-audit-pointers.json`` (and a vol1 sibling
 for completeness).
@@ -18,13 +17,15 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from collections import Counter, defaultdict
-from pathlib import Path
 
-TRIAGE = Path("/Users/VJ/GitHub/MLSysBook/book/quarto/_build/figure_triage_priorities.json")
-QUARTO_ROOT = Path("/Users/VJ/GitHub/MLSysBook-release-audit/book/quarto/contents")
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers"
+try:
+    from .paths import LEDGER_DIR, QUARTO_ROOT, REPO_ROOT
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import LEDGER_DIR, QUARTO_ROOT, REPO_ROOT
+
+TRIAGE = REPO_ROOT / "book/quarto/_build/figure_triage_priorities.json"
+OUT_DIR = LEDGER_DIR
 
 
 def find_label_volume_chapter(label: str) -> tuple[str | None, str | None, str | None]:
@@ -53,9 +54,8 @@ def main() -> None:
 
     if not TRIAGE.exists():
         raise FileNotFoundError(
-            f"Figure triage file missing at {TRIAGE}. The audit worktree's "
-            f"_build dir is gitignored; this file is read via absolute path "
-            f"from the primary worktree."
+            f"Figure triage file missing at {TRIAGE}. Run the figure triage "
+            f"step in this checkout first; _build is gitignored."
         )
 
     triage = json.loads(TRIAGE.read_text())
@@ -108,8 +108,8 @@ def main() -> None:
         "verification_status": (
             "Figure caption verification is being run separately by the "
             "author. See the project figure-audit fix list "
-            "in the primary worktree (note: file may not exist in audit "
-            "worktree because _reviews is gitignored)."
+            "in the active checkout (note: file may not exist because "
+            "_reviews is gitignored)."
         ),
         "unresolved_labels_sample": unresolved[:20],
     }

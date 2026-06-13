@@ -1,83 +1,38 @@
+import importlib
+
+import pytest
+
 import mlsysim
 import mlsysim.ops as ops
 import mlsysim.solvers as public_solvers
-from mlsysim.engine import solver
-from mlsysim.engine.solvers import (
-    BatchingOptimizer,
-    CheckpointModel,
-    CompressionModel,
-    ContinuousBatchingModel,
-    DataModel,
-    DistributedModel,
-    EconomicsModel,
-    EfficiencyModel,
-    InferenceScalingModel,
-    MoERoutingModel,
-    NetworkRooflineModel,
-    OrchestrationModel,
-    ParallelismOptimizer,
-    PlacementOptimizer,
-    ReliabilityModel,
-    ResponsibleEngineeringModel,
-    ScalingModel,
-    SensitivitySolver,
-    ServingCapacityModel,
-    ServingModel,
-    SingleNodeModel,
-    SynthesisSolver,
-    SustainabilityModel,
-    TailLatencyModel,
-    TopologyModel,
-    TransformationModel,
-    TrainingMemoryModel,
-    WeightStreamingModel,
-)
+import mlsysim.engine.solvers as engine_solvers
 
 
-def test_domain_solver_imports_preserve_existing_classes():
-    assert SingleNodeModel is solver.SingleNodeModel
-    assert NetworkRooflineModel is solver.NetworkRooflineModel
-    assert EfficiencyModel is solver.EfficiencyModel
-    assert SensitivitySolver is solver.SensitivitySolver
-    assert SynthesisSolver is solver.SynthesisSolver
-    assert DistributedModel is solver.DistributedModel
-    assert MoERoutingModel is solver.MoERoutingModel
-    assert TopologyModel is solver.TopologyModel
-    assert ParallelismOptimizer is solver.ParallelismOptimizer
-    assert ReliabilityModel is solver.ReliabilityModel
-    assert ServingModel is solver.ServingModel
-    assert ServingCapacityModel is solver.ServingCapacityModel
-    assert ContinuousBatchingModel is solver.ContinuousBatchingModel
-    assert WeightStreamingModel is solver.WeightStreamingModel
-    assert TailLatencyModel is solver.TailLatencyModel
-    assert InferenceScalingModel is solver.InferenceScalingModel
-    assert BatchingOptimizer is solver.BatchingOptimizer
-    assert TrainingMemoryModel is solver.TrainingMemoryModel
-    assert CheckpointModel is solver.CheckpointModel
-    assert ScalingModel is solver.ScalingModel
-    assert SustainabilityModel is solver.SustainabilityModel
-    assert EconomicsModel is solver.EconomicsModel
-    assert ResponsibleEngineeringModel is solver.ResponsibleEngineeringModel
-    assert PlacementOptimizer is solver.PlacementOptimizer
-    assert DataModel is solver.DataModel
-    assert TransformationModel is solver.TransformationModel
-    assert OrchestrationModel is solver.OrchestrationModel
-    assert CompressionModel is solver.CompressionModel
+def test_engine_solver_shim_stays_deleted():
+    # 2026-06-06 no-backward-compat policy: the middle re-export module
+    # (mlsysim.engine.solver) was removed; mlsysim.engine.solvers is the
+    # canonical implementation package and mlsysim.solvers the public path.
+    # This pin keeps the shim from quietly coming back.
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("mlsysim.engine.solver")
+
+
+def test_public_solvers_mirror_engine_solvers_exactly():
+    # mlsysim.solvers derives mechanically from engine.solvers.__all__, so the
+    # two surfaces must expose identical names bound to identical objects.
+    assert sorted(public_solvers.__all__) == sorted(engine_solvers.__all__)
+    for name in engine_solvers.__all__:
+        assert getattr(public_solvers, name) is getattr(engine_solvers, name)
 
 
 def test_solver_implementations_live_in_domain_modules():
-    assert solver.SingleNodeModel.__module__.endswith(".solvers.performance")
-    assert solver.DistributedModel.__module__.endswith(".solvers.distributed")
-    assert solver.TrainingMemoryModel.__module__.endswith(".solvers.training")
-    assert solver.ServingModel.__module__.endswith(".solvers.serving")
-    assert solver.EconomicsModel.__module__.endswith(".solvers.economics")
-    assert solver.DataModel.__module__.endswith(".solvers.data")
-    assert solver.CompressionModel.__module__.endswith(".solvers.compression")
-
-
-def test_public_solver_module_exports_protocol_and_solver_classes():
-    for name in solver.__all__:
-        assert getattr(public_solvers, name) is getattr(solver, name)
+    assert engine_solvers.SingleNodeModel.__module__.endswith(".solvers.performance")
+    assert engine_solvers.DistributedModel.__module__.endswith(".solvers.distributed")
+    assert engine_solvers.TrainingMemoryModel.__module__.endswith(".solvers.training")
+    assert engine_solvers.ServingModel.__module__.endswith(".solvers.serving")
+    assert engine_solvers.EconomicsModel.__module__.endswith(".solvers.economics")
+    assert engine_solvers.DataModel.__module__.endswith(".solvers.data")
+    assert engine_solvers.CompressionModel.__module__.endswith(".solvers.compression")
 
 
 def test_package_root_does_not_reexport_solver_aliases():

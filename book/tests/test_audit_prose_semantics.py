@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "book" / "tools" / "audit" / "fmt"))
 
 import audit_prose_semantics as A  # noqa: E402
+import audit_prose as P  # noqa: E402
 
 
 def codes_for(text: str) -> set[str]:
@@ -56,3 +57,28 @@ def test_legitimate_sentences_stay_clean():
     assert codes_for("about 3× smaller footprint") == set()
     # legitimate display math on a ref-bearing line must not be flagged
     assert codes_for(r"Stall % = \frac{250 - 200}{250} = 20%") == set()
+
+
+def test_list_index_inline_refs_resolve_in_prose_preview(tmp_path):
+    qmd = tmp_path / "indexed.qmd"
+    qmd.write_text(
+        """```{python}
+#| echo: false
+class C:
+    vals_str = ["5 GB", "10 GB"]
+```
+
+The first cache size is `{python} C.vals_str[0]`.
+""",
+        encoding="utf-8",
+    )
+
+    previews = P.audit_prose_previews(qmd)
+    assert len(previews) == 1
+    assert previews[0].refs == ["C.vals_str[0]"]
+    assert "5 GB" in previews[0].preview
+    assert "<MISSING:" not in previews[0].preview
+
+    findings, failure = A.scan_chapter(qmd)
+    assert failure is None
+    assert findings == []

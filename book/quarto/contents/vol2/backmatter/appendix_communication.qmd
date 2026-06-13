@@ -2,15 +2,13 @@
 engine: jupyter
 ---
 
-# Communication Foundations {#sec-appdx-communication-foundations}
+# Communication {#sec-appdx-communication-foundations}
 
 ## Purpose {.unnumbered}
 
-_***What* communication primitives bind the fleet together, and *how* do we predict their cost before running a single experiment?_
+_What communication primitives bind the fleet together, and how do we predict their cost before running a single experiment?_
 
-Distributed ML training spends a surprising fraction of wall time not computing, but communicating. A large distributed training run may dedicate a substantial fraction of every iteration to synchronizing gradients, redistributing activations, or shuffling expert tokens. When that communication overhead is the bottleneck, no amount of faster arithmetic will help. The question shifts from "how many FLOPs?" to "how many bytes, across what topology, at what latency?"
-
-This appendix collects the communication cost models that answer those questions quantitatively. It starts with the foundational $\alpha$-$\beta$ model---the "Roofline for networks"---then derives the cost of every collective operation used in distributed training, analyzes pipeline bubble overhead, and closes with the economics of gradient compression. These models support the distributed strategies in @sec-distributed-training-systems, the collective algorithms in @sec-collective-communication, the fault tolerance mechanisms in @sec-fault-tolerance-reliability, and the performance analysis in @sec-performance-engineering. Within the C$^3$ taxonomy (@sec-appdx-c3-taxonomy), this appendix develops the Communication ($C_2$) axis.
+Distributed ML training spends a surprising fraction of wall time not computing, but communicating. A large distributed training run may dedicate a substantial fraction of every iteration to synchronizing gradients, redistributing activations, or shuffling expert tokens. When that communication overhead is the bottleneck, no amount of faster arithmetic will help. The question shifts from "how many FLOPs?" to "how many bytes, across what topology, at what latency?" This appendix collects the communication cost models that answer those questions quantitatively: startup-latency and bandwidth models, the cost of every collective operation used in distributed training, pipeline bubble overhead, and the economics of gradient compression. These models support the distributed strategies, collective algorithms, fault tolerance mechanisms, and performance analysis used throughout the volume. In C³ terms, the appendix develops the communication axis, the cost of moving bytes across a fleet.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -29,20 +27,24 @@ Conventions used here follow the book-wide notation. We use $\alpha$ for per-mes
 #| echo: false
 
 from mlsysim import *
-from mlsysim.core.constants import *
-#| label: appendix-comm-alpha-beta
+from mlsysim.core.units import *
+
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ## The α-β Communication Model
 # │ Goal: α-β table, crossover callout, and perspective ring-N anchor.
-# │ Exports: CommAlphaBeta.*_str
 from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr, fmt_count, fmt_qty, fmt_qty_int, fmt_time
 
-from mlsysim.core.constants import (
-    GB, KB, microsecond, nanosecond, second,
+from mlsysim.core.units import (
+    GB,
+    KB,
+    microsecond,
+    nanosecond,
+    second,
 )
 
 class CommAlphaBeta:
     from mlsysim import Hardware
+
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     ib_hdr = Systems.Fabrics.InfiniBand_HDR
     roce = Systems.Fabrics.Ethernet_100G
@@ -68,14 +70,14 @@ class CommAlphaBeta:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     ib_ndr_alpha_us_str = fmt_time(ib_ndr_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
-    ib_ndr_beta_gb_per_s_str = fmt_qty(ib_ndr_beta, GB/second, precision=0, commas=False)
+    ib_ndr_beta_gb_per_s_str = fmt_qty(ib_ndr_beta, GB / second, precision=0, commas=False)
     ib_hdr_alpha_us_str = fmt_time(ib_hdr_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
-    ib_hdr_beta_gb_per_s_str = fmt_qty(ib_hdr_beta, GB/second, precision=0, commas=False)
+    ib_hdr_beta_gb_per_s_str = fmt_qty(ib_hdr_beta, GB / second, precision=0, commas=False)
     roce_alpha_us_str = fmt_time(roce_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
-    roce_beta_gb_per_s_str = fmt_qty(roce_beta, GB/second, precision=1, commas=False)
+    roce_beta_gb_per_s_str = fmt_qty(roce_beta, GB / second, precision=1, commas=False)
     tcp_alpha_us_str = fmt_time(tcp_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
-    nvlink_bw_gb_per_s_str = fmt_qty(nvlink_h100_bw, GB/second, precision=0, commas=False)
-    pcie_bw_gb_per_s_str = fmt_qty(pcie_gen5_bw, GB/second, precision=0, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_qty(nvlink_h100_bw, GB / second, precision=0, commas=False)
+    pcie_bw_gb_per_s_str = fmt_qty(pcie_gen5_bw, GB / second, precision=0, commas=False)
     nvlink_lat_ns_str = fmt_time(nvlink_latency, unit=nanosecond, precision=0, commas=False)
     pcie_lat_ns_str = fmt_time(pcie_latency, unit=nanosecond, precision=0, commas=False)
     crossover_kb_str = fmt_qty_int(crossover, KB, commas=False)
@@ -120,7 +122,7 @@ The model decomposes every transfer into exactly two costs: a per-message tax ($
 
 The $\alpha$-$\beta$ model reveals two distinct operating regimes. For small messages, the startup latency $\alpha$ dominates---the link spends most of its time *starting* transfers, not *sustaining* them. For large messages, the bandwidth term $n/\beta$ dominates, and the startup cost becomes negligible.
 
-The **crossover message size**\index{LogGP model!crossover message size} $n^*$ is the point where both terms contribute equally:
+The **crossover message size**\index{LogGP model!crossover message size} $n^*$, defined by @eq-crossover, is the point where both terms contribute equally:
 
 $$ n^* = \alpha \times \beta $$ {#eq-crossover}
 
@@ -185,30 +187,25 @@ The tree algorithm trades bandwidth efficiency for latency efficiency: the laten
 ```{python}
 #| echo: false
 
-#| label: appendix-comm-collectives
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ## Collective Operation Complexity — ring vs. tree callout
 # │ Goal: Ring vs. tree AllReduce worked example for 1 GB gradient.
-# │ Exports: CommCollectives.*_str
 from mlsysim.fmt import fmt_int, fmt, check, fmt_params, fmt_qty, fmt_time
 
-from mlsysim.core.constants import BILLION, GB, MILLION, microsecond, ms, param, second
+from mlsysim.core.units import BILLION, GB, MILLION, microsecond, ms, param, second
 from mlsysim.physics import calc_ring_allreduce_time, calc_tree_allreduce_time
 
 class CommCollectives:
     from mlsysim import Hardware
+
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     ring_n_gpus = 256
     ring_msg = 1 * GB
     ib_ndr_alpha_us = Systems.Fabrics.InfiniBand_NDR.latency_us
     ib_ndr_beta = ib_ndr.bandwidth
 
-    ring_time = calc_ring_allreduce_time(
-        ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond
-    )
-    tree_time = calc_tree_allreduce_time(
-        ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond
-    )
+    ring_time = calc_ring_allreduce_time(ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond)
+    tree_time = calc_tree_allreduce_time(ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond)
 
     check(ring_time < tree_time, "Ring should be faster than tree for 1 GB message")
     min_transfer = ring_msg / ib_ndr_beta
@@ -217,7 +214,7 @@ class CommCollectives:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     ring_n_str = fmt(ring_n_gpus, precision=0, commas=False)
     ib_ndr_alpha_us_str = fmt_time(ib_ndr_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
-    ib_ndr_beta_gb_per_s_str = fmt_qty(ib_ndr_beta, GB/second, precision=0, commas=False)
+    ib_ndr_beta_gb_per_s_str = fmt_qty(ib_ndr_beta, GB / second, precision=0, commas=False)
     ring_msg_gb_str = fmt_qty(ring_msg, GB, precision=0, commas=False)
     ring_msg_params = int(ring_msg.to(GB).magnitude * BILLION / 2)
     ring_msg_params_m_str = fmt_params(ring_msg_params * param, scale="M", precision=0, commas=False)
@@ -339,29 +336,31 @@ The decision boundary between ring and tree depends on message size:
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ## Algorithm Selection — hierarchical AllReduce
 # │ Goal: NVLink vs. IB bandwidth ratio for hierarchical collectives.
-# │ Exports: CommAlgorithmSelection.*_str
 from mlsysim.fmt import fmt, check, fmt_qty
-from mlsysim import Systems
-from mlsysim.core.constants import GB, second
-Systems.Nodes.DGX_H100.accelerators_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+
 class CommAlgorithmSelection:
     from mlsysim import Hardware
-    ib_ndr_beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth
-    nvlink_to_ndr_ratio = (nvlink_h100_bw / ib_ndr_beta).to_base_units().magnitude
 
-    check(abs(nvlink_to_ndr_ratio - 18) < 1e-9, "NVLink/NDR ratio should be 18x")
+    ib_ndr_beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port (per direction)
+    nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s bidirectional aggregate (spec)
+    nvlink_h100_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way
+    # Like-with-like cliff, both per-direction: 450/50 = 9x. (Comparing the
+    # 900 GB/s bidirectional total against a per-port rate would give a
+    # spurious 18x by mixing conventions.)
+    nvlink_to_ndr_ratio = (nvlink_h100_perdir / ib_ndr_beta).to_base_units().magnitude
+
+    check(abs(nvlink_to_ndr_ratio - 9) < 1e-9, "Per-direction NVLink/NDR ratio should be 9x")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    nvlink_bw_gb_per_s_str = fmt_qty(nvlink_h100_bw, GB/second, precision=0, commas=False)
-    ib_ndr_beta_gb_per_s_str = fmt_qty(ib_ndr_beta, GB/second, precision=0, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_qty(nvlink_h100_bw, GB / second, precision=0, commas=False)
+    ib_ndr_beta_gb_per_s_str = fmt_qty(ib_ndr_beta, GB / second, precision=0, commas=False)
     gpus_per_host_str = fmt_count(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
     nvlink_to_ndr_ratio_mult_str = fmt_multiple(nvlink_to_ndr_ratio, precision=0, commas=False)
 ```
 
 Modern clusters have a two-level topology: GPUs within a node are connected by NVLink (`{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str`), while nodes are connected by InfiniBand (`{python} CommAlgorithmSelection.ib_ndr_beta_gb_per_s_str`). Hierarchical AllReduce exploits this asymmetry in three phases:
 
-1. **Intra-node reduce** (NVLink): Each node reduces its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs to a single result using NVLink's `{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str` bandwidth. This is fast because NVLink is `{python} CommAlgorithmSelection.nvlink_to_ndr_ratio_mult_str` faster than InfiniBand NDR.
+1. **Intra-node reduce** (NVLink): Each node reduces its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs to a single result using NVLink's `{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str` bandwidth. This is fast because NVLink's per-direction rate is `{python} CommAlgorithmSelection.nvlink_to_ndr_ratio_mult_str` that of an InfiniBand NDR port.
 2. **Inter-node AllReduce** (InfiniBand): The per-node results are all-reduced across nodes. Only one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs participates, so the inter-node ring has one-eighth as many participants as a flat GPU-level ring.
 3. **Intra-node broadcast** (NVLink): Each node broadcasts the global result to its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs.
 
@@ -379,7 +378,7 @@ Pipeline parallelism splits a model across multiple GPUs so that each GPU holds 
 
 ### Bubble fraction {#sec-appdx-comm-foundations-bubble-fraction}
 
-In a pipeline with $p$ stages and $m$ microbatches, the **bubble fraction**\index{Pipeline!bubble fraction} is the proportion of total GPU-time spent idle:
+In a pipeline with $p$ stages and $m$ microbatches, @eq-pipeline-bubble defines the **bubble fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
 
 $$ b = \frac{p - 1}{p - 1 + m} $$ {#eq-pipeline-bubble}
 
@@ -397,7 +396,6 @@ Rule of thumb: Keeping bubble overhead at or below 20 percent requires $m \geq 4
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ## Pipeline Arithmetic — bubble fraction table
 # │ Goal: Pipeline bubble fractions and interleaved reduction example.
-# │ Exports: CommPipeline.*_str
 from mlsysim.fmt import fmt, check
 from mlsysim.physics import calc_pipeline_bubble
 
@@ -474,31 +472,26 @@ In the bandwidth-dominated regime ($M \gg n^*$), the communication time scales l
 ```{python}
 #| echo: false
 
-#| label: appendix-comm-compression
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ## Compression Economics — break-even callout and table
 # │ Goal: Top-k compression worked example and break-even thresholds.
-# │ Exports: CommCompression.*_str
 from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_time
 
-from mlsysim.core.constants import GB, microsecond, ms
+from mlsysim.core.units import GB, microsecond, ms
 from mlsysim.physics import calc_ring_allreduce_time
 
 class CommCompression:
     from mlsysim import Hardware
+
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     ring_n_gpus = 256
     ring_msg = 1 * GB
     compress_ratio = 64
     compress_overhead = 2.0 * ms
 
-    ring_time = calc_ring_allreduce_time(
-        ring_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond
-    )
+    ring_time = calc_ring_allreduce_time(ring_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond)
     compressed_msg = ring_msg / compress_ratio
-    compressed_comm = calc_ring_allreduce_time(
-        compressed_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond
-    )
+    compressed_comm = calc_ring_allreduce_time(compressed_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond)
     compressed_total = compressed_comm + compress_overhead
     compress_speedup = (ring_time / compressed_total).to_base_units().magnitude
     min_transfer = ring_msg / ib_ndr.bandwidth
@@ -544,7 +537,7 @@ class CommCompression:
 - Total with compression: `{python} CommCompression.compressed_total_ms_str`
 - Speedup: `{python} CommCompression.compress_speedup_mult_str`
 
-**Result**: Compression delivers a `{python} CommCompression.compress_speedup_mult_str` speedup in communication time. The `{python} CommCompression.compress_overhead_ms_str` codec overhead is a small fraction of the `{python} CommCompression.uncompressed_ms_str` uncompressed baseline.
+**Result**: Compression delivers an `{python} CommCompression.compress_speedup_mult_str` speedup in communication time. The `{python} CommCompression.compress_overhead_ms_str` codec overhead is a small fraction of the `{python} CommCompression.uncompressed_ms_str` uncompressed baseline.
 
 **Systems insight**: At this scale (256 GPUs, 1 GB gradients), gradient compression is clearly profitable. However, the convergence impact must be validated: Top-k sparsification discards information, and the model may require more iterations to reach the same accuracy, potentially negating the per-iteration speedup.
 

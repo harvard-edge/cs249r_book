@@ -1,68 +1,25 @@
 """Reliability and checkpoint-interval solvers.
 
-These implementations live outside ``engine.solver`` so the public import
-module can stay small while domain logic remains easier to review.
+Domain implementations behind ``mlsysim.solvers`` (the public import
+path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
 """
 
-# ruff: noqa: F401
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, List, Optional, Type
 
-from ..engine import Engine, PerformanceProfile
 from ..results import (
-    SolverResult,
-    DistributedResult,
     ReliabilityResult,
-    CheckpointResult,
-    SustainabilityResult,
-    ServingResult,
-    TrainingMemoryResult,
-    ServingCapacityResult,
-    MoERoutingResult,
-    ContinuousBatchingResult,
-    WeightStreamingResult,
-    TailLatencyResult,
-    EconomicsResult,
-    DataResult,
-    TopologyResult,
-    EfficiencyResult,
-    TransformationResult,
-    ScalingResult,
-    CompressionResult,
-    SynthesisResult,
-    OrchestrationResult,
-    InferenceScalingResult,
-    SensitivityResult,
-    ResponsibleEngineeringResult,
-    ParallelismOptimizerResult,
-    BatchingOptimizerResult,
-    PlacementOptimizerResult,
 )
 from ...physics import (
-    calc_ring_allreduce_time,
-    calc_hierarchical_allreduce_time,
-    calc_all_to_all_time,
-    calc_bottleneck,
     calc_mtbf_cluster,
     calc_mtbf_node,
     calc_young_daly_interval,
     calc_failure_probability,
-    calc_pipeline_bubble,
 )
-from ...core.constants import ureg, Q_, resolve_precision
-from ...infrastructure.registry import Infrastructure
-from ...literature.registry import Literature
+from ...core.units import ureg, Q_
 from ...systems.reliability import Reliability
-from .. import calibration as cal
-from ...core.types import Quantity
-from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
-from ...hardware.types import HardwareNode
-from ...systems.types import Fleet, NetworkFabric, Node
-from ...infrastructure.types import Datacenter
-from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
-from .utils import _inter_node_latency, _intra_node_latency
+from ...systems.types import Fleet
+from .base import ForwardModel
 
 class ReliabilityModel(ForwardModel):
     """
@@ -99,7 +56,10 @@ class ReliabilityModel(ForwardModel):
             Average time to recover from a failure in seconds (default 300s).
             Includes checkpoint reload, process restart, and re-warmup.
         """
-        # Use compound node MTBF accounting for GPUs, NICs, and PSUs
+        # Series-system reliability: any single component failure stalls the
+        # whole synchronous job, so failure rates ADD — first across a node's
+        # GPUs/NICs/PSUs, then across all nodes. Fleet MTBF therefore shrinks
+        # roughly as 1/N with cluster size.
         node_mtbf = calc_mtbf_node(
             gpu_mtbf_h=Reliability.Gpu.mttf_hours, n_gpus=fleet.node.accelerators_per_node,
             nic_mtbf_h=Reliability.Nic.mttf_hours, n_nics=fleet.node.nics_per_node,

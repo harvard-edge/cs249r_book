@@ -56,9 +56,6 @@ ASSIGNMENT = re.compile(r'^([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\s*=')
 # Pattern for class definitions in compute cells
 CLASS_DEF = re.compile(r'^class\s+(\w+)\s*[:(]')
 
-# Pattern for Exports: in header block
-EXPORTS_SECTION = re.compile(r'#\s*.\s*[Ee]xports?:\s*(.*)')
-
 # NOTE: The LATEX_INLINE_PYTHON and LATEX_ADJACENT patterns that used to live here
 # were retired alongside mlsysim.fmt's MarkdownStr migration. They guarded against
 # Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
@@ -701,7 +698,6 @@ def validate_file(qmd_path, verbose=False, check_patterns=False, check_lego=Fals
     defined_vars = set()
     defined_classes = set()
     in_cell = False
-    in_exports = False
 
     for i, line in enumerate(lines, 1):
         # 1. Track variable and class definitions in cells
@@ -710,7 +706,6 @@ def validate_file(qmd_path, verbose=False, check_patterns=False, check_lego=Fals
             continue
         if in_cell and CELL_END.match(line):
             in_cell = False
-            in_exports = False
             continue
         
         if in_cell:
@@ -726,36 +721,6 @@ def validate_file(qmd_path, verbose=False, check_patterns=False, check_lego=Fals
                 for v in re.split(r'[,\s]+', vars_part):
                     if v.strip():
                         defined_vars.add(v.strip())
-            
-            # Check for Exports: in header
-            m = EXPORTS_SECTION.match(line.strip())
-            if m:
-                in_exports = True
-                vars_raw = m.group(1)
-                # Remove unit parentheticals like (MB, GB)
-                vars_raw = re.sub(r'\(.*?\)', '', vars_raw)
-                for v in re.split(r'[,\s]+', vars_raw):
-                    v = v.strip().rstrip(',')
-                    if v:
-                        defined_vars.add(v)
-            elif in_exports:
-                # Continuation of exports
-                m = re.match(r'#\s*.\s*(.*)', line.strip())
-                if m:
-                    content = m.group(1).strip()
-                    # If content starts with a section like 'Goal:', stop
-                    if re.match(r'^[A-Z][a-z]+:', content):
-                        in_exports = False
-                    elif content == "" or "──" in content:
-                        in_exports = False
-                    else:
-                        vars_raw = re.sub(r'\(.*?\)', '', content)
-                        for v in re.split(r'[,\s]+', vars_raw):
-                            v = v.strip().rstrip(',')
-                            if v:
-                                defined_vars.add(v)
-                else:
-                    in_exports = False
             continue # Don't check for refs inside compute cells
 
         # 2. Check inline references for Locality

@@ -211,7 +211,7 @@ def test_model_loading_anchors():
 
     assert loading.StableDiffusionV15CheckpointSize.to(GB).magnitude == pytest.approx(5.0)
     assert loading.StableDiffusionV15PickleLoadTime.to(second).magnitude == pytest.approx(15.0)
-    assert loading.StableDiffusionV15SafetensorsLoadTime.to(second).magnitude == pytest.approx(0.5)
+    assert loading.StableDiffusionV15SafetensorsLoadTime.to(second).magnitude == pytest.approx(1.5)
     assert loading.PcieSwapReferenceModelSize.to(GB).magnitude == pytest.approx(10.0)
     assert loading.StableDiffusionV15CheckpointSize.provenance.ref
 
@@ -224,7 +224,7 @@ def test_serving_profile_anchors():
     assert profile.H100VendorMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
     assert float(profile.PrecisionDividendTensorParallelDegree) == pytest.approx(8.0)
     assert float(profile.PrecisionDividendContextLengthTokens) == pytest.approx(4096.0)
-    assert profile.PrecisionDividendGpuMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
+    assert not hasattr(profile, "PrecisionDividendGpuMemoryBudget")
     assert float(profile.PrecisionDividendBaselinePolicyBatchLimit) == pytest.approx(4.0)
     assert float(profile.PrecisionDividendOptimizedPolicyBatchLimit) == pytest.approx(32.0)
     assert float(profile.PrecisionDividendSpeculationBatchThreshold) == pytest.approx(16.0)
@@ -290,7 +290,9 @@ def test_mobilenetv2_variant_model_profiles():
     from mlsysim.core.units import param
 
     assert Models.Vision.MobileNetV2.parameters.to(param).magnitude == pytest.approx(3_504_872)
+    assert Models.Vision.EfficientNetB0.parameters.to(param).magnitude == pytest.approx(5_300_000)
     assert Models.Vision.MobileNetV2_Alpha0_5.parameters.to(param).magnitude == pytest.approx(1_968_680)
     assert Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters.to(param).magnitude == pytest.approx(687_680)
     assert Models.Vision.MobileNetV2.metadata.provenance.ref
+    assert Models.Vision.EfficientNetB0.metadata.provenance.ref
     assert Models.Vision.MobileNetV2_Alpha0_5.metadata.provenance.ref

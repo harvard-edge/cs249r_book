@@ -33,7 +33,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
-    from mlsysim.engine.solver import CompressionModel
+    from mlsysim.solvers import CompressionModel
     from mlsysim import Hardware, Models
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (

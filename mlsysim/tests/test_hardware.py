@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 from mlsysim.hardware import Hardware, HardwareNode
-from mlsysim.core.constants import Q_, ureg
+from mlsysim.core.units import Q_, ureg
 
 def test_hardware_registry():
     a100 = Hardware.Cloud.A100
@@ -39,7 +39,7 @@ def test_tpuv4_is_not_alias_to_tpuv5p():
 
 def test_nvlink_on_cloud_gpus():
     """NVLink bandwidth lives on HardwareNode, not loose constants."""
-    from mlsysim.core.constants import GB, second
+    from mlsysim.core.units import GB, second
 
     assert Hardware.Cloud.V100.nvlink.name == "NVLink 2.0"
     assert Hardware.Cloud.V100.nvlink.bandwidth.m_as(GB / second) == 300.0
@@ -66,11 +66,44 @@ def test_lab_track_hardware_profiles():
     assert robotaxi.metadata.provenance.kind.value == "estimate"
 
 
+def test_h100_die_area_is_registry_backed():
+    assert Hardware.Cloud.H100.die_area is not None
+    assert Hardware.Cloud.H100.die_area.m_as("mm^2") == pytest.approx(814.0)
+
+
+def test_h100_unit_cost_range_is_registry_backed():
+    assert Hardware.Cloud.H100.unit_cost is not None
+    assert Hardware.Cloud.H100.unit_cost_max is not None
+    assert Hardware.Cloud.H100.unit_cost.m_as("USD") == pytest.approx(25_000)
+    assert Hardware.Cloud.H100.unit_cost_max.m_as("USD") == pytest.approx(30_000)
+
+
 def test_memory_tech_bandwidth_tiers():
     """Memory-interface bandwidth tiers live in Hardware.Tech.Memory."""
-    from mlsysim.core.constants import GB, second
+    from mlsysim.core.units import GB, second
 
     assert Hardware.Tech.Memory.DDR4_3200.bandwidth.m_as(GB / second) == pytest.approx(51.2)
     assert Hardware.Tech.Memory.HBM2.bandwidth.m_as(GB / second) == pytest.approx(900)
     assert Hardware.Tech.Memory.HBM3.bandwidth.m_as(GB / second) == pytest.approx(1600)
     assert Hardware.Tech.Memory.GDDR6X.bandwidth.m_as(GB / second) == pytest.approx(760)
+
+
+def test_interconnect_direction_convention():
+    """2026-06-10 audit (findings_provenance.md M1/M2): NVLink datasheet
+    figures are bidirectional totals; PCIe figures are per-direction. The
+    schema must declare the convention and the per-direction accessor must
+    halve only the bidirectional entries."""
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.core.units import ureg
+
+    h100 = Hardware.Cloud.H100
+    assert h100.nvlink.direction == "bidirectional_total"
+    assert h100.nvlink.bandwidth.m_as("GB/s") == 900.0
+    assert h100.nvlink.bandwidth_per_direction.m_as("GB/s") == 450.0
+    # PCIe stays per-direction: accessor is the identity
+    assert h100.interconnect.direction == "per_direction"
+    assert h100.interconnect.bandwidth_per_direction == h100.interconnect.bandwidth
+    # All NVLink-family entries are tagged
+    for dev in ("V100", "A100", "H200", "B200", "TPUv5p"):
+        nv = getattr(Hardware.Cloud, dev).nvlink
+        assert nv.direction == "bidirectional_total", dev

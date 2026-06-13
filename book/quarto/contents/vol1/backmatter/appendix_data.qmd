@@ -8,9 +8,7 @@ engine: jupyter
 
 _What makes “data” a first-class systems constraint, and how do we measure when it is silently breaking our models?_
 
-In ML systems, data is not an abstract dataset—it is physical volume that must move through disks, networks, CPUs, and accelerator memory. Many expensive training runs are limited not by FLOP/s, but by I/O bandwidth, serialization overhead, and avoidable scans of irrelevant bytes. In production, the more dangerous failure mode is quieter: distributions drift, tails dominate user experience, and accuracy degrades long before average metrics look suspicious.
-
-This appendix collects the reference calculations and statistical tools for reasoning about the data path as a systems engineer. It focuses on what matters in practice: data gravity napkin math, format and serialization costs, the algebraic primitives that create pipeline blowups (especially joins), and drift metrics that compare full distributions rather than means.
+In ML systems, data is not an abstract dataset but physical volume that must move through disks, networks, CPUs, and accelerator memory. Many expensive training runs are limited not by FLOP/s, but by I/O bandwidth, serialization overhead, and avoidable scans of irrelevant bytes. In production, the more dangerous failure mode is quieter: distributions drift, tails dominate user experience, and accuracy degrades long before average metrics look suspicious. This appendix collects the reference calculations and statistical tools for reasoning about the data path as a systems engineer: data gravity napkin math, format and serialization costs, the algebraic primitives that create pipeline blowups, and drift metrics that compare full distributions rather than means. In D·A·M terms, it isolates the data axis and shows how volume, movement, and distribution constrain algorithm behavior and machine utilization.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -27,8 +25,8 @@ Conventions used here follow the book-wide notation (for example, we reserve $B$
 ```{python}
 #| echo: false
 from mlsysim import *
-from mlsysim.core.constants import *
-#| label: data-gravity-transfer
+from mlsysim.core.units import *
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DATA GRAVITY TRANSFER TIMES
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -39,16 +37,24 @@ from mlsysim.core.constants import *
 # │ Show:    Human-readable durations (Seconds, Minutes, Hours, Days, Months).
 # │ How:     T = Volume/Bandwidth, formatted via helper.
 # │
-# │ Imports: mlsysim.core.constants (TB, PB, Gbps, byte, BITS_PER_BYTE,
-# │          Systems.Fabrics.Ethernet_{10G,100G}.bandwidth, time constants)
-# │ Exports: t_1tb_1g … t_1pb_100g (9 formatted time strings)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import (
-    TB, PB, Gbps, byte,
-    BITS_PER_BYTE, SECONDS_PER_MINUTE, SEC_PER_HOUR, SEC_PER_DAY,
-    DAYS_PER_MONTH
+from mlsysim.core.units import (
+    TB,
+    PB,
+    Gbps,
+    bit,
+    byte,
+    second,
+    minute,
+    hour,
+    day,
+    BITS_PER_BYTE,
+    SECONDS_PER_MINUTE,
+    SEC_PER_HOUR,
+    SEC_PER_DAY,
+    DAYS_PER_MONTH,
 )
-from mlsysim.fmt import check, MarkdownStr
+from mlsysim.fmt import check, fmt_count, fmt_time
 from mlsysim import Systems  # Ethernet fabric bandwidths
 
 class DataGravity:
@@ -65,32 +71,9 @@ class DataGravity:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────
     @staticmethod
     def _xfer(vol_bytes, bw_bps):
-        return vol_bytes / (bw_bps/BITS_PER_BYTE)
-
-    @staticmethod
-    def _fmt_time(s):
-        if s < 2 * SECONDS_PER_MINUTE:
-            value = round(s)
-            unit = "Second" if value == 1 else "Seconds"
-            return f"{value:.0f} {unit}"
-        if s < SEC_PER_HOUR:
-            value = s / SECONDS_PER_MINUTE
-            unit = "Minute" if abs(value - 1) < 0.05 else "Minutes"
-            return f"{value:.1f} {unit}"
-        if s < SEC_PER_DAY:
-            value = s / SEC_PER_HOUR
-            unit = "Hour" if abs(value - 1) < 0.05 else "Hours"
-            return f"{value:.1f} {unit}"
-        if s < SEC_PER_DAY * DAYS_PER_MONTH:
-            value = round(s / SEC_PER_DAY)
-            unit = "Day" if value == 1 else "Days"
-            return f"{value:.0f} {unit}"
-        value = round(s / (SEC_PER_DAY * DAYS_PER_MONTH))
-        unit = "Month" if value == 1 else "Months"
-        return f"{value:.0f} {unit}"
+        return vol_bytes / (bw_bps / BITS_PER_BYTE)
 
     _x = _xfer.__func__
-    _f = _fmt_time.__func__
     truck_total_hours = truck_load_hours + truck_transit_hours + truck_unload_hours
     truck_total_seconds = truck_total_hours * SEC_PER_HOUR
 
@@ -99,17 +82,16 @@ class DataGravity:
     check(truck_total_hours == 48, "Truck transfer example should total two days")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    # Custom unit suffix ("Seconds"/"Minutes"/"Hours"/"Days"/"Months") → MarkdownStr per recipe Rule 1 escape-hatch
-    t_1tb_1g_str    = MarkdownStr(_f(_x(tb_bytes, bw_1g)))
-    t_1tb_10g_str   = MarkdownStr(_f(_x(tb_bytes, bw_10g)))
-    t_1tb_100g_str  = MarkdownStr(_f(_x(tb_bytes, bw_100g)))
-    t_100tb_1g_str  = MarkdownStr(_f(_x(100 * tb_bytes, bw_1g)))
-    t_100tb_10g_str = MarkdownStr(_f(_x(100 * tb_bytes, bw_10g)))
-    t_100tb_100g_str= MarkdownStr(_f(_x(100 * tb_bytes, bw_100g)))
-    t_1pb_1g_str    = MarkdownStr(_f(_x(pb_bytes, bw_1g)))
-    t_1pb_10g_str   = MarkdownStr(_f(_x(pb_bytes, bw_10g)))
-    t_1pb_100g_str  = MarkdownStr(_f(_x(pb_bytes, bw_100g)))
-    truck_1pb_str    = MarkdownStr(_f(truck_total_seconds))
+    t_1tb_1g_str = fmt_time(_x(tb_bytes, bw_1g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    t_1tb_10g_str = fmt_time(_x(tb_bytes, bw_10g) / SECONDS_PER_MINUTE, minute, precision=1, commas=False, style="word")
+    t_1tb_100g_str = fmt_time(round(_x(tb_bytes, bw_100g)), second, precision=0, commas=False, style="word")
+    t_100tb_1g_str = fmt_time(round(_x(100 * tb_bytes, bw_1g) / SEC_PER_DAY), day, precision=0, commas=False, style="word")
+    t_100tb_10g_str = fmt_time(_x(100 * tb_bytes, bw_10g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    t_100tb_100g_str = fmt_time(_x(100 * tb_bytes, bw_100g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    t_1pb_1g_str = fmt_count(round(_x(pb_bytes, bw_1g) / (SEC_PER_DAY * DAYS_PER_MONTH)), commas=False, label="month")
+    t_1pb_10g_str = fmt_time(round(_x(pb_bytes, bw_10g) / SEC_PER_DAY), day, precision=0, commas=False, style="word")
+    t_1pb_100g_str = fmt_time(_x(pb_bytes, bw_100g) / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    truck_1pb_str = fmt_time(truck_total_seconds / SEC_PER_DAY, day, precision=0, commas=False, style="word")
 ```
 
 With those reference points in place, the appendix begins with the physical constraints of data engineering and then moves to the statistical monitoring that keeps ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering and the operational monitoring in @sec-ml-operations.
@@ -148,11 +130,8 @@ The transfer time for moving a dataset is simply $T = D_{\text{vol}} / \text{BW}
 # │ Show:    MB/s and cycles-per-value for each format.
 # │ How:     Directly from representative benchmarks.
 # │
-# │ Imports: mlsysim.core.constants (MB, second)
-# │ Exports: csv_speed_mb_per_s_str, parquet_speed_mb_per_s_str, csv_cycles_str,
-# │          parquet_cycles_str, proto_speed_mb_per_s_str, proto_cycles_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import MB, second
+from mlsysim.core.units import MB, second
 from mlsysim.fmt import fmt_qty, MarkdownStr
 
 class SerializationCost:
@@ -171,12 +150,12 @@ class SerializationCost:
     # (no derived values requiring guards)
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    # Plain string literals → MarkdownStr per recipe Rule 1 escape-hatch
-    csv_speed_mb_per_s_str = fmt_qty(csv_speed, MB/second, precision=0, commas=False, approx=True)
-    parquet_speed_mb_per_s_str = fmt_qty(parquet_speed, MB/second, precision=0, commas=True, lower_bound=True)
+    # Categorical labels are non-numeric table values.
+    csv_speed_mb_per_s_str = fmt_qty(csv_speed, MB / second, precision=0, commas=False, approx=True)
+    parquet_speed_mb_per_s_str = fmt_qty(parquet_speed, MB / second, precision=0, commas=True, lower_bound=True)
     csv_cycles_str = MarkdownStr("High")
     parquet_cycles_str = MarkdownStr("Low")
-    proto_speed_mb_per_s_str = fmt_qty(proto_speed, MB/second, precision=0, commas=False, approx=True)
+    proto_speed_mb_per_s_str = fmt_qty(proto_speed, MB / second, precision=0, commas=False, approx=True)
     proto_cycles_str = MarkdownStr("Medium")
 ```
 
@@ -315,11 +294,8 @@ The choice of file format determines whether a system is I/O bound or compute bo
 # │ Show:    Waste percentage and network traffic for joins.
 # │ How:     Scalar arithmetic from row/column sizes.
 # │
-# │ Imports: mlsysim.core.constants (KB, byte, BYTES_INT32)
-# │ Exports: row_size_kb, int_size_bytes, waste_pct_str,
-# │          join_table_tb_str, join_network_tb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import KB, TB, byte, BYTES_INT32
+from mlsysim.core.units import KB, TB, byte, BYTES_INT32
 from mlsysim.fmt import fmt, check, fmt_percent, fmt_qty, MarkdownStr
 
 class DataAlgebra:
@@ -338,7 +314,7 @@ class DataAlgebra:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     row_size_kb_str = fmt_qty(row_size_q, KB, precision=0, commas=False)
     int_size_bytes_value_str = fmt(int_size_bytes, precision=0, commas=False)
-    waste_pct_str = fmt_percent(waste_pct/100, precision=1, commas=False, style='prose')
+    waste_pct_str = fmt_percent(waste_pct / 100, precision=1, commas=False, style='prose')
     join_table_tb_str = fmt_qty(join_table_q, TB, precision=0, commas=False)
     join_network_tb_str = fmt_qty(join_network_q, TB, precision=0, commas=False, approx=True)
 ```
@@ -367,7 +343,7 @@ Once data is flowing through our pipelines, we need mathematical tools to ensure
 
 ::: {#psp-appendix-data-statistics-matters-systems .callout-perspective title="Why statistics matters for systems"}
 
-Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
+Average latency can look fine while users still experience failures because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
 
 :::
 
@@ -383,10 +359,8 @@ Your monitoring dashboard says average latency is fine, but users are complainin
 # │ Show:    1% of 1M users = 10,000 affected users.
 # │ How:     Scalar multiplication.
 # │
-# │ Imports: mlsysim.core.constants (MILLION)
-# │ Exports: n_users_str, n_unhappy_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_count, check, MarkdownStr
+from mlsysim.fmt import fmt_count, check
 
 class LongTailScale:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
@@ -400,8 +374,7 @@ class LongTailScale:
     check(n_unhappy > 0, "Must have some unhappy users at scale")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    # Plain "1M" literal → MarkdownStr per recipe Rule 1 escape-hatch
-    n_users_str = MarkdownStr("1M")
+    n_users_str = fmt_count(n_users, scale="M", precision=0, commas=False)
     n_unhappy_str = fmt_count(n_unhappy, label="user")
 ```
 
@@ -421,8 +394,6 @@ In systems, the mean is often misleading. Latency distributions are almost alway
 # │ Show:    Formatted probability and inline equation.
 # │ How:     Binomial complement: Pr(Slow) = 1 - (1 - p99)^N_req.
 # │
-# │ Imports: mlsysim.book (fmt, fmt_math)
-# │ Exports: p_slow_eq, p_slow_pct_str, p_slow_pct_math_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_math, fmt_percent
 
@@ -432,7 +403,7 @@ class TailLatency:
     n_requests = 100
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────
-    p_all_fast = p_fast ** n_requests
+    p_all_fast = p_fast**n_requests
     p_slow = 1 - p_all_fast
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────
@@ -442,10 +413,7 @@ class TailLatency:
     p_all_fast_str = fmt(p_all_fast, precision=3, commas=False)
     p_slow_pct_str = fmt_percent(p_slow, precision=1, commas=False, style='prose')
     p_slow_pct_value_str = fmt_percent(p_slow, precision=1, commas=False, style='number')
-    p_slow_eq = fmt_math(
-        f"\\Pr(\\text{{Slow}}) = 1 - ({p_fast})^{{{n_requests}}} "
-        f"\\approx 1 - {p_all_fast_str} = {p_slow_pct_value_str}\\%"
-    )
+    p_slow_eq = fmt_math(f"\\Pr(\\text{{Slow}}) = 1 - ({p_fast})^{{{n_requests}}} " f"\\approx 1 - {p_all_fast_str} = {p_slow_pct_value_str}\\%")
 ```
 
 ::: {#nbk-appendix-data-median-experience .callout-notebook title="The median experience"}
@@ -479,13 +447,9 @@ $$ \mathcal{D}_{\text{KL}}(P_t \lVert P_0) = \sum_x P_t(x) \log \frac{P_t(x)}{P_
 # │ Show:    Step-by-step formulas, intermediate terms, and final values.
 # │ How:     Elementwise log-ratios, weighted sums, PSI symmetrization.
 # │
-# │ Imports: math (log), mlsysim.book (fmt, check, fmt_math)
-# │ Exports: scenario_str, P0_vec_str, Pt_vec_str,
-# │          kl_pq_eq, kl_pq_calc_eq, kl_qp_eq, kl_qp_calc_eq,
-# │          psi_eq, psi_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt, check, fmt_math, MarkdownStr
+from mlsysim.fmt import fmt, check, fmt_math, MarkdownStr, fmt_percent
 
 class KLDrift:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -493,7 +457,7 @@ class KLDrift:
     Pt = [0.45, 0.40, 0.15]
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    lr = [math.log(p0/pt) for p0, pt in zip(P0, Pt)]
+    lr = [math.log(p0 / pt) for p0, pt in zip(P0, Pt)]
 
     kl_pq_t = [p0 * l for p0, l in zip(P0, lr)]
     kl_pq = sum(kl_pq_t)
@@ -512,9 +476,6 @@ class KLDrift:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     # Internal interpolation helpers (no _str suffix — not exported to prose).
-    P0_pct = [f"{int(p0 * 100)}" for p0 in P0]
-    Pt_pct = [f"{int(pt * 100)}" for pt in Pt]
-
     P0_fmt = [f"{p0:.2f}" for p0 in P0]
     Pt_fmt = [f"{pt:.2f}" for pt in Pt]
     lr_fmt = [f"{l:.4f}" for l in lr]
@@ -528,16 +489,14 @@ class KLDrift:
     kl_pq_str = fmt(kl_pq, precision=4, commas=False)
     kl_qp_str = fmt(kl_qp, precision=4, commas=False)
     psi_str = fmt(psi, precision=4, commas=False)
+    p0_positive_pct_str = fmt_percent(P0[0], precision=0, commas=False, style="prose")
+    p0_negative_pct_str = fmt_percent(P0[1], precision=0, commas=False, style="prose")
+    p0_neutral_pct_str = fmt_percent(P0[2], precision=0, commas=False, style="prose")
+    pt_positive_pct_str = fmt_percent(Pt[0], precision=0, commas=False, style="prose")
+    pt_negative_pct_str = fmt_percent(Pt[1], precision=0, commas=False, style="prose")
+    pt_neutral_pct_str = fmt_percent(Pt[2], precision=0, commas=False, style="prose")
 
-    # Full equation strings (fmt_math for inline rendering)
-    # Multi-clause prose with custom interpolation → MarkdownStr per recipe Rule 1 escape-hatch
-    scenario_str = MarkdownStr(
-        f"{P0_pct[0]} percent of reviews were positive, {P0_pct[1]} percent negative, "
-        f"and {P0_pct[2]} percent neutral. After deployment, the serving distribution "
-        f"shifts to {Pt_pct[0]} percent positive, {Pt_pct[1]} percent negative, "
-        f"and {Pt_pct[2]} percent neutral"
-    )
-    # Custom bracketed-vector format → MarkdownStr per recipe Rule 1 escape-hatch
+    # Bracketed vectors and display equations are structural math strings.
     P0_vec_str = MarkdownStr(f"[{P0_fmt[0]}, {P0_fmt[1]}, {P0_fmt[2]}]")
     Pt_vec_str = MarkdownStr(f"[{Pt_fmt[0]}, {Pt_fmt[1]}, {Pt_fmt[2]}]")
 
@@ -595,7 +554,7 @@ class KLDrift:
 
 ::: {#nbk-appendix-data-kl-divergence-drift-detection .callout-notebook title="Worked example: KL divergence for drift detection"}
 
-**Scenario**: A sentiment classifier was trained on data where `{python} KLDrift.scenario_str`.
+**Scenario**: A sentiment classifier was trained on data where `{python} KLDrift.p0_positive_pct_str` of reviews were positive, `{python} KLDrift.p0_negative_pct_str` negative, and `{python} KLDrift.p0_neutral_pct_str` neutral. After deployment, the serving distribution shifts to `{python} KLDrift.pt_positive_pct_str` positive, `{python} KLDrift.pt_negative_pct_str` negative, and `{python} KLDrift.pt_neutral_pct_str` neutral.
 
 Training distribution $P_0$: `{python} KLDrift.P0_vec_str`. Serving distribution $P_t$: `{python} KLDrift.Pt_vec_str`.
 ```{python}
@@ -625,7 +584,6 @@ print(KLDrift.psi_eq)
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: PSI threshold prose in this callout
 # │ Goal: PSI retraining alert threshold (0.2)
-# │ Exports: PsiThreshold.psi_threshold_str
 from mlsysim import Ops
 from mlsysim.fmt import fmt
 
@@ -666,7 +624,6 @@ A training run can consume more examples, run longer, and still stop improving i
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-appdx-data-foundations-logits-numerical-stability-13e2
 # │ Goal: Example logit value that overflows naive softmax
-# │ Exports: LogitOverflowExample.logit_val_str
 from mlsysim.fmt import fmt
 
 class LogitOverflowExample:
@@ -701,10 +658,6 @@ A small softmax calculation shows why this trick matters in practice, even for l
 # │ Show:    Naive overflow risk, shifted exponentials, stable softmax values.
 # │ How:     Subtract max logit before exponentiation; compare to naive path.
 # │
-# │ Imports: math (exp, log, log10, floor), mlsysim.book (fmt, check, fmt_math)
-# │ Exports: lse_z_str, lse_z0..2, lse_naive0..2_str, lse_a_str,
-# │          lse_shifted_str, lse_shifted0..2, lse_sexp0..2_str,
-# │          lse_sum_str, lse_result_str, lse_sm0..2_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.fmt import fmt, check, fmt_math
@@ -729,7 +682,7 @@ class LogSumExp:
     # Softmax from stable exponentials (for-loop avoids Python 3 class-scope comprehension issue)
     softmax = []
     for e in stable_exp:
-        softmax.append(e/stable_sum)
+        softmax.append(e / stable_sum)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(sum(softmax) - 1.0) < 1e-10, "Softmax must sum to 1")
@@ -838,7 +791,7 @@ The tools in this section—tail-aware metrics, drift divergences, information-t
 * **Serialization format is a first-order decision**: Columnar binary formats (Parquet, Arrow) can be at least 10$\times$ faster to decode than text formats (CSV, JSON) in representative comparisons, directly determining whether accelerators starve or stay fed.
 * **Algebraic primitives shape I/O cost**: Selection, projection, and join have radically different I/O costs. Joins in particular can require moving both input tables across the network; choosing between shuffle and broadcast joins depends on relative table sizes.
 * **Average metrics hide tails**: Long-tailed distributions mean that the P99 latency becomes the typical user experience at scale, and monitoring only the mean creates dangerous blind spots.
-* **Drift detection compares distributions**: KL divergence and the symmetric PSI/Jeffreys divergence provide principled measures of distribution shift that catch problems before accuracy metrics react.
+* **Drift detection compares distributions**: KL divergence and symmetric population-stability measures provide principled ways to detect distribution shift before accuracy metrics react.
 * **Numerical stability is mandatory**: The log-sum-exp trick and log-space computation prevent overflow in softmax and loss calculations, making them essential building blocks of any training or inference pipeline.
 
 :::

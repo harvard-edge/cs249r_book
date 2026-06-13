@@ -174,7 +174,11 @@ _NAMED_PHRASES = (
 # "Machine" or "Data" in body prose would be ambiguous.
 _DAM_C3_AXIS_WORDS = (
     "Data", "Algorithm", "Machine",
-    "Computation", "Communication", "Coordination",
+    # "Compute" added 2026-06 when the C³ first axis was unified from
+    # "Computation" to "Compute" (the form used by the c3-taxonomy figure,
+    # part principles, and all prose triads). "Computation" retained for
+    # any historical headings.
+    "Compute", "Computation", "Communication", "Coordination",
 )
 
 # Sentinels used by the preprocessors. Each sentinel matches `_WORD_RE` as

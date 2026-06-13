@@ -51,9 +51,11 @@ FMT_FAMILY = _discover_fmt_family() or {
     "fmt_pp", "fmt_multiple", "fmt_count", "fmt_ratio", "fmt_range",
     "fmt_time", "fmt_rate", "fmt_qty_range", "fmt_time_range",
     "fmt_count_range", "fmt_usd_range", "fmt_percent_range",
-    "fmt_multiple_range", "fmt_sci_qty", "MarkdownStr",
+    "fmt_multiple_range", "fmt_sci_qty", "fmt_text", "fmt_display_math",
+    "MarkdownStr",
 }
-NUMERIC_FMT = FMT_FAMILY - {"MarkdownStr", "fmt_math", "fmt_frac"}
+NON_NUMERIC_FMT = {"MarkdownStr", "fmt_math", "fmt_display_math", "fmt_frac", "fmt_text"}
+NUMERIC_FMT = FMT_FAMILY - NON_NUMERIC_FMT
 
 FENCE_RE = re.compile(r"^([ \t]*)```+\s*\{python\}\s*$")
 CLOSE_RE = re.compile(r"^([ \t]*)```+\s*$")

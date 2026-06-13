@@ -14,6 +14,7 @@ __all__ = [
     "QUADRILLION", "TRILLION", "BILLION", "MILLION", "THOUSAND", "HUNDRED",
     # Base units
     "byte", "bit", "second", "joule", "watt", "kilowatt", "milliwatt", "meter", "liter", "L", "hour", "day", "count",
+    "kelvin", "K",
     # Data scale units
     "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
     # Precision sizes
@@ -22,7 +23,8 @@ __all__ = [
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
     "normalize_precision", "resolve_precision",
     "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
-    "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT", "VIDEO_FPS_STANDARD",
+    "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT",
+    "VIDEO_4K_WIDTH", "VIDEO_4K_HEIGHT", "VIDEO_FPS_STANDARD",
     # Time units
     "MS", "US", "NS", "ms", "MILLISECOND", "MICROSECOND", "NANOSECOND",
     "microsecond", "millisecond", "nanosecond", "minute", "week", "year",
@@ -47,7 +49,7 @@ __all__ = [
     "GW", "MW", "kW", "mW", "uW",
     "kilojoule", "microjoule", "gigawatt", "megawatt", "microwatt",
     # Mass and length
-    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km",
+    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km", "foot", "feet",
 ]
 
 ureg = pint.UnitRegistry()
@@ -80,6 +82,8 @@ L = ureg.liter
 hour = ureg.hour
 day = ureg.day
 count = ureg.count
+kelvin = ureg.kelvin
+K = ureg.kelvin
 
 # --- Exported aliases from loaded/custom registry ---
 KB = ureg.KB
@@ -94,6 +98,10 @@ BYTES_INT32 = 4 * byte
 BYTES_FP16 = 2 * byte
 BYTES_INT8 = 1 * byte
 BYTES_INT4 = 0.5 * byte
+# Adam FP32 first + second moments ONLY (4 + 4). EXCLUDES the FP32 master
+# copy of the weights — mixed-precision accountings that keep the master add
+# +4 B/param (engine/calibration.py: TRAINING_OPTIMIZER_BYTES_ADAM = 12,
+# CHECKPOINT_BYTES_PER_PARAM_ADAM = 14 include it). Pick deliberately.
 BYTES_ADAM_STATE = 8 * byte
 
 # Bit widths (companion to the byte widths above)
@@ -125,7 +133,19 @@ def normalize_precision(precision: str) -> str:
 
 
 def resolve_precision(precision: str):
-    """Return ``(canonical_key, bytes_per_element)`` for a supported precision."""
+    """Return ``(canonical_key, bytes_per_element)`` for a supported precision.
+
+    The single entry point solvers use to turn a user-facing precision string
+    into a storage width. ``bytes_per_element`` is a Pint byte Quantity from
+    ``PRECISION_MAP`` — the *storage* width, not the compute format (so
+    'tf32' maps to 4 bytes and 'fp8' to 1 byte). Case-insensitive; raises
+    ``ValueError`` for unsupported formats, listing the supported keys.
+
+    Examples
+    --------
+    >>> resolve_precision("FP16")
+    ('fp16', <Quantity(2, 'byte')>)
+    """
     key = normalize_precision(precision)
     return key, PRECISION_MAP[key]
 
@@ -135,6 +155,8 @@ IMAGE_CHANNELS_RGB = 3
 VIDEO_BYTES_PER_PIXEL_RGB = 3 * byte
 VIDEO_1080P_WIDTH = 1920
 VIDEO_1080P_HEIGHT = 1080
+VIDEO_4K_WIDTH = 3840   # UHD 4K (2160p) horizontal resolution
+VIDEO_4K_HEIGHT = 2160  # UHD 4K (2160p) vertical resolution
 VIDEO_FPS_STANDARD = Q_(30, 'Hz')
 
 KiB = ureg.KiB
@@ -245,6 +267,8 @@ metric_ton = ureg.metric_ton
 tonne = ureg.metric_ton
 kilometer = ureg.kilometer
 km = ureg.kilometer
+foot = ureg.foot
+feet = ureg.foot
 megabit = ureg.megabit
 gigabit = ureg.gigabit
 terabit = ureg.terabit

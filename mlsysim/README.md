@@ -15,6 +15,13 @@
     <b>A first-principles analytical modeling framework for ML systems.</b><br>
     Designed for education and early design-space reasoning before empirical benchmarking.
   </blockquote>
+  <p>
+    <a href="https://pypi.org/project/mlsysim/"><img src="https://img.shields.io/pypi/v/mlsysim?logo=pypi&logoColor=white" alt="PyPI"></a>
+    <a href="https://mlsysbook.ai/mlsysim"><img src="https://img.shields.io/badge/docs-mlsysbook.ai%2Fmlsysim-blue?logo=quarto&logoColor=white" alt="Documentation"></a>
+  </p>
+  <p>
+    <code>pip install mlsysim</code> · <a href="https://mlsysbook.ai/mlsysim">Documentation</a> · <a href="https://mlsysbook.ai/mlsysim/getting-started.html">Getting Started</a> · <a href="https://github.com/harvard-edge/cs249r_book/issues">Issues</a>
+  </p>
 </div>
 
 ---

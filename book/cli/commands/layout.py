@@ -7,17 +7,20 @@ Subcommands:
                block at the top of the next page that probably forced the
                break).
 
-The check is read-only: it inspects the PDF, prints a report, and exits.
-It does not modify source or PDF. Fixes happen in the QMD source by the
-author, optionally guided by a /layout-fix skill.
+The planner is read-only by default: it inspects the PDF, prints a report, and
+exits. It does not modify source or PDF. Fixes happen in the QMD source during
+an explicit apply/rebuild/re-scan loop.
 """
 
 import argparse
 import csv
 import json
+import math
 import re
 import shutil
 import subprocess
+import sys
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +32,32 @@ from rich.rule import Rule
 from rich.table import Table
 
 console = Console()
+
+
+class _LayoutHelpFormatter(
+    argparse.RawDescriptionHelpFormatter,
+):
+    """Argparse formatter that preserves examples."""
+
+
+def _clickable_source(rel_path: str, repo_root: Path) -> str:
+    """Wrap a repo-relative ``source_file`` as an OSC 8 terminal hyperlink.
+
+    The visible text stays the relative path, but a cmd+click (Ghostty, iTerm2)
+    opens the file via its absolute ``file://`` URL. The escape is emitted only
+    when stdout is an interactive TTY, so a redirected/piped CSV stays plain and
+    grep-able (the raw relative path, no control characters). Ghostty needs an
+    absolute, schemed URL to resolve a path — a bare relative path is never
+    clickable — so the link target is always the resolved absolute path.
+    """
+    if not rel_path or not sys.stdout.isatty():
+        return rel_path
+    try:
+        target = (repo_root / rel_path).resolve().as_uri()
+    except (OSError, ValueError):
+        return rel_path
+    esc = "\033"
+    return f"{esc}]8;;{target}{esc}\\{rel_path}{esc}]8;;{esc}\\"
 
 
 # --- geometry constants ---------------------------------------------------
@@ -62,13 +91,14 @@ class PageReport:
     size_hint: str = ""           # element size: "10 rows", "380pt tall", etc.
     fix_hint: str = ""            # one-word suggested fix
     is_frontmatter: bool = False  # roman-numbered page (likely intentional gap)
-    # ---- LLM-actionable fields ----
+    # ---- actionable fields ----
     source_file: str = ""         # QMD chapter file, relative to repo root
     source_line: int = 0          # 1-indexed line where the detail text appears
     section: str = ""             # nearest preceding H2/H3 header text
     next_page_starts_chapter: bool = False   # next sheet is a chapter opener
     klass: str = ""               # A | B | C | D classification
     action: str = ""              # recommended action (try-move-up / accept-…)
+    layout_strategy: str = ""     # machine route for auto-layout repair
 
 
 @dataclass
@@ -98,6 +128,17 @@ class CollisionFinding:
     band: str                     # "header" or "footer"
     y: float                      # top coordinate of the colliding text line
     snippet: str                  # colliding line text
+
+
+@dataclass(frozen=True)
+class CalloutBlock:
+    """A source callout block and its likely manual page-break controls."""
+    start_line: int
+    end_line: int
+    fence: str
+    title: str
+    kind: str
+    existing_breaks: List[int]
 
 
 @dataclass
@@ -154,14 +195,94 @@ class LayoutCommand:
     def run(self, args: List[str]) -> bool:
         parser = argparse.ArgumentParser(
             prog="binder layout",
-            description="PDF page-layout diagnostics.",
+            description=(
+                "PDF auto-layout planner and low-level diagnostics.\n\n"
+                "Default layout workflow: run `binder build pdf --vol1 "
+                "--layout` after a render, or `binder layout --vol1 --no-build` "
+                "to plan from an existing PDF. The high-level planner emits a "
+                "single strategy-routed queue. Main prose flow is always "
+                "phase 1; margin calibration is phase 2 and is deferred until "
+                "the prose flow is stable."
+            ),
+            epilog=(
+                "Examples:\n"
+                "  binder layout --vol1\n"
+                "      Build Volume I PDF, then emit the auto-layout plan.\n"
+                "  binder layout --vol1 --no-build --json /tmp/layout-plan.json\n"
+                "      Reuse the existing PDF and write the machine-readable plan.\n"
+                "  binder layout check book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv\n"
+                "      Low-level main-flow whitespace diagnostics.\n"
+                "  binder layout margins book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf --csv\n"
+                "      Low-level native margin-geometry diagnostics.\n\n"
+                "Layout repair contract:\n"
+                "  1. Prefer the high-level planner (`layout --volN` or build `--layout`).\n"
+                "  2. Route fixes by `channel` and `strategy`, not by prose wording.\n"
+                "  3. Clear phase 1 main-flow rows before applying phase 2 margin rows.\n"
+                "  4. Apply high-confidence ready rows, then rebuild and rescan.\n"
+                "  5. Use subcommands for debugging one scanner or one chapter."
+            ),
+            formatter_class=_LayoutHelpFormatter,
             add_help=True,
         )
-        sub = parser.add_subparsers(dest="subcommand")
+        vol_group = parser.add_mutually_exclusive_group()
+        vol_group.add_argument(
+            "--vol1",
+            dest="volume",
+            action="store_const",
+            const="vol1",
+            help="Run the high-level auto-layout planner for Volume I.",
+        )
+        vol_group.add_argument(
+            "--vol2",
+            dest="volume",
+            action="store_const",
+            const="vol2",
+            help="Run the high-level auto-layout planner for Volume II.",
+        )
+        parser.add_argument(
+            "--no-build",
+            action="store_true",
+            help="For high-level layout planning, reuse the existing built PDF "
+                 "instead of running `binder build pdf` first.",
+        )
+        parser.add_argument(
+            "--threshold",
+            type=float,
+            default=0.25,
+            help="High-level planner whitespace threshold (default 0.25).",
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=0,
+            help="High-level planner page limit (0 = all).",
+        )
+        parser.add_argument(
+            "--include-frontmatter",
+            action="store_true",
+            help="Include roman-numeral frontmatter in high-level whitespace "
+                 "planning.",
+        )
+        parser.add_argument(
+            "--json",
+            dest="plan_json",
+            default="",
+            help="Write the high-level layout plan as JSON.",
+        )
+        sub = parser.add_subparsers(
+            dest="subcommand",
+            title="low-level diagnostic subcommands",
+            description=(
+                "Optional. Omit the subcommand when using --vol1/--vol2 for "
+                "the high-level auto-layout planner."
+            ),
+            metavar="{collisions,check,margins,overlaps,tables}",
+        )
 
         collisions = sub.add_parser(
             "collisions",
             help="Scan PDF for body content invading header / footer bands.",
+            formatter_class=_LayoutHelpFormatter,
         )
         collisions.add_argument("pdf", help="Path to PDF file to scan.")
         collisions.add_argument(
@@ -178,7 +299,27 @@ class LayoutCommand:
                  "snippet.",
         )
 
-        check = sub.add_parser("check", help="Scan PDF for whitespace gaps.")
+        check = sub.add_parser(
+            "check",
+            help="Scan PDF for whitespace gaps.",
+            description=(
+                "Low-level main-flow scanner. It flags pages with excessive "
+                "bottom whitespace and classifies the likely next-page culprit."
+            ),
+            epilog=(
+                "Examples:\n"
+                "  binder layout check <pdf> --skip-frontmatter\n"
+                "  binder layout check <pdf> --chapter \"ML Systems\" --csv\n\n"
+                "CSV columns:\n"
+                "  chapter,sheet,label,gap_pct,pts,culprit,detail,size_hint,\n"
+                "  fix_hint,is_frontmatter,source_file,source_line,section,\n"
+                "  next_page_starts_chapter,class,action,layout_strategy,\n"
+                "  suggested_fix\n\n"
+                "For full volume layout work, prefer `binder layout --vol1 "
+                "--no-build` or `binder build pdf --vol1 --layout`."
+            ),
+            formatter_class=_LayoutHelpFormatter,
+        )
         check.add_argument("pdf", help="Path to PDF file to scan.")
         check.add_argument(
             "--chapter",
@@ -218,14 +359,29 @@ class LayoutCommand:
             "--csv",
             action="store_true",
             help="Emit one CSV row per flagged page to stdout instead of "
-                 "the rich report. Columns: chapter,sheet,label,gap_pct,"
-                 "pts,culprit,detail,size_hint,fix_hint,is_frontmatter.",
+                 "the rich report. Includes source coordinates, "
+                 "layout_strategy, and suggested_fix.",
         )
 
         margins = sub.add_parser(
             "margins",
-            help="Scan PDF for margin figures/notes overflowing off the page "
-                 "(exits non-zero when any overflow is found).",
+            help="Strict rendered-geometry margin gate: overlaps plus footer/"
+                 "header overflow (exits non-zero on any finding).",
+            description=(
+                "Low-level native margin-geometry scanner. It uses rendered "
+                "PDF boxes to find margin overlap plus footer/header overflow "
+                "and maps findings back to footnote offsets or .column-margin "
+                "spacing where possible."
+            ),
+            epilog=(
+                "Examples:\n"
+                "  binder layout margins <pdf> --csv\n"
+                "  binder layout margins <pdf> --chapter \"Inference at Scale\"\n\n"
+                "Native CSV includes layout_strategy and suggested_fix. "
+                "Strategies `margin-offset` and `margin-vspace` are the "
+                "deterministic margin repair routes."
+            ),
+            formatter_class=_LayoutHelpFormatter,
         )
         margins.add_argument("pdf", help="Path to PDF file to scan.")
         margins.add_argument(
@@ -239,8 +395,8 @@ class LayoutCommand:
             "--tol",
             type=float,
             default=2.0,
-            help="Points of slack below the footer line before margin "
-                 "content counts as overflow (default 2.0).",
+            help="Legacy mode only: points of slack below the footer line "
+                 "before margin content counts as overflow (default 2.0).",
         )
         margins.add_argument(
             "--limit",
@@ -251,21 +407,70 @@ class LayoutCommand:
         margins.add_argument(
             "--include-overlaps",
             action="store_true",
-            help="Also emit warning-level margin text crowding and image/text "
-                 "overlap candidates. Footer/off-page overflow remains the "
-                 "blocking gate.",
+            help="Legacy mode only: also emit warning-level margin text "
+                 "crowding and image/text overlap candidates.",
+        )
+        margins.add_argument(
+            "--legacy",
+            action="store_true",
+            help="Use the older pdfplumber footer-band heuristic with suggested "
+                 "manual nudge recipes instead of the native PyMuPDF geometry gate.",
         )
         margins.add_argument(
             "--csv",
             action="store_true",
-            help="Emit one CSV row per finding: chapter,sheet,label,issue,"
-                 "severity,signal,over_pts,off_page,source_file,source_line,"
-                 "section,snippet,related.",
+            help="Emit machine-readable findings. Native mode emits rendered "
+                 "geometry rows; legacy mode emits the old suggested_fix schema.",
+        )
+
+        overlaps = sub.add_parser(
+            "overlaps",
+            help="True-geometry margin scan (PyMuPDF): element-on-element "
+                 "overlaps and footer/header overflow from rendered bbox "
+                 "geometry, which the anchor-based 'margins' scan is blind to. "
+                 "Exits non-zero on any overlap.",
+            formatter_class=_LayoutHelpFormatter,
+        )
+        overlaps.add_argument("pdf", help="Path to PDF file to scan.")
+        overlaps.add_argument(
+            "--chapter",
+            type=str,
+            default="",
+            help="Only scan outline chapters matching this comma-separated "
+                 "title/slug/substring filter.",
+        )
+        overlaps.add_argument(
+            "--limit",
+            type=int,
+            default=0,
+            help="Only scan the first N pages (0 = all). For quick iteration.",
+        )
+        overlaps.add_argument(
+            "--json",
+            dest="json_out",
+            type=str,
+            default="",
+            help="Write findings as JSON to this path.",
+        )
+        overlaps.add_argument(
+            "--csv",
+            action="store_true",
+            help="Emit one CSV row per finding: chapter,sheet,label,issue,side,"
+                 "detail,source_file,source_line,section,snippet,"
+                 "layout_strategy,suggested_fix.",
+        )
+        overlaps.add_argument(
+            "--strict",
+            action="store_true",
+            help="Also exit non-zero on overflow findings, not just overlaps. "
+                 "Default treats overflow as reported-but-non-blocking (the "
+                 "known residuals are in-callout figures).",
         )
 
         tables = sub.add_parser(
             "tables",
             help="Render a table-only PDF audit for a volume or chapter.",
+            formatter_class=_LayoutHelpFormatter,
         )
         vol_group = tables.add_mutually_exclusive_group(required=True)
         vol_group.add_argument(
@@ -343,6 +548,18 @@ class LayoutCommand:
             return False
 
         opts = parser.parse_args(args)
+        if opts.subcommand is None:
+            if not opts.volume:
+                parser.print_help()
+                return False
+            return self._auto_layout(
+                opts.volume,
+                build_first=not opts.no_build,
+                threshold=opts.threshold,
+                limit=opts.limit,
+                skip_frontmatter=not opts.include_frontmatter,
+                json_out=opts.plan_json,
+            )
         if opts.subcommand == "collisions":
             return self._collisions(
                 Path(opts.pdf),
@@ -357,6 +574,16 @@ class LayoutCommand:
                 csv=opts.csv,
                 chapter_filter=self._parse_chapter_filter(opts.chapter),
                 include_overlaps=opts.include_overlaps,
+                legacy=opts.legacy,
+            )
+        if opts.subcommand == "overlaps":
+            return self._overlaps(
+                Path(opts.pdf),
+                limit=opts.limit,
+                json_out=opts.json_out,
+                strict=opts.strict,
+                chapter_filter=self._parse_chapter_filter(opts.chapter),
+                csv=opts.csv,
             )
         if opts.subcommand == "check":
             only = (
@@ -1022,19 +1249,322 @@ class LayoutCommand:
     # check
     # ------------------------------------------------------------------
 
-    def _check(
+    def _auto_layout(
+        self,
+        volume: str,
+        build_first: bool = True,
+        threshold: float = 0.25,
+        limit: int = 0,
+        skip_frontmatter: bool = True,
+        json_out: str = "",
+    ) -> bool:
+        """High-level volume layout planner.
+
+        This is the command-level contract for future automatic layout:
+        render or reuse a volume PDF, collect both main-flow whitespace and
+        margin-geometry findings, then emit one strategy-routed plan. Source
+        edits stay out of the default path so an apply loop can rebuild and
+        re-measure after each batch.
+        """
+        if volume not in {"vol1", "vol2"}:
+            console.print("[red]Use --vol1 or --vol2.[/red]")
+            return False
+
+        volume_label = "Volume I" if volume == "vol1" else "Volume II"
+        if build_first:
+            console.print(
+                f"[bold blue]Auto layout[/bold blue] building {volume_label} PDF first"
+            )
+            if not self._build_volume_pdf(volume):
+                return False
+
+        pdf_path = self._default_volume_pdf(volume)
+        if not pdf_path.exists():
+            console.print(
+                f"[red]PDF not found:[/red] {pdf_path}\n"
+                f"[yellow]Run `./book/binder build pdf --{volume}` or omit "
+                "`--no-build`.[/yellow]"
+            )
+            return False
+
+        whitespace_result = self._collect_whitespace_reports(
+            pdf_path,
+            threshold=threshold,
+            limit=limit,
+        )
+        margin_result = self._collect_margin_geometry_rows(
+            pdf_path,
+            limit=limit,
+        )
+        if whitespace_result is None or margin_result is None:
+            return False
+
+        whitespace_rows, scanned = whitespace_result
+        if skip_frontmatter:
+            whitespace_rows = [r for r in whitespace_rows if not r.is_frontmatter]
+        margin_rows, margin_scanned, page_count = margin_result
+
+        plan = self._layout_plan_payload(
+            volume=volume,
+            pdf_path=pdf_path,
+            whitespace_rows=whitespace_rows,
+            margin_rows=margin_rows,
+            pages_scanned=max(scanned, margin_scanned),
+            page_count=page_count,
+        )
+        self._render_layout_plan(plan)
+
+        if json_out:
+            out = Path(json_out)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            console.print(f"[dim]wrote {out}[/dim]")
+
+        return not plan["items"]
+
+    def _build_volume_pdf(self, volume: str) -> bool:
+        binder = self._repo_root() / "book" / "binder"
+        if not binder.exists():
+            binder = self._repo_root() / "binder"
+        cmd = [str(binder), "build", "pdf", f"--{volume}"]
+        console.print(f"[blue]💻 Command: {' '.join(cmd)}[/blue]")
+        try:
+            proc = subprocess.run(cmd, cwd=self._repo_root())
+        except OSError as exc:
+            console.print(f"[red]Failed to run build:[/red] {exc}")
+            return False
+        return proc.returncode == 0
+
+    def _default_volume_pdf(self, volume: str) -> Path:
+        try:
+            from cli.commands._pdf_checks import default_pdf_path
+        except ImportError:
+            from book.cli.commands._pdf_checks import default_pdf_path
+        return default_pdf_path(self.config_manager.book_dir, volume)
+
+    def _layout_plan_payload(
+        self,
+        volume: str,
+        pdf_path: Path,
+        whitespace_rows: List[PageReport],
+        margin_rows: List[Dict[str, Any]],
+        pages_scanned: int,
+        page_count: int,
+    ) -> Dict[str, Any]:
+        main_items: List[Dict[str, Any]] = []
+        for r in whitespace_rows:
+            strategy = r.layout_strategy or self._layout_strategy(r)
+            confidence = self._layout_strategy_confidence(strategy, r)
+            automatable = self._layout_strategy_automatable(strategy, r)
+            item = {
+                "phase": "1-main-flow",
+                "channel": "main-flow",
+                "strategy": strategy,
+                "confidence": confidence,
+                "automatable": automatable,
+                "deferred": False,
+                "ready": automatable and confidence == "high",
+                "chapter": r.chapter,
+                "sheet": r.sheet,
+                "label": r.label,
+                "gap_pct": int(r.whitespace_frac * 100),
+                "pts": int(r.whitespace_pts),
+                "culprit": r.cause,
+                "detail": r.detail,
+                "source_file": r.source_file,
+                "source_line": r.source_line,
+                "section": r.section,
+                "suggested_fix": self._suggest_whitespace_fix(r),
+            }
+            main_items.append(item)
+
+        active_main_flow = any(
+            item["channel"] == "main-flow"
+            and not str(item["strategy"]).startswith("accept-")
+            for item in main_items
+        )
+
+        margin_items: List[Dict[str, Any]] = []
+        for row in margin_rows:
+            f = row["finding"]
+            strategy = self._margin_geometry_strategy(row)
+            confidence = self._margin_strategy_confidence(strategy, row)
+            automatable = strategy in {"margin-offset", "margin-vspace"}
+            deferred = active_main_flow
+            margin_items.append({
+                "phase": "2-margin-calibration",
+                "channel": "margin-geometry",
+                "strategy": strategy,
+                "confidence": confidence,
+                "automatable": automatable,
+                "deferred": deferred,
+                "ready": automatable and confidence == "high" and not deferred,
+                "chapter": row["chapter"],
+                "sheet": f.page,
+                "label": row["label"],
+                "issue": f.issue,
+                "side": f.side,
+                "detail": f.detail,
+                "source_file": row["source_file"],
+                "source_line": row["source_line"],
+                "section": row["section"],
+                "snippet": f.snippet,
+                "suggested_fix": self._suggest_margin_geometry_fix(row),
+            })
+
+        items = main_items + margin_items
+        items.sort(key=lambda x: (
+            x["phase"],
+            x["chapter"],
+            -int(x["sheet"]),
+            x["channel"],
+        ))
+        next_phase = "clean"
+        if active_main_flow:
+            next_phase = "1-main-flow"
+        elif margin_items:
+            next_phase = "2-margin-calibration"
+        return {
+            "volume": volume,
+            "pdf": str(pdf_path),
+            "pages_scanned": pages_scanned,
+            "page_count": page_count,
+            "workflow": {
+                "phase_order": [
+                    "1-main-flow",
+                    "2-margin-calibration",
+                ],
+                "next_phase": next_phase,
+                "margin_deferred_until_main_flow_clean": active_main_flow,
+            },
+            "items": items,
+            "counts": {
+                "total": len(items),
+                "by_phase": dict(Counter(i["phase"] for i in items)),
+                "by_channel": dict(Counter(i["channel"] for i in items)),
+                "by_strategy": dict(Counter(i["strategy"] for i in items)),
+                "automatable": sum(1 for i in items if i["automatable"]),
+                "ready": sum(1 for i in items if i["ready"]),
+                "deferred": sum(1 for i in items if i["deferred"]),
+            },
+        }
+
+    def _render_layout_plan(self, plan: Dict[str, Any]) -> None:
+        items = plan["items"]
+        counts = plan["counts"]
+        if not items:
+            console.print(Panel(
+                f"No layout findings across {plan['pages_scanned']} scanned pages.",
+                title="✅ Auto Layout Plan Clean",
+                border_style="green",
+            ))
+            return
+
+        strategy_summary = ", ".join(
+            f"{n}× {name}" for name, n in Counter(
+                item["strategy"] for item in items
+            ).most_common()
+        )
+        channel_summary = ", ".join(
+            f"{n}× {name}" for name, n in Counter(
+                item["channel"] for item in items
+            ).most_common()
+        )
+        phase_summary = ", ".join(
+            f"{n}× {name}" for name, n in Counter(
+                item["phase"] for item in items
+            ).most_common()
+        )
+        console.print(Panel(
+            "\n".join([
+                f"PDF: {plan['pdf']}",
+                f"Findings: {counts['total']} "
+                f"({counts['ready']} ready now, {counts['deferred']} deferred)",
+                f"Next phase: {plan['workflow']['next_phase']}",
+                f"Phases: {phase_summary}",
+                f"Channels: {channel_summary}",
+                f"Strategies: {strategy_summary}",
+            ]),
+            title="Auto Layout Plan",
+            border_style="yellow",
+        ))
+
+        table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+        table.add_column("phase", style="white", width=20)
+        table.add_column("channel", style="cyan", width=15)
+        table.add_column("strategy", style="blue", width=24)
+        table.add_column("sheet", justify="right", width=6)
+        table.add_column("confidence", style="magenta", width=10)
+        table.add_column("state", style="yellow", width=9)
+        table.add_column("source / fix", overflow="fold")
+        for item in items[:80]:
+            src = item.get("source_file") or "?"
+            if item.get("source_line"):
+                src = f"{src}:{item['source_line']}"
+            fix = item.get("suggested_fix") or ""
+            if item["deferred"]:
+                state = "deferred"
+            elif item["ready"]:
+                state = "ready"
+            else:
+                state = "review"
+            table.add_row(
+                item["phase"],
+                item["channel"],
+                item["strategy"],
+                str(item["sheet"]),
+                item["confidence"],
+                state,
+                f"{src}\n[dim]{fix}[/dim]",
+            )
+        console.print(table)
+        if len(items) > 80:
+            console.print(f"[dim]...and {len(items) - 80} more findings[/dim]")
+
+    @staticmethod
+    def _layout_strategy_confidence(strategy: str, report: PageReport) -> str:
+        if strategy == "callout-tcbbreak" and report.source_file and report.source_line:
+            return "high"
+        if strategy in {
+            "table-source-flow",
+            "figure-source-flow",
+            "paragraph-source-flow",
+            "source-flow-callout-adjacent",
+        }:
+            return "medium"
+        if strategy.startswith("accept-"):
+            return "high"
+        return "low"
+
+    @staticmethod
+    def _layout_strategy_automatable(strategy: str, report: PageReport) -> bool:
+        return (
+            strategy == "callout-tcbbreak"
+            and bool(report.source_file)
+            and report.source_line > 0
+        )
+
+    @staticmethod
+    def _margin_strategy_confidence(
+        strategy: str,
+        row: Dict[str, Any],
+    ) -> str:
+        if strategy in {"margin-offset", "margin-vspace"}:
+            return "high" if row.get("source_file") and row.get("source_line") else "medium"
+        if strategy == "margin-stack-solve":
+            return "medium"
+        return "low"
+
+    def _collect_whitespace_reports(
         self,
         pdf_path: Path,
         threshold: float,
-        limit: int,
-        only: Optional[set] = None,
-        skip_frontmatter: bool = False,
-        csv: bool = False,
+        limit: int = 0,
         chapter_filter: Optional[List[str]] = None,
-    ) -> bool:
+    ) -> Optional[Tuple[List[PageReport], int]]:
         if not pdf_path.exists():
             console.print(f"[red]PDF not found:[/red] {pdf_path}")
-            return False
+            return None
 
         try:
             import pdfplumber  # type: ignore
@@ -1043,17 +1573,12 @@ class LayoutCommand:
                 "[red]pdfplumber not installed.[/red] "
                 "Run: [cyan]pip install pdfplumber[/cyan]"
             )
-            return False
-
-        console.print(
-            f"[bold blue]Scanning[/bold blue] {pdf_path.name} "
-            f"[dim](threshold={int(threshold*100)}%, "
-            f"main col <{int(MAIN_COL_RIGHT_FRAC*100)}% page width)[/dim]"
-        )
+            return None
 
         chapter_starts, labels = self._load_chapter_map(pdf_path)
         source_map = self._build_source_map(pdf_path)
         chapter_start_sheets = {start for start, _ in chapter_starts}
+        repo_root = self._repo_root_for(pdf_path)
 
         flagged: List[PageReport] = []
         scanned = 0
@@ -1080,12 +1605,10 @@ class LayoutCommand:
                     qmd_path = source_map.get(chapter)
                     if qmd_path is not None:
                         report.source_file = str(qmd_path)
-                        # Resolve to absolute path for actual file reads.
-                        repo_root = self._repo_root_for(pdf_path)
                         if repo_root is not None:
                             abs_path = repo_root / qmd_path
                             line_num = self._find_source_line(
-                                abs_path, report.detail
+                                abs_path, report.detail, allow_short=False
                             )
                             report.source_line = line_num
                             if line_num > 0:
@@ -1093,7 +1616,37 @@ class LayoutCommand:
                                     abs_path, line_num
                                 )
                     report.klass, report.action = self._classify(report)
+                    report.layout_strategy = self._layout_strategy(report)
                     flagged.append(report)
+
+        return flagged, scanned
+
+    def _check(
+        self,
+        pdf_path: Path,
+        threshold: float,
+        limit: int,
+        only: Optional[set] = None,
+        skip_frontmatter: bool = False,
+        csv: bool = False,
+        chapter_filter: Optional[List[str]] = None,
+    ) -> bool:
+        if not csv:
+            console.print(
+                f"[bold blue]Scanning[/bold blue] {pdf_path.name} "
+                f"[dim](threshold={int(threshold*100)}%, "
+                f"main col <{int(MAIN_COL_RIGHT_FRAC*100)}% page width)[/dim]"
+            )
+
+        collected = self._collect_whitespace_reports(
+            pdf_path,
+            threshold=threshold,
+            limit=limit,
+            chapter_filter=chapter_filter,
+        )
+        if collected is None:
+            return False
+        flagged, scanned = collected
 
         # Apply filters AFTER collection so the unfiltered counts are
         # available for the summary line.
@@ -1276,15 +1829,24 @@ class LayoutCommand:
         csv: bool = False,
         chapter_filter: Optional[List[str]] = None,
         include_overlaps: bool = False,
+        legacy: bool = False,
     ) -> bool:
-        """Flag margin-column content (figures, captions, notes) that runs
-        below the page's usable bottom — the documented ``figure-margin.md``
-        §7.2 failure mode where a margin figure anchored near a page break has
-        nowhere to float and clips off the page.
+        """Strict margin layout gate.
 
-        Returns True when clean, False when any overflow is found, so
-        ``binder layout margins`` exits non-zero as an explicit gate.
+        By default this uses the Binder-native PyMuPDF geometry scanner, which
+        gates both element-on-element margin overlap and footer/header overflow.
+        ``--legacy`` keeps the older pdfplumber footer-band heuristic available
+        for source nudge recipes.
         """
+        if not legacy:
+            return self._overlaps(
+                pdf_path,
+                limit=limit,
+                strict=True,
+                chapter_filter=chapter_filter,
+                csv=csv,
+            )
+
         if not pdf_path.exists():
             console.print(f"[red]PDF not found:[/red] {pdf_path}")
             return False
@@ -1316,6 +1878,369 @@ class LayoutCommand:
         else:
             self._render_margins(findings, scanned, pdf_path)
         return not any(f.severity == "error" for f in findings)
+
+    # ------------------------------------------------------------------
+    # overlaps (true PyMuPDF geometry)
+    # ------------------------------------------------------------------
+
+    def _collect_margin_geometry_rows(
+        self,
+        pdf_path: Path,
+        limit: int = 0,
+        chapter_filter: Optional[List[str]] = None,
+    ) -> Optional[Tuple[List[Dict[str, Any]], int, int]]:
+        if not pdf_path.exists():
+            console.print(f"[red]PDF not found:[/red] {pdf_path}")
+            return None
+        try:
+            try:
+                from cli.checks.margin_geometry import scan_pdf
+            except ImportError:
+                from book.cli.checks.margin_geometry import scan_pdf
+        except ImportError:
+            console.print(
+                "[red]PyMuPDF not installed.[/red] "
+                "Run: [cyan]pip install pymupdf[/cyan]"
+            )
+            return None
+
+        summary = scan_pdf(pdf_path, limit=limit)
+        chapter_starts, labels = self._load_chapter_map(pdf_path)
+        source_map = self._build_source_map(pdf_path)
+        repo_root = self._repo_root_for(pdf_path)
+
+        rows: List[Dict[str, Any]] = []
+        for f in summary.findings:
+            label = labels[f.page - 1] if f.page - 1 < len(labels) else str(f.page)
+            chapter = self._chapter_for(f.page, chapter_starts)
+            if not self._matches_chapter(chapter, chapter_filter):
+                continue
+            src_file, src_line, section = self._locate_margin_source(
+                repo_root, source_map, chapter, [f.snippet] if f.snippet else []
+            )
+            rows.append({
+                "finding": f,
+                "label": label,
+                "chapter": chapter,
+                "source_file": src_file,
+                "source_line": src_line,
+                "section": section,
+            })
+        return rows, summary.pages_scanned, summary.page_count
+
+    def _overlaps(
+        self,
+        pdf_path: Path,
+        limit: int = 0,
+        json_out: str = "",
+        strict: bool = False,
+        chapter_filter: Optional[List[str]] = None,
+        csv: bool = False,
+    ) -> bool:
+        """True-geometry margin scan via PyMuPDF. Detects element-on-element
+        overlaps (always bugs) and footer/header overflow from rendered bbox
+        geometry, which the anchor-based ``margins`` scan cannot see.
+
+        Returns False (gate) when any overlap is found; with ``--strict`` also
+        fails on overflow. Overflow alone is reported but non-blocking by
+        default, since the known residuals are in-callout figures.
+        """
+        collected = self._collect_margin_geometry_rows(
+            pdf_path,
+            limit=limit,
+            chapter_filter=chapter_filter,
+        )
+        if collected is None:
+            return False
+        rows, pages_scanned, page_count = collected
+
+        by_issue = Counter(row["finding"].issue for row in rows)
+        overlaps = by_issue.get("overlap", 0)
+        ob = by_issue.get("overflow-bottom", 0)
+        ot = by_issue.get("overflow-top", 0)
+
+        if csv:
+            self._render_margin_geometry_csv(rows)
+        else:
+            self._render_margin_geometry(
+                pdf_path,
+                rows,
+                pages_scanned=pages_scanned,
+                page_count=page_count,
+            )
+
+        if json_out:
+            from dataclasses import asdict
+
+            payload = []
+            for row in rows:
+                item = asdict(row["finding"])
+                item.update({
+                    "label": row["label"],
+                    "chapter": row["chapter"],
+                    "source_file": row["source_file"],
+                    "source_line": row["source_line"],
+                    "section": row["section"],
+                })
+                payload.append(item)
+            Path(json_out).write_text(json.dumps(payload, indent=2))
+            if not csv:
+                console.print(f"[dim]wrote {json_out}[/dim]")
+
+        if overlaps:
+            return False
+        if strict and rows:
+            return False
+        return True
+
+    def _render_margin_geometry(
+        self,
+        pdf_path: Path,
+        rows: List[Dict[str, Any]],
+        pages_scanned: int,
+        page_count: int,
+    ) -> None:
+        by_issue = Counter(row["finding"].issue for row in rows)
+        overlaps = by_issue.get("overlap", 0)
+        ob = by_issue.get("overflow-bottom", 0)
+        ot = by_issue.get("overflow-top", 0)
+        console.print(
+            f"[bold blue]Margin geometry[/bold blue] {pdf_path.name} "
+            f"[dim]({pages_scanned} of {page_count} pages, PyMuPDF bbox)[/dim]"
+        )
+        if rows:
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("page", justify="right")
+            table.add_column("chapter")
+            table.add_column("issue")
+            table.add_column("side")
+            table.add_column("detail")
+            table.add_column("strategy")
+            table.add_column("source", overflow="fold")
+            table.add_column("fix", overflow="fold")
+            for row in rows:
+                f = row["finding"]
+                colour = "red" if f.issue == "overlap" else "yellow"
+                src = row["source_file"]
+                if row["source_line"]:
+                    src += f":{row['source_line']}"
+                if row["section"]:
+                    src += f"  [{row['section']}]"
+                table.add_row(
+                    f"{row['label']} (sheet {f.page})",
+                    row["chapter"],
+                    f"[{colour}]{f.issue}[/{colour}]",
+                    f.side,
+                    f.detail,
+                    self._margin_geometry_strategy(row),
+                    src or "[dim]?[/dim]",
+                    self._suggest_margin_geometry_fix(row),
+                )
+            console.print(table)
+        console.print(
+            f"overlaps [red]{overlaps}[/red]  "
+            f"overflow-bottom [yellow]{ob}[/yellow]  "
+            f"overflow-top [yellow]{ot}[/yellow]  "
+            f"[dim](total {len(rows)})[/dim]"
+        )
+
+    def _render_margin_geometry_csv(self, rows: List[Dict[str, Any]]) -> None:
+        import csv as _csv
+
+        repo_root = self._repo_root()
+        writer = _csv.writer(sys.stdout)
+        writer.writerow([
+            "chapter", "sheet", "label", "issue", "side", "detail",
+            "source_file", "source_line", "section", "snippet",
+            "layout_strategy", "suggested_fix",
+        ])
+        for row in rows:
+            f = row["finding"]
+            writer.writerow([
+                row["chapter"],
+                f.page,
+                row["label"],
+                f.issue,
+                f.side,
+                f.detail,
+                _clickable_source(row["source_file"], repo_root),
+                row["source_line"],
+                row["section"],
+                f.snippet,
+                self._margin_geometry_strategy(row),
+                self._suggest_margin_geometry_fix(row),
+            ])
+
+    def _margin_geometry_strategy(self, row: Dict[str, Any]) -> str:
+        f = row["finding"]
+        context = self._source_layout_context(
+            row.get("source_file") or "",
+            row.get("source_line") or 0,
+        )
+        if context == "footnote":
+            return "margin-offset"
+        if context == "column-margin":
+            return "margin-vspace"
+        if f.issue == "overlap":
+            return "margin-stack-solve"
+        if f.issue in {"overflow-bottom", "overflow-top"}:
+            return "margin-geometry-review"
+        return "manual-review"
+
+    def _source_layout_context(self, source_file: str, source_line: int) -> str:
+        if not source_file or source_line <= 0:
+            return ""
+        try:
+            lines = (self._repo_root() / source_file).read_text(
+                encoding="utf-8"
+            ).splitlines()
+        except OSError:
+            return ""
+        if source_line > len(lines):
+            return ""
+
+        idx = source_line - 1
+        raw = lines[idx].strip()
+        if raw.startswith("[^"):
+            return "footnote"
+        if ".column-margin" in raw:
+            return "column-margin"
+
+        open_margin_re = re.compile(r"^:{3,}\s*\{[^}]*\.column-margin\b")
+        close_div_re = re.compile(r"^:{3,}\s*$")
+        for i in range(idx, -1, -1):
+            text = lines[i].strip()
+            if open_margin_re.match(text):
+                return "column-margin"
+            if close_div_re.match(text):
+                return ""
+        return ""
+
+    def _suggest_margin_geometry_fix(self, row: Dict[str, Any]) -> str:
+        """Actionable source-level recipe for a native margin-geometry row."""
+        f = row["finding"]
+        source = row.get("source_file") or ""
+        line = row.get("source_line") or 0
+        source_ref = f"{source}:{line}" if source and line else source
+        context = self._source_layout_context(source, line)
+
+        pts = 0.0
+        # Native details end with useful magnitudes such as ``= 124pt`` or
+        # ``45pt below text box``. Keep this loose so future wording changes
+        # still produce a conservative nudge.
+        m = re.search(r"(\d+(?:\.\d+)?)pt\s+below", f.detail)
+        if not m:
+            m = re.search(r"=\s*(\d+(?:\.\d+)?)pt\b", f.detail)
+        if m:
+            pts = float(m.group(1))
+        mm = math.ceil(pts * 0.35) + 2 if pts > 0 else 0
+
+        if f.issue == "overflow-bottom":
+            offset_hint = self._offset_change_hint(source, line, -mm)
+            if source_ref and mm:
+                if offset_hint:
+                    return (
+                        f"apply upward nudge near {source_ref}: "
+                        f"{offset_hint}"
+                    )
+                if context == "footnote":
+                    return (
+                        f"apply upward nudge near {source_ref}: "
+                        f"try [offset=-{mm}mm] on the footnote/sidenote"
+                    )
+                if context == "column-margin":
+                    return (
+                        f"apply upward nudge near {source_ref}: "
+                        f"try \\vspace*{{-{mm}mm}} inside .column-margin"
+                    )
+                return (
+                    f"apply upward nudge near {source_ref}: "
+                    f"try [offset=-{mm}mm] for sidenote/footnote or "
+                    f"\\vspace*{{-{mm}mm}} inside .column-margin"
+                )
+            if source_ref:
+                return (
+                    f"apply upward nudge near {source_ref}: footnote offset "
+                    "or in-block .column-margin \\vspace*"
+                )
+            return (
+                "needs eyes: bottom overflow without source match; inspect "
+                "nearest margin note/figure and nudge upward"
+            )
+
+        if f.issue == "overflow-top":
+            offset_hint = self._offset_change_hint(source, line, mm)
+            if source_ref and mm:
+                if offset_hint:
+                    return (
+                        f"apply downward nudge near {source_ref}: "
+                        f"{offset_hint}"
+                    )
+                if context == "footnote":
+                    return (
+                        f"apply downward nudge near {source_ref}: "
+                        f"try [offset=+{mm}mm] on the footnote/sidenote"
+                    )
+                if context == "column-margin":
+                    return (
+                        f"apply downward nudge near {source_ref}: "
+                        f"try positive \\vspace*{{{mm}mm}} inside .column-margin"
+                    )
+                return (
+                    f"apply downward nudge near {source_ref}: "
+                    f"try [offset=+{mm}mm] or positive in-block \\vspace*"
+                )
+            return "needs eyes: top overflow; move/nudge the nearest margin object down"
+
+        if f.issue == "overlap":
+            if source_ref:
+                if context == "footnote":
+                    return (
+                        f"resolve overlap near {source_ref}: adjust the "
+                        "footnote [offset=...] before moving the reader anchor"
+                    )
+                if context == "column-margin":
+                    return (
+                        f"resolve overlap near {source_ref}: adjust in-block "
+                        "\\vspace* before moving the reader anchor"
+                    )
+                return (
+                    f"resolve overlap near {source_ref}: prefer in-block "
+                    "\\vspace* or footnote [offset=...] before moving the "
+                    "reader anchor"
+                )
+            return (
+                "needs eyes: overlap without source match; inspect same-page "
+                "margin figure/sidenote stack"
+            )
+
+        return "manual review"
+
+    def _offset_change_hint(
+        self,
+        source_file: str,
+        source_line: int,
+        delta_mm: int,
+    ) -> str:
+        if not source_file or not source_line or not delta_mm:
+            return ""
+        try:
+            lines = (self._repo_root() / source_file).read_text(
+                encoding="utf-8"
+            ).splitlines()
+        except OSError:
+            return ""
+        if source_line > len(lines):
+            return ""
+        line = lines[source_line - 1]
+        m = re.search(r"\[offset=([+-]?\d+(?:\.\d+)?)mm\]", line)
+        if not m:
+            return ""
+        old = float(m.group(1))
+        new = old + delta_mm
+        old_s = f"{old:g}"
+        new_s = f"{new:g}"
+        return f"change [offset={old_s}mm] to [offset={new_s}mm]"
 
     @staticmethod
     def _margin_side(pw, x0, x1) -> str:
@@ -1685,19 +2610,96 @@ class LayoutCommand:
 
     def _render_margins_csv(self, findings: List[MarginFinding]) -> None:
         import csv as _csv
-        import sys
+        repo_root = self._repo_root()
         writer = _csv.writer(sys.stdout)
         writer.writerow([
             "chapter", "sheet", "label", "issue", "severity", "signal",
             "over_pts", "off_page", "source_file", "source_line", "section",
-            "snippet", "related",
+            "snippet", "related", "suggested_fix",
         ])
         for f in findings:
             writer.writerow([
                 f.chapter, f.sheet, f.label, f.issue, f.severity, f.signal,
-                f"{f.over_pts:.1f}", int(f.off_page), f.source_file,
+                f"{f.over_pts:.1f}", int(f.off_page),
+                _clickable_source(f.source_file, repo_root),
                 f.source_line, f.section, f.snippet, f.related,
+                self._suggest_margin_fix(f),
             ])
+
+    def _resolve_margin_block(
+        self, f: MarginFinding
+    ) -> Optional[Tuple[int, str]]:
+        """Resolve a margin finding to its source ``.column-margin`` block.
+
+        The scanner's ``source_line`` is a prose-anchor guess that can sit
+        hundreds of lines from the real figure (auto-layout.md §2.4), so scan
+        the chapter for ``.column-margin`` blocks and pick the one nearest the
+        anchor, disambiguating by the caption snippet when several sit close.
+        Returns ``(block_line, asset_basename)`` (1-indexed) or ``None`` when no
+        block is found near the anchor — a "needs eyes" case, usually a body
+        table or a mis-anchored object.
+        """
+        if not f.source_file or not f.source_line:
+            return None
+        try:
+            text = (self._repo_root() / f.source_file).read_text(
+                encoding="utf-8"
+            )
+        except OSError:
+            return None
+        lines = text.splitlines()
+        want = re.sub(r"[^a-z0-9]", "", f.snippet.lower())
+        best: Optional[Tuple[Tuple[int, int], int, str]] = None
+        for i, line in enumerate(lines):
+            if ".column-margin" not in line:
+                continue
+            dist = abs(i + 1 - f.source_line)
+            if dist > 40:
+                continue
+            asset, caption = "", ""
+            for j in range(i + 1, min(len(lines), i + 6)):
+                if lines[j].strip() == ":::":
+                    break
+                m = re.search(r"images/[\w/.-]+/([\w.-]+\.(?:svg|png|jpg))",
+                              lines[j])
+                if m and not asset:
+                    asset = m.group(1)
+                stripped = lines[j].strip()
+                if stripped.startswith("*") and stripped.endswith("*"):
+                    caption = stripped
+            cap = re.sub(r"[^a-z0-9]", "", caption.lower())
+            matched = bool(want) and bool(cap) and (
+                want in cap or cap[-12:] in want
+            )
+            key = (0 if matched else 1, dist)
+            if best is None or key < best[0]:
+                best = (key, i + 1, asset or "(no asset)")
+        if best is None:
+            return None
+        return (best[1], best[2])
+
+    def _suggest_margin_fix(self, f: MarginFinding) -> str:
+        """Actionable one-line fix recipe for a margin overflow.
+
+        Seeds the nudge as ``ceil(over_pts * 0.45) + 2`` mm — the 0.45
+        pre-absorbs the ~18% a ``\\vspace*`` loses inside a marginnote
+        (auto-layout.md §2) — then classifies figure vs footnote and resolves
+        the target block by asset rather than the scanner's line guess. Returns
+        an empty string for non-overflow rows.
+        """
+        if not f.over_pts or f.over_pts <= 0:
+            return ""
+        mm = math.ceil(f.over_pts * 0.45) + 2
+        block = self._resolve_margin_block(f)
+        if block:
+            line, asset = block
+            return (f"\\vspace*{{-{mm}mm}} in .column-margin ({asset}) "
+                    f"@ {f.source_file}:{line}")
+        if "image" in f.signal:
+            return ("needs eyes: image overflow with no .column-margin nearby "
+                    "(likely a body table or mis-anchored figure)")
+        return (f"[offset=-{mm}mm] on the footnote near "
+                f"{f.source_file}:{f.source_line}")
 
     # ------------------------------------------------------------------
     # CSV output
@@ -1705,15 +2707,17 @@ class LayoutCommand:
 
     def _render_csv(self, flagged: List[PageReport]) -> None:
         import csv as _csv
-        import sys
+        repo_root = self._repo_root()
         writer = _csv.writer(sys.stdout)
         writer.writerow([
             "chapter", "sheet", "label", "gap_pct", "pts",
             "culprit", "detail", "size_hint", "fix_hint", "is_frontmatter",
             "source_file", "source_line", "section",
             "next_page_starts_chapter", "class", "action",
+            "layout_strategy", "suggested_fix",
         ])
         for r in flagged:
+            strategy = r.layout_strategy or self._layout_strategy(r)
             writer.writerow([
                 r.chapter,
                 r.sheet,
@@ -1725,12 +2729,14 @@ class LayoutCommand:
                 r.size_hint,
                 r.fix_hint,
                 int(r.is_frontmatter),
-                r.source_file,
+                _clickable_source(r.source_file, repo_root),
                 r.source_line,
                 r.section,
                 int(r.next_page_starts_chapter),
                 r.klass,
                 r.action,
+                strategy,
+                self._suggest_whitespace_fix(r),
             ])
 
     # ------------------------------------------------------------------
@@ -1899,30 +2905,281 @@ class LayoutCommand:
         return False
 
     @staticmethod
-    def _find_source_line(qmd_path: Path, detail: str) -> int:
+    def _find_source_line(
+        qmd_path: Path,
+        detail: str,
+        allow_short: bool = True,
+    ) -> int:
         """Find a line in the QMD file matching the detail text.
 
-        pdfplumber sometimes strips spaces in extracted text, so we
-        normalize both source and detail by removing all whitespace,
-        then look for the detail as a substring of any source line's
-        normalized form. Returns 1-indexed line number or 0.
+        PDF extraction often removes spaces, injects line-wrap hyphens, or
+        normalizes mathematical glyphs differently from the source. Compare an
+        alphanumeric-only key so rendered snippets such as
+        ``Ware-house-Scale Com-puter`` still resolve to
+        ``Warehouse-Scale Computer`` in QMD. Returns a 1-indexed line number or
+        0.
         """
         if not detail or not qmd_path.exists():
             return 0
-        needle = "".join(detail.split()).lower()
-        if len(needle) < 12:
+        raw_needle = LayoutCommand._source_key(detail)
+        if len(raw_needle) < 12:
             return 0  # too short to match reliably
-        # Compare leading 40 chars to avoid spurious matches.
-        needle = needle[:40]
+        title_key = ""
+        title_raw = detail.split(":", 1)[0] if ":" in detail else ""
+        if title_raw:
+            title_key = LayoutCommand._source_key(re.sub(r"^\s*\d+\s+", "", title_raw))
+        # Compare leading chars to avoid spurious matches. Rendered sidenotes
+        # often begin with the visible note number ("15 HIPAA..."), which is
+        # not present in the QMD definition key, so try a no-leading-digits
+        # variant as well.
+        needles = []
+        had_leading_digits = bool(re.match(r"^\d+", raw_needle))
+        bases = [raw_needle]
+        stripped = re.sub(r"^\d+", "", raw_needle)
+        if stripped and stripped != raw_needle:
+            bases.append(stripped)
+        for base in bases:
+            if allow_short:
+                lengths = (48, 32, 24, 16, 12)
+                for n in lengths:
+                    if len(base) >= n:
+                        needles.append(base[:n])
+            else:
+                needles.append(base[: min(48, len(base))])
+        needles = list(dict.fromkeys(needles))
         try:
-            with qmd_path.open() as f:
-                for i, raw in enumerate(f, start=1):
-                    haystack = "".join(raw.split()).lower()
-                    if needle and needle in haystack:
-                        return i
+            lines = qmd_path.read_text(encoding="utf-8").splitlines()
         except OSError:
-            pass
+            return 0
+        if had_leading_digits:
+            if len(title_key) >= 12:
+                for i, raw in enumerate(lines, start=1):
+                    if not raw.lstrip().startswith("[^"):
+                        continue
+                    bold_titles = re.findall(r"\*\*(.*?)\*\*", raw)
+                    for bold in bold_titles:
+                        bold_key = LayoutCommand._source_key(bold)
+                        if len(bold_key) >= 12 and (
+                            title_key in bold_key or bold_key in title_key
+                        ):
+                            return i
+            for i, raw in enumerate(lines, start=1):
+                if not raw.lstrip().startswith("[^"):
+                    continue
+                haystack = LayoutCommand._source_key(raw)
+                if any(needle and needle in haystack for needle in needles):
+                    return i
+        for i, raw in enumerate(lines, start=1):
+            haystack = LayoutCommand._source_key(raw)
+            if any(needle and needle in haystack for needle in needles):
+                return i
+        # Some captions/footnotes are wrapped in source but extracted as one
+        # line in the PDF. Search two-line windows and report the first line.
+        for i in range(len(lines) - 1):
+            haystack = LayoutCommand._source_key(lines[i] + " " + lines[i + 1])
+            if any(needle and needle in haystack for needle in needles):
+                return i + 1
         return 0
+
+    @staticmethod
+    def _source_key(text: str) -> str:
+        """Normalize source/rendered text for fuzzy line localization."""
+        text = unicodedata.normalize("NFKC", text)
+        return re.sub(r"[^0-9a-z]+", "", text.lower())
+
+    @staticmethod
+    def _find_callout_blocks(qmd_path: Path) -> List[CalloutBlock]:
+        """Return source callout divs with balanced fence bounds.
+
+        Quarto callouts in this repo are fenced divs such as
+        ``:::: {#id .callout-notebook title="..."}``. We only need enough
+        structure for layout repair: block bounds, title/class, and existing
+        explicit ``\\tcbbreak`` controls.
+        """
+        if not qmd_path.exists():
+            return []
+        try:
+            lines = qmd_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+
+        open_re = re.compile(r"^(?P<fence>:{3,})\s*\{(?P<attrs>[^}]*)\}\s*$")
+        close_re = re.compile(r"^(?P<fence>:{3,})\s*$")
+        stack: List[Tuple[str, int, str]] = []
+        blocks: List[CalloutBlock] = []
+
+        for i, line in enumerate(lines, start=1):
+            opened = open_re.match(line.strip())
+            if opened:
+                attrs = opened.group("attrs")
+                if "callout-" in attrs:
+                    stack.append((opened.group("fence"), i, attrs))
+                continue
+
+            closed = close_re.match(line.strip())
+            if not closed or not stack:
+                continue
+            fence = closed.group("fence")
+            if fence != stack[-1][0]:
+                continue
+            open_fence, start, attrs = stack.pop()
+            body = lines[start:i]
+            title_m = re.search(r'title="([^"]+)"', attrs)
+            title = title_m.group(1) if title_m else ""
+            kind_m = re.search(r"\.([A-Za-z0-9_-]*callout-[A-Za-z0-9_-]+)", attrs)
+            kind = kind_m.group(1) if kind_m else "callout"
+            breaks = [
+                line_no
+                for line_no, raw in enumerate(body, start=start + 1)
+                if r"\tcbbreak" in raw
+            ]
+            blocks.append(CalloutBlock(
+                start_line=start,
+                end_line=i,
+                fence=open_fence,
+                title=title,
+                kind=kind,
+                existing_breaks=breaks,
+            ))
+
+        return blocks
+
+    @staticmethod
+    def _callout_block_for_line(
+        qmd_path: Path,
+        line_num: int,
+    ) -> Optional[CalloutBlock]:
+        if line_num <= 0:
+            return None
+        containing = [
+            block for block in LayoutCommand._find_callout_blocks(qmd_path)
+            if block.start_line <= line_num <= block.end_line
+        ]
+        if not containing:
+            return None
+        return min(containing, key=lambda b: b.end_line - b.start_line)
+
+    @staticmethod
+    def _semantic_callout_break_line(
+        qmd_path: Path,
+        block: CalloutBlock,
+        target_line: int,
+    ) -> int:
+        """Choose the nearest stable semantic boundary before target_line."""
+        try:
+            lines = qmd_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return target_line
+
+        start = max(block.start_line + 1, 1)
+        end = min(target_line, len(lines))
+        for line_no in range(end, start - 1, -1):
+            raw = lines[line_no - 1].strip()
+            if not raw:
+                continue
+            if raw.startswith("```"):
+                continue
+            if raw.startswith("**") or raw.startswith("***"):
+                return line_no
+            if re.match(r"^[-*]\s+\*\*", raw):
+                return line_no
+            if re.match(r"^\d+\.\s+\*\*", raw):
+                return line_no
+            if raw.startswith("| **"):
+                return line_no
+        return target_line
+
+    def _suggest_callout_break_fix(
+        self,
+        source_file: str,
+        source_line: int,
+        detail: str,
+    ) -> str:
+        """Return a rendered-PDF callout split recipe for a gap finding."""
+        if not source_file or source_line <= 0:
+            return (
+                "callout gap: locate the next-page callout source, then insert "
+                "\\tcbbreak at the first semantic label that appears on the "
+                "next page"
+            )
+        qmd_path = self._repo_root() / source_file
+        block = self._callout_block_for_line(qmd_path, source_line)
+        if block is None:
+            return (
+                f"callout gap near {source_file}:{source_line}: source line is "
+                "not inside a callout block; inspect adjacent block movement"
+            )
+
+        candidate = self._semantic_callout_break_line(
+            qmd_path,
+            block,
+            source_line,
+        )
+        title_suffix = f' "{block.title}"' if block.title else ""
+        block_ref = (
+            f"{block.kind}"
+            f"{title_suffix}"
+            f" ({source_file}:{block.start_line}-{block.end_line})"
+        )
+
+        first_content = block.start_line + 1
+        if candidate <= first_content + 1:
+            return (
+                f"callout gap: {block_ref} starts too late for the remaining "
+                "page; move the whole callout or its lead-in earlier before "
+                "adding micro-spacing"
+            )
+
+        later_breaks = [line for line in block.existing_breaks if line > candidate]
+        earlier_breaks = [line for line in block.existing_breaks if line <= candidate]
+        if later_breaks:
+            return (
+                f"callout gap: move existing \\tcbbreak from line "
+                f"{later_breaks[0]} to before line {candidate} in {block_ref}"
+            )
+        if earlier_breaks:
+            return (
+                f"callout gap: existing \\tcbbreak at line {earlier_breaks[-1]} "
+                f"is before the next-page start; add another \\tcbbreak before "
+                f"line {candidate} in {block_ref}"
+            )
+        return (
+            f"callout gap: insert \\tcbbreak before line {candidate} in "
+            f"{block_ref}"
+        )
+
+    def _layout_strategy(self, report: PageReport) -> str:
+        """Return the auto-layout strategy bucket for a whitespace finding.
+
+        The bucket is intentionally coarser than ``suggested_fix``: downstream
+        automation can route a row to the right repair algorithm before the
+        exact source edit is chosen.
+        """
+        if report.next_page_starts_chapter:
+            return "accept-chapter-break"
+        if report.cause == "end-of-document":
+            return "accept-end-of-doc"
+        if report.cause in {"heading", "delayed-opener"}:
+            return "accept-structural-opener"
+        if report.cause == "callout/box":
+            if self._report_source_inside_callout(report):
+                return "callout-tcbbreak"
+            if report.source_file and report.source_line:
+                return "source-flow-callout-adjacent"
+            return "callout-localize"
+        if report.cause == "table":
+            return "table-source-flow"
+        if report.cause == "figure":
+            return "figure-source-flow"
+        if report.cause == "paragraph":
+            return "paragraph-source-flow"
+        return "manual-review"
+
+    def _report_source_inside_callout(self, report: PageReport) -> bool:
+        if not report.source_file or report.source_line <= 0:
+            return False
+        qmd_path = self._repo_root() / report.source_file
+        return self._callout_block_for_line(qmd_path, report.source_line) is not None
 
     @staticmethod
     def _find_section(qmd_path: Path, line_num: int) -> str:
@@ -1967,6 +3224,8 @@ class LayoutCommand:
             return ("C", "accept-chapter-end")
         if report.cause == "heading":
             return ("D", "accept-orphan")
+        if report.cause == "delayed-opener":
+            return ("D", "accept-opener")
         if report.cause == "end-of-document":
             return ("C", "filter-end-of-doc")
         if report.cause in ("table", "figure", "callout/box"):
@@ -2066,10 +3325,61 @@ class LayoutCommand:
         if cause == "paragraph":
             return "rewrite"
         if cause == "callout/box":
-            return "audit"
+            return "tcbbreak"
+        if cause == "delayed-opener":
+            return "opener"
         if cause == "end-of-document":
             return "ignore"
         return "manual"
+
+    def _suggest_whitespace_fix(self, report: PageReport) -> str:
+        """Map a bottom-whitespace finding to the Zeljko layout device."""
+        if report.next_page_starts_chapter:
+            return "accept: structural chapter break"
+        if report.cause == "end-of-document":
+            return "accept/filter: end-of-document whitespace"
+        loc = (
+            f"{report.source_file}:{report.source_line}"
+            if report.source_file and report.source_line
+            else report.source_file
+        )
+        where = f" near {loc}" if loc else ""
+        if report.cause == "table":
+            return (
+                "source-flow first: move the lead-in directly above the table"
+                f"{where}; then retune tbl-colwidths/alignment or split only "
+                "if the rendered table is still too tall"
+            )
+        if report.cause == "figure":
+            return (
+                "source-flow first: move lead-in above and interpretation below"
+                f"{where}; then reduce figure height in small steps if needed"
+            )
+        if report.cause == "callout/box":
+            return self._suggest_callout_break_fix(
+                report.source_file,
+                report.source_line,
+                report.detail,
+            )
+        if report.cause == "heading":
+            return (
+                "usually accept orphan prevention; if repeated, use a PDF-only "
+                "\\newpage before the heading rather than micro-spacing"
+            )
+        if report.cause == "delayed-opener":
+            return (
+                "usually accept: next page is an opener/part page whose design "
+                "starts below the scan zone"
+            )
+        if report.cause == "paragraph":
+            return (
+                "source-flow/prose fix: move or lightly rewrite the paragraph"
+                f"{where} so the previous page can fill naturally"
+            )
+        return (
+            "manual review: inspect the next-page block and choose the "
+            "smallest rendered-PDF fix"
+        )
 
     # ------------------------------------------------------------------
     # cause guess: look at top of next page
@@ -2081,7 +3391,7 @@ class LayoutCommand:
         Inspects the top region of the next page (after the header band)
         and returns (cause, detail, size_hint):
             cause      — one of: table, figure, callout/box, heading,
-                         paragraph, unknown
+                         paragraph, delayed-opener, unknown
             detail     — caption / heading / title text (truncated)
             size_hint  — "10 rows", "380pt tall", etc., where extractable
         """
@@ -2094,10 +3404,6 @@ class LayoutCommand:
         # "Top of next page" = first ~40% of usable height after header.
         zone_bottom = header_y + (page_h - header_y) * 0.40
 
-        chars = [c for c in page.chars if header_y < c["top"] < zone_bottom]
-        if not chars:
-            return ("unknown", "", "")
-
         # 1. Figure? — any image object whose top is in the zone.
         images = getattr(page, "images", []) or []
         for im in images:
@@ -2108,6 +3414,8 @@ class LayoutCommand:
                 size_hint = f"{int(im_h)}pt tall" if im_h else ""
                 detail = self._extract_caption(page, prefix_pattern="Figure")
                 return ("figure", detail, size_hint)
+
+        chars = [c for c in page.chars if header_y < c["top"] < zone_bottom]
 
         # 2. Table? — many horizontal lines (rules) clustered in the zone.
         #    Tables in this book are typed with booktabs-style rules.
@@ -2154,6 +3462,13 @@ class LayoutCommand:
                 # First line of text inside the box = callout title.
                 title = self._first_line_text(chars, top_y_min=top)
                 return ("callout/box", title, "")
+
+        if not chars:
+            lower_chars = [c for c in page.chars if c["top"] >= zone_bottom]
+            first_lower = self._first_line_text(lower_chars)
+            if first_lower:
+                return ("delayed-opener", first_lower, "")
+            return ("unknown", "", "")
 
         # 4. Heading? — first line's font size is notably above median.
         sizes = [round(c.get("size", 0), 1) for c in chars if c.get("size")]
@@ -2290,6 +3605,13 @@ class LayoutCommand:
             f"{n}× {h}" for h, n in fix_counts.most_common()
         )
         console.print(f"[dim]by fix hint: {fix_summary}[/dim]")
+        strategy_counts = Counter(
+            (r.layout_strategy or self._layout_strategy(r)) for r in flagged
+        )
+        strategy_summary = ", ".join(
+            f"{n}× {h}" for h, n in strategy_counts.most_common()
+        )
+        console.print(f"[dim]by strategy: {strategy_summary}[/dim]")
 
         for chapter in chapter_order:
             rows = sorted(by_chapter[chapter], key=lambda x: -x.sheet)
@@ -2309,6 +3631,7 @@ class LayoutCommand:
             table.add_column("gap%", justify="right", style="yellow", width=6)
             table.add_column("cls", justify="center", style="magenta", width=3)
             table.add_column("culprit", style="white", width=11)
+            table.add_column("strategy", style="blue", width=22)
             table.add_column("detail / source / section", style="white")
             table.add_column("action", style="green", width=20)
 
@@ -2336,6 +3659,7 @@ class LayoutCommand:
                     f"{int(r.whitespace_frac * 100)}%",
                     r.klass or "?",
                     r.cause,
+                    r.layout_strategy or self._layout_strategy(r),
                     detail_block,
                     r.action or r.fix_hint,
                 )

@@ -21,11 +21,14 @@ from __future__ import annotations
 import json
 import random
 from collections import defaultdict
-from pathlib import Path
 
-LEDGER = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers/vol1-annotations-ground-truth.json"
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/scripts/locator-input"
-QUARTO_ROOT = Path("/Users/VJ/GitHub/MLSysBook-release-audit/book/quarto/contents")
+try:
+    from .paths import LEDGER_DIR, SCRIPT_DIR
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import LEDGER_DIR, SCRIPT_DIR
+
+LEDGER = LEDGER_DIR / "vol1-annotations-ground-truth.json"
+OUT_DIR = SCRIPT_DIR / "locator-input"
 
 MAX_PER_BIN = 250
 
