@@ -848,11 +848,11 @@ def fmt_percent(
 
     The formatter owns the trailing glyph via ``style`` so authors never type
     ``%`` or "percent" in prose (where a stray ``%`` could leak into math mode
-    and where MIT Press style — spell out "percent" in body, "%" in tables —
-    is otherwise unenforceable):
+    and where MIT Press style — spell out "percent" in sentence contexts,
+    "%" in dense data contexts — is otherwise unenforceable):
 
         style="prose"   →  "85 percent"   (MIT Press body style)
-        style="symbol"  →  "85%"          (tables, equations, captions)
+        style="symbol"  →  "85%"          (tables, equations, code)
         style="number"  →  "85"           (default; prose carries the meaning,
                                             e.g. "85 MFU", "85 goodput")
 
