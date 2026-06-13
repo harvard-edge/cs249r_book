@@ -14,14 +14,14 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_storage.png){fig-alt="Distributed data storage and scalable storage systems for ML workloads."}
+![](images/png/cover_data_storage_blueprint.png){fig-alt="Fleet storage fuel-line hierarchy where data moves from object storage through NVMe, DRAM, and HBM tiers into accelerator workers."}
 
 :::
 
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{100}{35}{15}{10}
+\mlfleetstack{30}{100}{35}{25}{20}{15}{0}{0}
 \end{marginfigure}
 
 _Why does storage become the invisible bottleneck that prevents accelerators from reaching their potential?_
@@ -36,12 +36,13 @@ Accelerators can compute faster than storage can feed them. A high-end accelerat
 
 ::: {.callout-learning-objectives}
 
-- Analyze how ML workloads invert traditional storage assumptions and apply the pipeline throughput equation to size bandwidth for training scenarios
-- Compare the six tiers of the ML storage hierarchy (HBM through archive) by bandwidth, latency, capacity, and cost per gigabyte
-- Design data pipeline architectures that use prefetching and pipelining to hide storage latency and prevent accelerator starvation
-- Explain how GPUDirect Storage bypasses the CPU to reduce data loading latency for accelerator-bound workloads
-- Evaluate storage cost trade-offs across tiers (including egress fees and IOPS charges) to design tiering strategies for training and inference
-- Explain how checkpoint storage requirements (tiered staging from NVMe to shared storage) interact with cluster fault tolerance strategies
+- Explain how ML storage workloads invert database assumptions through streaming, checkpoint bursts, and metadata pressure
+- Calculate required training bandwidth with the pipeline equation and target accelerator utilization
+- Compare memory, flash, parallel file, object, and archive storage tiers by bandwidth, latency, capacity, and cost
+- Design prefetching, sharding, caching, and locality strategies that prevent fleet-scale accelerator starvation
+- Evaluate accelerator-direct and CPU-bypass storage paths for latency, augmentation, and locality bottlenecks
+- Select checkpoint staging and replication strategies that balance pause time, recovery risk, and storage cost
+- Assess retrieval indexes and synthetic-data pipelines as storage workloads with distinct latency, consistency, and governance constraints
 
 :::
 
@@ -122,19 +123,19 @@ class StorageFuelLineContext:
 
 ## The Fuel Line {#sec-storage-fuel-line}
 
-The previous two chapters built the engine and wired it together. @Sec-compute-infrastructure established that dense accelerator nodes can pack eight GPUs delivering petaFLOP/s of aggregate compute, and @sec-network-fabrics showed how InfiniBand fabrics connect thousands of such nodes at hundreds of gigabits per second. Within the fleet stack shown in @fig-fleet-stack, data storage\index{Data Storage} completes that physical foundation by providing the fuel supply: training data, model weights, optimizer state, and intermediate checkpoints staged at the right distance from the accelerator. An engine without fuel is expensive sculpture. This chapter asks *how* to deliver that fuel fast enough that 1,000 accelerators never starve.
+Dense accelerator nodes can pack eight GPUs delivering petaFLOP/s of aggregate compute, and InfiniBand fabrics can connect thousands of such nodes at hundreds of gigabits per second. Within the fleet stack shown in @fig-fleet-stack, data storage\index{Data Storage} completes that physical foundation by providing the fuel supply: training data, model weights, optimizer state, and intermediate checkpoints staged at the right distance from the accelerator. An engine without fuel is expensive sculpture. The engineering question is how to deliver that fuel fast enough that 1,000 accelerators never starve.
 
 ::: {.column-margin}
-![](images/svg/data_storage_dai_locator.svg){width="100%" fig-alt="Three side-by-side pills labeled D, A, and I. The I pill is filled blue and the D and A pills are gray, marking the Infrastructure axis as this chapter's focus."}
+![](images/svg/data_storage_dai_locator.svg){width="100%" fig-alt="Three side-by-side pills labeled D, A, and I. The I pill is filled blue and the D and A pills are gray, marking the Infrastructure axis as the active focus."}
 
 *Storage is the Infrastructure axis of the fleet stack.*
 :::
 
-Consider the running example that will thread through this chapter. A 175-billion parameter language model trains on 1.5 trillion tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. Each training epoch reads every token once, in a shuffled order determined by the random seed. There is no "hot" subset of data that dominates access; every byte is consumed exactly once per pass. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
+Consider the running example for the storage analysis. A 175-billion parameter language model trains on 1.5 trillion tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. Each training epoch reads every token once, in a shuffled order determined by the random seed. There is no "hot" subset of data that dominates access; every byte is consumed exactly once per pass. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
 
-The problem is deceptive because storage technology has improved substantially. NVMe drives achieve `{python} StorageFuelLineContext.nvme_bw_gb_per_s_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. The accelerators, however, improved faster. An H100 GPU consumes data from its HBM at `{python} StorageFuelLineContext.h100_bw_tb_per_s_str`, roughly `{python} StorageFuelLineContext.bw_ratio_mult_str` faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central tension of this chapter, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
+The problem is deceptive because storage technology has improved substantially. NVMe drives achieve `{python} StorageFuelLineContext.nvme_bw_gb_per_s_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. The accelerators, however, improved faster. An H100 GPU consumes data from its HBM at `{python} StorageFuelLineContext.h100_bw_tb_per_s_str`, roughly `{python} StorageFuelLineContext.bw_ratio_mult_str` faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central storage tension, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
 
-The storage problem is fundamentally one of physics meeting economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering art is constructing a pipeline that bridges these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. This chapter shows *how* to reason quantitatively about each tier in the hierarchy, *how* to size the pipeline that connects them, and *how* to make the economic trade-offs that determine which data lives *where*.
+The storage problem is fundamentally one of physics meeting economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering art is constructing a pipeline that bridges these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. The resulting design problem is quantitative: how fast each tier must be, how deep the pipeline must run, and which bytes are worth keeping close to the accelerator.
 
 ::: {.column-margin}
 ```{=latex}
@@ -145,9 +146,9 @@ The storage problem is fundamentally one of physics meeting economics. Physics d
 *Checkpoint writes dwarf training-data reads by about 1,000 times.*
 :::
 
-The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced above. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates roughly 1.75 TB checkpoints (`{python} StorageFuelLineContext.ckpt_total_gb_str` total: 350 GB of weights plus 1.4 TB of Adam optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. These numbers thread through every section of this chapter, grounding abstract principles in concrete engineering constraints.
+The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the compressed corpus and tokenized shards introduced above. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. The model generates roughly 1.75 TB checkpoints (`{python} StorageFuelLineContext.ckpt_total_gb_str` total: 350 GB of weights plus 1.4 TB of Adam optimizer state) every 10 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data per epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. These numbers anchor the sections that follow, grounding abstract principles in concrete engineering constraints.
 
-Those numbers force the chapter's path. ML access patterns first invert the assumptions behind conventional storage systems; that inversion forces a hierarchy from HBM to cold archive; the hierarchy then requires pipeline equations, direct data paths, and economics that decide which bytes belong at each tier. Checkpoints, retrieval indexes, and synthetic-data provenance are variations on the same fuel-line problem: the storage system must place the right representation at the right distance before the accelerator asks for it.
+Those numbers force the storage path. ML access patterns first invert the assumptions behind conventional storage systems; that inversion forces a hierarchy from HBM to cold archive; the hierarchy then requires pipeline equations, direct data paths, and economics that decide which bytes belong at each tier. Checkpoints, retrieval indexes, and synthetic-data provenance are variations on the same fuel-line problem: the storage system must place the right representation at the right distance before the accelerator asks for it.
 
 ## How ML Workloads Invert Storage Assumptions {#sec-storage-workload-inversion}
 

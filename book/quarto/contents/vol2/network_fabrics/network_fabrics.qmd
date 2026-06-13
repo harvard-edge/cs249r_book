@@ -14,14 +14,14 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_network_fabrics.png){fig-alt="Network interconnects and fabric topology linking compute nodes in a data center."}
+![](images/png/cover_network_fabrics_blueprint.png){fig-alt="Isometric network fabric map connecting accelerator racks through elevated fabric layers with synchronization paths and a congestion constraint."}
 
 :::
 
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{100}{40}{15}{10}
+\mlfleetstack{45}{100}{40}{15}{15}{10}{0}{0}
 \end{marginfigure}
 
 _Why does the network connecting accelerators matter more than the accelerators themselves at scale?_
@@ -37,10 +37,10 @@ A single accelerator can perform trillions of operations per second, but distrib
 ::: {.callout-learning-objectives}
 
 - Model network communication cost using the $\alpha$-$\beta$ framework and identify bandwidth-dominated vs. latency-dominated regimes
-- Compare RDMA transport protocols (InfiniBand and RoCE) in terms of latency, lossless guarantees, and operational complexity
+- Compare high-performance transport protocols by latency, lossless guarantees, and operational complexity
 - Analyze network topologies (fat-tree, rail-optimized, dragonfly) by computing $\text{BW}_{\text{bisect}}$ and hop count for ML collective patterns
-- Evaluate congestion control mechanisms (PFC, DCQCN, HPCC) and their impact on tail latency during distributed training
-- Design network virtualization strategies for multi-tenant GPU clusters using SR-IOV and traffic isolation
+- Evaluate congestion-control mechanisms and their impact on tail latency during distributed training
+- Design network virtualization strategies for multi-tenant GPU clusters using device sharing and traffic isolation
 - Diagnose network performance bottlenecks using RDMA counters, link-level telemetry, and bandwidth testing tools
 
 :::
@@ -72,21 +72,21 @@ class NetworkRunningExampleCluster:
 *One slow link stalls every peer that waits on it.*
 :::
 
-Consider the running example: a 175-billion-parameter language model partitioned across `{python} NetworkRunningExampleCluster.n_gpus_str`. Each training step requires an AllReduce of 350 GB of gradient data, meaning every GPU must send and receive its share before the next step can begin. If even one link in the fabric is slow, all `{python} NetworkRunningExampleCluster.peer_gpus_str` other GPUs wait. The network is not auxiliary infrastructure; it is the synchronization backbone that determines whether this cluster trains efficiently or wastes millions of dollars in idle compute. @Sec-appdx-fleet-assumption-provenance records the model sizes and gradient-volume calculations behind the 350 GB AllReduce figure that recurs throughout this chapter.
+Consider a 175-billion-parameter language model partitioned across `{python} NetworkRunningExampleCluster.n_gpus_str`, where dense accelerator nodes are no longer useful unless they synchronize as one machine. Each training step requires an AllReduce of 350 GB of gradient data, meaning every GPU must send and receive its share before the next step can begin. If even one link in the fabric is slow, all `{python} NetworkRunningExampleCluster.peer_gpus_str` other GPUs wait. The network fabric is not auxiliary infrastructure; it is the synchronization backbone that determines whether this cluster trains efficiently or wastes millions of dollars in idle compute. The 350 GB figure follows from the model-size and gradient-volume assumptions used throughout the fleet examples.
 
-In the fleet stack\index{Fleet Stack} shown in @fig-fleet-stack, network fabrics form the connective tissue binding the Infrastructure Layer into a coherent whole. @Sec-compute-infrastructure established the building blocks: accelerators, power delivery, and cooling. Those components define what each node can compute in isolation. @Fig-network-five-level-model organizes the fabric design space into five co-dependent levels, from physical signaling to cluster-scale orchestration. The acronyms in the figure are a roadmap: each mechanism is defined when it becomes the binding constraint.
+In the fleet stack\index{Fleet Stack} shown in @fig-fleet-stack, the fabric turns isolated accelerator nodes into a coherent training system. Accelerators, power delivery, cooling, racks, and pods define what each node can compute in isolation; the fabric determines whether the nodes can act together before communication cost overwhelms computation. @Fig-network-five-level-model organizes that design space into five co-dependent levels, from physical signaling to cluster-scale orchestration. The acronyms in the figure are a roadmap: each mechanism is defined when it becomes the binding constraint.
 
 ::: {#fig-network-five-level-model fig-env="figure" fig-pos="htb" fig-cap="**The Five-Level Network Model for ML Training**: Five layered levels span from the physical wire to cluster-scale design. Level 1, Wire and Link: PAM4/NRZ signaling, SerDes, DAC, AOC, pluggable optics, Ethernet and InfiniBand link layers. Level 2, Transport: RDMA, GPUDirect, RoCEv2, zero-copy DMA, and the $\alpha$-$\beta$ communication model. Level 3, Switch and Topology: fat-tree, rail-optimized, Dragonfly, adaptive routing. Level 4, Fabric Behavior: PFC, DCQCN, HPCC congestion control, adaptive routing, incast handling. Level 5, Cluster Design: NVIDIA SuperPOD, Meta Grand Teton, and other production fabric integrations." fig-alt="Five-level stack from bottom to top: Wire and Link, Transport, Switch and Topology, Fabric Behavior, Cluster Design. Each level lists representative technologies; abstraction increases upward."}
 ![](images/svg/five-level-model.svg)
 :::
 
-This chapter wires those nodes together, because at scale, communication cost dominates computation cost. The fleet law in @eq-fleet-law makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric constrains every layer above it in the stack by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
+At scale, communication cost can dominate computation cost. The fleet law in @eq-fleet-law makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric constrains every layer above it in the stack by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
 
-The physical network fabric exists to carry three fundamental collective communication patterns. An AllReduce\index{AllReduce}[^fn-allreduce-forward] sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training. An AllGather[^fn-collectives-forward] collects different model portions so that every GPU can reconstruct the full model state. An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism[^fn-moe-forward]. @Sec-collective-communication covers the *algorithms* that orchestrate these patterns; this chapter covers the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
+The physical network fabric exists to carry three fundamental collective communication patterns. An AllReduce\index{AllReduce}[^fn-allreduce-forward] sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training. An AllGather[^fn-collectives-forward] collects different model portions so that every GPU can reconstruct the full model state. An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism[^fn-moe-forward]. @Sec-collective-communication covers the *algorithms* that orchestrate these patterns; the fabric layer supplies the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
 
 ::: {#psp-network-fabrics-network-as-gradient-bus .callout-perspective title="The network as a gradient bus"}
 
-In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the **Gradient Bus**\index{Gradient!bus} that moves parameter updates between workers. Just as the memory wall in @sec-compute-memory-wall limits single-device throughput, network fabric bandwidth determines multi-device throughput (the communication wall\index{Communication Wall}). Every concept in this chapter, from protocols to topologies to congestion control, exists to make this Gradient Bus as fast and reliable as possible.
+In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the **Gradient Bus**\index{Gradient!bus} that moves parameter updates between workers. Just as the memory wall in @sec-compute-memory-wall limits single-device throughput, network fabric bandwidth determines multi-device throughput (the communication wall\index{Communication Wall}). Protocols, topologies, congestion control, and collective-routing choices all determine how close that bus comes to its physical limits.
 
 :::
 
@@ -140,7 +140,7 @@ class NetworkFabricsContextScenario:
     h100_mem_bw_tb_per_s_str = fmt_qty(h100_mem_bw_raw, TB / second, precision=2, commas=False)
 ```
 
-The concrete bandwidth cliff that separates intra-node from inter-node communication makes this gradient bus analogy precise. @Sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor the figures used throughout this chapter. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
+The concrete bandwidth cliff that separates intra-node from inter-node communication makes this gradient bus analogy precise. @Sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor these figures. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
 
 @Fig-bandwidth-hierarchy makes this hierarchy concrete by plotting the bandwidth at each level across four GPU generations.
 
@@ -162,7 +162,8 @@ The ratio becomes visible during a single training step. @Fig-bandwidth-cliff-ga
 
 ```{.tikz}
 \usetikzlibrary{positioning, decorations.pathreplacing}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\providecommand{\mlsysFigureSans}{\usefont{T1}{phv}{m}{n}}
+\begin{tikzpicture}[font=\small\mlsysFigureSans]
   \definecolor{BlueLine}{HTML}{006395}
   \definecolor{BlueL}{HTML}{D1E6F3}
   \definecolor{GreenLine}{HTML}{008F45}
@@ -173,13 +174,13 @@ The ratio becomes visible during a single training step. @Fig-bandwidth-cliff-ga
   \definecolor{BrownLine}{HTML}{78492A}
 
   \tikzset{
-    ganttbar/.style={draw=none, text=white, font=\scriptsize\usefont{T1}{phv}{m}{n}, minimum height=0.8cm, inner sep=0pt, anchor=west},
+    ganttbar/.style={draw=none, text=white, font=\scriptsize\mlsysFigureSans, minimum height=0.8cm, inner sep=0pt, anchor=west},
     fwd/.style={ganttbar, fill=GreenLine!80},
     bwd/.style={ganttbar, fill=BlueLine!80},
     ar/.style={ganttbar, fill=RedLine},
-    label/.style={font=\small\bfseries, anchor=east},
-    sublabel/.style={font=\scriptsize\usefont{T1}{phv}{m}{n}, anchor=east, text=black!60},
-    util/.style={font=\scriptsize\bfseries, anchor=west}
+    label/.style={font=\small\mlsysFigureSans\bfseries, anchor=east},
+    sublabel/.style={font=\scriptsize\mlsysFigureSans, anchor=east, text=black!60},
+    util/.style={font=\scriptsize\mlsysFigureSans, anchor=west}
   }
 
   %—Scenario A: Intra-node (NVLink) ---
@@ -187,7 +188,7 @@ The ratio becomes visible during a single training step. @Fig-bandwidth-cliff-ga
     \node[fwd, minimum width=4cm] (fwd1) at (0, 1.6) {Forward (100 ms)};
     \node[bwd, minimum width=4cm, right=0pt of fwd1] (bwd1) {Backward (100 ms)};
     \node[ar, minimum width=0.04cm, right=0pt of bwd1] (ar1) {};
-    \node[font=\tiny\usefont{T1}{phv}{m}{n}, anchor=west, text=RedLine, right=2pt of ar1] (ar1_label) {AR (1 ms)};
+    \node[font=\tiny\mlsysFigureSans, anchor=west, text=RedLine, right=2pt of ar1] (ar1_label) {AR (1 ms)};
     \node[util, text=GreenLine, right=10pt of ar1_label] {99.5\% util.};
 
     \node[label, left=0.3cm of fwd1.west, yshift=0.2cm] {Intra-Node};
@@ -207,10 +208,10 @@ The ratio becomes visible during a single training step. @Fig-bandwidth-cliff-ga
 
   % Time axis
   \begin{scope}[yshift=-1.0cm]
-    \draw[->, line width=1.0pt, black!60] (0, 0) -- (9.8, 0) node[right, font=\scriptsize\usefont{T1}{phv}{m}{n}] {Time (ms)};
+    \draw[->, line width=1.0pt, black!60] (0, 0) -- (9.8, 0) node[right, font=\scriptsize\mlsysFigureSans] {Time (ms)};
     \foreach \x/\t in {0/0, 4/100, 8/200, 9.2/230} {
       \draw[black!60, line width=1.0pt] (\x, 0.1) -- (\x, -0.1);
-      \node[font=\tiny\usefont{T1}{phv}{m}{n}, below] at (\x, -0.1) {\t};
+      \node[font=\tiny\mlsysFigureSans, below] at (\x, -0.1) {\t};
     }
   \end{scope}
 
@@ -2108,13 +2109,13 @@ The practical value of this layered understanding is diagnostic precision. When 
 
 Equally important, the $\alpha$-$\beta$ cost model provides a quantitative vocabulary for making architectural decisions before hardware is purchased and racks are wired. Choices between InfiniBand and RoCE, between fat-tree and rail-optimized topologies, and between 400G and 800G link speeds are all decisions with multi-million-dollar consequences that hinge on the interaction between message size distributions, collective algorithms, and physical link characteristics. The framework developed in this chapter equips practitioners to evaluate these trade-offs with analytical rigor rather than vendor benchmarks alone.
 
-::: {.callout-takeaways title="The network is the bottleneck"}
+::: {.callout-takeaways title="The fabric decides useful compute"}
 
-* At scale, the interconnect\index{Interconnect!performance role} is a primary determinant of system performance. Bandwidth and topology constrain training speed as fundamentally as accelerator FLOP/s.
-* The $\alpha$-$\beta$ framework developed in @sec-network-fabrics-performance-model guides topology selection and collective algorithm design by separating latency-dominated and bandwidth-dominated regimes.
-* RDMA\index{RDMA!lossless requirement} requires a lossless fabric. InfiniBand provides this natively; Ethernet must approximate it via PFC/ECN, adding operational complexity and tail-latency risk.
-* The topology comparison\index{Network Topology!workload fit} in @fig-network-topologies shows why fat-trees provide flexibility, rail-optimized networks accelerate same-rank data-parallel AllReduce, and dragonflies reduce cabling costs for massive scale.
-* Systematic telemetry\index{Network Telemetry!observability} (PFC counters, bandwidth baselines) is the only way to detect subtle network-induced training slowdowns before they waste significant GPU-hours.
+* **Link speed is not fabric speed**: A global AllReduce is limited by the narrowest bisection cut, not the fastest advertised port. Topology decides how much purchased accelerator throughput becomes useful training throughput and how much becomes idle silicon.
+* **Latency and bandwidth bind differently**: The $\alpha$-$\beta$ model separates startup cost from per-byte transfer cost, with $n^* = \alpha \cdot \beta$ marking the regime change. Message-size distributions, not vendor peak numbers, determine whether to optimize software latency or hardware bandwidth.
+* **Losslessness moves the risk**: RDMA needs a lossless fabric to avoid expensive retransmission stalls. InfiniBand supplies this natively, while RoCE depends on PFC, ECN, DCQCN, and HPCC, trading hardware flexibility for tail-latency and operational complexity.
+* **Topology must match traffic**: Fat-trees buy flexible bisection bandwidth, rail-optimized designs accelerate same-rank AllReduce, and dragonfly or torus designs trade cabling and locality differently. The right fabric depends on whether the workload stresses AllReduce, AllToAll, or multi-tenant sharing.
+* **Telemetry saves GPU-hours**: PFC counters, link error rates, bandwidth baselines, and application throughput must be correlated across layers. Without that observability, a degraded transceiver or congestion storm silently converts a high-end fleet into a queue of waiting accelerators.
 
 :::
 

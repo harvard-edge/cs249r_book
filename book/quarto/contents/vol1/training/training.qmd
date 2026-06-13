@@ -14,7 +14,7 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_ai_training.png){fig-alt="Artistic depiction of neural network training showing miniature workers and scientists operating machinery on a large glowing neural network with interconnected neurons and synapses."}
+![](images/png/cover_training_blueprint.png){fig-alt="Isometric training cutaway showing a forward pass storing activations, a loss signal, returning gradients, and weight updates."}
 
 :::
 
@@ -36,13 +36,13 @@ Inference computes a single forward pass: data flows through the network, a pred
 
 ::: {.callout-learning-objectives}
 
-- Explain the iron law of training performance and identify which term (operations, peak throughput, or utilization) each optimization technique targets
-- Calculate computational requirements (FLOPs), memory footprints (activation storage, optimizer states), and training cost estimates for neural network training
-- Compare optimization algorithms (SGD, Adam, AdamW) based on convergence speed, memory overhead, and computational cost
-- Identify training bottlenecks using arithmetic intensity (Roofline Model) and the profile-diagnose-fix-reprofile methodology to distinguish compute, memory, and data-bound regimes
-- Apply memory and throughput optimizations (mixed-precision, activation checkpointing, gradient accumulation, IO-aware attention) to fit large models within accelerator constraints
-- Construct efficient single-machine training pipelines using data prefetching, pipeline overlapping, and the systematic optimization framework
-- Analyze when single-machine training becomes infeasible (memory, duration, dataset scale) and evaluate trade-offs of scaling to multi-accelerator configurations
+- Explain training cost asymmetry using forward, backward, optimizer-state, data, and iteration costs
+- Calculate FLOPs, activation memory, optimizer state, and dollar cost for neural network training
+- Compare SGD, Adam, and AdamW by convergence behavior, memory overhead, and compute cost
+- Diagnose compute-, memory-, and data-bound training bottlenecks with roofline analysis and profiling evidence
+- Apply mixed precision, checkpointing, gradient accumulation, and FlashAttention to fit accelerator memory and throughput limits
+- Design single-machine training pipelines with prefetching, overlap, batching, and systematic re-profiling
+- Evaluate when to scale beyond one machine using memory, duration, communication, energy, and cost constraints
 
 :::
 
@@ -130,7 +130,7 @@ class TrainingScenarios:
 
 ## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
 
-The frameworks examined in @sec-ml-frameworks provided the execution substrate: computational graphs that schedule operations, automatic differentiation that computes gradients, and hardware abstractions that target diverse accelerators. Those tools make a single training step possible. This chapter confronts what happens when that step must execute billions of times, and what systems engineering is required to do so within practical time and budget constraints.
+Frameworks provide the execution substrate: computational graphs schedule operations, automatic differentiation computes gradients, and hardware abstractions target diverse accelerators. Those mechanisms make a single training step possible; training systems make it repeatable at scale. The same forward/backward/update loop must now run billions of times while retaining activations, feeding accelerators, and staying within practical memory, time, and budget limits.
 
 ::: {.column-margin}
 ![](images/svg/training_cost_asymmetry.svg){width="100%" fig-alt="A cost curve that stays nearly flat across model scale, then rises almost vertically at the right, with a marked knee point and a shaded danger zone past it. Training cost explodes at large scale."}
@@ -6739,13 +6739,12 @@ class GPT2SummaryChapterRecap:
 
 ::: {.callout-takeaways title="Why training costs millions"}
 
-* **The iron law governs training**: $T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$. Every optimization affects one of these terms. Identifying which term is affected is essential for effective optimization.
-* **Memory and convergence are coupled**: Adam converges in roughly one-third the iterations of SGD but requires 3$\times$ the memory for per-parameter state. Activations add another batch-size-dependent memory term, so optimizer choice and activation management often determine whether training fits.
-* **Profiling precedes optimization**: The iterative loop is: profile → identify bottleneck → apply targeted fix → re-profile. Optimization without profiling typically wastes effort on nonbottlenecks.
-* **Precision and I/O-aware kernels shift bottlenecks**: FP16 training with FP32 accumulation delivers about 2$\times$ throughput and memory reduction, while Flash Attention's tiling avoids materializing the full $S{\times}S$ matrix in HBM and achieves 2--4$\times$ speedups.
-* **Gradient checkpointing trades compute for memory**: Recomputing activations during the backward pass enables larger memory-feasible configurations by cutting stored activations 3--4$\times$ (the walkthrough's fall from `{python} GPT2SummaryChapterRecap.act_fp16_gb_str` to `{python} GPT2SummaryChapterRecap.act_ckpt_gb_str` at batch 4). It is essential when memory is the binding constraint.
-* **Optimizations compose and must be applied systematically**: No single technique addresses all bottlenecks. The GPT-2 walkthrough demonstrates how mixed precision, gradient checkpointing, and data prefetching must be layered together, guided by iterative profiling, to transform an infeasible `{python} GPT2SummaryChapterRecap.b_total_mem_gb_str` memory requirement into a practical `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` configuration.
-* **Efficiency reduces scale-out, cost, and energy**: Distributed training adds communication overhead and complexity, so prefetching, mixed precision, checkpointing, and accumulation should be exhausted before scaling out. The same optimizations reduce training time, emissions, and cloud cost.
+* **Training cost is an iron-law budget**: $T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$ makes every optimization accountable: reduce work, raise effective throughput, or improve utilization. A change that misses the dominant term only moves cost around the training loop.
+* **Memory determines whether convergence matters**: Adam can reach good solutions in roughly one-third the iterations of SGD, but its per-parameter state costs 3$\times$ extra memory before activations enter the budget. Optimizer choice and batch-size-dependent activations often decide whether training fits at all.
+* **Profiles choose the remedy**: The loop is profile, diagnose, fix, and re-profile. Compute-bound jobs benefit from larger batches and mixed precision; memory-bound jobs need checkpointing or smaller state; data- and communication-bound jobs need pipeline or parallelism changes.
+* **Precision and IO-aware kernels shift bottlenecks**: FP16 with FP32 accumulation can deliver about 2$\times$ throughput and memory reduction, while Flash Attention avoids materializing the full $S{\times}S$ matrix in HBM and can yield 2--4$\times$ speedups when attention IO dominates.
+* **Checkpointing buys memory with recompute**: Storing fewer activations and recomputing them during backpropagation cuts activation memory 3--4$\times$ in the walkthrough, from `{python} GPT2SummaryChapterRecap.act_fp16_gb_str` to `{python} GPT2SummaryChapterRecap.act_ckpt_gb_str` at batch 4. Use it when memory, not compute, binds.
+* **Composed optimizations postpone scale-out**: Mixed precision, checkpointing, and prefetching together turn `{python} GPT2SummaryChapterRecap.b_total_mem_gb_str` into `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` for the GPT-2 walkthrough. Exhaust these local levers before paying distributed-training communication, reliability, energy, and cost overheads.
 
 :::
 

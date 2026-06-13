@@ -14,14 +14,14 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_orchestration.png){fig-alt="Stylized data center visualization with blue glowing server towers, hexagonal node clusters connected by bright network pathways, and circuit board patterns below."}
+![](images/png/cover_fleet_orchestration_blueprint.png){fig-alt="Scheduler control-plane blueprint where queued jobs are placed onto topology-aware accelerator capacity with preemption, recovery, and policy constraints."}
 
 :::
 
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{30}{100}{40}{15}
+\mlfleetstack{25}{30}{40}{100}{35}{45}{10}{0}
 \end{marginfigure}
 
 _Why does resource allocation become the primary bottleneck when hardware is plentiful?_
@@ -36,13 +36,13 @@ A thousand accelerators sitting idle waiting for scheduling decisions cost the s
 
 ::: {.callout-learning-objectives}
 
-- Implement gang scheduling policies to prevent resource fragmentation and deadlocks in distributed training jobs
-- Design multi-tenant quota systems using hierarchical fair-share and borrowing to maximize cluster utilization
-- Differentiate between HPC (Slurm) and cloud-native (Kubernetes) scheduling paradigms and their trade-offs for ML workloads
-- Architect autoscaling policies for inference workloads based on custom metrics like queue depth and GPU memory pressure
-- Apply topology-aware scheduling to place distributed training jobs with respect to NVLink domains and switch hierarchy
-- Evaluate elastic training strategies that allow jobs to grow and shrink dynamically without full restarts
-- Quantify the economics of fleet scheduling including spot instances, preemption costs, and capacity reservation strategies
+- Analyze scheduling objectives, fragmentation, and deadlock risks for distributed training jobs under shared fleet constraints
+- Compare HPC, cloud-native, and hybrid orchestration paradigms for batch training and self-healing serving workloads
+- Apply gang, bin-packing, and topology-aware placement policies across NVLink domains and switch hierarchies
+- Design elastic training and preemption policies that trade throughput, recovery overhead, and spot-instance savings
+- Evaluate ML-specific schedulers using job duration, iteration progress, fairness, and adaptive resource-allocation signals
+- Design inference autoscaling, isolation, and routing policies using queue depth, tail latency, and GPU memory pressure
+- Diagnose utilization losses from quota hoarding, noisy neighbors, fragmentation, topology mismatch, and data starvation
 
 :::
 
@@ -71,7 +71,7 @@ from mlsysim.fmt import fmt, check, MarkdownStr
 
 ## The Scheduling Problem {#sec-fleet-orchestration-introduction}
 
-Distributing computation (@sec-distributed-training-systems), synchronizing it efficiently (@sec-collective-communication), and recovering from hardware failures (@sec-fault-tolerance-reliability) solve the problem of running a single job across many machines. Orchestration solves the next problem: deciding which jobs run, where they run, and how resources are shared among competing demands.
+Partitioning computation, synchronizing it efficiently, and recovering from hardware failures solve the problem of running a single job across many machines. Orchestration solves the next problem: deciding which jobs run, where they run, and how resources are shared among competing demands.
 
 Imagine two research teams sharing a 1,000-GPU cluster: Team A submits a 512-GPU job that will run for a month, while Team B submits hundreds of 8-GPU experiments that each run for an hour. If the scheduler simply processes jobs as they arrive, Team B's tiny experiments might indefinitely block Team A's massive training run. The scheduling problem is the challenge of navigating this multi-dimensional conflict between throughput, fairness, and cluster utilization.
 
@@ -266,7 +266,7 @@ Optimizing all four simultaneously is impossible; every scheduling policy repres
 *Past about 70 percent utilization, queue wait time explodes.*
 :::
 
-Consider a 64-GPU fine-tuning run for our 175B model, a scheduling-demo workload distinct from the full 1,024-GPU pretraining run that recurs elsewhere in this chapter. From a throughput perspective, this is an ideal job: it runs for days with high utilization and zero scheduling overhead once started. From a latency perspective, it is a boulder in the stream. To schedule it, the system might need to drain 64 GPUs of all other work, forcing hundreds of smaller jobs to wait. Once running, it occupies those resources immovably. If the scheduler prioritizes this run (throughput), the P99 latency for small jobs explodes. If it prioritizes small jobs (latency) by allowing them to preempt or fragmentation-fill the cluster, the 64-GPU job may never assemble the contiguous block it needs to start. This zero-sum game forces organizations to make explicit policy choices. In scheduler terminology, those choices often appear as Quality of Service classes: job-priority tiers that decide which objective wins when throughput, latency, fairness, and cost collide.
+Consider a 64-GPU fine-tuning run for our 175B model, a scheduling-demo workload distinct from the full 1,024-GPU pretraining run that recurs elsewhere in the fleet discussion. From a throughput perspective, this is an ideal job: it runs for days with high utilization and zero scheduling overhead once started. From a latency perspective, it is a boulder in the stream. To schedule it, the system might need to drain 64 GPUs of all other work, forcing hundreds of smaller jobs to wait. Once running, it occupies those resources immovably. If the scheduler prioritizes this run (throughput), the P99 latency for small jobs explodes. If it prioritizes small jobs (latency) by allowing them to preempt or fragmentation-fill the cluster, the 64-GPU job may never assemble the contiguous block it needs to start. This zero-sum game forces organizations to make explicit policy choices. In scheduler terminology, those choices often appear as Quality of Service classes: job-priority tiers that decide which objective wins when throughput, latency, fairness, and cost collide.
 
 ```{python}
 #| echo: false
@@ -308,7 +308,7 @@ $$ \frac{W_q}{1/\mu} = \frac{\rho}{1-\rho} \cdot \frac{1+C_s^2}{2} $$
 
 Here, $\rho = \lambda_{\text{job}}/\mu$ represents cluster utilization, $1/\mu$ is the average job duration, and $C_s = \sigma \mu$ is the **coefficient of variation** of job duration. The right-hand side is therefore the waiting time expressed as a multiple of the average job duration.
 
-In standard web serving, request service times are often approximated by an exponential distribution, yielding $C_s \approx 1$. In ML clusters, job durations follow a heavy-tailed distribution: a vast number of short debugging jobs (minutes) mixed with a few massive training runs (weeks). The representative $C_s=3$ calculation in this callout captures that variance without claiming a universal fleet constant. The impact on wait times is multiplicative. For this chapter, the single-server multiplier is sufficient; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 generalizes the result to the M/G/c/K queue and validates it against Little's Law for readers sizing a scheduler's admission queue under heavy-tailed arrivals.
+In standard web serving, request service times are often approximated by an exponential distribution, yielding $C_s \approx 1$. In ML clusters, job durations follow a heavy-tailed distribution: a vast number of short debugging jobs (minutes) mixed with a few massive training runs (weeks). The representative $C_s=3$ calculation in this callout captures that variance without claiming a universal fleet constant. The impact on wait times is multiplicative. For the scheduling argument here, the single-server multiplier is sufficient; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 generalizes the result to the M/G/c/K queue and validates it against Little's Law for readers sizing a scheduler's admission queue under heavy-tailed arrivals.
 
 At `{python} QueuingTheory.rho_pct_str` utilization $(\rho = 0.8)$: with an exponential workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With a typical ML workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. This explains the "utilization wall" in ML infrastructure. A web server cluster feels responsive at `{python} QueuingTheory.rho_pct_str` load, but an ML cluster at the same utilization feels broken, with jobs languishing in the queue for days. The heavy tail of the service distribution acts as a latency multiplier, forcing operators to run ML clusters at lower utilization (often 60 to 70 percent) to maintain acceptable responsiveness for interactive users.
 

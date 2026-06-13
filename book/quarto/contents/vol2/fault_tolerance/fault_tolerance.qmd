@@ -4,7 +4,7 @@ concepts: fault_tolerance_concepts.yml
 engine: jupyter
 ---
 
-# Fault Tolerance and Reliability {#sec-fault-tolerance-reliability}
+# Fault Tolerance {#sec-fault-tolerance-reliability}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -14,14 +14,14 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_fault_tolerance.png){fig-alt="Fault tolerance, checkpointing, and recovery in distributed training."}
+![](images/png/cover_fault_tolerance_blueprint.png){fig-alt="Fleet recovery blueprint showing a training path interrupted by a failed node, checkpoint state preserved, and work resumed through replacement workers."}
 
 :::
 
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{25}{100}{25}{10}
+\mlfleetstack{15}{20}{45}{100}{20}{30}{10}{0}
 \end{marginfigure}
 
 _Why does scale transform hardware failure from rare exception to routine condition that systems must absorb continuously?_
@@ -35,12 +35,13 @@ A single accelerator can run for years between hardware failures. A thousand acc
 :::
 ::: {.callout-learning-objectives}
 
-- Calculate system-level MTBF from component failure rates and derive optimal checkpoint intervals using the Young-Daly formula to minimize wasted work
-- Design distributed checkpoint and recovery strategies that coordinate state across thousands of GPUs while managing multi-terabyte checkpoint sizes
-- Implement serving redundancy, replication, and failover mechanisms that maintain availability within millisecond latency requirements under partial failures
-- Apply graceful degradation (model fallback, feature fallback, load shedding) to maintain partial service when full capability is unavailable
-- Construct observability infrastructure using metrics, logs, and distributed traces to diagnose nondeterministic failures and silent accuracy degradation
-- Evaluate fault tolerance trade-offs across training and serving workloads by analyzing their distinct latency tolerances, state requirements, and recovery strategies
+- Calculate fleet-level MTBF from component failure rates and estimate failure frequency for large training clusters
+- Classify hardware, software, and silent-data-corruption failures by detectability, blast radius, and recovery path
+- Derive checkpoint intervals that balance write overhead, lost work, and cluster failure rates
+- Design distributed checkpointing and elastic recovery plans for multi-terabyte model state across GPU fleets
+- Evaluate fault injection and observability evidence to validate detection, isolation, and recovery behavior
+- Implement serving redundancy, failover, and state replication under millisecond latency and partial-failure constraints
+- Select graceful degradation strategies that preserve useful service when models, features, regions, or capacity fail
 
 :::
 
@@ -113,13 +114,13 @@ class FleetReliabilityRates:
 
 ## Failure Analysis at Scale {#sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b}
 
-Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. Statistically, a GPU will fail every few hours. If the system is not designed to absorb these continuous physical failures, the training process will halt entirely, wasting millions of dollars in compute time. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the fleet stack shown in @fig-fleet-stack, fault tolerance acts as the resilience layer for distributed execution. The challenges span the full failure spectrum, from transient bit flips through intermittent aging-related errors to permanent component failures, as @fig-fault-tolerance-failure-spectrum illustrates. Beyond these temporal categories, gray failures and silent data corruption (SDC) introduce a second axis of difficulty (low detection rate, high blast radius) that the rest of the chapter develops.
+Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The communication layer has done its job: thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the fleet stack shown in @fig-fleet-stack, fault tolerance acts as the resilience layer for distributed execution. The challenges span the full failure spectrum, from transient bit flips through intermittent aging-related errors to permanent component failures, as @fig-fault-tolerance-failure-spectrum illustrates. Gray failures and silent data corruption (SDC) add a second axis of difficulty: low detection rate, high blast radius.
 
 ::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML Failure Spectrum**: Reliability challenges at scale span a temporal taxonomy from transient errors (bit flips, single-event upsets) through intermittent errors (aging, marginal components) to permanent errors (stuck-at faults, dead components). Each category demands different detection latency and recovery strategy, and fault tolerance engineering must address all three to maintain fleet-scale throughput." fig-alt="Continuum diagram showing failure characteristics across three categories: Transient, Intermittent, and Permanent. Each category labeled with characteristic frequency and detection profile."}
 ![](images/svg/failure-spectrum.svg)
 :::
 
-The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices, and the collective communication patterns from @sec-collective-communication (AllReduce, AllGather, AllToAll) sustain that coordination through rigidly synchronized exchanges. However, this tight synchronization creates fragility: a failure in any single device can stall the entire fleet. This chapter builds the resilience layer that keeps that fleet running: a taxonomy of how hardware and software fail at scale, the detection methods that catch even silent data corruption, and the checkpointing, recovery, and elastic-training mechanisms that turn a failure from a catastrophe into a pause.
+That fragility is the direct consequence of successful synchronization. Distributed training systems achieve massive throughput by coordinating thousands of devices, and collective communication keeps that coordination synchronized through rigid exchanges. The same synchronization means one stalled device can stall the fleet. Fault-tolerant ML systems preserve progress by detecting failure, checkpointing recoverable state, restarting or elastically reshaping jobs, and treating hardware churn as normal execution rather than an exceptional path.
 
 The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU can go years without a hardware failure. That same workload on a 1,000-GPU cluster sees GPU-only failures every couple of days, and a production cluster fails more often once PCIe, power, storage, and network domains enter the failure budget. This shift from *rare exception* to *routine occurrence* demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
 
@@ -141,7 +142,7 @@ System reliability engineering provides the foundational framework for understan
 
 $$ R_{\text{single}}(t) = e^{-\lambda t} $$ {#eq-single-component-reliability}
 
-The mean time between failures (MTBF) for this component equals $1/\lambda$. By the book's convention, mean time to failure (MTTF) names a single component's expected time to its first failure while MTBF names the repairable system's expected time between successive failures; under the constant-rate exponential model used here the two coincide numerically, and the chapter uses MTTF for per-component constants and MTBF for composed system rates. Data center GPUs often have specified MTBF values in the tens of thousands of hours, with field behavior depending on operating conditions, cooling effectiveness, manufacturing variation, and workload stress.[^fn-gpu-mtbf-field] @sec-appdx-reliability-foundations-component-rates catalogs the canonical per-component MTTF values (H100, A100, TPU, PCIe, power, network) that anchor these $\lambda$ and FIT figures, so a reader can substitute the constant for any device and reproduce the rates used throughout this chapter.
+The mean time between failures (MTBF) for this component equals $1/\lambda$. By the book's convention, mean time to failure (MTTF) names a single component's expected time to its first failure while MTBF names the repairable system's expected time between successive failures; under the constant-rate exponential model used here the two coincide numerically, and the fault-tolerance model uses MTTF for per-component constants and MTBF for composed system rates. Data center GPUs often have specified MTBF values in the tens of thousands of hours, with field behavior depending on operating conditions, cooling effectiveness, manufacturing variation, and workload stress.[^fn-gpu-mtbf-field] @sec-appdx-reliability-foundations-component-rates catalogs the canonical per-component MTTF values (H100, A100, TPU, PCIe, power, network) that anchor these $\lambda$ and FIT figures, so a reader can substitute the constant for any device and reproduce the rates used throughout the fault-tolerance analysis.
 
 [^fn-gpu-mtbf-field]: **GPU MTBF Variation**\index{GPU!MTBF variation}\index{MTBF!GPU field variation}: NVIDIA specifies A100 MTBF at approximately 50,000 hours under controlled conditions, while published fleet studies from Google (Tensor Processing Unit (TPU) pods) and Meta (GPUs) report field failure rates above manufacturer specifications in their environments. The gap arises from thermal stress, power fluctuations, and memory-intensive ML workloads that push components beyond the steady-state assumptions in reliability models.
 
@@ -230,9 +231,9 @@ When failure is inevitable, the key engineering decision is how often to save pr
 
 $$ \tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}} $$
 
-$T_{\text{write}}$ in distributed ML training is not the time to flush a small process state—it is the time required to transfer hundreds of gigabytes of FP32 optimizer state (momentum and variance tensors for every trainable parameter) plus model weights to durable storage. For a 70B-parameter model with full Adam state, a single checkpoint can reach several hundred gigabytes; for the 175B-parameter running example used later in this chapter, that figure exceeds a terabyte. Compressing $T_{\text{write}}$ therefore requires purpose-built high-bandwidth storage, and $T_{\text{write}}$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
+$T_{\text{write}}$ in distributed ML training is not the time to flush a small process state—it is the time required to transfer hundreds of gigabytes of FP32 optimizer state (momentum and variance tensors for every trainable parameter) plus model weights to durable storage. For a 70B-parameter model with full Adam state, a single checkpoint can reach several hundred gigabytes; for the later 175B-parameter running example, that figure exceeds a terabyte. Compressing $T_{\text{write}}$ therefore requires purpose-built high-bandwidth storage, and $T_{\text{write}}$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
 
-The optimal interval balances the cost of writing checkpoints against the expected cost of reworking lost progress, the U-shaped trade-off @fig-young-daly plots. Its scaling consequence is the one to carry forward: as clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage (@sec-data-storage) to keep $T_{\text{write}}$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth. @Sec-appdx-reliability-foundations-young-daly carries out the full derivation and the tighter second-order bounds; the Checkpointing section later in this chapter (@sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d) applies the formula to the chapter's own cluster once its system MTBF is in hand.
+The optimal interval balances the cost of writing checkpoints against the expected cost of reworking lost progress, the U-shaped trade-off @fig-young-daly plots. Its scaling consequence is the one to carry forward: as clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage (@sec-data-storage) to keep $T_{\text{write}}$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth. @Sec-appdx-reliability-foundations-young-daly carries out the full derivation and the tighter second-order bounds; the later Checkpointing section (@sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d) applies the formula to the local cluster once its system MTBF is in hand.
 
 [^fn-young-daly-history]: **Young-Daly Formula**\index{Young-Daly Formula!history}: J. W. Young derived the first-order optimal checkpoint interval in a 1974 *Communications of the ACM* paper; John Daly independently refined it in 2006 with tighter second-order bounds. The formula's square-root relationship $(\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}})$ means that halving system MTBF only increases optimal checkpoint frequency by $\sqrt{2}\approx 1.4\times$, explaining why doubling cluster size does not demand doubling checkpoint I/O bandwidth.
 
@@ -332,7 +333,7 @@ class HbmSerBudget:
     time_to_error_str = fmt_time(round(time_to_error_s), 'second', precision=0, commas=False, style='word')
 ```
 
-Composition also exposes which subsystem dominates the budget, and memory is the consequential case. Consider training an Archetype A (GPT-4/Llama-3) 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs. Unprotected HBM is the binding term: at roughly `{python} HbmSerBudget.fit_per_mbit_str` FIT per megabit, the cluster's $1,024 \times 80 \text{ GB}$ of memory accumulates so many failure sites that uncorrected corruption would strike roughly every `{python} HbmSerBudget.time_to_error_str`, making large-scale training impossible. Error-correcting-code (ECC) memory protection is therefore not optional. ECC detects and corrects common single-bit errors, cutting the effective soft-error rate by roughly two orders of magnitude and pushing memory back below the logic and interconnect terms in the budget, though residual multi-bit or escaped corruptions remain (the silent-data-corruption problem developed later in this chapter).
+Composition also exposes which subsystem dominates the budget, and memory is the consequential case. Consider training an Archetype A (GPT-4/Llama-3) 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs. Unprotected HBM is the binding term: at roughly `{python} HbmSerBudget.fit_per_mbit_str` FIT per megabit, the cluster's $1,024 \times 80 \text{ GB}$ of memory accumulates so many failure sites that uncorrected corruption would strike roughly every `{python} HbmSerBudget.time_to_error_str`, making large-scale training impossible. Error-correcting-code (ECC) memory protection is therefore not optional. ECC detects and corrects common single-bit errors, cutting the effective soft-error rate by roughly two orders of magnitude and pushing memory back below the logic and interconnect terms in the budget, though residual multi-bit or escaped corruptions remain as the silent-data-corruption problem.
 
 These per-component FIT figures describe the silicon's intrinsic soft-error budget, which is why they differ from the 50,000-hour whole-device MTTF used in the worked cascade that follows: the device MTTF folds in every field failure mode (thermal stress, power events, mechanical wear), not just the logic and memory soft-error rates isolated here. The cascade composes those whole-device rates into the cluster figure that actually sets the checkpoint interval; this estimate only establishes why memory protection is the precondition for everything that follows.
 
@@ -883,7 +884,7 @@ class FaultToleranceIntroRecap:
     gpt3_ckpt_tb_str = fmt_qty(gpt3_ckpt_bytes, TB, precision=1, commas=False)
 ```
 
-Large Language Models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. For example, a large training run consuming 25,000 GPUs at approximately \$2 per GPU-hour incurs \$1.2M in compute costs per day. A failure that loses 24 hours of training progress costs \$1.2M in wasted compute plus schedule delay. The checkpoint overhead spans a wide range: 70B-class dense LLM checkpoints can reach hundreds of gigabytes, and the 175B-parameter running example used later in this chapter reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` once FP32 Adam optimizer state is included.
+Large Language Models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. For example, a large training run consuming 25,000 GPUs at approximately \$2 per GPU-hour incurs \$1.2M in compute costs per day. A failure that loses 24 hours of training progress costs \$1.2M in wasted compute plus schedule delay. The checkpoint overhead spans a wide range: 70B-class dense LLM checkpoints can reach hundreds of gigabytes, and the 175B-parameter running example reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` once FP32 Adam optimizer state is included.
 
 Recommendation Systems present unique challenges because their training is often continuous rather than episodic. The value of a RecSys model derives partly from its freshness. Embeddings that capture recent user behavior outperform stale embeddings. A failure that loses hours of embedding updates may degrade recommendation quality in ways that directly impact revenue. Meta has documented that recommendation model freshness directly correlates with engagement metrics, making recovery time a business-critical metric.[^fn-recsys-freshness-cost]
 
@@ -925,7 +926,7 @@ Three foundational principles guide every design decision in this domain.
 
 :::
 
-Rule 3—the training/serving divergence—structures the rest of this chapter: training recovery comes first, serving resilience later. Before either, the physical realities of what breaks must be understood, starting with the hardware faults that trigger these failures.
+Rule 3—the training/serving divergence—sets the sequence: training recovery comes first, serving resilience later. Before either, the physical realities of what breaks must be understood, starting with the hardware faults that trigger these failures.
 
 ## Hardware Fault Taxonomy {#sec-fault-tolerance-hardware-fault-taxonomy}
 

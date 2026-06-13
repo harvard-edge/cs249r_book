@@ -14,7 +14,7 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_ai_hardware.png){fig-alt="Colorful illustration of a System on Chip design showing specialized machine learning accelerators and chiplets integrated into a processor, with vibrant data streams flowing between neural network nodes."}
+![](images/png/cover_hw_acceleration_blueprint.png){fig-alt="Layered isometric hardware blueprint where a tensor operation lowers into tiles, local SRAM, and an execution array while avoiding an off-chip memory wall."}
 
 :::
 
@@ -36,13 +36,13 @@ The central surprise of modern computing is that arithmetic is nearly free while
 
 ::: {.callout-learning-objectives}
 
-- Explain why systolic arrays and Tensor Cores achieve 10 to 100 times better efficiency than general-purpose processors
-- Calculate arithmetic intensity and use the roofline model to determine compute-bound vs. memory-bound workloads
-- Predict performance bottlenecks by quantifying the memory wall: bandwidth limits, energy costs, and cache hierarchy trade-offs
-- Select appropriate dataflow strategies (weight-stationary, output-stationary, input-stationary) based on workload reuse priorities
-- Analyze compiler optimizations including kernel fusion, tiling, and memory planning for efficient hardware execution
-- Evaluate accelerator choices for specific deployment scenarios by reasoning about cost-performance trade-offs
-- Identify common pitfalls such as ignoring bandwidth limits, expecting linear scaling, or optimizing for peak FLOP/s
+- Explain hardware acceleration as Machine-axis specialization for tensor workloads, data reuse, and performance per watt
+- Calculate arithmetic intensity and roofline ceilings to classify kernels as compute bound or memory bound
+- Diagnose memory-wall bottlenecks using bandwidth, cache hierarchy, host-device transfer, and energy-movement costs
+- Compare Tensor Cores, systolic arrays, SIMD/SIMT units, and sparse execution for ML compute primitives
+- Select dataflow, tiling, and mapping strategies that maximize reuse under memory-capacity constraints
+- Analyze compiler and runtime optimizations that fuse kernels, plan memory, and schedule accelerators
+- Evaluate accelerator choices across throughput, latency, power, cost, and deployment-context constraints
 
 :::
 
@@ -93,12 +93,12 @@ class HwAccelSetup:
 ## Acceleration Fundamentals {#sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28}
 
 ::: {.column-margin}
-![](images/svg/hw_acceleration_dam_locator.svg){width="100%" fig-alt="D·A·M taxonomy triangle with three vertices labeled D, A, and M connected by edges. The M (Machine) vertex is filled in solid color; the D and A vertices are gray, marking this chapter as the Machine axis."}
+![](images/svg/hw_acceleration_dam_locator.svg){width="100%" fig-alt="D·A·M taxonomy triangle with three vertices labeled D, A, and M connected by edges. The M (Machine) vertex is filled in solid color; the D and A vertices are gray, marking the Machine axis."}
 
 *Hardware acceleration turns on the machine axis.*
 :::
 
-Data selection optimized the data axis, and model compression optimized the algorithm (model) axis. @Sec-data-selection and @sec-model-compression established those constraints; @sec-appdx-dam-taxonomy frames the final machine axis of the D·A·M taxonomy\index{D·A·M Taxonomy!machine axis}, the subject of hardware acceleration. Hardware acceleration exists because of a striking asymmetry in modern computing: arithmetic is *cheap*, but moving data is *expensive*. In the time a modern accelerator computes a thousand floating-point operations, a single value travels from main memory. This inversion, where computation is the abundant resource and bandwidth is the scarce one, is the reason specialized hardware matters for machine learning.
+Reducing parameters, precision, or operations only matters when the machine can execute the resulting representation efficiently. Data selection reduced the data term, and compression reduced the algorithm's work; hardware acceleration asks what the machine can actually deliver. The answer starts with the memory wall: arithmetic is *cheap*, but moving data is *expensive*. In the time a modern accelerator computes a thousand floating-point operations, a single value travels from main memory. Specialized hardware matters because it raises compute throughput while organizing memory, dataflow, and parallelism so those arithmetic units stay fed.
 
 ::: {#dfn-hw-acceleration-hardware-acceleration .callout-definition title="Hardware acceleration"}
 
@@ -106,7 +106,7 @@ Data selection optimized the data axis, and model compression optimized the algo
 
 1.  **Significance (quantitative)**: The throughput gain is orders of magnitude. An A100 GPU delivers `{python} HwAccelSetup.a100_fp16_tflop_per_s_str` for FP16/BF16 matrix multiplication, while a server-class CPU delivers roughly 1–2 TFLOP/s for the same operation, a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap achieved by dedicating 80+ billion transistors to parallel arithmetic units rather than to branch predictors, out-of-order schedulers, and large caches.
 2.  **Distinction**: Unlike a general-purpose CPU, which is optimized to minimize latency for any single instruction in an arbitrary serial program, an accelerator is optimized to maximize throughput for a specific operation class—meaning it achieves its gains only when the workload presents enough parallel work to keep all arithmetic units busy simultaneously.
-3.  **Common pitfall**: A frequent misconception is that an accelerator's advertised peak throughput is the throughput a workload receives. Delivered performance is the lower of the compute ceiling and what memory bandwidth can feed, the roofline developed in @sec-hardware-acceleration-roofline-model-42ff: a low-arithmetic-intensity kernel can sit at a small fraction of peak FLOP/s no matter how fast the silicon is rated, because it starves for data rather than for arithmetic.
+3.  **Common pitfall**: A frequent misconception is that an accelerator's advertised peak throughput is the throughput a workload receives. Delivered performance is the lower of the compute ceiling and what memory bandwidth can feed, the roofline constraint: a low-arithmetic-intensity kernel can sit at a small fraction of peak FLOP/s no matter how fast the silicon is rated, because it starves for data rather than for arithmetic.
 
 :::
 
@@ -124,7 +124,7 @@ Hardware alone, however, cannot achieve these gains. The algorithms must be desi
 
 :::
 
-Co-design explains *why* the compression techniques introduced in @sec-model-compression deliver real speedups. The quantization techniques in @sec-model-compression-quantization-precision-cd46 show why converting FP32 to INT8\index{Quantization!INT8 co-design} yields 2--4$\times$ acceleration: not because of fewer bits in the abstract, but because accelerators pack 4$\times$ more INT8 operations into the same silicon area. Structured pruning\index{Structured Pruning!hardware alignment} improves performance while unstructured pruning often does not, because structured patterns preserve the regular memory access patterns that hardware can optimize. This chapter develops that perspective level by level: the compute primitives accelerators are built to execute, the memory systems that keep those primitives fed, the roofline model that predicts which of the two is the binding constraint, and the mapping and dataflow strategies that turn a neural network into work the silicon runs efficiently. Throughout this chapter, the physical constraints of silicon will reveal *why* some theoretically promising algorithmic optimizations succeed in practice and others fail.
+Co-design explains *why* the compression techniques introduced in @sec-model-compression deliver real speedups. The quantization techniques in @sec-model-compression-quantization-precision-cd46 show why converting FP32 to INT8\index{Quantization!INT8 co-design} yields 2--4$\times$ acceleration: not because of fewer bits in the abstract, but because accelerators pack 4$\times$ more INT8 operations into the same silicon area. Structured pruning\index{Structured Pruning!hardware alignment} improves performance while unstructured pruning often does not, because structured patterns preserve the regular memory access patterns that hardware can optimize. The analysis now follows the path from workload to silicon: compute primitives, memory systems, roofline diagnosis, mapping and dataflow, then compiler and runtime support. The recurring question is why some promising algorithmic optimizations survive contact with hardware while others remain paper savings.
 
 ::: {#thrm-hw-acceleration-fundamental-limit-acceleration-amdahls-law .callout-theorem title="The fundamental limit of acceleration (Amdahl's Law)"}
 

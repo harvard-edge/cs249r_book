@@ -14,14 +14,14 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_optimization.png){fig-alt="Performance engineering and optimization at scale."}
+![](images/png/cover_performance_engineering_blueprint.png){fig-alt="Performance engineering workbench where a fleet workload is measured, bottlenecks are diagnosed, and tiling, fusion, memory, and scheduling rewrites improve the path."}
 
 :::
 
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{35}{45}{100}{10}
+\mlfleetstack{25}{35}{55}{30}{100}{35}{0}{0}
 \end{marginfigure}
 
 _How do we make billion-parameter models run on millisecond timescales?_
@@ -36,13 +36,13 @@ Model compression reduces the size of the model's computation. Performance engin
 
 ::: {.callout-learning-objectives}
 
-- Apply the Roofline Model to diagnose whether an ML workload is compute-bound or memory-bound on a given accelerator
-- Explain how Operator Fusion and Tiling (FlashAttention) overcome HBM bandwidth limitations by keeping intermediate data in on-chip SRAM
-- Evaluate inference-side block-wise quantization (LLM.int8(), GPTQ, AWQ) and INT8/INT4 precision choices under bandwidth, compute, and quality constraints
-- Apply Graph Compilation frameworks (torch.compile, Accelerated Linear Algebra (XLA), TensorRT) to automate operator fusion, memory planning, and kernel selection
-- Explain how Speculative Decoding changes autoregressive decode arithmetic intensity and where acceptance-rate and batching constraints limit speedup
-- Explain how Mixture of Experts (MoE) decouples model capacity from active compute while introducing routing, memory, and AllToAll bottlenecks
-- Diagnose performance bottlenecks using System Profiling tools (Nsight Systems, PyTorch Profiler) and roofline plots
+- Apply roofline analysis to classify ML kernels as compute-bound, memory-bound, or launch-limited on target accelerators
+- Analyze prefill, decode, and batch-size regimes to predict latency-throughput behavior in LLM serving
+- Design fusion, tiling, and CUDA graph strategies that reduce HBM traffic and launch overhead
+- Select precision, compilation, and runtime optimizations from bandwidth, quality, and deployment constraints
+- Evaluate speculative decoding and MoE routing using acceptance rates, batching limits, and AllToAll costs
+- Diagnose serving bottlenecks with profilers, roofline plots, and fleet-efficiency metrics
+- Synthesize a 70B serving optimization plan across compute, communication, coordination, and quality trade-offs
 
 :::
 
@@ -64,12 +64,6 @@ from mlsysim.physics.quantities import token_throughput
 from mlsysim.fmt import fmt_int, fmt, check
 from mlsysim.physics import calc_bottleneck, model_memory
 ```
-
-::: {#psp-performance-engineering-fleet-stack-connection .callout-perspective title="Fleet stack connection"}
-
-Performance Engineering is the Optimization Layer of the fleet stack. Serving architecture and scheduling policy determine which node receives the work; performance engineering determines how efficiently that node executes it. In the fleet stack shown in @fig-fleet-stack, this chapter belongs to the Serving Layer while reaching downward into the Distribution and Infrastructure layers that determine how hardware actually executes work. Every technique here targets the same goal: closing the gap between theoretical hardware peak and achieved throughput, turning the iron law from a speed limit into a speedometer that reads closer to maximum.
-
-:::
 
 ## The Memory Wall and Roofline Diagnosis {#sec-performance-engineering-memory-wall}
 
@@ -101,9 +95,9 @@ class MemoryWallOpening:
     h100_fp16_tflop_per_s_str = fmt_qty_int(peak_flops, TFLOP / second, commas=False)
 ```
 
-An H100 GPU capable of `{python} MemoryWallOpening.h100_fp16_tflop_per_s_str` of FP16 compute can show single-digit compute utilization during small-batch language-model decode because the processor is starving for data rather than arithmetic. Performance engineering operates within a constrained optimization space defined by the memory wall, where the speed of moving bytes from memory to compute units fundamentally caps operational throughput.
+An H100 GPU capable of `{python} MemoryWallOpening.h100_fp16_tflop_per_s_str` of FP16 compute can still show single-digit compute utilization during small-batch language-model decode. The processor is not short on arithmetic; it is starving for data. Performance engineering operates inside that constraint: the memory wall, where moving bytes from memory to compute units can cap throughput long before Tensor Cores reach their advertised peak.
 
-Distributed training (@sec-distributed-training-systems), collective communication (@sec-collective-communication), fault tolerance (@sec-fault-tolerance-reliability), and fleet orchestration (@sec-fleet-orchestration) established how workloads reach the right hardware and survive failures along the way. This chapter asks why expensive hardware still sits idle after the work arrives. The answer is usually data movement. Performance engineering therefore begins with the memory hierarchy, then follows the consequences through fusion, precision, compilation, and algorithmic changes that either move fewer bytes, launch less overhead, or do different work entirely.
+Placement, synchronization, recovery, and scheduling can put the workload on the right hardware and keep it alive. The remaining problem is local execution: expensive silicon can still sit idle after work arrives. In the fleet stack shown in @fig-fleet-stack, performance engineering is the optimization discipline within the Serving Layer, reaching down into the Distribution and Infrastructure layers when kernels, memory hierarchy, interconnects, or framework overhead determine achieved throughput. The answer is usually data movement, so performance engineering begins with the memory hierarchy and then follows the consequences through fusion, precision, compilation, and algorithmic changes that move fewer bytes, launch less overhead, or do different work entirely.
 
 ### The iron law of ML performance {#sec-performance-engineering-efficiency-frontier}
 
@@ -127,7 +121,7 @@ The inherited iron law decomposes execution time into three terms. The compute f
 *Autoregressive transformer decode is often memory-bound: the data-movement term dominates the iron law.*
 :::
 
-Standard model compression (pruning, quantization, distillation) shrinks the model's intrinsic work, performing fewer operations on smaller data. System optimization, the focus of this chapter, shrinks the gap between that work and the hardware's peak by moving the same terms through implementation rather than model change: keeping data in fast memory, packing each transfer more densely, and removing software overhead.
+Standard model compression (pruning, quantization, distillation) shrinks the model's intrinsic work, performing fewer operations on smaller data. System optimization addresses the complementary problem: shrinking the gap between that work and the hardware's peak by moving the same terms through implementation rather than model change, keeping data in fast memory, packing each transfer more densely, and removing software overhead.
 
 Several levers map directly to those terms. When memory traffic dominates, operator fusion and tiling reduce the exposed data-volume term by eliminating intermediate HBM round-trips. A fused sequence that keeps its intermediates in SRAM can shrink the exposed memory-access term dramatically, often by 10--30$\times$ for attention computation. Precision engineering attacks the same numerator from a different angle: FP8, INT4, and KV-cache compression (storing the per-token attention keys and values in fewer bytes) represent each value in fewer bytes, so the same physical bandwidth carries more useful model state.
 
@@ -171,7 +165,7 @@ The central lesson of @fig-iron-law-flowchart is that profiling must precede opt
 
 :::
 
-That discipline of bounding the worst case before a global rollout is the operational complement to the throughput-vs-quality tuning the rest of this chapter pursues, and that tuning implies a trade-off space with a boundary. The **efficiency frontier**\index{Efficiency Frontier!definition} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
+That discipline of bounding the worst case before a global rollout is the operational complement to throughput-vs-quality tuning, and that tuning implies a trade-off space with a boundary. The **efficiency frontier**\index{Efficiency Frontier!definition} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. Performance engineering pushes the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
 
 The multi-dimensional nature of this frontier makes optimization challenging. Five dimensions span the efficiency frontier:
 
@@ -183,7 +177,7 @@ The multi-dimensional nature of this frontier makes optimization challenging. Fi
 
 These dimensions interact in nonobvious ways. Increasing batch size improves throughput and cost efficiency but degrades latency. Reducing precision improves throughput and memory but may degrade quality. Speculative decoding improves latency but may increase per-token cost. The performance engineer's task is to navigate these trade-offs guided by the application's specific requirements.
 
-A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the techniques in this chapter provide the tools to reach that point.
+A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the performance-engineering toolbox provides the methods for reaching that point.
 
 To make this concrete, consider two deployment configurations for the same 70B large language model (LLM).
 
@@ -191,13 +185,13 @@ Configuration A is latency-optimized: FP16 weights, batch size 1, speculative de
 
 Configuration B is throughput-optimized: INT4 weights (AWQ), batch size 64, no speculation. Each H100 serves approximately 4,000 tokens/second aggregate throughput across all batched requests, with 120 ms inter-token latency per request. Cost: 4 GPUs serving 64 concurrent users, approximately \$0.002 per 1,000 output tokens.
 
-Configuration B achieves 60$\times$ lower cost per token than Configuration A, but at 6$\times$ higher latency. Neither configuration is objectively "better"; they represent different points on the efficiency frontier, optimized for different applications. The performance engineering techniques in this chapter are the tools for navigating between these points.
+Configuration B achieves 60$\times$ lower cost per token than Configuration A, but at 6$\times$ higher latency. Neither configuration is objectively "better"; they represent different points on the efficiency frontier, optimized for different applications. Performance engineering is the discipline of navigating between these points.
 
 ### The memory wall {#sec-performance-engineering-memory-wall-physics}
 
 The efficiency frontier establishes what we are optimizing toward. The physics of memory bandwidth determines where we start. Many accelerator-based ML performance problems begin with the same observation: memory bandwidth, not compute, is the bottleneck. Consider a single autoregressive decoding step in a large language model. The model reads its full weight matrix from High Bandwidth Memory (HBM)[^fn-hbm-perf] to generate a single token, performing only one or two multiply-accumulate operations per weight loaded.
 
-[^fn-hbm-perf]: **HBM (High Bandwidth Memory)**\index{HBM!memory hierarchy}: Achieves its bandwidth by vertically stacking DRAM dies connected through thousands of through-silicon vias (TSVs), a 3D packaging technique first commercialized by SK Hynix in 2013. Despite the "high bandwidth" label, HBM's 3.35 TB/s on the H100 is still 200--600$\times$ slower than on-chip SRAM access, making the memory hierarchy gap the central constraint of every optimization technique in this chapter.
+[^fn-hbm-perf]: **HBM (High Bandwidth Memory)**\index{HBM!memory hierarchy}: Achieves its bandwidth by vertically stacking DRAM dies connected through thousands of through-silicon vias (TSVs), a 3D packaging technique first commercialized by SK Hynix in 2013. Despite the "high bandwidth" label, HBM's 3.35 TB/s on the H100 is still 200--600$\times$ slower than on-chip SRAM access, making the memory hierarchy gap the central constraint of performance optimization.
 
 ```{python}
 #| echo: false
@@ -275,7 +269,7 @@ The memory wall represents a fundamental physical constraint rather than a tempo
 *Access energy climbs from registers out to HBM.*
 :::
 
-The capacity-bandwidth tension shapes every optimization technique in this chapter. Operator fusion reduces the number of trips to HBM by combining operations so that intermediate results stay in SRAM. Precision engineering reduces the number of bytes per trip by representing values in FP8 or INT4 instead of FP16. Tiling strategies restructure algorithms to maximize data reuse within SRAM. Graph compilers automate these transformations. Each technique attacks a different term in the same fundamental equation: minimize the ratio of bytes moved to operations performed.
+The capacity-bandwidth tension shapes the optimization space. Operator fusion reduces the number of trips to HBM by combining operations so that intermediate results stay in SRAM. Precision engineering reduces the number of bytes per trip by representing values in FP8 or INT4 instead of FP16. Tiling strategies restructure algorithms to maximize data reuse within SRAM. Graph compilers automate these transformations. Each technique attacks a different term in the same fundamental equation: minimize the ratio of bytes moved to operations performed.
 
 ### The GPU memory hierarchy {#sec-performance-engineering-memory-hierarchy}
 
@@ -291,7 +285,7 @@ High Bandwidth Memory (HBM) is the main off-chip memory, providing `{python} Mem
 
 The energy cost of data movement has a direct economic consequence at data center scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's `{python} MemoryWallScenario.h100_tdp_w_str` TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
 
-The performance engineering challenge reduces to a data placement problem: keep the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the HBM round-trip dominates execution time for any operation with low arithmetic intensity. Every technique in this chapter shares the same goal: keeping data closer to compute for longer.
+The performance engineering challenge reduces to a data placement problem: keep the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the HBM round-trip dominates execution time for any operation with low arithmetic intensity. Every technique here shares the same goal: keeping data closer to compute for longer.
 
 ::: {#psp-performance-engineering-analogy-scholars-library .callout-perspective title="Analogy: The scholar's library"}
 
@@ -726,7 +720,7 @@ Autoregressive LLM decoding at batch size one represents the extreme case. Each 
 
 : **Arithmetic Intensity of Common ML Operations**: Many transformer inference operations, aside from large batched GEMMs, fall below the H100's ridge point and are therefore memory-bound. Performance engineering focuses on reducing the memory traffic of these operations. {#tbl-arithmetic-intensity}
 
-The majority of operations in a transformer inference pipeline are memory-bound. Training workloads with large batch sizes shift more operations into the compute-bound regime because GEMM dimensions scale with batch size. Inference, however, especially autoregressive generation, is dominated by memory-bound operations. The techniques in the rest of this chapter, including fusion, tiling, reduced precision, and algorithmic shortcuts, all target the same fundamental problem: reducing bytes moved per operation.
+The majority of operations in a transformer inference pipeline are memory-bound. Training workloads with large batch sizes shift more operations into the compute-bound regime because GEMM dimensions scale with batch size. Inference, however, especially autoregressive generation, is dominated by memory-bound operations. Fusion, tiling, reduced precision, and algorithmic shortcuts all target the same fundamental problem: reducing bytes moved per operation.
 
 The memory-bound nature of inference also explains a common source of confusion: GPU benchmarks reporting peak TFLOP/s often fail to predict real inference performance. Two GPUs with different TFLOP/s but identical memory bandwidth will achieve virtually identical LLM decode throughput at batch size 1, because decode is entirely memory bound. The correct metric for comparing GPUs for LLM inference is not FLOP/s but rather the combination of memory bandwidth and memory capacity. Bandwidth determines the token generation rate, and capacity determines the maximum batch size (and therefore throughput). Only at large batch sizes, where decode approaches the compute-bound regime, do the FLOP/s differences between GPUs translate into throughput differences.
 
@@ -2735,13 +2729,11 @@ This iterative mindset also determines which skills endure as hardware evolves. 
 
 ::: {.callout-takeaways title="Match the software to the silicon"}
 
-* **The memory wall defines performance engineering**: Most transformer operations are memory-bound, with arithmetic intensity far below the hardware ridge point. Performance engineering is primarily about reducing bytes moved, not operations computed.
-* **Operator fusion and tiling**: FlashAttention eliminates redundant HBM traffic by keeping intermediate results in on-chip SRAM and avoiding the quadratic attention intermediates that dominate long-context memory use.
-* **Precision engineering**: Reducing numerical representation (FP8, INT4) doubles effective bandwidth, but requires careful handling of outlier features (LLM.int8(), GPTQ, AWQ) and dynamic scaling for training stability.
-* **Graph compilation**: Graph compilers (torch.compile, XLA, TensorRT) automate known optimizations across the entire model graph, but cannot discover algorithmic innovations like FlashAttention or speculative decoding.
-* **Speculative decoding**: Trading abundant compute for scarce bandwidth, parallel verification of draft tokens reduces latency for memory-bound decode without changing precision or batch size.
-* **Mixture of experts**: Enables parameter scaling without proportional compute scaling, but introduces AllToAll communication patterns and load balancing challenges that require careful system engineering.
-* **Always profile before optimizing**: The dominant bottleneck is often not where intuition suggests, and applying the wrong optimization wastes engineering effort while leaving the actual bottleneck untouched.
+* **Bytes usually bind**: On H100-class accelerators, the chapter's roofline recap places most transformer work below the FP16 ridge point of `{python} RooflineSummaryRecap.h100_fp16_ridge_str`, so useful speedups come first from reducing HBM traffic, keeping intermediates in SRAM, and spending compute only when it moves the active bottleneck.
+* **Fusion makes locality real**: Operator fusion, CUDA graphs, and FlashAttention are not just kernel tricks; they remove launch overhead and materialized attention state. In the 8K example, tiled attention cuts stored intermediate state by `{python} FlashAttentionSummaryRecap.savings_mult_str`, turning memory pressure into usable throughput.
+* **Precision buys bandwidth with risk**: FP8, INT8, and INT4 increase effective bandwidth and batch capacity only when outliers, scale factors, and quality checks are managed. Quantization is a systems contract between numerical format, kernel implementation, serving memory, and acceptable model behavior.
+* **Algorithms can move the roofline**: Speculative decoding and mixture-of-experts change how much useful work each target-model pass performs, but they introduce acceptance-rate, routing, AllToAll, and load-balancing constraints. The win is real only after communication and scheduler costs are measured.
+* **Profiling is every step**: The 70B case study shows optimization as bottleneck displacement: INT4 changes batch size, batch size changes arithmetic intensity, and the next limit moves. Fleet performance engineering means measure, optimize the binding term, then measure again before believing the speedup.
 
 :::
 

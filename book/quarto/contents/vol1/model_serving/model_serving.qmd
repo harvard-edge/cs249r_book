@@ -15,7 +15,7 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_model_serving.png){fig-alt="Warehouse pipeline metaphor for model serving: conveyor belts move boxes labeled BATCHES through PREPROCESSING and POSTPROCESSING stations toward a glowing central INFERENCE ENGINE, with operators monitoring latency dashboards under wall clocks."}
+![](images/png/cover_model_serving_blueprint.png){fig-alt="Isometric serving pipeline where variable requests become scheduled batches, occupy cache pages, run through inference workers, and return responses under latency pressure."}
 
 :::
 
@@ -37,19 +37,19 @@ Training and serving demand opposite physics. Training maximizes throughput (sam
 
 ::: {.callout-learning-objectives}
 
-- Explain the inversion from throughput optimization to latency minimization that distinguishes serving from training
-- Decompose request latency into preprocessing, inference, and postprocessing phases to identify bottlenecks using the latency budget framework
-- Apply queuing theory (Little's Law, M/M/1 models) and capacity planning to meet percentile latency SLOs
-- Identify sources of training-serving skew and cold start latency, and select appropriate prevention and mitigation strategies
-- Select batching and runtime strategies based on traffic patterns (Server, SingleStream, MultiStream, Offline), latency constraints, and cost requirements
-- Evaluate memory-bandwidth and KV-cache constraints unique to LLM serving (TTFT/TPOT, continuous batching, PagedAttention)
-- Evaluate deployment trade-offs across precision, runtime selection, and infrastructure cost
+- Explain serving inversion from training throughput to per-request latency, headroom, and tail behavior
+- Decompose request latency across serialization, preprocessing, inference, queuing, postprocessing, and network overhead
+- Apply queueing laws and simple queue models to plan capacity against percentile latency targets
+- Diagnose training-serving skew and cold starts from mismatched preprocessing, model loading, or cache behavior
+- Select batching, load shedding, autoscaling, and runtime strategies for traffic patterns and latency budgets
+- Evaluate LLM serving bottlenecks using token latency, KV-cache memory, and continuous batching constraints
+- Calculate cost per inference from precision, hardware utilization, replica count, and runtime throughput
 
 :::
 
 ## Serving Paradigm {#sec-model-serving-serving-paradigm-9634}
 
-Serving\index{Serving!production deployment}\index{Model Serving!paradigm shift} marks the transition from model development to production deployment. The four deployment paradigms introduced in @sec-ml-systems (Cloud, Edge, Mobile, and TinyML) each impose distinct serving challenges, but all share a common inversion: the throughput-to-latency shift introduced in the Purpose. This serving inversion\index{Serving Inversion!throughput-to-latency shift} has concrete engineering implications that ripple through every technique established in prior chapters. The iron law of ML systems (@sec-introduction-iron-law-ml-systems-c32a) undergoes a decisive shift: the latency term\index{Latency!serving constraint} $(L_{\text{lat}})$, representing the irreducible overhead of request scheduling, network round-trips, and system orchestration, becomes the dominant constraint rather than a rounding error. @Sec-benchmarking measured performance under controlled conditions, but serving faces traffic patterns that no benchmark could anticipate; @sec-model-compression provided quantization methods that reduced model size, but serving must confirm those optimizations preserve accuracy under real traffic distributions. Together these revalidations flip the priorities established in every prior chapter—data, algorithm, and machine each take on a different role once requests arrive one at a time under a latency budget.
+Serving\index{Serving!production deployment}\index{Model Serving!paradigm shift} begins where benchmarking stops: a model that performed under controlled measurement must now answer unpredictable live requests. Cloud, Edge, Mobile, and TinyML each impose distinct serving challenges, but all share the same inversion from throughput optimization to latency control. This serving inversion\index{Serving Inversion!throughput-to-latency shift} has concrete engineering implications that ripple through the whole stack. The iron law of ML systems undergoes a decisive shift: the latency term\index{Latency!serving constraint} $(L_{\text{lat}})$, representing the irreducible overhead of request scheduling, network round-trips, and system orchestration, becomes the dominant constraint rather than a rounding error. Controlled benchmarks establish performance under known conditions; serving faces traffic patterns no benchmark can fully anticipate. Quantization can reduce model size; serving must confirm that such optimizations preserve accuracy under real traffic distributions. Together these revalidations flip the priorities of data, algorithm, and machine once requests arrive one at a time under a latency budget.
 
 ::: {#psp-model-serving-serving-inversion .callout-perspective title="The serving inversion"}
 
@@ -1019,7 +1019,7 @@ Request distribution, the first function, routes incoming requests to available 
 
 For single-machine serving with multiple model instances, such as running several Open Neural Network Exchange (ONNX) Runtime sessions, the framework and operating system handle request queuing. The full complexity of load balancing becomes necessary when scaling to distributed inference systems, where multiple machines serve the same model. The implementation details of request distribution algorithms and multi-replica architectures belong to that distributed context.
 
-When capacity planning considers "the server" in this chapter, it means the single machine's model serving capacity. The queuing dynamics analyzed in @sec-model-serving-queuing-theory-tail-latency-29a6 apply to understanding single-machine behavior and determining when scaling to multiple machines becomes necessary.
+When capacity planning considers "the server" in this single-machine serving analysis, it means the machine's model serving capacity. The queuing dynamics analyzed in @sec-model-serving-queuing-theory-tail-latency-29a6 apply to understanding single-machine behavior and determining when scaling to multiple machines becomes necessary.
 
 While load balancers distribute requests *across replicas*, achieving predictable latency also requires controlling what happens *within each machine*. The operating system environment introduces its own sources of variability.
 
@@ -5317,13 +5317,13 @@ The serving principles established here (queuing theory for capacity planning, p
 
 ::: {.callout-takeaways title="Inverting every training priority"}
 
-* **Serving inverts training priorities**: Training optimizes throughput (samples/hour); serving optimizes latency (ms/request). Different objectives require different system designs.
-* **Queuing theory governs capacity planning**: At 80 percent utilization, average time in system is 5$\times$ service time; at 90 percent, it reaches 10$\times$. Small load increases cause disproportionate latency spikes.
-* **Preprocessing dominates optimized systems**: When model inference is fast (5 ms), preprocessing (image decode, tokenization) consumes 45–70 percent of total latency. Optimize the pipeline, not just the model.
-* **Batching strategy depends on traffic pattern**: Poisson arrivals (web APIs) use dynamic batching; streaming sensors use synchronized batches; mobile apps eliminate batching entirely.
-* **Training-serving skew can degrade accuracy undetected**: Different preprocessing between training and serving (for example, resize interpolation, normalization order) shifts inputs outside the training distribution, causing accuracy degradation that conventional monitoring cannot detect. Use identical code paths.
-* **LLM serving is memory-bandwidth bound**: Token generation reads the model weights from VRAM per token, making decode latency primarily limited by memory bandwidth rather than compute when batching does not change the bound. KV cache management via PagedAttention and continuous batching is a major throughput lever, with reported and scenario-dependent gains over naive serving.
-* **Precision and runtime selection directly determine infrastructure cost**: INT8 inference achieves ~3$\times$ higher throughput than FP32, translating directly to proportionally fewer GPUs. Runtime optimization (TensorRT, ONNX Runtime) provides an additional 2--5$\times$ speedup over framework-native serving, making these choices as impactful as model architecture decisions.
+* **Serving is latency economics**: Training rewards throughput over long runs, but serving spends a fixed per-request budget across serialization, preprocessing, queuing, inference, postprocessing, and the network. Optimizing only model latency misses the stages users actually wait on.
+* **Utilization turns into waiting**: Queuing theory makes capacity planning nonlinear: at 80 percent utilization, average time in system is 5$\times$ service time; at 90 percent, it reaches 10$\times$. Cost-efficient headroom keeps modest traffic surges from becoming SLO failures.
+* **Fast models reveal pipeline taxes**: Once inference falls to roughly 5 ms, image decode, tokenization, and other preprocessing can consume 45–70 percent of total latency. The binding optimization becomes the request path, not the neural network kernel.
+* **Batching follows traffic, not habit**: Poisson web arrivals can use dynamic batching, synchronized sensors need aligned batches, and single-user mobile workloads often cannot batch at all. The right batching window converts slack into throughput without spending the latency budget.
+* **Skew breaks accuracy without errors**: Resize methods, normalization order, calibration data, or feature definitions that differ between training and serving shift live inputs outside the learned distribution. Reusing identical code paths and monitoring production slices prevents silent degradation.
+* **LLM serving is memory management**: Decode often reads weights from VRAM for every generated token, so token latency is bandwidth-bound unless batching changes the constraint. KV-cache layout, PagedAttention, continuous batching, precision, and runtime choice determine both concurrency and cost per token.
+* **Runtime choices become infrastructure bills**: Precision, graph compilation, operator fusion, and serving runtime translate directly into replica count and cost per inference. INT8 can deliver about 3$\times$ FP32 throughput, while TensorRT or ONNX Runtime often adds 2--5$\times$ over framework-native serving.
 
 :::
 

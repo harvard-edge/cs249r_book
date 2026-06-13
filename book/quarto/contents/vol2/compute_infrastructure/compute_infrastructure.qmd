@@ -14,14 +14,14 @@ engine: jupyter
 :::
 
 \noindent
-![](images/png/cover_infrastructure.png){fig-alt="Isometric data center visualization with rows of server racks connected by glowing blue network paths, cooling infrastructure below, and monitoring dashboards displaying utilization graphs above."}
+![](images/png/cover_compute_infrastructure_blueprint.png){fig-alt="Layered compute infrastructure cutaway from accelerator chip and HBM to server nodes, racks, power delivery, and cooling loops."}
 
 :::
 
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{100}{30}{15}{10}
+\mlfleetstack{100}{40}{15}{10}{10}{0}{0}{0}
 \end{marginfigure}
 
 _Why does infrastructure, not algorithms alone, determine who can participate in advancing machine learning at scale?_
@@ -36,12 +36,12 @@ Machine learning systems have a physical reality that transcends code. While the
 
 ::: {.callout-learning-objectives}
 
-- Explain the Accelerator Spectrum (GPU vs. TPU vs. ASIC) and how workload dataflows drive architectural specialization
-- Quantify the memory wall by comparing HBM generations and calculating token generation latency
-- Apply the Roofline Model to diagnose whether a cluster is throttled by arithmetic units or memory bandwidth
-- Analyze the bandwidth hierarchy from HBM to NVLink to InfiniBand and its impact on parallel strategy selection
-- Explain how power density and thermal limits drive the rack's transition from air to liquid cooling
-- Compare accelerators by cost per useful TFLOP-hour rather than cost per GPU-hour, given the efficiency gains across hardware generations
+- Compare GPU, TPU, and ASIC dataflows to explain specialization across the accelerator spectrum
+- Apply roofline analysis to identify compute-, memory-, or bandwidth-bound limits for training and inference
+- Calculate token latency or memory budgets from HBM capacity, bandwidth, precision, and model state size
+- Map tensor, pipeline, and data parallelism onto NVLink, rack, and pod bandwidth tiers
+- Evaluate rack and pod designs using power density, cooling limits, topology, and facility reliability constraints
+- Select accelerator infrastructure using sustained throughput, utilization threshold, energy cost, and fleet ownership cost
 
 :::
 
@@ -108,15 +108,23 @@ class InfraSetup:
     frontier_params_b_str = fmt_params(m_frontier.parameters)
 ```
 
-Four physical constraints recur at different levels of the infrastructure stack: the memory wall, the power wall, the communication wall, and the reliability wall. @Fig-three-walls-grid maps *how* these constraints cascade from the accelerator die to the warehouse-scale pod.
+## The Infrastructure Walls {#sec-compute-infrastructure-infrastructure-walls-4f2c}
+
+Scale forces distribution: Compute, Communication, and Coordination replace the single-machine instincts of Data, Algorithm, and Machine. Those fleet-level limits now have to be paid for in hardware. Four physical constraints recur as the system grows from one accelerator to a warehouse-scale pod: memory bandwidth, power delivery, communication bandwidth, and reliability. @Fig-three-walls-grid shows where each wall becomes dominant along that path.
+
+The physical stack begins at the silicon die and expands outward through four levels. At each level, the same engineering pattern appears: a constraint becomes intolerable, and the solution creates the next layer of infrastructure. Nodes aggregate accelerators to overcome memory capacity limits. Racks concentrate nodes and confront power delivery and cooling. Pods wire racks into a warehouse-scale computer and face the communication wall at full force. The path from transistor to data center is anchored by the `{python} InfraSetup.frontier_params_b_str` model, which serves as the thread connecting each level.
+
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
 
 ::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Four Infrastructure Walls**: Four dominant constraints arranged across a Scaling Journey: Power wall (data center delivery limits, ~40 MW facility), memory wall (HBM bandwidth gap, 3.35 TB/s HBM3 vs. ~2K TFLOP/s), communication wall (network bisection limit, 400 Gb/s NDR IB per port), and reliability wall (MTBF ~2 hours at 25K GPUs). Each wall becomes the dominant constraint at a different scale, from a single GPU through 8-GPU nodes and 1K-GPU clusters to 25K+ GPU fleets." fig-alt="Four walls laid out horizontally: Power, Memory, Comm., and Reliability, each with a quantitative constraint and a mitigation. Below, a Scaling Journey marks Single Node, 8-GPU Node, Multi-Node Cluster, and 10K+ GPU Fleet."}
 
 ![](images/svg/infra-walls.svg)
 
 :::
-
-As @fig-three-walls-grid illustrates, this chapter begins at the silicon die and expands outward through four physical levels. At each level, we encounter the same engineering pattern: a constraint becomes intolerable, and the solution creates the next level of infrastructure. The Node aggregates accelerators to overcome memory capacity limits. The Rack concentrates nodes and confronts power delivery and cooling. The Pod wires racks into a warehouse-scale computer and faces the communication wall at full force. The chapter maps the physical stack from transistor to data center, with our `{python} InfraSetup.frontier_params_b_str` model serving as the thread that connects each level.
 
 ## Accelerator Spectrum {#sec-compute-accelerator-spectrum}
 
@@ -4037,9 +4045,9 @@ The practical method transfers beyond this particular model. Identify the bindin
 * **Memory wall diagnosis starts with roofline**: For single-request LLM inference, memory bandwidth\index{Memory Wall!dominance} determines latency because arithmetic completes in microseconds while data transfer takes milliseconds. The ridge point ($I_{\text{ridge}}$ = peak FLOP/s divided by memory BW) separates memory-bound LLM decode ($I \approx 1$) from compute-bound training ($I > 2{,}000$).
 * **Bandwidth hierarchy dictates parallelism**: The 18$\times$ bandwidth cliff between NVLink and InfiniBand\index{Bandwidth Hierarchy!parallelism placement} confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
 * **Peak vs. sustained**: Model FLOPs Utilization (MFU)\index{MFU!sustained vs. peak} of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.
-* **Facility efficiency is part of the computer**: Liquid cooling achieves PUE of 1.05--1.10, delivering 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. At pod scale, network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
+* **Facility efficiency is part of the computer**: Liquid cooling can deliver 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. At pod scale, network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 * **Failure at scale**: A 10,000-GPU cluster\index{Failure!at scale} experiences roughly one GPU failure every five hours. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
-* **TCO, not CapEx**: The total cost of ownership includes electricity, facility construction, networking, and staffing, not just the purchase price, so ownership pays off only above a utilization threshold that the purchase price alone never reveals. @Sec-ops-scale-fleet-economics works the build-vs-buy breakeven and the full fleet TCO where the fleet is operated and paid for.
+* **Lifetime cost beats purchase price**: Ownership cost includes electricity, facility construction, networking, and staffing, not just the purchase price, so owning infrastructure pays off only above a utilization threshold that hardware price alone never reveals. @Sec-ops-scale-fleet-economics works the build-vs-buy breakeven and the full fleet cost where the fleet is operated and paid for.
 
 :::
 
