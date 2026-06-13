@@ -1170,7 +1170,7 @@ The elastic job completes in approximately 26.5 hours (8 hours of scaled-up trai
 
 :::
 
-The scheduler cannot treat every job as elastic. The most significant constraint is incompatibility with model parallelism. Elastic scaling is fundamentally a data-parallel operation: the scheduler adds or removes replicas of the model, changing the global batch size but keeping the model architecture constant. For a 175B-parameter job that relies on 8-way tensor parallelism within each node, elasticity operates strictly at the *node* level. The job can scale from 128 nodes (1,024 GPUs) to 120 nodes (960 GPUs), changing the data-parallel degree. It *cannot* elastically remove a single GPU from a tensor-parallel group; doing so would require re-sharding the model weights, equivalent to a full checkpoint-and-restart cycle. Pipeline parallelism permits limited elasticity in principle, but adding or removing stages forces a recalculation of the pipeline schedule that often negates the benefit.
+The scheduler cannot treat every job as elastic. The most significant constraint is incompatibility with model parallelism. Elastic scaling is fundamentally a data-parallel operation: the scheduler adds or removes replicas of the model, changing the global batch size but keeping the model architecture constant. For a 175B-parameter job that relies on 8-way tensor parallelism within each node, elasticity operates strictly at the *node* level. The job can scale between 128 nodes (1,024 GPUs) and 32 nodes (256 GPUs) in whole-node steps, changing the data-parallel degree. It *cannot* elastically remove a single GPU from a tensor-parallel group; doing so would require re-sharding the model weights, equivalent to a full checkpoint-and-restart cycle. Pipeline parallelism permits limited elasticity in principle, but adding or removing stages forces a recalculation of the pipeline schedule that often negates the benefit.
 
 The transition cost also constrains the scheduler's resize frequency. Each scaling event incurs 10 to 60 seconds of reduced throughput while the framework reconstructs its communication group. The scheduler must amortize this cost over the subsequent run duration, so small resize increments are only worthwhile if the job will run at the new scale for significantly longer than the transition window; @sec-fleet-orchestration-elastic-policies works through the thrashing regime this rule rules out.
 
@@ -2079,7 +2079,7 @@ Attribution in a shared fleet presents a forensic challenge. A single "training"
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
-from mlsysim.fmt import check, fmt_time, fmt_usd
+from mlsysim.fmt import check, fmt, fmt_time, fmt_usd
 
 class ChargebackExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -2098,9 +2098,11 @@ class ChargebackExample:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     chargeback_hours_h_str = fmt_time(duration, hour, precision=0, commas=False)
     chargeback_cost_str = fmt_usd(cost, precision=0)
+    chargeback_gpus_str = fmt(gpus, precision=0, commas=True)
+    chargeback_rate_str = fmt_usd(gpu_hour_rate, precision=2, commas=False, per="GPU-hour")
 ```
 
-This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A 64-GPU fine-tuning run for our 175B model held for `{python} ChargebackExample.chargeback_hours_h_str` consumes about `{python} ChargebackExample.chargeback_cost_str` of capacity (64 GPUs $\times$ `{python} ChargebackExample.chargeback_hours_h_str` $\times$ \$2.50/GPU-hour). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
+This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index}, a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. A `{python} ChargebackExample.chargeback_gpus_str`-GPU fine-tuning run for our 175B model held for `{python} ChargebackExample.chargeback_hours_h_str` consumes about `{python} ChargebackExample.chargeback_cost_str` of capacity (`{python} ChargebackExample.chargeback_gpus_str` GPUs $\times$ `{python} ChargebackExample.chargeback_hours_h_str` $\times$ `{python} ChargebackExample.chargeback_rate_str`). Without proper accounting, this cost is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
 
 Automated anomaly detection turns these metrics into actionable signals. A sudden spike in a team's consumption to 3$\times$ their historical norm might indicate a runaway script spawning infinite jobs. A queue that grows faster than it drains signals a capacity shortfall that auto-scaling must address. Conversely, a sudden drop in cluster-wide power consumption typically precedes a mass job failure event, often due to a shared dependency like a storage outage. These alerts allow operators to intervene before the budget is drained or the queue becomes unmanageable.
 
