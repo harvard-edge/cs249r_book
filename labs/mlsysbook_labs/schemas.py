@@ -45,6 +45,38 @@ class TrackSpec:
 
 
 @dataclass(frozen=True)
+class TrackProfile:
+    track_id: str
+    label: str
+    category: str
+    hardware_ref: str
+    stakeholder: str
+    primary_metrics: tuple[str, ...]
+    guardrail_metrics: tuple[str, ...]
+    dominant_constraints: tuple[str, ...]
+    narrative: str
+    source_policy: str
+    system_ref: str | None = None
+
+
+@dataclass(frozen=True)
+class LabTrackVariant:
+    lab_id: str
+    track_id: str
+    scenario_id: str
+    stakeholder: str
+    workload_summary: str
+    objective: str
+    primary_metric: str
+    guardrail_metric: str
+    hardware_ref: str
+    model_ref: str = ""
+    system_ref: str | None = None
+    defaults: Mapping[str, Any] = field(default_factory=dict)
+    assumptions: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class NuggetSpec:
     nugget_id: str
     title: str

@@ -7,18 +7,18 @@ app = marimo.App(width="full")
 # ZONE A: OPENING
 # ===========================================================================
 
+
 @app.cell
 async def _():
     import marimo as mo
     import sys
-    import math
     from pathlib import Path
-    import numpy as np
 
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
@@ -29,123 +29,190 @@ async def _():
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim import Engine, Hardware, Models
-
-    H100_TFLOPS = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_RAM    = Hardware.Cloud.H100.memory.capacity.m_as("GB")
-    ESP32_RAM_KB = Hardware.Tiny.ESP32_S3.memory.sram_capacity.m_as("KiB")
-
-    RESNET50_PARAMS = Models.Vision.ResNet50.parameters.m_as("count")
-    RESNET50_SIZE_MB = RESNET50_PARAMS * 2 / (1024 * 1024)
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        constraint_tax,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        iteration_frontier,
+        part_workflow,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_arc_context,
+        track_selector,
+        workflow_policy,
+        workflow_track_profile,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, LAB_CSS, apply_plotly_theme,
-        go, mo, np, math,
-        Engine, Models, Hardware,
-        H100_TFLOPS, H100_RAM,
-        ESP32_RAM_KB,
-        RESNET50_PARAMS, RESNET50_SIZE_MB,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        build_lab_report,
+        constraint_tax,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        iteration_frontier,
         ledger,
+        mo,
+        part_workflow,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_arc_context,
+        track_selector,
+        workflow_policy,
+        workflow_track_profile,
     )
 
+
+@app.cell
+def _(get_lab_metadata):
+    v1_03_metadata = get_lab_metadata("vol1/lab_03_ml_workflow.py")
+    return (v1_03_metadata,)
+
+
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v1_03_track_picker = track_selector(default=_default_track)
+    v1_03_track_picker
+    return (v1_03_track_picker,)
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v1_03_track_picker,
+    workflow_track_profile,
+):
+    v1_03_track_id = v1_03_track_picker.value
+    v1_03_profile = get_track_profile(v1_03_track_id)
+    v1_03_variant = get_lab_track_variant("v1_03_constraint_tax", v1_03_profile.track_id)
+    v1_03_hardware = resolve_mlsysim_ref(v1_03_variant.hardware_ref)
+    v1_03_model = resolve_mlsysim_ref(v1_03_variant.model_ref)
+    v1_03_workflow = workflow_track_profile(
+        v1_03_profile,
+        v1_03_variant,
+        v1_03_hardware,
+        v1_03_model,
+    )
+    return (
+        v1_03_hardware,
+        v1_03_model,
+        v1_03_profile,
+        v1_03_track_id,
+        v1_03_variant,
+        v1_03_workflow,
+    )
+
+
+@app.cell(hide_code=True)
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    track_arc_context,
+    v1_03_metadata,
+    v1_03_profile,
+    v1_03_variant,
+    v1_03_workflow,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
+                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 03
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
+                       color: #f8fafc; line-height: 1.1;">
                 The Constraint Tax
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Orchestrating the ML Lifecycle
+                Workflow Gates &middot; Iteration Risk &middot; Release Policy
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                A DR screening team spends 5 months building a model, then discovers
-                it cannot deploy. Constraints discovered late cost exponentially more
-                than constraints discovered early.
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
+                      max-width: 820px; line-height: 1.65;">
+                {v1_03_variant.workload_summary} This lab traces how the selected
+                track's deployment constraint propagates backward through data,
+                model design, validation, release, and monitoring.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~51 min
+                    4 Parts + Synthesis &middot; ~45 min
                 </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 3: ML Workflow
+                    {v1_03_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v1_03_workflow.constraint_name}
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Exponential Cost Curve 2^(N-1)</span>
-                <span class="badge badge-warn">Iteration Velocity &gt; Starting Accuracy</span>
-                <span class="badge badge-fail">~100x OOM Discovered at Stage 5</span>
+                <span class="badge badge-info">Constraint Propagation</span>
+                <span class="badge badge-warn">Iteration Tax</span>
+                <span class="badge badge-info">Gate Confidence</span>
+                <span class="badge badge-fail">Release Policy</span>
             </div>
         </div>
         """),
+        track_context(v1_03_profile),
+        track_arc_context(v1_03_profile, v1_03_metadata.lab_id),
     ])
     return
 
+
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, mo, part_workflow, v1_03_workflow):
+    mo.vstack([
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the exponential cost</strong> of
-                    discovering deployment constraints late: cost = 2^(N-1) where N is lifecycle stage.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Predict when iteration velocity beats starting
-                    accuracy</strong> using the logarithmic improvement model.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Identify hidden effort allocation</strong> &mdash;
-                    data activities consume 60-80% of ML project effort, not model development.</div>
-            </div>
+        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+            Learning Objectives
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Engine.solve() from Lab 01-02 &middot;
-                    Physical walls from Lab 02 &middot;
-                    ML lifecycle stages from the ML Workflow chapter
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~51 min</strong><br/>
-                    Part A: ~12 min &middot; Part B: ~12 min<br/>
-                    Part C: ~12 min &middot; Part D: ~9 min
-                </div>
-            </div>
+        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+            <div style="margin-bottom: 3px;">1. <strong>Trace propagation:</strong>
+                follow {v1_03_workflow.constraint_name} across data, model, validation, release, and monitoring.</div>
+            <div style="margin-bottom: 3px;">2. <strong>Measure iteration tax:</strong>
+                compute the rework created by late discovery.</div>
+            <div style="margin-bottom: 3px;">3. <strong>Balance gates:</strong>
+                trade iteration speed against deployment confidence.</div>
+            <div style="margin-bottom: 3px;">4. <strong>Write policy:</strong>
+                choose gates, release rules, rollback rules, and residual blind spot.</div>
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
                     padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
@@ -153,905 +220,1104 @@ def _(COLORS, mo):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;A team spent 5 months building a model that cannot deploy.
-                Engine.solve() could have told them in 3 milliseconds. When should
-                you check constraints, and what does it cost to check late?&rdquo;
+                When should {v1_03_workflow.label} test the deployment constraint so
+                the team avoids expensive rework without making every iteration too slow?
             </div>
         </div>
     </div>
-    """)
+    """),
+    part_workflow(
+        "Constraint Tax Workflow",
+        (
+            {
+                "part": "Part A",
+                "concept": "Constraints Propagate Through The Workflow",
+                "prediction": "Predict when the deployment constraint should be tested.",
+                "controls": "Move the discovery stage and inspect which assumptions harden.",
+                "evidence": "Read the stage table across data, model, validation, release, and monitoring.",
+                "decision": "Name the first gate that should block bad assumptions.",
+            },
+            {
+                "part": "Part B",
+                "concept": "Late Discovery Creates Iteration Tax",
+                "prediction": "Predict the cost shape for discovering the constraint late.",
+                "controls": "Move the discovery stage and compare current rework with the recommended gate.",
+                "evidence": "Read multiplier, rework days, avoidable rework, and artifacts to rebuild.",
+                "decision": "Decide whether to pay the tax or move the gate earlier.",
+            },
+            {
+                "part": "Part C",
+                "concept": "Evaluation Gates Trade Speed For Confidence",
+                "prediction": "Predict the weakest validation dimension for this track.",
+                "controls": "Tune validation depth, automation, hardware realism, and data scale.",
+                "evidence": "Compare iteration days, confidence, residual risk, and risk budget.",
+                "decision": "Choose the validation stance before release pressure arrives.",
+            },
+            {
+                "part": "Part D",
+                "concept": "Workflow Policy Is System Design",
+                "prediction": "Predict which release gate should become non-negotiable.",
+                "controls": "Select the gate, release policy, and rollback rule.",
+                "evidence": "Compare policy summary, residual risk, and the remaining blind spot.",
+                "decision": "Write the workflow memo and name the risk you still carry.",
+            },
+        ),
+        scenario=(
+            f"{v1_03_workflow.label} needs a workflow that discovers "
+            f"{v1_03_workflow.constraint_name} before the team builds on a bad assumption."
+        ),
+        reflection="Carry one gate, one evidence requirement, and one residual blind spot into the report.",
+    ),
+    ])
     return
 
+
 # ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
+# ZONE B: CONTROLS
 # ===========================================================================
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
 
-    - **The ML Workflow chapter** -- The 6-stage ML lifecycle and the cost of late constraint discovery.
-    - **The Iteration Velocity section (Ch. 3)** -- Iteration velocity vs starting accuracy trade-offs.
-    - **The Effort Distribution section (Ch. 3)** -- Effort distribution in production ML projects.
-    """), kind="info")
-    return
-
-# ─── WIDGET CELLS (one per part) ─────────────────────────────────────────
-# Each cell defines and RETURNS every widget it owns so marimo's dataflow
-# can route them to the tabs cell. A previous version defined partA_stage /
-# partB_cycle_a / partB_cycle_b / partC_sliders / partD_months but only
-# returned the next part's prediction, so sliders and the PM allocation
-# chart never re-rendered when changed. #1332.
 @app.cell(hide_code=True)
-def _(mo):
-    partA_prediction = mo.ui.radio(
+def _(mo, v1_03_workflow):
+    v1_03_gate_prediction = mo.ui.radio(
         options={
-            "A) During architecture selection (Stage 2, cost 2x)": "stage2",
-            "B) During training (Stage 3, cost 4x)":               "stage3",
-            "C) During evaluation (Stage 4, cost 8x)":             "stage4",
-            "D) Doesn't matter -- cost is similar at all stages":   "same",
+            "Before data and model assumptions harden": "early",
+            "During model design": "model_design",
+            "During release hardening": "release",
+            "After launch in monitoring": "monitoring",
         },
-        label="A team trained a 95%-accurate model (100 MB FP16) for deployment on "
-              "an ESP32 (512 KB SRAM). When is the constraint cheapest to address?",
+        label=f"When should {v1_03_workflow.constraint_name} be tested?",
     )
-    return (partA_prediction,)
+    v1_03_gate_prediction
+    return (v1_03_gate_prediction,)
+
 
 @app.cell(hide_code=True)
-def _(mo):
-    partA_stage = mo.ui.slider(
-        start=1, stop=6, value=5, step=1,
-        label="Discovery stage (1=Problem Definition, 6=Monitoring)",
+def _(mo, v1_03_workflow):
+    v1_03_discovery_stage = mo.ui.slider(
+        start=1,
+        stop=len(v1_03_workflow.stage_names),
+        value=v1_03_workflow.default_discovery_stage,
+        step=1,
+        label="Discovery stage",
     )
-    return (partA_stage,)
+    v1_03_discovery_stage
+    return (v1_03_discovery_stage,)
+
 
 @app.cell(hide_code=True)
-def _(mo):
-    partB_prediction = mo.ui.radio(
+def _(mo, v1_03_workflow):
+    v1_03_tax_prediction = mo.ui.radio(
         options={
-            "A) Team A -- 5% head start is insurmountable": "team_a",
-            "B) Team A -- but barely (within 1%)":           "team_a_barely",
-            "C) Team B -- faster iteration wins":            "team_b",
-            "D) They converge to the same accuracy":         "converge",
+            "It stays roughly constant across stages": "constant",
+            "It grows linearly with the number of stages": "linear",
+            "It doubles at each later stage": "exponential",
+            "It is mostly documentation overhead": "paperwork",
         },
-        label="Team A: 95% start, 1-week cycles. Team B: 90% start, 1-hour cycles. "
-              "After 26 weeks, which team has higher accuracy?",
+        label=f"How does the cost change if {v1_03_workflow.constraint_name} is found later?",
     )
-    return (partB_prediction,)
+    v1_03_tax_prediction
+    return (v1_03_tax_prediction,)
+
 
 @app.cell(hide_code=True)
-def _(mo):
-    partB_cycle_a = mo.ui.slider(
-        start=1, stop=336, value=168, step=1,
-        label="Team A cycle time (hours)",
-    )
-    partB_cycle_b = mo.ui.slider(
-        start=1, stop=168, value=1, step=1,
-        label="Team B cycle time (hours)",
-    )
-    return (partB_cycle_a, partB_cycle_b)
-
-@app.cell(hide_code=True)
-def _(mo):
-    partC_prediction = mo.ui.radio(
+def _(mo, v1_03_workflow):
+    v1_03_frontier_prediction = mo.ui.radio(
         options={
-            "A) 50-60% (it is the core task)":    "50",
-            "B) 30-40% (significant but not dominant)": "30",
-            "C) 10-20% (surprisingly small)":     "10",
-            "D) <5% (negligible)":                "5",
+            "Validation depth": "validation depth",
+            "Automation": "automation",
+            "Hardware realism": "hardware realism",
+            "Data scale": "data scale",
         },
-        label="What fraction of total engineering effort goes to model development "
-              "(architecture, training, hyperparameters)?",
+        label="Which validation dimension is most likely to be the current bottleneck?",
     )
-    return (partC_prediction,)
+    v1_03_validation_depth = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=v1_03_workflow.default_validation_depth_pct,
+        step=5,
+        label="Validation depth (%)",
+    )
+    v1_03_automation = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=v1_03_workflow.default_automation_pct,
+        step=5,
+        label="Automation (%)",
+    )
+    v1_03_realism = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=v1_03_workflow.default_hardware_realism_pct,
+        step=5,
+        label="Hardware realism (%)",
+    )
+    v1_03_data_scale = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=v1_03_workflow.default_data_scale_pct,
+        step=5,
+        label="Data scale coverage (%)",
+    )
+    return (
+        v1_03_automation,
+        v1_03_data_scale,
+        v1_03_frontier_prediction,
+        v1_03_realism,
+        v1_03_validation_depth,
+    )
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_03_workflow):
+    _policy_prediction_options = {gate.label: gate.gate_id for gate in v1_03_workflow.gate_options}
+    v1_03_policy_prediction = mo.ui.radio(
+        options=_policy_prediction_options,
+        label="Which gate should become non-negotiable in the workflow policy?",
+    )
+    _gate_options = {gate.label: gate.gate_id for gate in v1_03_workflow.gate_options}
+    v1_03_gate_choice = mo.ui.dropdown(
+        options=_gate_options,
+        value=v1_03_workflow.gate_options[0].label,
+        label="Workflow gate",
+    )
+    _release_options = {policy: policy for policy in v1_03_workflow.release_policies}
+    v1_03_release_policy = mo.ui.dropdown(
+        options=_release_options,
+        value=v1_03_workflow.release_policies[0],
+        label="Release policy",
+    )
+    _rollback_options = {rule: rule for rule in v1_03_workflow.rollback_rules}
+    v1_03_rollback_rule = mo.ui.dropdown(
+        options=_rollback_options,
+        value=v1_03_workflow.rollback_rules[0],
+        label="Rollback rule",
+    )
+    return (
+        v1_03_gate_choice,
+        v1_03_policy_prediction,
+        v1_03_release_policy,
+        v1_03_rollback_rule,
+    )
+
 
 @app.cell(hide_code=True)
 def _(mo):
-    partC_sliders = {
-        "data_collect": mo.ui.slider(start=0, stop=20, value=3, step=1,
-                                      label="Data Collection (person-months)"),
-        "data_label": mo.ui.slider(start=0, stop=20, value=2, step=1,
-                                    label="Data Labeling/Validation"),
-        "model_dev": mo.ui.slider(start=0, stop=20, value=4, step=1,
-                                   label="Model Development"),
-        "deploy": mo.ui.slider(start=0, stop=20, value=1, step=1,
-                                label="Deployment/Infrastructure"),
-        "monitor": mo.ui.slider(start=0, stop=20, value=0, step=1,
-                                 label="Monitoring/Maintenance"),
-    }
-    return (partC_sliders,)
-
-@app.cell(hide_code=True)
-def _(mo):
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) 0 -- it was validated during pilot":    "zero",
-            "B) 1 -- one round of fixes":                "one",
-            "C) 2-3 -- a few adjustments":               "few",
-            "D) 4-8 -- continuous iteration":             "many",
-        },
-        label="After deploying from 5 pilot clinics to 200 clinics, how many "
-              "complete lifecycle iterations before the system stabilizes?",
+    _text_area = getattr(mo.ui, "text_area")
+    v1_03_reflection = _text_area(
+        label="Reflection",
+        placeholder="Name the gate you would defend and the blind spot the workflow still has.",
+        full_width=True,
     )
-    return (partD_prediction,)
+    return (v1_03_reflection,)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partD_months = mo.ui.slider(
-        start=0, stop=24, value=0, step=1,
-        label="Months since production launch",
+
+@app.cell
+def _(
+    constraint_tax,
+    iteration_frontier,
+    v1_03_automation,
+    v1_03_data_scale,
+    v1_03_discovery_stage,
+    v1_03_gate_choice,
+    v1_03_realism,
+    v1_03_release_policy,
+    v1_03_rollback_rule,
+    v1_03_validation_depth,
+    v1_03_workflow,
+    workflow_policy,
+):
+    v1_03_tax = constraint_tax(v1_03_workflow, discovery_stage=v1_03_discovery_stage.value)
+    v1_03_frontier = iteration_frontier(
+        v1_03_workflow,
+        validation_depth_pct=v1_03_validation_depth.value,
+        automation_pct=v1_03_automation.value,
+        hardware_realism_pct=v1_03_realism.value,
+        data_scale_pct=v1_03_data_scale.value,
     )
-    return (partD_months,)
+    v1_03_policy = workflow_policy(
+        v1_03_workflow,
+        v1_03_frontier,
+        gate_id=v1_03_gate_choice.value,
+        release_policy=v1_03_release_policy.value,
+        rollback_rule=v1_03_rollback_rule.value,
+    )
+    v1_03_risk_budget_pct = (
+        v1_03_workflow.min_residual_risk_pct
+        + (v1_03_workflow.base_residual_risk_pct - v1_03_workflow.min_residual_risk_pct) * 0.35
+    )
+    v1_03_cycle_budget_days = v1_03_workflow.base_cycle_days * 1.5
+    return (
+        v1_03_cycle_budget_days,
+        v1_03_frontier,
+        v1_03_policy,
+        v1_03_risk_budget_pct,
+        v1_03_tax,
+    )
 
-# ─── TABS COMPOSITION ────────────────────────────────────────────────────
+
+# ===========================================================================
+# ZONE C: PARTS
+# ===========================================================================
+
+
 @app.cell(hide_code=True)
 def _(
-    COLORS, H100_TFLOPS, H100_RAM, ESP32_RAM_KB,
-    RESNET50_PARAMS, RESNET50_SIZE_MB, Engine, Models,
-    Hardware, apply_plotly_theme, go, math,
-    mo, np, partA_prediction, partA_stage,
-    partB_cycle_a, partB_cycle_b, partB_prediction, partC_prediction,
-    partC_sliders, partD_months, partD_prediction,
+    COLORS,
+    apply_plotly_theme,
+    constraint_tax,
+    go,
+    iteration_frontier,
+    mo,
+    source_trace,
+    v1_03_automation,
+    v1_03_cycle_budget_days,
+    v1_03_data_scale,
+    v1_03_discovery_stage,
+    v1_03_frontier,
+    v1_03_frontier_prediction,
+    v1_03_gate_choice,
+    v1_03_gate_prediction,
+    v1_03_policy,
+    v1_03_policy_prediction,
+    v1_03_realism,
+    v1_03_reflection,
+    v1_03_release_policy,
+    v1_03_risk_budget_pct,
+    v1_03_rollback_rule,
+    v1_03_tax,
+    v1_03_tax_prediction,
+    v1_03_validation_depth,
+    v1_03_workflow,
 ):
-
-    # ═════════════════════════════════════════════════════════════════════
-    # PART A -- Constraint Propagation
-    # ═════════════════════════════════════════════════════════════════════
-
-    def build_part_a():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incident Report &middot; MedVision Health DR Screening Project
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;After 5 months of development, we achieved 95% accuracy on our DR
-                screening model (ResNet-50 backbone, ~{RESNET50_SIZE_MB:.0f} MB FP16). Today we
-                learned the rural clinic tablets are ESP32-based with {ESP32_RAM_KB:.0f} KB of SRAM.
-                The model does not fit. We need to restart.&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Post-mortem report, Month 5
-            </div>
+    def v1_03_part_header(part, concept, question, color):
+        return mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget" style="border-left:4px solid {color};">
+          <div class="mlsysbook-part-title"><h2>{part}: {concept}</h2></div>
+          <div class="mlsysbook-callout"><strong>Systems question:</strong> {question}</div>
         </div>
-        """))
+        """)
 
-        items.append(mo.md(f"""
-        ## The Exponential Cost of Late Constraint Discovery
+    def v1_03_prediction_feedback(value, correct_value, correct_text, miss_text):
+        if value is None:
+            return mo.callout(mo.md("Commit to a prediction to unlock the instrument."), kind="warn")
+        _reveal = f"You predicted `{value}`; actual evidence points to `{correct_value}`."
+        if value == correct_value:
+            return mo.callout(mo.md(f"{_reveal} {correct_text}"), kind="success")
+        return mo.callout(mo.md(f"{_reveal} {miss_text}"), kind="warn")
 
-        The cost of discovering a deployment constraint at lifecycle stage N grows as
-        **2^(N-1)**. The DR screening case is concrete: a team spent 150 person-days
-        building a model that Engine.solve() could have rejected in 3 milliseconds.
-
-        ```
-        Engine.solve(ResNet50, ESP32, batch_size=1, precision="fp16")
-        -> INFEASIBLE: {RESNET50_SIZE_MB:.0f} MB model vs {ESP32_RAM_KB:.0f} KB SRAM (~{RESNET50_SIZE_MB*1024/ESP32_RAM_KB:.0f}x over)
-        -> This diagnosis took 0.003 seconds.
-        -> The team spent 150 days before discovering it.
-        ```
-        """))
-
-        items.append(partA_prediction)
-
-        if partA_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction to unlock the cost curve."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(partA_stage)
-
-        _stage = partA_stage.value
-        _stages = {
-            1: "Problem Definition",
-            2: "Data Engineering",
-            3: "Model Development",
-            4: "Evaluation",
-            5: "Deployment",
-            6: "Monitoring",
-        }
-        _stage_name = _stages[_stage]
-        _cost_multiplier = 2 ** (_stage - 1)
-        _base_cost_days = 5  # person-days for early discovery
-        _actual_cost = _base_cost_days * _cost_multiplier
-
-        _artifacts_to_rebuild = {
-            1: ["Requirements document"],
-            2: ["Requirements", "Data pipeline"],
-            3: ["Requirements", "Data pipeline", "Model architecture", "Training runs"],
-            4: ["Requirements", "Data pipeline", "Model", "Training", "Evaluation suite"],
-            5: ["Requirements", "Data pipeline", "Model", "Training", "Evaluation", "Deployment config"],
-            6: ["Everything + production rollback"],
-        }
-        _artifacts = _artifacts_to_rebuild[_stage]
-
-        # Cost curve chart
-        _stage_nums = [1, 2, 3, 4, 5, 6]
-        _costs = [2 ** (s - 1) * _base_cost_days for s in _stage_nums]
-        _colors_bar = [COLORS["GreenLine"] if s < _stage else
-                       COLORS["RedLine"] if s == _stage else
-                       COLORS["Grey"] for s in _stage_nums]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            x=[_stages[s] for s in _stage_nums], y=_costs,
-            marker_color=_colors_bar, opacity=0.85,
-            text=[f"{c:.0f} days" for c in _costs],
-            textposition="outside",
-        ))
-        _fig.update_layout(
-            height=320,
-            yaxis=dict(title="Cost (person-days)", gridcolor="#f1f5f9"),
-            xaxis=dict(gridcolor="#f1f5f9"),
-            margin=dict(l=50, r=20, t=30, b=80),
+    def v1_03_recommended_gate():
+        return min(
+            v1_03_workflow.gate_options,
+            key=lambda gate: abs(gate.stage - v1_03_workflow.recommended_gate_stage),
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.md("### Exponential Cost Curve: 2^(N-1)"))
-        items.append(mo.as_html(_fig))
 
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:14px; border:2px solid {COLORS['RedLine']}; border-radius:10px;
-                        text-align:center; background:{COLORS['RedLL']}; flex:1;">
-                <div style="color:{COLORS['RedLine']}; font-size:0.72rem; font-weight:700;">
-                    Discovery Stage</div>
-                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['RedLine']};">
-                    Stage {_stage}: {_stage_name}</div>
-            </div>
-            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        text-align:center; background:white; flex:1;
-                        border-top:3px solid {COLORS['OrangeLine']};">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Cost Multiplier</div>
-                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                    {_cost_multiplier}x</div>
-            </div>
-            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        text-align:center; background:white; flex:1;
-                        border-top:3px solid {COLORS['BlueLine']};">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Person-Days</div>
-                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_actual_cost:.0f}</div>
-            </div>
-        </div>
-        """))
-
-        # Artifacts list
-        _artifacts_html = "".join([f"<li style='margin-bottom:4px;'>{a}</li>" for a in _artifacts])
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:10px; padding:16px 20px; margin:8px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; margin-bottom:8px;">
-                Artifacts that must be rebuilt at Stage {_stage}</div>
-            <ul style="margin:0; padding-left:20px; font-size:0.88rem;
-                       color:{COLORS['TextSec']}; line-height:1.65;">
-                {_artifacts_html}
-            </ul>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['BlueLL']}; border-left:4px solid {COLORS['BlueLine']};
-                    border-radius:0 10px 10px 0; padding:14px 20px; margin:12px 0;">
-            <div style="font-size:0.85rem; color:{COLORS['Text']}; line-height:1.6;">
-                <strong>Engine.solve() check:</strong> This diagnosis took <strong>0.003 seconds</strong>.
-                The team spent <strong>{_actual_cost:.0f} person-days</strong> before discovering it
-                at Stage {_stage}. At Stage 1, it would have cost {_base_cost_days} person-days.
-            </div>
-        </div>
-        """))
-
-        _pred = partA_prediction.value
-        if _pred == "stage2":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Early discovery is exponentially cheaper. "
-                "At Stage 2 (cost 2x), you rebuild only the requirements and data pipeline. "
-                f"At Stage 5 (cost {2**4}x), you rebuild everything."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**The cost grows exponentially.** At Stage 1-2, fixing a constraint "
-                "costs 5-10 person-days. At Stage 5, it costs 80+ person-days because "
-                "every artifact built on top of the wrong assumption must be rebuilt."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Exponential Cost": mo.md("""
-$$
-\\text{Cost}(N) = C_0 \\cdot 2^{N-1}
-$$
-
-where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
-
-| Stage | Name | Cost Multiplier | Person-Days |
-|-------|------|-----------------|-------------|
-| 1 | Problem Definition | 1x | 5 |
-| 2 | Data Engineering | 2x | 10 |
-| 3 | Model Development | 4x | 20 |
-| 4 | Evaluation | 8x | 40 |
-| 5 | Deployment | 16x | 80 |
-| 6 | Monitoring | 32x | 160 |
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════
-    # PART B -- Iteration Velocity
-    # ═════════════════════════════════════════════════════════════════════
-
-    def build_part_b():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Team Decision &middot; MedVision Health
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We are choosing between two approaches. Team A proposes a large ensemble
-                (95% starting accuracy, 1-week training cycles). Team B proposes a lightweight
-                edge model (90% start, 1-hour cycles). We have 26 weeks. Which team wins?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Project Planning Meeting
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Iteration Velocity Dominates Starting Accuracy
-
-        ```
-        accuracy(t) = accuracy_0 + alpha * log(1 + experiments(t))
-        ```
-
-        More experiments explore more of the design space. A team that runs 100
-        experiments in 26 weeks finds better configurations than a team running 26.
-        """))
-
-        items.append(partB_prediction)
-
-        if partB_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction to unlock the iteration race."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partB_cycle_a, partB_cycle_b], justify="start", gap="2rem"))
-
-        _cycle_a = partB_cycle_a.value  # hours
-        _cycle_b = partB_cycle_b.value
-        _weeks = 26
-        _total_hours = _weeks * 168  # hours in 26 weeks
-        _acc_a_start = 95.0
-        _acc_b_start = 90.0
-        _alpha = 2.0
-
-        _exps_a = _total_hours / _cycle_a
-        _exps_b = _total_hours / _cycle_b
-
-        _acc_a_final = min(99.5, _acc_a_start + _alpha * math.log(1 + _exps_a))
-        _acc_b_final = min(99.5, _acc_b_start + _alpha * math.log(1 + _exps_b))
-
-        # Timeline
-        _weeks_range = np.linspace(0, 26, 200)
-        _acc_a_curve = [min(99.5, _acc_a_start + _alpha * math.log(1 + w * 168 / _cycle_a))
-                        for w in _weeks_range]
-        _acc_b_curve = [min(99.5, _acc_b_start + _alpha * math.log(1 + w * 168 / _cycle_b))
-                        for w in _weeks_range]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_weeks_range.tolist(), y=_acc_a_curve, mode="lines",
-            name=f"Team A ({_cycle_a}h cycle, {_exps_a:.0f} exps)",
-            line=dict(color=COLORS["BlueLine"], width=2.5),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_weeks_range.tolist(), y=_acc_b_curve, mode="lines",
-            name=f"Team B ({_cycle_b}h cycle, {_exps_b:.0f} exps)",
-            line=dict(color=COLORS["GreenLine"], width=2.5),
-        ))
-        _fig.update_layout(
-            height=320,
-            xaxis=dict(title="Weeks", gridcolor="#f1f5f9"),
-            yaxis=dict(title="Accuracy (%)", range=[88, 100], gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=50, r=20, t=60, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.md("### The Iteration Race"))
-        items.append(mo.as_html(_fig))
-
-        _winner = "Team A" if _acc_a_final > _acc_b_final else "Team B"
-        _winner_color = COLORS["BlueLine"] if _winner == "Team A" else COLORS["GreenLine"]
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        text-align:center; background:white; flex:1;
-                        border-top:3px solid {COLORS['BlueLine']};">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Team A Final</div>
-                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_acc_a_final:.1f}%</div>
-                <div style="font-size:0.68rem; color:#94a3b8;">{_exps_a:.0f} experiments</div>
-            </div>
-            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        text-align:center; background:white; flex:1;
-                        border-top:3px solid {COLORS['GreenLine']};">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Team B Final</div>
-                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['GreenLine']};">
-                    {_acc_b_final:.1f}%</div>
-                <div style="font-size:0.68rem; color:#94a3b8;">{_exps_b:.0f} experiments</div>
-            </div>
-            <div style="padding:14px; border:2px solid {_winner_color}; border-radius:10px;
-                        text-align:center; background:white; flex:1;">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Winner</div>
-                <div style="font-size:1.4rem; font-weight:800; color:{_winner_color};">
-                    {_winner}</div>
-            </div>
-        </div>
-        """))
-
-        _pred = partB_prediction.value
-        if _pred == "team_b":
-            items.append(mo.callout(mo.md(
-                f"**Correct.** Team B runs {_exps_b:.0f} experiments vs Team A's {_exps_a:.0f}. "
-                "Faster iteration explores more design space and finds better configurations."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**{_winner} wins at week 26.** Team A: {_acc_a_final:.1f}% ({_exps_a:.0f} exps). "
-                f"Team B: {_acc_b_final:.1f}% ({_exps_b:.0f} exps). "
-                "Adjust the cycle time sliders to find the crossover point."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Logarithmic Improvement Model": mo.md("""
-**Formula:**
-$$
-A(t) = A_0 + \\alpha \\cdot \\ln\\!\\left(1 + \\frac{t}{\\tau}\\right)
-$$
-
-**Variables:**
-- **$A_0$**: starting accuracy (%)
-- **$\\alpha$**: improvement rate per log-experiment (~2-3% typical)
-- **$t$**: elapsed time (hours or weeks)
-- **$\\tau$**: iteration cycle time (hours)
-- **$t / \\tau$**: number of experiments run
-
-The key insight: accuracy improves *logarithmically* with experiments, so the team
-running 100 experiments (1-hour cycles) gains far more than the team running 26
-experiments (1-week cycles), even starting 5% behind.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════
-    # PART C -- Where Does the Time Go?
-    # ═════════════════════════════════════════════════════════════════════
-
-    def build_part_c():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Resource Planning &middot; MedVision Health
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We have a 10-person team and 6 months. How should we allocate
-                effort across the ML lifecycle? Most of us assumed model development
-                would be the biggest block.&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Project kickoff meeting
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Data Activities Consume 60-80% of ML Project Effort
-
-        Model development -- the phase that receives the most research attention --
-        is typically only 10-20% of total effort. Data collection, cleaning, labeling,
-        and validation dominate the budget.
-        """))
-
-        items.append(partC_prediction)
-
-        if partC_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction to unlock the effort allocator."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.md("### Allocate Your Team's 10 Person-Months"))
-        for _k, _s in partC_sliders.items():
-            items.append(_s)
-
-        _alloc = {k: s.value for k, s in partC_sliders.items()}
-        _total = sum(_alloc.values())
-        _model_pct = (_alloc["model_dev"] / _total * 100) if _total > 0 else 0
-        _data_pct = ((_alloc["data_collect"] + _alloc["data_label"]) / _total * 100) if _total > 0 else 0
-
-        # Industry reference (from Hidden Technical Debt, MLCommons)
-        _industry = {"Data Collection": 25, "Data Labeling": 35, "Model Development": 15,
-                     "Deployment": 15, "Monitoring": 10}
-        _student = {
-            "Data Collection": _alloc["data_collect"] / _total * 100 if _total > 0 else 0,
-            "Data Labeling": _alloc["data_label"] / _total * 100 if _total > 0 else 0,
-            "Model Development": _alloc["model_dev"] / _total * 100 if _total > 0 else 0,
-            "Deployment": _alloc["deploy"] / _total * 100 if _total > 0 else 0,
-            "Monitoring": _alloc["monitor"] / _total * 100 if _total > 0 else 0,
-        }
-
-        _phases = list(_industry.keys())
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            name="Your Allocation", x=_phases,
-            y=[_student[p] for p in _phases],
-            marker_color=COLORS["BlueLine"], opacity=0.85,
-        ))
-        _fig.add_trace(go.Bar(
-            name="Industry Average", x=_phases,
-            y=[_industry[p] for p in _phases],
-            marker_color=COLORS["OrangeLine"], opacity=0.85,
-        ))
-        _fig.update_layout(
-            barmode="group", height=320,
-            yaxis=dict(title="% of Total Effort", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=50, r=20, t=60, b=80),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        # Consequences
-        if _alloc["data_collect"] + _alloc["data_label"] < 3 and _total > 0:
-            items.append(mo.callout(mo.md(
-                "**Data starvation warning.** You allocated less than 30% to data activities. "
-                "The team will run out of clean training data by month 2 -- "
-                "three modelers will sit idle waiting for labeled images."
-            ), kind="danger"))
-        if _alloc["deploy"] == 0 and _total > 0:
-            items.append(mo.callout(mo.md(
-                "**Deployment crisis.** Zero allocation to deployment means the model "
-                "achieves 95% accuracy in development, then fails the ESP32 feasibility "
-                "check (see Part A). This is the DR clinic disaster repeating."
-            ), kind="danger"))
-
-        _pred = partC_prediction.value
-        if _pred == "10":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Model development is typically 10-20% of total effort. "
-                "Data activities dominate at 60-80%."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Model development is only 10-20% of total effort.** "
-                "Data collection + labeling + validation consume 60-80%. "
-                "Compare your allocation to the industry average above."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Effort Distribution": mo.md("""
-**Formula:**
-$$
-E_{\\text{total}} = E_{\\text{data}} + E_{\\text{model}} + E_{\\text{deploy}} + E_{\\text{monitor}}
-$$
-
-**Industry averages (from Google, Meta production ML studies):**
-
-| Activity | Share of $E_{\\text{total}}$ |
-|----------|---------------------------|
-| Data collection + labeling | 25-35% |
-| Data validation + cleaning | 20-30% |
-| Model development | 10-20% |
-| Deployment + infrastructure | 10-15% |
-| Monitoring + maintenance | 10-15% |
-
-The critical implication: under-investing in data activities creates idle engineers
-downstream, while under-investing in deployment recreates the DR clinic disaster.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════
-    # PART D -- Feedback Loops
-    # ═════════════════════════════════════════════════════════════════════
-
-    def build_part_d():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Production Update &middot; MedVision Health (6 months post-launch)
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We scaled from 5 pilot clinics to 200 clinics. New camera equipment,
-                new demographics, new failure modes. The pilot validation is not holding.
-                How many iteration cycles should we budget?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Operations team, Month 6
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Lifecycle Never Ends
-
-        Unlike traditional software, ML systems require continuous feedback loops.
-        Scaling from pilot to production reveals problems invisible at small scale.
-        Each feedback event triggers re-entry into an earlier lifecycle stage.
-        """))
-
-        items.append(partD_prediction)
-
-        if partD_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction to unlock the feedback timeline."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(partD_months)
-
-        _month = partD_months.value
-
-        # Feedback events
-        _events = [
-            (3, "Camera model changed at clinic #47", "accuracy drops 8%", "Data Engineering"),
-            (6, "New demographic (elderly with cataracts)", "40% higher error rate", "Data Collection"),
-            (9, "Regulatory audit requires balanced demographics", "model retraining mandated", "Problem Definition"),
-            (12, "Seasonal lighting changes affect image quality", "5% accuracy drop", "Data Validation"),
-            (15, "New clinic network has different image format", "pipeline failure", "Data Engineering"),
-            (18, "Model drift detected across all clinics", "2% gradual degradation", "Model Development"),
-            (21, "Competitor publishes better architecture", "accuracy gap identified", "Model Development"),
-        ]
-
-        _triggered = [e for e in _events if e[0] <= _month]
-        _cycle_count = len(_triggered)
-
-        # Timeline visualization
-        _fig = go.Figure()
-
-        # Base timeline
-        _fig.add_trace(go.Scatter(
-            x=[0, 24], y=[0, 0], mode="lines",
-            line=dict(color=COLORS["Border"], width=2),
-            showlegend=False,
-        ))
-
-        for _i, (_m, _desc, _impact, _stage) in enumerate(_events):
-            _color = COLORS["RedLine"] if _m <= _month else COLORS["Grey"]
-            _fig.add_trace(go.Scatter(
-                x=[_m], y=[0], mode="markers+text",
-                marker=dict(color=_color, size=14, symbol="diamond"),
-                text=[f"M{_m}"], textposition="top center",
-                name=f"M{_m}: {_desc[:30]}...",
-                textfont=dict(size=9),
-            ))
-
-        _fig.add_vline(x=_month, line_dash="dash", line_color=COLORS["BlueLine"], line_width=1.5)
-
-        _fig.update_layout(
-            height=200,
-            xaxis=dict(title="Months Since Launch", range=[-1, 25], gridcolor="#f1f5f9"),
-            yaxis=dict(visible=False, range=[-1, 1]),
-            legend=dict(orientation="v", x=1.05, y=1, font=dict(size=9)),
-            margin=dict(l=30, r=200, t=20, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.md("### Feedback Event Timeline"))
-        items.append(mo.as_html(_fig))
-
-        # Events table
-        if _triggered:
-            _rows = ""
-            for _m, _desc, _impact, _stage in _triggered:
-                _rows += f"""
-                <tr>
-                    <td style="padding:8px; font-weight:700;">Month {_m}</td>
-                    <td style="padding:8px;">{_desc}</td>
-                    <td style="padding:8px; color:{COLORS['RedLine']};">{_impact}</td>
-                    <td style="padding:8px; color:{COLORS['OrangeLine']}; font-weight:600;">
-                        -> {_stage}</td>
-                </tr>"""
-
-            items.append(mo.Html(f"""
-            <div style="overflow-x:auto; margin:12px 0;">
-                <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-                    <thead>
-                        <tr style="background:{COLORS['Surface2']}; border-bottom:2px solid {COLORS['Border']};">
-                            <th style="padding:8px; text-align:left;">When</th>
-                            <th style="padding:8px; text-align:left;">Event</th>
-                            <th style="padding:8px; text-align:left;">Impact</th>
-                            <th style="padding:8px; text-align:left;">Re-entry Stage</th>
-                        </tr>
-                    </thead>
-                    <tbody>{_rows}</tbody>
-                </table>
-            </div>
-            """))
-
-        items.append(mo.Html(f"""
-        <div style="padding:16px; border:2px solid {COLORS['OrangeLine']}; border-radius:10px;
-                    text-align:center; background:white; margin:16px 0;">
-            <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">
-                Complete Lifecycle Iterations</div>
-            <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                {_cycle_count}</div>
-            <div style="font-size:0.72rem; color:#94a3b8;">by month {_month}</div>
-        </div>
-        """))
-
-        _pred = partD_prediction.value
-        if _pred == "many":
-            items.append(mo.callout(mo.md(
-                f"**Correct.** By month 24, there are {len(_events)} feedback events, "
-                "each triggering re-entry into an earlier stage. "
-                "Production ML is a continuous loop, not a one-time pipeline."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Scaling reveals problems invisible at pilot scale.** "
-                "Rare subgroups, equipment drift, regulatory changes, and distribution "
-                "shift each trigger a complete lifecycle iteration. Budget 4-8 cycles."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Feedback Event Rate": mo.md("""
-**Formula:**
-$$
-N_{\\text{events}}(t) \\approx \\lambda \\cdot t + \\beta \\cdot \\ln(S)
-$$
-
-**Variables:**
-- **$N_{\\text{events}}$**: cumulative feedback events requiring lifecycle re-entry
-- **$\\lambda$**: base event rate (~0.3 events/month from distribution shift, regulatory changes)
-- **$t$**: months since production launch
-- **$\\beta$**: scale sensitivity coefficient (~1.5)
-- **$S$**: number of deployment sites (e.g., clinics)
-
-Scaling from 5 to 200 sites increases $\\ln(S)$ from 1.6 to 5.3, exposing rare subgroups
-and equipment variations invisible at pilot scale. Budget 4-8 complete lifecycle iterations
-in the first 24 months of production deployment.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════
-    # SYNTHESIS
-    # ═════════════════════════════════════════════════════════════════════
-
-    def build_synthesis():
-        return mo.vstack([
+    def v1_03_build_part_a():
+        _items = [
+            v1_03_part_header(
+                "Part A",
+                "Constraints Propagate Through The Workflow",
+                f"Where should {v1_03_workflow.constraint_name} first block the workflow?",
+                COLORS["BlueLine"],
+            ),
             mo.Html(f"""
-            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                    Key Takeaways
-                </div>
-                <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                    <div style="margin-bottom: 10px;">
-                        <strong>1. Constraint discovery cost grows as 2^(N-1).</strong>
-                        A deployment constraint found at Stage 5 costs 16x more than at Stage 1.
-                        Engine.solve() can check feasibility in 3 ms -- run it before writing
-                        training code.
-                    </div>
-                    <div style="margin-bottom: 10px;">
-                        <strong>2. Iteration velocity beats starting accuracy.</strong>
-                        1-hour cycles produce ~100 experiments in 26 weeks vs 26 for 1-week cycles.
-                        The team that explores more of the design space wins.
-                    </div>
-                    <div>
-                        <strong>3. Data activities dominate effort at 60-80%.</strong>
-                        Model development is only 10-20%. Under-investing in data causes
-                        team idle time; under-investing in deployment causes the DR disaster.
-                    </div>
-                </div>
+            <div class="mlsysbook-panel">
+              <h2>Scenario</h2>
+              <p>{v1_03_workflow.failure_story}</p>
+              <p>The stakeholder is the <strong>{v1_03_workflow.stakeholder}</strong>. The decision is not just when to test;
+                 it is which downstream assumptions are allowed to harden before the track proves the deployment wall.</p>
             </div>
             """),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
+            v1_03_gate_prediction,
+        ]
+        if v1_03_gate_prediction.value is None:
+            _items.append(mo.callout(mo.md("Pick a gate timing before inspecting the stage evidence."), kind="warn"))
+            return mo.vstack(_items)
 
+        _assumptions = (
+            "success metric, guardrail metric, and deployment envelope",
+            "data or signal contract and collection assumptions",
+            "model size, runtime, feature, and preprocessing choices",
+            "production-condition validation evidence",
+            "release package, rollout commitment, and rollback surface",
+            "monitoring threshold, retraining trigger, and incident playbook",
+        )
+        _stage_rows = []
+        for idx, stage in enumerate(v1_03_workflow.stage_names, start=1):
+            _tax = constraint_tax(v1_03_workflow, discovery_stage=idx)
+            _gate = next((gate.label for gate in v1_03_workflow.gate_options if gate.stage == idx), "stage contract")
+            _status = "recommended or earlier" if idx <= v1_03_workflow.recommended_gate_stage else "late evidence debt"
+            _color = COLORS["GreenLine"] if idx <= v1_03_workflow.recommended_gate_stage else COLORS["RedLine"]
+            _stage_rows.append(
+                f"""
+                <tr>
+                  <td>{idx}</td>
+                  <td>{stage}</td>
+                  <td>{_assumptions[idx - 1]}</td>
+                  <td>{_gate}</td>
+                  <td style="color:{_color}; font-weight:800;">{_status}</td>
+                  <td style="text-align:right;">{_tax.cost_multiplier:.0f}x</td>
+                </tr>
+                """
+            )
+
+        _items.extend([
+            v1_03_prediction_feedback(
+                v1_03_gate_prediction.value,
+                "early",
+                "**Correct direction.** The deployment constraint must be tested before data and model assumptions harden.",
+                "**The instrument will show why later checks are expensive.** A deployment constraint that survives into release or monitoring propagates backward through the already-built workflow.",
+            ),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
+            v1_03_discovery_stage,
             mo.Html(f"""
-            <div style="display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        What's Next
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab 04: The Data Gravity Trap</strong> -- Data is the heaviest
-                        object in your system. You will discover that GPUs starve when
-                        storage is slow, and that moving 50 TB costs more than the compute.
-                    </div>
-                </div>
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Textbook Connection
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the ML Workflow chapter for the full lifecycle model,
-                        iteration velocity analysis, and effort distribution data.
-                        <br/><strong>Build:</strong> TinyTorch Module 03 -- implement an experiment tracker with iteration velocity metrics.
-                    </div>
-                </div>
+            <div class="mlsysbook-panel">
+              <h2>Evidence Table</h2>
+              <table style="width:100%; border-collapse:collapse; font-size:0.84rem;">
+                <thead>
+                  <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
+                    <th>Stage</th><th>Name</th><th>Assumption that hardens</th><th>Evidence gate</th><th>Status</th><th style="text-align:right;">Cost shape</th>
+                  </tr>
+                </thead>
+                <tbody>{''.join(_stage_rows)}</tbody>
+              </table>
+            </div>
+            """),
+        ])
+        if v1_03_tax.late_discovery:
+            _items.append(mo.callout(
+                mo.md(
+                    f"**Boundary crossed.** Discovery at **{v1_03_tax.discovery_stage_name}** means "
+                    f"the workflow must revisit **{', '.join(v1_03_tax.artifacts_to_rebuild)}** for "
+                    f"**{v1_03_workflow.constraint_name}**."
+                ),
+                kind="danger",
+            ))
+        else:
+            _items.append(mo.callout(
+                mo.md(f"**Gate is early enough.** {v1_03_tax.discovery_stage_name} catches the constraint before late artifacts harden."),
+                kind="success",
+            ))
+        _items.extend([
+            mo.accordion({
+                "Math Peek / Source Model - workflow iron law": mo.md(f"""
+The chapter's workflow view maps lifecycle stages onto the iron law:
+
+$$
+T = \\frac{{D_{{vol}}}}{{BW}} + \\frac{{O}}{{R_{{peak}} \\cdot \\eta_{{hw}}}} + L_{{lat}}
+$$
+
+For **{v1_03_workflow.label}**, the deployment constraint is **{v1_03_workflow.constraint_name}**.
+If that constraint changes $L_{{lat}}$, $R_{{peak}}$, or feasible efficiency $\\eta_{{hw}}$,
+then data assumptions, model operations, validation evidence, and monitoring thresholds all move.
+""")
+            }),
+            source_trace({
+                "chapter_anchor": "ML Workflow - Lifecycle Stages and Constraint Propagation Principle",
+                "profile_helper": "mlsysbook_labs.workflow_track_profile",
+                "hardware_ref": v1_03_workflow.hardware_ref,
+                "model_ref": v1_03_workflow.model_ref,
+            }, summary="Stage names and track constraints come from the selected V1-03 workflow profile."),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Checkpoint</h2>
+              <div class="mlsysbook-callout"><strong>Report decision:</strong>
+                The first blocking gate should be at stage {v1_03_tax.recommended_stage},
+                {v1_03_tax.recommended_stage_name}, before {v1_03_workflow.constraint_name}
+                becomes release debt.</div>
+            </div>
+            """),
+        ])
+        return mo.vstack(_items)
+
+    def v1_03_build_part_b():
+        _items = [
+            v1_03_part_header(
+                "Part B",
+                "Late Discovery Creates A Measurable Iteration Tax",
+                "How large is the rework tax when the deployment wall is found late?",
+                COLORS["RedLine"],
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Scenario</h2>
+              <p>The team asks whether late discovery is just a schedule issue. Move the discovery stage and measure
+                 how many person-days become avoidable rework for <strong>{v1_03_workflow.label}</strong>.</p>
+            </div>
+            """),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
+            v1_03_tax_prediction,
+        ]
+        if v1_03_tax_prediction.value is None:
+            _items.append(mo.callout(mo.md("Predict the cost shape before opening the rework chart."), kind="warn"))
+            return mo.vstack(_items)
+
+        _stage_numbers = list(range(1, len(v1_03_workflow.stage_names) + 1))
+        _stage_taxes = [constraint_tax(v1_03_workflow, discovery_stage=idx) for idx in _stage_numbers]
+        _bar_colors = [
+            COLORS["GreenLine"] if tax.discovery_stage <= v1_03_workflow.recommended_gate_stage else COLORS["RedLine"]
+            for tax in _stage_taxes
+        ]
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=[tax.discovery_stage_name for tax in _stage_taxes],
+            y=[tax.rework_days for tax in _stage_taxes],
+            marker=dict(color=_bar_colors),
+            name="Rework days",
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[v1_03_tax.discovery_stage_name],
+            y=[v1_03_tax.rework_days],
+            mode="markers",
+            marker=dict(color=COLORS["BlueLine"], size=16, line=dict(color="white", width=2)),
+            name="Current discovery",
+        ))
+        _fig.update_layout(
+            height=340,
+            xaxis=dict(title="Discovery stage"),
+            yaxis=dict(title="Person-days of rework"),
+            margin=dict(l=60, r=20, t=35, b=90),
+        )
+        apply_plotly_theme(_fig)
+
+        _stage_rows = []
+        for tax in _stage_taxes:
+            _color = COLORS["GreenLine"] if tax.discovery_stage <= v1_03_workflow.recommended_gate_stage else COLORS["RedLine"]
+            _stage_rows.append(
+                f"""
+                <tr>
+                  <td>{tax.discovery_stage}</td>
+                  <td>{tax.discovery_stage_name}</td>
+                  <td style="text-align:right;">{tax.cost_multiplier:.0f}x</td>
+                  <td style="text-align:right; color:{_color}; font-weight:800;">{tax.rework_days:.0f}</td>
+                  <td style="text-align:right;">{tax.avoidable_rework_days:.0f}</td>
+                </tr>
+                """
+            )
+
+        _items.extend([
+            v1_03_prediction_feedback(
+                v1_03_tax_prediction.value,
+                "exponential",
+                "**Correct.** The chapter model doubles the correction cost at each later stage.",
+                "**The chart shows exponential escalation.** A late constraint is not a one-stage fix; it propagates backward through every artifact that assumed the wrong envelope.",
+            ),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
+            v1_03_discovery_stage,
+            mo.as_html(_fig),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Computed Evidence</h2>
+              <div class="mlsysbook-grid">
+                <div class="mlsysbook-field"><strong>Discovery stage</strong>{v1_03_tax.discovery_stage}: {v1_03_tax.discovery_stage_name}</div>
+                <div class="mlsysbook-field"><strong>Recommended gate</strong>{v1_03_tax.recommended_stage}: {v1_03_tax.recommended_stage_name}</div>
+                <div class="mlsysbook-field"><strong>Cost multiplier</strong>{v1_03_tax.cost_multiplier:.0f}x</div>
+                <div class="mlsysbook-field"><strong>Avoidable rework</strong>{v1_03_tax.avoidable_rework_days:.0f} person-days</div>
+              </div>
+              <table style="width:100%; border-collapse:collapse; margin-top:14px; font-size:0.84rem;">
+                <thead>
+                  <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
+                    <th>Stage</th><th>Name</th><th style="text-align:right;">Multiplier</th><th style="text-align:right;">Rework days</th><th style="text-align:right;">Avoidable days</th>
+                  </tr>
+                </thead>
+                <tbody>{''.join(_stage_rows)}</tbody>
+              </table>
+            </div>
+            """),
+        ])
+        if v1_03_tax.late_discovery:
+            _items.append(mo.callout(
+                mo.md(
+                    f"**Failure state: iteration tax is active.** The current stage creates "
+                    f"**{v1_03_tax.avoidable_rework_days:.0f} avoidable person-days** and reopens: "
+                    f"{', '.join(v1_03_tax.artifacts_to_rebuild)}."
+                ),
+                kind="danger",
+            ))
+        else:
+            _items.append(mo.callout(mo.md("**Recovered.** Moving the gate to the recommended stage removes the avoidable tax."), kind="success"))
+        _items.extend([
+            mo.accordion({
+                "Math Peek / Source Model - constraint propagation cost": mo.md(f"""
+The notebook uses the chapter's simplified correction model:
+
+$$
+\\text{{rework}} = \\text{{base effort}} \\times 2^{{\\text{{stage}} - 1}}
+$$
+
+For this track:
+
+$$
+{v1_03_workflow.base_rework_days:.1f} \\times 2^{{{v1_03_tax.discovery_stage - 1}}}
+= {v1_03_tax.rework_days:.1f}\\;\\text{{person-days}}
+$$
+
+Stage 5 produces a 16x multiplier and stage 6 produces a 32x multiplier in the chapter framing.
+""")
+            }),
+            source_trace({
+                "api": "mlsysbook_labs.constraint_tax",
+                "base_rework_days": v1_03_workflow.base_rework_days,
+                "recommended_gate_stage": v1_03_workflow.recommended_gate_stage,
+                "stage_count": len(v1_03_workflow.stage_names),
+            }, summary="Constraint-tax evidence uses the shared workflow helper and selected profile."),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Checkpoint</h2>
+              <div class="mlsysbook-callout"><strong>Report decision:</strong>
+                Move the gate earlier if the avoidable tax ({v1_03_tax.avoidable_rework_days:.0f} days)
+                is larger than the cost of running the gate before release pressure.</div>
+            </div>
+            """),
+        ])
+        return mo.vstack(_items)
+
+    def v1_03_build_part_c():
+        _items = [
+            v1_03_part_header(
+                "Part C",
+                "Evaluation Gates Trade Speed For Confidence",
+                "How much evidence should the workflow buy before deployment confidence is credible?",
+                COLORS["OrangeLine"],
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Scenario</h2>
+              <p>{v1_03_workflow.stakeholder} must decide how realistic the gate should be before
+                 {v1_03_workflow.constraint_name} can block release. A shallow gate is fast; a realistic
+                 gate makes weaker assumptions.</p>
+            </div>
+            """),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
+            v1_03_frontier_prediction,
+        ]
+        if v1_03_frontier_prediction.value is None:
+            _items.append(mo.callout(mo.md("Predict the bottleneck before opening the frontier chart."), kind="warn"))
+            return mo.vstack(_items)
+
+        _depth_values = list(range(5, 101, 5))
+        _points = [
+            iteration_frontier(
+                v1_03_workflow,
+                validation_depth_pct=depth,
+                automation_pct=v1_03_automation.value,
+                hardware_realism_pct=v1_03_realism.value,
+                data_scale_pct=v1_03_data_scale.value,
+            )
+            for depth in _depth_values
+        ]
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=[point.iteration_days for point in _points],
+            y=[point.residual_risk_pct for point in _points],
+            mode="lines+markers",
+            marker=dict(color=COLORS["BlueLine"], size=7),
+            line=dict(color=COLORS["BlueLine"], width=2.5),
+            name="Validation depth sweep",
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[v1_03_frontier.iteration_days],
+            y=[v1_03_frontier.residual_risk_pct],
+            mode="markers",
+            marker=dict(color=COLORS["RedLine"], size=14, line=dict(color="white", width=2)),
+            name="Current workflow",
+        ))
+        _fig.add_hline(
+            y=v1_03_risk_budget_pct,
+            line_dash="dash",
+            line_color=COLORS["RedLine"],
+            annotation_text="risk budget",
+        )
+        _fig.add_vline(
+            x=v1_03_cycle_budget_days,
+            line_dash="dot",
+            line_color=COLORS["TextMuted"],
+            annotation_text="cycle budget",
+        )
+        _fig.update_layout(
+            height=360,
+            xaxis=dict(title="Iteration time (days)", gridcolor="#f1f5f9"),
+            yaxis=dict(title="Residual deployment risk (%)", gridcolor="#f1f5f9"),
+            margin=dict(l=60, r=20, t=40, b=55),
+        )
+        apply_plotly_theme(_fig)
+
+        _risk_over = v1_03_frontier.residual_risk_pct > v1_03_risk_budget_pct
+        _cycle_over = v1_03_frontier.iteration_days > v1_03_cycle_budget_days
+        if _risk_over:
+            _consequence = mo.callout(
+                mo.md(
+                    f"**Fast but blind.** Residual risk is **{v1_03_frontier.residual_risk_pct:.1f}%**, "
+                    f"above the {v1_03_risk_budget_pct:.1f}% budget. Add realism, data scale, or validation depth."
+                ),
+                kind="danger",
+            )
+        elif _cycle_over:
+            _consequence = mo.callout(
+                mo.md(
+                    f"**Confident but slow.** Iteration time is **{v1_03_frontier.iteration_days:.1f} days**, "
+                    f"above the {v1_03_cycle_budget_days:.1f}-day cycle budget. Add automation or reduce scope."
+                ),
+                kind="warn",
+            )
+        else:
+            _consequence = mo.callout(
+                mo.md("**Balanced gate.** Current settings stay inside the risk and cycle budgets."),
+                kind="success",
+            )
+
+        _items.extend([
+            v1_03_prediction_feedback(
+                v1_03_frontier_prediction.value,
+                v1_03_frontier.bottleneck,
+                f"**Correct.** The current bottleneck is **{v1_03_frontier.bottleneck}**.",
+                f"**Measured bottleneck: {v1_03_frontier.bottleneck}.** The weakest validation dimension controls the residual risk.",
+            ),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
+            mo.hstack([v1_03_validation_depth, v1_03_automation], justify="start", gap="2rem"),
+            mo.hstack([v1_03_realism, v1_03_data_scale], justify="start", gap="2rem"),
+            mo.as_html(_fig),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Computed Evidence</h2>
+              <div class="mlsysbook-grid">
+                <div class="mlsysbook-field"><strong>Iteration time</strong>{v1_03_frontier.iteration_days:.1f} days</div>
+                <div class="mlsysbook-field"><strong>Cycle budget</strong>{v1_03_cycle_budget_days:.1f} days</div>
+                <div class="mlsysbook-field"><strong>Confidence</strong>{v1_03_frontier.confidence_pct:.1f}%</div>
+                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_03_frontier.residual_risk_pct:.1f}%</div>
+                <div class="mlsysbook-field"><strong>Risk budget</strong>{v1_03_risk_budget_pct:.1f}%</div>
+                <div class="mlsysbook-field"><strong>Bottleneck</strong>{v1_03_frontier.bottleneck}</div>
+              </div>
+            </div>
+            """),
+            _consequence,
+            mo.accordion({
+                "Math Peek / Source Model - validation frontier": mo.md(f"""
+The source model estimates confidence from four gate dimensions:
+
+$$
+\\text{{confidence}} = 18 + 0.28d + 0.27r + 0.22s + 0.12a
+$$
+
+Residual risk falls toward a track-specific floor:
+
+$$
+\\text{{risk}} = \\max(\\text{{floor}}, \\text{{base risk}} - 0.62 \\cdot \\text{{confidence}})
+$$
+
+Current values: depth={v1_03_frontier.validation_depth_pct:.0f}%, realism={v1_03_frontier.hardware_realism_pct:.0f}%,
+data scale={v1_03_frontier.data_scale_pct:.0f}%, automation={v1_03_frontier.automation_pct:.0f}%.
+""")
+            }),
+            source_trace({
+                "api": "mlsysbook_labs.iteration_frontier",
+                "base_cycle_days": v1_03_workflow.base_cycle_days,
+                "base_residual_risk_pct": v1_03_workflow.base_residual_risk_pct,
+                "min_residual_risk_pct": v1_03_workflow.min_residual_risk_pct,
+                "derived_risk_budget_pct": round(v1_03_risk_budget_pct, 2),
+            }, summary="Frontier evidence uses the shared helper plus a notebook-local derived risk budget."),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Checkpoint</h2>
+              <div class="mlsysbook-callout"><strong>Report decision:</strong>
+                The gate should focus on {v1_03_frontier.bottleneck} until residual risk is below
+                {v1_03_risk_budget_pct:.1f}% without pushing cycle time beyond {v1_03_cycle_budget_days:.1f} days.</div>
+            </div>
+            """),
+        ])
+        return mo.vstack(_items)
+
+    def v1_03_build_part_d():
+        _recommended_gate = v1_03_recommended_gate()
+        _items = [
+            v1_03_part_header(
+                "Part D",
+                "Workflow Policy Is System Design",
+                f"Which gate and release rule should {v1_03_workflow.label} adopt?",
+                COLORS["GreenLine"],
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Scenario</h2>
+              <p>The policy decides when evidence can block release. For this track, that means the policy must
+                 name the gate, release rule, rollback rule, and the residual blind spot the team still accepts.</p>
+            </div>
+            """),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
+            v1_03_policy_prediction,
+        ]
+        if v1_03_policy_prediction.value is None:
+            _items.append(mo.callout(mo.md("Predict the non-negotiable gate before comparing policies."), kind="warn"))
+            return mo.vstack(_items)
+
+        _gate_rows = []
+        for gate in v1_03_workflow.gate_options:
+            _tax = constraint_tax(v1_03_workflow, discovery_stage=gate.stage)
+            _color = COLORS["GreenLine"] if gate.gate_id == v1_03_policy.gate_id else COLORS["TextSec"]
+            _gate_rows.append(
+                f"""
+                <tr>
+                  <td style="color:{_color}; font-weight:800;">{gate.label}</td>
+                  <td>{_tax.discovery_stage_name}</td>
+                  <td style="text-align:right;">{_tax.rework_days:.0f} days</td>
+                  <td>{gate.validation_focus}</td>
+                  <td>{gate.residual_risk}</td>
+                </tr>
+                """
+            )
+
+        _late_policy = v1_03_policy.gate_stage > v1_03_workflow.recommended_gate_stage
+        _items.extend([
+            v1_03_prediction_feedback(
+                v1_03_policy_prediction.value,
+                _recommended_gate.gate_id,
+                f"**Correct direction.** {_recommended_gate.label} is the earliest policy gate aligned to the recommended stage.",
+                f"**Compare against {_recommended_gate.label}.** Later gates can still be useful, but they let more assumptions harden before evidence can block release.",
+            ),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
+            mo.hstack([v1_03_gate_choice, v1_03_release_policy], justify="start", gap="2rem"),
+            v1_03_rollback_rule,
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Policy Evidence</h2>
+              <div class="mlsysbook-grid">
+                <div class="mlsysbook-field"><strong>Selected gate</strong>{v1_03_policy.gate_label}</div>
+                <div class="mlsysbook-field"><strong>Gate stage</strong>{v1_03_policy.gate_stage_name}</div>
+                <div class="mlsysbook-field"><strong>Rework at gate</strong>{v1_03_policy.rework_days_at_gate:.0f} days</div>
+                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_03_policy.residual_risk_pct:.1f}%</div>
+                <div class="mlsysbook-field"><strong>Release policy</strong>{v1_03_policy.release_policy}</div>
+                <div class="mlsysbook-field"><strong>Rollback rule</strong>{v1_03_policy.rollback_rule}</div>
+              </div>
+              <div class="mlsysbook-callout"><strong>Policy summary:</strong> {v1_03_policy.policy_summary}</div>
+              <table style="width:100%; border-collapse:collapse; margin-top:14px; font-size:0.84rem;">
+                <thead>
+                  <tr style="border-bottom:1px solid {COLORS['Border']}; text-align:left; color:{COLORS['TextMuted']};">
+                    <th>Gate</th><th>Stage</th><th style="text-align:right;">Rework</th><th>Validation focus</th><th>Blind spot</th>
+                  </tr>
+                </thead>
+                <tbody>{''.join(_gate_rows)}</tbody>
+              </table>
+            </div>
+            """),
+        ])
+        if _late_policy:
+            _items.append(mo.callout(
+                mo.md(
+                    f"**Policy boundary crossed.** {v1_03_policy.gate_label} is after the recommended gate, "
+                    f"so the policy accepts {v1_03_policy.rework_days_at_gate:.0f} days of rework before evidence can block release."
+                ),
+                kind="danger",
+            ))
+        else:
+            _items.append(mo.callout(
+                mo.md("**Policy blocks early enough.** Evidence can stop the workflow before release debt compounds."),
+                kind="success",
+            ))
+        _items.extend([
+            mo.accordion({
+                "Math Peek / Source Model - policy tuple": mo.md(f"""
+The policy is a system design tuple, not paperwork:
+
+$$
+\\text{{policy}} =
+(\\text{{gate timing}}, \\text{{evidence requirement}}, \\text{{rollout}}, \\text{{rollback}}, \\text{{blind spot}})
+$$
+
+Current tuple:
+
+- Gate timing: **{v1_03_policy.gate_label}** at **{v1_03_policy.gate_stage_name}**
+- Evidence requirement: **{v1_03_policy.release_policy}**
+- Rollback: **{v1_03_policy.rollback_rule}**
+- Residual blind spot: **{v1_03_policy.blind_spot}**
+""")
+            }),
+            source_trace({
+                "api": "mlsysbook_labs.workflow_policy",
+                "gate_id": v1_03_policy.gate_id,
+                "release_policy": v1_03_policy.release_policy,
+                "rollback_rule": v1_03_policy.rollback_rule,
+                "blind_spot_source": "WorkflowGate.residual_risk",
+            }, summary="Policy evidence packages selected gate metadata and frontier risk."),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Checkpoint</h2>
+              <div class="mlsysbook-callout"><strong>Report decision:</strong>
+                Defend this policy only if the release evidence can block {v1_03_workflow.constraint_name}
+                before {v1_03_policy.blind_spot} becomes the next unknown.</div>
+            </div>
+            """),
+        ])
+        return mo.vstack(_items)
+
+    def v1_03_build_synthesis():
+        _complete = (
+            v1_03_gate_prediction.value is not None
+            and v1_03_tax_prediction.value is not None
+            and v1_03_frontier_prediction.value is not None
+            and v1_03_policy_prediction.value is not None
+            and bool(str(v1_03_reflection.value or "").strip())
+        )
+        _status = "READY" if _complete else "IN PROGRESS"
+        return mo.vstack([
+            v1_03_part_header(
+                "Synthesis",
+                "Release Memo With Residual Blind Spot",
+                "What policy will this track carry forward?",
+                COLORS["BlueLine"],
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Release Policy Memo</h2>
+              <div class="mlsysbook-grid">
+                <div class="mlsysbook-field"><strong>Track</strong>{v1_03_workflow.label}</div>
+                <div class="mlsysbook-field"><strong>Constraint</strong>{v1_03_workflow.constraint_name}</div>
+                <div class="mlsysbook-field"><strong>Discovery stage</strong>{v1_03_tax.discovery_stage_name}</div>
+                <div class="mlsysbook-field"><strong>Avoidable rework</strong>{v1_03_tax.avoidable_rework_days:.0f} person-days</div>
+                <div class="mlsysbook-field"><strong>Iteration time</strong>{v1_03_frontier.iteration_days:.1f} days</div>
+                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_03_frontier.residual_risk_pct:.1f}%</div>
+                <div class="mlsysbook-field"><strong>Policy</strong>{v1_03_policy.policy_summary}</div>
+                <div class="mlsysbook-field"><strong>Blind spot</strong>{v1_03_policy.blind_spot}</div>
+              </div>
+            </div>
+            """),
+            mo.Html("<div class=\"mlsysbook-panel\"><h2>Final Checkpoint</h2></div>"),
+            v1_03_reflection,
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Big Takeaways</h2>
+              <ul class="mlsysbook-list">
+                <li><strong>Constraints propagate backward.</strong> A late deployment failure invalidates upstream data, model, validation, release, and monitoring artifacts.</li>
+                <li><strong>The iteration tax is measurable.</strong> The same stage move changes the cost multiplier and the artifacts to rebuild.</li>
+                <li><strong>Evaluation gates buy evidence.</strong> Speed without realism leaves residual deployment risk; realism without automation slows learning.</li>
+                <li><strong>Workflow policy is system design.</strong> The selected gate determines when evidence can block the system.</li>
+              </ul>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="lab-hud">
+                <span class="hud-label">LAB</span>
+                <span class="hud-value">03 &middot; Constraint Tax</span>
+                <span class="hud-label">TRACK</span>
+                <span class="hud-value">{v1_03_workflow.label}</span>
+                <span style="flex:1;"></span>
+                <span class="hud-label">ARTIFACT</span>
+                <span class="hud-value">{v1_03_workflow.report_artifact}</span>
+                <span class="hud-label">STATUS</span>
+                <span class="hud-active">{_status}</span>
             </div>
             """),
         ])
 
-    # ── COMPOSE TABS ─────────────────────────────────────────────────────
-    tabs = mo.ui.tabs({
-        "Part A -- Constraint Propagation":     build_part_a(),
-        "Part B -- Iteration Velocity":         build_part_b(),
-        "Part C -- Where Does the Time Go?":    build_part_c(),
-        "Part D -- Feedback Loops":             build_part_d(),
-        "Synthesis":                             build_synthesis(),
+    def build_synthesis():
+        return v1_03_build_synthesis()
+
+    _tabs = mo.ui.tabs({
+        "Part A: Propagation": v1_03_build_part_a(),
+        "Part B: Iteration Tax": v1_03_build_part_b(),
+        "Part C: Gate Confidence": v1_03_build_part_c(),
+        "Part D: Workflow Policy": v1_03_build_part_d(),
+        "Synthesis": build_synthesis(),
     })
-    tabs
+    _tabs
     return
 
+
 # ===========================================================================
-# ZONE D: LEDGER HUD
+# ZONE D: SYNTHESIS AND REPORT
 # ===========================================================================
+
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, partA_prediction, partB_prediction, partC_prediction, partD_prediction):
-    _track = ledger._state.track or "not set"
-    if partA_prediction.value is not None and partD_prediction.value is not None:
+def _(
+    ledger,
+    mo,
+    v1_03_frontier,
+    v1_03_frontier_prediction,
+    v1_03_gate_prediction,
+    v1_03_policy,
+    v1_03_policy_prediction,
+    v1_03_profile,
+    v1_03_reflection,
+    v1_03_risk_budget_pct,
+    v1_03_tax,
+    v1_03_tax_prediction,
+    v1_03_variant,
+    v1_03_workflow,
+):
+    _ledger_ready = (
+        v1_03_gate_prediction.value is not None
+        and v1_03_tax_prediction.value is not None
+        and v1_03_frontier_prediction.value is not None
+        and v1_03_policy_prediction.value is not None
+        and bool(str(v1_03_reflection.value or "").strip())
+    )
+    if _ledger_ready:
         ledger.save(chapter=3, design={
             "chapter": "v1_03",
-            "constraint_discovery_prediction": partA_prediction.value,
-            "iteration_velocity_prediction": partB_prediction.value,
-            "effort_distribution_prediction": partC_prediction.value,
-            "feedback_loops_prediction": partD_prediction.value,
-            "constraint_discovery_correct": partA_prediction.value == "stage2",
-            "iteration_velocity_correct": partB_prediction.value == "team_b",
-            "effort_model_dev_correct": partC_prediction.value == "10",
-            "feedback_loops_correct": partD_prediction.value == "many",
+            "track_id": v1_03_profile.track_id,
+            "scenario_id": v1_03_variant.scenario_id,
+            "hardware_ref": v1_03_workflow.hardware_ref,
+            "model_ref": v1_03_workflow.model_ref,
+            "completed": True,
+            "gate_prediction": v1_03_gate_prediction.value,
+            "tax_prediction": v1_03_tax_prediction.value,
+            "frontier_prediction": v1_03_frontier_prediction.value,
+            "policy_prediction": v1_03_policy_prediction.value,
+            "constraint_name": v1_03_workflow.constraint_name,
+            "discovery_stage": v1_03_tax.discovery_stage_name,
+            "selected_gate_id": v1_03_policy.gate_id,
+            "avoidable_rework_days": v1_03_tax.avoidable_rework_days,
+            "iteration_days": v1_03_frontier.iteration_days,
+            "confidence_pct": v1_03_frontier.confidence_pct,
+            "residual_risk_pct": v1_03_frontier.residual_risk_pct,
+            "risk_budget_pct": v1_03_risk_budget_pct,
+            "release_policy": v1_03_policy.release_policy,
+            "rollback_rule": v1_03_policy.rollback_rule,
+            "policy_summary": v1_03_policy.policy_summary,
+            "blind_spot": v1_03_policy.blind_spot,
         })
 
+    _status = "SAVED" if _ledger_ready else "ACTIVE"
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>
-        <span class="hud-value">03 &middot; The Constraint Tax</span>
-        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-value">03 &middot; Constraint Tax</span>
         <span class="hud-label">TRACK</span>
-        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">CHAPTER&nbsp;3</span>
-        <span class="hud-value">ML Workflow</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">active</span>
+        <span class="hud-value">{v1_03_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">{v1_03_workflow.report_artifact}</span>
+        <span class="hud-label">LEDGER</span>
+        <span class="hud-active">{_status}</span>
     </div>
     """)
     return
+
+
+@app.cell(hide_code=True)
+def _(
+    build_lab_report,
+    mo,
+    report_export_panel,
+    v1_03_automation,
+    v1_03_cycle_budget_days,
+    v1_03_data_scale,
+    v1_03_frontier,
+    v1_03_frontier_prediction,
+    v1_03_gate_prediction,
+    v1_03_metadata,
+    v1_03_policy,
+    v1_03_policy_prediction,
+    v1_03_profile,
+    v1_03_realism,
+    v1_03_reflection,
+    v1_03_risk_budget_pct,
+    v1_03_tax,
+    v1_03_tax_prediction,
+    v1_03_variant,
+    v1_03_validation_depth,
+    v1_03_workflow,
+):
+    _incomplete = []
+    if v1_03_gate_prediction.value is None:
+        _incomplete.append("Part A gate timing prediction")
+    if v1_03_tax_prediction.value is None:
+        _incomplete.append("Part B iteration-tax prediction")
+    if v1_03_frontier_prediction.value is None:
+        _incomplete.append("Part C validation-bottleneck prediction")
+    if v1_03_policy_prediction.value is None:
+        _incomplete.append("Part D policy-gate prediction")
+    if not str(v1_03_reflection.value or "").strip():
+        _incomplete.append("Synthesis release memo blind spot")
+
+    _report = build_lab_report(
+        v1_03_metadata,
+        track=v1_03_profile.label,
+        scenario=v1_03_variant.workload_summary,
+        learning_objectives=(
+            "Trace how deployment constraints propagate through workflow stages.",
+            "Measure the iteration tax created by late constraint discovery.",
+            "Compare validation realism, automation, iteration time, and residual risk.",
+            "Choose a track-specific workflow gate, release policy, rollback rule, and blind spot.",
+        ),
+        predictions={
+            "gate_timing": v1_03_gate_prediction.value,
+            "iteration_tax_shape": v1_03_tax_prediction.value,
+            "validation_bottleneck": v1_03_frontier_prediction.value,
+            "policy_gate": v1_03_policy_prediction.value,
+        },
+        knob_settings={
+            "discovery_stage": v1_03_tax.discovery_stage,
+            "validation_depth_pct": v1_03_validation_depth.value,
+            "automation_pct": v1_03_automation.value,
+            "hardware_realism_pct": v1_03_realism.value,
+            "data_scale_pct": v1_03_data_scale.value,
+            "selected_gate": v1_03_policy.gate_id,
+            "release_policy": v1_03_policy.release_policy,
+            "rollback_rule": v1_03_policy.rollback_rule,
+        },
+        evidence_summary={
+            "hardware_ref": v1_03_workflow.hardware_ref,
+            "model_ref": v1_03_workflow.model_ref,
+            "constraint_name": v1_03_workflow.constraint_name,
+            "cost_multiplier": v1_03_tax.cost_multiplier,
+            "rework_days": v1_03_tax.rework_days,
+            "avoidable_rework_days": v1_03_tax.avoidable_rework_days,
+            "iteration_days": v1_03_frontier.iteration_days,
+            "cycle_budget_days": v1_03_cycle_budget_days,
+            "confidence_pct": v1_03_frontier.confidence_pct,
+            "residual_risk_pct": v1_03_frontier.residual_risk_pct,
+            "risk_budget_pct": v1_03_risk_budget_pct,
+            "bottleneck": v1_03_frontier.bottleneck,
+            "selected_gate": v1_03_policy.gate_label,
+            "release_policy": v1_03_policy.release_policy,
+            "rollback_rule": v1_03_policy.rollback_rule,
+            "blind_spot": v1_03_policy.blind_spot,
+        },
+        final_decision=v1_03_policy.policy_summary,
+        big_takeaways=(
+            "Deployment constraints propagate backward through the whole workflow.",
+            "Late discovery creates a measurable iteration tax.",
+            "Evaluation gates trade iteration speed for deployment confidence.",
+            "A workflow policy must name both release evidence and residual blind spot.",
+        ),
+        reflections={
+            "student_reflection": v1_03_reflection.value,
+            "blind_spot": v1_03_policy.blind_spot,
+            "report_artifact": v1_03_workflow.report_artifact,
+        },
+        residual_risk=v1_03_policy.blind_spot,
+        source_trace={
+            "track_id": v1_03_profile.track_id,
+            "scenario_id": v1_03_variant.scenario_id,
+            "hardware_ref": v1_03_variant.hardware_ref,
+            "model_ref": v1_03_variant.model_ref,
+            "shared_helpers": "workflow_track_profile, constraint_tax, iteration_frontier, workflow_policy",
+            "source_policy": v1_03_profile.source_policy,
+        },
+        result_snapshot={
+            "workflow_profile": v1_03_workflow,
+            "constraint_tax": v1_03_tax,
+            "iteration_frontier": v1_03_frontier,
+            "workflow_policy": v1_03_policy,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
+    mo.vstack([
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V1-03 workflow memo is generated locally from the selected track, "
+                "your inputs, and the computed evidence."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
+    ])
+    return
+
 
 if __name__ == "__main__":
     app.run()

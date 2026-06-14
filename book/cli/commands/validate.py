@@ -94,6 +94,7 @@ class ValidationRunResult:
 
 
 INLINE_REF_PATTERN = re.compile(r"`\{python\}\s+(\w+(?:\.\w+)?)`")
+INLINE_EXPR_PATTERN = re.compile(r"`\{python\}\s+([^`]+?)`")
 CELL_START_PATTERN = re.compile(r"^```\{python\}|^```python")
 CELL_END_PATTERN = re.compile(r"^```\s*$")
 ASSIGN_PATTERN = re.compile(r"^([A-Za-z_]\w*)\s*=")
@@ -101,14 +102,84 @@ ASSIGN_PATTERN = re.compile(r"^([A-Za-z_]\w*)\s*=")
 TUPLE_ASSIGN_PATTERN = re.compile(r"^((?:[A-Za-z_]\w*\s*,\s*)+[A-Za-z_]\w*)\s*=")
 CLASS_DEF_PATTERN = re.compile(r"^class\s+(\w+)\s*[:(]")
 GRID_TABLE_SEP_PATTERN = re.compile(r"^\+[-:=+]+\+$")
-# NOTE: The LATEX_INLINE_PATTERN and LATEX_ADJACENT_PATTERN checks were retired
-# from validate_inline_refs.py when fmt() gained MarkdownStr; re-enabled here for
-# `{python}` nested inside \(...\) or $...$ (breaks Quarto math parsing).
-LATEX_INLINE_PATTERN = re.compile(
-    r"(?<![\\$])\$(?!\$)[^$\n]*`\{python\}[^$\n]*\$"
-    r"|\\\([^)]*`\{python\}[^)]*\\\)"
+# NOTE: The old LATEX_INLINE_PATTERN regex could treat the closing `$` of one
+# math span as the opening `$` of the next, producing false positives on lines
+# such as `$P_0$: `{python} x_str`. $P_t$`. Use a scanner so only actual
+# `$...$` and `\(...\)` spans are checked for inline Python.
+
+
+def _is_escaped(text: str, idx: int) -> bool:
+    backslashes = 0
+    j = idx - 1
+    while j >= 0 and text[j] == "\\":
+        backslashes += 1
+        j -= 1
+    return backslashes % 2 == 1
+
+
+def _inline_math_spans(text: str) -> List[str]:
+    """Return inline math spans from one Markdown source line."""
+    spans: List[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text.startswith(r"\(", i) and not _is_escaped(text, i):
+            end = text.find(r"\)", i + 2)
+            if end == -1:
+                i += 2
+                continue
+            spans.append(text[i:end + 2])
+            i = end + 2
+            continue
+
+        if text[i] == "$" and not _is_escaped(text, i):
+            if (i + 1 < n and text[i + 1] == "$") or (i > 0 and text[i - 1] == "$"):
+                i += 1
+                continue
+            j = i + 1
+            while j < n:
+                if text[j] == "$" and not _is_escaped(text, j):
+                    if (j + 1 < n and text[j + 1] == "$") or text[j - 1] == "$":
+                        j += 1
+                        continue
+                    spans.append(text[i:j + 1])
+                    i = j + 1
+                    break
+                j += 1
+            else:
+                i += 1
+            continue
+
+        i += 1
+    return spans
+
+
+def _inline_python_math_spans(text: str) -> List[str]:
+    return [span for span in _inline_math_spans(text) if "{python}" in span]
+
+
+LATEX_OPERATOR_AFTER_PATTERN = re.compile(
+    r"\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)"
 )
-# along with mlsysim.fmt's MarkdownStr migration. They had been guarding against
+CANONICAL_INLINE_SUFFIXES = ("_str", "_math", "_eq", "_frac")
+
+
+def _inline_python_latex_operator_warnings(text: str) -> List[str]:
+    """Refs adjacent to LaTeX operators without a canonical display suffix."""
+    refs: List[str] = []
+    for match in INLINE_EXPR_PATTERN.finditer(text):
+        after = text[match.end():]
+        if not LATEX_OPERATOR_AFTER_PATTERN.match(after):
+            continue
+        expr = match.group(1).strip()
+        name = expr.split("[", 1)[0].split("(", 1)[0].strip()
+        final = name.split(".")[-1]
+        if not final.endswith(CANONICAL_INLINE_SUFFIXES):
+            refs.append(match.group(0))
+    return refs
+
+# LATEX_ADJACENT_PATTERN checks were retired from validate_inline_refs.py along
+# with mlsysim.fmt's MarkdownStr migration. They had been guarding against
 # Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
 # mode — a bug class that no longer exists now that fmt() returns a Markdown-
 # rendering string that bypasses the escape. See mlsysim/mlsysim/fmt.py and
@@ -1227,9 +1298,6 @@ class ValidateCommand:
             ("missing_backtick", re.compile(r"(?<!`)(\{python\}\s+\w+`)"), "Missing opening backtick before {python}", "error"),
             ("dollar_as_backtick", re.compile(r"\$\{python\}\s+\w+`"), "Dollar sign used instead of backtick before {python}", "error"),
             ("display_math", re.compile(r"\$\$[^$]*`?\{python\}"), "Inline Python inside $$...$$ display math", "error"),
-            # NOTE: $\times$ adjacent to inline Python is the PREFERRED convention.
-            # Only flag non-_str variables inside $...$ math (decimal stripping risk).
-            ("latex_adjacent_raw", re.compile(r"`\{python\}\s+(?!\w+_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)"), "Non-_str inline Python adjacent to LaTeX operator (decimal stripping risk)", "warning"),
         ]
 
         for file in files:
@@ -1256,14 +1324,24 @@ class ValidateCommand:
                             context=match.group(0)[:160],
                         ))
 
-                if LATEX_INLINE_PATTERN.search(line):
+                for ref in _inline_python_latex_operator_warnings(line):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="latex_adjacent_raw",
+                        message="Non-canonical inline Python adjacent to LaTeX operator",
+                        severity="warning",
+                        context=ref[:160],
+                    ))
+
+                for math_span in _inline_python_math_spans(line):
                     issues.append(ValidationIssue(
                         file=self._relative_file(file),
                         line=idx,
                         code="python_in_math",
                         message="Inline Python inside $...$ math can render incorrectly",
                         severity="error",
-                        context=line.strip()[:160],
+                        context=math_span[:160],
                     ))
 
                 if GRID_TABLE_SEP_PATTERN.match(stripped):
@@ -3684,7 +3762,7 @@ class ValidateCommand:
     # Chapter-opener cover images are decorative and not cross-referenced
     # by convention. They carry fig-alt for accessibility but no #fig-
     # label. Skip them in the label-required check.
-    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif)")
+    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif|webp)")
 
     def _run_figure_label_required(self, root: Path) -> ValidationRunResult:
         """Flag `![](...)` markdown image figures with no `{#fig-X}` label.
@@ -4144,11 +4222,9 @@ class ValidateCommand:
                         )
                     )
 
-                # Python inside $...$ math
-                for m in math_span_pat.finditer(line):
-                    inner = m.group(1)
-                    if "{python}" not in inner:
-                        continue
+                # Python inside $...$ or \(...\) math
+                for math_span in _inline_python_math_spans(line):
+                    inner = math_span[2:-2] if math_span.startswith(r"\(") else math_span[1:-1]
                     inner_clean = re.sub(r"\^\{[^}]*`\{python\}[^`]*`[^}]*\}", "", inner)
                     if "{python}" in inner_clean:
                         issues.append(
@@ -4158,7 +4234,7 @@ class ValidateCommand:
                                 code="python_in_dollar_math",
                                 message="Inline Python inside $...$ math block",
                                 severity="error",
-                                context=m.group(0)[:120],
+                                context=math_span[:120],
                             )
                         )
 

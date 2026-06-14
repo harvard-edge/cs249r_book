@@ -3,62 +3,29 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
+
+# -----------------------------------------------------------------------------
 # LAB V2-09: THE OPTIMIZATION TRAP
 #
-# Volume II, Chapter: Performance Engineering (performance_engineering.qmd)
-#
-# Five Parts (~58 minutes):
-#   Part A — The Roofline Diagnostic (10 min)
-#             LLM decode at batch=1 is 295x below the H100 ridge point.
-#             Prediction: is LLM decode compute-bound or memory-bound?
-#             Instrument: interactive log-log Roofline plot with GPU + op selectors.
-#
-#   Part B — The Fusion Dividend (12 min)
-#             Three-level fusion comparison: no fusion vs elementwise vs FlashAttention.
-#             Prediction: what is the ratio of FlashAttention to elementwise savings?
-#             Instrument: stacked bar chart of HBM traffic per fusion level.
-#
-#   Part C — FlashAttention: The Savings Curve (12 min)
-#             Standard attention O(N^2) vs FlashAttention O(N) memory.
-#             Prediction: memory savings ratio at 32K tokens.
-#             Instrument: log-log savings curve vs sequence length.
-#
-#   Part D — Precision Engineering: Naive vs Outlier-Aware (12 min)
-#             INT4 quantization shifts roofline, but outliers break naive quant.
-#             Prediction: perplexity difference between naive and outlier-aware INT4.
-#             Instrument: roofline shift + quality comparison panels.
-#
-#   Part E — The Optimization Playbook (12 min)
-#             Wrong optimization yields zero improvement. Diagnose first.
-#             Instrument: mystery workload diagnosis + optimization selector.
-#
-# Hardware constants:
-#   H100 FP16: 989 TFLOPS, 3350 GB/s HBM3, 80 GB, ridge = 295 FLOP/byte
-#   V100 FP16: 125 TFLOPS, 900 GB/s HBM2, ridge = 139 FLOP/byte
-#   A100 FP16: 312 TFLOPS, 2039 GB/s HBM2e, ridge = 153 FLOP/byte
-#   B200 FP16: 2250 TFLOPS, 8000 GB/s HBM3e, ridge = 281 FLOP/byte
-#
-# Design Ledger: chapter="v2_09"
-# ─────────────────────────────────────────────────────────────────────────────
+# Chapter invariant: optimization is measurement-driven. The same Part A/B/C/D
+# concept sequence is realized by each track through different thresholds,
+# evidence emphasis, failure modes, and report framing.
+# -----------------------------------------------------------------------------
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: SETUP + OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 0: SETUP ────────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
     import sys
     import math
+    import html as html_lib
     from pathlib import Path
-    import numpy as np
 
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
@@ -69,1379 +36,1567 @@ async def _():
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
-    from mlsysim import Hardware, Models, Engine
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        get_lab_metadata,
+        get_track_profile,
+        report_export_panel,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
+    return (
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        build_lab_report,
+        get_lab_metadata,
+        get_track_profile,
+        go,
+        html_lib,
+        ledger,
+        math,
+        mo,
+        report_export_panel,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
-    # ── Hardware from registry ──────────────────────────────────────────────
-    _h100 = Hardware.Cloud.H100
-    _a100 = Hardware.Cloud.A100
-    _v100 = Hardware.Cloud.V100
-    _b200 = Hardware.Cloud.B200
-    _edge = Hardware.Edge.JetsonOrinNX   # Edge tier for comparison
 
-    H100_TFLOPS_FP16 = _h100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS      = _h100.memory.bandwidth.m_as("GB/s")
-    H100_RAM_GB      = _h100.memory.capacity.m_as("GiB")  # 80 GiB
-    H100_RIDGE       = H100_TFLOPS_FP16 * 1e12 / (H100_BW_GBS * 1e9)  # ~295
+@app.cell
+def _(get_lab_metadata):
+    v2_09_lab_path = "vol2/lab_09_perf_engineering.py"
+    v2_09_chapter = 9
+    v2_09_metadata = get_lab_metadata(v2_09_lab_path)
+    return v2_09_chapter, v2_09_lab_path, v2_09_metadata
 
-    V100_TFLOPS_FP16 = _v100.compute.peak_flops.m_as("TFLOPs/s")
-    V100_BW_GBS      = _v100.memory.bandwidth.m_as("GB/s")
-    V100_RIDGE       = V100_TFLOPS_FP16 * 1e12 / (V100_BW_GBS * 1e9)  # ~139
 
-    A100_TFLOPS_FP16 = _a100.compute.peak_flops.m_as("TFLOPs/s")
-    A100_BW_GBS      = _a100.memory.bandwidth.m_as("GB/s")
-    A100_RIDGE       = A100_TFLOPS_FP16 * 1e12 / (A100_BW_GBS * 1e9)  # ~153
+@app.cell(hide_code=True)
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
+    v2_09_track_picker = track_selector(default=_default_track)
+    v2_09_track_picker
+    return (v2_09_track_picker,)
 
-    B200_TFLOPS_FP16 = _b200.compute.peak_flops.m_as("TFLOPs/s")
-    B200_BW_GBS      = _b200.memory.bandwidth.m_as("GB/s")
-    B200_RIDGE       = B200_TFLOPS_FP16 * 1e12 / (B200_BW_GBS * 1e9)  # ~281
 
-    # Edge tier (Jetson Orin NX) — for cloud-vs-edge roofline contrast
-    EDGE_TFLOPS_FP16 = _edge.compute.peak_flops.m_as("TFLOPs/s")   # 25
-    EDGE_BW_GBS      = _edge.memory.bandwidth.m_as("GB/s")          # 102
-    EDGE_RIDGE       = EDGE_TFLOPS_FP16 * 1e12 / (EDGE_BW_GBS * 1e9)
+@app.cell
+def _(get_track_profile, v2_09_track_picker):
+    v2_09_track_id = v2_09_track_picker.value
+    v2_09_profile = get_track_profile(v2_09_track_id)
+    return v2_09_profile, v2_09_track_id
 
-    _llama70b = Models.Language.Llama2_70B
-    LLAMA2_70B = _llama70b
-    H100_NODE = _h100
-    GPU_NODES = {"h100": _h100, "a100": _a100, "v100": _v100, "b200": _b200}
-    HEAD_DIM     = _llama70b.hidden_dim // _llama70b.heads
-    NUM_HEADS    = _llama70b.heads
-    NUM_LAYERS   = _llama70b.layers
-    HIDDEN_DIM   = _llama70b.hidden_dim
-    BYTES_FP16   = 2
 
-    # ── Fusion constants ─────────────────────────────────────────────────────
-    # Source: @sec-performance-engineering, FlashAttention paper
-    # Elementwise fusion savings: ~64 MB/layer (GELU+LN+Dropout intermediates)
-    ELEM_FUSION_SAVE_MB = 64.0
-    # FlashAttention savings scale with N^2 — at N=4096: ~4 GB/layer
-    # Naive attention HBM = 2 * N^2 * bytes_per_elem * num_heads
-    # Flash HBM = 4 * N * d * bytes_per_elem * num_heads
+@app.cell
+def _(COLORS, html_lib, math, mo):
+    def v2_09_pct(value, digits=1):
+        return f"{value * 100:.{digits}f}%"
 
-    # ── Quantization quality constants ───────────────────────────────────────
-    # Source: @sec-performance-engineering, published quantization benchmarks
-    # 70B model perplexity at various precision/method combos
-    PPL_FP16           = 5.2    # baseline
-    PPL_INT8_NAIVE     = 5.3    # INT8 naive — small degradation
-    PPL_INT8_OUTLIER   = 5.2    # INT8 outlier-aware — matches FP16
-    PPL_INT4_NAIVE     = 13.5   # INT4 naive — catastrophic for large models
-    PPL_INT4_OUTLIER   = 5.7    # INT4 outlier-aware — within 0.5 of FP16
+    def v2_09_ms(value, digits=1):
+        if not math.isfinite(value):
+            return "unbounded"
+        return f"{value:.{digits}f} ms"
+
+    def v2_09_num(value, digits=1):
+        if abs(value) >= 1000:
+            return f"{value:,.0f}"
+        return f"{value:.{digits}f}"
+
+    def v2_09_money(value):
+        if value >= 1000:
+            return f"${value:,.0f}"
+        if value >= 10:
+            return f"${value:,.1f}"
+        return f"${value:,.2f}"
+
+    def v2_09_optimization_label(lever):
+        return {
+            "none": "No local optimization",
+            "data_path": "Reduce data movement",
+            "compute_path": "Improve compute path",
+            "overhead_path": "Reduce launch/coordination overhead",
+            "capacity_path": "Add serving capacity",
+            "bottleneck_fix": "Fix the measured bottleneck",
+        }.get(lever, str(lever))
+
+    def v2_09_bottleneck_label(bottleneck):
+        return {
+            "data": "Data movement / bandwidth",
+            "compute": "Compute path",
+            "overhead": "Launch or coordination overhead",
+            "capacity": "Fleet capacity",
+        }.get(bottleneck, str(bottleneck))
+
+    def v2_09_candidate_label(candidate_id):
+        return {
+            "targeted": "Target measured bottleneck",
+            "scale": "Buy more serving units",
+            "precision": "Aggressive precision/cache compression",
+            "algorithmic": "Speculative or algorithmic path",
+        }.get(candidate_id, str(candidate_id))
+
+    def v2_09_track_packet(profile):
+        shared = {
+            "track_id": profile.track_id,
+            "label": profile.label,
+            "stakeholder": profile.stakeholder,
+            "track_source": profile.source_policy,
+            "hardware_ref": profile.hardware_ref,
+            "system_ref": profile.system_ref or "track-local deployment envelope",
+            "quality_budget_pct": 2.0,
+            "regression_budget_pct": 4.0,
+            "reality_tax_pct": 12.0,
+            "headroom_target_pct": 25.0,
+            "cost_ceiling_multiplier": 1.35,
+        }
+        track_configs = {
+            "iphone": {
+                "scenario_id": "iphone_sustained_local_assistant",
+                "workload": "sustained on-device assistant requests after a feature rollout",
+                "report_frame": "Mobile performance release memo",
+                "amount_unit": "requests/min across enrolled phones",
+                "serving_unit": "release shard",
+                "failure_mode": "thermal or battery budget miss after a cold run looked fine",
+                "constraint_note": "battery, thermal headroom, memory pressure, and responsiveness",
+                "base_terms_ms": {"data": 78.0, "compute": 40.0, "overhead": 20.0},
+                "tail_multiplier": 1.28,
+                "slo_ms": 150.0,
+                "base_demand": 4200.0,
+                "base_capacity_per_unit": 900.0,
+                "default_units": 5,
+                "max_units": 12,
+                "unit_cost_day": 180.0,
+                "default_cv_pct": 5.5,
+                "quality_budget_pct": 2.0,
+            },
+            "oura_ring": {
+                "scenario_id": "oura_sleep_feature_wake_window",
+                "workload": "overnight sensing windows that must finish inside a duty-cycle wake slot",
+                "report_frame": "Wearable firmware performance memo",
+                "amount_unit": "sensing windows/hour",
+                "serving_unit": "firmware cohort",
+                "failure_mode": "duty-cycle energy or SRAM/flash budget miss",
+                "constraint_note": "SRAM, flash, wake time, energy, and OTA payload",
+                "base_terms_ms": {"data": 16.0, "compute": 9.0, "overhead": 7.0},
+                "tail_multiplier": 1.25,
+                "slo_ms": 35.0,
+                "base_demand": 9600.0,
+                "base_capacity_per_unit": 1800.0,
+                "default_units": 6,
+                "max_units": 16,
+                "unit_cost_day": 45.0,
+                "default_cv_pct": 8.0,
+                "quality_budget_pct": 1.5,
+            },
+            "robotaxi": {
+                "scenario_id": "robotaxi_perception_tail_deadline",
+                "workload": "perception frames during dense urban driving",
+                "report_frame": "Safety-critical performance memo",
+                "amount_unit": "frames/s across active vehicles",
+                "serving_unit": "compute lane",
+                "failure_mode": "p99 deadline or safety margin miss",
+                "constraint_note": "p99/p999 latency, recall, power, and sensor bandwidth",
+                "base_terms_ms": {"data": 42.0, "compute": 58.0, "overhead": 12.0},
+                "tail_multiplier": 1.45,
+                "slo_ms": 95.0,
+                "base_demand": 84.0,
+                "base_capacity_per_unit": 32.0,
+                "default_units": 3,
+                "max_units": 10,
+                "unit_cost_day": 620.0,
+                "default_cv_pct": 4.0,
+                "quality_budget_pct": 1.0,
+            },
+            "cloud_fleet": {
+                "scenario_id": "cloud_llm_serving_efficiency",
+                "workload": "LLM serving traffic during the weekday peak",
+                "report_frame": "Fleet capacity and optimization memo",
+                "amount_unit": "tokens/s at peak",
+                "serving_unit": "GPU slice",
+                "failure_mode": "SLA breach, queueing pressure, or negative ROI",
+                "constraint_note": "SLA p99, throughput, cost/request, utilization, and headroom",
+                "base_terms_ms": {"data": 96.0, "compute": 54.0, "overhead": 26.0},
+                "tail_multiplier": 1.35,
+                "slo_ms": 180.0,
+                "base_demand": 19000.0,
+                "base_capacity_per_unit": 4500.0,
+                "default_units": 5,
+                "max_units": 18,
+                "unit_cost_day": 980.0,
+                "default_cv_pct": 6.0,
+                "quality_budget_pct": 2.0,
+            },
+        }
+        packet = dict(shared)
+        packet.update(track_configs.get(profile.track_id, track_configs["cloud_fleet"]))
+        packet["headroom_target"] = packet["headroom_target_pct"] / 100.0
+        packet["reality_tax"] = packet["reality_tax_pct"] / 100.0
+        packet["quality_budget"] = packet["quality_budget_pct"] / 100.0
+        packet["regression_budget"] = packet["regression_budget_pct"] / 100.0
+        return packet
+
+    def v2_09_best_lever(bottleneck):
+        return {
+            "data": "data_path",
+            "compute": "compute_path",
+            "overhead": "overhead_path",
+        }.get(bottleneck, "data_path")
+
+    def v2_09_profile_result(packet, optimization="none", pressure=1.0):
+        terms = dict(packet["base_terms_ms"])
+        terms["data"] *= 0.88 + 0.18 * pressure
+        terms["compute"] *= 0.90 + 0.12 * pressure
+        terms["overhead"] *= 0.80 + 0.22 * pressure
+
+        effects = {
+            "none": {"data": 1.0, "compute": 1.0, "overhead": 1.0, "quality": 0.0, "complexity": 0.0},
+            "data_path": {"data": 0.58, "compute": 1.03, "overhead": 0.96, "quality": 0.012, "complexity": 0.35},
+            "compute_path": {"data": 1.00, "compute": 0.62, "overhead": 1.03, "quality": 0.004, "complexity": 0.30},
+            "overhead_path": {"data": 0.98, "compute": 1.00, "overhead": 0.45, "quality": 0.001, "complexity": 0.25},
+            "capacity_path": {"data": 0.96, "compute": 0.96, "overhead": 0.98, "quality": 0.0, "complexity": 0.10},
+        }
+        effect = effects.get(optimization, effects["none"])
+        for key in ("data", "compute", "overhead"):
+            terms[key] *= effect[key]
+
+        p50_ms = max(terms["data"], terms["compute"]) + terms["overhead"]
+        load_tail = 1.0 + max(0.0, pressure - 1.0) * 0.30
+        p99_ms = p50_ms * packet["tail_multiplier"] * load_tail
+        bottleneck = max(terms, key=terms.get)
+        return {
+            "terms": terms,
+            "p50_ms": p50_ms,
+            "p99_ms": p99_ms,
+            "slo_ok": p99_ms <= packet["slo_ms"],
+            "bottleneck": bottleneck,
+            "quality_risk": effect["quality"],
+            "complexity": effect["complexity"],
+        }
+
+    def v2_09_regression_result(packet, sample_count, cv_pct, candidate_delta_pct):
+        baseline = v2_09_profile_result(packet, v2_09_best_lever(v2_09_profile_result(packet)["bottleneck"]))
+        baseline_ms = baseline["p99_ms"]
+        candidate_ms = baseline_ms * (1.0 + candidate_delta_pct / 100.0)
+        sigma_ms = baseline_ms * cv_pct / 100.0
+        ci_diff_ms = 1.96 * math.sqrt(2.0) * sigma_ms / math.sqrt(max(1, sample_count))
+        mde_pct = ci_diff_ms / baseline_ms * 100.0
+        detectable = abs(candidate_delta_pct) >= mde_pct
+        regression = candidate_delta_pct > packet["regression_budget_pct"]
+        guardrail_fail = candidate_ms > packet["slo_ms"]
+        if guardrail_fail and detectable:
+            decision = "block"
+            reason = "candidate p99 breaches the track guardrail and the effect is detectable"
+        elif regression and detectable:
+            decision = "block"
+            reason = "regression exceeds the release budget and is detectable"
+        elif regression or guardrail_fail:
+            decision = "hold"
+            reason = "effect is policy-relevant but hidden by variance; collect more canary evidence"
+        elif candidate_delta_pct < -mde_pct:
+            decision = "ship"
+            reason = "improvement is detectable and guardrails hold"
+        else:
+            decision = "hold"
+            reason = "change is inside the noise band; do not claim a speedup"
+        return {
+            "baseline_ms": baseline_ms,
+            "candidate_ms": candidate_ms,
+            "sigma_ms": sigma_ms,
+            "ci_diff_ms": ci_diff_ms,
+            "mde_pct": mde_pct,
+            "detectable": detectable,
+            "regression": regression,
+            "guardrail_fail": guardrail_fail,
+            "decision": decision,
+            "reason": reason,
+        }
+
+    def v2_09_capacity_result(packet, demand_multiplier, units, optimization):
+        base_profile = v2_09_profile_result(packet, "none")
+        if optimization == "bottleneck_fix":
+            optimization = v2_09_best_lever(base_profile["bottleneck"])
+        profile = v2_09_profile_result(packet, optimization)
+        service_rate = packet["base_capacity_per_unit"] * base_profile["p99_ms"] / max(1e-6, profile["p99_ms"])
+        service_rate *= 1.0 - packet["reality_tax"]
+        demand = packet["base_demand"] * demand_multiplier
+        capacity = service_rate * units
+        utilization = demand / max(1e-9, capacity)
+        if utilization >= 1.0:
+            queue_multiplier = 3.0 + 4.0 * min(1.0, utilization - 1.0)
+        else:
+            queue_multiplier = 1.0 + 0.35 * (utilization * utilization) / max(0.05, 1.0 - utilization)
+        p99_ms = profile["p99_ms"] * queue_multiplier
+        headroom = capacity / max(1e-9, demand) - 1.0
+        daily_cost = units * packet["unit_cost_day"]
+        failures = []
+        if utilization >= 1.0:
+            failures.append("demand exceeds measured capacity")
+        if p99_ms > packet["slo_ms"]:
+            failures.append("p99 exceeds track guardrail")
+        if headroom < packet["headroom_target"]:
+            failures.append("headroom below target")
+        return {
+            "optimization": optimization,
+            "profile": profile,
+            "demand": demand,
+            "service_rate": service_rate,
+            "capacity": capacity,
+            "units": units,
+            "utilization": utilization,
+            "queue_multiplier": queue_multiplier,
+            "p99_ms": p99_ms,
+            "headroom": headroom,
+            "daily_cost": daily_cost,
+            "feasible": not failures,
+            "failures": failures,
+        }
+
+    def v2_09_tradeoff_candidates(packet, demand_multiplier, units, risk_budget_pct, cost_ceiling):
+        base = v2_09_profile_result(packet)
+        targeted_lever = v2_09_best_lever(base["bottleneck"])
+        quality_by_track = {
+            "iphone": {"targeted": 0.8, "scale": 0.1, "precision": 1.9, "algorithmic": 0.9},
+            "oura_ring": {"targeted": 0.7, "scale": 0.1, "precision": 2.4, "algorithmic": 1.4},
+            "robotaxi": {"targeted": 0.4, "scale": 0.1, "precision": 4.8, "algorithmic": 2.4},
+            "cloud_fleet": {"targeted": 0.7, "scale": 0.1, "precision": 1.3, "algorithmic": 1.0},
+        }.get(packet["track_id"], {})
+        specs = [
+            {
+                "id": "targeted",
+                "optimization": targeted_lever,
+                "unit_multiplier": 1.0,
+                "cost_multiplier": 1.10,
+                "p99_multiplier": 1.0,
+                "reason": f"targets {v2_09_bottleneck_label(base['bottleneck'])}",
+            },
+            {
+                "id": "scale",
+                "optimization": "capacity_path",
+                "unit_multiplier": 1.5,
+                "cost_multiplier": 1.35,
+                "p99_multiplier": 0.94,
+                "reason": "buys queue headroom but raises recurring cost",
+            },
+            {
+                "id": "precision",
+                "optimization": "data_path",
+                "unit_multiplier": 1.0,
+                "cost_multiplier": 0.90,
+                "p99_multiplier": 0.95,
+                "reason": "cheap when bandwidth binds but carries quality and validation risk",
+            },
+            {
+                "id": "algorithmic",
+                "optimization": "compute_path" if base["bottleneck"] == "compute" else "overhead_path",
+                "unit_multiplier": 1.0,
+                "cost_multiplier": 1.20,
+                "p99_multiplier": 0.82,
+                "reason": "can cut latency but adds scheduler and validation complexity",
+            },
+        ]
+        rows = []
+        for spec in specs:
+            cand_units = max(1, math.ceil(units * spec["unit_multiplier"]))
+            capacity = v2_09_capacity_result(packet, demand_multiplier, cand_units, spec["optimization"])
+            p99_ms = capacity["p99_ms"] * spec["p99_multiplier"]
+            daily_cost = capacity["daily_cost"] * spec["cost_multiplier"]
+            quality_loss_pct = quality_by_track.get(spec["id"], 1.0)
+            failures = []
+            if p99_ms > packet["slo_ms"]:
+                failures.append("p99")
+            if capacity["headroom"] < packet["headroom_target"]:
+                failures.append("headroom")
+            if quality_loss_pct > risk_budget_pct:
+                failures.append("quality")
+            if daily_cost > cost_ceiling:
+                failures.append("cost")
+            score = (
+                p99_ms / packet["slo_ms"]
+                + max(0.0, packet["headroom_target"] - capacity["headroom"]) * 2.0
+                + daily_cost / max(1.0, cost_ceiling) * 0.45
+                + quality_loss_pct / max(0.1, risk_budget_pct) * 0.30
+                + (3.0 if failures else 0.0)
+            )
+            rows.append({
+                "id": spec["id"],
+                "label": v2_09_candidate_label(spec["id"]),
+                "optimization": spec["optimization"],
+                "units": cand_units,
+                "p99_ms": p99_ms,
+                "headroom": capacity["headroom"],
+                "daily_cost": daily_cost,
+                "quality_loss_pct": quality_loss_pct,
+                "feasible": not failures,
+                "failures": failures,
+                "score": score,
+                "reason": spec["reason"],
+            })
+        feasible = [row for row in rows if row["feasible"]]
+        selected = min(feasible or rows, key=lambda row: row["score"])
+        rejected_pool = [row for row in rows if row["id"] != selected["id"]]
+        rejected = max(rejected_pool, key=lambda row: (not row["feasible"], -row["p99_ms"], row["daily_cost"]))
+        if rejected["feasible"]:
+            rejected = min(rejected_pool, key=lambda row: row["score"])
+        return rows, selected, rejected
+
+    def v2_09_part_banner(letter, title, why, color):
+        return mo.Html(f"""
+        <div style="margin:12px 0 16px 0;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="background:{color}; color:white; border-radius:50%;
+                            width:32px; height:32px; display:inline-flex; align-items:center;
+                            justify-content:center; font-size:0.9rem; font-weight:800;
+                            flex-shrink:0;">{html_lib.escape(letter)}</div>
+                <div style="flex:1; height:2px; background:{COLORS['Border']};"></div>
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.12em;">
+                    Concept module</div>
+            </div>
+            <div style="font-size:1.45rem; font-weight:800; color:{COLORS['Text']};
+                        margin-top:8px; line-height:1.2;">{html_lib.escape(title)}</div>
+            <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
+                        line-height:1.55; max-width:820px;">{html_lib.escape(why)}</div>
+        </div>
+        """)
+
+    def v2_09_metric_card(label, value, subvalue="", color=None, danger=False):
+        _color = color or COLORS["BlueLine"]
+        _border = COLORS["RedLine"] if danger else COLORS["Border"]
+        return f"""
+        <div style="padding:14px 16px; border:1px solid {_border}; border-radius:8px;
+                    min-width:148px; text-align:center; background:white;">
+            <div style="color:{COLORS['TextMuted']}; font-size:0.72rem; font-weight:700;
+                        text-transform:uppercase;">{html_lib.escape(label)}</div>
+            <div style="font-size:1.45rem; font-weight:800; color:{_color}; font-family:monospace;
+                        line-height:1.35;">{html_lib.escape(str(value))}</div>
+            <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{html_lib.escape(str(subvalue))}</div>
+        </div>
+        """
+
+    def v2_09_table(headers, rows):
+        head = "".join(f"<th>{html_lib.escape(str(header))}</th>" for header in headers)
+        body_rows = []
+        for row in rows:
+            cells = "".join(f"<td>{html_lib.escape(str(cell))}</td>" for cell in row)
+            body_rows.append(f"<tr>{cells}</tr>")
+        return mo.Html(f"""
+        <div style="overflow-x:auto; margin:10px 0;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
+            <thead><tr style="background:{COLORS['Surface2']}; color:{COLORS['Text']};">{head}</tr></thead>
+            <tbody>{''.join(body_rows)}</tbody>
+        </table>
+        </div>
+        <style>
+            table td, table th {{
+                border:1px solid {COLORS['Border']};
+                padding:8px 10px;
+                text-align:left;
+                vertical-align:top;
+            }}
+        </style>
+        """)
+
+    def v2_09_math_peek(title, body):
+        return mo.accordion({title: mo.md(body)})
+
+    def v2_09_feedback(predicted, actual, success, miss):
+        if predicted is None:
+            return mo.callout(mo.md("Commit to the structured prediction before using this evidence."), kind="warn")
+        if predicted == actual:
+            return mo.callout(mo.md(success), kind="success")
+        return mo.callout(mo.md(miss), kind="warn")
+
+    def v2_09_failure_card(active, title, detail, recovery):
+        if active:
+            return mo.callout(mo.md(f"**{title}**  \n{detail}  \n\nRecovery path: {recovery}"), kind="danger")
+        return mo.callout(mo.md(f"**Boundary holds: {title}**  \n{detail}"), kind="success")
 
     return (
-        mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
-        go, np, math, DecisionLog,
-        H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_RIDGE,
-        V100_TFLOPS_FP16, V100_BW_GBS, V100_RIDGE,
-        A100_TFLOPS_FP16, A100_BW_GBS, A100_RIDGE,
-        B200_TFLOPS_FP16, B200_BW_GBS, B200_RIDGE,
-        EDGE_TFLOPS_FP16, EDGE_BW_GBS, EDGE_RIDGE,
-        HEAD_DIM, NUM_HEADS, NUM_LAYERS, HIDDEN_DIM, BYTES_FP16,
-        ELEM_FUSION_SAVE_MB,
-        PPL_FP16, PPL_INT8_NAIVE, PPL_INT8_OUTLIER,
-        PPL_INT4_NAIVE, PPL_INT4_OUTLIER,
-        Engine, H100_NODE, LLAMA2_70B, GPU_NODES,
+        v2_09_best_lever,
+        v2_09_bottleneck_label,
+        v2_09_candidate_label,
+        v2_09_capacity_result,
+        v2_09_failure_card,
+        v2_09_feedback,
+        v2_09_math_peek,
+        v2_09_metric_card,
+        v2_09_money,
+        v2_09_ms,
+        v2_09_num,
+        v2_09_optimization_label,
+        v2_09_part_banner,
+        v2_09_pct,
+        v2_09_profile_result,
+        v2_09_regression_result,
+        v2_09_table,
+        v2_09_track_packet,
+        v2_09_tradeoff_candidates,
     )
 
-# ─── CELL 1: HEADER ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(LAB_CSS, mo):
-    mo.vstack([
-        LAB_CSS,
-        mo.Html("""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-bottom: 8px;">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 09
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.2rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Optimization Trap
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.1rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Roofline &middot; Fusion &middot; FlashAttention &middot; Quantization
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 700px; line-height: 1.65;">
-                A junior engineer profiles a Transformer layer and declares it
-                "compute-bound because Transformers are compute-heavy." The roofline
-                says otherwise. Most ML operations live far below the ridge point,
-                and applying the wrong optimization yields zero improvement.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    5 Parts &middot; ~58 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter: Performance Engineering
-                </span>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;">
-                <span class="badge badge-fail">H100 at 0.3% utilization</span>
-                <span class="badge badge-warn">FlashAttention 128x savings at 32K</span>
-                <span class="badge badge-info">Profile first, optimize second</span>
-            </div>
-        </div>
-        """),
-    ])
-    return
 
-# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Diagnose bottlenecks with the Roofline Model</strong> &mdash;
-                    determine whether LLM decode at batch=1 is compute-bound or memory-bound, and calculate
-                    that it achieves only 0.34% of H100 peak utilization.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Quantify fusion savings</strong> &mdash; compare elementwise
-                    fusion (~64 MB/layer) vs FlashAttention (~4 GB/layer) and discover the 60x ratio between them.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Match optimizations to bottlenecks</strong> &mdash; predict which
-                    optimization helps a given workload and discover that applying the wrong one yields &lt;5% improvement.</div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Roofline model and arithmetic intensity from the Performance Engineering chapter
-                    &middot; Iron Law of ML Performance &middot; Lab V2-08 (inference at scale)
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~58 min</strong><br/>
-                    A: 10 &middot; B: 12 &middot; C: 12 &middot; D: 12 &middot; E: 12 min
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="margin-top: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                &ldquo;Your H100 has 989 TFLOPS. LLM decode uses 0.3% of it. Three techniques
-                &mdash; fusion, tiling, and quantization &mdash; close the gap. But which one
-                helps which workload, and why does applying the wrong one yield zero improvement?&rdquo;
-            </div>
-        </div>
-    </div>
-    """)
-    return
+@app.cell
+def _(v2_09_profile, v2_09_track_packet):
+    v2_09_packet = v2_09_track_packet(v2_09_profile)
+    return (v2_09_packet,)
 
-# ─── CELL 3: RECOMMENDED READING ────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** &mdash; Complete the following before this lab:
-
-    - **The Roofline Model** &mdash; Arithmetic intensity, ridge point formula,
-      workload placement on the roofline (the Performance Engineering chapter).
-    - **FlashAttention: Tiled Attention as a System Primitive** &mdash; How tiling
-      reduces HBM traffic from O(N^2) to O(N).
-    - **Operator Fusion** &mdash; Elementwise fusion vs full attention block fusion
-      and the HBM traffic reduction for each.
-    - **Precision Engineering** &mdash; How INT4 quantization shifts the roofline
-      and why outlier-aware methods preserve quality.
-    """), kind="info")
-    return
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: WIDGET DEFINITIONS (one cell per prediction + controls chain)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 4: Part A prediction ───────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    pA_pred = mo.ui.radio(
-        options={
-            "A: Compute-bound -- H100 has 989 TFLOPS, compute must dominate": "A",
-            "B: Slightly memory-bound -- close to the ridge point": "B",
-            "C: Deeply memory-bound -- 100x+ below the ridge point": "C",
-            "D: It depends on the model size": "D",
-        },
-        label=(
-            "LLM decode (batch=1) on an H100. The model reads its full weight matrix "
-            "to generate each token, performing ~1 FLOP per byte loaded (FP16). "
-            "The H100 ridge point is 295 FLOP/byte. Is this workload compute-bound or memory-bound?"
-        ),
-    )
-    return (pA_pred,)
-
-# ─── CELL 5: Part A controls + Part B prediction ────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    pA_batch = mo.ui.dropdown(
-        options={"Batch 1": 1, "Batch 4": 4, "Batch 16": 16,
-                 "Batch 64": 64, "Batch 256": 256},
-        value="Batch 1",
-        label="Batch size",
-    )
-    pA_gpu = mo.ui.dropdown(
-        options={
-            "V100 FP16 (ridge = 139)": "v100",
-            "A100 FP16 (ridge = 153)": "a100",
-            "H100 FP16 (ridge = 295)": "h100",
-            "B200 FP16 (ridge = 281)": "b200",
-        },
-        value="H100 FP16 (ridge = 295)",
-        label="GPU generation",
-    )
-    pA_op = mo.ui.dropdown(
-        options={
-            "LLM Decode (AI = batch FLOP/byte)": "decode",
-            "LayerNorm (AI ~ 1.5)": "layernorm",
-            "Large GEMM 4096x4096 (AI ~ 1365)": "gemm",
-            "Attention naive (AI ~ 64)": "attn_naive",
-        },
-        value="LLM Decode (AI = batch FLOP/byte)",
-        label="ML operation",
-    )
-
-    # -- Part B prediction --
-    pB_pred = mo.ui.radio(
-        options={
-            "A: ~2x -- fusion is fusion, all savings are similar": "A",
-            "B: ~10x -- attention is bigger but not dramatically": "B",
-            "C: ~60x -- attention score matrix is quadratically larger": "C",
-            "D: ~1000x -- FlashAttention is a completely different class": "D",
-        },
-        label=(
-            "A Transformer layer has 50+ operations. Fusing three elementwise ops "
-            "(GELU + LayerNorm + Dropout) saves ~64 MB/layer in HBM traffic. "
-            "FlashAttention fuses the entire attention block. What is the ratio of "
-            "FlashAttention savings to elementwise fusion savings?"
-        ),
-    )
-    return (pA_batch, pA_gpu, pA_op, pB_pred)
-
-# ─── CELL 6: Part B controls + Part C prediction ────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    pB_seqlen = mo.ui.slider(
-        start=512, stop=131072, value=4096, step=512,
-        label="Sequence length (tokens)",
-    )
-
-    # -- Part C prediction --
-    pC_pred = mo.ui.number(
-        start=1, stop=10000, value=None,
-        label=(
-            "Standard attention at 32K tokens uses ~32 GB of HBM for the score matrix "
-            "(FP16, 64 heads). FlashAttention uses tiled SRAM computation. "
-            "What are the memory savings? Enter a multiplier (e.g., 8 for 8x)."
-        ),
-    )
-    return (pB_seqlen, pC_pred)
-
-# ─── CELL 7: Part D prediction ──────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    pD_pred = mo.ui.radio(
-        options={
-            "A: Both are similar -- 4 bits is 4 bits": "A",
-            "B: Naive is 1-2 perplexity points worse": "B",
-            "C: Naive is 5-10 points worse -- catastrophic for large models": "C",
-            "D: Outlier-aware is worse due to overhead": "D",
-        },
-        label=(
-            "You quantize a 70B LLM from FP16 to INT4. Naive (uniform) quantization vs "
-            "outlier-aware quantization. Both use 4 bits per weight on average. "
-            "What is the perplexity difference?"
-        ),
-    )
-    return (pD_pred,)
-
-# ─── CELL 8: Part D controls + Part E prediction ────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    pD_precision = mo.ui.dropdown(
-        options={"FP16": 16, "INT8": 8, "INT4": 4},
-        value="INT4",
-        label="Precision (bits)",
-    )
-
-    # -- Part E prediction --
-    pE_pred = mo.ui.radio(
-        options={
-            "A: FlashAttention -- it is the most powerful optimization": "A",
-            "B: INT4 quantization -- reduce data movement": "B",
-            "C: It depends on whether the workload is compute-bound or memory-bound": "C",
-            "D: All optimizations help equally": "D",
-        },
-        label=(
-            "You have a mystery workload. Without profiling it first, which single "
-            "optimization would you apply?"
-        ),
-    )
-    return (pD_precision, pE_pred)
-
-# ─── CELL 9: Part E controls ────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    pE_workload = mo.ui.dropdown(
-        options={
-            "LLM Decode (batch=1) -- AI=1, memory-bound": "decode",
-            "LLM Prefill (batch=64) -- AI=512, compute-bound": "prefill",
-            "Vision Inference (batch=32) -- AI=180, near ridge": "vision",
-        },
-        value="LLM Decode (batch=1) -- AI=1, memory-bound",
-        label="Select workload to optimize",
-    )
-    pE_optim = mo.ui.dropdown(
-        options={
-            "FlashAttention (reduces HBM traffic)": "flash",
-            "INT4 Quantization (4x effective bandwidth)": "int4",
-            "Operator Fusion (fuse elementwise ops)": "fusion",
-            "CUDA Graphs (reduce kernel launch overhead)": "graphs",
-            "Larger Batch Size": "batch",
-        },
-        value="FlashAttention (reduces HBM traffic)",
-        label="Select optimization",
-    )
-    return (pE_optim, pE_workload)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: SINGLE TABS CELL (all build_part functions + mo.ui.tabs)
-# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math,
-    mo, np, H100_TFLOPS_FP16, H100_BW_GBS,
-    H100_RAM_GB, H100_RIDGE, V100_TFLOPS_FP16, V100_BW_GBS,
-    V100_RIDGE, A100_TFLOPS_FP16, A100_BW_GBS, A100_RIDGE,
-    B200_TFLOPS_FP16, B200_BW_GBS, B200_RIDGE, HEAD_DIM,
-    NUM_HEADS, BYTES_FP16, ELEM_FUSION_SAVE_MB, PPL_FP16,
-    PPL_INT8_NAIVE, PPL_INT8_OUTLIER, PPL_INT4_NAIVE, PPL_INT4_OUTLIER,
-    pA_batch, pA_gpu, pA_op, pA_pred,
-    pB_pred, pB_seqlen, pC_pred, pD_precision,
-    pD_pred, pE_optim, pE_pred, pE_workload,
-    Engine, H100_NODE, LLAMA2_70B, GPU_NODES,
+    ACADEMIC_LAB_CSS,
+    COLORS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_arc_context,
+    track_context,
+    v2_09_metadata,
+    v2_09_packet,
+    v2_09_profile,
 ):
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART A: THE ROOFLINE DIAGNOSTIC
-    # ═════════════════════════════════════════════════════════════════════════
-
-    def build_part_a():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; Junior ML Engineer, LLM Serving Team
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "I profiled our 70B model inference on the H100 cluster. Transformers are
-                all matrix multiplications, so it should be compute-bound, right? I want to
-                request faster GPUs to improve our token generation speed."
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Roofline Diagnostic
-
-        You expect a powerful GPU to be compute-bound. The roofline reveals that LLM
-        decode at batch=1 sits 295x below the H100 ridge point -- using only 0.34%
-        of available compute. The GPU is not slow. It is starving for data.
-        """))
-
-        items.append(mo.callout(mo.md(
-            "**Important:** The roofline is an upper bound on attainable performance, not a prediction "
-            "of actual performance. Real workloads achieve 50-70% of theoretical memory bandwidth due "
-            "to strided access patterns, TLB misses, and bank conflicts. The value of the roofline is "
-            "in identifying *which* resource is the bottleneck, not in predicting exact throughput."
-        ), kind="info"))
-
-        # Prediction
-        items.append(mo.md("### Your Prediction"))
-        items.append(mo.md("*Commit before touching the simulator.*"))
-        items.append(pA_pred)
-
-        if pA_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Roofline simulator."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.callout(
-            mo.md(f"**Prediction locked:** Option **{pA_pred.value}**. Now explore the simulator below."),
-            kind="info",
-        ))
-
-        # Controls
-        items.append(mo.hstack([pA_batch, pA_gpu, pA_op], gap="1.5rem", justify="start"))
-
-        # Roofline chart computation
-        _GPU_SPECS = {
-            "h100": ("H100", H100_TFLOPS_FP16, H100_BW_GBS, H100_RIDGE, COLORS["BlueLine"]),
-            "a100": ("A100", A100_TFLOPS_FP16, A100_BW_GBS, A100_RIDGE, COLORS["OrangeLine"]),
-            "v100": ("V100", V100_TFLOPS_FP16, V100_BW_GBS, V100_RIDGE, "#7c3aed"),
-            "b200": ("B200", B200_TFLOPS_FP16, B200_BW_GBS, B200_RIDGE, COLORS["GreenLine"]),
-        }
-        _gpu_name, _peak, _bw, _ridge, _gpu_color = _GPU_SPECS[pA_gpu.value]
-        _batch = pA_batch.value
-
-        # Operation arithmetic intensity
-        _OP_AI = {
-            "decode": float(_batch),
-            "layernorm": 1.5,
-            "gemm": 1365.0,
-            "attn_naive": 64.0,
-        }
-        _ai = _OP_AI[pA_op.value]
-
-        # Roofline calculation
-        _achievable = min(_peak, (_bw / 1e3) * _ai)
-        _util_pct = (_achievable / _peak) * 100.0
-        _is_mem_bound = _ai < _ridge
-
-        if pA_op.value == "decode":
-            _prof = Engine.solve(
-                LLAMA2_70B, GPU_NODES[pA_gpu.value], batch_size=_batch,
-                precision="fp16", efficiency=0.5,
-            )
-            _engine_util = _prof.mfu * 100
-            _engine_bn = _prof.bottleneck
-            _engine_lat_ms = _prof.latency.m_as("ms")
-        else:
-            _engine_util = _engine_bn = _engine_lat_ms = None
-
-        # Build figure
-        _ai_range = np.logspace(-1, 4, 400)
-        _mem_ceil = (_bw / 1e3) * _ai_range
-        _comp_ceil = np.full_like(_ai_range, _peak)
-        _roofline = np.minimum(_mem_ceil, _comp_ceil)
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_ai_range, y=_mem_ceil, mode="lines", name="Memory BW ceiling",
-            line=dict(color=COLORS["RedLine"], width=2),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_ai_range, y=_comp_ceil, mode="lines",
-            name=f"Compute ceiling ({_peak:.0f} TFLOPS)",
-            line=dict(color=COLORS["BlueLine"], width=2),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_ai_range, y=_roofline, mode="lines", name="Roofline",
-            line=dict(color="#334155", width=3), showlegend=False,
-        ))
-        _fig.add_vline(
-            x=_ridge, line_dash="dash", line_color="#94a3b8", line_width=1.5,
-            annotation_text=f"Ridge = {_ridge:.0f}", annotation_position="top right",
-            annotation_font_size=10, annotation_font_color="#94a3b8",
-        )
-        _dot_color = COLORS["RedLine"] if _is_mem_bound else COLORS["GreenLine"]
-        _fig.add_trace(go.Scatter(
-            x=[_ai], y=[_achievable], mode="markers",
-            name=f"{'Memory-bound' if _is_mem_bound else 'Compute-bound'}: AI={_ai:.1f}",
-            marker=dict(size=16, color=_dot_color, line=dict(color="white", width=2)),
-        ))
-        _fig.add_annotation(
-            x=math.log10(max(_ai, 0.1)), y=math.log10(max(_achievable, 0.01)),
-            xref="x", yref="y",
-            text=f"Utilization: {_util_pct:.2f}%",
-            showarrow=True, arrowhead=2, arrowcolor=_dot_color,
-            ax=60, ay=-40,
-            font=dict(size=11, color=_dot_color, family="SF Mono, monospace"),
-            bgcolor="white", bordercolor=_dot_color, borderpad=4,
-        )
-        _fig.update_layout(
-            height=380,
-            xaxis=dict(title="Arithmetic Intensity (FLOP/byte)", type="log", range=[-1, 4]),
-            yaxis=dict(title="Achievable Performance (TFLOPS)", type="log", range=[-1, 4]),
-            legend=dict(orientation="h", y=-0.25, x=0, font_size=11),
-            margin=dict(l=60, r=20, t=30, b=110),
-        )
-        apply_plotly_theme(_fig)
-
-        # Metric cards
-        _u_color = (COLORS["GreenLine"] if _util_pct > 20 else
-                    COLORS["OrangeLine"] if _util_pct > 5 else COLORS["RedLine"])
-        _regime = "Memory-Bound" if _is_mem_bound else "Compute-Bound"
-        _r_color = COLORS["RedLine"] if _is_mem_bound else COLORS["GreenLine"]
-
-        _cards = f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {_u_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Utilization</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{_u_color};">{_util_pct:.2f}%</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {_r_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Regime</div>
-                <div style="font-size:1.3rem; font-weight:800; color:{_r_color};">{_regime}</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">AI / Ridge</div>
-                <div style="font-size:1.3rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_ai:.1f} / {_ridge:.0f}</div>
-            </div>
-        </div>"""
-
-        items.append(mo.as_html(_fig))
-        items.append(mo.Html(_cards))
-        _engine_line = ""
-        if _engine_util is not None:
-            _engine_line = (
-                f"\nEngine.solve (70B decode) = {_engine_lat_ms:.2f} ms/token, "
-                f"MFU {_engine_util:.2f}%, bottleneck: {_engine_bn}"
-            )
-
-        items.append(mo.md(f"""
-**Roofline Calculation**
-
-```
-Arithmetic Intensity  = {_ai:.1f} FLOP/byte
-Ridge Point ({_gpu_name})    = {_ridge:.0f} FLOP/byte
-AI / Ridge            = {_ai:.1f} / {_ridge:.0f} = {_ai/_ridge:.4f}
-Achievable TFLOPS     = min({_peak:.0f}, {_bw/1e3:.1f} x {_ai:.1f}) = {_achievable:.1f} TFLOPS
-Utilization           = {_achievable:.1f} / {_peak:.0f} = {_util_pct:.2f}%{_engine_line}
-```
-*Source: @sec-performance-engineering, roofline model*
-"""))
-
-        # Reveal
-        if pA_pred.value == "C":
-            _pA_msg = (
-                "**Correct.** LLM decode at batch=1 has arithmetic intensity of ~1 FLOP/byte. "
-                "The H100 ridge point is 295. The workload is 295x below the ridge, achieving "
-                "only 0.34% utilization. The fix is not faster math -- it is moving less data."
-            )
-            _pA_kind = "success"
-        elif pA_pred.value == "A":
-            _pA_msg = (
-                "**The GPU is almost entirely idle.** You predicted compute-bound, but LLM decode "
-                "at batch=1 has AI=1 FLOP/byte -- 295x below the H100 ridge point. Utilization is "
-                "0.34%, not the 80%+ you expected. The 989 TFLOPS are irrelevant when the workload "
-                "cannot feed data fast enough."
-            )
-            _pA_kind = "warn"
-        elif pA_pred.value == "B":
-            _pA_msg = (
-                "**Much worse than 'slightly' memory-bound.** AI=1 is not 'close to' the ridge "
-                "at 295 -- it is 295x below. This is not a marginal inefficiency. The GPU achieves "
-                "0.34% utilization. Increasing batch size is the primary lever to improve this."
-            )
-            _pA_kind = "warn"
-        else:
-            _pA_msg = (
-                "**Model size matters for total memory, not for the roofline regime.** At batch=1, "
-                "ANY autoregressive LLM has AI~1 FLOP/byte regardless of size. The ridge point "
-                "determines the regime, and at AI=1 on the H100 (ridge=295), every LLM decode is "
-                "deeply memory-bound."
-            )
-            _pA_kind = "warn"
-
-        items.append(mo.md(f"**You predicted:** {pA_pred.value}"))
-        items.append(mo.callout(mo.md(_pA_msg), kind=_pA_kind))
-        items.append(mo.accordion({
-            "Math Peek: Roofline Model": mo.md("""
-**The Roofline Equation**
-
-$$\\text{Achievable FLOPS} = \\min(\\pi, \\beta \\cdot I)$$
-
-Where:
-- $\\pi$ = peak compute (TFLOPS)
-- $\\beta$ = memory bandwidth (TB/s)
-- $I$ = arithmetic intensity (FLOP/byte)
-
-The **ridge point** $I_{\\text{ridge}} = \\pi / \\beta$ divides memory-bound ($I < I_{\\text{ridge}}$)
-from compute-bound ($I > I_{\\text{ridge}}$).
-
-For LLM decode at batch=1: $I = 1$ FLOP/byte, $I_{\\text{ridge}} = 295$ on H100.
-Utilization = $I / I_{\\text{ridge}} = 1/295 = 0.34\\%$.
-
-*Source: @sec-performance-engineering*
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART B: THE FUSION DIVIDEND
-    # ═════════════════════════════════════════════════════════════════════════
-
-    def build_part_b():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['GreenLine']}; background: {COLORS['GreenL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['GreenLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; Senior Kernel Engineer
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "LLM decode is memory-bound -- the fix is moving less data. Fusion eliminates
-                HBM round-trips by keeping intermediates in SRAM. But not all fusions are equal:
-                FlashAttention saves 60x more than elementwise fusion."
+    reading_rows = """
+    <tr><td>Part A</td><td>Iron law and profiling hierarchy</td><td>Localize the active bottleneck before choosing a lever.</td></tr>
+    <tr><td>Part B</td><td>Profiling feedback loop and scaling regressions</td><td>Use baseline, variance, and detectability evidence.</td></tr>
+    <tr><td>Part C</td><td>Measurement at scale and fleet efficiency</td><td>Convert measured service rate into headroom and cost.</td></tr>
+    <tr><td>Part D</td><td>Efficiency frontier and optimization playbook</td><td>Defend a trade-off and reject an alternative.</td></tr>
+    """
+    mo.vstack([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
+        <div style="background:linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
+                    border-radius:16px; padding:32px 40px; margin-bottom:8px;
+                    border:1px solid #2d3748;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
+                <div>
+                    <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
+                                text-transform:uppercase; letter-spacing:0.14em; margin-bottom:8px;">
+                        Vol 2 &middot; Lab 09 &middot; Performance Engineering
+                    </div>
+                    <div style="font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.15; margin-bottom:10px;">
+                        The Optimization Trap
+                    </div>
+                    <div style="font-size:0.95rem; color:#94a3b8; max-width:760px; line-height:1.6;">
+                        {v2_09_packet['stakeholder']} must improve {v2_09_packet['workload']}.
+                        The invariant is measurement-driven optimization: localize, detect, plan, and defend.
+                    </div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
+                    <span class="badge badge-info">{v2_09_profile.label}</span>
+                    <span class="badge badge-info">{v2_09_packet['hardware_ref']}</span>
+                    <span class="badge badge-warn">45-55 minutes &middot; 4 Parts + Synthesis</span>
+                </div>
             </div>
         </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Fusion Dividend
-
-        A Transformer layer has 50+ operations. Fusing three elementwise ops
-        (GELU + LayerNorm + Dropout) saves ~64 MB/layer. FlashAttention fuses the
-        entire attention block, eliminating the O(N^2) score matrix materialization.
-        """))
-
-        # Prediction
-        items.append(mo.md("### Your Prediction"))
-        items.append(mo.md("*What is the ratio of FlashAttention savings to elementwise fusion savings?*"))
-        items.append(pB_pred)
-
-        if pB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Fusion comparison."), kind="warn"))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(pB_seqlen)
-
-        # Computation
-        _N = pB_seqlen.value
-
-        # HBM traffic calculation per layer
-        _naive_attn_mb = 2 * _N * _N * BYTES_FP16 * NUM_HEADS / (1024 * 1024)
-        _elem_traffic_mb = ELEM_FUSION_SAVE_MB
-        _no_fusion_mb = _naive_attn_mb + _elem_traffic_mb
-
-        _elem_fused_mb = _naive_attn_mb
-        _flash_attn_mb = 4 * _N * HEAD_DIM * BYTES_FP16 * NUM_HEADS / (1024 * 1024)
-        _full_fused_mb = _flash_attn_mb
-
-        _elem_savings_mb = _no_fusion_mb - _elem_fused_mb
-        _flash_savings_mb = _no_fusion_mb - _full_fused_mb
-        _ratio = _flash_savings_mb / max(_elem_savings_mb, 0.01)
-
-        # Build stacked bar chart
-        _labels = ["No Fusion", "Elementwise Fusion", "FlashAttention"]
-        _attn_vals = [_naive_attn_mb, _naive_attn_mb, _flash_attn_mb]
-        _elem_vals = [_elem_traffic_mb, 0, 0]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            name="Attention HBM Traffic", x=_labels, y=_attn_vals,
-            marker_color=COLORS["RedLine"], opacity=0.85,
-        ))
-        _fig.add_trace(go.Bar(
-            name="Elementwise HBM Traffic", x=_labels, y=_elem_vals,
-            marker_color=COLORS["OrangeLine"], opacity=0.85,
-        ))
-        _fig.update_layout(
-            barmode="stack", height=360,
-            yaxis=dict(title="HBM Traffic per Layer (MB)", type="log"),
-            margin=dict(l=60, r=20, t=30, b=40),
-            legend=dict(orientation="h", y=-0.15, x=0),
-        )
-        apply_plotly_theme(_fig)
-
-        _cards = f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Elementwise Savings</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                    {_elem_savings_mb:.0f} MB</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">FlashAttention Savings</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">
-                    {_flash_savings_mb:,.0f} MB</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Savings Ratio</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_ratio:.0f}x</div>
-            </div>
-        </div>"""
-
-        items.append(mo.as_html(_fig))
-        items.append(mo.Html(_cards))
-        items.append(mo.md(f"""
-**Fusion Physics** (sequence length = {_N:,} tokens)
-
-```
-Naive attention HBM    = 2 * N^2 * 2 bytes * {NUM_HEADS} heads
-                       = 2 * {_N}^2 * 2 * {NUM_HEADS} = {_naive_attn_mb:,.0f} MB
-
-FlashAttention HBM     = 4 * N * d * 2 bytes * {NUM_HEADS} heads
-                       = 4 * {_N} * {HEAD_DIM} * 2 * {NUM_HEADS} = {_flash_attn_mb:.1f} MB
-
-Elementwise savings    = {_elem_savings_mb:.0f} MB (fixed per layer)
-FlashAttention savings = {_flash_savings_mb:,.0f} MB
-Ratio                  = {_flash_savings_mb:,.0f} / {_elem_savings_mb:.0f} = {_ratio:.0f}x
-```
-"""))
-
-        # Reveal
-        if pB_pred.value == "C":
-            _pB_msg = (
-                "**Correct.** FlashAttention saves ~60x more HBM traffic than elementwise fusion "
-                "because the attention score matrix grows quadratically with sequence length (N^2) "
-                "while elementwise intermediates are fixed. At 4K tokens, this is already 60x. "
-                "At 32K tokens, the ratio grows to ~4000x."
-            )
-            _pB_kind = "success"
-        else:
-            _pB_msg = (
-                "**The ratio is ~60x at 4K tokens, and it grows quadratically.** "
-                "Elementwise fusion saves ~64 MB/layer (fixed). FlashAttention eliminates the "
-                "N x N score matrix, saving ~4 GB/layer at 4K tokens. The score matrix grows as "
-                "O(N^2) while elementwise intermediates are O(N), so the ratio widens with "
-                "sequence length. Increase the slider to see it grow."
-            )
-            _pB_kind = "warn"
-
-        items.append(mo.callout(mo.md(_pB_msg), kind=_pB_kind))
-        items.append(mo.accordion({
-            "Math Peek: Fusion Savings": mo.md("""
-**HBM Traffic Reduction**
-
-Naive attention per layer: $\\text{HBM}_{\\text{naive}} = 2 N^2 \\cdot b \\cdot H$ bytes
-
-FlashAttention per layer: $\\text{HBM}_{\\text{flash}} = 4 N d \\cdot b \\cdot H$ bytes
-
-Savings ratio: $\\frac{N^2}{2Nd} = \\frac{N}{2d}$
-
-At $N = 4096$, $d = 128$: ratio = $4096 / 256 = 16$, but including the full traffic
-accounting the actual ratio is ~60x because FlashAttention eliminates *all* intermediate
-materializations, not just the score matrix.
-
-*Source: @sec-performance-engineering, FlashAttention*
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART C: FLASHATTENTION: THE SAVINGS CURVE
-    # ═════════════════════════════════════════════════════════════════════════
-
-    def build_part_c():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['OrangeLine']}; background: {COLORS['OrangeL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['OrangeLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; Systems Architect
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "Standard attention materializes an N x N score matrix in HBM, costing O(N^2)
-                memory. FlashAttention tiles the computation to SRAM, reducing memory to O(N).
-                The savings ratio grows linearly with sequence length: 32x at 8K, 128x at 32K."
-            </div>
+        """),
+        track_context(v2_09_profile),
+        track_arc_context(v2_09_profile, v2_09_metadata.lab_id),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <div class="mlsysbook-section-label">Shared Concept Sequence</div>
+          <h2>One Sequence, Track-Specific Evidence</h2>
+          <p>All tracks run the same modules: bottleneck localization, regression detectability,
+          capacity planning, trade-off reporting, and a synthesis memo for V2-10 inference.</p>
+          <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
+            <thead><tr style="background:{COLORS['Surface2']};"><th>Module</th><th>Reading anchor</th><th>Student decision</th></tr></thead>
+            <tbody>{reading_rows}</tbody>
+          </table>
+          </div>
         </div>
-        """))
+        """),
+        source_trace({
+            "chapter": "Volume II, Chapter 9: Performance Engineering",
+            "anchors": (
+                "The iron law of ML performance",
+                "System Profiling",
+                "Profiling feedback loop",
+                "Measurement at Scale",
+                "Detecting scaling regressions",
+                "The Optimization Playbook",
+                "Fallacies and Pitfalls",
+            ),
+            "local_models": "Notebook-local v2_09_* teaching models encode the track thresholds and calculations.",
+            "track_source": v2_09_packet["track_source"],
+        }, summary="Source trace: V2-09 concept-module evidence"),
+    ])
+    return
 
-        items.append(mo.md("""
-        ## FlashAttention: The Savings Curve
 
-        Standard attention at 32K tokens uses ~32 GB of HBM for the score matrix.
-        FlashAttention uses tiled SRAM computation, never materializing the full matrix.
-        How much memory does it save?
-        """))
+@app.cell(hide_code=True)
+def _(mo, v2_09_packet):
+    partA_prediction = mo.ui.radio(
+        options={
+            "Data movement / memory bandwidth": "data",
+            "Compute path": "compute",
+            "Launch or coordination overhead": "overhead",
+            "Fleet capacity, not local code": "capacity",
+        },
+        label=f"Part A prediction: what is the active bottleneck for {v2_09_packet['label']}?",
+    )
+    partA_pressure = mo.ui.slider(
+        start=0.75,
+        stop=1.40,
+        value=1.00,
+        step=0.05,
+        label="Workload pressure multiplier",
+    )
+    partA_lever = mo.ui.radio(
+        options={
+            "Reduce data movement": "data_path",
+            "Improve compute path": "compute_path",
+            "Reduce launch/coordination overhead": "overhead_path",
+            "Add serving capacity": "capacity_path",
+        },
+        label="Optimization lever to try first",
+    )
+    partA_checkpoint = mo.ui.radio(
+        options={
+            "Authorize data-movement work": "data_path",
+            "Authorize compute-kernel work": "compute_path",
+            "Authorize overhead/graph work": "overhead_path",
+            "Do not optimize locally; plan capacity instead": "capacity_path",
+        },
+        label="Checkpoint: which first experiment should the memo authorize?",
+    )
+    return partA_checkpoint, partA_lever, partA_prediction, partA_pressure
 
-        # Prediction
-        items.append(mo.md("### Your Prediction"))
-        items.append(mo.md("*How much memory does FlashAttention save at 32K tokens?*"))
-        items.append(pC_pred)
 
-        if pC_pred.value is None:
-            items.append(mo.callout(mo.md("Enter your savings prediction above to unlock the savings curve."), kind="warn"))
-            return mo.vstack(items)
+@app.cell(hide_code=True)
+def _(mo, v2_09_packet):
+    partB_prediction = mo.ui.radio(
+        options={
+            "Ship: the change is clearly safe": "ship",
+            "Hold: the effect is inside measurement noise": "hold",
+            "Block: this is a detectable regression": "block",
+            "Ignore variance and use the latest run": "ignore",
+        },
+        label="Part B prediction: what release decision will the evidence support?",
+    )
+    partB_samples = mo.ui.slider(start=3, stop=50, value=8, step=1, label="Repeated runs per variant")
+    partB_cv = mo.ui.slider(
+        start=2.0,
+        stop=20.0,
+        value=float(v2_09_packet["default_cv_pct"]),
+        step=0.5,
+        label="Run-to-run CV (%)",
+    )
+    partB_delta = mo.ui.slider(
+        start=-8.0,
+        stop=12.0,
+        value=5.0,
+        step=0.5,
+        label="Candidate p99 delta vs baseline (%)",
+    )
+    partB_checkpoint = mo.ui.radio(
+        options={
+            "Ship after canary": "ship",
+            "Hold and collect more samples": "hold",
+            "Block and revert": "block",
+            "Shadow traffic only": "shadow",
+        },
+        label="Checkpoint: what should the release owner do?",
+    )
+    return partB_checkpoint, partB_cv, partB_delta, partB_prediction, partB_samples
 
-        # Computation
-        _d = HEAD_DIM
-        _h = NUM_HEADS
-        _b = BYTES_FP16
 
-        _seq_lengths = np.array([512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072])
+@app.cell(hide_code=True)
+def _(mo, v2_09_packet):
+    partC_prediction = mo.ui.radio(
+        options={
+            "Under-capacity: headroom will fail": "under",
+            "Enough headroom: launch as sized": "enough",
+            "Overbought: too much cost for the demand": "overbuy",
+            "Unknown until p99 is included": "unknown",
+        },
+        label="Part C prediction: what will the capacity plan reveal?",
+    )
+    partC_demand = mo.ui.slider(
+        start=0.60,
+        stop=2.40,
+        value=1.00,
+        step=0.05,
+        label="Demand forecast multiplier",
+    )
+    partC_units = mo.ui.slider(
+        start=1,
+        stop=int(v2_09_packet["max_units"]),
+        value=int(v2_09_packet["default_units"]),
+        step=1,
+        label=f"Serving units ({v2_09_packet['serving_unit']})",
+    )
+    partC_optimization = mo.ui.radio(
+        options={
+            "No optimization": "none",
+            "Fix measured bottleneck": "bottleneck_fix",
+            "Reduce data movement": "data_path",
+            "Improve compute path": "compute_path",
+            "Reduce launch/coordination overhead": "overhead_path",
+        },
+        value="Fix measured bottleneck",
+        label="Local profile used for capacity planning",
+    )
+    partC_checkpoint = mo.ui.radio(
+        options={
+            "Add serving units": "add_units",
+            "Optimize measured bottleneck before buying capacity": "optimize_first",
+            "Reduce rollout scope": "reduce_scope",
+            "Launch with current headroom": "launch",
+        },
+        label="Checkpoint: which capacity decision should go into the memo?",
+    )
+    return partC_checkpoint, partC_demand, partC_optimization, partC_prediction, partC_units
 
-        # Naive: 2 * N^2 * bytes * heads (score matrix + softmax output)
-        _naive_gb = 2 * _seq_lengths.astype(float)**2 * _b * _h / (1024**3)
-        # Flash: 4 * N * d * bytes * heads (Q, K, V, O reads)
-        _flash_gb = 4 * _seq_lengths.astype(float) * _d * _b * _h / (1024**3)
-        # Savings ratio
-        _ratios = _naive_gb / _flash_gb
 
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_seq_lengths, y=_naive_gb, mode="lines+markers",
-            name="Naive Attention (O(N^2))",
-            line=dict(color=COLORS["RedLine"], width=3),
-            marker=dict(size=8),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_seq_lengths, y=_flash_gb, mode="lines+markers",
-            name="FlashAttention (O(N))",
-            line=dict(color=COLORS["GreenLine"], width=3),
-            marker=dict(size=8),
-        ))
+@app.cell(hide_code=True)
+def _(mo, v2_09_money, v2_09_packet):
+    partD_prediction = mo.ui.radio(
+        options={
+            "Target measured bottleneck": "targeted",
+            "Buy more serving units": "scale",
+            "Aggressive precision/cache compression": "precision",
+            "Speculative or algorithmic path": "algorithmic",
+        },
+        label="Part D prediction: which candidate will survive the report guardrails?",
+    )
+    partD_risk_budget = mo.ui.slider(
+        start=0.5,
+        stop=6.0,
+        value=float(v2_09_packet["quality_budget_pct"]),
+        step=0.5,
+        label="Allowed quality/safety risk (%)",
+    )
+    _default_cost = (
+        v2_09_packet["default_units"]
+        * v2_09_packet["unit_cost_day"]
+        * v2_09_packet["cost_ceiling_multiplier"]
+    )
+    partD_cost_ceiling = mo.ui.number(
+        start=0.0,
+        stop=max(_default_cost * 3.0, 1.0),
+        value=_default_cost,
+        step=max(_default_cost / 50.0, 1.0),
+        label=f"Daily cost ceiling ({v2_09_money(_default_cost)} default)",
+    )
+    partD_checkpoint = mo.ui.radio(
+        options={
+            "Target measured bottleneck": "targeted",
+            "Buy more serving units": "scale",
+            "Aggressive precision/cache compression": "precision",
+            "Speculative or algorithmic path": "algorithmic",
+        },
+        label="Checkpoint: which candidate should the memo defend?",
+    )
+    partD_rejected = mo.ui.radio(
+        options={
+            "Target measured bottleneck": "targeted",
+            "Buy more serving units": "scale",
+            "Aggressive precision/cache compression": "precision",
+            "Speculative or algorithmic path": "algorithmic",
+        },
+        label="Checkpoint: which tempting alternative should the memo reject?",
+    )
+    return partD_checkpoint, partD_cost_ceiling, partD_prediction, partD_rejected, partD_risk_budget
 
-        # Annotate key points
-        for _i, _n in enumerate(_seq_lengths):
-            if _n in [8192, 32768, 131072]:
-                _fig.add_annotation(
-                    x=_n, y=_naive_gb[_i],
-                    text=f"{_ratios[_i]:.0f}x savings",
-                    showarrow=True, arrowhead=2, ax=40, ay=-30,
-                    font=dict(size=10, color=COLORS["BlueLine"]),
-                )
 
-        _fig.update_layout(
-            height=380,
-            xaxis=dict(title="Sequence Length (tokens)", type="log"),
-            yaxis=dict(title="HBM Memory (GB)", type="log"),
-            legend=dict(orientation="h", y=-0.2, x=0),
-            margin=dict(l=60, r=20, t=30, b=90),
-        )
-        apply_plotly_theme(_fig)
+@app.cell(hide_code=True)
+def _(mo):
+    v2_09_next_implication = mo.ui.radio(
+        options={
+            "Carry measured p99 into V2-10 serving SLO policy": "measured_p99",
+            "Carry capacity headroom into V2-10 batching/admission": "capacity_headroom",
+            "Carry residual bottleneck into V2-10 optimization risk": "residual_bottleneck",
+            "Carry regression canary into V2-10 rollout guardrails": "regression_canary",
+        },
+        label="Synthesis: what evidence should V2-10 inference inherit first?",
+    )
+    v2_09_student_id = mo.ui.text(label="Student or team ID")
+    return v2_09_next_implication, v2_09_student_id
 
-        # Find the 32K ratio
-        _idx_32k = list(_seq_lengths).index(32768)
-        _actual_ratio = _ratios[_idx_32k]
-        _predicted = pC_pred.value if pC_pred.value else 1
-        _gap = _actual_ratio / _predicted
 
-        _cards = f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Naive at 32K</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">
-                    {_naive_gb[_idx_32k]:.1f} GB</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Flash at 32K</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">
-                    {_flash_gb[_idx_32k]*1024:.0f} MB</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Savings Ratio</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_actual_ratio:.0f}x</div>
-            </div>
-        </div>"""
+@app.cell
+def _(
+    partA_lever,
+    partA_pressure,
+    partB_cv,
+    partB_delta,
+    partB_samples,
+    partC_demand,
+    partC_optimization,
+    partC_units,
+    partD_cost_ceiling,
+    partD_risk_budget,
+    v2_09_best_lever,
+    v2_09_capacity_result,
+    v2_09_packet,
+    v2_09_profile_result,
+    v2_09_regression_result,
+    v2_09_tradeoff_candidates,
+):
+    v2_09_partA_base = v2_09_profile_result(v2_09_packet, "none", partA_pressure.value)
+    v2_09_partA_best_lever = v2_09_best_lever(v2_09_partA_base["bottleneck"])
+    v2_09_partA_selected_lever = partA_lever.value or v2_09_partA_best_lever
+    v2_09_partA_after = v2_09_profile_result(
+        v2_09_packet,
+        v2_09_partA_selected_lever,
+        partA_pressure.value,
+    )
+    v2_09_partA_speedup = v2_09_partA_base["p99_ms"] / max(1e-9, v2_09_partA_after["p99_ms"])
+    v2_09_partB = v2_09_regression_result(
+        v2_09_packet,
+        partB_samples.value,
+        partB_cv.value,
+        partB_delta.value,
+    )
+    v2_09_partC = v2_09_capacity_result(
+        v2_09_packet,
+        partC_demand.value,
+        partC_units.value,
+        partC_optimization.value or "bottleneck_fix",
+    )
+    v2_09_partD_candidates, v2_09_partD_selected, v2_09_partD_rejected = v2_09_tradeoff_candidates(
+        v2_09_packet,
+        partC_demand.value,
+        partC_units.value,
+        partD_risk_budget.value,
+        partD_cost_ceiling.value,
+    )
+    return (
+        v2_09_partA_after,
+        v2_09_partA_base,
+        v2_09_partA_best_lever,
+        v2_09_partA_selected_lever,
+        v2_09_partA_speedup,
+        v2_09_partB,
+        v2_09_partC,
+        v2_09_partD_candidates,
+        v2_09_partD_rejected,
+        v2_09_partD_selected,
+    )
 
-        items.append(mo.as_html(_fig))
-        items.append(mo.Html(_cards))
 
-        if _gap < 1.5 and _gap > 0.67:
-            _reveal_kind = "success"
-            _reveal_msg = f"**Excellent.** You predicted {_predicted}x. Actual: {_actual_ratio:.0f}x. You were within range."
-        else:
-            _reveal_kind = "warn"
-            _reveal_msg = (
-                f"**You predicted {_predicted}x. Actual: {_actual_ratio:.0f}x. "
-                f"You were off by {_gap:.1f}x.** Most students predict 4-8x (thinking linearly). "
-                f"The actual savings ratio is N/(2d) = {32768}/{2*_d} = {_actual_ratio:.0f}x, "
-                f"growing linearly with sequence length."
-            )
-
-        items.append(mo.callout(mo.md(_reveal_msg), kind=_reveal_kind))
-        items.append(mo.md(f"""
-**Savings Formula**
-
-```
-Naive HBM  = 2 * N^2 * bytes * heads = 2 * 32768^2 * 2 * 64 = {_naive_gb[_idx_32k]:.1f} GB
-Flash HBM  = 4 * N * d * bytes * heads = 4 * 32768 * 128 * 2 * 64 = {_flash_gb[_idx_32k]*1024:.0f} MB
-Ratio      = N / (2d) = 32768 / 256 = {_actual_ratio:.0f}x
-```
-*Source: @sec-performance-engineering, FlashAttention tiling analysis*
-"""))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART D: PRECISION ENGINEERING
-    # ═════════════════════════════════════════════════════════════════════════
-
-    def build_part_d():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid #7c3aed; background: #f3f0ff;
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #7c3aed;
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; ML Quality Engineer
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "INT4 quantization quadruples effective memory bandwidth, shifting the workload
-                rightward on the roofline. But transformer models have outlier features --
-                a handful of channels with values 100x larger. Naive quantization clips these
-                outliers, causing catastrophic accuracy loss."
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Precision Engineering: Naive vs Outlier-Aware
-
-        INT4 quantization quadruples effective memory bandwidth, shifting the workload
-        rightward on the roofline. But the quality impact depends on the method.
-        """))
-
-        # Prediction
-        items.append(mo.md("### Your Prediction"))
-        items.append(pD_pred)
-
-        if pD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the quantization comparison."), kind="warn"))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(pD_precision)
-
-        # Computation
-        _bits = pD_precision.value
-        _bw_mult = 16 / _bits  # effective bandwidth multiplier
-        _eff_bw = H100_BW_GBS * _bw_mult
-        _eff_ridge = H100_TFLOPS_FP16 * 1e12 / (_eff_bw * 1e9)
-
-        # Quality lookup
-        _ppl_table = {
-            16: {"naive": PPL_FP16, "outlier": PPL_FP16},
-            8:  {"naive": PPL_INT8_NAIVE, "outlier": PPL_INT8_OUTLIER},
-            4:  {"naive": PPL_INT4_NAIVE, "outlier": PPL_INT4_OUTLIER},
-        }
-        _ppl_naive = _ppl_table[_bits]["naive"]
-        _ppl_outlier = _ppl_table[_bits]["outlier"]
-
-        # Left panel: roofline shift
-        _ai_range = np.logspace(-1, 4, 400)
-        _mem_ceil_orig = (H100_BW_GBS / 1e3) * _ai_range
-        _mem_ceil_quant = (_eff_bw / 1e3) * _ai_range
-        _comp_ceil = np.full_like(_ai_range, H100_TFLOPS_FP16)
-
-        _fig_roof = go.Figure()
-        _fig_roof.add_trace(go.Scatter(
-            x=_ai_range, y=_mem_ceil_orig, mode="lines",
-            name="FP16 bandwidth ceiling",
-            line=dict(color="#94a3b8", width=2, dash="dash"),
-        ))
-        _fig_roof.add_trace(go.Scatter(
-            x=_ai_range, y=_mem_ceil_quant, mode="lines",
-            name=f"INT{_bits} effective bandwidth ({_bw_mult:.0f}x)",
-            line=dict(color=COLORS["GreenLine"], width=2),
-        ))
-        _fig_roof.add_trace(go.Scatter(
-            x=_ai_range, y=_comp_ceil, mode="lines",
-            name="Compute ceiling",
-            line=dict(color=COLORS["BlueLine"], width=2),
-        ))
-        _fig_roof.add_vline(x=H100_RIDGE, line_dash="dot", line_color="#ccc")
-        _fig_roof.add_vline(x=_eff_ridge, line_dash="dash", line_color=COLORS["GreenLine"],
-                            annotation_text=f"New ridge: {_eff_ridge:.0f}",
-                            annotation_font_size=10)
-        _fig_roof.update_layout(
-            height=320, title=dict(text="Roofline Shift with Quantization", font_size=13),
-            xaxis=dict(title="Arithmetic Intensity (FLOP/byte)", type="log", range=[-1, 4]),
-            yaxis=dict(title="TFLOPS", type="log", range=[-1, 4]),
-            legend=dict(orientation="h", y=-0.25, font_size=10),
-            margin=dict(l=50, r=20, t=40, b=100),
-        )
-        apply_plotly_theme(_fig_roof)
-
-        # Right panel: quality comparison
-        _fig_qual = go.Figure()
-        _fig_qual.add_trace(go.Bar(
-            x=["Naive", "Outlier-Aware", "FP16 Baseline"],
-            y=[_ppl_naive, _ppl_outlier, PPL_FP16],
-            marker_color=[COLORS["RedLine"], COLORS["GreenLine"], COLORS["BlueLine"]],
-            text=[f"{_ppl_naive:.1f}", f"{_ppl_outlier:.1f}", f"{PPL_FP16:.1f}"],
-            textposition="outside",
-        ))
-        _fig_qual.update_layout(
-            height=320, title=dict(text=f"Perplexity at INT{_bits} (lower is better)", font_size=13),
-            yaxis=dict(title="Perplexity", range=[0, max(_ppl_naive + 2, 8)]),
-            margin=dict(l=50, r=20, t=40, b=40),
-        )
-        apply_plotly_theme(_fig_qual)
-
-        _ppl_diff = _ppl_naive - _ppl_outlier
-        _d_color = COLORS["RedLine"] if _ppl_diff > 3 else COLORS["OrangeLine"] if _ppl_diff > 1 else COLORS["GreenLine"]
-
-        items.append(mo.hstack([mo.as_html(_fig_roof), mo.as_html(_fig_qual)]))
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">BW Multiplier</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_bw_mult:.0f}x</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {_d_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Perplexity Gap (naive - outlier)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_d_color};">{_ppl_diff:.1f}</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">New Ridge Point</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_eff_ridge:.0f}</div>
-            </div>
-        </div>"""))
-
-        # Reveal
-        _diff = PPL_INT4_NAIVE - PPL_INT4_OUTLIER
-        if pD_pred.value == "C":
-            _pD_msg = (
-                f"**Correct.** Naive INT4 perplexity spikes by {_diff:.1f} points for a 70B model "
-                "due to outlier clipping. Outlier-aware methods protect the salient 1% of weights "
-                "at higher precision, staying within 0.5 points of FP16. The bandwidth gain is "
-                "identical for both methods -- the quality cost is in the method, not the bit-width."
-            )
-            _pD_kind = "success"
-        else:
-            _pD_msg = (
-                f"**Naive INT4 is catastrophic for large models.** The perplexity gap is {_diff:.1f} "
-                "points -- not similar, not mild, but catastrophic. Transformer models have outlier "
-                "features (channels with values 100x larger than the rest). Naive quantization clips "
-                "these, destroying model quality. Outlier-aware methods protect the top 1% at full "
-                "precision, preserving quality while capturing the same bandwidth gain."
-            )
-            _pD_kind = "warn"
-
-        items.append(mo.callout(mo.md(_pD_msg), kind=_pD_kind))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART E: THE OPTIMIZATION PLAYBOOK
-    # ═════════════════════════════════════════════════════════════════════════
-
-    def build_part_e():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['RedLine']}; background: {COLORS['RedL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['RedLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; Performance Lead
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "Applying the wrong optimization yields zero improvement. FlashAttention on a
-                compute-bound prefill workload? Negligible gain. INT4 quantization on a
-                memory-bound decode workload? Huge gain. The meta-skill: diagnose first, then treat."
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Optimization Playbook
-
-        You have a mystery workload. Without profiling it first, which single
-        optimization would you apply? The answer reveals whether you understand
-        bottleneck-driven optimization.
-        """))
-
-        # Prediction
-        items.append(mo.md("### Your Prediction"))
-        items.append(pE_pred)
-
-        if pE_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the optimization playbook."), kind="warn"))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(mo.hstack([pE_workload, pE_optim], gap="1.5rem"))
-
-        # Speedup matrix
-        _speedups = {
-            "decode": {
-                "flash": 1.02,
-                "int4": 3.2,
-                "fusion": 1.15,
-                "graphs": 1.08,
-                "batch": 2.5,
-            },
-            "prefill": {
-                "flash": 1.8,
-                "int4": 1.05,
-                "fusion": 1.1,
-                "graphs": 1.03,
-                "batch": 1.02,
-            },
-            "vision": {
-                "flash": 1.0,
-                "int4": 1.8,
-                "fusion": 1.25,
-                "graphs": 1.1,
-                "batch": 1.15,
-            },
-        }
-
-        _wl = pE_workload.value
-        _opt = pE_optim.value
-        _speedup = _speedups[_wl][_opt]
-
-        _wl_info = {
-            "decode": ("Memory-Bound", 1, "Deeply memory-bound (AI=1, ridge=295). Fix: reduce data movement."),
-            "prefill": ("Compute-Bound", 512, "Compute-bound (AI=512 > ridge=295). Fix: reduce compute."),
-            "vision": ("Near Ridge", 180, "Near the ridge point (AI=180, ridge=295). Mixed constraint."),
-        }
-        _regime, _ai, _diagnosis = _wl_info[_wl]
-
-        _sp_color = (COLORS["GreenLine"] if _speedup > 1.5 else
-                     COLORS["OrangeLine"] if _speedup > 1.1 else COLORS["RedLine"])
-
-        _opt_names = ["FlashAttention", "INT4 Quant", "Fusion", "CUDA Graphs", "Larger Batch"]
-        _opt_keys = ["flash", "int4", "fusion", "graphs", "batch"]
-        _all_speedups = [_speedups[_wl][k] for k in _opt_keys]
-        _bar_colors = [COLORS["GreenLine"] if s > 1.5 else COLORS["OrangeLine"] if s > 1.1 else COLORS["RedLine"]
-                       for s in _all_speedups]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            x=_opt_names, y=_all_speedups,
-            marker_color=_bar_colors,
-            text=[f"{s:.2f}x" for s in _all_speedups],
-            textposition="outside",
-        ))
-        _fig.add_hline(y=1.0, line_dash="dash", line_color="#94a3b8",
-                       annotation_text="No improvement", annotation_position="bottom right")
-        _fig.update_layout(
-            height=340,
-            yaxis=dict(title="Speedup", range=[0, max(_all_speedups) + 0.5]),
-            title=dict(text=f"Optimization Impact on: {_regime} Workload (AI={_ai})", font_size=13),
-            margin=dict(l=50, r=20, t=50, b=40),
-        )
-        apply_plotly_theme(_fig)
-
-        _match_text = (
-            f"**Your choice: {_opt}** on a **{_regime}** workload. "
-            f"Speedup: **{_speedup:.2f}x**."
-        )
-
-        if _speedup < 1.1:
-            _match_callout = mo.callout(mo.md(
-                f"{_match_text} This optimization attacks the wrong bottleneck. "
-                f"Diagnosis: {_diagnosis}"
-            ), kind="danger")
-        elif _speedup < 1.5:
-            _match_callout = mo.callout(mo.md(
-                f"{_match_text} Marginal improvement. There is a better option for this workload. "
-                f"Diagnosis: {_diagnosis}"
-            ), kind="warn")
-        else:
-            _match_callout = mo.callout(mo.md(
-                f"{_match_text} Good match. This optimization addresses the binding constraint. "
-                f"Diagnosis: {_diagnosis}"
-            ), kind="success")
-
-        items.append(mo.as_html(_fig))
-        items.append(_match_callout)
-
-        # Reveal
-        if pE_pred.value == "C":
-            _pE_msg = (
-                "**Correct.** The right optimization depends entirely on the bottleneck. "
-                "INT4 quantization gives 3.2x speedup on memory-bound decode but only 1.05x on "
-                "compute-bound prefill. FlashAttention helps prefill (1.8x) but barely helps "
-                "decode at batch=1 (1.02x). The meta-skill is: profile on the roofline, identify "
-                "the bottleneck, then select the matching optimization."
-            )
-            _pE_kind = "success"
-        else:
-            _pE_msg = (
-                "**There is no universally best optimization.** The right choice depends on whether "
-                "the workload is compute-bound or memory-bound. Applying FlashAttention to a "
-                "compute-bound workload, or INT4 quantization to a compute-bound workload, yields "
-                "less than 5% improvement. Always profile first: diagnose the bottleneck, then treat."
-            )
-            _pE_kind = "warn"
-
-        items.append(mo.callout(mo.md(_pE_msg), kind=_pE_kind))
-        items.append(mo.accordion({
-            "Optimization Matching Framework": mo.md("""
-| Bottleneck | Best Optimization | Why |
-|---|---|---|
-| Memory-bound (AI << ridge) | INT4 quantization, larger batch | Increases effective bandwidth or AI |
-| Compute-bound (AI >> ridge) | FlashAttention (for attention), better kernels | Reduces compute or HBM traffic |
-| Overhead-dominated | CUDA Graphs, operator fusion | Eliminates kernel launch overhead |
-| Near ridge | Profile carefully -- small changes shift regime | Mixed strategies needed |
-
-**The diagnostic sequence:**
-1. Profile on roofline -- place workload dot
-2. Identify bottleneck (compute / memory / overhead)
-3. Select matching optimization from the table above
-4. Reprofile after optimization -- the regime may have shifted
-
-*Source: @sec-performance-engineering, optimization methodology*
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # SYNTHESIS
-    # ═════════════════════════════════════════════════════════════════════════
-
-    def build_synthesis():
+@app.cell(hide_code=True)
+def _(
+    COLORS,
+    apply_plotly_theme,
+    build_lab_report,
+    go,
+    ledger,
+    mo,
+    partA_checkpoint,
+    partA_lever,
+    partA_prediction,
+    partA_pressure,
+    partB_checkpoint,
+    partB_cv,
+    partB_delta,
+    partB_prediction,
+    partB_samples,
+    partC_checkpoint,
+    partC_demand,
+    partC_optimization,
+    partC_prediction,
+    partC_units,
+    partD_checkpoint,
+    partD_cost_ceiling,
+    partD_prediction,
+    partD_rejected,
+    partD_risk_budget,
+    report_export_panel,
+    v2_09_best_lever,
+    v2_09_bottleneck_label,
+    v2_09_candidate_label,
+    v2_09_capacity_result,
+    v2_09_chapter,
+    v2_09_failure_card,
+    v2_09_feedback,
+    v2_09_math_peek,
+    v2_09_metadata,
+    v2_09_metric_card,
+    v2_09_money,
+    v2_09_ms,
+    v2_09_next_implication,
+    v2_09_num,
+    v2_09_optimization_label,
+    v2_09_packet,
+    v2_09_partA_after,
+    v2_09_partA_base,
+    v2_09_partA_best_lever,
+    v2_09_partA_selected_lever,
+    v2_09_partA_speedup,
+    v2_09_partB,
+    v2_09_partC,
+    v2_09_partD_candidates,
+    v2_09_partD_rejected,
+    v2_09_partD_selected,
+    v2_09_part_banner,
+    v2_09_pct,
+    v2_09_profile,
+    v2_09_table,
+    v2_09_student_id,
+):
+    def v2_09_opening():
         return mo.vstack([
-            mo.Html(f"""
-            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                    Key Takeaways
-                </div>
-                <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                    <div style="margin-bottom: 10px;">
-                        <strong>1. The roofline is a diagnostic tool, not a decoration.</strong>
-                        LLM decode at batch=1 achieves 0.34% of H100 compute capacity because
-                        AI=1 is 295x below the ridge point. Faster GPUs do not help memory-bound workloads.
-                    </div>
-                    <div style="margin-bottom: 10px;">
-                        <strong>2. Not all fusion is equal.</strong>
-                        FlashAttention saves 60x more HBM traffic than elementwise fusion because
-                        the attention score matrix grows as O(N^2). The savings ratio widens to 128x
-                        at 32K tokens and 512x at 128K tokens.
-                    </div>
-                    <div>
-                        <strong>3. Profile first, optimize second.</strong>
-                        Applying the wrong optimization yields &lt;5% improvement. The meta-skill is:
-                        diagnose the bottleneck (roofline placement), then select the matching
-                        optimization. Reprofile after each change -- the regime may shift.
-                    </div>
-                </div>
-            </div>
+            mo.md(f"""
+## Lab Brief
+
+You are the performance engineer for **{v2_09_packet['label']}**. The stakeholder
+has a concrete launch decision for **{v2_09_packet['workload']}**.
+
+The shared sequence is:
+
+1. Localize the bottleneck before optimizing.
+2. Prove regressions with baseline, variance, and detectability.
+3. Convert measured bottlenecks into capacity headroom and cost.
+4. Defend an optimization trade-off and reject an alternative.
+5. Save a memo that V2-10 inference can inherit.
             """),
-            mo.Html(f"""
-            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        What's Next
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab V2-10: The Edge Thermodynamics Lab</strong> &mdash; You optimized
-                        inference on H100s. Now discover what happens when you move training to a
-                        smartphone: memory amplifies 4-12x, and the battery becomes the binding constraint.
-                    </div>
-                </div>
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Textbook &amp; TinyTorch
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the Performance Engineering chapter for the full roofline derivation
-                        and FlashAttention tiling analysis.<br/>
-                        <strong>Build:</strong> TinyTorch attention module &mdash; implement tiled attention
-                        and measure HBM traffic reduction.
-                    </div>
-                </div>
-            </div>
-            """),
+            mo.callout(mo.md(
+                f"**Track consequence:** for {v2_09_packet['label']}, the natural failure is "
+                f"{v2_09_packet['failure_mode']}. Track constraints emphasize "
+                f"{v2_09_packet['constraint_note']}."
+            ), kind="info"),
+            v2_09_table(
+                ("Part", "Concept", "Evidence saved"),
+                (
+                    ("A", "Localize bottleneck", "active term, selected first lever, p99 speedup"),
+                    ("B", "Regression detectability", "n, CV, MDE, canary decision"),
+                    ("C", "Capacity planning", "demand, capacity, utilization, headroom, daily cost"),
+                    ("D", "Trade-off report", "selected candidate, rejected alternative, feasibility reason"),
+                    ("Synthesis", "Performance memo", "V2-10 inference implication"),
+                ),
+            ),
         ])
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # COMPOSE TABS
-    # ═════════════════════════════════════════════════════════════════════════
+    def build_part_a():
+        items = [
+            v2_09_part_banner(
+                "A",
+                "Localize The Bottleneck Before Optimizing",
+                f"{v2_09_packet['stakeholder']} needs to decide which experiment is worth engineering time first.",
+                COLORS["BlueLine"],
+            ),
+            mo.md("""
+### Scenario
+
+A quick optimization request arrives. Before changing kernels, precision, graph
+capture, or capacity, commit to the bottleneck you think is active.
+            """),
+            partA_prediction,
+        ]
+        if partA_prediction.value is None:
+            items.append(mo.callout(mo.md("Commit to the bottleneck prediction before revealing the profile."), kind="warn"))
+            return mo.vstack(items)
+
+        items.extend([mo.hstack([partA_pressure, partA_lever], widths="equal")])
+        labels = ["Data movement", "Compute", "Overhead"]
+        term_keys = ["data", "compute", "overhead"]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=labels,
+            y=[v2_09_partA_base["terms"][key] for key in term_keys],
+            name="Measured baseline",
+            marker_color=COLORS["BlueLine"],
+        ))
+        fig.add_trace(go.Bar(
+            x=labels,
+            y=[v2_09_partA_after["terms"][key] for key in term_keys],
+            name=v2_09_optimization_label(v2_09_partA_selected_lever),
+            marker_color=COLORS["OrangeLine"],
+        ))
+        fig.update_layout(
+            barmode="group",
+            height=350,
+            yaxis=dict(title="Exposed time term (ms)", gridcolor="#edf2f7"),
+            legend=dict(orientation="h", y=1.14, x=0),
+            margin=dict(l=60, r=20, t=55, b=50),
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        miss = v2_09_partA_selected_lever != v2_09_partA_best_lever
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
+          {v2_09_metric_card("Actual bottleneck", v2_09_bottleneck_label(v2_09_partA_base['bottleneck']), "largest exposed term", COLORS["BlueLine"])}
+          {v2_09_metric_card("Baseline p99", v2_09_ms(v2_09_partA_base['p99_ms']), f"SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}", COLORS["OrangeLine"], not v2_09_partA_base["slo_ok"])}
+          {v2_09_metric_card("After p99", v2_09_ms(v2_09_partA_after['p99_ms']), f"{v2_09_partA_speedup:.2f}x speedup", COLORS["GreenLine"], not v2_09_partA_after["slo_ok"])}
+          {v2_09_metric_card("First lever", v2_09_optimization_label(v2_09_partA_best_lever), "bottleneck-targeted", COLORS["GreenLine"])}
+        </div>
+        """))
+        items.append(v2_09_table(
+            ("Term", "Baseline", "After selected lever", "Interpretation"),
+            (
+                ("Data movement", v2_09_ms(v2_09_partA_base["terms"]["data"]), v2_09_ms(v2_09_partA_after["terms"]["data"]), "bandwidth/cache/precision/fusion path"),
+                ("Compute", v2_09_ms(v2_09_partA_base["terms"]["compute"]), v2_09_ms(v2_09_partA_after["terms"]["compute"]), "kernel math/Tensor Core path"),
+                ("Overhead", v2_09_ms(v2_09_partA_base["terms"]["overhead"]), v2_09_ms(v2_09_partA_after["terms"]["overhead"]), "launch, scheduler, coordination, or communication gaps"),
+                ("p99", v2_09_ms(v2_09_partA_base["p99_ms"]), v2_09_ms(v2_09_partA_after["p99_ms"]), "track guardrail evidence"),
+            ),
+        ))
+        items.append(v2_09_feedback(
+            partA_prediction.value,
+            v2_09_partA_base["bottleneck"],
+            "**Prediction matched the measured bottleneck.** The first optimization now has a measured target.",
+            f"**Optimization trap:** the profile says the active bottleneck is {v2_09_bottleneck_label(v2_09_partA_base['bottleneck'])}, not the predicted target.",
+        ))
+        items.append(v2_09_failure_card(
+            miss or not v2_09_partA_after["slo_ok"],
+            "Wrong lever or remaining guardrail miss",
+            (
+                f"Selected lever: {v2_09_optimization_label(v2_09_partA_selected_lever)}. "
+                f"Targeted lever: {v2_09_optimization_label(v2_09_partA_best_lever)}. "
+                f"After p99: {v2_09_ms(v2_09_partA_after['p99_ms'])} against SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}."
+            ),
+            "switch to the bottleneck-targeted lever, then reprofile before claiming a win",
+        ))
+        items.append(v2_09_math_peek(
+            "Math Peek / Source Model - iron-law bottleneck",
+            f"""
+```
+T_p50 ~= max(data_movement_ms, compute_ms) + overhead_ms
+T_p99 ~= T_p50 * track_tail_multiplier
+speedup = baseline_p99 / optimized_p99
+first_lever = lever_that_targets(max(data, compute, overhead))
+```
+
+Current profile: data `{v2_09_ms(v2_09_partA_base['terms']['data'])}`,
+compute `{v2_09_ms(v2_09_partA_base['terms']['compute'])}`, overhead
+`{v2_09_ms(v2_09_partA_base['terms']['overhead'])}`. Chapter anchor:
+the iron law of ML performance and the profiling hierarchy.
+            """,
+        ))
+        items.append(partA_checkpoint)
+        return mo.vstack(items)
+
+    def build_part_b():
+        items = [
+            v2_09_part_banner(
+                "B",
+                "Regressions Need Baseline, Variance, And Detectability",
+                "A before/after number is not release evidence until variance and sample size say the effect is detectable.",
+                COLORS["OrangeLine"],
+            ),
+            mo.md("""
+### Scenario
+
+A candidate patch claims to improve performance, but production-like runs vary.
+Decide whether the release owner should ship, hold for more evidence, or block.
+            """),
+            partB_prediction,
+        ]
+        if partB_prediction.value is None:
+            items.append(mo.callout(mo.md("Commit to the regression decision prediction before revealing the run evidence."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partB_samples, partB_cv, partB_delta], widths="equal"))
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=["Baseline", "Candidate"],
+            y=[v2_09_partB["baseline_ms"], v2_09_partB["candidate_ms"]],
+            error_y=dict(type="data", array=[v2_09_partB["ci_diff_ms"] / 2.0, v2_09_partB["ci_diff_ms"] / 2.0], visible=True),
+            marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]],
+            name="p99 with uncertainty",
+        ))
+        fig.add_hline(
+            y=v2_09_packet["slo_ms"],
+            line_dash="dash",
+            line_color=COLORS["RedLine"],
+            annotation_text=f"SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}",
+        )
+        fig.update_layout(
+            height=340,
+            yaxis=dict(title="p99 latency / time budget (ms)", gridcolor="#edf2f7"),
+            showlegend=False,
+            margin=dict(l=60, r=20, t=50, b=50),
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
+          {v2_09_metric_card("MDE", f"{v2_09_partB['mde_pct']:.1f}%", "minimum detectable effect", COLORS["BlueLine"])}
+          {v2_09_metric_card("Candidate delta", f"{partB_delta.value:.1f}%", f"budget {v2_09_packet['regression_budget_pct']:.1f}%", COLORS["OrangeLine"], v2_09_partB["regression"])}
+          {v2_09_metric_card("Detectable", "yes" if v2_09_partB["detectable"] else "no", f"n={partB_samples.value}, CV={partB_cv.value:.1f}%", COLORS["GreenLine"] if v2_09_partB["detectable"] else COLORS["OrangeLine"])}
+          {v2_09_metric_card("Decision", v2_09_partB["decision"], v2_09_partB["reason"], COLORS["GreenLine"] if v2_09_partB["decision"] == "ship" else COLORS["RedLine"] if v2_09_partB["decision"] == "block" else COLORS["OrangeLine"])}
+        </div>
+        """))
+        items.append(v2_09_table(
+            ("Evidence", "Value", "Why it matters"),
+            (
+                ("Baseline p99", v2_09_ms(v2_09_partB["baseline_ms"]), "reference distribution after the Part A bottleneck fix"),
+                ("Candidate p99", v2_09_ms(v2_09_partB["candidate_ms"]), "patched distribution under the same scenario"),
+                ("95% diff half-width", v2_09_ms(v2_09_partB["ci_diff_ms"]), "uncertainty around before/after comparison"),
+                ("Minimum detectable effect", f"{v2_09_partB['mde_pct']:.1f}%", "smallest effect this experiment can distinguish"),
+                ("Release decision", v2_09_partB["decision"], v2_09_partB["reason"]),
+            ),
+        ))
+        items.append(v2_09_feedback(
+            partB_prediction.value,
+            v2_09_partB["decision"],
+            "**Prediction matched the evidence.** The release decision is supported by variance-aware data.",
+            "**Regression evidence gap:** one run is not enough; the baseline, CV, sample count, and MDE drive the decision.",
+        ))
+        items.append(v2_09_failure_card(
+            v2_09_partB["decision"] != "ship",
+            "Regression evidence is not launch-safe",
+            (
+                f"Decision `{v2_09_partB['decision']}` because {v2_09_partB['reason']}. "
+                f"The measured delta is {partB_delta.value:.1f}% and the MDE is {v2_09_partB['mde_pct']:.1f}%."
+            ),
+            "increase sample count, reduce measurement noise, or block/revert if the regression is detectable",
+        ))
+        items.append(v2_09_math_peek(
+            "Math Peek / Source Model - baseline variance and detectability",
+            f"""
+```
+sigma_ms = baseline_ms * CV
+CI_diff  = 1.96 * sqrt(2) * sigma_ms / sqrt(n)
+MDE_pct  = CI_diff / baseline_ms
+```
+
+Current values: n `{partB_samples.value}`, CV `{partB_cv.value:.1f}%`,
+MDE `{v2_09_partB['mde_pct']:.1f}%`, candidate delta `{partB_delta.value:.1f}%`.
+Chapter anchors: profiling feedback loop, profiling at scale, and detecting
+scaling regressions.
+            """,
+        ))
+        items.append(partB_checkpoint)
+        return mo.vstack(items)
+
+    def build_part_c():
+        items = [
+            v2_09_part_banner(
+                "C",
+                "Capacity Planning Converts Bottlenecks Into Headroom And Cost",
+                "The local profile becomes a fleet amount system: demand, service rate, units, utilization, headroom, p99, and cost.",
+                COLORS["GreenLine"],
+            ),
+            mo.md(f"""
+### Scenario
+
+The launch forecast is expressed as **{v2_09_packet['amount_unit']}**. Use the
+measured profile to decide whether the selected **{v2_09_packet['serving_unit']}**
+count is enough.
+            """),
+            partC_prediction,
+        ]
+        if partC_prediction.value is None:
+            items.append(mo.callout(mo.md("Commit to the capacity prediction before opening the amount-system planner."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partC_demand, partC_units, partC_optimization], widths="equal"))
+        x_units = list(range(1, int(v2_09_packet["max_units"]) + 1))
+        y_capacity = [
+            v2_09_capacity_result(v2_09_packet, partC_demand.value, units, partC_optimization.value or "bottleneck_fix")["capacity"]
+            for units in x_units
+        ]
+        demand_line = [v2_09_partC["demand"] for _ in x_units]
+        headroom_line = [v2_09_partC["demand"] * (1.0 + v2_09_packet["headroom_target"]) for _ in x_units]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=x_units, y=y_capacity, mode="lines+markers", name="Measured capacity", line=dict(color=COLORS["BlueLine"], width=3)))
+        fig.add_trace(go.Scatter(x=x_units, y=demand_line, mode="lines", name="Forecast demand", line=dict(color=COLORS["OrangeLine"], dash="dash")))
+        fig.add_trace(go.Scatter(x=x_units, y=headroom_line, mode="lines", name="Demand + headroom target", line=dict(color=COLORS["GreenLine"], dash="dot")))
+        fig.add_trace(go.Scatter(x=[partC_units.value], y=[v2_09_partC["capacity"]], mode="markers", name="selected plan", marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond")))
+        fig.update_layout(
+            height=360,
+            xaxis=dict(title=v2_09_packet["serving_unit"]),
+            yaxis=dict(title=v2_09_packet["amount_unit"], gridcolor="#edf2f7"),
+            legend=dict(orientation="h", y=1.17, x=0),
+            margin=dict(l=70, r=20, t=55, b=50),
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
+          {v2_09_metric_card("Demand", v2_09_num(v2_09_partC['demand']), v2_09_packet["amount_unit"], COLORS["OrangeLine"])}
+          {v2_09_metric_card("Capacity", v2_09_num(v2_09_partC['capacity']), f"{partC_units.value} {v2_09_packet['serving_unit']}", COLORS["BlueLine"])}
+          {v2_09_metric_card("Utilization", v2_09_pct(v2_09_partC['utilization']), "demand / capacity", COLORS["OrangeLine"], v2_09_partC["utilization"] >= 1.0)}
+          {v2_09_metric_card("Headroom", v2_09_pct(v2_09_partC['headroom']), f"target {v2_09_packet['headroom_target_pct']:.0f}%", COLORS["GreenLine"], v2_09_partC["headroom"] < v2_09_packet["headroom_target"])}
+          {v2_09_metric_card("Daily cost", v2_09_money(v2_09_partC['daily_cost']), "serving-unit cost", COLORS["BlueLine"])}
+        </div>
+        """))
+        items.append(v2_09_table(
+            ("Amount-system field", "Value", "Decision use"),
+            (
+                ("Measured service rate", f"{v2_09_num(v2_09_partC['service_rate'])} {v2_09_packet['amount_unit']} per {v2_09_packet['serving_unit']}", "capacity per unit after reality tax"),
+                ("Forecast demand", f"{v2_09_num(v2_09_partC['demand'])} {v2_09_packet['amount_unit']}", "what the launch must absorb"),
+                ("Total capacity", f"{v2_09_num(v2_09_partC['capacity'])} {v2_09_packet['amount_unit']}", "serving units times measured rate"),
+                ("p99 under load", v2_09_ms(v2_09_partC["p99_ms"]), f"track SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}"),
+                ("Failures", ", ".join(v2_09_partC["failures"]) or "none", "launch gate"),
+            ),
+        ))
+        expected_capacity = "under" if not v2_09_partC["feasible"] else "enough"
+        items.append(v2_09_feedback(
+            partC_prediction.value,
+            expected_capacity,
+            "**Prediction matched the capacity evidence.** The amount system makes the launch decision explicit.",
+            "**Capacity planning trap:** average speed is not enough; headroom and p99 determine whether the plan is launchable.",
+        ))
+        items.append(v2_09_failure_card(
+            not v2_09_partC["feasible"],
+            "Capacity plan misses the operating envelope",
+            (
+                f"Failures: {', '.join(v2_09_partC['failures']) or 'none'}. "
+                f"p99 is {v2_09_ms(v2_09_partC['p99_ms'])}; headroom is {v2_09_pct(v2_09_partC['headroom'])}."
+            ),
+            "add measured capacity, lower demand, or apply the bottleneck fix before launch",
+        ))
+        items.append(v2_09_math_peek(
+            "Math Peek / Source Model - capacity headroom",
+            f"""
+```
+service_rate = baseline_capacity_per_unit * baseline_p99 / optimized_p99
+capacity     = serving_units * service_rate * (1 - reality_tax)
+utilization  = demand / capacity
+headroom     = capacity / demand - 1
+p99_load     = measured_p99 * queue_pressure(utilization)
+```
+
+Current values: demand `{v2_09_num(v2_09_partC['demand'])}`,
+capacity `{v2_09_num(v2_09_partC['capacity'])}`, utilization
+`{v2_09_pct(v2_09_partC['utilization'])}`, headroom
+`{v2_09_pct(v2_09_partC['headroom'])}`. Chapter anchors: Measurement at
+Scale, fleet efficiency, and benchmark reality tax.
+            """,
+        ))
+        items.append(partC_checkpoint)
+        return mo.vstack(items)
+
+    def build_part_d():
+        items = [
+            v2_09_part_banner(
+                "D",
+                "Optimization Reports Must Defend A Trade-Off",
+                "The final memo must explain why one optimization survives p99, cost, quality/risk, and headroom while another is rejected.",
+                COLORS["RedLine"],
+            ),
+            mo.md("""
+### Scenario
+
+The engineering lead does not want a benchmark screenshot. They want the
+optimization you recommend, the trade-off it accepts, and the tempting
+alternative it rejects.
+            """),
+            partD_prediction,
+        ]
+        if partD_prediction.value is None:
+            items.append(mo.callout(mo.md("Commit to the candidate prediction before opening the frontier."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partD_risk_budget, partD_cost_ceiling], widths="equal"))
+        fig = go.Figure()
+        for row in v2_09_partD_candidates:
+            fig.add_trace(go.Scatter(
+                x=[row["daily_cost"]],
+                y=[row["p99_ms"]],
+                mode="markers+text",
+                text=[row["label"]],
+                textposition="top center",
+                name=row["label"],
+                marker=dict(
+                    size=16,
+                    color=COLORS["GreenLine"] if row["feasible"] else COLORS["RedLine"],
+                    symbol="circle" if row["feasible"] else "x",
+                ),
+                hovertemplate="%{text}<br>cost=%{x:.1f}<br>p99=%{y:.1f} ms<extra></extra>",
+            ))
+        fig.add_hline(y=v2_09_packet["slo_ms"], line_dash="dash", line_color=COLORS["RedLine"], annotation_text="p99 guardrail")
+        fig.add_vline(x=partD_cost_ceiling.value, line_dash="dash", line_color=COLORS["OrangeLine"], annotation_text="cost ceiling")
+        fig.update_layout(
+            height=390,
+            xaxis=dict(title="Daily cost", gridcolor="#edf2f7"),
+            yaxis=dict(title="p99 latency / time budget (ms)", gridcolor="#edf2f7"),
+            showlegend=False,
+            margin=dict(l=70, r=30, t=50, b=55),
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        rows = []
+        for row in v2_09_partD_candidates:
+            rows.append((
+                row["label"],
+                v2_09_ms(row["p99_ms"]),
+                v2_09_pct(row["headroom"]),
+                v2_09_money(row["daily_cost"]),
+                f"{row['quality_loss_pct']:.1f}%",
+                "PASS" if row["feasible"] else "FAIL: " + ", ".join(row["failures"]),
+                row["reason"],
+            ))
+        items.append(v2_09_table(
+            ("Candidate", "p99", "Headroom", "Daily cost", "Quality/risk", "Gate", "Trade-off"),
+            rows,
+        ))
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
+          {v2_09_metric_card("Selected", v2_09_partD_selected['label'], "best feasible score", COLORS["GreenLine"], not v2_09_partD_selected["feasible"])}
+          {v2_09_metric_card("Rejected", v2_09_partD_rejected['label'], ", ".join(v2_09_partD_rejected["failures"]) or "dominated", COLORS["RedLine"])}
+          {v2_09_metric_card("Risk budget", f"{partD_risk_budget.value:.1f}%", "quality/safety loss", COLORS["OrangeLine"])}
+          {v2_09_metric_card("Cost ceiling", v2_09_money(partD_cost_ceiling.value), "daily", COLORS["BlueLine"])}
+        </div>
+        """))
+        items.append(v2_09_feedback(
+            partD_prediction.value,
+            v2_09_partD_selected["id"],
+            "**Prediction matched the frontier.** The chosen option survives all report guardrails.",
+            "**Trade-off trap:** fastest, cheapest, or most familiar is not enough; feasibility is a conjunction of p99, headroom, quality/risk, and cost.",
+        ))
+        items.append(v2_09_failure_card(
+            not v2_09_partD_selected["feasible"],
+            "No candidate satisfies all report guardrails",
+            (
+                f"Best candidate is {v2_09_partD_selected['label']}, but failures are "
+                f"{', '.join(v2_09_partD_selected['failures']) or 'none'}."
+            ),
+            "relax scope, collect more evidence, or change the capacity plan before signing the memo",
+        ))
+        items.append(v2_09_math_peek(
+            "Math Peek / Source Model - trade-off feasibility",
+            f"""
+```
+feasible =
+  p99 <= track_slo
+  and headroom >= target_headroom
+  and quality_loss <= risk_budget
+  and daily_cost <= cost_ceiling
+
+score = p99/SLO + headroom_penalty + cost_penalty + quality_penalty
+```
+
+Selected candidate: `{v2_09_partD_selected['label']}`.
+Rejected alternative: `{v2_09_partD_rejected['label']}`. Chapter anchors:
+efficiency frontier, combining techniques, and case-study lessons.
+            """,
+        ))
+        items.extend([partD_checkpoint, partD_rejected])
+        return mo.vstack(items)
+
+    def build_synthesis():
+        incomplete = []
+        required = {
+            "Part A prediction": partA_prediction.value,
+            "Part A checkpoint": partA_checkpoint.value,
+            "Part B prediction": partB_prediction.value,
+            "Part B checkpoint": partB_checkpoint.value,
+            "Part C prediction": partC_prediction.value,
+            "Part C checkpoint": partC_checkpoint.value,
+            "Part D prediction": partD_prediction.value,
+            "Part D checkpoint": partD_checkpoint.value,
+            "Part D rejected alternative": partD_rejected.value,
+            "V2-10 implication": v2_09_next_implication.value,
+        }
+        for label, value in required.items():
+            if value is None:
+                incomplete.append(label)
+        implication_text = {
+            "measured_p99": "V2-10 must use measured p99 as the serving SLO input, not peak throughput.",
+            "capacity_headroom": "V2-10 batching and admission controls must preserve the measured capacity headroom.",
+            "residual_bottleneck": "V2-10 should treat the residual bottleneck as an inference rollout risk.",
+            "regression_canary": "V2-10 rollout must include the regression canary because variance can hide tail changes.",
+        }.get(v2_09_next_implication.value, "V2-10 implication not selected yet.")
+        selected_id = partD_checkpoint.value or v2_09_partD_selected["id"]
+        rejected_id = partD_rejected.value or v2_09_partD_rejected["id"]
+        final_summary = (
+            f"For {v2_09_packet['label']}, localize {v2_09_bottleneck_label(v2_09_partA_base['bottleneck'])}; "
+            f"use {v2_09_partB['decision']} as the regression gate; plan "
+            f"{partC_units.value} {v2_09_packet['serving_unit']} with "
+            f"{v2_09_pct(v2_09_partC['headroom'])} headroom; defend "
+            f"{v2_09_candidate_label(selected_id)} and reject {v2_09_candidate_label(rejected_id)}."
+        )
+        ledger_design = {
+            "lab_id": v2_09_metadata.lab_id,
+            "track_id": v2_09_profile.track_id,
+            "scenario_id": v2_09_packet["scenario_id"],
+            "stakeholder": v2_09_packet["stakeholder"],
+            "report_frame": v2_09_packet["report_frame"],
+            "partA_predicted_bottleneck": partA_prediction.value or "no_selection",
+            "partA_actual_bottleneck": v2_09_partA_base["bottleneck"],
+            "partA_selected_first_lever": partA_checkpoint.value or "no_selection",
+            "partA_profile_p99_ms": round(v2_09_partA_base["p99_ms"], 4),
+            "partA_selected_speedup": round(v2_09_partA_speedup, 4),
+            "partB_prediction": partB_prediction.value or "no_selection",
+            "partB_samples": partB_samples.value,
+            "partB_cv_pct": round(partB_cv.value, 4),
+            "partB_candidate_delta_pct": round(partB_delta.value, 4),
+            "partB_mde_pct": round(v2_09_partB["mde_pct"], 4),
+            "partB_decision": partB_checkpoint.value or v2_09_partB["decision"],
+            "partC_prediction": partC_prediction.value or "no_selection",
+            "partC_demand_amount": round(v2_09_partC["demand"], 4),
+            "partC_serving_units": partC_units.value,
+            "partC_utilization_pct": round(v2_09_partC["utilization"] * 100.0, 4),
+            "partC_headroom_pct": round(v2_09_partC["headroom"] * 100.0, 4),
+            "partC_daily_cost": round(v2_09_partC["daily_cost"], 4),
+            "partC_decision": partC_checkpoint.value or "no_selection",
+            "partD_prediction": partD_prediction.value or "no_selection",
+            "partD_selected_candidate": selected_id,
+            "partD_rejected_candidate": rejected_id,
+            "partD_computed_selected": v2_09_partD_selected["id"],
+            "partD_computed_rejected": v2_09_partD_rejected["id"],
+            "partD_risk_budget_pct": partD_risk_budget.value,
+            "partD_cost_ceiling": partD_cost_ceiling.value,
+            "v2_10_implication": implication_text,
+            "final_summary": final_summary,
+        }
+        if not incomplete:
+            ledger.save(track=v2_09_profile.track_id, chapter=v2_09_chapter, design=ledger_design)
+        report = build_lab_report(
+            v2_09_metadata,
+            student_id=v2_09_student_id.value or "",
+            track=v2_09_profile.label,
+            scenario=v2_09_packet["workload"],
+            learning_objectives=(
+                "Localize the active bottleneck before optimizing.",
+                "Use baseline, variance, and detectability evidence for regressions.",
+                "Convert measured performance into capacity headroom and cost.",
+                "Defend an optimization trade-off and reject an alternative.",
+            ),
+            predictions={
+                "part_a_bottleneck": partA_prediction.value,
+                "part_b_regression": partB_prediction.value,
+                "part_c_capacity": partC_prediction.value,
+                "part_d_tradeoff": partD_prediction.value,
+            },
+            knob_settings={
+                "part_a_pressure": partA_pressure.value,
+                "part_a_lever": partA_lever.value,
+                "part_b_samples": partB_samples.value,
+                "part_b_cv_pct": partB_cv.value,
+                "part_b_delta_pct": partB_delta.value,
+                "part_c_demand_multiplier": partC_demand.value,
+                "part_c_units": partC_units.value,
+                "part_c_optimization": partC_optimization.value,
+                "part_d_risk_budget_pct": partD_risk_budget.value,
+                "part_d_cost_ceiling": partD_cost_ceiling.value,
+            },
+            binding_constraints={
+                "part_a_bottleneck": v2_09_bottleneck_label(v2_09_partA_base["bottleneck"]),
+                "part_b_decision": v2_09_partB["decision"],
+                "part_c_failures": v2_09_partC["failures"],
+                "part_d_selected_failures": v2_09_partD_selected["failures"],
+            },
+            decisions={
+                "part_a_checkpoint": partA_checkpoint.value,
+                "part_b_checkpoint": partB_checkpoint.value,
+                "part_c_checkpoint": partC_checkpoint.value,
+                "part_d_selected": selected_id,
+                "part_d_rejected": rejected_id,
+                "v2_10_implication": implication_text,
+            },
+            reflections={"performance_engineering_memo": final_summary},
+            evidence_summary={
+                "actual_bottleneck": v2_09_bottleneck_label(v2_09_partA_base["bottleneck"]),
+                "mde_pct": round(v2_09_partB["mde_pct"], 3),
+                "capacity_headroom_pct": round(v2_09_partC["headroom"] * 100.0, 3),
+                "capacity_daily_cost": round(v2_09_partC["daily_cost"], 3),
+                "selected_candidate": v2_09_candidate_label(selected_id),
+                "rejected_candidate": v2_09_candidate_label(rejected_id),
+            },
+            final_decision={
+                "memo": final_summary,
+                "computed_selected": v2_09_partD_selected["label"],
+                "computed_rejected": v2_09_partD_rejected["label"],
+            },
+            big_takeaways=(
+                "Performance optimization starts with bottleneck localization.",
+                "Regression evidence needs baseline variance and detectability.",
+                "Capacity planning is an amount system, not an average-speed claim.",
+                "A credible optimization report names the trade-off and rejected alternative.",
+            ),
+            residual_risk=(
+                "Teaching constants must be checked against production traces, current hardware counters, "
+                "quality canaries, and real workload distributions before launch."
+            ),
+            source_trace={
+                "book_anchor": v2_09_metadata.book_anchor,
+                "chapter_sections": (
+                    "The iron law of ML performance",
+                    "System Profiling",
+                    "Profiling feedback loop",
+                    "Measurement at Scale",
+                    "The Optimization Playbook",
+                    "Fallacies and Pitfalls",
+                ),
+                "local_solver": "v2_09_profile_result, v2_09_regression_result, v2_09_capacity_result, v2_09_tradeoff_candidates",
+                "hardware_ref": v2_09_packet["hardware_ref"],
+                "system_ref": v2_09_packet["system_ref"],
+            },
+            result_snapshot=ledger_design,
+            incomplete_fields=tuple(incomplete),
+        )
+        status_kind = "success" if not incomplete else "warn"
+        status_text = "Saved to Design Ledger" if not incomplete else "Complete all prediction and checkpoint controls to save."
+        return mo.vstack([
+            mo.md("## Synthesis - Performance Engineering Memo"),
+            v2_09_student_id,
+            v2_09_next_implication,
+            mo.callout(mo.md(f"**Memo summary:** {final_summary}  \n\n**V2-10 implication:** {implication_text}"), kind=status_kind),
+            mo.callout(mo.md(status_text), kind=status_kind),
+            v2_09_table(
+                ("Memo field", "Evidence", "Report decision"),
+                (
+                    ("Bottleneck", v2_09_bottleneck_label(v2_09_partA_base["bottleneck"]), v2_09_optimization_label(partA_checkpoint.value or v2_09_partA_best_lever)),
+                    ("Regression", f"MDE {v2_09_partB['mde_pct']:.1f}%, decision {v2_09_partB['decision']}", partB_checkpoint.value or "not selected"),
+                    ("Capacity", f"{v2_09_pct(v2_09_partC['headroom'])} headroom, {v2_09_money(v2_09_partC['daily_cost'])}/day", partC_checkpoint.value or "not selected"),
+                    ("Trade-off", f"computed select {v2_09_partD_selected['label']}; reject {v2_09_partD_rejected['label']}", f"student select {v2_09_candidate_label(selected_id)}; reject {v2_09_candidate_label(rejected_id)}"),
+                    ("Next lab", implication_text, "carry into V2-10 inference"),
+                ),
+            ),
+            report_export_panel(report),
+        ])
 
     tabs = mo.ui.tabs({
-        "Part A -- The Roofline Diagnostic": build_part_a(),
-        "Part B -- The Fusion Dividend": build_part_b(),
-        "Part C -- FlashAttention: The Savings Curve": build_part_c(),
-        "Part D -- Precision Engineering": build_part_d(),
-        "Part E -- The Optimization Playbook": build_part_e(),
+        "Opening": v2_09_opening(),
+        "Part A: Bottleneck Localization": build_part_a(),
+        "Part B: Regression Evidence": build_part_b(),
+        "Part C: Capacity Planning": build_part_c(),
+        "Part D: Trade-off Report": build_part_d(),
         "Synthesis": build_synthesis(),
     })
     tabs
     return
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: LEDGER HUD
-# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred):
-    if pA_pred.value is not None:
-        ledger.save(chapter=9, design={
-            "roofline_diagnostic": "memory-bound",
-            "flash_savings_ratio_32k": 128,
-            "optimization_methodology": "profile-diagnose-treat",
-        })
-
+def _(
+    COLORS,
+    mo,
+    v2_09_bottleneck_label,
+    v2_09_metadata,
+    v2_09_money,
+    v2_09_packet,
+    v2_09_partA_base,
+    v2_09_partC,
+    v2_09_partD_selected,
+    v2_09_profile,
+    v2_09_pct,
+):
+    _status = "PASS" if v2_09_partC["feasible"] and v2_09_partD_selected["feasible"] else "WATCH"
+    _status_color = COLORS["GreenLine"] if _status == "PASS" else COLORS["OrangeLine"]
     mo.Html(f"""
-    <div style="background: #0f172a; border-radius: 10px; padding: 18px 24px;
-                margin-top: 32px; font-family: 'SF Mono', 'Fira Code', monospace;">
-        <div style="color: #475569; font-size: 0.7rem; font-weight: 700;
-                    text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 10px;">
-            Design Ledger &middot; Lab V2-09 Saved
-        </div>
-        <div style="color: #94a3b8; font-size: 0.82rem; line-height: 1.8;">
-            <span style="color: #64748b;">roofline_diagnostic:</span>
-            <span style="color: {COLORS['RedLine']};">memory-bound</span><br/>
-            <span style="color: #64748b;">flash_savings_32k:</span>
-            <span style="color: {COLORS['GreenLine']};">128x</span><br/>
-            <span style="color: #64748b;">methodology:</span>
-            <span style="color: {COLORS['BlueLine']};">profile &rarr; diagnose &rarr; treat</span>
-        </div>
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">{v2_09_metadata.lab_id}</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v2_09_profile.label}</span>
+      <span class="hud-label">BOTTLENECK</span>
+      <span class="hud-value">{v2_09_bottleneck_label(v2_09_partA_base['bottleneck'])}</span>
+      <span class="hud-label">HEADROOM</span>
+      <span class="hud-value">{v2_09_pct(v2_09_partC['headroom'])}</span>
+      <span class="hud-label">COST</span>
+      <span class="hud-value">{v2_09_money(v2_09_partC['daily_cost'])}/day</span>
+      <span class="hud-label">SLO</span>
+      <span class="hud-value">{v2_09_packet['slo_ms']:.0f} ms</span>
+      <span style="flex:1;"></span>
+      <span class="hud-label">STATUS</span>
+      <span style="color:{_status_color}; font-family:var(--font-mono);">{_status}</span>
     </div>
     """)
     return
+
 
 if __name__ == "__main__":
     app.run()

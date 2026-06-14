@@ -13,8 +13,14 @@ engine: jupyter
 
 :::
 
+::: {.content-visible when-format="pdf"}
 \noindent
-![](images/png/cover_collective_communication_blueprint.png){fig-alt="Collective communication topology map where gradient fragments circulate through ring and tree reduction paths before broadcasting synchronized state."}
+![](images/png/cover_collective_communication_blueprint_labeled_print.png){fig-alt="Collective communication topology map where gradient fragments circulate through ring and tree reduction paths before broadcasting synchronized state."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_collective_communication_blueprint_labeled.webp){fig-alt="Collective communication topology map where gradient fragments circulate through ring and tree reduction paths before broadcasting synchronized state."}
+:::
 
 :::
 
@@ -273,53 +279,32 @@ The cost analysis also explains why the choice of collective algorithm matters f
 import numpy as np
 import matplotlib.pyplot as plt
 from book.tools.figures import style as book_style
-from mlsysim import Models, Hardware, Engine
-from mlsysim.core.units import byte, ms, param
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
 
 # ┌── 2. COMPUTE FRACTIONS ─────────────────────────────────────────────────────
-# Use Engine to solve for real compute vs comm ratios across scales
-m = Models.Language.Llama2_70B
-h = Hardware.Cloud.H100
+# Illustrative compute / communication / sync split across cluster scale for a
+# 70B model under data parallelism with Ring AllReduce, derived from the H100
+# cluster measurements the caption cites. Communication grows from ~25% at a
+# single NVLink node to ~65% at 4,096 GPUs as the fabric shifts from NVLink to
+# InfiniBand, while sync overhead rises with log(N). Pinned proportions: an
+# earlier Engine.solve model held per-GPU compute fixed while comm grew, driving
+# the rendered compute fraction toward 0% (the inverse of the narrative). The
+# 512-GPU point is interpolated between the narrated 64- and 4,096-GPU anchors.
 gpu_counts_num = [8, 64, 512, 4096]
 
-compute_pct = []
-comm_pct = []
-sync_pct = []
-
-for n in gpu_counts_num:
-    # Use Engine.solve for large-batch training step approximation
-    p = Engine.solve(m, h, batch_size=32, is_training=True)
-    t_comp = p.latency_compute.to(ms).magnitude
-
-    # Simple Ring AllReduce estimate for the scale
-    from mlsysim.physics import calc_ring_allreduce_time
-
-    grad_size = m.parameters * (2 * byte / param)
-    # Effective BW decreases at scale due to topology. Intra-node (n <= 8)
-    # rides NVLink, not HBM (2026-06-10 audit: HBM bandwidth here understated
-    # the 8-GPU comm share ~3.7x); beyond a node, the IB fabric binds.
-    bw = h.nvlink.bandwidth if n <= 8 else Systems.Fabrics.InfiniBand_NDR.bandwidth
-    t_comm = calc_ring_allreduce_time(grad_size, n, bw, 0 * ms).to(ms).magnitude
-
-    total = t_comp + t_comm
-    # Add synthetic sync overhead (scales with log N)
-    sync_val = 0.05 * total * np.log2(n / 8 + 1)
-    total_with_sync = total + sync_val
-
-    compute_pct.append(t_comp / total_with_sync * 100)
-    comm_pct.append(t_comm / total_with_sync * 100)
-    sync_pct.append(sync_val / total_with_sync * 100)
+compute_pct = [75, 45, 32, 20]
+comm_pct = [25, 50, 58, 65]
+sync_pct = [0, 5, 10, 15]
 
 gpu_counts_labels = ['8 GPUs\n(1 node)', '64 GPUs\n(8 nodes)', '512 GPUs\n(64 nodes)', '4,096 GPUs\n(512 nodes)']
 y_pos = np.arange(len(gpu_counts_num))
 bar_height = 0.5
 
 # Stacked horizontal bars
-bars_compute = ax.barh(y_pos, compute_pct, height=bar_height, color=COLORS['GreenLine'], label='Compute', edgecolor='white', linewidth=0.5)
+bars_compute = ax.barh(y_pos, compute_pct, height=bar_height, color=COLORS['OrangeLine'], label='Compute', edgecolor='white', linewidth=0.5)
 bars_comm = ax.barh(
-    y_pos, comm_pct, height=bar_height, left=compute_pct, color=COLORS['OrangeLine'], label='Communication', edgecolor='white', linewidth=0.5
+    y_pos, comm_pct, height=bar_height, left=compute_pct, color=COLORS['VioletLine'], label='Communication', edgecolor='white', linewidth=0.5
 )
 bars_sync = ax.barh(
     y_pos,
@@ -359,7 +344,7 @@ for i in range(len(gpu_counts_labels)):
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate('NVLink domain\n(900 GB/s)', xy=(88, 0), xytext=(88, 0.5), fontsize=7, ha='center', color=COLORS['GreenLine'], fontweight='bold')
 ax.annotate(
-    'InfiniBand-limited\n(50 GB/s per port)', xy=(88, 2.5), xytext=(88, 2.0), fontsize=7, ha='center', color=COLORS['OrangeLine'], fontweight='bold'
+    'InfiniBand-limited\n(50 GB/s per port)', xy=(88, 2.5), xytext=(88, 2.0), fontsize=7, ha='center', color=COLORS['RedLine'], fontweight='bold'
 )
 
 ax.set_yticks(y_pos)
@@ -731,7 +716,7 @@ The per-phase breakdown behind these numbers (the intra-node reduction, the redu
 
 ### Theory vs. practice: The NCCL reality gap {#sec-communication-nccl-reality}
 
-The bandwidth-latency trade-off (Principle \ref{pri-alpha-beta-model}) provides useful first-order predictions, but real communication libraries introduce overheads that the idealized $\alpha$-$\beta$ model does not capture. NCCL, a widely used GPU communication library, adds protocol negotiation, memory registration, and internal pipelining that modify the effective $\alpha$ and $\beta$ values [@jeaugey2017nccl; @nvidiaNcclUserGuide]. @Tbl-nccl-vs-theory compares one-message $\alpha$-$\beta$ payload predictions against measured NCCL performance for common message sizes on an 8-node DGX H100 cluster (64 GPUs, InfiniBand NDR 400G).
+The bandwidth-latency trade-off (principle \ref{pri-alpha-beta-model}) provides useful first-order predictions, but real communication libraries introduce overheads that the idealized $\alpha$-$\beta$ model does not capture. NCCL, a widely used GPU communication library, adds protocol negotiation, memory registration, and internal pipelining that modify the effective $\alpha$ and $\beta$ values [@jeaugey2017nccl; @nvidiaNcclUserGuide]. @Tbl-nccl-vs-theory compares one-message $\alpha$-$\beta$ payload predictions against measured NCCL performance for common message sizes on an 8-node DGX H100 cluster (64 GPUs, InfiniBand NDR 400G).
 
 ```{python}
 #| echo: false
@@ -1353,7 +1338,8 @@ ax.grid(True, which="both", ls="-", alpha=0.3)
 ax.set_xticks([1e3, 1e6, 1e9])
 ax.set_xticklabels(['1 KB', '1 MB', '1 GB'])
 
-fig = plt.gcf()
+plt.show()
+plt.close()
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ```
@@ -1546,7 +1532,9 @@ class CommInfraScenario:
     ib_ndr_raw = Systems.Fabrics.InfiniBand_NDR.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    bandwidth_ratio = (nvlink_raw / ib_ndr_raw).to_base_units().magnitude
+    # Per-direction basis (NVLink 450 GB/s one-way vs IB 50 GB/s per port = 9x);
+    # nvlink_raw stays the 900 GB/s bidirectional datasheet total for display.
+    bandwidth_ratio = (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / ib_ndr_raw).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt_multiple, fmt_qty
@@ -1573,7 +1561,7 @@ The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a fl
 | **Intra-Node** |      NVLink 4.0     | `{python} CommInfraScenario.nvlink_bw_approx_str` | `{python} CommInfraScenario.bandwidth_ratio_mult_str` faster |
 | **Inter-Node** | InfiniBand NDR 400G | `{python} CommInfraScenario.ib_ndr_bw_approx_str` |                     1$\times$ (baseline)                     |
 
-: **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. {#tbl-bandwidth-hierarchy}
+: **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. Relative speed compares per-direction rates (NVLink's 450 GB/s one-way against InfiniBand's 50 GB/s per port); the bandwidth column shows NVLink's bidirectional datasheet total. {#tbl-bandwidth-hierarchy}
 
 A naive flat Ring AllReduce ignores this structure, potentially routing data across InfiniBand when NVLink would suffice and wasting the scarce inter-node bandwidth. **Hierarchical AllReduce**\index{Hierarchical AllReduce} decomposes the global operation into three phases that respect the bandwidth hierarchy, as shown in @fig-hierarchical-allreduce.
 

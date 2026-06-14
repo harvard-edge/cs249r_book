@@ -68,6 +68,55 @@ def test_percent_number_style_not_flagged(tmp_path):
     assert check_file(p) == []
 
 
+def test_percent_symbol_style_in_prose_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="rate_str = fmt_percent(0.5, style='symbol')",
+        prose="improves by `{python} C.rate_str` overall"))
+    assert any(x.code == "percent_symbol_in_prose" for x in check_file(p))
+
+
+def test_percent_symbol_style_in_caption_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="rate_str = fmt_percent(0.5, style='symbol')",
+        prose=": **Caption**: The rate is `{python} C.rate_str`. {#tbl-x}"))
+    assert any(x.code == "percent_symbol_in_prose" for x in check_file(p))
+
+
+def test_percent_prose_style_in_table_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="rate_str = fmt_percent(0.5, style='prose')",
+        prose="| Metric | Value |\n|:--|--:|\n| Rate | `{python} C.rate_str` |"))
+    assert any(x.code == "percent_prose_in_table" for x in check_file(p))
+
+
+def test_indexed_percent_prose_style_in_table_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="rates_str = [fmt_percent(0.5, style='prose')]",
+        prose="| Metric | Value |\n|:--|--:|\n| Rate | `{python} C.rates_str[0]` |"))
+    assert any(x.code == "percent_prose_in_table" for x in check_file(p))
+
+
+def test_percent_range_symbol_style_in_prose_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="range_str = fmt_percent_range(0.3, 0.5, style='symbol')",
+        prose="drops by `{python} C.range_str` overall"))
+    assert any(x.code == "percent_symbol_in_prose" for x in check_file(p))
+
+
+def test_pp_symbol_style_in_prose_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="gap_str = fmt_pp(7, style='symbol')",
+        prose="a `{python} C.gap_str` gap remains"))
+    assert any(x.code == "percent_symbol_in_prose" for x in check_file(p))
+
+
+def test_pp_prose_style_in_table_flagged(tmp_path):
+    p = _write(tmp_path, CELL.format(
+        assigns="gap_str = fmt_pp(7)",
+        prose="| Metric | Gap |\n|:--|--:|\n| Accuracy | `{python} C.gap_str` |"))
+    assert any(x.code == "percent_prose_in_table" for x in check_file(p))
+
+
 def test_usd_prefix_dup_flagged(tmp_path):
     p = _write(tmp_path, CELL.format(
         assigns="cost_str = fmt_usd(1500)",
