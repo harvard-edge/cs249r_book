@@ -1079,7 +1079,7 @@ class FlashAttentionSavings:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     from mlsysim.fmt import fmt, fmt_int, fmt_qty
 
-    naive_mb_str = fmt_qty(naive_attn_bytes_total, MB, precision=1, commas=False)
+    naive_gb_str = fmt_qty(naive_attn_bytes_total, GB, precision=1, commas=False)
     flash_mb_str = fmt_qty(flash_attn_bytes_total, MB, precision=1, commas=False)
     savings_mult_str = fmt_multiple(round(savings_ratio), commas=False, precision=0)
 
@@ -1097,7 +1097,7 @@ FlashAttention\index{FlashAttention} [@dao2022] reformulates attention using til
 *FlashAttention shrinks attention memory about 65 times.*
 :::
 
-The reduction in materialized attention state is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the naive implementation materializes and revisits approximately `{python} FlashAttentionSavings.naive_mb_str` of HBM-resident tensors for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. FlashAttention avoids the quadratic score and probability tensors; its persistent HBM-visible tensors are dominated by $Q$, $K$, $V$, and output $Y$, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. This simplified accounting excludes schedule-dependent tile reloads inside a particular kernel, but it captures the important scaling result: a `{python} FlashAttentionSavings.savings_mult_str` reduction in HBM-visible attention state for this configuration.
+The reduction in materialized attention state is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the naive implementation materializes and revisits approximately `{python} FlashAttentionSavings.naive_gb_str` of HBM-resident tensors for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. FlashAttention avoids the quadratic score and probability tensors; its persistent HBM-visible tensors are dominated by $Q$, $K$, $V$, and output $Y$, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. This simplified accounting excludes schedule-dependent tile reloads inside a particular kernel, but it captures the important scaling result: a `{python} FlashAttentionSavings.savings_mult_str` reduction in HBM-visible attention state for this configuration.
 
 The key insight behind FlashAttention is the **online softmax**\index{Online Softmax!FlashAttention}[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $S{\times}S$ matrix.
 
@@ -1112,7 +1112,7 @@ The online algorithm avoids this by maintaining running statistics that are upda
 
 After processing all tiles, the running output contains the mathematically equivalent result to the standard algorithm up to the floating-point roundoff of the chosen precision. The rescaling step (step 3) is the critical innovation: it allows the algorithm to "fix up" previous partial results when a new tile reveals a larger maximum value. The algorithm is exact in the mathematical sense, but floating-point execution order can still change the last few bits relative to an unfused implementation.
 
-The cost of this tiling is additional arithmetic: the rescaling operations in step 3 add FLOPs that the standard algorithm does not perform. Because the operation is profoundly memory-bound (the arithmetic intensity of standard attention is roughly 1--10 FLOP/byte for typical sequence lengths), the additional compute is "free" in the sense that the GPU's arithmetic units would otherwise be idle, waiting for HBM data transfers. *Trading extra compute for fewer memory accesses is profitable whenever the operation is memory-bound*, the central principle of this entire chapter.
+The cost of this tiling is additional arithmetic: the rescaling operations in step 3 add FLOPs that the standard algorithm does not perform. Because the operation is profoundly memory-bound (standard attention's arithmetic intensity falls to roughly 1--10 FLOP/byte once its materialized score and probability tensors are counted against the HBM traffic they generate, below the higher regime-dependent figures in @tbl-arithmetic-intensity), the additional compute is "free" in the sense that the GPU's arithmetic units would otherwise be idle, waiting for HBM data transfers. *Trading extra compute for fewer memory accesses is profitable whenever the operation is memory-bound*, the central principle of this entire chapter.
 
 ```{python}
 #| echo: false
