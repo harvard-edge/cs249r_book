@@ -6,8 +6,8 @@ This folder contains the vector graphics (`.svg`) used in the academic manuscrip
 To ensure consistency across the paper and the documentation site, all figures use the following semantic color scheme:
 
 - **Cyan (`#e0f2fe` background, `#0284c7` stroke):** Represents **Solvers (Layer E)** or analytical math in action.
-- **Yellow/Orange (`#fef08a` background, `#d97706` stroke):** Represents **Demand / Workloads (Layer A)** (e.g., parameter counts, FLOPs).
-- **Purple (`#ddd6fe` background, `#7c3aed` stroke):** Represents **Supply / Hardware (Layers B-D)** (e.g., silicon, networks).
+- **Orange (`#fff7ed` background, `#d97706` stroke):** Represents **Demand / Workloads (Layer A)** (e.g., parameter counts, FLOPs).
+- **Purple (`#f5f3ff` or `#ddd6fe` background, `#7c3aed` stroke):** Represents **Supply / Hardware (Layers B-D)** (e.g., silicon, networks).
 - **Green (`#ecfdf5` background, `#10b981` stroke):** Represents **Outcomes** (e.g., predicted latency, bottleneck identification, cost).
 - **Light Gray (`#f8fafc` background, `#cbd5e1` stroke):** Represents external inputs or documentation (e.g., datasheets, literature).
 - **Crimson (`#a31f34`):** Represents binding constraints or critical alerts (e.g., hitting a "Wall").
