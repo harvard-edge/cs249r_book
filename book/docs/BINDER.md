@@ -133,10 +133,10 @@ Requires Python 3.10+ and project dependencies (Rich, etc.). Run `./book/binder 
 | Group | What it validates | Common scopes |
 |-------|-------------------|---------------|
 | `cli` | Public Binder command/help contract | `contract` |
-| `refs` | Cross-refs, citations, inline `{python}` refs | `cross-refs`, `citations`, `inline`; opt-in: `inline-python`, `self-ref` |
+| `refs` | Cross-refs, citations, inline `{python}` refs | `cross-refs`, `citations`, `scaffold-citations`, `inline`; opt-in: `inline-python`, `self-ref` |
 | `labels` | Duplicate and orphan `@fig-` / `@tbl-` / … labels | `duplicates`, `orphans` |
 | `headers` | Section IDs (`{#sec-…}`) and headline case | `ids`, `case` |
-| `bib` | Bibliography hygiene | `hygiene` |
+| `bib` | Bibliography hygiene, metadata style, citation integrity | `hygiene`, `style`, `integrity`; opt-in: `orphans`, `key-content` |
 | `footnotes` | Definition shape, placement, integrity | `definition-shape`, `placement`, `integrity` |
 | `figures` | Captions, div syntax, alt text, label-required | default set in `check figures help` |
 | `markup` | Low-level markup (patterns, div fences, callouts) | `patterns`, `div-fences`, `callouts` |
@@ -187,7 +187,7 @@ Requires Python 3.10+ and project dependencies (Rich, etc.). Run `./book/binder 
 ./book/binder check labels --scope orphans --vol1
 
 # External bibliography audit (optional dependency)
-./book/binder check references --scope hallucinator -f book/quarto/contents/vol1/backmatter/references.bib --limit 10
+./book/binder check references --scope hallucinator -f book/quarto/contents/references.bib --limit 10
 
 # Machine-readable output (CI / automation integration)
 ./book/binder check refs --json --quiet
@@ -287,7 +287,11 @@ Committed `.bib` files go through pre-commit in this order:
 
 1. **`bib-apply-mechanical`** — `./book/binder bib mechanical --pre-commit` on staged `.bib` only
 2. **`bibtex-tidy`** — layout
-3. **`./book/binder check bib --scope hygiene`** — same errors as `book/tools/bib_lint.py` (see `book/tools/bib_lint_baseline.json`)
+3. **`./book/binder check bib`** — curated bibliography gate:
+   `hygiene` for new hard BibTeX errors, `style` for new warning/info
+   metadata debt, and `integrity` for volume-scoped citation resolution.
+   Baselines: `book/tools/bib_lint_baseline.json` and
+   `book/tools/bib_lint_style_baseline.json`.
 
 Normalize the whole tree by hand:
 

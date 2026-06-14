@@ -237,6 +237,13 @@ CAPTIONS_BASELINE_PATH = (
     / "tools" / "audit" / "baselines" / "captions_baseline.json"
 )
 
+# Existing bibliography citations inside scaffolding blocks. New citations in
+# Purpose, learning objectives, or takeaways fail `refs.scaffold-citations`.
+SCAFFOLD_CITATION_BASELINE_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "tools" / "audit" / "baselines" / "scaffold_citation_baseline.json"
+)
+
 
 @dataclass(frozen=True)
 class Scope:
@@ -353,6 +360,8 @@ class ValidateCommand:
             Scope("inline-python", "_run_inline_python", default=False),
             Scope("cross-refs", "_run_refs"),
             Scope("citations", "_run_citations"),
+            Scope("scaffold-citations", "_run_scaffold_citations",
+                  note="no bibliography citations in Purpose, learning objectives, or takeaways; current debt baseline-ratcheted"),
             Scope("duplicate-year", "_run_duplicate_citation_year",
                   note='"[@foo1964] (1964)" — redundant year after citation'),
             Scope("duplicate-key", "_run_duplicate_citation_key",
@@ -393,6 +402,12 @@ class ValidateCommand:
         ],
         "bib": [
             Scope("hygiene", "_run_bib_hygiene"),
+            Scope("style", "_run_bib_style",
+                  note="baseline-ratcheted metadata style: title case, author initials, venues, publishers"),
+            Scope("integrity", "_run_bib_integrity",
+                  note="volume-scoped citation resolution: no missing keys or cross-volume leaks"),
+            Scope("orphans", "_run_bib_orphans", default=False,
+                  note="unused entries in volume BibTeX files; opt-in because current bibs retain legacy/canonical background"),
             # key-content fails on dev (legacy keys grandfathered).
             # Was never wired to pre-commit; default=False preserves status quo.
             Scope("key-content", "_run_bib_key_content", default=False),
@@ -1542,18 +1557,15 @@ class ValidateCommand:
         )
 
     def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
-        """Resolve the volume backmatter references.bib for a .qmd from its path."""
+        """Resolve the shared book references.bib for a book .qmd."""
         try:
             rel = file.relative_to(self.config_manager.book_dir)
         except ValueError:
             return None
         parts = rel.parts
-        if "vol1" in parts:
-            bib_file = self.config_manager.book_dir / "contents" / "vol1" / "backmatter" / "references.bib"
-        elif "vol2" in parts:
-            bib_file = self.config_manager.book_dir / "contents" / "vol2" / "backmatter" / "references.bib"
-        else:
+        if not ({"vol1", "vol2", "frontmatter", "backmatter"} & set(parts)):
             return None
+        bib_file = self.config_manager.book_dir / "contents" / "references.bib"
         return bib_file if bib_file.exists() else None
 
     def _run_citations(self, root: Path) -> ValidationRunResult:
@@ -1595,6 +1607,124 @@ class ValidateCommand:
         return ValidationRunResult(
             name="citations",
             description="Validate citation keys against bibliography files",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _SCAFFOLD_CITATION_KIND_RE = re.compile(
+        r"^:::+\s*\{[^}]*\.(callout-learning-objectives|callout-takeaways)\b"
+    )
+    _SCAFFOLD_DIV_OPEN_RE = re.compile(r"^:::+\s*\{")
+    _SCAFFOLD_DIV_CLOSE_RE = re.compile(r"^:::+\s*$")
+    _SCAFFOLD_PURPOSE_RE = re.compile(r"^##\s+Purpose\b")
+    _SCAFFOLD_H2_RE = re.compile(r"^##\s+")
+
+    def _load_scaffold_citation_baseline(self) -> Set[Tuple[str, str, str]]:
+        try:
+            data = json.loads(SCAFFOLD_CITATION_BASELINE_PATH.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return set()
+        return {
+            (entry.get("file", ""), entry.get("kind", ""), entry.get("key", ""))
+            for entry in data.get("allowed", [])
+        }
+
+    @staticmethod
+    def _scaffold_citation_kind(raw_kind: str) -> str:
+        if raw_kind == "callout-learning-objectives":
+            return "learning-objectives"
+        if raw_kind == "callout-takeaways":
+            return "takeaways"
+        return raw_kind
+
+    @classmethod
+    def _is_bibliography_citation_key(cls, key: str) -> bool:
+        key = key.rstrip(".,;:)")
+        return (
+            bool(key)
+            and not key.startswith(EXCLUDED_CITATION_PREFIXES)
+            and not key.lower().startswith(EXCLUDED_CITATION_PREFIXES)
+            and not re.match(r"^\d+\.\d+", key)
+        )
+
+    def _run_scaffold_citations(self, root: Path) -> ValidationRunResult:
+        """Block new bibliography citations in pedagogical scaffolding.
+
+        Purpose sections, learning objectives, and takeaways frame the chapter;
+        they should not carry provenance. Put source support in the body prose,
+        technical callout where the claim is taught, figure/table caption, or
+        appendix prose instead.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        baseline = self._load_scaffold_citation_baseline()
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            rel = self._relative_file(file)
+            lines = self._read_text(file).splitlines()
+            in_fence = False
+            in_purpose = False
+            callout_kind: Optional[str] = None
+            callout_depth = 0
+
+            for line_no, line in enumerate(lines, start=1):
+                if self._BIB_FENCE_RE.match(line):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+
+                if self._SCAFFOLD_PURPOSE_RE.match(line):
+                    in_purpose = True
+                elif in_purpose and self._SCAFFOLD_H2_RE.match(line):
+                    in_purpose = False
+
+                if callout_kind:
+                    if self._SCAFFOLD_DIV_OPEN_RE.match(line):
+                        callout_depth += 1
+                    elif self._SCAFFOLD_DIV_CLOSE_RE.match(line):
+                        callout_depth -= 1
+                        if callout_depth <= 0:
+                            callout_kind = None
+                        continue
+                else:
+                    match = self._SCAFFOLD_CITATION_KIND_RE.match(line)
+                    if match:
+                        callout_kind = self._scaffold_citation_kind(match.group(1))
+                        callout_depth = 1
+
+                kind = "purpose" if in_purpose else callout_kind
+                if not kind:
+                    continue
+
+                for key in CITATION_REF_PATTERN.findall(line):
+                    key = key.rstrip(".,;:)")
+                    if not self._is_bibliography_citation_key(key):
+                        continue
+                    if (rel, kind, key) in baseline:
+                        continue
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=line_no,
+                        code="citation_in_scaffold",
+                        message=(
+                            f"Bibliography citation @{key} appears in {kind}. "
+                            "Purpose, learning objectives, and takeaways should not carry citations."
+                        ),
+                        severity="error",
+                        context=line.strip()[:220],
+                        suggestion=(
+                            f"Move @{key} to the body prose, a technical callout/caption, "
+                            "or appendix passage where the sourced claim is actually taught; "
+                            f"leave the {kind} text citation-free."
+                        ),
+                    ))
+
+        return ValidationRunResult(
+            name="scaffold-citations",
+            description="No bibliography citations in Purpose, learning objectives, or takeaways",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -8322,31 +8452,399 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    @dataclass(frozen=True)
+    class _BibScope:
+        name: str
+        qmd_prefixes: Tuple[str, ...]
+        bib_paths: Tuple[Path, ...]
+
+    @dataclass(frozen=True)
+    class _BibEntryRef:
+        key: str
+        path: Path
+        line: int
+        entry_type: str
+
+    @dataclass(frozen=True)
+    class _CitationOccurrence:
+        key: str
+        path: Path
+        line: int
+        context: str
+        scope: "ValidateCommand._BibScope"
+
+    _BIB_CITE_RE = re.compile(r"(?<![=,(])\[?@([A-Za-z][\w:.-]*)\b")
+    _BIB_ENTRY_RE = re.compile(r"^@(?P<entry_type>\w+)\s*\{\s*(?P<key>[\w:.-]+)\s*,", re.M)
+    _BIB_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+    _BIB_SINGLE_LETTER_RE = re.compile(r"^[A-Z](\.[A-Z])*$")
+    _BIB_NON_CITE_PREFIXES = (
+        "sec-", "fig-", "tbl-", "eq-", "lst-", "exr-", "exm-", "thm-",
+        "cor-", "cnj-", "def-", "prp-", "rem-", "prf-", "alg-", "algo-",
+        "ch-", "nb-",
+    )
+    _BIB_FALSE_POSITIVE_KEYS = {
+        "media", "keyframes", "import", "supports", "page", "font-face",
+        "charset", "namespace", "document",
+        "grad", "staticmethod", "classmethod", "property", "abstractmethod",
+        "dataclass", "cached_property", "wraps",
+        "eecs",
+    }
+
+    def _book_bib_scopes(self) -> List[_BibScope]:
+        contents = self.config_manager.book_dir / "contents"
+        shared_bib = contents / "references.bib"
+        return [
+            self._BibScope("vol1", ("contents/vol1/",), (shared_bib,)),
+            self._BibScope("vol2", ("contents/vol2/",), (shared_bib,)),
+            self._BibScope(
+                "book-shared",
+                ("contents/frontmatter/", "contents/backmatter/"),
+                (shared_bib,),
+            ),
+        ]
+
+    def _book_bib_scope_for_qmd(self, qmd_path: Path) -> Optional[_BibScope]:
+        try:
+            rel = qmd_path.relative_to(self.config_manager.book_dir).as_posix()
+        except ValueError:
+            return None
+        for scope in self._book_bib_scopes():
+            if any(rel.startswith(prefix) for prefix in scope.qmd_prefixes):
+                return scope
+        return None
+
+    def _book_bib_scope_for_bib(self, bib_path: Path) -> Optional[_BibScope]:
+        resolved = bib_path.resolve()
+        for scope in self._book_bib_scopes():
+            if any(path.resolve() == resolved for path in scope.bib_paths):
+                return scope
+        return None
+
+    def _book_qmd_files_for_bib_root(self, root: Path) -> List[Path]:
+        """Return book QMD files relevant to a bibliography check."""
+        contents = self.config_manager.book_dir / "contents"
+        if root.is_file() and root.suffix == ".qmd":
+            return [root] if self._book_bib_scope_for_qmd(root) is not None else []
+
+        if root.is_file() and root.suffix == ".bib":
+            resolved = root.resolve()
+            matched_scopes = [
+                scope for scope in self._book_bib_scopes()
+                if any(path.resolve() == resolved for path in scope.bib_paths)
+            ]
+            if not matched_scopes:
+                return []
+            prefixes = tuple(sorted({prefix for scope in matched_scopes for prefix in scope.qmd_prefixes}))
+            files: List[Path] = []
+            for prefix in prefixes:
+                rel_dir = prefix.removeprefix("contents/").rstrip("/")
+                qroot = contents / rel_dir
+                if qroot.exists():
+                    files.extend(self._qmd_files(qroot))
+            return sorted({f for f in files if self._book_bib_scope_for_qmd(f) is not None})
+
+        if root.exists():
+            files = self._qmd_files(root)
+            return [f for f in files if self._book_bib_scope_for_qmd(f) is not None]
+
+        return []
+
+    def _book_bib_files_for_root(self, root: Path) -> List[Path]:
+        if root.is_file() and root.suffix == ".bib":
+            return [root]
+
+        selected: Set[Path] = set()
+        for qmd in self._book_qmd_files_for_bib_root(root):
+            scope = self._book_bib_scope_for_qmd(qmd)
+            if scope is not None:
+                selected.update(path for path in scope.bib_paths if path.exists())
+        if selected:
+            return sorted(selected)
+
+        bibs: Set[Path] = set()
+        for scope in self._book_bib_scopes():
+            for bib in scope.bib_paths:
+                if not bib.exists():
+                    continue
+                try:
+                    if bib == root or bib.is_relative_to(root):
+                        bibs.add(bib)
+                except ValueError:
+                    continue
+        return sorted(bibs)
+
+    @classmethod
+    def _bib_should_skip_cite_key(cls, key: str) -> bool:
+        key = key.rstrip(".,;:)")
+        return (
+            not key
+            or key.lower().startswith(cls._BIB_NON_CITE_PREFIXES)
+            or key in cls._BIB_FALSE_POSITIVE_KEYS
+            or bool(cls._BIB_SINGLE_LETTER_RE.match(key))
+            or bool(re.match(r"^\d+\.\d+", key))
+        )
+
+    @staticmethod
+    def _strip_bib_inline_protected(line: str) -> str:
+        line = re.sub(r"`[^`]*`", "", line)
+        line = re.sub(r"<!--.*?-->", "", line)
+        return line
+
+    def _citation_occurrences_for_qmd(self, path: Path) -> List[_CitationOccurrence]:
+        scope = self._book_bib_scope_for_qmd(path)
+        if scope is None:
+            return []
+
+        lines = self._read_text(path).splitlines()
+        occurrences: List[ValidateCommand._CitationOccurrence] = []
+        in_yaml = bool(lines and lines[0].strip() == "---")
+        in_fence = False
+        in_html_comment = False
+        in_raw_block: Optional[str] = None
+
+        for line_no, line in enumerate(lines, start=1):
+            stripped = line.strip()
+
+            if line_no > 1 and in_yaml and stripped == "---":
+                in_yaml = False
+                continue
+            if in_yaml:
+                continue
+
+            if in_html_comment:
+                if "-->" in line:
+                    in_html_comment = False
+                continue
+            if "<!--" in line and "-->" not in line:
+                in_html_comment = True
+                continue
+
+            if in_raw_block:
+                if f"</{in_raw_block}>" in line.lower():
+                    in_raw_block = None
+                continue
+            lower = line.lower()
+            if "<style" in lower and "</style>" not in lower:
+                in_raw_block = "style"
+                continue
+            if "<script" in lower and "</script>" not in lower:
+                in_raw_block = "script"
+                continue
+
+            if self._BIB_FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+
+            scan_line = self._strip_bib_inline_protected(line)
+            for match in self._BIB_CITE_RE.finditer(scan_line):
+                key = match.group(1).rstrip(".,;:)")
+                if self._bib_should_skip_cite_key(key):
+                    continue
+                occurrences.append(self._CitationOccurrence(
+                    key=key,
+                    path=path,
+                    line=line_no,
+                    context=line.strip()[:220],
+                    scope=scope,
+                ))
+        return occurrences
+
+    def _parse_bib_entries_for_integrity(self, bib_path: Path) -> Dict[str, _BibEntryRef]:
+        try:
+            text = self._read_text(bib_path)
+        except OSError:
+            return {}
+        entries: Dict[str, ValidateCommand._BibEntryRef] = {}
+        for match in self._BIB_ENTRY_RE.finditer(text):
+            key = match.group("key")
+            entries[key] = self._BibEntryRef(
+                key=key,
+                path=bib_path,
+                line=text.count("\n", 0, match.start()) + 1,
+                entry_type=match.group("entry_type").lower(),
+            )
+        return entries
+
+    def _book_bib_index(self) -> Dict[Path, Dict[str, _BibEntryRef]]:
+        index: Dict[Path, Dict[str, ValidateCommand._BibEntryRef]] = {}
+        for scope in self._book_bib_scopes():
+            for bib_path in scope.bib_paths:
+                if bib_path.exists() and bib_path not in index:
+                    index[bib_path] = self._parse_bib_entries_for_integrity(bib_path)
+        return index
+
+    def _run_bib_integrity(self, root: Path) -> ValidationRunResult:
+        """Validate citation keys against the shared book bibliography."""
+        t0 = time.time()
+        qmd_files = self._book_qmd_files_for_bib_root(root)
+        bib_index = self._book_bib_index()
+        all_bib_locations: Dict[str, List[ValidateCommand._BibEntryRef]] = defaultdict(list)
+        for entries in bib_index.values():
+            for entry in entries.values():
+                all_bib_locations[entry.key].append(entry)
+
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            for occ in self._citation_occurrences_for_qmd(qmd):
+                allowed_entries: Dict[str, ValidateCommand._BibEntryRef] = {}
+                for bib_path in occ.scope.bib_paths:
+                    allowed_entries.update(bib_index.get(bib_path, {}))
+                if occ.key in allowed_entries:
+                    continue
+
+                rel = self._relative_file(occ.path)
+                allowed = ", ".join(self._relative_file(path) for path in occ.scope.bib_paths)
+                elsewhere = all_bib_locations.get(occ.key, [])
+                if elsewhere:
+                    locations = ", ".join(
+                        f"{self._relative_file(entry.path)}:{entry.line}" for entry in elsewhere
+                    )
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=occ.line,
+                        code="bib_scope_violation",
+                        message=(
+                            f"Citation @{occ.key} is not in the allowed bibliography "
+                            f"for {occ.scope.name}; it exists in {locations}."
+                        ),
+                        severity="error",
+                        context=occ.context,
+                        suggestion=(
+                            f"Copy the reviewed @{occ.key} entry into {allowed}, "
+                            f"or replace @{occ.key} with a source already present in that volume."
+                        ),
+                    ))
+                else:
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=occ.line,
+                        code="bib_missing_citation",
+                        message=(
+                            f"Citation @{occ.key} is missing from the allowed "
+                            f"bibliography for {occ.scope.name}: {allowed}."
+                        ),
+                        severity="error",
+                        context=occ.context,
+                        suggestion=(
+                            f"Add a verified @{occ.key} BibTeX entry to {allowed}, "
+                            f"or replace/remove @{occ.key} if the local claim should use a different source."
+                        ),
+                    ))
+
+        return ValidationRunResult(
+            name="bib-integrity",
+            description="Shared book citation-to-BibTeX integrity",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_orphans(self, root: Path) -> ValidationRunResult:
+        """Report shared BibTeX entries that no book QMD cites."""
+        t0 = time.time()
+        selected_bibs = self._book_bib_files_for_root(root)
+        qmd_files = self._book_qmd_files_for_bib_root(root)
+        bib_index = self._book_bib_index()
+
+        cited_by_bib: Dict[Path, Set[str]] = {bib: set() for bib in selected_bibs}
+        for qmd in qmd_files:
+            for occ in self._citation_occurrences_for_qmd(qmd):
+                for bib_path in occ.scope.bib_paths:
+                    if bib_path in cited_by_bib and occ.key in bib_index.get(bib_path, {}):
+                        cited_by_bib[bib_path].add(occ.key)
+
+        issues: List[ValidationIssue] = []
+        for bib_path in selected_bibs:
+            entries = bib_index.get(bib_path, {})
+            cited = cited_by_bib.get(bib_path, set())
+            for key in sorted(set(entries) - cited):
+                entry = entries[key]
+                issues.append(ValidationIssue(
+                    file=self._relative_file(entry.path),
+                    line=entry.line,
+                    code="bib_orphan_entry",
+                    message=(
+                        f"@{entry.entry_type}{{{key}}} is not cited by any "
+                        "book QMD file in the shared book scope."
+                    ),
+                    severity="warning",
+                    context=f"@{entry.entry_type}{{{key},",
+                    suggestion=(
+                        f"Remove @{key}, cite it where it supports a local claim, "
+                        "or document it in a canonical-background allowlist before publication."
+                    ),
+                ))
+
+        return ValidationRunResult(
+            name="bib-orphans",
+            description="Unused shared bibliography entries",
+            files_checked=len(selected_bibs),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _bib_baseline_key_path(self, path: Path) -> str:
+        """Return the repo-relative path used by bib_lint baseline files."""
+        from cli.checks import bib_lint
+
+        return bib_lint.baseline_file_key(path, self.config_manager.root_dir)
+
+    @staticmethod
+    def _bib_style_suggestion(rule: str, key: str) -> str:
+        suggestions = {
+            "author-initials-only": (
+                f"Verify @{key}'s published byline and expand given names when "
+                "publicly attested; keep initials only when the source itself uses initials."
+            ),
+            "article-missing-volume": (
+                f"Add the journal volume for @{key}, or verify the entry is genuinely "
+                "preprint-style and adjust the metadata accordingly."
+            ),
+            "booktitle-suspect-acronym-only": (
+                f"Expand @{key}'s booktitle to the official full venue name plus "
+                "the acronym in parentheses when applicable."
+            ),
+            "publisher-not-canonical": (
+                f"Verify @{key}'s publisher against the official venue/source. "
+                "Use the canonical publisher name, or update the allow-list only after review."
+            ),
+            "title-appears-all-caps": (
+                f"Convert @{key}'s title to semantic sentence case and brace only "
+                "acronyms, mixed-case systems, and proper nouns."
+            ),
+            "booktitle-appears-all-caps": (
+                f"Convert @{key}'s booktitle to the official mixed-case venue name "
+                "and include the acronym in parentheses when applicable."
+            ),
+            "title-suspect-titlecase-function": (
+                f"Review @{key}'s title for semantic sentence case. Lowercase ordinary "
+                "mid-title function words and brace only terms whose capitalization must survive CSL."
+            ),
+            "title-trailing-period": f"Remove the trailing period from @{key}'s title field.",
+            "pages-single-hyphen": f"Use a BibTeX page range with double hyphen for @{key}, e.g. 123--145.",
+            "pages-has-prefix": f"Remove p./pp. from @{key}'s pages field; keep only the bare range.",
+            "doi-with-prefix": f"Store @{key}'s DOI as a bare DOI without https://doi.org/.",
+            "journal-abbreviated": f"Spell out @{key}'s journal title using the official full name.",
+            "forbidden-field": f"Remove or convert the forbidden field on @{key} per .claude/rules/bib-check.md.",
+        }
+        return suggestions.get(
+            rule,
+            f"Fix @{key} per .claude/rules/bib-check.md, then rerun ./book/binder check bib --json.",
+        )
+
     def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
         """Validate .bib files against §5 Bibliography Hygiene schema.
 
-        Native import of book/tools/bib_lint.py via importlib — no
-        subprocess. Mirrors the original `bib_lint --check` semantics:
+        Native import of cli.checks.bib_lint — no subprocess. Mirrors the
+        original `bib_lint --check` semantics:
         only NEW errors (not in book/tools/bib_lint_baseline.json) block;
-        baseline-grandfathered errors are silenced. The script itself
+        baseline-grandfathered errors are silenced. The compatibility script
         remains callable as a standalone CLI for its --fix / --baseline
         modes.
         """
-        import importlib.util
-        import sys as _sys
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "bib_lint.py"
-        )
-        mod_name = "mlsys_bib_lint"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        from cli.checks import bib_lint
 
         t0 = time.time()
         bib_files = self._bib_files(root)
@@ -8359,20 +8857,9 @@ class ValidateCommand:
 
         # Baseline (file, entry_key, rule) tuples — these errors are grandfathered.
         try:
-            baseline = mod.load_baseline()
+            baseline = bib_lint.load_baseline()
         except Exception:
             baseline = set()
-
-        # The baseline JSON was generated with file paths stripped of the
-        # canonical "MLSysBook/" prefix (bib_lint.py:798). Mirror that here
-        # so worktrees and the main checkout agree on the lookup key.
-        def _baseline_key_path(path: Path) -> str:
-            s = str(path)
-            for prefix in ("/Users/VJ/GitHub/MLSysBook/",
-                           "/Users/VJ/GitHub/MLSysBook-notation/"):
-                if s.startswith(prefix):
-                    return s[len(prefix):]
-            return s
 
         issues: List[ValidationIssue] = []
         for bib_path in bib_files:
@@ -8381,7 +8868,7 @@ class ValidateCommand:
             except (OSError, UnicodeDecodeError):
                 continue
             try:
-                entries, _ = mod.parse_bib(text)
+                entries, _ = bib_lint.parse_bib(text)
             except ValueError as exc:
                 rel = self._relative_file(bib_path)
                 issues.append(ValidationIssue(
@@ -8390,11 +8877,11 @@ class ValidateCommand:
                 ))
                 continue
 
-            fp_key = _baseline_key_path(bib_path)
+            fp_key = self._bib_baseline_key_path(bib_path)
             rel = self._relative_file(bib_path)
 
             for entry in entries:
-                for v in mod.validate_entry(entry):
+                for v in bib_lint.validate_entry(entry):
                     # Mirror bib_lint.py --check semantics exactly:
                     # only NEW errors block the gate; warnings and
                     # baseline-grandfathered errors are silent. Run the
@@ -8415,6 +8902,84 @@ class ValidateCommand:
         return ValidationRunResult(
             name="bib-hygiene", description="bib-hygiene (§5)",
             files_checked=len(bib_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_style(self, root: Path) -> ValidationRunResult:
+        """Fail on new warning/info BibTeX metadata debt.
+
+        This is intentionally separate from `bib hygiene`: hygiene is the hard
+        schema/error gate, while style is a ratchet over known metadata debt
+        such as suspicious title case, initials-only authors, missing journal
+        volumes, acronym-only venues, and non-canonical publisher names.
+        """
+        from cli.checks import bib_lint
+
+        t0 = time.time()
+        bib_files = self._bib_files(root)
+        if not bib_files:
+            return ValidationRunResult(
+                name="bib-style",
+                description="bib-style",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        try:
+            baseline = bib_lint.load_style_baseline()
+        except Exception:
+            baseline = set()
+
+        issues: List[ValidationIssue] = []
+        style_severities = getattr(bib_lint, "STYLE_BASELINE_SEVERITIES", {"warning", "info"})
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                entries, _ = bib_lint.parse_bib(text)
+            except ValueError as exc:
+                rel = self._relative_file(bib_path)
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=0,
+                    code="bib_style_parse_error",
+                    message=f"PARSE ERROR: {exc}",
+                    severity="error",
+                    suggestion="Fix the BibTeX syntax before checking metadata style.",
+                ))
+                continue
+
+            fp_key = self._bib_baseline_key_path(bib_path)
+            rel = self._relative_file(bib_path)
+            for entry in entries:
+                for v in bib_lint.validate_entry(entry):
+                    if v.severity not in style_severities:
+                        continue
+                    if (fp_key, v.entry_key, v.rule) in baseline:
+                        continue
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=v.entry_line,
+                        code=f"bib_style_{v.rule}",
+                        message=(
+                            f"New bibliography style issue: @{entry.entry_type}{{{v.entry_key}}} "
+                            f"— {v.message}. Current debt is grandfathered in "
+                            "book/tools/bib_lint_style_baseline.json; new issues must be fixed "
+                            "or explicitly accepted by updating that baseline after review."
+                        ),
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{v.entry_key},",
+                        suggestion=self._bib_style_suggestion(v.rule, v.entry_key),
+                    ))
+
+        return ValidationRunResult(
+            name="bib-style",
+            description="BibTeX warning/info metadata style ratchet (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
@@ -8605,7 +9170,12 @@ class ValidateCommand:
                                 f"match the work the key names."
                             ),
                             severity="warning",
-                            context="",
+                            context=f"@{entry_type}{{{key},",
+                            suggestion=(
+                                f"Verify @{key}. If the entry body is correct, "
+                                "rename the citekey to match an actual author and update all citations; "
+                                "if the citekey is correct, replace the entry body with the work the key names."
+                            ),
                         ))
 
                 if year_field and year_field != key_year:
@@ -8632,7 +9202,12 @@ class ValidateCommand:
                                 f"describes."
                             ),
                             severity="error",
-                            context="",
+                            context=f"@{entry_type}{{{key},",
+                            suggestion=(
+                                f"Verify @{key}. If year={year_field} is correct, "
+                                f"rename the citekey so it does not claim {key_year}; "
+                                f"if the citekey year {key_year} is correct, update the year field."
+                            ),
                         ))
 
         return ValidationRunResult(

@@ -957,8 +957,6 @@ class LayoutCommand:
         bib = (
             self.config_manager.book_dir
             / "contents"
-            / volume
-            / "backmatter"
             / "references.bib"
         ).resolve()
 

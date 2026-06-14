@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Comprehensive bib/qmd link-integrity check.
 
-Catches four failure modes that the existing per-volume `binder check
-refs --scope citations` does NOT cover:
+Catches four failure modes that the standard `binder check refs --scope
+citations` does NOT cover:
 
 1. **Unresolved cites** — `[@key]` appears in a `.qmd` but is not
    defined in *any* bib in the repo.
-2. **Scope violations** — a `vol1/**/*.qmd` cites a key that *is*
-   defined, but only in `vol2/backmatter/references.bib`. The vol1 PDF
-   bibliography won't contain it, so the citation renders as `[?]`.
-   This is the "cross-volume leak" class — silent under a pooled check
-   that just asks "is the key defined somewhere?"
+2. **Scope violations** — a source cites a key that is defined somewhere
+   in the repo, but not in that source tree's allowed bibliography. The
+   book volumes intentionally share one bibliography; companion projects
+   still keep their own bibliography boundaries.
 3. **Out-of-tree qmd files** — `interviews/**/*.qmd`, `tinytorch/**/*.qmd`,
    `mlsysim/**/*.qmd`, `design-grammar/**/*.qmd` are skipped by the
    per-volume check entirely.
@@ -20,9 +19,9 @@ refs --scope citations` does NOT cover:
 
 The static scope mapping (SCOPES, below) is the contract: each tree of
 `.qmd` files is allowed to resolve only against a specific list of bib
-files. Vol1 against vol1's bib, vol2 against vol2's, the four companion
-papers each against their own. The shared book-level frontmatter and
-backmatter are allowed against either volume's bib.
+files. Vol1, Vol2, and shared book-level frontmatter/backmatter resolve
+against the book's shared bibliography; the companion papers each resolve
+against their own bibliography.
 
 Usage:
     python3 book/tools/scripts/check_bib_qmd_integrity.py
@@ -52,34 +51,27 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # Static scope mapping: each citation source (qmd or tex) is matched to the
 # first scope whose `paths` prefix matches the file's repo-relative path.
 # That scope's `bibs` list is the *only* set of bib files allowed to resolve
-# the source's citations. A vol1 chapter citing a vol2-only key is a scope
-# violation — the vol1 PDF bibliography won't contain that entry, so the
-# rendered citation breaks even though the key technically "exists" in the
-# repo. Order matters: more-specific prefixes must come before less-specific
-# ones (vol1/vol2 before the shared book-level frontmatter/backmatter).
+# the source's citations. Order matters: more-specific prefixes must come before
+# less-specific ones (vol1/vol2 before the shared book-level front/backmatter).
 SCOPES = [
     {
         "name": "vol1",
         "paths": ["book/quarto/contents/vol1/"],
-        "bibs":  ["book/quarto/contents/vol1/backmatter/references.bib"],
+        "bibs":  ["book/quarto/contents/references.bib"],
     },
     {
         "name": "vol2",
         "paths": ["book/quarto/contents/vol2/"],
-        "bibs":  ["book/quarto/contents/vol2/backmatter/references.bib"],
+        "bibs":  ["book/quarto/contents/references.bib"],
     },
     {
-        # Book-level frontmatter and backmatter are shared between volumes.
-        # A citation here may resolve against either volume's bib.
+        # Book-level frontmatter and backmatter share the book bibliography.
         "name": "book-shared",
         "paths": [
             "book/quarto/contents/frontmatter/",
             "book/quarto/contents/backmatter/",
         ],
-        "bibs": [
-            "book/quarto/contents/vol1/backmatter/references.bib",
-            "book/quarto/contents/vol2/backmatter/references.bib",
-        ],
+        "bibs": ["book/quarto/contents/references.bib"],
     },
     {
         "name": "interviews",
@@ -134,6 +126,7 @@ EXCLUDE = ("_build", "_site", "node_modules", ".git", "__pycache__",
 NON_CITE_PREFIXES = (
     "sec-", "fig-", "tbl-", "eq-", "lst-", "exr-", "exm-",
     "thm-", "cor-", "cnj-", "def-", "prp-", "rem-", "prf-", "alg-",
+    "algo-", "ch-", "nb-",
 )
 
 # Keys that look like CSS / JS / Python decorators / emails — false positives
@@ -260,7 +253,7 @@ def main() -> int:
                         help="Exit nonzero on orphan bib entries too")
     parser.add_argument("--no-scope-check", action="store_true",
                         help="Pool every bib together (legacy mode); skip "
-                             "per-scope vol1/vol2 enforcement")
+                             "component-scope enforcement")
     parser.add_argument("--show-false-positives", action="store_true",
                         help="Show suppressed false-positive keys")
     args = parser.parse_args()
