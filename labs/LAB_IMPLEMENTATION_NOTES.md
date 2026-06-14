@@ -78,7 +78,16 @@ Tests or checks run:
 - Playwright/Marimo batch G4, V2-10 through V2-17: 8/8 notebooks passed and 2/2 HTML pages passed.
 - Aggregate Playwright result: 34/34 notebooks passed; dashboard/catalog passed; no page errors, console errors, stale output, horizontal overflow, offscreen elements, or overflowing fields reported.
 - Screenshots written under `/tmp/mlsysbook-interaction-smoke-final-g1`, `g2`, `g3`, and `g4`.
+- After merging current `dev` into `codex/labs`, re-ran the same four Playwright batches:
+  - Post-merge G1, V1-00 through V1-08: 9/9 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge G2, V1-09 through V1-16: 8/8 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge G3, V2-01 through V2-09: 9/9 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge G4, V2-10 through V2-17: 8/8 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge aggregate: 34/34 notebooks passed; dashboard/catalog passed; no page errors, console errors, stale output, horizontal overflow, offscreen elements, or overflowing fields reported.
+  - Post-merge screenshots written under `/tmp/mlsysbook-interaction-smoke-postmerge-g1`, `g2`, `g3`, and `g4`.
 - Full lab tests from the prior final audit: `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q --tb=short` -> 1569 passed, 80 skipped, 123 xfailed.
+- Full lab tests after merging current `dev`: `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q --tb=short` -> 1569 passed, 80 skipped, 123 xfailed.
+- Targeted MLSysIM tests after merging current `dev`: `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_hardware.py mlsysim/tests/test_compression_candidates.py mlsysim/tests/test_solver_module_exports.py -q` -> 19 passed.
 - `git diff --check` -> passed.
 
 Follow-up:
