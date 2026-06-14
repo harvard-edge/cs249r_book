@@ -3,50 +3,20 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB V2-06: WHEN FAILURE IS ROUTINE
-#
-# Chapter: Fault Tolerance (@sec-fault-tolerance)
-# Core Invariant: At fleet scale, failure is statistically certain. The
-#                 Young-Daly optimal checkpoint interval (sqrt(2 * T_write * MTBF))
-#                 minimizes total wasted work. Checkpoint storms create a
-#                 pathological state where checkpointing takes longer than the
-#                 optimal interval.
-#
-# Structure (35-40 minutes):
-#   Part A  — Young-Daly Sweet Spot (12-15 min)
-#             Quick recall: 10,000-GPU cluster fails every ~5 hours.
-#             Then the Young-Daly U-curve reveals the checkpoint interval.
-#
-#   Part B  — The Checkpoint Storm (20-25 min)
-#             175B checkpoint on NFS takes 41 minutes -- longer than the
-#             optimal interval. Checkpoint storms at frontier scale.
-#
-#   Synthesis — Key Takeaways + Decision Log
-#
-# Hardware Constants:
-#   GPU_MTTF_HOURS  (book MTTF anchor, ~50k h)
-#   H100_RAM_GB       = 80       (NVIDIA H100 SXM5 spec)
-#   H100_COST_HR      = 3.0      ($3/GPU-hour cloud pricing)
-# ─────────────────────────────────────────────────────────────────────────────
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
-    import sys
+    import html as html_lib
     import math
+    import sys
     from pathlib import Path
-    import numpy as np
 
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
@@ -57,1407 +27,1476 @@ async def _():
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
-    from mlsysim import Hardware, Systems, Infrastructure
-    from mlsysim.physics import calc_young_daly_interval
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        report_export_panel,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
-    GPU_MTTF_HOURS = Systems.Reliability.Gpu.mttf_hours
-
-    # ── Hardware registry ─────────────────────────────────────────────────
-    H100 = Hardware.Cloud.H100
-    A100 = Hardware.Cloud.A100
-    EDGE = Hardware.Edge.JetsonOrinNX
-    H100_RAM_GB = H100.memory.capacity.m_as("GB")
-    EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
-    GPU_COST_HR = Infrastructure.Pricing.Fleet.GpuHourRef.rate.m_as("USD/hour")
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
-    return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR, DecisionLog, Hardware, H100, A100, EDGE, H100_RAM_GB, EDGE_RAM_GB, calc_young_daly_interval
+    return (
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        html_lib,
+        ledger,
+        math,
+        mo,
+        report_export_panel,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
-# ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
+
+@app.cell
+def _(get_lab_metadata):
+    v2_07_metadata = get_lab_metadata("vol2/lab_07_fault_tolerance.py")
+    return (v2_07_metadata,)
+
+
 @app.cell(hide_code=True)
-def _(COLORS, LAB_CSS, mo):
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
+    v2_07_track_picker = track_selector(default=_default_track)
+    v2_07_track_picker
+    return (v2_07_track_picker,)
+
+
+@app.cell
+def _(get_lab_track_variant, get_track_profile, v2_07_metadata, v2_07_track_picker):
+    v2_07_track_id = v2_07_track_picker.value
+    v2_07_profile = get_track_profile(v2_07_track_id)
+    v2_07_variant = get_lab_track_variant(v2_07_metadata.lab_id, v2_07_profile.track_id)
+    v2_07_defaults = v2_07_variant.defaults
+    return v2_07_defaults, v2_07_profile, v2_07_track_id, v2_07_variant
+
+
+@app.cell
+def _():
+    v2_07_TRACK_LENSES = {
+        "iphone": {
+            "scenario": "Approve a staged on-device model rollout while crashes and rollback events accumulate across the installed fleet.",
+            "unit_label": "phones",
+            "component_label": "phone/app instance",
+            "failure_mode": "bad rollout, app crash, or offline fallback miss",
+            "component_mtbf_h": 20000.0,
+            "fleet_min": 10000,
+            "fleet_max": 1000000,
+            "fleet_step": 10000,
+            "fleet_default": 250000,
+            "duration_min_h": 1,
+            "duration_max_h": 168,
+            "duration_step_h": 1,
+            "duration_default_h": 24,
+            "clean_target_pct": 95.0,
+            "state_gb": 0.8,
+            "write_min_default": 4.0,
+            "write_min_max": 30.0,
+            "interval_default_min": 20.0,
+            "interval_max_min": 240.0,
+            "tax_limit_pct": 18.0,
+            "policy_default": "warm_history",
+            "history_default": 2,
+            "write_bw_min_gbs": 0.01,
+            "write_bw_max_gbs": 5.0,
+            "write_bw_step_gbs": 0.01,
+            "write_bw_default_gbs": 0.20,
+            "write_budget_gbs": 1.0,
+            "storage_budget_gb": 4000.0,
+            "recovery_objective_min": 12.0,
+            "minimum_failover_min": 0.4,
+            "single_availability": 0.985,
+            "availability_target_pct": 99.90,
+            "replica_default": 2,
+            "replica_sync_latency_ms": 2.0,
+            "orchestration_implication": "V2-08 must schedule staged rollout cohorts, rollback gates, and local fallback capacity before widening release.",
+        },
+        "oura_ring": {
+            "scenario": "Protect an overnight sensing firmware update when rings may drop sync, drain battery, or need rollback away from the phone.",
+            "unit_label": "rings",
+            "component_label": "ring firmware instance",
+            "failure_mode": "battery depletion, sensor dropout, firmware rollback, or sync gap",
+            "component_mtbf_h": 30000.0,
+            "fleet_min": 5000,
+            "fleet_max": 500000,
+            "fleet_step": 5000,
+            "fleet_default": 100000,
+            "duration_min_h": 1,
+            "duration_max_h": 168,
+            "duration_step_h": 1,
+            "duration_default_h": 10,
+            "clean_target_pct": 98.0,
+            "state_gb": 0.05,
+            "write_min_default": 3.0,
+            "write_min_max": 60.0,
+            "interval_default_min": 45.0,
+            "interval_max_min": 360.0,
+            "tax_limit_pct": 12.0,
+            "policy_default": "warm_history",
+            "history_default": 3,
+            "write_bw_min_gbs": 0.001,
+            "write_bw_max_gbs": 0.5,
+            "write_bw_step_gbs": 0.001,
+            "write_bw_default_gbs": 0.02,
+            "write_budget_gbs": 0.10,
+            "storage_budget_gb": 250.0,
+            "recovery_objective_min": 30.0,
+            "minimum_failover_min": 1.0,
+            "single_availability": 0.990,
+            "availability_target_pct": 99.95,
+            "replica_default": 2,
+            "replica_sync_latency_ms": 8.0,
+            "orchestration_implication": "V2-08 must schedule OTA waves around radio duty cycle, battery state, and safe-mode rollback cohorts.",
+        },
+        "robotaxi": {
+            "scenario": "Keep perception and planning inside a safety envelope while vehicle-hours expose sensor and compute faults.",
+            "unit_label": "vehicles",
+            "component_label": "vehicle autonomy stack",
+            "failure_mode": "sensor degradation, perception compute fault, or degraded-mode entry",
+            "component_mtbf_h": 8000.0,
+            "fleet_min": 100,
+            "fleet_max": 20000,
+            "fleet_step": 100,
+            "fleet_default": 5000,
+            "duration_min_h": 1,
+            "duration_max_h": 72,
+            "duration_step_h": 1,
+            "duration_default_h": 8,
+            "clean_target_pct": 99.9,
+            "state_gb": 12.0,
+            "write_min_default": 0.8,
+            "write_min_max": 20.0,
+            "interval_default_min": 6.0,
+            "interval_max_min": 60.0,
+            "tax_limit_pct": 8.0,
+            "policy_default": "replicated_state",
+            "history_default": 2,
+            "write_bw_min_gbs": 0.1,
+            "write_bw_max_gbs": 20.0,
+            "write_bw_step_gbs": 0.1,
+            "write_bw_default_gbs": 4.0,
+            "write_budget_gbs": 8.0,
+            "storage_budget_gb": 500.0,
+            "recovery_objective_min": 1.5,
+            "minimum_failover_min": 0.15,
+            "single_availability": 0.995,
+            "availability_target_pct": 99.99,
+            "replica_default": 2,
+            "replica_sync_latency_ms": 3.0,
+            "orchestration_implication": "V2-08 must reserve safety-critical standby compute and route degraded vehicles before utilization goals.",
+        },
+        "cloud_fleet": {
+            "scenario": "Run a large accelerator fleet under SLA while node failures, checkpoint storms, and replica loss become routine.",
+            "unit_label": "accelerators",
+            "component_label": "accelerator",
+            "failure_mode": "accelerator/node failure, checkpoint storm, or replica failure",
+            "component_mtbf_h": 50000.0,
+            "fleet_min": 256,
+            "fleet_max": 25000,
+            "fleet_step": 256,
+            "fleet_default": 10000,
+            "duration_min_h": 1,
+            "duration_max_h": 2160,
+            "duration_step_h": 24,
+            "duration_default_h": 168,
+            "clean_target_pct": 50.0,
+            "state_gb": 1200.0,
+            "write_min_default": 5.0,
+            "write_min_max": 45.0,
+            "interval_default_min": 60.0,
+            "interval_max_min": 240.0,
+            "tax_limit_pct": 15.0,
+            "policy_default": "warm_history",
+            "history_default": 2,
+            "write_bw_min_gbs": 10.0,
+            "write_bw_max_gbs": 500.0,
+            "write_bw_step_gbs": 5.0,
+            "write_bw_default_gbs": 240.0,
+            "write_budget_gbs": 300.0,
+            "storage_budget_gb": 10000.0,
+            "recovery_objective_min": 20.0,
+            "minimum_failover_min": 0.5,
+            "single_availability": 0.990,
+            "availability_target_pct": 99.95,
+            "replica_default": 2,
+            "replica_sync_latency_ms": 4.0,
+            "orchestration_implication": "V2-08 must co-schedule spare pools, checkpoint I/O windows, and failure-domain-aware replicas.",
+        },
+    }
+
+    v2_07_POLICY_PROFILES = {
+        "retry_only": {
+            "label": "Retry or pause only",
+            "lost_factor": 2.0,
+            "detect_min": 0.5,
+            "restart_min": 0.0,
+            "load_factor": 0.0,
+            "warmup_min": 0.2,
+            "storage_mode": "none",
+            "write_multiplier": 0.0,
+            "coverage": "transient stalls",
+            "uncovered": "permanent component loss, silent corruption rollback",
+            "validation": "straggler retry replay",
+        },
+        "single_checkpoint": {
+            "label": "Single checkpoint + cold restart",
+            "lost_factor": 0.5,
+            "detect_min": 1.5,
+            "restart_min": 5.0,
+            "load_factor": 1.0,
+            "warmup_min": 2.0,
+            "storage_mode": "single",
+            "write_multiplier": 1.0,
+            "coverage": "fail-stop component loss",
+            "uncovered": "bad checkpoint and correlated outage",
+            "validation": "restore-from-checkpoint drill",
+        },
+        "warm_history": {
+            "label": "Checkpoint history + warm restart",
+            "lost_factor": 0.35,
+            "detect_min": 0.8,
+            "restart_min": 1.5,
+            "load_factor": 0.25,
+            "warmup_min": 0.5,
+            "storage_mode": "history",
+            "write_multiplier": 1.05,
+            "coverage": "transient stalls, fail-stop loss, one bad checkpoint",
+            "uncovered": "regional or shared software outage",
+            "validation": "warm restart plus older-checkpoint rollback drill",
+        },
+        "replicated_state": {
+            "label": "Replicated state + degraded mode",
+            "lost_factor": 0.15,
+            "detect_min": 0.4,
+            "restart_min": 0.7,
+            "load_factor": 0.10,
+            "warmup_min": 0.2,
+            "storage_mode": "replicated_history",
+            "write_multiplier": 1.40,
+            "coverage": "fast failover, fail-stop loss, rollback, degraded service",
+            "uncovered": "shared software bug or bad upstream data",
+            "validation": "failover, degraded-mode, and corruption rollback drill",
+        },
+    }
+
+    v2_07_PLAN_PROFILES = {
+        "local_baseline": {
+            "replica_default": 1,
+            "recovery_factor": 1.15,
+            "cost_step": 0.08,
+            "latency_factor": 1.00,
+            "frame": "best-effort retry",
+        },
+        "balanced_policy": {
+            "replica_default": 2,
+            "recovery_factor": 0.65,
+            "cost_step": 0.18,
+            "latency_factor": 1.03,
+            "frame": "graceful degradation",
+        },
+        "scale_first": {
+            "replica_default": 3,
+            "recovery_factor": 0.35,
+            "cost_step": 0.38,
+            "latency_factor": 1.12,
+            "frame": "redundant safety path",
+        },
+    }
+
+    def v2_07_lens_for(track_id):
+        return v2_07_TRACK_LENSES.get(track_id, v2_07_TRACK_LENSES["cloud_fleet"])
+
+    return v2_07_PLAN_PROFILES, v2_07_POLICY_PROFILES, v2_07_TRACK_LENSES, v2_07_lens_for
+
+
+@app.cell
+def _(v2_07_lens_for, v2_07_profile):
+    v2_07_lens = v2_07_lens_for(v2_07_profile.track_id)
+    return (v2_07_lens,)
+
+
+@app.cell(hide_code=True)
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    track_arc_context,
+    track_context,
+    v2_07_lens,
+    v2_07_metadata,
+    v2_07_profile,
+    v2_07_variant,
+):
     mo.vstack([
         LAB_CSS,
+        ACADEMIC_LAB_CSS,
         mo.Html(f"""
-    <div style="background: linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
-                border-radius: 16px; padding: 32px 40px; margin-bottom: 8px;
-                border: 1px solid #2d3748;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
-            <div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
-                            text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 8px;">
-                    Vol 2 &middot; Lab 07 &middot; Fault Tolerance
-                </div>
-                <div style="font-size: 2.0rem; font-weight: 800; color: #f1f5f9; line-height: 1.15; margin-bottom: 10px;">
-                    When Failure is Routine
-                </div>
-                <div style="font-size: 0.95rem; color: #94a3b8; max-width: 600px; line-height: 1.6;">
-                    A 10,000-GPU cluster fails every 5 hours. Checkpoint too often and you
-                    waste compute writing. Checkpoint too rarely and you lose days of work.
-                    The Young-Daly formula finds the sweet spot -- but at frontier scale,
-                    even checkpointing can become the bottleneck.
-                </div>
+        <div style="background: linear-gradient(135deg, #111827 0%, #1f2937 55%, #0f172a 100%);
+                    padding: 32px 40px; border-radius: 16px; color: white;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.32);">
+            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
+                        color: #9ca3af; text-transform: uppercase; margin-bottom: 10px;">
+                Machine Learning Systems &middot; Volume II &middot; Lab 07
             </div>
-            <div style="display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
-                <span class="badge badge-info">MTBF Scaling</span>
-                <span class="badge badge-info">Young-Daly U-Curve</span>
-                <span class="badge badge-info">Checkpoint Storm</span>
-                <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
+            <h1 style="margin: 0 0 10px 0; font-size: 2.35rem; font-weight: 900;
+                       color: #f9fafb; line-height: 1.1;">
+                When Failure Is Routine
+            </h1>
+            <p style="margin: 0 0 8px 0; font-size: 1.08rem; font-weight: 600;
+                      color: #cbd5e1; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
+                MTBF &middot; Young-Daly &middot; Lost Work &middot; Recovery Guardrails
+            </p>
+            <p style="margin: 0 0 20px 0; font-size: 1.0rem; color: #d1d5db;
+                      max-width: 820px; line-height: 1.65;">
+                {v2_07_lens["scenario"]} The selected track changes the persona,
+                thresholds, and memo framing, but every track reasons over the same
+                failure amounts.
+            </p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <span class="badge badge-info">{v2_07_profile.label}</span>
+                <span class="badge badge-warn">{v2_07_variant.guardrail_metric}</span>
+                <span class="badge badge-fail">{v2_07_lens["failure_mode"]}</span>
             </div>
         </div>
-    </div>
-    """),
+        """),
+        track_context(v2_07_profile),
+        track_arc_context(v2_07_profile, v2_07_metadata.lab_id),
     ])
     return
 
-# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo, v2_07_lens, v2_07_profile):
     mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Calculate cluster MTBF:</strong> apply MTBF_system = MTBF_component / N to determine failure frequency at scale.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Derive the Young-Daly optimal checkpoint interval:</strong> understand why tau_opt = sqrt(2 * T_write * MTBF) minimizes total waste on the U-shaped cost curve.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Identify the checkpoint storm pathology:</strong> recognize when checkpoint write time exceeds the optimal interval, making the system spend more time checkpointing than computing.</div>
-            </div>
+    <div style="border-left:4px solid {COLORS['BlueLine']}; background:white;
+                border-radius:0 12px 12px 0; padding:20px 28px; margin:8px 0 16px 0;
+                box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                    text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
+            Chapter invariant
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Reliability collapse from the Scale chapter &middot;
-                    MTBF_system = MTBF_component / N from the Fault Tolerance chapter
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35-40 min</strong><br/>
-                    Part A: ~15 min &middot; Part B: ~25 min
-                </div>
-            </div>
+        <div style="font-size:1.0rem; color:{COLORS['Text']}; line-height:1.65;">
+            At fleet scale, failures become routine. MTBF, checkpoint interval, lost work,
+            recovery time, and redundancy are design amounts.
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="margin-top: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
+        <div style="border-top:1px solid {COLORS['Border']}; margin:14px -28px 0 -28px;
+                    padding:14px 28px 0 28px;">
+            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
+                Track realization
             </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                "If a 10,000-GPU cluster fails every 5 hours, how do you checkpoint often enough
-                to avoid losing work but not so often that checkpointing itself becomes the
-                bottleneck &mdash; and what happens when even optimal checkpointing cannot keep up?"
+            <div style="font-size:0.95rem; color:{COLORS['TextSec']}; line-height:1.65;">
+                <strong>{v2_07_profile.stakeholder}</strong> must plan for
+                <strong>{v2_07_lens["unit_label"]}</strong> whose routine failure mode is
+                <strong>{v2_07_lens["failure_mode"]}</strong>.
             </div>
         </div>
     </div>
     """)
     return
 
-# ─── CELL 3: RECOMMENDED READING ──────────────────────────────────────────────
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** -- Complete before this lab:
+    **Recommended Reading** - Complete before this lab:
 
-    - **The Fault Tolerance chapter** -- MTBF scaling, Young-Daly checkpoint model
-    - **The Scale chapter** -- Fleet reliability collapse (V2-01 recap)
-    - The Checkpoint Storm section -- Storage bandwidth saturation at scale
-    - The Serving Fault Tolerance section -- KV cache state and replica failover
+    - **Volume II, Chapter 7: Fault Tolerance and Reliability** - failure analysis
+      at scale, MTBF composition, Young-Daly checkpointing, recovery procedures,
+      serving redundancy, and graceful degradation.
     """), kind="info")
     return
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: WIDGET DEFINITIONS
-# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 4: PART A WIDGETS ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    partA_prediction = mo.ui.radio(
+    v2_07_part_a_prediction = mo.ui.radio(
         options={
-            "A) Every 2 minutes -- match the write time": "A",
-            "B) Every 10 minutes -- frequent saves": "B",
-            "C) Every ~27 minutes -- the square-root law": "C",
-            "D) Every 90 minutes -- halfway to MTBF": "D",
+            "A) It stays the same because component MTBF is unchanged": "same",
+            "B) It falls by about 10x when fleet size grows 10x": "inverse",
+            "C) It improves because more devices create redundancy": "improves",
+            "D) It cannot be estimated from MTBF": "unknowable",
         },
-        label="A 16,000-GPU cluster (MTBF ~3 hours). Checkpoint writes take 2 minutes. What is the optimal checkpoint interval?",
+        label="Part A prediction: if the fleet grows 10x, what happens to aggregate MTBF?",
     )
-    a1_cluster_gpus = mo.ui.slider(start=1000, stop=25000, value=16000, step=1000, label="Cluster GPUs")
-    a1_write_time_s = mo.ui.slider(start=10, stop=300, value=120, step=10, label="Checkpoint write time (seconds)")
-    a1_interval_s = mo.ui.slider(start=60, stop=10800, value=600, step=60, label="Your checkpoint interval (seconds)")
-    return (a1_cluster_gpus, a1_interval_s, a1_write_time_s, partA_prediction)
+    v2_07_part_b_prediction = mo.ui.radio(
+        options={
+            "A) Checkpoint as often as possible": "minimum",
+            "B) Checkpoint as rarely as possible": "maximum",
+            "C) Choose the interval where save overhead and expected rework balance": "optimum",
+            "D) Use the same interval for every fleet": "fixed",
+        },
+        label="Part B prediction: what checkpoint interval policy is safest?",
+    )
+    v2_07_part_c_prediction = mo.ui.radio(
+        options={
+            "A) Lost work since the last checkpoint": "lost_work",
+            "B) Storage footprint and write bandwidth": "storage_write",
+            "C) Detection, restart, load, and warmup time": "recovery_terms",
+            "D) All of these become design amounts": "all_amounts",
+        },
+        label="Part C prediction: which amount can dominate failure cost?",
+    )
+    v2_07_part_d_prediction = mo.ui.radio(
+        options={
+            "A) Recovery time objective": "recovery",
+            "B) Cost budget": "cost",
+            "C) Latency, quality, or safety guardrails": "performance",
+            "D) Any one of these can reject the plan": "any_guardrail",
+        },
+        label="Part D prediction: which guardrail can reject a fault-tolerance plan?",
+    )
+    return (
+        v2_07_part_a_prediction,
+        v2_07_part_b_prediction,
+        v2_07_part_c_prediction,
+        v2_07_part_d_prediction,
+    )
 
-# ─── CELL 5: PART A REFLECTION + PART B PREDICTION WIDGETS ──────────────────
+
 @app.cell(hide_code=True)
-def _(mo):
-    partA_reflection = mo.ui.radio(
+def _(mo, v2_07_defaults, v2_07_lens):
+    v2_07_fleet_size = mo.ui.slider(
+        start=int(v2_07_lens["fleet_min"]),
+        stop=int(v2_07_lens["fleet_max"]),
+        value=int(v2_07_lens["fleet_default"]),
+        step=int(v2_07_lens["fleet_step"]),
+        label=f"Fleet size ({v2_07_lens['unit_label']})",
+    )
+    v2_07_duration_h = mo.ui.slider(
+        start=int(v2_07_lens["duration_min_h"]),
+        stop=int(v2_07_lens["duration_max_h"]),
+        value=int(v2_07_lens["duration_default_h"]),
+        step=int(v2_07_lens["duration_step_h"]),
+        label="Mission or rollout window (hours)",
+    )
+    v2_07_write_min = mo.ui.slider(
+        start=0.5,
+        stop=float(v2_07_lens["write_min_max"]),
+        value=float(v2_07_lens["write_min_default"]),
+        step=0.5,
+        label="Checkpoint or rollback snapshot write time (minutes)",
+    )
+    v2_07_checkpoint_interval_min = mo.ui.slider(
+        start=1.0,
+        stop=float(v2_07_lens["interval_max_min"]),
+        value=float(v2_07_lens["interval_default_min"]),
+        step=1.0,
+        label="Chosen checkpoint interval (minutes)",
+    )
+    v2_07_recovery_policy = mo.ui.radio(
         options={
-            "A) Double the checkpoint frequency to protect against failures": "A",
-            "B) Reduce checkpoint write time through faster storage or async checkpointing": "B",
-            "C) Increase GPU MTTF by using higher-quality components": "C",
-            "D) Accept the waste -- it is a fixed cost of distributed training": "D",
+            "Retry or pause only": "retry_only",
+            "Single checkpoint + cold restart": "single_checkpoint",
+            "Checkpoint history + warm restart": "warm_history",
+            "Replicated state + degraded mode": "replicated_state",
         },
-        label="The Young-Daly formula shows waste is sqrt(T_write / MTBF). Which lever most effectively reduces waste?",
+        value=v2_07_POLICY_PROFILES[v2_07_lens["policy_default"]]["label"],
+        label="Recovery policy",
     )
-
-    partB_prediction = mo.ui.radio(
+    v2_07_checkpoint_history = mo.ui.slider(
+        start=1,
+        stop=5,
+        value=int(v2_07_lens["history_default"]),
+        step=1,
+        label="Retained checkpoint or rollback history",
+    )
+    v2_07_write_bandwidth_gbs = mo.ui.slider(
+        start=float(v2_07_lens["write_bw_min_gbs"]),
+        stop=float(v2_07_lens["write_bw_max_gbs"]),
+        value=float(v2_07_lens["write_bw_default_gbs"]),
+        step=float(v2_07_lens["write_bw_step_gbs"]),
+        label="Available write/read bandwidth (GB/s)",
+    )
+    v2_07_part_a_checkpoint = mo.ui.radio(
         options={
-            "A) ~10 seconds -- fast with modern storage": "A",
-            "B) ~2 minutes -- manageable": "B",
-            "C) ~41 minutes -- longer than the Young-Daly optimal interval at this cluster size": "C",
-            "D) ~5 minutes -- within budget": "D",
+            "Use component MTBF as the planning amount": "component",
+            "Use aggregate fleet MTBF and expected failures": "aggregate",
+            "Ignore failures until after the first incident": "ignore",
         },
-        label="A 175B model checkpoints on a 1,000-GPU cluster with NFS storage (1 GB/s). How long does one checkpoint take?",
+        value="Use aggregate fleet MTBF and expected failures",
+        label="Part A checkpoint: which amount should drive recovery design?",
     )
-    return (partA_reflection, partB_prediction)
-
-# ─── CELL 6: PART B CONTROLS + SYNTHESIS WIDGETS ────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    a2_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model size (B params)")
-    a2_cluster_gpus = mo.ui.slider(start=100, stop=25000, value=1000, step=100, label="Cluster GPUs")
-    a2_storage = mo.ui.dropdown(
-        options={"NFS (1 GB/s)": 1.0, "Parallel FS (10 GB/s)": 10.0, "NVMe RAID (100 GB/s)": 100.0},
-        value="NFS (1 GB/s)",
-        label="Storage type",
-    )
-
-    partB_reflection = mo.ui.radio(
+    v2_07_part_b_checkpoint = mo.ui.radio(
         options={
-            "A) Asynchronous checkpointing -- overlap checkpoint writes with training compute": "A",
-            "B) Reduce model size so checkpoints are smaller": "B",
-            "C) Increase cluster MTBF by adding redundant GPUs": "C",
-            "D) Checkpoint only every hour regardless of the Young-Daly formula": "D",
+            "Shorten the interval because expected rework dominates": "shorten",
+            "Lengthen the interval because save overhead dominates": "lengthen",
+            "Stay near the computed optimum and improve write bandwidth if tax is high": "optimum",
         },
-        label="What is the most practical solution to the checkpoint storm?",
+        value="Stay near the computed optimum and improve write bandwidth if tax is high",
+        label="Part B checkpoint: what operating move follows from the curve?",
     )
-    return (a2_cluster_gpus, a2_model_b, a2_storage, partB_reflection)
-
-# ─── CELL 6b: PART C WIDGETS ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partC_prediction = mo.ui.radio(
+    _plan_options = {
+        v2_07_defaults["decision_options"][key]["label"]: key
+        for key in ("local_baseline", "balanced_policy", "scale_first")
+    }
+    v2_07_plan_choice = mo.ui.radio(
+        options=_plan_options,
+        value=v2_07_defaults["decision_options"]["balanced_policy"]["label"],
+        label="Fault-tolerance plan",
+    )
+    v2_07_replica_count = mo.ui.slider(
+        start=1,
+        stop=5,
+        value=int(v2_07_lens["replica_default"]),
+        step=1,
+        label="Replica or standby count",
+    )
+    v2_07_uncovered_failure = mo.ui.radio(
         options={
-            "A) 10 seconds -- NVMe is fast": "A",
-            "B) ~24 seconds -- local NVMe first, then drain": "B",
-            "C) ~1 second -- async hides all write time": "C",
-            "D) Same as NFS -- 41 minutes": "D",
+            "Transient stall": "transient",
+            "Permanent component loss": "permanent",
+            "Silent corruption or bad checkpoint": "sdc",
+            "Correlated failure domain": "correlated",
+            "Shared software/configuration bug": "software",
         },
-        label="With async checkpointing (write to local NVMe RAID at 100 GB/s, then drain), how long does the training loop pause for a 175B checkpoint?",
+        label="Part C checkpoint: which failure remains uncovered or needs a drill?",
     )
-    c1_nvme_bw = mo.ui.slider(start=10, stop=200, value=100, step=10, label="Local NVMe BW (GB/s)")
-    c1_drain_bw = mo.ui.slider(start=1, stop=50, value=10, step=1, label="Background drain BW to durable storage (GB/s)")
-    c1_cluster_gpus = mo.ui.slider(start=1000, stop=25000, value=10000, step=1000, label="Cluster GPUs")
-    partC_reflection = mo.ui.radio(
-        options={
-            "A) Async checkpointing eliminates all checkpoint overhead": "A",
-            "B) Async reduces training-loop pause to NVMe write time but requires enough local NVMe capacity for at least 2 checkpoints": "B",
-            "C) Async is free -- no additional hardware cost": "C",
-            "D) Async is unnecessary if you use a fast parallel file system": "D",
-        },
-        label="What is the key requirement for async checkpointing to work?",
+    v2_07_rejected_alternative = mo.ui.radio(
+        options=_plan_options,
+        value=v2_07_defaults["decision_options"]["scale_first"]["label"],
+        label="Synthesis checkpoint: rejected alternative",
     )
-    return (c1_cluster_gpus, c1_drain_bw, c1_nvme_bw, partC_prediction, partC_reflection)
+    v2_07_student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
+    v2_07_memo_decision = mo.ui.text_area(
+        label="Reliability memo",
+        placeholder="State checkpoint policy, replication plan, binding amount, rejected alternative, and V2-08 orchestration implication.",
+        full_width=True,
+    )
+    return (
+        v2_07_checkpoint_history,
+        v2_07_checkpoint_interval_min,
+        v2_07_duration_h,
+        v2_07_fleet_size,
+        v2_07_memo_decision,
+        v2_07_part_a_checkpoint,
+        v2_07_part_b_checkpoint,
+        v2_07_plan_choice,
+        v2_07_recovery_policy,
+        v2_07_rejected_alternative,
+        v2_07_replica_count,
+        v2_07_student_id,
+        v2_07_uncovered_failure,
+        v2_07_write_bandwidth_gbs,
+        v2_07_write_min,
+    )
 
-# ─── CELL 6c: PART D WIDGETS ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) 1 replica -- just restart the failed one": "A",
-            "B) N+1 replicas -- one cold spare per service": "B",
-            "C) It depends: replica count = ceil(QPS * recovery_time / max_queue_depth)": "C",
-            "D) 2x replicas -- always double for safety": "D",
-        },
-        label="Your inference service runs 10 replicas at 1000 QPS total. One replica fails (MTBF ~30 days). Recovery takes 90 seconds (model reload). How many spare replicas do you need to maintain the SLO?",
-    )
-    d1_replicas = mo.ui.slider(start=4, stop=32, value=10, step=1, label="Active replicas")
-    d1_qps = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="Total QPS")
-    d1_recovery_s = mo.ui.slider(start=10, stop=300, value=90, step=10, label="Recovery time (seconds)")
-    d1_slo_p99_ms = mo.ui.slider(start=100, stop=2000, value=500, step=50, label="P99 latency SLO (ms)")
-    partD_reflection = mo.ui.radio(
-        options={
-            "A) Serving fault tolerance is simpler than training -- just add replicas": "A",
-            "B) Serving fault tolerance is harder because KV cache state is lost on failure and must be rebuilt per-request": "B",
-            "C) Serving fault tolerance is the same problem as training fault tolerance": "C",
-            "D) Serving does not need fault tolerance -- requests are stateless": "D",
-        },
-        label="How does serving fault tolerance differ from training fault tolerance?",
-    )
-    return (d1_qps, d1_recovery_s, d1_replicas, d1_slo_p99_ms, partD_prediction, partD_reflection)
 
-# ─── CELL 7: DECISION LOG WIDGET ────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(DecisionLog, mo, partD_reflection):
-    synth_decision_input, synth_decision_ui = DecisionLog(
-        placeholder="Based on what I learned in this lab, the most important insight about "
-                    "fault tolerance at scale is..."
-    )
-    return (synth_decision_input, synth_decision_ui)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: SINGLE TABS CELL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 8: TABS ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math,
-    mo, np, GPU_MTTF_HOURS, GPU_COST_HR, calc_young_daly_interval,
-    H100_RAM_GB, synth_decision_input, synth_decision_ui, ledger,
-    a1_cluster_gpus, a1_interval_s, a1_write_time_s, a2_cluster_gpus,
-    a2_model_b, a2_storage, c1_cluster_gpus, c1_drain_bw,
-    c1_nvme_bw, d1_qps, d1_recovery_s, d1_replicas,
-    d1_slo_p99_ms, partA_prediction, partA_reflection, partB_prediction,
-    partB_reflection, partC_prediction, partC_reflection, partD_prediction,
-    partD_reflection,
+    COLORS,
+    apply_plotly_theme,
+    build_lab_report,
+    go,
+    html_lib,
+    ledger,
+    math,
+    mo,
+    report_export_panel,
+    v2_07_PLAN_PROFILES,
+    v2_07_POLICY_PROFILES,
+    v2_07_checkpoint_history,
+    v2_07_checkpoint_interval_min,
+    v2_07_defaults,
+    v2_07_duration_h,
+    v2_07_fleet_size,
+    v2_07_lens,
+    v2_07_memo_decision,
+    v2_07_metadata,
+    v2_07_part_a_checkpoint,
+    v2_07_part_a_prediction,
+    v2_07_part_b_checkpoint,
+    v2_07_part_b_prediction,
+    v2_07_part_c_prediction,
+    v2_07_part_d_prediction,
+    v2_07_plan_choice,
+    v2_07_profile,
+    v2_07_recovery_policy,
+    v2_07_rejected_alternative,
+    v2_07_replica_count,
+    v2_07_student_id,
+    v2_07_uncovered_failure,
+    v2_07_variant,
+    v2_07_write_bandwidth_gbs,
+    v2_07_write_min,
 ):
-    # ─────────────────────────────────────────────────────────────────────
-    # PART A BUILDER -- The Young-Daly Sweet Spot
-    # ─────────────────────────────────────────────────────────────────────
+    def v2_07_fmt(value, digits=2):
+        if isinstance(value, str):
+            return value
+        if abs(float(value)) >= 100:
+            return f"{float(value):,.0f}"
+        if abs(float(value)) >= 10:
+            return f"{float(value):,.1f}"
+        return f"{float(value):,.{digits}f}"
+
+    def v2_07_pct(value, digits=2):
+        return f"{100 * float(value):,.{digits}f}%"
+
+    def v2_07_status(ok):
+        return "PASS" if ok else "MISS"
+
+    def v2_07_table(headers, rows):
+        _head = "".join(f"<th>{html_lib.escape(str(header))}</th>" for header in headers)
+        _body = []
+        for row in rows:
+            _body.append("<tr>" + "".join(f"<td>{html_lib.escape(str(cell))}</td>" for cell in row) + "</tr>")
+        return mo.Html(f"""
+        <div style="overflow-x:auto; margin:12px 0;">
+          <table style="border-collapse:collapse; width:100%; font-size:0.88rem;">
+            <thead><tr style="background:#f8fafc;">{_head}</tr></thead>
+            <tbody>{''.join(_body)}</tbody>
+          </table>
+        </div>
+        <style>
+          table td, table th {{
+            border: 1px solid #e5e7eb;
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+          }}
+          table th {{
+            font-weight: 700;
+            color: #374151;
+          }}
+        </style>
+        """)
+
+    def v2_07_exposure(fleet_size=None, duration_h=None):
+        _fleet = max(1, int(fleet_size if fleet_size is not None else v2_07_fleet_size.value))
+        _duration = max(0.01, float(duration_h if duration_h is not None else v2_07_duration_h.value))
+        _component_mtbf_h = float(v2_07_lens["component_mtbf_h"])
+        _system_mtbf_h = _component_mtbf_h / _fleet
+        _expected_failures = _duration / _system_mtbf_h
+        _clean_probability = 0.0 if _expected_failures > 700 else math.exp(-_expected_failures)
+        return {
+            "fleet_size": _fleet,
+            "duration_h": _duration,
+            "component_mtbf_h": _component_mtbf_h,
+            "system_mtbf_h": _system_mtbf_h,
+            "expected_failures": _expected_failures,
+            "clean_probability": _clean_probability,
+            "failures_per_day": 24.0 / _system_mtbf_h,
+            "target_clean_probability": float(v2_07_lens["clean_target_pct"]) / 100.0,
+        }
+
+    def v2_07_checkpoint_result():
+        _exposure = v2_07_exposure()
+        _mtbf_min = max(0.001, _exposure["system_mtbf_h"] * 60.0)
+        _write_min = max(0.001, float(v2_07_write_min.value))
+        _interval_min = max(0.001, float(v2_07_checkpoint_interval_min.value))
+        _tau_opt = math.sqrt(2.0 * _write_min * _mtbf_min)
+        _save_tax = _write_min / _interval_min
+        _rework_tax = _interval_min / (2.0 * _mtbf_min)
+        _total_tax = _save_tax + _rework_tax
+        _side = "save overhead" if _save_tax > _rework_tax else "expected rework"
+        _near = abs(_interval_min - _tau_opt) / max(_tau_opt, 0.001) <= 0.20
+        return {
+            "mtbf_min": _mtbf_min,
+            "write_min": _write_min,
+            "interval_min": _interval_min,
+            "tau_opt_min": _tau_opt,
+            "save_tax_pct": 100.0 * _save_tax,
+            "rework_tax_pct": 100.0 * _rework_tax,
+            "total_tax_pct": 100.0 * _total_tax,
+            "dominant_tax": _side,
+            "near_optimum": _near,
+            "tax_ok": 100.0 * _total_tax <= float(v2_07_lens["tax_limit_pct"]),
+        }
+
+    def v2_07_storage_for_policy(policy, history):
+        _mode = policy["storage_mode"]
+        _state_gb = float(v2_07_lens["state_gb"])
+        if _mode == "none":
+            return 0.0
+        if _mode == "single":
+            return _state_gb
+        if _mode == "history":
+            return _state_gb * int(history)
+        return _state_gb * int(history) * 2.0
+
+    def v2_07_policy_result(policy_id=None):
+        _policy_id = policy_id or v2_07_recovery_policy.value or v2_07_lens["policy_default"]
+        _policy = v2_07_POLICY_PROFILES[_policy_id]
+        _interval = max(0.001, float(v2_07_checkpoint_interval_min.value))
+        _history = int(v2_07_checkpoint_history.value)
+        _available_bw = max(0.001, float(v2_07_write_bandwidth_gbs.value))
+        _state_gb = float(v2_07_lens["state_gb"])
+        _write_min = max(0.001, float(v2_07_write_min.value))
+        _lost_work_min = _interval * float(_policy["lost_factor"])
+        _storage_gb = v2_07_storage_for_policy(_policy, _history)
+        _required_write_gbs = 0.0
+        if _policy["write_multiplier"] > 0:
+            _required_write_gbs = (_state_gb * float(_policy["write_multiplier"])) / (_write_min * 60.0)
+        _load_min = (_state_gb * float(_policy["load_factor"])) / _available_bw / 60.0
+        _recovery_min = (
+            _lost_work_min
+            + float(_policy["detect_min"])
+            + float(_policy["restart_min"])
+            + _load_min
+            + float(_policy["warmup_min"])
+        )
+        _rto_ok = _recovery_min <= float(v2_07_lens["recovery_objective_min"])
+        _storage_ok = _storage_gb <= float(v2_07_lens["storage_budget_gb"])
+        _write_ok = (
+            _required_write_gbs <= _available_bw
+            and _required_write_gbs <= float(v2_07_lens["write_budget_gbs"])
+        )
+        return {
+            "policy_id": _policy_id,
+            "label": _policy["label"],
+            "lost_work_min": _lost_work_min,
+            "recovery_min": _recovery_min,
+            "storage_gb": _storage_gb,
+            "required_write_gbs": _required_write_gbs,
+            "available_write_gbs": _available_bw,
+            "coverage": _policy["coverage"],
+            "uncovered": _policy["uncovered"],
+            "validation": _policy["validation"],
+            "rto_ok": _rto_ok,
+            "storage_ok": _storage_ok,
+            "write_ok": _write_ok,
+            "feasible": _rto_ok and _storage_ok and _write_ok,
+        }
+
+    def v2_07_all_policy_results():
+        return [v2_07_policy_result(policy_id) for policy_id in v2_07_POLICY_PROFILES]
+
+    def v2_07_plan_result(plan_id=None, replicas=None, recovery=None):
+        _plan_id = plan_id or v2_07_plan_choice.value or "balanced_policy"
+        _replicas = max(1, int(replicas if replicas is not None else v2_07_replica_count.value))
+        _option = v2_07_defaults["decision_options"][_plan_id]
+        _profile = v2_07_PLAN_PROFILES[_plan_id]
+        _recovery = recovery or v2_07_policy_result()
+        _availability = 1.0 - (1.0 - float(v2_07_lens["single_availability"])) ** _replicas
+        _recovery_min = max(
+            float(v2_07_lens["minimum_failover_min"]),
+            _recovery["recovery_min"] * float(_profile["recovery_factor"]) / math.sqrt(_replicas),
+        )
+        _cost = float(_option["base_cost"]) * (1.0 + max(0, _replicas - 1) * float(_profile["cost_step"]))
+        _latency_ms = (
+            float(_option["base_latency_ms"]) * float(_profile["latency_factor"])
+            + max(0, _replicas - 1) * float(v2_07_lens["replica_sync_latency_ms"])
+        )
+        _quality_pct = float(_option["quality_pct"])
+        _guardrail_pct = float(_option["guardrail_pct"])
+        _recovery_ok = _recovery_min <= float(v2_07_lens["recovery_objective_min"])
+        _availability_ok = _availability * 100.0 >= float(v2_07_lens["availability_target_pct"])
+        _cost_ok = _cost <= float(v2_07_defaults["cost_budget"])
+        _latency_ok = _latency_ms <= float(v2_07_defaults["latency_budget_ms"])
+        _quality_ok = _quality_pct >= float(v2_07_defaults["quality_floor_pct"])
+        _guardrail_ok = _guardrail_pct >= float(v2_07_defaults["guardrail_floor_pct"])
+        _misses = []
+        if not _recovery_ok:
+            _misses.append("recovery objective")
+        if not _availability_ok:
+            _misses.append("availability target")
+        if not _cost_ok:
+            _misses.append("cost budget")
+        if not _latency_ok:
+            _misses.append("latency budget")
+        if not _quality_ok:
+            _misses.append("quality floor")
+        if not _guardrail_ok:
+            _misses.append(f"{v2_07_variant.guardrail_metric} floor")
+        return {
+            "plan_id": _plan_id,
+            "label": _option["label"],
+            "frame": _profile["frame"],
+            "replicas": _replicas,
+            "availability_pct": _availability * 100.0,
+            "recovery_min": _recovery_min,
+            "cost": _cost,
+            "latency_ms": _latency_ms,
+            "quality_pct": _quality_pct,
+            "guardrail_pct": _guardrail_pct,
+            "recovery_ok": _recovery_ok,
+            "availability_ok": _availability_ok,
+            "cost_ok": _cost_ok,
+            "latency_ok": _latency_ok,
+            "quality_ok": _quality_ok,
+            "guardrail_ok": _guardrail_ok,
+            "feasible": not _misses,
+            "misses": ", ".join(_misses) if _misses else "none",
+            "mitigation": _option["mitigation"],
+            "validation_requirement": _option["validation_requirement"],
+            "residual_risk": _option["residual_risk"],
+        }
+
+    def v2_07_default_plan_results(recovery=None):
+        return [
+            v2_07_plan_result(plan_id, v2_07_PLAN_PROFILES[plan_id]["replica_default"], recovery)
+            for plan_id in ("local_baseline", "balanced_policy", "scale_first")
+        ]
+
+    def v2_07_binding_summary(exposure, checkpoint, recovery, plan):
+        _candidates = [
+            {
+                "label": "expected failures",
+                "value": exposure["expected_failures"],
+                "limit": 1.0,
+                "unit": "failures/window",
+                "severity": exposure["expected_failures"] / 1.0,
+                "ok": exposure["expected_failures"] < 1.0,
+            },
+            {
+                "label": "checkpoint tax",
+                "value": checkpoint["total_tax_pct"],
+                "limit": float(v2_07_lens["tax_limit_pct"]),
+                "unit": "percent",
+                "severity": checkpoint["total_tax_pct"] / max(float(v2_07_lens["tax_limit_pct"]), 0.001),
+                "ok": checkpoint["tax_ok"],
+            },
+            {
+                "label": "recovery time",
+                "value": recovery["recovery_min"],
+                "limit": float(v2_07_lens["recovery_objective_min"]),
+                "unit": "minutes",
+                "severity": recovery["recovery_min"] / max(float(v2_07_lens["recovery_objective_min"]), 0.001),
+                "ok": recovery["rto_ok"],
+            },
+            {
+                "label": "storage footprint",
+                "value": recovery["storage_gb"],
+                "limit": float(v2_07_lens["storage_budget_gb"]),
+                "unit": "GB",
+                "severity": recovery["storage_gb"] / max(float(v2_07_lens["storage_budget_gb"]), 0.001),
+                "ok": recovery["storage_ok"],
+            },
+            {
+                "label": "write bandwidth",
+                "value": recovery["required_write_gbs"],
+                "limit": min(float(v2_07_lens["write_budget_gbs"]), recovery["available_write_gbs"]),
+                "unit": "GB/s",
+                "severity": recovery["required_write_gbs"] / max(min(float(v2_07_lens["write_budget_gbs"]), recovery["available_write_gbs"]), 0.001),
+                "ok": recovery["write_ok"],
+            },
+            {
+                "label": "plan recovery",
+                "value": plan["recovery_min"],
+                "limit": float(v2_07_lens["recovery_objective_min"]),
+                "unit": "minutes",
+                "severity": plan["recovery_min"] / max(float(v2_07_lens["recovery_objective_min"]), 0.001),
+                "ok": plan["recovery_ok"],
+            },
+            {
+                "label": "plan cost",
+                "value": plan["cost"],
+                "limit": float(v2_07_defaults["cost_budget"]),
+                "unit": "cost units",
+                "severity": plan["cost"] / max(float(v2_07_defaults["cost_budget"]), 0.001),
+                "ok": plan["cost_ok"],
+            },
+            {
+                "label": "plan latency",
+                "value": plan["latency_ms"],
+                "limit": float(v2_07_defaults["latency_budget_ms"]),
+                "unit": "ms",
+                "severity": plan["latency_ms"] / max(float(v2_07_defaults["latency_budget_ms"]), 0.001),
+                "ok": plan["latency_ok"],
+            },
+            {
+                "label": v2_07_variant.guardrail_metric,
+                "value": plan["guardrail_pct"],
+                "limit": float(v2_07_defaults["guardrail_floor_pct"]),
+                "unit": "percent floor",
+                "severity": float(v2_07_defaults["guardrail_floor_pct"]) / max(plan["guardrail_pct"], 0.001),
+                "ok": plan["guardrail_ok"],
+            },
+        ]
+        return max(_candidates, key=lambda item: item["severity"])
+
+    def v2_07_mtbf_chart(exposure):
+        _start = int(v2_07_lens["fleet_min"])
+        _stop = int(v2_07_lens["fleet_max"])
+        _points = []
+        for i in range(0, 40):
+            _ratio = i / 39
+            _points.append(max(1, round(_start * ((_stop / _start) ** _ratio))))
+        _mtbf = [float(v2_07_lens["component_mtbf_h"]) / point for point in _points]
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_points,
+            y=_mtbf,
+            mode="lines",
+            name="Aggregate MTBF",
+            line=dict(color=COLORS["RedLine"], width=3),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[exposure["fleet_size"]],
+            y=[exposure["system_mtbf_h"]],
+            mode="markers",
+            name="Current design",
+            marker=dict(color=COLORS["BlueLine"], size=12),
+        ))
+        _fig.add_hline(
+            y=exposure["duration_h"],
+            line_dash="dash",
+            line_color=COLORS["OrangeLine"],
+            annotation_text="mission window",
+        )
+        _fig.update_layout(
+            height=360,
+            xaxis_title=f"Fleet size ({v2_07_lens['unit_label']})",
+            yaxis_title="Aggregate MTBF (hours)",
+            xaxis_type="log",
+            yaxis_type="log",
+            legend=dict(orientation="h", y=1.15, x=0),
+            margin=dict(l=65, r=20, t=50, b=45),
+        )
+        return apply_plotly_theme(_fig)
+
+    def v2_07_young_daly_chart(checkpoint):
+        _stop = float(v2_07_lens["interval_max_min"])
+        _start = 1.0
+        _taus = [_start + (_stop - _start) * i / 79 for i in range(80)]
+        _save = [100.0 * checkpoint["write_min"] / tau for tau in _taus]
+        _rework = [100.0 * tau / (2.0 * checkpoint["mtbf_min"]) for tau in _taus]
+        _total = [_save[i] + _rework[i] for i in range(len(_taus))]
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(x=_taus, y=_save, mode="lines", name="Save overhead"))
+        _fig.add_trace(go.Scatter(x=_taus, y=_rework, mode="lines", name="Expected rework"))
+        _fig.add_trace(go.Scatter(
+            x=_taus,
+            y=_total,
+            mode="lines",
+            name="Total checkpoint tax",
+            line=dict(color=COLORS["GreenLine"], width=3),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[checkpoint["interval_min"]],
+            y=[checkpoint["total_tax_pct"]],
+            mode="markers",
+            name="Chosen interval",
+            marker=dict(color=COLORS["RedLine"], size=12),
+        ))
+        _fig.add_vline(
+            x=checkpoint["tau_opt_min"],
+            line_dash="dash",
+            line_color=COLORS["BlueLine"],
+            annotation_text="Young-Daly optimum",
+        )
+        _fig.update_layout(
+            height=360,
+            xaxis_title="Checkpoint interval (minutes)",
+            yaxis_title="Wasted capacity (%)",
+            legend=dict(orientation="h", y=1.15, x=0),
+            margin=dict(l=65, r=20, t=50, b=45),
+        )
+        return apply_plotly_theme(_fig)
+
+    def v2_07_availability_chart(rows):
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=[row["label"] for row in rows],
+            y=[row["availability_pct"] for row in rows],
+            marker_color=[
+                COLORS["GreenLine"] if row["feasible"] else COLORS["RedLine"]
+                for row in rows
+            ],
+            text=[v2_07_status(row["feasible"]) for row in rows],
+            textposition="auto",
+        ))
+        _fig.add_hline(
+            y=float(v2_07_lens["availability_target_pct"]),
+            line_dash="dash",
+            line_color=COLORS["BlueLine"],
+            annotation_text="availability target",
+        )
+        _fig.update_layout(
+            height=320,
+            yaxis_title="Availability (%)",
+            showlegend=False,
+            margin=dict(l=60, r=20, t=35, b=70),
+        )
+        return apply_plotly_theme(_fig)
+
+    def v2_07_math_peek(title, body):
+        return mo.accordion({title: mo.md(body)})
+
+    def v2_07_prediction_feedback(selected, correct, explanation):
+        if selected is None:
+            return mo.callout(mo.md("Select a prediction to unlock the instrument."), kind="warn")
+        return mo.callout(
+            mo.md(
+                f"You predicted `{selected}`; actual result is `{correct}`. "
+                + ("Correct. " if selected == correct else "Revise the prior. ")
+                + explanation
+            ),
+            kind="success" if selected == correct else "warn",
+        )
 
     def build_part_a():
-        items = []
+        _exposure = v2_07_exposure()
+        _clean_ok = _exposure["clean_probability"] >= _exposure["target_clean_probability"]
+        _failure_expected = _exposure["expected_failures"] >= 1.0
+        _items = [
+            mo.md("## Part A - Aggregate MTBF Falls as Fleet Size Grows"),
+            mo.callout(mo.md(
+                f"{v2_07_profile.stakeholder}: decide whether {v2_07_lens['fleet_default']:,} "
+                f"{v2_07_lens['unit_label']} can finish the window without treating "
+                f"{v2_07_lens['failure_mode']} as routine."
+            ), kind="info"),
+            v2_07_part_a_prediction,
+        ]
+        if v2_07_part_a_prediction.value is None:
+            _items.append(v2_07_prediction_feedback(None, "inverse", ""))
+            return mo.vstack(_items)
+        _items.extend([
+            v2_07_prediction_feedback(
+                v2_07_part_a_prediction.value,
+                "inverse",
+                "Aggregate failure rate grows with component count, so aggregate MTBF falls by the same factor.",
+            ),
+            mo.hstack([v2_07_fleet_size, v2_07_duration_h], justify="start"),
+            mo.as_html(v2_07_mtbf_chart(_exposure)),
+            v2_07_table(
+                ["Amount", "Value", "Decision meaning"],
+                [
+                    ["Component MTBF", f"{v2_07_fmt(_exposure['component_mtbf_h'])} h", v2_07_lens["component_label"]],
+                    ["Aggregate MTBF", f"{v2_07_fmt(_exposure['system_mtbf_h'])} h", "mean time between any fleet-visible failure"],
+                    ["Expected failures", v2_07_fmt(_exposure["expected_failures"]), "routine if >= 1 in the window"],
+                    ["Clean-run probability", v2_07_pct(_exposure["clean_probability"]), f"target {v2_07_lens['clean_target_pct']}%"],
+                    ["Failures/day", v2_07_fmt(_exposure["failures_per_day"]), "sets recovery staffing and automation pressure"],
+                ],
+            ),
+            mo.callout(
+                mo.md(
+                    f"Boundary: expected failures = **{v2_07_fmt(_exposure['expected_failures'])}** "
+                    f"in the window and clean-run probability = **{v2_07_pct(_exposure['clean_probability'])}**. "
+                    f"Recovery must be automatic for this track."
+                    if (_failure_expected or not _clean_ok)
+                    else "The selected window is below one expected failure, but the margin shrinks linearly with fleet size."
+                ),
+                kind="warn" if (_failure_expected or not _clean_ok) else "success",
+            ),
+            v2_07_math_peek(
+                "Math Peek: Fleet MTBF",
+                """
+The chapter uses the exponential reliability model:
 
-        # ── Stakeholder message ────────────────────────────────────────
-        items.append(mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message &middot; Training Reliability Engineer
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "Our 16,000-GPU cluster has a system MTBF of about 3 hours. Each checkpoint
-            write takes 2 minutes. I want to checkpoint every 10 minutes to be safe.
-            My manager says that is too aggressive. Who is right?"
-        </div>
-    </div>
-    """))
+`R_system(t) = exp(-N * lambda * t)`
 
-        # ── Concept framing ───────────────────────────────────────────
-        items.append(mo.md("""
-    Checkpointing has two costs that pull in opposite directions:
+For identical independent components:
 
-    1. **Checkpoint overhead**: Writing checkpoints consumes time that could be used for
-       training. Checkpointing every tau seconds wastes T_write/tau fraction of wall time.
+`MTBF_system = MTBF_component / N`
 
-    2. **Expected rework**: When a failure occurs, you lose all progress since the last
-       checkpoint. On average, you lose tau/2 seconds of compute. The expected rework
-       per unit time is tau / (2 * MTBF).
-
-    Total waste = T_write/tau + tau/(2*MTBF). This is a **U-shaped curve** with a unique
-    minimum at:
-
-    **tau_opt = sqrt(2 * T_write * MTBF)** (the Young-Daly formula)
-
-    For MTBF = 3 hours (10,800s) and T_write = 2 minutes (120s):
-    tau_opt = sqrt(2 * 120 * 10,800) = sqrt(2,592,000) = **~1,610 seconds = ~27 minutes**
-
-    The engineer's 10-minute interval wastes 2/10 = 20% of time on checkpoint overhead alone.
-    The optimal 27-minute interval wastes only 2/27 = 7.4% on overhead.
-    """))
-
-        items.append(mo.callout(mo.md(
-            "**Caveat:** The MTBF formula assumes independent failures. In practice, failures are often "
-            "correlated: a power supply failure takes down 8 GPUs, a switch failure isolates an entire "
-            "rack (64-128 GPUs). Correlated failures can increase effective failure rates by 2-5x over "
-            "the independent model."
-        ), kind="info"))
-
-        # ── Prediction lock ───────────────────────────────────────────
-        items.append(mo.md("### Your Prediction"))
-        items.append(partA_prediction)
-
-        if partA_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part A instruments."), kind="warn"))
-            return mo.vstack(items)
-
-        # ── Instruments ───────────────────────────────────────────────
-        items.append(mo.md("### Young-Daly Checkpoint Optimizer"))
-        items.append(mo.hstack([a1_cluster_gpus, a1_write_time_s, a1_interval_s], justify="center", gap=2))
-
-        _n_gpus = a1_cluster_gpus.value
-        _t_write = a1_write_time_s.value
-        _tau = a1_interval_s.value
-
-        # MTBF = component MTTF / N
-        _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
-        _mtbf_h = _mtbf_s / 3600
-
-        # Young-Daly optimal
-        _tau_opt = calc_young_daly_interval(_t_write, _mtbf_s).m_as("second")
-        _tau_opt_min = _tau_opt / 60
-
-        # Waste components at current interval
-        _ckpt_overhead = _t_write / _tau if _tau > 0 else 1.0
-        _rework = _tau / (2 * _mtbf_s) if _mtbf_s > 0 else 1.0
-        _total_waste = _ckpt_overhead + _rework
-        _total_waste_pct = min(_total_waste * 100, 100)
-
-        # Waste at optimal
-        _waste_opt = _t_write / _tau_opt + _tau_opt / (2 * _mtbf_s)
-        _waste_opt_pct = _waste_opt * 100
-
-        # Dollar cost of waste per day
-        _compute_cost_day = _n_gpus * GPU_COST_HR * 24
-        _waste_cost_day = _compute_cost_day * _total_waste
-        _waste_cost_opt_day = _compute_cost_day * _waste_opt
-
-        # ── U-curve chart ─────────────────────────────────────────────
-        _tau_range = np.linspace(60, min(_mtbf_s, 10800), 200)
-        _overhead_curve = [_t_write / t * 100 for t in _tau_range]
-        _rework_curve = [t / (2 * _mtbf_s) * 100 for t in _tau_range]
-        _total_curve = [(_t_write / t + t / (2 * _mtbf_s)) * 100 for t in _tau_range]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_overhead_curve, mode="lines",
-                                   name="Checkpoint overhead", line=dict(color=COLORS["BlueLine"], width=2)))
-        _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_rework_curve, mode="lines",
-                                   name="Expected rework", line=dict(color=COLORS["RedLine"], width=2)))
-        _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_total_curve, mode="lines",
-                                   name="Total waste", line=dict(color=COLORS["Text"], width=3)))
-        # Mark optimal
-        _fig.add_trace(go.Scatter(x=[_tau_opt_min], y=[_waste_opt_pct], mode="markers",
-                                   name="Young-Daly optimum", marker=dict(size=14, color=COLORS["GreenLine"], symbol="star")))
-        # Mark current
-        _fig.add_trace(go.Scatter(x=[_tau / 60], y=[_total_waste_pct], mode="markers",
-                                   name="Your interval", marker=dict(size=14, color=COLORS["OrangeLine"], symbol="diamond")))
-        _fig.update_layout(
-            height=340,
-            xaxis=dict(title="Checkpoint Interval (minutes)"),
-            yaxis=dict(title="Time Wasted (%)", range=[0, min(max(_total_curve) * 1.1, 100)]),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(t=40, b=50, l=50, r=20),
-        )
-        apply_plotly_theme(_fig)
-
-        # Colors
-        _waste_color = COLORS["GreenLine"] if _total_waste_pct < 15 else (COLORS["OrangeLine"] if _total_waste_pct < 30 else COLORS["RedLine"])
-
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Young-Daly Checkpoint Optimization
-            </div>
-            <div>Cluster: {_n_gpus:,} GPUs &times; MTTF {GPU_MTTF_HOURS:,} hrs = MTBF_system = <strong>{_mtbf_h:.1f} hours ({_mtbf_s:.0f}s)</strong></div>
-            <div>tau_opt = sqrt(2 &times; {_t_write}s &times; {_mtbf_s:.0f}s) = <strong>{_tau_opt:.0f}s ({_tau_opt_min:.1f} min)</strong></div>
-            <div>Your interval: {_tau}s ({_tau/60:.1f} min) &mdash; overhead: {_ckpt_overhead*100:.1f}% + rework: {_rework*100:.1f}% = <strong style="color:{_waste_color};">{_total_waste_pct:.1f}% waste</strong></div>
-            <div>Optimal waste: <strong style="color:{COLORS['GreenLine']};">{_waste_opt_pct:.1f}%</strong> &mdash; savings vs your interval: <strong>${(_waste_cost_day - _waste_cost_opt_day):,.0f}/day</strong></div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">System MTBF</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_mtbf_h:.1f}h</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{_n_gpus:,} GPUs</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Optimal Interval</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_tau_opt_min:.0f}m</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">Young-Daly</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Total Waste</div>
-                <div style="font-size:2rem; font-weight:800; color:{_waste_color}; font-family:monospace;">{_total_waste_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">your interval</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Waste Cost</div>
-                <div style="font-size:2rem; font-weight:800; color:{_waste_color}; font-family:monospace;">${_waste_cost_day:,.0f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">per day</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # ── Prediction reveal ─────────────────────────────────────────
-        if partA_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Correct.** The Young-Daly formula gives tau_opt = sqrt(2 * 120s * 10,800s) = "
-                "~1,610 seconds = ~27 minutes. This is the geometric mean between write time and "
-                "MTBF, not the arithmetic mean. The square root law means the optimal interval "
-                "is much closer to the write time than to the MTBF."
-            ), kind="success"))
-        elif partA_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Far too aggressive.** Checkpointing every 2 minutes with a 2-minute write time "
-                "means 50% of wall time is spent checkpointing. Only 50% remains for training. "
-                "The optimal interval balances overhead against rework, not minimizes rework alone."
-            ), kind="warn"))
-        elif partA_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Too aggressive.** At 10-minute intervals, checkpoint overhead is 2/10 = 20%, "
-                "plus rework of 10/(2*180) = 2.8%, total = 22.8%. The optimal 27-minute interval "
-                "achieves only 12.3% waste -- saving nearly 10 percentage points of compute time."
-            ), kind="warn"))
-        elif partA_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Too conservative.** At 90 minutes with MTBF of 3 hours, expected rework is "
-                "90/(2*180) = 25%. Combined with 2/90 = 2.2% overhead, total waste is 27.2%. "
-                "The optimal 27-minute interval achieves 12.3% -- half the waste."
-            ), kind="warn"))
-
-        # ── MathPeek ──────────────────────────────────────────────────
-        items.append(mo.accordion({
-            "Governing equations -- Young-Daly checkpoint optimization": mo.md("""
-        **System MTBF**
-
-        ```
-        MTBF_system = MTBF_component / N
-        ```
-
-        - N = number of GPUs in the cluster
-        - MTBF_component = 50,000 hours (individual GPU MTTF)
-        - At N = 16,000: MTBF = 50,000 / 16,000 = 3.125 hours
-
-        **Young-Daly Optimal Interval**
-
-        ```
-        tau_opt = sqrt(2 * T_write * MTBF)
-        ```
-
-        - T_write = time to write one checkpoint
-        - Total waste at optimum = 2 * sqrt(T_write / (2 * MTBF))
-        - The square root law means the interval scales with the geometric
-          mean of write time and MTBF, not the arithmetic mean
-
-        **U-Shaped Waste Curve**
-
-        ```
-        W(tau) = T_write / tau  +  tau / (2 * MTBF)
-                 [overhead]        [rework]
-        ```
-
-        - dW/d(tau) = 0 yields tau_opt = sqrt(2 * T_write * MTBF)
-        """)
-        }))
-
-        # ── Reflection ────────────────────────────────────────────────
-        items.append(mo.md("### Reflection"))
-        items.append(partA_reflection)
-
-        if partA_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
-        elif partA_reflection.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** The optimal waste is proportional to sqrt(T_write / MTBF). Reducing "
-                "T_write by 4x (e.g., from NFS to parallel FS) reduces waste by 2x. Async "
-                "checkpointing effectively makes T_write appear near-zero for the training loop. "
-                "This is the most actionable lever because storage is within the team's control."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not the primary lever.** The Young-Daly waste formula is 2 * sqrt(T_write / (2 * MTBF)). "
-                "Reducing T_write has the most direct impact because storage technology is within "
-                "engineering control, unlike hardware reliability (MTBF)."
-            ), kind="warn"))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART B BUILDER -- The Checkpoint Storm
-    # ─────────────────────────────────────────────────────────────────────
+The track changes what a component is, but the amount-system reasoning is the
+same: more exposed units create a shorter time between fleet-visible failures.
+                """,
+            ),
+            v2_07_part_a_checkpoint,
+        ])
+        return mo.vstack(_items)
 
     def build_part_b():
-        items = []
+        _checkpoint = v2_07_checkpoint_result()
+        _items = [
+            mo.md("## Part B - Checkpoint Interval Has an Optimum"),
+            mo.callout(mo.md(
+                f"The {v2_07_profile.label} plan must choose how often to save recoverable state. "
+                "The goal is not maximum checkpointing or minimum checkpointing; it is minimum wasted capacity."
+            ), kind="info"),
+            v2_07_part_b_prediction,
+        ]
+        if v2_07_part_b_prediction.value is None:
+            _items.append(v2_07_prediction_feedback(None, "optimum", ""))
+            return mo.vstack(_items)
+        _items.extend([
+            v2_07_prediction_feedback(
+                v2_07_part_b_prediction.value,
+                "optimum",
+                "Young-Daly gives the minimum of a U-shaped tax: save overhead falls with interval while expected rework rises.",
+            ),
+            mo.hstack([v2_07_write_min, v2_07_checkpoint_interval_min], justify="start"),
+            mo.as_html(v2_07_young_daly_chart(_checkpoint)),
+            v2_07_table(
+                ["Amount", "Value", "Limit or comparison"],
+                [
+                    ["System MTBF", f"{v2_07_fmt(_checkpoint['mtbf_min'])} min", "from Part A aggregate MTBF"],
+                    ["Write time", f"{v2_07_fmt(_checkpoint['write_min'])} min", "snapshot cost paid every checkpoint"],
+                    ["Chosen interval", f"{v2_07_fmt(_checkpoint['interval_min'])} min", "student-controlled policy"],
+                    ["Young-Daly optimum", f"{v2_07_fmt(_checkpoint['tau_opt_min'])} min", "minimum total checkpoint tax"],
+                    ["Total tax", f"{v2_07_fmt(_checkpoint['total_tax_pct'])}%", f"limit {v2_07_lens['tax_limit_pct']}%"],
+                    ["Dominant side", _checkpoint["dominant_tax"], "move interval toward the opposite side"],
+                ],
+            ),
+            mo.callout(
+                mo.md(
+                    "Near optimum: the current interval is within 20 percent of the Young-Daly interval."
+                    if _checkpoint["near_optimum"]
+                    else f"Boundary: current interval is dominated by **{_checkpoint['dominant_tax']}**. "
+                         f"Move from {v2_07_fmt(_checkpoint['interval_min'])} min toward "
+                         f"{v2_07_fmt(_checkpoint['tau_opt_min'])} min, or reduce write time with more bandwidth."
+                ),
+                kind="success" if _checkpoint["near_optimum"] and _checkpoint["tax_ok"] else "warn",
+            ),
+            v2_07_math_peek(
+                "Math Peek: Young-Daly Checkpoint Tax",
+                """
+The chapter's first-order checkpoint model is:
 
-        # ── Stakeholder message ────────────────────────────────────────
-        items.append(mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message &middot; Storage Architect
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We have a 175B model training on 1,000 GPUs. Our storage is NFS with
-            1 GB/s aggregate write bandwidth. How long does one checkpoint take?
-            The training team says it is only a few minutes. I disagree."
-        </div>
-    </div>
-    """))
+`tau_opt = sqrt(2 * T_write * MTBF_system)`
 
-        # ── Concept framing ───────────────────────────────────────────
-        items.append(mo.md("""
-    A 175B model checkpoint includes weights + optimizer states + gradients:
-    - 175B parameters x 14 bytes (FP16 weights + FP32 Adam m1 + m2 + master) = **2.45 TB** per checkpoint
-    - At NFS 1 GB/s aggregate write: 2,450 seconds = **~41 minutes**
+For a chosen interval `tau`, the visible tax is:
 
-    With MTBF of ~50 hours (1,000 GPUs, MTTF=50,000 hrs each), the Young-Daly optimal interval is:
-    tau_opt = sqrt(2 * 2450 * 180,000) = sqrt(882,000,000) = ~29,700s = ~8.2 hours
+`waste = T_write / tau + tau / (2 * MTBF_system)`
 
-    At 1 GB/s NFS, checkpoint write time (41 min) is a manageable fraction of the 8.2 hour
-    optimal interval. With faster storage (100 GB/s NVMe RAID), the same checkpoint takes only
-    24.5 seconds.
-
-    What happens at a larger cluster (10,000 GPUs) where MTBF drops to ~5 hours?
-    """))
-
-        # ── Prediction lock ───────────────────────────────────────────
-        items.append(mo.md("### Your Prediction"))
-        items.append(partB_prediction)
-
-        if partB_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part B instruments."), kind="warn"))
-            return mo.vstack(items)
-
-        # ── Instruments ───────────────────────────────────────────────
-        items.append(mo.md("### Checkpoint Storm Analyzer"))
-        items.append(mo.hstack([a2_model_b, a2_cluster_gpus, a2_storage], justify="center", gap=2))
-
-        _params_b = a2_model_b.value
-        _n_gpus = a2_cluster_gpus.value
-        _storage_bw = a2_storage.value
-
-        # Checkpoint size: 14 bytes per param (weights + optimizer)
-        _ckpt_bytes = _params_b * 1e9 * 14
-        _ckpt_tb = _ckpt_bytes / 1e12
-        _ckpt_gb = _ckpt_bytes / 1e9
-
-        # Write time
-        _write_time_s = _ckpt_gb / _storage_bw
-        _write_time_min = _write_time_s / 60
-
-        # MTBF
-        _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
-        _mtbf_h = _mtbf_s / 3600
-
-        # Young-Daly optimal
-        _tau_opt_s = calc_young_daly_interval(_write_time_s, _mtbf_s).m_as("second")
-        _tau_opt_min = _tau_opt_s / 60
-
-        # Pathological: write time > optimal interval
-        _pathological = _write_time_s > _tau_opt_s
-        _ckpt_fraction = _write_time_s / _tau_opt_s if _tau_opt_s > 0 else 999
-
-        # Dollar cost
-        _compute_cost_day = _n_gpus * GPU_COST_HR * 24
-        _ckpt_cost_per = _n_gpus * GPU_COST_HR * (_write_time_s / 3600)
-        _daily_ckpts = 86400 / _tau_opt_s if _tau_opt_s > 0 else 0
-        _daily_ckpt_cost = _ckpt_cost_per * _daily_ckpts
-
-        # ── Storage comparison chart ──────────────────────────────────
-        _storages = [("NFS 1 GB/s", 1.0), ("Parallel FS 10 GB/s", 10.0), ("NVMe RAID 100 GB/s", 100.0)]
-        _write_times = [_ckpt_gb / bw for _, bw in _storages]
-        _bar_colors = [COLORS["RedLine"] if wt > _tau_opt_s else COLORS["GreenLine"] for wt in _write_times]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            x=[n for n, _ in _storages], y=[wt / 60 for wt in _write_times],
-            marker_color=_bar_colors,
-            text=[f"{wt/60:.1f} min" for wt in _write_times],
-            textposition="auto",
-            hovertemplate="%{x}<br>Write time: %{y:.1f} min<extra></extra>",
-        ))
-        _fig.add_hline(y=_tau_opt_min, line=dict(color=COLORS["OrangeLine"], width=2, dash="dash"),
-                       annotation_text=f"Young-Daly optimal: {_tau_opt_min:.1f} min",
-                       annotation_position="top right")
-        _fig.update_layout(
-            height=300,
-            xaxis=dict(title="Storage System"),
-            yaxis=dict(title="Checkpoint Write Time (minutes)"),
-            margin=dict(t=30, b=50, l=50, r=20),
-            showlegend=False,
-        )
-        apply_plotly_theme(_fig)
-
-        # ── Failure banner ────────────────────────────────────────────
-        if _pathological:
-            items.append(mo.Html(f"""
-        <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
-                    border-radius:10px; padding:14px 18px; margin:10px 0;">
-            <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
-                CHECKPOINT STORM &mdash; System Pathological
-            </div>
-            <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
-                Checkpoint write time ({_write_time_min:.1f} min) <strong>exceeds</strong> the
-                Young-Daly optimal interval ({_tau_opt_min:.1f} min).<br>
-                The system would spend more time writing checkpoints than computing.
-                <strong>Upgrade storage bandwidth or reduce checkpoint size.</strong>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Checkpoint Storm Analysis
-            </div>
-            <div>Model: {_params_b}B params &times; 14 bytes = <strong>{_ckpt_tb:.2f} TB</strong> per checkpoint</div>
-            <div>Write time = {_ckpt_gb:.0f} GB / {_storage_bw} GB/s = <strong>{_write_time_min:.1f} minutes</strong></div>
-            <div>System MTBF = {GPU_MTTF_HOURS:,}h / {_n_gpus:,} = <strong>{_mtbf_h:.1f} hours</strong></div>
-            <div>Young-Daly optimal = sqrt(2 &times; {_write_time_s:.0f}s &times; {_mtbf_s:.0f}s) = <strong>{_tau_opt_min:.1f} minutes</strong></div>
-            <div>Write/Optimal ratio = <strong style="color:{COLORS['RedLine'] if _pathological else COLORS['GreenLine']};">{_ckpt_fraction:.2f}x</strong>
-                 {'(PATHOLOGICAL)' if _pathological else '(healthy)'}</div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Ckpt Size</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_ckpt_tb:.1f}TB</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Write Time</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['RedLine'] if _pathological else COLORS['GreenLine']}; font-family:monospace;">{_write_time_min:.0f}m</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Daily Ckpt Cost</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">${_daily_ckpt_cost:,.0f}</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">System MTBF</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_mtbf_h:.1f}h</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # ── Prediction reveal ─────────────────────────────────────────
-        if partB_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Correct.** 175B x 14 bytes = 2.45 TB per checkpoint. At 1 GB/s NFS, that is "
-                "2,450 seconds = ~41 minutes. With MTBF of ~50 hours for a 1,000-GPU cluster, "
-                "the Young-Daly optimal interval is ~8.2 hours, so 41 minutes is well within budget. "
-                "But at 10,000 GPUs (MTBF ~5 hours), optimal interval drops to ~2.6 hours "
-                "-- now the write time (41 min) is a large fraction of the optimal interval."
-            ), kind="success"))
-        elif partB_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Off by orders of magnitude.** 175B x 14 bytes = 2.45 TB. At 1 GB/s NFS, "
-                "writing 2,450 GB takes 2,450 seconds -- not 10 seconds. Even NVMe RAID at "
-                "100 GB/s takes ~24.5 seconds. NFS cannot handle frontier-scale checkpoints."
-            ), kind="warn"))
-        elif partB_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Too optimistic by 20x.** 2.45 TB at 1 GB/s = 2,450 seconds = ~41 minutes, "
-                "not 2 minutes. 2 minutes would require 2,450 / 120 = 20 GB/s sustained write -- "
-                "faster than most parallel file systems."
-            ), kind="warn"))
-        elif partB_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Still 8x too optimistic.** 5 minutes = 300 seconds. But 2,450 GB / 300s = "
-                "8.2 GB/s required. NFS provides 1 GB/s. Even parallel FS at 10 GB/s "
-                "takes 4 minutes. NFS: 41 minutes."
-            ), kind="warn"))
-
-        # ── MathPeek ──────────────────────────────────────────────────
-        items.append(mo.accordion({
-            "Governing equations -- checkpoint storm and storage requirements": mo.md("""
-        **Checkpoint Size**
-
-        ```
-        C = P * (2 + 4 + 4 + 4) = P * 14 bytes
-        ```
-
-        - FP16 weights: 2 bytes/param
-        - FP32 optimizer momentum (m1): 4 bytes/param
-        - FP32 optimizer variance (m2): 4 bytes/param
-        - FP32 master weights: 4 bytes/param
-        - 175B params: C = 175e9 * 14 = 2.45 TB
-
-        **Checkpoint Storm Condition**
-
-        ```
-        T_write > tau_opt  =>  C/BW > sqrt(2 * C/BW * MTBF)
-        ```
-
-        Simplifying: C/BW > 2 * MTBF (approximately)
-        Storm occurs when storage bandwidth is insufficient relative to
-        model size and cluster MTBF.
-
-        **Required Storage Bandwidth to Avoid Storm**
-
-        ```
-        BW_min > C / tau_opt = C / sqrt(2 * T_write * MTBF)
-        ```
-        """)
-        }))
-
-        # ── Reflection ────────────────────────────────────────────────
-        items.append(mo.md("### Reflection"))
-        items.append(partB_reflection)
-
-        if partB_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
-        elif partB_reflection.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Async checkpointing writes to fast local NVMe while training continues, "
-                "then drains to durable storage in the background. This makes T_write effectively "
-                "near-zero for the training loop, breaking the checkpoint storm. Combined with "
-                "parallel file systems (10-100 GB/s), this is the standard production solution."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not the primary solution.** Asynchronous checkpointing decouples checkpoint "
-                "writes from the training loop by writing to fast local NVMe first, then draining "
-                "to durable storage in the background. This makes T_write effectively zero for "
-                "the training loop, eliminating the checkpoint storm regardless of storage speed."
-            ), kind="warn"))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART C BUILDER -- Async Checkpointing
-    # ─────────────────────────────────────────────────────────────────────
+Restart time is a per-failure recovery term. It should be budgeted, but not
+folded into `T_write` unless a recovery-aware checkpoint model is derived.
+                """,
+            ),
+            v2_07_part_b_checkpoint,
+        ])
+        return mo.vstack(_items)
 
     def build_part_c():
-        items = []
+        _rows = v2_07_all_policy_results()
+        _selected = v2_07_policy_result()
+        _items = [
+            mo.md("## Part C - Lost Work and Recovery Policy Trade Amounts"),
+            mo.callout(mo.md(
+                f"A {v2_07_lens['failure_mode']} incident has arrived. Choose the recovery policy that "
+                f"meets a {v2_07_lens['recovery_objective_min']}-minute objective without exceeding "
+                "storage or write-bandwidth budgets."
+            ), kind="info"),
+            v2_07_part_c_prediction,
+        ]
+        if v2_07_part_c_prediction.value is None:
+            _items.append(v2_07_prediction_feedback(None, "all_amounts", ""))
+            return mo.vstack(_items)
+        _items.extend([
+            v2_07_prediction_feedback(
+                v2_07_part_c_prediction.value,
+                "all_amounts",
+                "Lost work, storage, bandwidth, and restart terms all become design amounts; the binding one changes by policy.",
+            ),
+            mo.hstack([v2_07_recovery_policy, v2_07_checkpoint_history, v2_07_write_bandwidth_gbs], justify="start"),
+            v2_07_table(
+                ["Policy", "Lost work", "Recovery", "Storage", "Write GB/s", "Coverage", "Status"],
+                [
+                    [
+                        row["label"],
+                        f"{v2_07_fmt(row['lost_work_min'])} min",
+                        f"{v2_07_fmt(row['recovery_min'])} min",
+                        f"{v2_07_fmt(row['storage_gb'])} GB",
+                        v2_07_fmt(row["required_write_gbs"], 3),
+                        row["coverage"],
+                        v2_07_status(row["feasible"]),
+                    ]
+                    for row in _rows
+                ],
+            ),
+            mo.callout(
+                mo.md(
+                    f"Selected policy: **{_selected['label']}**. Recovery = "
+                    f"**{v2_07_fmt(_selected['recovery_min'])} min** against "
+                    f"**{v2_07_lens['recovery_objective_min']} min**; storage = "
+                    f"**{v2_07_fmt(_selected['storage_gb'])} GB** against "
+                    f"**{v2_07_fmt(v2_07_lens['storage_budget_gb'])} GB**; required write bandwidth = "
+                    f"**{v2_07_fmt(_selected['required_write_gbs'], 3)} GB/s**. "
+                    f"Uncovered: {_selected['uncovered']}."
+                ),
+                kind="success" if _selected["feasible"] else "warn",
+            ),
+            v2_07_math_peek(
+                "Math Peek: Failure Cost Budget",
+                """
+The recovery budget decomposes a failure event:
 
-        # Stakeholder message
-        items.append(mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['OrangeLine']}; background: {COLORS['OrangeLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['OrangeLine']};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message &middot; Systems Architect
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "The checkpoint storm from Part B is blocking our 175B training run.
-            Someone suggested async checkpointing -- write to local NVMe first, then drain
-            to durable storage in the background. How much does this actually help?"
-        </div>
-    </div>
-    """))
+`T_failure = lost_work + T_detect + T_restart + T_load + T_warmup`
 
-        # Concept framing
-        items.append(mo.md("""
-    Asynchronous checkpointing splits the write into two phases:
-
-    1. **Snapshot to local NVMe**: Each GPU writes its shard to local NVMe RAID.
-       At 100 GB/s per node, 8 GPUs write their shards in parallel.
-
-    2. **Background drain**: A background thread copies the snapshot from NVMe
-       to durable storage (parallel FS or object store) while training resumes.
-
-    The training loop pauses only for Phase 1. For a 175B model:
-    - Checkpoint per node = 2.45 TB / (N_nodes) -- sharded across nodes
-    - At 100 GB/s local NVMe: pause = shard_size / 100 GB/s
-
-    For 256 GPUs (32 nodes): per-node shard = 2.45 TB / 32 = ~77 GB.
-    NVMe pause = 77 GB / 100 GB/s = **~0.8 seconds** (vs 41 min on NFS).
-
-    The catch: local NVMe must hold at least 2 checkpoints (current + previous)
-    for rollback safety. At 77 GB per checkpoint, that requires ~154 GB local NVMe per node.
-        """))
-
-        # Prediction lock
-        items.append(mo.md("### Your Prediction"))
-        items.append(partC_prediction)
-
-        if partC_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part C instruments."), kind="warn"))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(mo.md("### Async Checkpoint Analyzer"))
-        items.append(mo.hstack([c1_nvme_bw, c1_drain_bw, c1_cluster_gpus], justify="center", gap=2))
-
-        # Physics
-        _params_b = 175
-        _ckpt_gb = _params_b * 1e9 * 14 / 1e9  # 2450 GB
-        _n_gpus = c1_cluster_gpus.value
-        _n_nodes = max(_n_gpus // 8, 1)
-        _nvme_bw = c1_nvme_bw.value
-        _drain_bw = c1_drain_bw.value
-
-        _shard_gb = _ckpt_gb / _n_nodes
-        _nvme_pause_s = _shard_gb / _nvme_bw
-        _drain_time_s = _ckpt_gb / _drain_bw  # total drain time
-        _nfs_time_s = _ckpt_gb / 1.0  # NFS baseline
-        _nfs_time_min = _nfs_time_s / 60
-
-        _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
-        _tau_opt = calc_young_daly_interval(_nvme_pause_s, _mtbf_s).m_as("second")
-        _tau_opt_min = _tau_opt / 60
-
-        _waste_async = _nvme_pause_s / _tau_opt + _tau_opt / (2 * _mtbf_s) if _tau_opt > 0 else 1.0
-        _tau_nfs = calc_young_daly_interval(_nfs_time_s, _mtbf_s).m_as("second")
-        _waste_nfs = _nfs_time_s / _tau_nfs + _tau_nfs / (2 * _mtbf_s) if _mtbf_s > 0 else 1.0
-
-        _speedup = _nfs_time_s / max(_nvme_pause_s, 0.001)
-        _nvme_storage_needed_gb = _shard_gb * 2  # 2 checkpoints
-
-        # Comparison chart
-        _methods = ["NFS (1 GB/s)", "Parallel FS (10 GB/s)", f"Async NVMe ({_nvme_bw} GB/s)"]
-        _pause_times = [_nfs_time_s, _ckpt_gb / 10.0, _nvme_pause_s]
-        _bar_colors = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"]]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            x=_methods, y=_pause_times,
-            marker_color=_bar_colors,
-            text=[f"{t:.1f}s" if t < 60 else f"{t/60:.1f}m" for t in _pause_times],
-            textposition="auto",
-        ))
-        _fig.update_layout(
-            height=300,
-            xaxis=dict(title="Checkpoint Method"),
-            yaxis=dict(title="Training Loop Pause (seconds)", type="log"),
-            margin=dict(t=30, b=50, l=50, r=20),
-            showlegend=False,
-        )
-        apply_plotly_theme(_fig)
-
-        _pause_color = COLORS["GreenLine"] if _nvme_pause_s < 5 else (COLORS["OrangeLine"] if _nvme_pause_s < 60 else COLORS["RedLine"])
-
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Async Checkpoint Analysis
-            </div>
-            <div>Checkpoint: 175B &times; 14 bytes = <strong>{_ckpt_gb:.0f} GB</strong></div>
-            <div>Nodes: {_n_nodes} &mdash; shard per node: <strong>{_shard_gb:.1f} GB</strong></div>
-            <div>NVMe pause = {_shard_gb:.1f} / {_nvme_bw} = <strong style="color:{_pause_color};">{_nvme_pause_s:.2f}s</strong></div>
-            <div>NFS baseline: <strong style="color:{COLORS['RedLine']};">{_nfs_time_min:.1f} min</strong></div>
-            <div>Speedup: <strong style="color:{COLORS['GreenLine']};">{_speedup:.0f}x</strong></div>
-            <div>Local NVMe required: <strong>{_nvme_storage_needed_gb:.0f} GB</strong> per node (2 checkpoints)</div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">NVMe Pause</div>
-                <div style="font-size:2rem; font-weight:800; color:{_pause_color}; font-family:monospace;">{_nvme_pause_s:.1f}s</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">vs {_nfs_time_min:.0f}m NFS</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Speedup</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_speedup:.0f}x</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Waste (async)</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_waste_async*100:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">vs {_waste_nfs*100:.1f}% NFS</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # Prediction reveal
-        if partC_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Correct.** With 256 GPUs across 32 nodes, each node writes ~77 GB to local NVMe "
-                "at 100 GB/s = 0.8 seconds. The training loop pauses for less than 1 second. "
-                "Background drain to durable storage takes minutes, but training has already resumed. "
-                "This reduces Young-Daly waste from ~25% (NFS) to under 2%."
-            ), kind="success"))
-        elif partC_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Close but wrong phase.** 10 seconds would be the time to drain to NVMe if the "
-                "entire checkpoint were written to one node. With sharding across 32 nodes, "
-                "each writes only 77 GB -- pause is under 1 second."
-            ), kind="warn"))
-        elif partC_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**That is the full checkpoint size / NVMe BW.** 2450 GB / 100 GB/s = 24.5 seconds. "
-                "But with 32 nodes writing in parallel, each writes only 77 GB / 100 = 0.8 seconds. "
-                "The parallelism across nodes is the key insight."
-            ), kind="warn"))
-        elif partC_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Async does not use NFS for the training pause.** The whole point is to write to "
-                "fast local NVMe first (sub-second), then drain to NFS/parallel FS in the background."
-            ), kind="warn"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Governing equations -- async checkpointing": mo.md("""
-        **Async Checkpoint Pause**
-
-        ```
-        T_pause = (C / N_nodes) / BW_nvme
-        ```
-
-        - C = total checkpoint size (bytes)
-        - N_nodes = cluster nodes (each writes its shard in parallel)
-        - BW_nvme = per-node NVMe write bandwidth
-
-        **Background Drain Time**
-
-        ```
-        T_drain = C / BW_durable_storage
-        ```
-
-        T_drain > T_pause is expected and acceptable -- training continues during drain.
-
-        **Requirement**: Local NVMe must hold >= 2 checkpoints:
-        - Current checkpoint being written
-        - Previous checkpoint for rollback safety
-        - NVMe_capacity >= 2 * C / N_nodes
-            """)
-        }))
-
-        # Reflection
-        items.append(mo.md("### Reflection"))
-        items.append(partC_reflection)
-
-        if partC_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
-        elif partC_reflection.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Async checkpointing reduces the training pause to NVMe write time, "
-                "but requires: (1) enough local NVMe capacity for 2 checkpoints per node, "
-                "(2) background drain bandwidth sufficient to drain before the next checkpoint. "
-                "For 175B at 32 nodes: 154 GB NVMe per node. Most DGX nodes ship with 2-4 TB NVMe."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not quite.** Async checkpointing is not free -- it requires local NVMe storage "
-                "capacity for at least 2 checkpoints per node. The training pause is reduced to "
-                "NVMe write time, but if drain bandwidth is too slow, checkpoints can pile up "
-                "and exhaust local storage."
-            ), kind="warn"))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART D BUILDER -- Serving Fault Tolerance
-    # ─────────────────────────────────────────────────────────────────────
+Checkpoint history increases storage but protects against a bad latest
+checkpoint. Replicated state increases normal-operation cost but reduces lost
+work and failover latency. A policy is feasible only when recovery time, storage,
+and write bandwidth all fit the selected track.
+                """,
+            ),
+            v2_07_uncovered_failure,
+            mo.callout(mo.md(f"Validation drill: **{_selected['validation']}**."), kind="info"),
+        ])
+        return mo.vstack(_items)
 
     def build_part_d():
-        items = []
+        _recovery = v2_07_policy_result()
+        _selected = v2_07_plan_result(recovery=_recovery)
+        _rows = v2_07_default_plan_results(_recovery)
+        _items = [
+            mo.md("## Part D - Recovery Plan Must Pass Guardrails"),
+            mo.callout(mo.md(
+                f"The {v2_07_profile.label} design review asks for one plan that meets recovery, "
+                f"cost, latency, quality, and {v2_07_variant.guardrail_metric} guardrails."
+            ), kind="info"),
+            v2_07_part_d_prediction,
+        ]
+        if v2_07_part_d_prediction.value is None:
+            _items.append(v2_07_prediction_feedback(None, "any_guardrail", ""))
+            return mo.vstack(_items)
+        _items.extend([
+            v2_07_prediction_feedback(
+                v2_07_part_d_prediction.value,
+                "any_guardrail",
+                "A reliability plan is valid only inside all guardrails at once; a single miss rejects it.",
+            ),
+            mo.hstack([v2_07_plan_choice, v2_07_replica_count], justify="start"),
+            mo.as_html(v2_07_availability_chart(_rows)),
+            v2_07_table(
+                ["Plan", "Replicas", "Avail.", "Recovery", "Cost", "Latency", "Quality", v2_07_variant.guardrail_metric, "Misses"],
+                [
+                    [
+                        row["label"],
+                        row["replicas"],
+                        f"{v2_07_fmt(row['availability_pct'], 4)}%",
+                        f"{v2_07_fmt(row['recovery_min'])} min",
+                        v2_07_fmt(row["cost"]),
+                        f"{v2_07_fmt(row['latency_ms'])} ms",
+                        f"{v2_07_fmt(row['quality_pct'])}%",
+                        f"{v2_07_fmt(row['guardrail_pct'])}%",
+                        row["misses"],
+                    ]
+                    for row in _rows
+                ],
+            ),
+            v2_07_table(
+                ["Selected plan amount", "Value", "Limit", "Status"],
+                [
+                    ["Availability", f"{v2_07_fmt(_selected['availability_pct'], 4)}%", f"{v2_07_lens['availability_target_pct']}%", v2_07_status(_selected["availability_ok"])],
+                    ["Recovery time", f"{v2_07_fmt(_selected['recovery_min'])} min", f"{v2_07_lens['recovery_objective_min']} min", v2_07_status(_selected["recovery_ok"])],
+                    ["Cost", v2_07_fmt(_selected["cost"]), v2_07_fmt(v2_07_defaults["cost_budget"]), v2_07_status(_selected["cost_ok"])],
+                    ["Latency/performance", f"{v2_07_fmt(_selected['latency_ms'])} ms", f"{v2_07_defaults['latency_budget_ms']} ms", v2_07_status(_selected["latency_ok"])],
+                    ["Quality", f"{v2_07_fmt(_selected['quality_pct'])}%", f"{v2_07_defaults['quality_floor_pct']}%", v2_07_status(_selected["quality_ok"])],
+                    [v2_07_variant.guardrail_metric, f"{v2_07_fmt(_selected['guardrail_pct'])}%", f"{v2_07_defaults['guardrail_floor_pct']}%", v2_07_status(_selected["guardrail_ok"])],
+                ],
+            ),
+            mo.callout(
+                mo.md(
+                    f"Selected **{_selected['label']}** is feasible. Residual risk: {_selected['residual_risk']}"
+                    if _selected["feasible"]
+                    else f"Selected **{_selected['label']}** misses: **{_selected['misses']}**. "
+                         "Adjust plan, replicas, or the recovery policy before accepting it."
+                ),
+                kind="success" if _selected["feasible"] else "warn",
+            ),
+            v2_07_math_peek(
+                "Math Peek: Redundancy Guardrail Gate",
+                """
+For independent replicas, the chapter availability model is:
 
-        # Stakeholder message
-        items.append(mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['RedLine']}; background: {COLORS['RedLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['RedLine']};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message &middot; SRE Team Lead
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "Our inference service runs 10 replicas serving 1,000 QPS total with a 500ms P99 SLO.
-            When a replica fails, it takes 90 seconds to reload the 70B model. During recovery,
-            the remaining 9 replicas must absorb the extra traffic. Are we SLO-safe, or do we
-            need spare replicas?"
-        </div>
-    </div>
-    """))
+`A_system = 1 - (1 - A_single)^k`
 
-        # Concept framing
-        items.append(mo.md("""
-    Training fault tolerance is about **protecting state** (checkpoint/restore).
-    Serving fault tolerance is about **maintaining throughput** during failures.
+The design gate is a conjunction:
 
-    Key differences:
-    - **Training**: lose GPU -> lose progress since last checkpoint. Restart from checkpoint.
-    - **Serving**: lose replica -> lose KV cache state for all in-flight requests. Those
-      requests must be re-issued to other replicas. The remaining replicas must absorb
-      the extra QPS without violating the latency SLO.
+`feasible = recovery_ok and cost_ok and performance_ok and guardrail_ok`
 
-    The critical question: can N-1 replicas handle the full QPS within the SLO
-    during the recovery window?
-
-    Per-replica capacity = QPS_total / N. After one failure, load per survivor =
-    QPS_total / (N - 1). If this exceeds per-replica max throughput, requests queue
-    and P99 latency spikes above the SLO.
-        """))
-
-        # Prediction lock
-        items.append(mo.md("### Your Prediction"))
-        items.append(partD_prediction)
-
-        if partD_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part D instruments."), kind="warn"))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(mo.md("### Serving Fault Tolerance Analyzer"))
-        items.append(mo.hstack([
-            mo.vstack([d1_replicas, d1_qps]),
-            mo.vstack([d1_recovery_s, d1_slo_p99_ms]),
-        ], justify="center", gap=2))
-
-        # Physics
-        _replicas = d1_replicas.value
-        _qps = d1_qps.value
-        _recovery_s = d1_recovery_s.value
-        _slo_ms = d1_slo_p99_ms.value
-
-        _qps_per_replica = _qps / _replicas
-        _qps_after_failure = _qps / max(_replicas - 1, 1)
-
-        # Simple capacity model: max throughput per replica before SLO violation
-        # Assume each replica can handle ~1.3x its normal load before SLO breach
-        _max_qps_per_replica = _qps_per_replica * 1.3
-        _overloaded = _qps_after_failure > _max_qps_per_replica
-        _overflow_qps = max(0, _qps_after_failure - _max_qps_per_replica)
-
-        # Requests dropped during recovery
-        _requests_at_risk = _overflow_qps * _recovery_s if _overloaded else 0
-        _slo_violation = _overloaded
-
-        # Spare replicas needed
-        _spare_needed = 0
-        for _s in range(0, 5):
-            _test_survivors = _replicas + _s - 1
-            if _test_survivors > 0 and _qps / _test_survivors <= _max_qps_per_replica:
-                _spare_needed = _s
-                break
-        else:
-            _spare_needed = 5
-
-        # Cost of spares
-        _spare_cost_day = _spare_needed * 8 * GPU_COST_HR * 24  # 8 GPUs per replica
-
-        # Chart: latency vs replica count during failure
-        _replica_range = list(range(max(_replicas - 3, 2), _replicas + 5))
-        _latency_factor = []
-        for _r in _replica_range:
-            _survivors = _r - 1
-            if _survivors <= 0:
-                _latency_factor.append(999)
-                continue
-            _load_ratio = _qps / _survivors / _qps_per_replica
-            # Approximate: latency scales as 1/(1 - load_ratio/capacity) for queueing
-            _lat = _slo_ms * min(max(_load_ratio, 1.0), 5.0) if _load_ratio < 1.3 else _slo_ms * 5
-            _latency_factor.append(_lat)
-
-        _fig = go.Figure()
-        _colors_bar = [COLORS["GreenLine"] if lat <= _slo_ms else COLORS["RedLine"] for lat in _latency_factor]
-        _fig.add_trace(go.Bar(
-            x=[str(r) for r in _replica_range], y=_latency_factor,
-            marker_color=_colors_bar,
-            text=[f"{l:.0f}ms" for l in _latency_factor],
-            textposition="auto",
-        ))
-        _fig.add_hline(y=_slo_ms, line=dict(color=COLORS["OrangeLine"], width=2, dash="dash"),
-                       annotation_text=f"P99 SLO: {_slo_ms}ms", annotation_position="top right")
-        _fig.update_layout(
-            height=300,
-            xaxis=dict(title="Total Replicas (one fails)"),
-            yaxis=dict(title="Estimated P99 Latency (ms)", range=[0, max(max(_latency_factor) * 1.2, _slo_ms * 2)]),
-            margin=dict(t=30, b=50, l=50, r=20),
-            showlegend=False,
-        )
-        apply_plotly_theme(_fig)
-
-        _status_color = COLORS["RedLine"] if _slo_violation else COLORS["GreenLine"]
-        _status_text = "SLO VIOLATED" if _slo_violation else "SLO MAINTAINED"
-
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Serving Fault Tolerance
-            </div>
-            <div>Replicas: {_replicas} &mdash; QPS/replica: {_qps_per_replica:.0f} &mdash; Total QPS: {_qps}</div>
-            <div>After 1 failure: QPS/survivor = {_qps_after_failure:.0f} (max safe: {_max_qps_per_replica:.0f})</div>
-            <div>Recovery time: {_recovery_s}s &mdash; Requests at risk: <strong>{_requests_at_risk:.0f}</strong></div>
-            <div>Status: <strong style="color:{_status_color};">{_status_text}</strong></div>
-            <div>Spare replicas needed: <strong>{_spare_needed}</strong> (cost: ${_spare_cost_day:,.0f}/day)</div>
-        </div>
-        """))
-
-        # SLO violation banner
-        if _slo_violation:
-            items.append(mo.Html(f"""
-        <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
-                    border-radius:10px; padding:14px 18px; margin:10px 0;">
-            <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
-                SLO VIOLATION &mdash; Insufficient Replicas
-            </div>
-            <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
-                After 1 replica failure, remaining {_replicas - 1} replicas receive {_qps_after_failure:.0f} QPS each
-                (max safe: {_max_qps_per_replica:.0f}). ~{_requests_at_risk:.0f} requests will breach the {_slo_ms}ms SLO
-                during the {_recovery_s}s recovery window. <strong>Add {_spare_needed} spare replica(s).</strong>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Status</div>
-                <div style="font-size:1.4rem; font-weight:800; color:{_status_color}; font-family:monospace;">{_status_text.split()[0]}</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Spares Needed</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">{_spare_needed}</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Recovery</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_recovery_s}s</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # Prediction reveal
-        if partD_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Correct.** The required spare count depends on the specific numbers. With 10 "
-                "replicas at 100 QPS each, losing 1 pushes survivors to 111 QPS each. If max "
-                "safe capacity is ~130 QPS/replica, 9 survivors can absorb the load. But with "
-                "fewer replicas or higher QPS, you need N+1 or N+2 provisioning."
-            ), kind="success"))
-        elif partD_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Dangerous assumption.** During the 90-second recovery, the remaining 9 replicas "
-                "must handle 111% of their normal load. If they were already at 80% capacity, "
-                "the extra 11% pushes them past the SLO threshold. 'Just restart' works only "
-                "if you have headroom."
-            ), kind="warn"))
-        elif partD_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Conservative but not always necessary.** N+1 guarantees one failure tolerance "
-                "but costs 8 extra GPUs ($576/day). If the existing replicas have >30% headroom, "
-                "they can absorb the load without a spare."
-            ), kind="warn"))
-        elif partD_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Wasteful.** 2x replicas provides excellent fault tolerance but doubles GPU cost. "
-                "The right answer depends on the specific QPS, SLO, and recovery time. "
-                "Most production systems use N+1 or N+2, not N*2."
-            ), kind="warn"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Governing equations -- serving fault tolerance": mo.md("""
-        **Load After Failure**
-
-        ```
-        QPS_per_survivor = QPS_total / (N - k)
-        ```
-
-        - N = total replicas, k = failed replicas
-        - Each survivor must handle more traffic
-
-        **SLO Violation Condition**
-
-        ```
-        QPS_per_survivor > max_capacity_per_replica  =>  SLO violated
-        requests_at_risk = (QPS_per_survivor - max_capacity) * recovery_time
-        ```
-
-        **Serving vs Training Fault Tolerance**
-
-        | Property | Training | Serving |
-        |----------|----------|---------|
-        | State | Checkpoint (GB-TB) | KV cache (GB, per-request) |
-        | Recovery | Restore from storage | Reload model weights |
-        | Cost of failure | Lost compute since checkpoint | Dropped/delayed requests |
-        | Mitigation | Checkpoint frequency | Spare replicas |
-            """)
-        }))
-
-        # Reflection
-        items.append(mo.md("### Reflection"))
-        items.append(partD_reflection)
-
-        if partD_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
-        elif partD_reflection.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Training fault tolerance preserves long-lived state (checkpoint/restore). "
-                "Serving fault tolerance maintains throughput. When a serving replica fails, its KV cache "
-                "(active request state) is lost entirely. Those requests must restart from scratch on "
-                "another replica, and the replica must reload ~140 GB of model weights before serving again."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not quite.** Serving fault tolerance differs fundamentally because KV cache state "
-                "is per-request and ephemeral. When a replica fails, all in-flight request state is "
-                "lost. Recovery requires reloading model weights (90+ seconds for 70B), during which "
-                "remaining replicas must absorb the extra traffic."
-            ), kind="warn"))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # SYNTHESIS BUILDER
-    # ─────────────────────────────────────────────────────────────────────
+Replication can improve availability while still failing cost, latency, or
+quality. That is why the plan must pass all guardrails, not just one metric.
+                """,
+            ),
+            v2_07_rejected_alternative,
+        ])
+        return mo.vstack(_items)
 
     def build_synthesis():
-        items = []
+        _exposure = v2_07_exposure()
+        _checkpoint = v2_07_checkpoint_result()
+        _recovery = v2_07_policy_result()
+        _plan = v2_07_plan_result(recovery=_recovery)
+        _binding = v2_07_binding_summary(_exposure, _checkpoint, _recovery, _plan)
+        _rejected_id = v2_07_rejected_alternative.value or "scale_first"
+        _rejected_label = v2_07_defaults["decision_options"][_rejected_id]["label"]
+        _decision_text = v2_07_memo_decision.value or (
+            f"Use {_recovery['label']} with a {_checkpoint['interval_min']:.1f}-minute checkpoint interval "
+            f"and {_plan['label']} at {_plan['replicas']} replicas. Binding amount: "
+            f"{_binding['label']} = {_binding['value']:.2f} {_binding['unit']}. "
+            f"Reject {_rejected_label}. {v2_07_lens['orchestration_implication']}"
+        )
+        _snapshot = {
+            "track_id": v2_07_profile.track_id,
+            "scenario_id": v2_07_variant.scenario_id,
+            "fleet_size": _exposure["fleet_size"],
+            "duration_h": _exposure["duration_h"],
+            "component_mtbf_h": _exposure["component_mtbf_h"],
+            "system_mtbf_h": _exposure["system_mtbf_h"],
+            "expected_failures": _exposure["expected_failures"],
+            "clean_probability": _exposure["clean_probability"],
+            "checkpoint_interval_min": _checkpoint["interval_min"],
+            "young_daly_interval_min": _checkpoint["tau_opt_min"],
+            "checkpoint_tax_pct": _checkpoint["total_tax_pct"],
+            "recovery_policy": _recovery["label"],
+            "lost_work_min": _recovery["lost_work_min"],
+            "recovery_time_min": _recovery["recovery_min"],
+            "storage_gb": _recovery["storage_gb"],
+            "required_write_gbs": _recovery["required_write_gbs"],
+            "replication_plan": _plan["label"],
+            "replica_count": _plan["replicas"],
+            "availability_pct": _plan["availability_pct"],
+            "plan_cost": _plan["cost"],
+            "plan_latency_ms": _plan["latency_ms"],
+            "binding_failure_amount": _binding,
+            "rejected_alternative": _rejected_label,
+            "uncovered_failure": v2_07_uncovered_failure.value or _recovery["uncovered"],
+            "v2_08_orchestration_implication": v2_07_lens["orchestration_implication"],
+        }
+        _incomplete = []
+        if v2_07_part_a_prediction.value is None:
+            _incomplete.append("Part A aggregate MTBF prediction")
+        if v2_07_part_b_prediction.value is None:
+            _incomplete.append("Part B checkpoint interval prediction")
+        if v2_07_part_c_prediction.value is None:
+            _incomplete.append("Part C recovery policy prediction")
+        if v2_07_part_d_prediction.value is None:
+            _incomplete.append("Part D guardrail prediction")
+        if v2_07_uncovered_failure.value is None:
+            _incomplete.append("Part C uncovered failure checkpoint")
 
-        items.append(mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. System MTBF = Component_MTTF / N scales inversely with cluster size.</strong>
-                    A 10,000-GPU cluster with 50,000-hour component MTTF experiences failures
-                    every 5 hours. At 25,000 GPUs (GPT-4 scale), failures occur every 2 hours.
-                    Failure is the common case, not the exception.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. The Young-Daly sweet spot is tau = sqrt(2 * T_write * MTBF).</strong>
-                    For a 16,000-GPU cluster (MTBF ~3h) with 2-minute writes, the optimal interval
-                    is ~27 minutes -- not 10 minutes (too aggressive) or 90 minutes (too conservative).
-                    The U-shaped waste curve has a sharp minimum.
-                </div>
-                <div>
-                    <strong>3. Checkpoint storms occur when T_write > tau_opt.</strong>
-                    A 175B model on NFS (1 GB/s) takes ~41 minutes to checkpoint. If the
-                    Young-Daly optimal interval is shorter than 41 minutes, the system is
-                    pathological. Async checkpointing to local NVMe is the standard fix.
-                </div>
-            </div>
-        </div>
-        """))
+        ledger.save(
+            chapter=7,
+            design={
+                "lab_id": v2_07_metadata.lab_id,
+                "track_id": v2_07_profile.track_id,
+                "scenario_id": v2_07_variant.scenario_id,
+                "decision": _decision_text,
+                "binding_constraint": _binding["label"],
+                "result_snapshot": _snapshot,
+            },
+        )
+        _report = build_lab_report(
+            v2_07_metadata,
+            student_id=v2_07_student_id.value or "",
+            track=v2_07_profile.label,
+            scenario=v2_07_variant.workload_summary,
+            learning_objectives=(
+                "Calculate aggregate MTBF and clean-completion probability at fleet scale.",
+                "Use Young-Daly reasoning to choose a checkpoint interval with an optimum.",
+                "Compare recovery policies across lost work, storage, write bandwidth, and resilience.",
+                "Select a fault-tolerance plan that satisfies recovery, cost, and performance guardrails.",
+            ),
+            predictions={
+                "aggregate_mtbf": v2_07_part_a_prediction.value,
+                "checkpoint_interval": v2_07_part_b_prediction.value,
+                "recovery_policy_amount": v2_07_part_c_prediction.value,
+                "guardrail_plan": v2_07_part_d_prediction.value,
+            },
+            knob_settings={
+                "fleet_size": v2_07_fleet_size.value,
+                "duration_h": v2_07_duration_h.value,
+                "part_a_checkpoint": v2_07_part_a_checkpoint.value,
+                "write_min": v2_07_write_min.value,
+                "checkpoint_interval_min": v2_07_checkpoint_interval_min.value,
+                "part_b_checkpoint": v2_07_part_b_checkpoint.value,
+                "recovery_policy": v2_07_recovery_policy.value,
+                "checkpoint_history": v2_07_checkpoint_history.value,
+                "write_bandwidth_gbs": v2_07_write_bandwidth_gbs.value,
+                "plan_choice": v2_07_plan_choice.value,
+                "replica_count": v2_07_replica_count.value,
+            },
+            binding_constraints={
+                "binding_failure_amount": _binding,
+                "selected_policy_feasible": _recovery["feasible"],
+                "selected_plan_feasible": _plan["feasible"],
+            },
+            evidence_summary={
+                "system_mtbf_h": round(_exposure["system_mtbf_h"], 4),
+                "expected_failures": round(_exposure["expected_failures"], 4),
+                "clean_probability": round(_exposure["clean_probability"], 6),
+                "young_daly_interval_min": round(_checkpoint["tau_opt_min"], 3),
+                "checkpoint_tax_pct": round(_checkpoint["total_tax_pct"], 3),
+                "recovery_time_min": round(_recovery["recovery_min"], 3),
+                "storage_gb": round(_recovery["storage_gb"], 3),
+                "availability_pct": round(_plan["availability_pct"], 5),
+                "plan_cost": round(_plan["cost"], 3),
+                "plan_latency_ms": round(_plan["latency_ms"], 3),
+            },
+            decisions={
+                "checkpoint_policy": _recovery["label"],
+                "replication_policy": _plan["label"],
+                "rejected_alternative": _rejected_label,
+                "uncovered_failure": v2_07_uncovered_failure.value or _recovery["uncovered"],
+            },
+            reflections={"reliability_memo": v2_07_memo_decision.value},
+            final_decision=_decision_text,
+            big_takeaways=(
+                "Fleet size turns failures into a routine rate, not a rare anecdote.",
+                "Checkpoint interval has an optimum because save overhead and lost work pull in opposite directions.",
+                "Recovery policy and redundancy are valid only when recovery objective, cost, and performance guardrails pass together.",
+                "V2-08 orchestration must schedule the spare capacity and failure-domain placement implied by the reliability memo.",
+            ),
+            residual_risk=_plan["residual_risk"],
+            source_trace={
+                "book_anchor": v2_07_metadata.book_anchor,
+                "chapter_formulas": (
+                    "R_system(t)=exp(-N lambda t)",
+                    "MTBF_system=MTBF_component/N",
+                    "tau_opt=sqrt(2*T_write*MTBF_system)",
+                    "A_system=1-(1-A_single)^k",
+                ),
+                "track_id": v2_07_profile.track_id,
+                "scenario_id": v2_07_variant.scenario_id,
+                "variant_source": "get_lab_track_variant",
+                "local_helper_prefix": "v2_07_",
+            },
+            result_snapshot=_snapshot,
+            incomplete_fields=tuple(_incomplete),
+        )
+        return mo.vstack([
+            mo.md("## Synthesis - Reliability Memo"),
+            v2_07_student_id,
+            v2_07_memo_decision,
+            v2_07_table(
+                ["Memo field", "Selected evidence"],
+                [
+                    ["Checkpoint policy", f"{_recovery['label']} every {v2_07_fmt(_checkpoint['interval_min'])} min"],
+                    ["Replication policy", f"{_plan['label']} with {_plan['replicas']} replicas"],
+                    ["Binding failure amount", f"{_binding['label']}: {v2_07_fmt(_binding['value'])} {_binding['unit']} (limit {v2_07_fmt(_binding['limit'])})"],
+                    ["Rejected alternative", _rejected_label],
+                    ["V2-08 orchestration implication", v2_07_lens["orchestration_implication"]],
+                ],
+            ),
+            mo.callout(mo.md(_decision_text), kind="success" if _plan["feasible"] else "warn"),
+            report_export_panel(_report),
+        ])
 
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-07: The Scheduling Trap</strong> &mdash; You designed fault tolerance
-                    for a cluster. But scheduling GPU jobs across that cluster is harder than scheduling
-                    CPU jobs: heavy-tailed durations, fragmentation, and the utilization paradox.
-                </div>
-            </div>
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> the Fault Tolerance chapter for the Young-Daly derivation and
-                    checkpoint storm analysis.<br/>
-                    <strong>Build:</strong> TinyTorch checkpoint module &mdash; implement async
-                    checkpoint write and restore in <code>tinytorch/src/checkpoint/</code>.
-                </div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.accordion({
-            "Self-Assessment": mo.md("""
-1. What is the system MTBF for a 10,000-GPU cluster with 50,000-hour component MTTF?
-2. Using the Young-Daly formula, what is the optimal checkpoint interval for MTBF=3h, T_write=2min?
-3. At what storage bandwidth does a 175B model checkpoint create a checkpoint storm on a 10,000-GPU cluster?
-
-*If you cannot answer all three from memory, revisit Parts A and B.*
-""")
-        }))
-
-        items.append(mo.md("---"))
-        items.append(mo.md("### Decision Log"))
-        items.append(mo.md("Record the single most important insight from this lab. "
-                           "This entry carries forward to future labs via the Design Ledger."))
-        items.append(synth_decision_ui)
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # COMPOSE TABS
-    # ─────────────────────────────────────────────────────────────────────
-
-    # Save ledger
-    ledger.save(
-        chapter=6,
-        design={
-            "partA_prediction": partA_prediction.value or "no_selection",
-            "partA_correct": partA_prediction.value == "C",
-            "partA_reflection": partA_reflection.value or "no_selection",
-            "partB_prediction": partB_prediction.value or "no_selection",
-            "partB_correct": partB_prediction.value == "C",
-            "partB_reflection": partB_reflection.value or "no_selection",
-            "partC_prediction": partC_prediction.value or "no_selection",
-            "partC_correct": partC_prediction.value == "C",
-            "partC_reflection": partC_reflection.value or "no_selection",
-            "partD_prediction": partD_prediction.value or "no_selection",
-            "partD_correct": partD_prediction.value == "C",
-            "partD_reflection": partD_reflection.value or "no_selection",
-            "student_justification": str(synth_decision_input.value),
-        },
-    )
-
-    tabs = mo.ui.tabs({
-        "Part A -- The Young-Daly Sweet Spot":  build_part_a(),
-        "Part B -- The Checkpoint Storm":       build_part_b(),
-        "Part C -- Async Checkpointing":        build_part_c(),
-        "Part D -- Serving Fault Tolerance":    build_part_d(),
-        "Synthesis":                            build_synthesis(),
+    _tabs = mo.ui.tabs({
+        "Part A: Aggregate MTBF": build_part_a(),
+        "Part B: Checkpoint Optimum": build_part_b(),
+        "Part C: Recovery Policy": build_part_c(),
+        "Part D: Guardrail Plan": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
-    tabs
+    _tabs
     return
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 9: LEDGER_HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, partA_prediction, partB_prediction, mo):
-    _a1_ok = partA_prediction.value == "C"
-    _a2_ok = partB_prediction.value == "C"
-    _tier = "Optimal" if (_a1_ok and _a2_ok) else ("Partial" if (_a1_ok or _a2_ok) else "Developing")
-    _tier_color = COLORS["GreenLine"] if _tier == "Optimal" else (COLORS["OrangeLine"] if _tier == "Partial" else COLORS["TextMuted"])
-
+def _(mo, v2_07_metadata, v2_07_profile):
     mo.Html(f"""
     <div class="lab-hud">
-        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 07</span></div>
-        <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_06 &middot; Fault Tolerance</span></div>
-        <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">{v2_07_metadata.lab_id}</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v2_07_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">ACTIVE</span>
     </div>
     """)
     return
+
 
 if __name__ == "__main__":
     app.run()

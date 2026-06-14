@@ -3,1082 +3,1645 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 @app.cell
 async def _():
-    import marimo as mo
+    import html as html_lib
     import sys
-    import math
     from pathlib import Path
-    import numpy as np
+
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
+
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
             sys.path.insert(0, str(_labs_dir))
         from bootstrap import native_bootstrap
+
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim import Hardware, Systems, ureg
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim import Hardware, Models, Systems
-    from mlsysim.engine import calibration
-    from mlsysim import ureg
     from mlsysim.physics import (
-        calc_ring_allreduce_time,
-        calc_tree_allreduce_time,
-        calc_hierarchical_allreduce_time,
+        calc_alpha_beta_crossover,
+        calc_bisection_bandwidth,
+        calc_oversubscription_effect,
+        calc_point_to_point_time,
     )
-
-    IB_NDR_LATENCY_US = Systems.Fabrics.InfiniBand_NDR.latency.m_as("microsecond")
-    IB_HDR_LATENCY_US = Systems.Fabrics.InfiniBand_HDR.latency.m_as("microsecond")
-    INFINIBAND_NDR_BW_GBS = Systems.Fabrics.InfiniBand_NDR.bandwidth.m_as("GB/s")
-    INFINIBAND_HDR_BW_GBS = Systems.Fabrics.InfiniBand_HDR.bandwidth.m_as("GB/s")
-    DEFAULT_OVERLAP_EFFICIENCY = calibration.DEFAULT_OVERLAP_EFFICIENCY
-
-    # ── Hardware registry ─────────────────────────────────────────────────────
-    _H100_REG = Hardware.Cloud.H100
-    _EDGE_REG = Hardware.Edge.JetsonOrinNX
-
-    H100_TFLOPS = _H100_REG.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS = _H100_REG.memory.bandwidth.m_as("GB/s")
-    EDGE_TFLOPS = _EDGE_REG.compute.peak_flops.m_as("TFLOPs/s")
-    EDGE_BW_GBS = _EDGE_REG.memory.bandwidth.m_as("GB/s")
-
-    NVLINK_GBS = _H100_REG.nvlink.bandwidth.m_as("GB/s")
-
-    # ── Model registry ────────────────────────────────────────────────────────
-    GPT2 = Models.Language.GPT2
-    GPT2_PARAMS = GPT2.parameters.m_as("count")
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        MathPeek,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        report_export_panel,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
-        INFINIBAND_NDR_BW_GBS, INFINIBAND_HDR_BW_GBS,
-        IB_NDR_LATENCY_US, IB_HDR_LATENCY_US,
-        H100_TFLOPS, H100_BW_GBS,
-        EDGE_TFLOPS, EDGE_BW_GBS,
-        GPT2_PARAMS,
-        NVLINK_GBS, DEFAULT_OVERLAP_EFFICIENCY,
-        calc_ring_allreduce_time, calc_tree_allreduce_time,
-        calc_hierarchical_allreduce_time,
-    )
-
-@app.cell(hide_code=True)
-def _(LAB_CSS, mo):
-    mo.vstack([
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        Hardware,
         LAB_CSS,
-        mo.Html("""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 03
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                Communication at Scale
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Alpha-Beta Model &middot; Ring vs Tree &middot; Hierarchy &middot; Compression
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                Gradient synchronization can consume half of training step time.
-                The alpha-beta model reveals why, algorithm choice depends on a
-                crossover formula, and hierarchical strategies exploit the NVLink/IB cliff.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    5 Parts &middot; ~58 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Vol II Ch 3+6: Network Fabrics + Collective Comms
-                </span>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">T(n) = alpha + n/beta</span>
-                <span class="badge badge-warn">Ring vs Tree crossover</span>
-                <span class="badge badge-fail">11-second AllReduce for 70B</span>
-            </div>
-        </div>
-        """),
-    ])
-    return
+        MathPeek,
+        Systems,
+        apply_plotly_theme,
+        build_lab_report,
+        calc_alpha_beta_crossover,
+        calc_bisection_bandwidth,
+        calc_oversubscription_effect,
+        calc_point_to_point_time,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        html_lib,
+        ledger,
+        mo,
+        report_export_panel,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
+        ureg,
+    )
+
+
+@app.cell
+def _(get_lab_metadata):
+    v2_03_lab_path = "vol2/lab_03_communication.py"
+    v2_03_chapter = 3
+    v2_03_metadata = get_lab_metadata(v2_03_lab_path)
+    return v2_03_chapter, v2_03_lab_path, v2_03_metadata
+
 
 @app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Calculate AllReduce time</strong> &mdash; use the alpha-beta
-                    model to show that 70B FP32 gradients on 64 GPUs take ~11 seconds via Ring
-                    AllReduce on IB NDR, with bandwidth comprising 99.99% of total.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Identify the Ring/Tree crossover</strong> &mdash; find the
-                    message size where Tree AllReduce beats Ring at 256 GPUs and explain the
-                    O(N) vs O(log N) latency trade-off.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Build a communication budget</strong> &mdash; stack hierarchical
-                    AllReduce, FP16 gradients, overlap, and bucket fusion to reduce communication
-                    below 20% of step time for a 70B model.</div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    V2-01 (Fleet Law) &middot; V2-02 (bandwidth staircase)
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~58 min</strong><br/>
-                    Parts A&ndash;E: ~10&ndash;12 min each
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                &ldquo;A single Ring AllReduce for a 70B model takes 11 seconds. How many
-                optimizations must you stack to get communication under 20% of step time
-                &mdash; and when does each optimization actually help?&rdquo;
-            </div>
-        </div>
-    </div>
-    """)
-    return
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
+    v2_03_track_picker = track_selector(default=_default_track)
+    v2_03_track_picker
+    return (v2_03_track_picker,)
 
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
+@app.cell
+def _(get_lab_track_variant, get_track_profile, v2_03_metadata, v2_03_track_picker):
+    v2_03_track_id = v2_03_track_picker.value
+    v2_03_profile = get_track_profile(v2_03_track_id)
+    v2_03_variant = get_lab_track_variant(v2_03_metadata.lab_id, v2_03_profile.track_id)
+    return v2_03_profile, v2_03_track_id, v2_03_variant
 
-    - **Vol II Ch 3: Network Fabrics** -- alpha-beta model, fat-tree topology, oversubscription.
-    - **Vol II Ch 6: Collective Communication** -- Ring vs Tree AllReduce, hierarchical algorithms,
-      gradient compression trade-offs, communication-computation overlap.
-    """), kind="info")
-    return
+
+@app.cell
+def _(
+    Hardware,
+    Systems,
+    apply_plotly_theme,
+    calc_alpha_beta_crossover,
+    calc_bisection_bandwidth,
+    calc_oversubscription_effect,
+    calc_point_to_point_time,
+    go,
+    html_lib,
+    mo,
+    ureg,
+):
+    def v2_03_to_ms(quantity):
+        return float(quantity.to(ureg.millisecond).magnitude)
+
+    def v2_03_to_mb_s(quantity):
+        return float(quantity.to(ureg.MB / ureg.second).magnitude)
+
+    def v2_03_fmt(value, digits=2):
+        if isinstance(value, int):
+            return f"{value:,}"
+        if isinstance(value, float):
+            if abs(value) >= 100:
+                return f"{value:,.0f}"
+            if abs(value) >= 10:
+                return f"{value:,.1f}"
+            return f"{value:,.{digits}f}"
+        return str(value)
+
+    def v2_03_track_lenses(Systems, Hardware, ureg):
+        h100_nvlink = Hardware.Cloud.H100.nvlink
+        nvlink_alpha = getattr(h100_nvlink, "latency", None) or 0.5 * ureg.microsecond
+        ib_ndr = Systems.Fabrics.InfiniBand_NDR
+        eth_100g = Systems.Fabrics.Ethernet_100G
+
+        return {
+            "iphone": {
+                "scenario": "A mobile product team is deciding which payloads can cross the device-edge-cloud path without harming responsiveness or privacy posture.",
+                "decision_frame": "Decide what stays local, what can use edge sync, and what must be staged outside the interaction path.",
+                "payload_name": "privacy-safe telemetry or offload payload",
+                "participant_name": "phones in a regional cohort",
+                "message_default_mb": 8,
+                "message_min_mb": 1,
+                "message_max_mb": 160,
+                "message_step_mb": 1,
+                "participants_default": 80,
+                "participants_min": 4,
+                "participants_max": 500,
+                "communication_budget_ms": 120,
+                "step_budget_ms": 180,
+                "utilization_limit": 0.70,
+                "failure_mode": "responsiveness or privacy-routing miss",
+                "guardrail_text": "Per-interaction payloads should stay edge-local unless they are staged or summarized.",
+                "report_prompt": "Frame the memo around local-vs-networked payload policy.",
+                "collective_implication": "V2-06 collectives should assume phone-originated payloads are summarized before any fleet aggregation.",
+                "links": {
+                    "wifi_edge": {
+                        "label": "Wi-Fi to edge point of presence",
+                        "alpha": 8 * ureg.millisecond,
+                        "bandwidth": 90 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for low-latency edge path",
+                    },
+                    "5g_edge": {
+                        "label": "5G uplink to edge",
+                        "alpha": 28 * ureg.millisecond,
+                        "bandwidth": 18 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for mobile uplink",
+                    },
+                    "cloud_wan": {
+                        "label": "Direct cloud WAN path",
+                        "alpha": 70 * ureg.millisecond,
+                        "bandwidth": 10 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for cloud round trip",
+                    },
+                },
+                "default_link": "wifi_edge",
+                "topology_labels": {
+                    "nonblocking": "Edge-local fan-in",
+                    "aligned": "Region-sharded edge mesh",
+                    "grouped": "Phone-to-edge-to-cloud staging",
+                    "oversubscribed": "Single shared cloud ingress",
+                },
+                "placement_labels": {
+                    "affinity": "Keep cohort near its edge region",
+                    "balanced": "Balance across nearby edge regions",
+                    "spread": "Route by cheapest cloud capacity",
+                    "noisy": "Share ingress with analytics upload",
+                },
+                "hop_latency": 3 * ureg.millisecond,
+            },
+            "oura_ring": {
+                "scenario": "A wearable firmware team must move sync windows and OTA payloads across intermittent ring-phone-cloud connectivity.",
+                "decision_frame": "Choose a sync/update policy that survives a short connection window without stealing sensing duty cycle.",
+                "payload_name": "BLE sync or OTA payload",
+                "participant_name": "rings syncing through phones",
+                "message_default_mb": 6,
+                "message_min_mb": 1,
+                "message_max_mb": 48,
+                "message_step_mb": 1,
+                "participants_default": 64,
+                "participants_min": 4,
+                "participants_max": 300,
+                "communication_budget_ms": 120000,
+                "step_budget_ms": 180000,
+                "utilization_limit": 0.55,
+                "failure_mode": "sync-window or OTA budget miss",
+                "guardrail_text": "Radio transfer must fit an intermittent phone-nearby window.",
+                "report_prompt": "Frame the memo around sync cadence, OTA staging, and payload minimization.",
+                "collective_implication": "V2-06 collectives should assume wearable updates are staged and delay-tolerant, not synchronous.",
+                "links": {
+                    "ble_phone": {
+                        "label": "BLE ring-to-phone",
+                        "alpha": 90 * ureg.millisecond,
+                        "bandwidth": 0.18 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for intermittent BLE transfer",
+                    },
+                    "phone_wifi": {
+                        "label": "Phone Wi-Fi relay",
+                        "alpha": 35 * ureg.millisecond,
+                        "bandwidth": 12 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for phone relay",
+                    },
+                    "cellular_relay": {
+                        "label": "Phone cellular relay",
+                        "alpha": 80 * ureg.millisecond,
+                        "bandwidth": 4 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for cellular relay",
+                    },
+                },
+                "default_link": "ble_phone",
+                "topology_labels": {
+                    "nonblocking": "Ring-phone local sync",
+                    "aligned": "Phone batches by sleep window",
+                    "grouped": "Daily cloud staging group",
+                    "oversubscribed": "Fleet-wide OTA push",
+                },
+                "placement_labels": {
+                    "affinity": "Sync only when phone is nearby",
+                    "balanced": "Batch by charging/sleep window",
+                    "spread": "Opportunistic background relay",
+                    "noisy": "OTA and sensing upload collide",
+                },
+                "hop_latency": 40 * ureg.millisecond,
+            },
+            "robotaxi": {
+                "scenario": "An autonomous vehicle platform team must keep sensor-fabric traffic local while triaging upload of fleet evidence.",
+                "decision_frame": "Decide which communication must stay vehicle-local and which evidence can be delayed to depot or cloud.",
+                "payload_name": "sensor burst or triaged event payload",
+                "participant_name": "vehicles or sensor endpoints",
+                "message_default_mb": 96,
+                "message_min_mb": 4,
+                "message_max_mb": 1024,
+                "message_step_mb": 4,
+                "participants_default": 32,
+                "participants_min": 4,
+                "participants_max": 256,
+                "communication_budget_ms": 60,
+                "step_budget_ms": 90,
+                "utilization_limit": 0.62,
+                "failure_mode": "safety-latency or event-upload backlog miss",
+                "guardrail_text": "Safety-critical sensor exchange must stay on the vehicle-local fabric.",
+                "report_prompt": "Frame the memo around vehicle-local placement and delayed fleet upload.",
+                "collective_implication": "V2-06 collectives should treat safety data as local-first and fleet evidence as asynchronous.",
+                "links": {
+                    "vehicle_fabric": {
+                        "label": "Vehicle-local sensor fabric",
+                        "alpha": 0.7 * ureg.millisecond,
+                        "bandwidth": 9500 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for in-vehicle high-speed fabric",
+                    },
+                    "depot_wifi": {
+                        "label": "Depot Wi-Fi offload",
+                        "alpha": 18 * ureg.millisecond,
+                        "bandwidth": 75 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for depot upload",
+                    },
+                    "cellular_upload": {
+                        "label": "Cellular fleet upload",
+                        "alpha": 55 * ureg.millisecond,
+                        "bandwidth": 6 * ureg.MB / ureg.second,
+                        "source": "local scenario assumption for on-road upload",
+                    },
+                },
+                "default_link": "vehicle_fabric",
+                "topology_labels": {
+                    "nonblocking": "Vehicle-local switched fabric",
+                    "aligned": "Sensor-domain aligned fabric",
+                    "grouped": "Depot batch groups",
+                    "oversubscribed": "Cloud-first event upload",
+                },
+                "placement_labels": {
+                    "affinity": "Keep safety loop in-vehicle",
+                    "balanced": "Upload triaged events at depot",
+                    "spread": "Stream selected evidence to cloud",
+                    "noisy": "Share link with map and log upload",
+                },
+                "hop_latency": 0.25 * ureg.millisecond,
+            },
+            "cloud_fleet": {
+                "scenario": "A fleet service owner must choose a GPU fabric and placement policy for synchronous distributed work.",
+                "decision_frame": "Choose the topology and placement policy that turns purchased accelerators into useful parallel work.",
+                "payload_name": "gradient shard or activation payload",
+                "participant_name": "accelerators",
+                "message_default_mb": 350,
+                "message_min_mb": 4,
+                "message_max_mb": 4096,
+                "message_step_mb": 4,
+                "participants_default": 64,
+                "participants_min": 4,
+                "participants_max": 1024,
+                "communication_budget_ms": 80,
+                "step_budget_ms": 120,
+                "utilization_limit": 0.80,
+                "failure_mode": "SLO breach, queue growth, or idle accelerators",
+                "guardrail_text": "Synchronous jobs need topology-aware placement and enough bisection bandwidth.",
+                "report_prompt": "Frame the memo around fabric topology, bisection, and placement policy.",
+                "collective_implication": "V2-06 collectives should choose algorithms that match the selected bisection and placement envelope.",
+                "links": {
+                    "ib_ndr": {
+                        "label": "InfiniBand NDR",
+                        "alpha": Systems.SwitchFabric.AlphaNdr,
+                        "bandwidth": ib_ndr.bandwidth,
+                        "source": "MLSysIM Systems.Fabrics.InfiniBand_NDR and SwitchFabric.AlphaNdr",
+                    },
+                    "roce_100g": {
+                        "label": "RoCE over 100G Ethernet",
+                        "alpha": Systems.SwitchFabric.AlphaRoce,
+                        "bandwidth": eth_100g.bandwidth,
+                        "source": "MLSysIM Systems.Fabrics.Ethernet_100G and SwitchFabric.AlphaRoce",
+                    },
+                    "nvlink_local": {
+                        "label": "NVLink local domain",
+                        "alpha": nvlink_alpha,
+                        "bandwidth": h100_nvlink.bandwidth_per_direction,
+                        "source": "MLSysIM Hardware.Cloud.H100.nvlink",
+                    },
+                },
+                "default_link": "ib_ndr",
+                "topology_labels": {
+                    "nonblocking": "Non-blocking fat-tree",
+                    "aligned": "Rail-optimized placement",
+                    "grouped": "Dragonfly/group-local job",
+                    "oversubscribed": "4:1 oversubscribed spine",
+                },
+                "placement_labels": {
+                    "affinity": "Pack job inside one pod/rail group",
+                    "balanced": "Topology-aware multi-pod spread",
+                    "spread": "Capacity-first scheduler spread",
+                    "noisy": "Co-tenant checkpoint traffic",
+                },
+                "hop_latency": Systems.SwitchFabric.HopLatency,
+            },
+        }
+
+    def v2_03_topology_options(lens):
+        labels = lens["topology_labels"]
+        return {
+            "nonblocking": {
+                "label": labels["nonblocking"],
+                "oversubscription": 1.0,
+                "bisection_factor": 1.0,
+                "cross_fraction": 1.0,
+                "hop_count": 2,
+                "guard_ok": True,
+                "note": "Full bisection for arbitrary communication.",
+            },
+            "aligned": {
+                "label": labels["aligned"],
+                "oversubscription": 1.2,
+                "bisection_factor": 0.85,
+                "cross_fraction": 0.62,
+                "hop_count": 1,
+                "guard_ok": True,
+                "note": "Topology matches the dominant local/same-rank traffic.",
+            },
+            "grouped": {
+                "label": labels["grouped"],
+                "oversubscription": 2.2,
+                "bisection_factor": 0.58,
+                "cross_fraction": 0.78,
+                "hop_count": 2,
+                "guard_ok": True,
+                "note": "Works when the job fits inside groups and avoids global links.",
+            },
+            "oversubscribed": {
+                "label": labels["oversubscribed"],
+                "oversubscription": 4.0,
+                "bisection_factor": 0.45,
+                "cross_fraction": 1.0,
+                "hop_count": 4,
+                "guard_ok": False,
+                "note": "Cheap shared path; narrow cut throttles synchronous traffic.",
+            },
+        }
+
+    def v2_03_placement_options(lens):
+        labels = lens["placement_labels"]
+        return {
+            "affinity": {
+                "label": labels["affinity"],
+                "cross_factor": 0.52,
+                "background_load": 0.05,
+                "guard_ok": True,
+                "note": "Keeps most communication inside the natural local domain.",
+            },
+            "balanced": {
+                "label": labels["balanced"],
+                "cross_factor": 0.74,
+                "background_load": 0.14,
+                "guard_ok": True,
+                "note": "Uses more fabric while staying topology-aware.",
+            },
+            "spread": {
+                "label": labels["spread"],
+                "cross_factor": 1.08,
+                "background_load": 0.28,
+                "guard_ok": False,
+                "note": "Local scheduling looks efficient but crosses the expensive cut.",
+            },
+            "noisy": {
+                "label": labels["noisy"],
+                "cross_factor": 1.18,
+                "background_load": 0.46,
+                "guard_ok": False,
+                "note": "A neighboring or secondary flow shares the same bottleneck.",
+            },
+        }
+
+    def v2_03_option_labels(options):
+        return {option["label"]: key for key, option in options.items()}
+
+    def v2_03_link_option_labels(lens):
+        return {link["label"]: key for key, link in lens["links"].items()}
+
+    def v2_03_alpha_beta_result(lens, link_id, payload_mb):
+        link = lens["links"][link_id]
+        payload = float(payload_mb) * ureg.MB
+        alpha = link["alpha"]
+        beta = link["bandwidth"]
+        beta_term = (payload / beta).to(ureg.second)
+        total = calc_point_to_point_time(payload, alpha, beta)
+        crossover = calc_alpha_beta_crossover(alpha, beta)
+        alpha_ms = v2_03_to_ms(alpha)
+        beta_ms = v2_03_to_ms(beta_term)
+        total_ms = v2_03_to_ms(total)
+        binding = "latency (alpha)" if alpha_ms >= beta_ms else "bandwidth (n/beta)"
+        return {
+            "link_id": link_id,
+            "link_label": link["label"],
+            "payload_mb": float(payload_mb),
+            "alpha_ms": alpha_ms,
+            "beta_ms": beta_ms,
+            "total_ms": total_ms,
+            "bandwidth_mb_s": v2_03_to_mb_s(beta),
+            "crossover_kb": float(crossover.to(ureg.KB).magnitude),
+            "binding_term": binding,
+            "budget_ms": lens["communication_budget_ms"],
+            "passes_budget": total_ms <= lens["communication_budget_ms"],
+            "source": link["source"],
+        }
+
+    def v2_03_evaluate_topologies(lens, link_id, payload_mb, participants):
+        link = lens["links"][link_id]
+        payload = float(payload_mb) * ureg.MB
+        n = max(2, int(participants))
+        ports = max(1, n // 2)
+        rows = []
+        for topology_id, topology in v2_03_topology_options(lens).items():
+            effective_oversub = topology["oversubscription"] / topology["bisection_factor"]
+            _relative_throughput, throughput_loss = calc_oversubscription_effect(
+                0.30,
+                effective_oversub,
+            )
+            bisection = calc_bisection_bandwidth(
+                ports,
+                link["bandwidth"],
+                oversubscription_ratio=effective_oversub,
+            )
+            cross_cut_data = payload * ports * topology["cross_fraction"]
+            hop_penalty = topology["hop_count"] * lens["hop_latency"]
+            sync_time = (link["alpha"] + hop_penalty + cross_cut_data / bisection).to(ureg.second)
+            sync_ms = v2_03_to_ms(sync_time)
+            rows.append(
+                {
+                    "topology_id": topology_id,
+                    "label": topology["label"],
+                    "bisection_mb_s": v2_03_to_mb_s(bisection),
+                    "sync_ms": sync_ms,
+                    "step_budget_ms": lens["step_budget_ms"],
+                    "passes_step": sync_ms <= lens["step_budget_ms"],
+                    "guard_ok": topology["guard_ok"],
+                    "hop_count": topology["hop_count"],
+                    "oversubscription": effective_oversub,
+                    "throughput_loss": throughput_loss,
+                    "note": topology["note"],
+                }
+            )
+        return rows
+
+    def v2_03_selected_topology_result(lens, link_id, payload_mb, participants, topology_id):
+        rows = v2_03_evaluate_topologies(lens, link_id, payload_mb, participants)
+        return next(row for row in rows if row["topology_id"] == topology_id)
+
+    def v2_03_congestion_result(lens, link_id, payload_mb, participants, topology_id, placement_id, burst_multiplier):
+        topology_result = v2_03_selected_topology_result(lens, link_id, payload_mb, participants, topology_id)
+        placement = v2_03_placement_options(lens)[placement_id]
+        step_seconds = lens["step_budget_ms"] / 1000
+        payload_mb = float(payload_mb)
+        n = max(2, int(participants))
+        offered_mb_s = payload_mb * n * placement["cross_factor"] * float(burst_multiplier) / max(step_seconds, 1e-9)
+        capacity_mb_s = max(topology_result["bisection_mb_s"], 1e-9)
+        utilization = offered_mb_s / capacity_mb_s + placement["background_load"]
+        if utilization < 0.70:
+            tail_multiplier = 1 + 0.35 * utilization
+        elif utilization < 1.0:
+            tail_multiplier = min(8.0, 1 + (utilization - 0.70) / max(1.0 - utilization, 0.02))
+        else:
+            tail_multiplier = min(20.0, 8.0 + 4.0 * (utilization - 1.0))
+        tail_ms = topology_result["sync_ms"] * tail_multiplier
+        utilization_limit = lens["utilization_limit"]
+        utilization_ok = utilization <= utilization_limit
+        topology_ok = topology_result["guard_ok"] and placement["guard_ok"]
+        if not topology_ok:
+            binding = "placement/topology guardrail"
+        elif not utilization_ok:
+            binding = "congestion utilization"
+        else:
+            binding = "bisection headroom"
+        return {
+            "placement_id": placement_id,
+            "placement_label": placement["label"],
+            "topology_id": topology_id,
+            "topology_label": topology_result["label"],
+            "offered_mb_s": offered_mb_s,
+            "capacity_mb_s": capacity_mb_s,
+            "utilization": utilization,
+            "utilization_limit": utilization_limit,
+            "utilization_ok": utilization_ok,
+            "tail_multiplier": tail_multiplier,
+            "tail_ms": tail_ms,
+            "topology_ok": topology_ok,
+            "placement_guard_ok": placement["guard_ok"],
+            "failure_state": "OK" if utilization_ok and topology_ok else lens["failure_mode"],
+            "binding_amount": binding,
+            "placement_note": placement["note"],
+        }
+
+    def v2_03_decision_result(
+        lens,
+        link_id,
+        payload_mb,
+        participants,
+        topology_id,
+        placement_id,
+        burst_multiplier,
+        payload_reduction_pct,
+        overlap_pct,
+    ):
+        reduced_payload_mb = float(payload_mb) * (1 - float(payload_reduction_pct) / 100)
+        reduced_payload_mb = max(reduced_payload_mb, 0.05)
+        congestion = v2_03_congestion_result(
+            lens,
+            link_id,
+            reduced_payload_mb,
+            participants,
+            topology_id,
+            placement_id,
+            burst_multiplier,
+        )
+        exposed_ms = congestion["tail_ms"] * (1 - float(overlap_pct) / 100)
+        step_ok = exposed_ms <= lens["step_budget_ms"]
+        utilization_ok = congestion["utilization_ok"]
+        topology_ok = congestion["topology_ok"]
+        ratios = {
+            "step-time/SLO": exposed_ms / lens["step_budget_ms"],
+            "utilization": congestion["utilization"] / lens["utilization_limit"],
+            "topology": 0.0 if topology_ok else 1.5,
+        }
+        binding = max(ratios.items(), key=lambda item: item[1])[0]
+        return {
+            **congestion,
+            "reduced_payload_mb": reduced_payload_mb,
+            "payload_reduction_pct": float(payload_reduction_pct),
+            "overlap_pct": float(overlap_pct),
+            "exposed_ms": exposed_ms,
+            "step_budget_ms": lens["step_budget_ms"],
+            "step_ok": step_ok,
+            "utilization_ok": utilization_ok,
+            "topology_ok": topology_ok,
+            "valid_plan": step_ok and utilization_ok and topology_ok,
+            "binding_guardrail": binding,
+            "ratios": ratios,
+        }
+
+    def v2_03_status_label(condition):
+        return "PASS" if condition else "FAIL"
+
+    def v2_03_html_table(rows, columns, caption=""):
+        header = "".join(f"<th>{html_lib.escape(label)}</th>" for label, _key in columns)
+        body_rows = []
+        for row in rows:
+            cells = []
+            for _label, key in columns:
+                value = row.get(key, "")
+                cells.append(f"<td>{html_lib.escape(str(value))}</td>")
+            body_rows.append(f"<tr>{''.join(cells)}</tr>")
+        caption_html = f"<div style='font-weight:700; margin-bottom:8px;'>{html_lib.escape(caption)}</div>" if caption else ""
+        return mo.Html(
+            f"""
+<div style="overflow-x:auto; margin:12px 0;">
+  {caption_html}
+  <table style="border-collapse:collapse; min-width:720px; width:100%; font-size:0.9rem;">
+    <thead><tr style="background:#f8fafc;">{header}</tr></thead>
+    <tbody>{''.join(body_rows)}</tbody>
+  </table>
+</div>
+<style>
+td, th {{ border:1px solid #d9dee8; padding:8px 10px; text-align:left; vertical-align:top; }}
+th {{ color:#344054; font-weight:700; }}
+</style>
+"""
+        )
+
+    def v2_03_failure_callout(result, message_ok, message_fail):
+        if result:
+            return mo.callout(mo.md(message_ok), kind="success")
+        return mo.callout(mo.md(message_fail), kind="danger")
+
+    def v2_03_prediction_feedback(predicted, actual, correct, missed):
+        if predicted is None:
+            return mo.callout(mo.md("Make the structured prediction first; the evidence below is unlocked after you commit."), kind="warn")
+        if predicted == actual:
+            return mo.callout(mo.md(correct), kind="success")
+        return mo.callout(mo.md(missed), kind="warn")
+
+    def v2_03_alpha_beta_chart(colors, result):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=["Current transfer"],
+                y=[result["alpha_ms"]],
+                name="alpha startup",
+                marker_color=colors["BlueLine"],
+            )
+        )
+        fig.add_trace(
+            go.Bar(
+                x=["Current transfer"],
+                y=[result["beta_ms"]],
+                name="n/beta payload",
+                marker_color=colors["OrangeLine"],
+            )
+        )
+        fig.add_hline(
+            y=result["budget_ms"],
+            line_dash="dash",
+            line_color=colors["RedLine"],
+            annotation_text=f"budget {v2_03_fmt(result['budget_ms'])} ms",
+        )
+        fig.update_layout(
+            barmode="stack",
+            height=320,
+            yaxis_title="Milliseconds",
+            margin=dict(l=60, r=20, t=30, b=40),
+            legend=dict(orientation="h", y=1.18, x=0),
+        )
+        return apply_plotly_theme(fig)
+
+    def v2_03_topology_chart(colors, rows, budget_ms):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=[row["label"] for row in rows],
+                y=[row["sync_ms"] for row in rows],
+                marker_color=[
+                    colors["GreenLine"] if row["passes_step"] and row["guard_ok"] else colors["RedLine"]
+                    for row in rows
+                ],
+                text=[
+                    "PASS" if row["passes_step"] and row["guard_ok"] else "CHECK"
+                    for row in rows
+                ],
+                textposition="outside",
+            )
+        )
+        fig.add_hline(
+            y=budget_ms,
+            line_dash="dash",
+            line_color=colors["RedLine"],
+            annotation_text=f"step/SLO {v2_03_fmt(budget_ms)} ms",
+        )
+        fig.update_layout(
+            height=360,
+            yaxis_title="Synchronization time (ms)",
+            showlegend=False,
+            margin=dict(l=60, r=20, t=30, b=90),
+        )
+        return apply_plotly_theme(fig)
+
+    def v2_03_congestion_chart(colors, congestion):
+        fig = go.Figure()
+        util_pct = congestion["utilization"] * 100
+        limit_pct = congestion["utilization_limit"] * 100
+        fig.add_trace(
+            go.Bar(
+                x=["Utilization"],
+                y=[util_pct],
+                name="Utilization",
+                marker_color=colors["RedLine"] if not congestion["utilization_ok"] else colors["GreenLine"],
+                text=[f"{util_pct:.0f}%"],
+                textposition="outside",
+            )
+        )
+        fig.add_trace(
+            go.Bar(
+                x=["Tail time"],
+                y=[congestion["tail_ms"]],
+                name="Tail time (ms)",
+                yaxis="y2",
+                marker_color=colors["OrangeLine"],
+                text=[f"{congestion['tail_ms']:.1f} ms"],
+                textposition="outside",
+            )
+        )
+        fig.add_hline(y=limit_pct, line_dash="dash", line_color=colors["RedLine"], annotation_text="utilization limit")
+        fig.update_layout(
+            height=330,
+            yaxis=dict(title="Utilization (%)"),
+            yaxis2=dict(title="Tail time (ms)", overlaying="y", side="right", showgrid=False),
+            legend=dict(orientation="h", y=1.18, x=0),
+            margin=dict(l=60, r=60, t=30, b=40),
+        )
+        return apply_plotly_theme(fig)
+
+    def v2_03_candidate_chart(colors, selected, rejected):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=["Selected plan", "Rejected alternative"],
+                y=[selected["exposed_ms"], rejected["exposed_ms"]],
+                marker_color=[
+                    colors["GreenLine"] if selected["valid_plan"] else colors["RedLine"],
+                    colors["RedLine"],
+                ],
+                text=[
+                    f"{selected['exposed_ms']:.1f} ms",
+                    f"{rejected['exposed_ms']:.1f} ms",
+                ],
+                textposition="outside",
+            )
+        )
+        fig.add_hline(
+            y=selected["step_budget_ms"],
+            line_dash="dash",
+            line_color=colors["RedLine"],
+            annotation_text=f"SLO {v2_03_fmt(selected['step_budget_ms'])} ms",
+        )
+        fig.update_layout(
+            height=330,
+            yaxis_title="Exposed communication time (ms)",
+            showlegend=False,
+            margin=dict(l=60, r=20, t=30, b=45),
+        )
+        return apply_plotly_theme(fig)
+
+    def v2_03_scenario_assumptions(lens):
+        link_sources = "; ".join(
+            f"{link['label']}: {link['source']}" for link in lens["links"].values()
+        )
+        return {
+            "summary": "V2-03 communication fabric source trace",
+            "chapter_anchor": "Volume II, Chapter 3: Network Fabrics",
+            "source_models": "T(n)=alpha+n/beta; BW_bisect=(N/2)*beta/oversubscription; utilization=offered_load/capacity",
+            "registry_functions": "mlsysim.physics.calc_point_to_point_time, calc_alpha_beta_crossover, calc_bisection_bandwidth, calc_oversubscription_effect",
+            "track_scenario_thresholds": (
+                f"communication budget {lens['communication_budget_ms']} ms; "
+                f"step/SLO budget {lens['step_budget_ms']} ms; "
+                f"utilization limit {lens['utilization_limit']:.0%}"
+            ),
+            "link_sources": link_sources,
+            "local_assumptions": "Non-cloud link rates and track guardrail thresholds are notebook-local pedagogical assumptions.",
+        }
+
+    return (
+        v2_03_alpha_beta_chart,
+        v2_03_alpha_beta_result,
+        v2_03_candidate_chart,
+        v2_03_congestion_chart,
+        v2_03_congestion_result,
+        v2_03_decision_result,
+        v2_03_evaluate_topologies,
+        v2_03_failure_callout,
+        v2_03_fmt,
+        v2_03_html_table,
+        v2_03_link_option_labels,
+        v2_03_option_labels,
+        v2_03_placement_options,
+        v2_03_prediction_feedback,
+        v2_03_scenario_assumptions,
+        v2_03_selected_topology_result,
+        v2_03_status_label,
+        v2_03_to_mb_s,
+        v2_03_to_ms,
+        v2_03_topology_chart,
+        v2_03_topology_options,
+        v2_03_track_lenses,
+    )
+
+
+@app.cell
+def _(Hardware, Systems, ureg, v2_03_profile, v2_03_track_lenses):
+    v2_03_lenses = v2_03_track_lenses(Systems, Hardware, ureg)
+    v2_03_lens = v2_03_lenses[v2_03_profile.track_id]
+    return v2_03_lens, v2_03_lenses
+
 
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np, ureg,
-    INFINIBAND_NDR_BW_GBS, IB_NDR_LATENCY_US, NVLINK_GBS,
-    DEFAULT_OVERLAP_EFFICIENCY,
-    calc_ring_allreduce_time, calc_tree_allreduce_time,
-    calc_hierarchical_allreduce_time,
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_arc_context,
+    track_context,
+    v2_03_lens,
+    v2_03_metadata,
+    v2_03_profile,
+    v2_03_scenario_assumptions,
+    v2_03_variant,
 ):
-    # ═════════════════════════════════════════════════════════════════════════
-    # WIDGETS
-    # ═════════════════════════════════════════════════════════════════════════
-    pA_pred = mo.ui.radio(
-        options={
-            "A) ~0.5 ms -- network latency dominates": "0.5",
-            "B) ~50 ms -- bandwidth matters, but IB is fast": "50",
-            "C) ~1,100 ms (~1 second)": "1100",
-            "D) ~11,000 ms (~11 seconds) -- bandwidth completely dominates": "11000",
-        },
-        label="70B FP32 gradients, 64 GPUs, IB NDR. How long does one Ring AllReduce take?",
+    mo.vstack(
+        [
+            LAB_CSS,
+            ACADEMIC_LAB_CSS,
+            mo.Html(
+                f"""
+<div class="mlsysbook-panel mlsysbook-launch-panel">
+  <div class="mlsysbook-section-label">Machine Learning Systems - Volume II - Lab 03</div>
+  <h1 style="margin-bottom:8px;">Network Fabric Design</h1>
+  <p class="mlsysbook-scenario-narrative" style="font-size:1.02rem;">
+    <strong>Chapter invariant:</strong> Network shape governs distributed work.
+    Bandwidth, latency, bisection, topology, placement, and congestion turn
+    communication into a binding amount.
+  </p>
+  <div class="mlsysbook-compact-fields is-brief">
+    <div><strong>Selected track:</strong> {v2_03_profile.label}</div>
+    <div><strong>Stakeholder:</strong> {v2_03_variant.stakeholder}</div>
+    <div><strong>Scenario:</strong> {v2_03_lens["scenario"]}</div>
+    <div><strong>Report frame:</strong> {v2_03_lens["report_prompt"]}</div>
+  </div>
+</div>
+"""
+            ),
+            track_context(v2_03_profile),
+            track_arc_context(v2_03_profile, v2_03_metadata.lab_id),
+            mo.callout(
+                mo.md(
+                    """
+**Recommended reading before this lab**
+
+- Volume II, Chapter 3: Network Fabrics
+- Focus sections: alpha/beta performance model, switch and topology,
+  fabric behavior, congestion control, monitoring, and summary.
+"""
+                ),
+                kind="info",
+            ),
+            source_trace(v2_03_scenario_assumptions(v2_03_lens), collapsed=True),
+        ]
     )
-    return (pA_pred,)
+    return
+
 
 @app.cell(hide_code=True)
-def _(mo):
-    pA_model = mo.ui.dropdown(
-        options={"1B": 1, "7B": 7, "13B": 13, "70B": 70, "175B": 175},
-        value="70B", label="Model params (B)",
-    )
-    pA_prec = mo.ui.dropdown(
-        options={"FP32 (4B)": 4, "BF16 (2B)": 2, "FP8 (1B)": 1},
-        value="FP32 (4B)", label="Gradient precision",
-    )
-    pA_gpus = mo.ui.dropdown(
-        options={"8": 8, "16": 16, "32": 32, "64": 64, "128": 128, "256": 256, "512": 512, "1024": 1024},
-        value="64", label="GPU count",
-    )
-
-    pB_pred = mo.ui.radio(
+def _(mo, v2_03_lens):
+    partA_prediction = mo.ui.radio(
         options={
-            "A) Ring -- it is always bandwidth-optimal": "ring",
-            "B) Tree -- at 1 MB and 256 GPUs, Tree's O(log N) wins": "tree",
-            "C) They are identical for this message size": "same",
-            "D) Neither -- you need hierarchical AllReduce": "hier",
+            "A) The fixed startup latency alpha": "latency (alpha)",
+            "B) The per-byte bandwidth term n/beta": "bandwidth (n/beta)",
+            "C) Link bandwidth alone, regardless of payload": "bandwidth_only",
+            "D) Topology only, before payload size is known": "topology_only",
         },
-        label="256 GPUs on IB NDR. Which AllReduce is faster for a 1 MB message?",
+        label="Part A prediction - which term will bind for the current payload and path?",
     )
-    return (pA_gpus, pA_model, pA_prec, pB_pred)
-
-@app.cell(hide_code=True)
-def _(mo):
-    pB_msg_exp = mo.ui.slider(start=0, stop=10, value=0, step=1, label="Message size (10^x KB)")
-    pB_n_gpus = mo.ui.dropdown(
-        options={"64": 64, "256": 256, "1024": 1024},
-        value="256", label="GPU count",
-    )
-
-    pC_pred = mo.ui.radio(
+    partB_prediction = mo.ui.radio(
         options={
-            "A) ~1.5x -- marginal improvement": "1.5",
-            "B) ~2x -- moderate improvement": "2",
-            "C) ~5-6x -- dramatic improvement": "5",
-            "D) ~18x -- full NVLink/IB ratio": "18",
+            "A) Fast endpoint links are enough": "edge_links",
+            "B) The narrowest bisection cut controls feasible parallel work": "bisection",
+            "C) More participants always improves synchronization": "participants",
+            "D) Hop count matters, but oversubscription does not": "hops_only",
         },
-        label="Hierarchical AllReduce vs flat ring for 64 GPUs (8 nodes x 8). Speedup?",
+        label="Part B prediction - what decides whether parallel communication remains feasible?",
     )
-    return (pB_msg_exp, pB_n_gpus, pC_pred)
-
-@app.cell(hide_code=True)
-def _(mo):
-    pC_topo = mo.ui.dropdown(
-        options={"Flat Ring": "flat", "Hierarchical 2-level": "hier2"},
-        value="Flat Ring", label="Topology",
-    )
-    pC_gpus_per_node = mo.ui.slider(start=2, stop=8, value=8, step=2, label="GPUs per node")
-    pC_oversub = mo.ui.dropdown(
-        options={"1:1 (full bisection)": 1, "2:1": 2, "4:1": 4},
-        value="1:1 (full bisection)", label="Oversubscription",
-    )
-
-    pD_pred = mo.ui.radio(
+    partC_prediction = mo.ui.radio(
         options={
-            "A) Yes, by ~4x -- 75% bandwidth saved": "4x",
-            "B) Yes, by ~2x": "2x",
-            "C) It depends -- on IB NDR, compression barely helps": "depends",
-            "D) No -- compression always hurts": "no",
+            "A) Topology-aware placement keeps utilization below the tail-risk limit": "placement",
+            "B) Adaptive routing removes congestion risk": "routing",
+            "C) Background traffic is unrelated to synchronous work": "background",
+            "D) Local placement choices cannot create fleet-wide bottlenecks": "local_only",
         },
-        label="INT8 gradient compression (4x BW reduction) for 70B on 64 GPUs with IB NDR. "
-              "Does total training time decrease?",
+        label="Part C prediction - what prevents a local communication choice from becoming a fleet bottleneck?",
     )
-    return (pC_gpus_per_node, pC_oversub, pC_topo, pD_pred)
-
-@app.cell(hide_code=True)
-def _(mo):
-    pD_comp = mo.ui.dropdown(
-        options={"None": 1.0, "FP16 (2x)": 0.5, "INT8 (4x)": 0.25, "Top-K 1%": 0.01, "1-bit": 0.03125},
-        value="None", label="Compression method",
-    )
-    pD_bw = mo.ui.slider(start=10, stop=100, value=50, step=5, label="Network BW (GB/s)")
-
-    pE_pred = mo.ui.radio(
+    partD_prediction = mo.ui.radio(
         options={
-            "A) Just one -- hierarchical AllReduce is enough": "1",
-            "B) Two -- hierarchical + FP16": "2",
-            "C) Three or four -- hier + FP16 + overlap + fusion": "3",
-            "D) Impossible on IB NDR": "impossible",
+            "A) Step-time/SLO will reject the naive plan": "step",
+            "B) Utilization will reject the naive plan": "utilization",
+            "C) Topology/placement guardrails will reject the naive plan": "topology",
+            "D) One passing metric is enough to approve the plan": "single_metric",
         },
-        label="Starting from 11s AllReduce for 70B: how many optimizations "
-              "to get under 20% of step time?",
+        label="Part D prediction - which guardrail is most likely to reject the naive plan?",
     )
-    return (pD_bw, pD_comp, pE_pred)
 
-# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
-@app.cell(hide_code=True)
-def _(mo):
-    pE_hier = mo.ui.checkbox(label="Hierarchical AllReduce")
-    pE_fp16 = mo.ui.checkbox(label="FP16 gradients")
-    pE_bucket = mo.ui.checkbox(label="Bucket fusion")
-    pE_overlap = mo.ui.checkbox(label="Backward overlap")
-    return (pE_bucket, pE_fp16, pE_hier, pE_overlap)
+    partA_checkpoint = mo.ui.radio(
+        options={
+            "Reduce alpha by shortening the path or hop count": "reduce_alpha",
+            "Increase beta by choosing a higher-bandwidth link": "increase_beta",
+            "Reduce payload before crossing the network": "reduce_payload",
+        },
+        label="Part A checkpoint - which lever should this track try first?",
+    )
+    partB_checkpoint = mo.ui.radio(
+        options={
+            "Carry forward a topology with full or aligned bisection": "bisection_guard",
+            "Accept oversubscription and rely on retries": "accept_oversub",
+            "Reduce endpoint count until the topology becomes feasible": "reduce_participants",
+        },
+        label="Part B checkpoint - what topology assumption should the memo carry forward?",
+    )
+    partC_checkpoint = mo.ui.radio(
+        options={
+            "Use topology-aware affinity placement": "affinity",
+            "Use balanced placement with explicit utilization headroom": "balanced",
+            "Use cheapest available placement and monitor later": "cheap",
+        },
+        label="Part C checkpoint - what placement mitigation should the final plan use?",
+    )
+    partD_final_decision = mo.ui.radio(
+        options={
+            "Approve the selected plan": "approve",
+            "Revise payload or overlap before approval": "revise_payload",
+            "Reject topology/placement and choose a safer fabric policy": "reject_policy",
+        },
+        label="Final decision - how should the stakeholder sign the communication plan?",
+    )
+    student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
+    memo_note = mo.ui.text_area(
+        label="Communication memo note",
+        placeholder="Name the selected topology/placement, binding amount, rejected alternative, and collective-communication implication.",
+        full_width=True,
+    )
+
+    payload_mb = mo.ui.slider(
+        start=v2_03_lens["message_min_mb"],
+        stop=v2_03_lens["message_max_mb"],
+        value=v2_03_lens["message_default_mb"],
+        step=v2_03_lens["message_step_mb"],
+        label=f"Payload size ({v2_03_lens['payload_name']}, MB)",
+    )
+    participants = mo.ui.slider(
+        start=v2_03_lens["participants_min"],
+        stop=v2_03_lens["participants_max"],
+        value=v2_03_lens["participants_default"],
+        step=4,
+        label=f"Parallel endpoints ({v2_03_lens['participant_name']})",
+    )
+    burst_multiplier = mo.ui.slider(
+        start=0.5,
+        stop=4.0,
+        value=1.0,
+        step=0.25,
+        label="Burst / background pressure multiplier",
+    )
+    payload_reduction_pct = mo.ui.slider(
+        start=0,
+        stop=80,
+        value=25,
+        step=5,
+        label="Payload reduction before crossing fabric (%)",
+    )
+    overlap_pct = mo.ui.slider(
+        start=0,
+        stop=80,
+        value=20,
+        step=5,
+        label="Communication hidden by useful work (%)",
+    )
+    return (
+        burst_multiplier,
+        memo_note,
+        overlap_pct,
+        partA_checkpoint,
+        partA_prediction,
+        partB_checkpoint,
+        partB_prediction,
+        partC_checkpoint,
+        partC_prediction,
+        partD_final_decision,
+        partD_prediction,
+        participants,
+        payload_mb,
+        payload_reduction_pct,
+        student_id,
+    )
+
 
 @app.cell(hide_code=True)
 def _(
-    mo, pA_gpus, pA_model, pA_prec,
-    pA_pred, pB_msg_exp, pB_n_gpus, pB_pred,
-    pC_gpus_per_node, pC_oversub, pC_pred, pC_topo,
-    pD_bw, pD_comp, pD_pred, pE_pred,
-    pE_bucket, pE_fp16, pE_hier, pE_overlap,
+    mo,
+    v2_03_lens,
+    v2_03_link_option_labels,
+    v2_03_option_labels,
+    v2_03_placement_options,
+    v2_03_topology_options,
 ):
+    _link_options = v2_03_link_option_labels(v2_03_lens)
+    _topology_options = v2_03_option_labels(v2_03_topology_options(v2_03_lens))
+    _placement_options = v2_03_option_labels(v2_03_placement_options(v2_03_lens))
+    active_link = mo.ui.dropdown(
+        options=_link_options,
+        value=v2_03_lens["links"][v2_03_lens["default_link"]]["label"],
+        label="Active communication path",
+    )
+    topology_choice = mo.ui.dropdown(
+        options=_topology_options,
+        value=v2_03_lens["topology_labels"]["aligned"],
+        label="Topology shape",
+    )
+    placement_choice = mo.ui.dropdown(
+        options=_placement_options,
+        value=v2_03_lens["placement_labels"]["affinity"],
+        label="Placement policy",
+    )
+    return active_link, placement_choice, topology_choice
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART A: THE NETWORK TIME BUDGET
-    # ═════════════════════════════════════════════════════════════════════════
+
+@app.cell(hide_code=True)
+def _(
+    COLORS,
+    MathPeek,
+    active_link,
+    build_lab_report,
+    burst_multiplier,
+    ledger,
+    memo_note,
+    mo,
+    overlap_pct,
+    partA_checkpoint,
+    partA_prediction,
+    partB_checkpoint,
+    partB_prediction,
+    partC_checkpoint,
+    partC_prediction,
+    partD_final_decision,
+    partD_prediction,
+    participants,
+    payload_mb,
+    payload_reduction_pct,
+    placement_choice,
+    report_export_panel,
+    student_id,
+    topology_choice,
+    v2_03_alpha_beta_chart,
+    v2_03_alpha_beta_result,
+    v2_03_candidate_chart,
+    v2_03_chapter,
+    v2_03_congestion_chart,
+    v2_03_congestion_result,
+    v2_03_decision_result,
+    v2_03_evaluate_topologies,
+    v2_03_failure_callout,
+    v2_03_fmt,
+    v2_03_html_table,
+    v2_03_lens,
+    v2_03_metadata,
+    v2_03_prediction_feedback,
+    v2_03_profile,
+    v2_03_status_label,
+    v2_03_topology_chart,
+    v2_03_variant,
+):
+    _payload_mb = payload_mb.value
+    _participants = participants.value
+    _link_id = active_link.value
+    _topology_id = topology_choice.value
+    _placement_id = placement_choice.value
+
+    _part_a = v2_03_alpha_beta_result(v2_03_lens, _link_id, _payload_mb)
+    _actual_part_a = _part_a["binding_term"]
+    _topology_rows = v2_03_evaluate_topologies(v2_03_lens, _link_id, _payload_mb, _participants)
+    _part_b_selected = next(row for row in _topology_rows if row["topology_id"] == _topology_id)
+    _part_c = v2_03_congestion_result(
+        v2_03_lens,
+        _link_id,
+        _payload_mb,
+        _participants,
+        _topology_id,
+        _placement_id,
+        burst_multiplier.value,
+    )
+    _part_d = v2_03_decision_result(
+        v2_03_lens,
+        _link_id,
+        _payload_mb,
+        _participants,
+        _topology_id,
+        _placement_id,
+        burst_multiplier.value,
+        payload_reduction_pct.value,
+        overlap_pct.value,
+    )
+    _rejected = v2_03_decision_result(
+        v2_03_lens,
+        _link_id,
+        _payload_mb,
+        _participants,
+        "oversubscribed",
+        "spread",
+        max(1.5, burst_multiplier.value),
+        0,
+        0,
+    )
+
+    def _part_a_table():
+        return v2_03_html_table(
+            [
+                {
+                    "Field": "Active path",
+                    "Value": _part_a["link_label"],
+                    "Interpretation": _part_a["source"],
+                },
+                {
+                    "Field": "alpha startup",
+                    "Value": f"{_part_a['alpha_ms']:.3f} ms",
+                    "Interpretation": "Fixed cost before bytes move.",
+                },
+                {
+                    "Field": "n/beta payload term",
+                    "Value": f"{_part_a['beta_ms']:.3f} ms",
+                    "Interpretation": "Payload cost from message size and bandwidth.",
+                },
+                {
+                    "Field": "Crossover size",
+                    "Value": f"{_part_a['crossover_kb']:.1f} KB",
+                    "Interpretation": "Below this size alpha dominates; above it bandwidth dominates.",
+                },
+                {
+                    "Field": "Budget status",
+                    "Value": v2_03_status_label(_part_a["passes_budget"]),
+                    "Interpretation": f"{_part_a['total_ms']:.3f} ms vs {v2_03_fmt(_part_a['budget_ms'])} ms budget.",
+                },
+            ],
+            [("Field", "Field"), ("Value", "Value"), ("Interpretation", "Interpretation")],
+            caption="Part A exact evidence table",
+        )
+
+    def _part_b_table():
+        rows = []
+        for row in _topology_rows:
+            rows.append(
+                {
+                    "Topology": row["label"],
+                    "BW_bisect": f"{row['bisection_mb_s']:,.0f} MB/s",
+                    "Sync time": f"{row['sync_ms']:.2f} ms",
+                    "Throughput loss": f"{row['throughput_loss']:.0%}",
+                    "Step/SLO": v2_03_status_label(row["passes_step"]),
+                    "Topology guard": v2_03_status_label(row["guard_ok"]),
+                    "Note": row["note"],
+                }
+            )
+        return v2_03_html_table(
+            rows,
+            [
+                ("Topology", "Topology"),
+                ("BW_bisect", "BW_bisect"),
+                ("Sync time", "Sync time"),
+                ("Throughput loss", "Throughput loss"),
+                ("Step/SLO", "Step/SLO"),
+                ("Topology guard", "Topology guard"),
+                ("Note", "Note"),
+            ],
+            caption="Part B bisection and topology table",
+        )
+
+    def _part_c_table():
+        return v2_03_html_table(
+            [
+                {
+                    "Metric": "Placement",
+                    "Value": _part_c["placement_label"],
+                    "Limit or meaning": _part_c["placement_note"],
+                },
+                {
+                    "Metric": "Offered load",
+                    "Value": f"{_part_c['offered_mb_s']:,.0f} MB/s",
+                    "Limit or meaning": "Demand injected into the selected bisection window.",
+                },
+                {
+                    "Metric": "Bisection capacity",
+                    "Value": f"{_part_c['capacity_mb_s']:,.0f} MB/s",
+                    "Limit or meaning": "Effective capacity after topology and oversubscription.",
+                },
+                {
+                    "Metric": "Utilization",
+                    "Value": f"{_part_c['utilization']:.0%}",
+                    "Limit or meaning": f"Track limit is {v2_03_lens['utilization_limit']:.0%}.",
+                },
+                {
+                    "Metric": "Tail multiplier",
+                    "Value": f"{_part_c['tail_multiplier']:.2f}x",
+                    "Limit or meaning": "Congestion turns average sync time into tail sync time.",
+                },
+                {
+                    "Metric": "Failure state",
+                    "Value": _part_c["failure_state"],
+                    "Limit or meaning": _part_c["binding_amount"],
+                },
+            ],
+            [("Metric", "Metric"), ("Value", "Value"), ("Limit or meaning", "Limit or meaning")],
+            caption="Part C congestion and placement table",
+        )
+
+    def _part_d_table(selected, rejected):
+        rows = [
+            {
+                "Guardrail": "Step-time/SLO",
+                "Selected plan": f"{selected['exposed_ms']:.2f} ms ({v2_03_status_label(selected['step_ok'])})",
+                "Rejected alternative": f"{rejected['exposed_ms']:.2f} ms ({v2_03_status_label(rejected['step_ok'])})",
+                "Limit": f"<= {v2_03_fmt(selected['step_budget_ms'])} ms",
+            },
+            {
+                "Guardrail": "Utilization",
+                "Selected plan": f"{selected['utilization']:.0%} ({v2_03_status_label(selected['utilization_ok'])})",
+                "Rejected alternative": f"{rejected['utilization']:.0%} ({v2_03_status_label(rejected['utilization_ok'])})",
+                "Limit": f"<= {v2_03_lens['utilization_limit']:.0%}",
+            },
+            {
+                "Guardrail": "Topology/placement",
+                "Selected plan": v2_03_status_label(selected["topology_ok"]),
+                "Rejected alternative": v2_03_status_label(rejected["topology_ok"]),
+                "Limit": "must pass topology guardrail",
+            },
+        ]
+        return v2_03_html_table(
+            rows,
+            [
+                ("Guardrail", "Guardrail"),
+                ("Selected plan", "Selected plan"),
+                ("Rejected alternative", "Rejected alternative"),
+                ("Limit", "Limit"),
+            ],
+            caption="Part D simultaneous guardrail table",
+        )
 
     def build_part_a():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Systems Engineer, DistributedAI Corp
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We need a time budget for gradient AllReduce in our 70B model training.
-                InfiniBand latency is measured in microseconds. How long can it possibly take?&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md(f"""
-        ## The Alpha-Beta Model: T(n) = alpha + n/beta
-
-        For LLM-scale gradients (hundreds of GB), the bandwidth term dominates by four
-        to five orders of magnitude. InfiniBand latency (5 us) is irrelevant compared to
-        the time to push 280 GB through a 50 GB/s pipe.
-
-        Ring AllReduce transfers **2(N-1)/N x M** bytes total.
-
-        **Systems Bridge:** AllReduce is the ML-specific instance of a collective
-        reduce operation, analogous to `MPI_Allreduce` in HPC. The alpha-beta model
-        is the same LogP/LogGP communication cost model used in parallel computing
-        since the 1990s — `alpha` = startup latency, `beta` = inverse bandwidth.
-        """))
-
-        items.append(pA_pred)
-        if pA_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+        items = [
+            mo.md("## Part A - Concept Module: Alpha/Beta Terms Predict Communication Cost"),
+            mo.callout(
+                mo.md(
+                    f"**Scenario.** {v2_03_variant.stakeholder} must move a "
+                    f"**{_part_a['payload_mb']:.0f} MB {v2_03_lens['payload_name']}** "
+                    f"over **{_part_a['link_label']}** before the track budget is exhausted."
+                ),
+                kind="info",
+            ),
+            partA_prediction,
+            v2_03_prediction_feedback(
+                partA_prediction.value,
+                _actual_part_a,
+                f"Correct. The measured binding term is **{_actual_part_a}**.",
+                f"The measured binding term is **{_actual_part_a}**. The chart separates alpha from n/beta.",
+            ),
+        ]
+        if partA_prediction.value is None:
             return mo.vstack(items)
-
-        items.append(mo.hstack([pA_model, pA_prec, pA_gpus], justify="start", gap="1rem"))
-
-        _params = pA_model.value * 1e9
-        _bpp = pA_prec.value
-        _n = pA_gpus.value
-        _msg_bytes = _params * _bpp
-        _msg_gb = _msg_bytes / 1e9
-
-        _ar = calc_ring_allreduce_time(_msg_bytes, _n, INFINIBAND_NDR_BW_GBS * 1e9, IB_NDR_LATENCY_US * 1e-6)
-        _t_total_ms = _ar.m_as(ureg.millisecond)
-
-        # Bandwidth vs latency breakdown
-        _bw_coeff = 2 * (_n - 1) / _n
-        _t_bw_ms = (_bw_coeff * _msg_gb / INFINIBAND_NDR_BW_GBS) * 1000
-        _t_lat_ms = (2 * (_n - 1) * IB_NDR_LATENCY_US * 1e-6) * 1000
-        _bw_pct = _t_bw_ms / _t_total_ms * 100 if _t_total_ms > 0 else 0
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(name="Bandwidth term", x=["AllReduce"], y=[_t_bw_ms],
-                              marker_color=COLORS["RedLine"], width=0.4))
-        _fig.add_trace(go.Bar(name="Latency term", x=["AllReduce"], y=[_t_lat_ms],
-                              marker_color=COLORS["BlueLine"], width=0.4))
-        _fig.update_layout(barmode="stack", height=280,
-                           yaxis=dict(title="Time (ms)", type="log", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=50, r=20, t=60, b=40))
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total AllReduce</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_t_total_ms:,.0f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_t_total_ms/1000:.1f} seconds</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Bandwidth %</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_bw_pct:.2f}%</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Message Size</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_msg_gb:.0f} GB</div>
-            </div>
-        </div>"""))
-
-        items.append(mo.md(f"""
-**Alpha-Beta -- Live Calculation** (`{pA_model.value}B, {_bpp}B/param, {_n} GPUs`)
-
-```
-M            = {_params:.0e} params x {_bpp} bytes = {_msg_gb:.0f} GB
-T_bandwidth  = 2({_n}-1)/{_n} x {_msg_gb:.0f} GB / {INFINIBAND_NDR_BW_GBS} GB/s = {_t_bw_ms:,.0f} ms
-T_latency    = 2({_n}-1) x {IB_NDR_LATENCY_US} us = {_t_lat_ms:.2f} ms
-Total        = {_t_total_ms:,.0f} ms ({_t_total_ms/1000:.1f} s)
-BW fraction  = {_bw_pct:.4f}%
-```
-*Source: Vol II Ch 3/6 -- Alpha-Beta Model*
-        """))
-
-        _pred = pA_pred.value
-        if _pred == "11000":
-            _msg = "**Correct.** Bandwidth completely dominates. The latency term is negligible."
-            _kind = "success"
-        else:
-            _msg = (f"**AllReduce takes {_t_total_ms/1000:.1f} seconds.** Students anchor on "
-                    "InfiniBand's microsecond latency and underestimate by 100-1000x.")
-            _kind = "warn"
-        items.append(mo.callout(mo.md(_msg), kind=_kind))
-
-        items.append(mo.accordion({
-            "Math Peek: Ring AllReduce Time (Alpha-Beta Model)": mo.md("""
-**Formula:**
-$$
-T_{\\text{ring}} = 2(N-1) \\cdot \\alpha + 2\\,\\frac{N-1}{N} \\cdot \\frac{M}{\\beta}
-$$
-
-**Variables:**
-- **$\\alpha$**: per-hop latency (IB NDR: ~5 $\\mu$s)
-- **$\\beta$**: per-link bandwidth (IB NDR: ~50 GB/s)
-- **$M$**: message size in bytes (e.g., 70B $\\times$ 4 bytes/FP32 = 280 GB)
-- **$N$**: number of GPUs in the ring
-
-**Key insight:** The latency term $2(N-1) \\cdot \\alpha$ is microseconds. The bandwidth term $2(N-1)/N \\cdot M/\\beta$ is seconds. For LLM-scale gradients, bandwidth dominates by 4--5 orders of magnitude.
-""")
-        }))
+        items.extend(
+            [
+                mo.hstack([payload_mb, active_link], justify="start"),
+                mo.as_html(v2_03_alpha_beta_chart(COLORS, _part_a)),
+                _part_a_table(),
+                v2_03_failure_callout(
+                    _part_a["passes_budget"],
+                    f"Consequence: {_part_a['total_ms']:.2f} ms fits the {v2_03_fmt(_part_a['budget_ms'])} ms communication budget.",
+                    f"Boundary: {_part_a['total_ms']:.2f} ms exceeds the {v2_03_fmt(_part_a['budget_ms'])} ms budget. Mitigation must reduce hops/alpha, raise beta, or shrink payload.",
+                ),
+                MathPeek(
+                    "T(n)=alpha+n/beta; n*=alpha*beta",
+                    {
+                        "alpha": f"{_part_a['alpha_ms']:.3f} ms startup",
+                        "n/beta": f"{_part_a['beta_ms']:.3f} ms payload term",
+                        "n*": f"{_part_a['crossover_kb']:.1f} KB crossover",
+                        "chapter source": "Network Fabrics performance model",
+                    },
+                ),
+                partA_checkpoint,
+            ]
+        )
         return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART B: RING VS TREE CROSSOVER
-    # ═════════════════════════════════════════════════════════════════════════
 
     def build_part_b():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; NCCL Engineer, DistributedAI Corp
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We default to Ring AllReduce everywhere. Someone suggested Tree
-                might be faster for small messages. When does each win?&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Ring vs Tree: Bandwidth-Optimal vs Latency-Optimal
-
-        - **Ring**: BW-optimal (2(N-1)/N x M/beta) but O(N) latency steps
-        - **Tree**: O(log N) latency steps but O(log N) bandwidth overhead
-
-        The crossover depends on message size, GPU count, and network parameters.
-        """))
-
-        items.append(pB_pred)
-        if pB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+        _actual = "bisection"
+        items = [
+            mo.md("## Part B - Concept Module: Topology And Bisection Change Feasible Parallel Work"),
+            mo.callout(
+                mo.md(
+                    f"**Scenario.** The same payload now scales to **{_participants} "
+                    f"{v2_03_lens['participant_name']}**. The question is whether the topology "
+                    "keeps enough cross-sectional bandwidth for parallel work."
+                ),
+                kind="info",
+            ),
+            partB_prediction,
+            v2_03_prediction_feedback(
+                partB_prediction.value,
+                _actual,
+                "Correct. The narrowest bisection cut determines feasible global communication.",
+                "Endpoint link speed is not enough. The bisection table shows which topology preserves useful parallel work.",
+            ),
+        ]
+        if partB_prediction.value is None:
             return mo.vstack(items)
-
-        items.append(mo.hstack([pB_msg_exp, pB_n_gpus], justify="start", gap="2rem"))
-
-        _n = pB_n_gpus.value
-        _msg_kb = 10 ** pB_msg_exp.value
-        _msg_bytes = _msg_kb * 1024
-
-        # Sweep message sizes for both algorithms
-        _sizes_kb = np.logspace(0, 10, 200)  # 1 KB to 10 GB
-        _ring_ms = []
-        _tree_ms = []
-        for _s in _sizes_kb:
-            _sb = _s * 1024
-            _r = calc_ring_allreduce_time(_sb, _n, INFINIBAND_NDR_BW_GBS * 1e9, IB_NDR_LATENCY_US * 1e-6)
-            _t = calc_tree_allreduce_time(_sb, _n, INFINIBAND_NDR_BW_GBS * 1e9, IB_NDR_LATENCY_US * 1e-6)
-            _ring_ms.append(_r.m_as(ureg.millisecond))
-            _tree_ms.append(_t.m_as(ureg.millisecond))
-
-        _ring_ms = np.array(_ring_ms)
-        _tree_ms = np.array(_tree_ms)
-
-        # Find crossover
-        _diff = _ring_ms - _tree_ms
-        _cross_idx = np.argmax(_diff < 0)  # Ring becomes faster
-        _cross_kb = _sizes_kb[_cross_idx] if _cross_idx > 0 else _sizes_kb[-1]
-
-        # Current point
-        _r_cur = calc_ring_allreduce_time(_msg_bytes, _n, INFINIBAND_NDR_BW_GBS * 1e9, IB_NDR_LATENCY_US * 1e-6)
-        _t_cur = calc_tree_allreduce_time(_msg_bytes, _n, INFINIBAND_NDR_BW_GBS * 1e9, IB_NDR_LATENCY_US * 1e-6)
-        _ring_cur_ms = _r_cur.m_as(ureg.millisecond)
-        _tree_cur_ms = _t_cur.m_as(ureg.millisecond)
-        _winner = "Ring" if _ring_cur_ms < _tree_cur_ms else "Tree"
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=_sizes_kb, y=_ring_ms, mode="lines",
-                                  name="Ring AllReduce", line=dict(color=COLORS["BlueLine"], width=2.5)))
-        _fig.add_trace(go.Scatter(x=_sizes_kb, y=_tree_ms, mode="lines",
-                                  name="Tree AllReduce", line=dict(color=COLORS["OrangeLine"], width=2.5)))
-        _fig.add_vline(x=_cross_kb, line_dash="dash", line_color=COLORS["GreenLine"],
-                       annotation_text=f"Crossover: {_cross_kb:.0f} KB", annotation_position="top right",
-                       annotation_font_size=10)
-        _fig.add_trace(go.Scatter(x=[_msg_kb], y=[min(_ring_cur_ms, _tree_cur_ms)],
-                                  mode="markers", name=f"Your msg: {_msg_kb:.0f} KB",
-                                  marker=dict(color=COLORS["RedLine"], size=14, symbol="star",
-                                              line=dict(color="white", width=2))))
-        _fig.update_layout(height=380,
-                           xaxis=dict(title="Message Size (KB)", type="log", gridcolor="#f1f5f9"),
-                           yaxis=dict(title="Time (ms)", type="log", gridcolor="#f1f5f9"),
-                           legend=dict(orientation="h", y=1.12, x=0),
-                           margin=dict(l=50, r=20, t=60, b=40))
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Ring Time</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_ring_cur_ms:.2f} ms</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Tree Time</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_tree_cur_ms:.2f} ms</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Winner</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_winner}</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['TextMuted']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Crossover</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['TextMuted']};">{_cross_kb:.0f} KB</div>
-            </div>
-        </div>"""))
-
-        _pred = pB_pred.value
-        if _pred == "tree":
-            _msg = ("**Correct.** At 1 MB with 256 GPUs, Tree's O(log N) latency advantage wins. "
-                    "Ring incurs 510 latency steps vs Tree's 16.")
-            _kind = "success"
-        else:
-            _msg = (f"**Tree wins at 1 MB / 256 GPUs.** Ring is BW-optimal but its O(N) latency "
-                    "penalty is catastrophic at large GPU counts for small messages.")
-            _kind = "warn"
-        items.append(mo.callout(mo.md(_msg), kind=_kind))
-
-        items.append(mo.accordion({
-            "Math Peek: Ring vs Tree AllReduce Crossover": mo.md("""
-**Ring AllReduce:**
-$$
-T_{\\text{ring}} = 2(N-1)\\alpha + 2\\frac{N-1}{N}\\frac{M}{\\beta}
-$$
-
-**Tree AllReduce:**
-$$
-T_{\\text{tree}} = 2\\log_2(N)\\alpha + 2\\frac{\\log_2(N)}{N}\\frac{M}{\\beta} \\cdot N = 2\\log_2(N)\\left(\\alpha + \\frac{M}{\\beta}\\right)
-$$
-
-**Crossover condition (Tree wins when):**
-$$
-M < M^{*} \\quad \\text{where} \\quad \\frac{2(N-1)\\alpha}{2\\frac{N-1}{N}\\frac{1}{\\beta}} \\ll M^{*}
-$$
-
-**Variables:**
-- **Ring latency**: $O(N)$ hops, bandwidth-optimal ($2(N-1)/N \\approx 2$ for large $N$)
-- **Tree latency**: $O(\\log N)$ hops, but each hop transfers full $M$
-- **Crossover**: at small $M$ and large $N$, Tree's $O(\\log N)$ latency wins; at large $M$, Ring's bandwidth-optimality wins
-""")
-        }))
+        items.extend(
+            [
+                mo.hstack([participants, topology_choice, active_link], justify="start"),
+                mo.as_html(v2_03_topology_chart(COLORS, _topology_rows, v2_03_lens["step_budget_ms"])),
+                _part_b_table(),
+                v2_03_failure_callout(
+                    _part_b_selected["passes_step"] and _part_b_selected["guard_ok"],
+                    f"Consequence: {_part_b_selected['label']} keeps the modeled sync at {_part_b_selected['sync_ms']:.2f} ms.",
+                    f"Boundary: {_part_b_selected['label']} is not a safe topology assumption. It reports {_part_b_selected['sync_ms']:.2f} ms against a {v2_03_fmt(v2_03_lens['step_budget_ms'])} ms step/SLO budget and guardrail status {v2_03_status_label(_part_b_selected['guard_ok'])}.",
+                ),
+                MathPeek(
+                    "BW_bisect=(N/2)*beta/oversubscription",
+                    {
+                        "participants": f"{_participants}",
+                        "selected topology": _part_b_selected["label"],
+                        "effective bisection": f"{_part_b_selected['bisection_mb_s']:,.0f} MB/s",
+                        "chapter source": "Network Fabrics topology and bisection sections",
+                    },
+                ),
+                partB_checkpoint,
+            ]
+        )
         return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART C: TOPOLOGY AND HIERARCHY EFFECTS
-    # ═════════════════════════════════════════════════════════════════════════
 
     def build_part_c():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Performance Lead, DistributedAI Corp
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our flat Ring AllReduce across 64 GPUs mixes NVLink and IB links.
-                A hierarchical approach does local reduce first, then inter-node. How much faster?&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md(f"""
-        ## Hierarchical AllReduce Exploits the Bandwidth Cliff
-
-        NVLink ({NVLINK_GBS:.0f} GB/s) vs IB NDR ({INFINIBAND_NDR_BW_GBS} GB/s) = {NVLINK_GBS/INFINIBAND_NDR_BW_GBS:.0f}x gap.
-
-        Hierarchical AllReduce: local reduce within NVLink, then global AllReduce over IB.
-        Reduces inter-node traffic by a factor of GPUs-per-node.
-        """))
-
-        items.append(pC_pred)
-        if pC_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+        _actual = "placement"
+        items = [
+            mo.md("## Part C - Concept Module: Congestion And Placement Make Local Choices Fleet-Wide Bottlenecks"),
+            mo.callout(
+                mo.md(
+                    f"**Scenario.** The scheduler chooses **{_part_c['placement_label']}** on "
+                    f"**{_part_c['topology_label']}**. Under BSP-style synchronization, the slowest "
+                    "congested path paces the whole fleet."
+                ),
+                kind="info",
+            ),
+            partC_prediction,
+            v2_03_prediction_feedback(
+                partC_prediction.value,
+                _actual,
+                "Correct. Placement and utilization headroom decide whether local choices create fleet-wide tail latency.",
+                "The productive failure is treating placement as bookkeeping. The evidence below shows congestion amplification.",
+            ),
+        ]
+        if partC_prediction.value is None:
             return mo.vstack(items)
-
-        items.append(mo.hstack([pC_topo, pC_gpus_per_node], justify="start", gap="2rem"))
-        items.append(pC_oversub)
-
-        _gpn = pC_gpus_per_node.value
-        _total = 64
-        _n_nodes = _total // _gpn
-        _oversub = pC_oversub.value
-        _msg_bytes = 70e9 * 2  # 70B FP16
-        _ib_bw_effective = INFINIBAND_NDR_BW_GBS / _oversub  # oversubscription effect
-
-        # Flat ring
-        _flat = calc_ring_allreduce_time(
-            _msg_bytes, _total, INFINIBAND_NDR_BW_GBS * 1e9, IB_NDR_LATENCY_US * 1e-6
+        items.extend(
+            [
+                mo.hstack([placement_choice, burst_multiplier, topology_choice], justify="start"),
+                mo.as_html(v2_03_congestion_chart(COLORS, _part_c)),
+                _part_c_table(),
+                v2_03_failure_callout(
+                    _part_c["utilization_ok"] and _part_c["topology_ok"],
+                    f"Consequence: utilization is {_part_c['utilization']:.0%}, below the {v2_03_lens['utilization_limit']:.0%} guardrail.",
+                    f"Boundary: utilization is {_part_c['utilization']:.0%} against a {v2_03_lens['utilization_limit']:.0%} limit, with topology guardrail {v2_03_status_label(_part_c['topology_ok'])}. Mitigation must improve locality or reduce burst pressure.",
+                ),
+                MathPeek(
+                    "rho=offered_load/capacity; tail rises as rho approaches 1",
+                    {
+                        "offered load": f"{_part_c['offered_mb_s']:,.0f} MB/s",
+                        "capacity": f"{_part_c['capacity_mb_s']:,.0f} MB/s",
+                        "rho": f"{_part_c['utilization']:.2f}",
+                        "chapter source": "Network Fabrics fabric behavior and congestion-control sections",
+                    },
+                ),
+                partC_checkpoint,
+            ]
         )
-        _flat_ms = _flat.m_as(ureg.millisecond)
-
-        # Hierarchical
-        _hier = calc_hierarchical_allreduce_time(
-            _msg_bytes, _n_nodes, _gpn,
-            NVLINK_GBS * 1e9 * ureg.byte / ureg.second,
-            _ib_bw_effective * 1e9 * ureg.byte / ureg.second,
-        )
-        _hier_ms = _hier.m_as(ureg.millisecond)
-        _speedup = _flat_ms / _hier_ms if _hier_ms > 0 else 0
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Flat Ring</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_flat_ms:,.0f} ms</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Hierarchical</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_hier_ms:,.0f} ms</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Speedup</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_speedup:.1f}x</div>
-            </div>
-        </div>"""))
-
-        if _oversub > 1:
-            items.append(mo.callout(mo.md(
-                f"**Oversubscription {_oversub}:1** reduces effective inter-node bandwidth "
-                f"from {INFINIBAND_NDR_BW_GBS} to {_ib_bw_effective:.1f} GB/s, "
-                "proportionally slowing the inter-node component."
-            ), kind="warn"))
-
-        _pred = pC_pred.value
-        if _pred == "5":
-            _msg = f"**Correct.** Hierarchical achieves {_speedup:.1f}x speedup by confining most traffic to NVLink."
-            _kind = "success"
-        else:
-            _msg = f"**Hierarchical achieves {_speedup:.1f}x speedup.** Reducing inter-node traffic by {_gpn}x is the key."
-            _kind = "warn"
-        items.append(mo.callout(mo.md(_msg), kind=_kind))
-
-        items.append(mo.accordion({
-            "Math Peek: Hierarchical AllReduce": mo.md("""
-**Two-level hierarchical AllReduce (intra-node NVLink + inter-node IB):**
-$$
-T_{\\text{hier}} = T_{\\text{intra}} + T_{\\text{inter}} + T_{\\text{intra,broadcast}}
-$$
-
-$$
-T_{\\text{intra}} = 2\\frac{G-1}{G}\\frac{M}{\\beta_{\\text{NVLink}}} \\qquad T_{\\text{inter}} = 2\\frac{K-1}{K}\\frac{M/G}{\\beta_{\\text{IB}}}
-$$
-
-**Variables:**
-- **$G$**: GPUs per node (typically 8)
-- **$K$**: number of nodes ($N/G$)
-- **$\\beta_{\\text{NVLink}}$**: intra-node bandwidth (~900 GB/s)
-- **$\\beta_{\\text{IB}}$**: inter-node bandwidth (~50 GB/s)
-
-**Key insight:** Hierarchical reduces inter-node traffic by $G\\times$ (only $M/G$ crosses IB instead of $M$). The speedup is $\\approx 5$--$6\\times$ vs flat ring because most bytes stay on the fast NVLink fabric.
-""")
-        }))
         return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART D: GRADIENT COMPRESSION
-    # ═════════════════════════════════════════════════════════════════════════
 
     def build_part_d():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; ML Researcher, DistributedAI Corp
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We applied INT8 gradient compression. Per-step communication dropped 4x.
-                But total training time barely changed. What happened?&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Gradient Compression: When Does It Pay Off?
-
-        Compression trades bandwidth savings for convergence slowdown.
-        It only helps when the **communication-to-computation ratio is high**.
-        On fast networks, the extra convergence steps nearly cancel per-step savings.
-        """))
-
-        items.append(pD_pred)
-        if pD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+        _naive_binding = _rejected["binding_guardrail"]
+        _naive_prediction_key = {
+            "step-time/SLO": "step",
+            "utilization": "utilization",
+            "topology": "topology",
+        }.get(_naive_binding, "topology")
+        items = [
+            mo.md("## Part D - Concept Module: Communication Plan Guardrails"),
+            mo.callout(
+                mo.md(
+                    f"**Scenario.** The final communication plan must satisfy step-time/SLO, "
+                    f"utilization, and topology guardrails for {v2_03_profile.label}. "
+                    f"{v2_03_lens['guardrail_text']}"
+                ),
+                kind="info",
+            ),
+            partD_prediction,
+            v2_03_prediction_feedback(
+                partD_prediction.value,
+                _naive_prediction_key,
+                f"Correct. The rejected alternative is primarily blocked by **{_rejected['binding_guardrail']}**.",
+                f"The rejected alternative is primarily blocked by **{_rejected['binding_guardrail']}**. A plan needs all three guardrails, not one good metric.",
+            ),
+        ]
+        if partD_prediction.value is None:
             return mo.vstack(items)
-
-        items.append(mo.hstack([pD_comp, pD_bw], justify="start", gap="2rem"))
-
-        _comp_ratio = pD_comp.value
-        _bw = pD_bw.value
-        _msg_gb = 70 * 2  # 70B FP16 baseline = 140 GB
-        _n = 64
-
-        # Convergence penalty
-        _penalties = {1.0: 1.0, 0.5: 1.05, 0.25: 1.15, 0.01: 1.3, 0.03125: 1.5}
-        _conv_penalty = _penalties.get(_comp_ratio, 1.0)
-
-        _compressed_gb = _msg_gb * _comp_ratio
-        _t_comp_ms = 5000  # 5 seconds compute per step (approximate for 70B)
-        _t_comm_ms = (2 * (_n - 1) / _n * _compressed_gb / _bw) * 1000
-        _t_step_ms = _t_comp_ms + _t_comm_ms
-        _comm_pct = _t_comm_ms / _t_step_ms * 100
-
-        # Total training time (relative)
-        _base_comm_ms = (2 * (_n - 1) / _n * _msg_gb / _bw) * 1000
-        _base_step_ms = _t_comp_ms + _base_comm_ms
-        _base_total = _base_step_ms * 1000  # 1000 steps baseline
-        _new_total = _t_step_ms * 1000 * _conv_penalty
-        _time_ratio = _new_total / _base_total
-
-        _net_benefit = _time_ratio < 1.0
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Comm Time/Step</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_t_comm_ms:,.0f} ms</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Conv. Penalty</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_conv_penalty:.2f}x</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine'] if _net_benefit else COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Net Time Change</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine'] if _net_benefit else COLORS['RedLine']};">{(_time_ratio-1)*100:+.0f}%</div>
-            </div>
-        </div>"""))
-
-        if not _net_benefit and _comp_ratio < 1.0:
-            items.append(mo.callout(mo.md(
-                "**Compression hurts here.** The convergence penalty outweighs per-step savings. "
-                "Try a slower network (lower BW slider) where communication is the dominant term."
-            ), kind="danger"))
-
-        _pred = pD_pred.value
-        if _pred == "depends":
-            _msg = ("**Correct.** On fast networks (IB NDR), communication is only 30-40% of step time. "
-                    "The convergence penalty nearly cancels per-step savings. "
-                    "On slow networks (100GbE), compression provides substantial benefit.")
-            _kind = "success"
-        else:
-            _msg = ("**It depends on the network.** Compression trades per-step savings for "
-                    "extra steps. On IB NDR, the trade-off is marginal. On slow networks, it wins.")
-            _kind = "warn"
-        items.append(mo.callout(mo.md(_msg), kind=_kind))
-
-        items.append(mo.accordion({
-            "Math Peek: Gradient Compression Trade-off": mo.md("""
-**Compressed communication time:**
-$$
-T_{\\text{comm,compressed}} = c \\cdot T_{\\text{comm,baseline}}
-$$
-
-**Total training time with compression:**
-$$
-T_{\\text{total}} = S \\cdot (1 + \\epsilon) \\cdot (T_{\\text{compute}} + c \\cdot T_{\\text{comm}})
-$$
-
-**Variables:**
-- **$c$**: compression ratio (FP16: 0.5, INT8: 0.25, Top-K 1%: 0.01)
-- **$\\epsilon$**: convergence penalty (extra steps needed, typically 5--15%)
-- **$S$**: baseline number of training steps
-
-**Key insight:** Compression is only beneficial when $c \\cdot T_{\\text{comm}}$ savings exceed the $\\epsilon$ penalty in extra steps. On IB NDR (fast), communication is ~30% of step time, so 4x compression saves ~22% per step but costs ~10% more steps -- marginal net benefit.
-""")
-        }))
+        items.extend(
+            [
+                mo.hstack(
+                    [topology_choice, placement_choice, payload_reduction_pct, overlap_pct],
+                    justify="start",
+                ),
+                mo.as_html(v2_03_candidate_chart(COLORS, _part_d, _rejected)),
+                _part_d_table(_part_d, _rejected),
+                v2_03_failure_callout(
+                    _part_d["valid_plan"],
+                    f"Consequence: selected plan passes all guardrails. Binding guardrail is {_part_d['binding_guardrail']}.",
+                    f"Boundary: selected plan fails at least one guardrail. Binding guardrail is {_part_d['binding_guardrail']}; revise topology, placement, payload reduction, or overlap.",
+                ),
+                MathPeek(
+                    "valid = exposed_time<=SLO and utilization<=limit and topology_guardrail",
+                    {
+                        "exposed time": f"{_part_d['exposed_ms']:.2f} ms vs {v2_03_fmt(_part_d['step_budget_ms'])} ms",
+                        "utilization": f"{_part_d['utilization']:.0%} vs {v2_03_lens['utilization_limit']:.0%}",
+                        "topology guardrail": v2_03_status_label(_part_d["topology_ok"]),
+                        "chapter source": "Network Fabrics summary and fallacies",
+                    },
+                ),
+                partD_final_decision,
+            ]
+        )
         return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART E: COMMUNICATION BUDGET OPTIMIZATION
-    # ═════════════════════════════════════════════════════════════════════════
-
-    def build_part_e():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid #6366f1; background:#f0f4ff;
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:#6366f1;
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; CTO, DistributedAI Corp
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Raw AllReduce for our 70B model takes 11 seconds. Our training step
-                is 30 seconds. Communication is 37% of step time. Get it under 20%.&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Stack Optimizations to Hit the 20% Target
-
-        Starting point: 11-second raw Ring AllReduce for 70B FP32 on 64 GPUs.
-        Toggle optimizations one at a time and watch each chip away at the budget.
-        """))
-
-        items.append(pE_pred)
-        if pE_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([pE_hier, pE_fp16, pE_bucket, pE_overlap], justify="start", gap="1rem"))
-
-        _base_ms = 11000  # 11 seconds raw AllReduce
-        _compute_ms = 19000  # ~19 seconds compute
-        _comm_ms = _base_ms
-
-        # Apply optimizations
-        if pE_hier.value:
-            _comm_ms *= 0.18  # ~5-6x reduction
-        if pE_fp16.value:
-            _comm_ms *= 0.5
-        if pE_bucket.value:
-            _comm_ms *= 0.9  # 10% latency reduction from fusion
-        _visible_comm_ms = _comm_ms
-        if pE_overlap.value:
-            _visible_comm_ms = _comm_ms * (1 - float(DEFAULT_OVERLAP_EFFICIENCY))
-
-        _step_ms = _compute_ms + _visible_comm_ms
-        _comm_pct = _visible_comm_ms / _step_ms * 100 if _step_ms > 0 else 0
-        _target_met = _comm_pct < 20
-
-        # Progress chart
-        _stages = ["Raw"]
-        _times = [_base_ms]
-        _cur = _base_ms
-        if pE_hier.value:
-            _cur *= 0.18
-            _stages.append("+Hierarchical")
-            _times.append(_cur)
-        if pE_fp16.value:
-            _cur *= 0.5
-            _stages.append("+FP16")
-            _times.append(_cur)
-        if pE_bucket.value:
-            _cur *= 0.9
-            _stages.append("+Bucket")
-            _times.append(_cur)
-        if pE_overlap.value:
-            _cur *= (1 - float(DEFAULT_OVERLAP_EFFICIENCY))
-            _stages.append("+Overlap")
-            _times.append(_cur)
-
-        _fig = go.Figure()
-        _bar_cols = [COLORS["RedLine"] if t / (_compute_ms + t) > 0.2 else COLORS["GreenLine"] for t in _times]
-        _fig.add_trace(go.Bar(x=_stages, y=[t / 1000 for t in _times],
-                              marker_color=_bar_cols, width=0.5))
-        _target_time_s = 0.2 * _compute_ms / (1 - 0.2) / 1000  # 20% threshold
-        _fig.add_hline(y=_target_time_s, line_dash="dash", line_color=COLORS["GreenLine"],
-                       annotation_text="20% target", annotation_font_size=10)
-        _fig.update_layout(height=300, yaxis=dict(title="Communication (seconds)", gridcolor="#f1f5f9"),
-                           margin=dict(l=50, r=20, t=30, b=40))
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _tc = COLORS["GreenLine"] if _target_met else COLORS["RedLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_tc}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Comm % of Step</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{_tc};">{_comm_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">Target: &lt; 20%</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Effective Comm</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_visible_comm_ms/1000:.1f} s</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Reduction from Raw</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">{_base_ms/_visible_comm_ms:.0f}x</div>
-            </div>
-        </div>"""))
-
-        if _target_met:
-            items.append(mo.callout(mo.md(
-                f"**Target met.** Communication is {_comm_pct:.1f}% of step time. "
-                f"You stacked {sum([pE_hier.value, pE_fp16.value, pE_bucket.value, pE_overlap.value])} optimizations."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**Not yet.** Communication is still {_comm_pct:.1f}% of step time. "
-                "Toggle more optimizations to reach the 20% target."
-            ), kind="warn"))
-
-        _pred = pE_pred.value
-        if _pred == "3":
-            _msg = ("**Correct.** You typically need 3-4 optimizations stacked: hierarchical + "
-                    "FP16 + overlap + bucket fusion. No single optimization is sufficient.")
-            _kind = "success"
-        else:
-            _msg = ("**You need 3-4 stacked optimizations.** Hierarchical gives ~5-6x. "
-                    "FP16 halves it. Overlap hides 85%. Bucket fusion reduces latency. "
-                    "All are required to reach <20%.")
-            _kind = "warn"
-        items.append(mo.callout(mo.md(_msg), kind=_kind))
-
-        items.append(mo.accordion({
-            "Math Peek: Communication Budget Stacking": mo.md("""
-**Stacked optimization formula:**
-$$
-T_{\\text{comm,final}} = T_{\\text{baseline}} \\times \\frac{1}{\\text{hier}} \\times \\text{precision} \\times (1 - \\text{overlap})
-$$
-
-**Example for 70B on 64 GPUs, IB NDR:**
-
-| Optimization | Factor | Cumulative Time |
-|---|---|---|
-| Baseline Ring AllReduce | 1x | ~11 s |
-| + Hierarchical (8 GPUs/node) | /5.6x | ~2.0 s |
-| + FP16 gradients | /2x | ~1.0 s |
-| + 85% backward overlap | x0.15 | ~0.15 s |
-| + Bucket fusion | ~latency reduction | ~0.12 s |
-
-**Variables:**
-- **hier**: hierarchical speedup factor (~5--6x for 8 GPUs/node)
-- **precision**: FP16 = 0.5, FP32 = 1.0
-- **overlap**: fraction of communication hidden behind backward pass (0.0--0.85)
-
-**Key insight:** No single optimization is sufficient. You must stack 3--4 techniques to reach the <20% communication budget target.
-""")
-        }))
-        return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # SYNTHESIS
-    # ═════════════════════════════════════════════════════════════════════════
 
     def build_synthesis():
-        return mo.vstack([
-            mo.md("## Key Takeaways"),
-            mo.callout(mo.md(
-                "**1. AllReduce is a bandwidth problem.** For 70B FP32 gradients on 64 GPUs, "
-                "Ring AllReduce takes ~11 seconds. The bandwidth term is 99.99% of total. "
-                "InfiniBand latency (5 us) is irrelevant at LLM scale."
-            ), kind="info"),
-            mo.callout(mo.md(
-                "**2. Algorithm choice depends on message size and GPU count.** "
-                "Ring is bandwidth-optimal but latency-poor (O(N) steps). "
-                "Tree has logarithmic latency but bandwidth overhead. "
-                "The crossover formula determines which wins."
-            ), kind="info"),
-            mo.callout(mo.md(
-                "**3. No single optimization is sufficient.** "
-                "Reaching <20% communication requires stacking: hierarchical AllReduce (~5-6x), "
-                "FP16 gradients (2x), backward overlap (85%), and bucket fusion. "
-                "This is the Megatron-LM recipe."
-            ), kind="info"),
-            mo.md("""
-## Connections
+        _completed = all(
+            value is not None
+            for value in (
+                partA_prediction.value,
+                partA_checkpoint.value,
+                partB_prediction.value,
+                partB_checkpoint.value,
+                partC_prediction.value,
+                partC_checkpoint.value,
+                partD_prediction.value,
+                partD_final_decision.value,
+            )
+        )
+        _binding_amount = _part_d["binding_guardrail"] if not _part_d["valid_plan"] else _part_c["binding_amount"]
+        _memo = memo_note.value or (
+            f"Use {_part_d['topology_label']} with {_part_d['placement_label']}; "
+            f"binding amount: {_binding_amount}; reject raw payload on oversubscribed spread placement; "
+            f"{v2_03_lens['collective_implication']}"
+        )
+        _snapshot = {
+            "track_id": v2_03_profile.track_id,
+            "scenario_id": v2_03_variant.scenario_id,
+            "active_link": _part_a["link_label"],
+            "payload_mb": _payload_mb,
+            "participants": _participants,
+            "selected_topology": _part_d["topology_label"],
+            "selected_placement": _part_d["placement_label"],
+            "reduced_payload_mb": round(_part_d["reduced_payload_mb"], 3),
+            "binding_network_amount": _binding_amount,
+            "step_time_ms": round(_part_d["exposed_ms"], 3),
+            "utilization": round(_part_d["utilization"], 4),
+            "valid_plan": _part_d["valid_plan"],
+            "rejected_alternative": "raw payload on oversubscribed spread placement",
+            "rejected_exposed_ms": round(_rejected["exposed_ms"], 3),
+            "collective_communication_implication": v2_03_lens["collective_implication"],
+            "completed": _completed,
+        }
+        _design = {
+            "lab_id": v2_03_metadata.lab_id,
+            "track_id": v2_03_profile.track_id,
+            "scenario_id": v2_03_variant.scenario_id,
+            "selected_topology": _part_d["topology_label"],
+            "selected_placement": _part_d["placement_label"],
+            "active_link": _part_a["link_label"],
+            "payload_mb": _payload_mb,
+            "binding_network_amount": _binding_amount,
+            "step_time_ms": _part_d["exposed_ms"],
+            "utilization": _part_d["utilization"],
+            "rejected_alternative": "raw payload on oversubscribed spread placement",
+            "collective_communication_implication": v2_03_lens["collective_implication"],
+            "completed": _completed,
+            "result_snapshot": _snapshot,
+        }
+        ledger.save(track=v2_03_profile.track_id, chapter=v2_03_chapter, design=_design)
 
-**Textbook:** Vol II Ch 3 (Network Fabrics) + Ch 6 (Collective Communication).
+        _incomplete = []
+        if partA_prediction.value is None:
+            _incomplete.append("Part A alpha/beta prediction")
+        if partA_checkpoint.value is None:
+            _incomplete.append("Part A checkpoint decision")
+        if partB_prediction.value is None:
+            _incomplete.append("Part B bisection prediction")
+        if partB_checkpoint.value is None:
+            _incomplete.append("Part B topology checkpoint")
+        if partC_prediction.value is None:
+            _incomplete.append("Part C congestion/placement prediction")
+        if partC_checkpoint.value is None:
+            _incomplete.append("Part C placement checkpoint")
+        if partD_prediction.value is None:
+            _incomplete.append("Part D guardrail prediction")
+        if partD_final_decision.value is None:
+            _incomplete.append("Final communication plan decision")
 
-**Next Lab:** V2-04 explores the data pipeline wall: the storage-compute chasm,
-shard contention, prefetching limits, and checkpoint economics.
-            """),
-        ])
+        _report = build_lab_report(
+            v2_03_metadata,
+            student_id=student_id.value or "",
+            track=v2_03_profile.label,
+            scenario=v2_03_lens["scenario"],
+            learning_objectives=(
+                "Use alpha/beta terms to classify communication cost.",
+                "Use bisection bandwidth and topology to test feasible parallel work.",
+                "Diagnose congestion and placement as fleet-wide bottlenecks.",
+                "Approve a communication plan only when SLO, utilization, and topology guardrails pass.",
+            ),
+            predictions={
+                "partA_alpha_beta": partA_prediction.value,
+                "partB_bisection": partB_prediction.value,
+                "partC_congestion_placement": partC_prediction.value,
+                "partD_guardrail": partD_prediction.value,
+            },
+            knob_settings={
+                "payload_mb": _payload_mb,
+                "participants": _participants,
+                "active_link": _part_a["link_label"],
+                "topology": _part_d["topology_label"],
+                "placement": _part_d["placement_label"],
+                "burst_multiplier": burst_multiplier.value,
+                "payload_reduction_pct": payload_reduction_pct.value,
+                "overlap_pct": overlap_pct.value,
+            },
+            binding_constraints={
+                "binding_network_amount": _binding_amount,
+                "step_time_ms": round(_part_d["exposed_ms"], 3),
+                "utilization": round(_part_d["utilization"], 4),
+                "valid_plan": _part_d["valid_plan"],
+            },
+            evidence_summary={
+                "alpha_beta_binding": _part_a["binding_term"],
+                "topology_sync_ms": round(_part_b_selected["sync_ms"], 3),
+                "congestion_tail_ms": round(_part_c["tail_ms"], 3),
+                "final_exposed_ms": round(_part_d["exposed_ms"], 3),
+                "rejected_exposed_ms": round(_rejected["exposed_ms"], 3),
+            },
+            decisions={
+                "alpha_beta_checkpoint": partA_checkpoint.value,
+                "topology_checkpoint": partB_checkpoint.value,
+                "placement_checkpoint": partC_checkpoint.value,
+                "final_decision": partD_final_decision.value,
+            },
+            reflections={"communication_memo_note": memo_note.value},
+            final_decision=_memo,
+            big_takeaways=(
+                "Communication cost is an amount-system budget, not a single link-speed number.",
+                "Bisection and placement decide how much parallel work remains useful.",
+                "A network plan must pass SLO, utilization, and topology guardrails simultaneously.",
+            ),
+            residual_risk=v2_03_lens["failure_mode"],
+            source_trace={
+                "chapter_anchor": "Volume II, Chapter 3: Network Fabrics",
+                "source_models": "alpha/beta, bisection bandwidth, utilization guardrails",
+                "mlsysim_functions": "calc_point_to_point_time, calc_alpha_beta_crossover, calc_bisection_bandwidth",
+                "track_source_policy": v2_03_profile.source_policy,
+                "scenario_assumptions": "track thresholds and non-cloud link rates are notebook-local pedagogical assumptions",
+            },
+            result_snapshot=_snapshot,
+            incomplete_fields=tuple(_incomplete),
+        )
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # COMPOSE TABS
-    # ═════════════════════════════════════════════════════════════════════════
+        return mo.vstack(
+            [
+                mo.md("## Synthesis - Network Communication Memo"),
+                student_id,
+                memo_note,
+                mo.callout(
+                    mo.md(
+                        f"**Selected policy:** {_part_d['topology_label']} with {_part_d['placement_label']}.\n\n"
+                        f"**Binding network amount:** {_binding_amount}.\n\n"
+                        f"**Rejected alternative:** raw payload on oversubscribed spread placement "
+                        f"({_rejected['exposed_ms']:.2f} ms exposed time).\n\n"
+                        f"**Carry-forward:** {v2_03_lens['collective_implication']}"
+                    ),
+                    kind="success" if _part_d["valid_plan"] else "warn",
+                ),
+                partD_final_decision,
+                report_export_panel(_report),
+            ]
+        )
 
-    tabs = mo.ui.tabs({
-        "Part A -- The Network Time Budget": build_part_a(),
-        "Part B -- Ring vs Tree Crossover": build_part_b(),
-        "Part C -- Topology and Hierarchy": build_part_c(),
-        "Part D -- Gradient Compression": build_part_d(),
-        "Part E -- Communication Budget": build_part_e(),
-        "Synthesis": build_synthesis(),
-    })
-    tabs
+    v2_03_tabs = mo.ui.tabs(
+        {
+            "Part A: Alpha/Beta": build_part_a(),
+            "Part B: Topology": build_part_b(),
+            "Part C: Congestion": build_part_c(),
+            "Part D: Guardrails": build_part_d(),
+            "Synthesis": build_synthesis(),
+        }
+    )
+    v2_03_tabs
     return
 
-# ===========================================================================
-# ZONE D: LEDGER HUD
-# ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
-    _track = ledger._state.track or "not set"
-    if pA_pred.value is not None:
-        ledger.save(chapter=3, design={
-            "chapter": "v2_03",
-            "completed": True,
-            "allreduce_time_prediction": pA_pred.value,
-            "ring_vs_tree_crossover": pB_pred.value,
-            "hierarchical_speedup_prediction": pC_pred.value,
-            "compression_tradeoff_prediction": pD_pred.value,
-            "optimization_stack_prediction": pE_pred.value,
-        })
-
-    mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">V2-03 &middot; Communication at Scale</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">TRACK</span>
-        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">VOL&nbsp;II&nbsp;CH&nbsp;3+6</span>
-        <span class="hud-value">Communication at Scale</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">active</span>
-    </div>
-    """)
+def _(mo, v2_03_metadata, v2_03_profile):
+    mo.Html(
+        f"""
+<div class="lab-hud">
+  <span class="hud-label">LAB</span>
+  <span class="hud-value">{v2_03_metadata.lab_id}</span>
+  <span class="hud-label">TRACK</span>
+  <span class="hud-value">{v2_03_profile.label}</span>
+  <span style="flex:1;"></span>
+  <span class="hud-label">STATUS</span>
+  <span class="hud-active">ACTIVE</span>
+</div>
+"""
+    )
     return
+
 
 if __name__ == "__main__":
     app.run()

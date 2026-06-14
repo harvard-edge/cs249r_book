@@ -3,44 +3,35 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB V2-14: THE CARBON BUDGET
+# -----------------------------------------------------------------------------
+# LAB V2-15: THE CARBON BUDGET
 #
-# Volume II, Chapter 14 — Sustainable AI
+# Chapter invariant: sustainable AI is an amount system. Energy, carbon
+# intensity, utilization, embodied carbon, quality, latency, cost, reliability,
+# and governance all have to fit the selected track's operating envelope.
 #
-# Core Invariant: AI compute demand outpaces hardware efficiency by 2,400,000x.
-#   Geography is a 40x carbon lever. Embodied carbon dominates on clean grids.
-#   The Jevons Paradox means efficiency gains can INCREASE total consumption.
-#   Only absolute caps guarantee net reduction.
-#
-# 5 Parts (~60 minutes):
-#   Part A — The Energy Wall (10 min)
-#   Part B — The Geography of Carbon (12 min)
-#   Part C — The Lifecycle Carbon Shift (12 min)
-#   Part D — The Jevons Trap (14 min)  *** THE highlight of Vol 2 ***
-#   Part E — Carbon-Aware Fleet Design (12 min)
-#
-# Design Ledger: saves chapter="v2_14"
-# ─────────────────────────────────────────────────────────────────────────────
+# Packet modules:
+#   Part A - Carbon Is An Amount Stack
+#   Part B - Placement And Utilization Change The Carbon Bill
+#   Part C - Mitigation Must Preserve Guardrails
+#   Part D - Carbon-Aware Policy Is A Guardrail Bundle
+#   Synthesis
+# -----------------------------------------------------------------------------
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 0: SETUP ──────────────────────────────────────────────────────────
 
 @app.cell
 async def _():
     import marimo as mo
     import sys
     import math
+    import html
     from pathlib import Path
-    import numpy as np
 
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
         if str(_labs_dir) not in sys.path:
@@ -51,1211 +42,1750 @@ async def _():
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
-    from mlsysim import Hardware, Infrastructure
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
 
-    # ── Hardware from registry (Cloud + Edge tiers) ─────────────────────────
-    _cloud = Hardware.Cloud.H100
-    _edge  = Hardware.Edge.JetsonOrinNX
+    return (
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        html,
+        ledger,
+        math,
+        mo,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
-    # ── Sustainability constants from Infrastructure registry ───────────────
-    _grids = Infrastructure.Grids
-    CI_QUEBEC    = float(_grids.Quebec.carbon_intensity_g_kwh)
-    CI_ICELAND   = float(_grids.Iceland.carbon_intensity_g_kwh)
-    CI_FRANCE    = float(_grids.France.carbon_intensity_g_kwh)
-    CI_GERMANY   = float(_grids.Germany.carbon_intensity_g_kwh)
-    CI_US_AVG    = float(_grids.US_Avg.carbon_intensity_g_kwh)
-    CI_TEXAS     = float(_grids.Texas.carbon_intensity_g_kwh)
-    CI_INDIA     = float(_grids.India_Avg.carbon_intensity_g_kwh)
-    CI_POLAND    = float(_grids.Poland.carbon_intensity_g_kwh)
 
-    _cooling = Infrastructure.FacilityCooling
-    PUE_LIQUID   = float(_cooling.LiquidCooled.pue)
-    PUE_AIR      = float(_cooling.BestAir.pue)
-    PUE_LEGACY   = float(_cooling.Legacy.pue)
+@app.cell
+def _(get_lab_metadata):
+    v2_15_metadata = get_lab_metadata("vol2/lab_15_sustainable_ai.py")
+    v2_15_chapter = 15
+    return v2_15_chapter, v2_15_metadata
 
-    H100_EMBODIED_KG = _cloud.embodied_carbon_kg
-    H100_TDP_W       = _cloud.tdp.m_as("W")   # 700 W from registry
-    EDGE_TDP_W       = _edge.tdp.m_as("W")    # 25 W — edge power for comparison
 
-    # Growth rates — Source: chapter energy wall section
-    DEMAND_DOUBLING_MONTHS = 3.4    # AI compute demand doubling time
-    EFFICIENCY_DOUBLING_MONTHS = 24  # Hardware efficiency doubling time
+@app.cell(hide_code=True)
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
+    v2_15_track_picker = track_selector(default=_default_track)
+    v2_15_track_picker
+    return (v2_15_track_picker,)
 
-    # Jevons Paradox — Source: chapter implementation solutions section
-    # Elasticity estimates from observed API pricing vs volume data
-    JEVONS_ELASTICITY_INELASTIC = 0.3
-    JEVONS_ELASTICITY_UNIT      = 1.0
-    JEVONS_ELASTICITY_ELASTIC   = 2.0
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v2_15_track_picker,
+):
+    v2_15_track_id = v2_15_track_picker.value
+    v2_15_profile = get_track_profile(v2_15_track_id)
+    v2_15_variant = get_lab_track_variant("v2_15_carbon_budget", v2_15_profile.track_id)
+    v2_15_hardware = resolve_mlsysim_ref(v2_15_variant.hardware_ref)
+    v2_15_model = resolve_mlsysim_ref(v2_15_variant.model_ref)
+    v2_15_system = resolve_mlsysim_ref(v2_15_variant.system_ref) if v2_15_variant.system_ref else None
+    return (
+        v2_15_hardware,
+        v2_15_model,
+        v2_15_profile,
+        v2_15_system,
+        v2_15_track_id,
+        v2_15_variant,
+    )
+
+
+@app.cell
+def _(COLORS, html, math, mo):
+    def v2_15_color(name, fallback):
+        return COLORS.get(name, fallback)
+
+    def v2_15_qty(value, unit, default=0.0):
+        try:
+            return float(value.to(unit).magnitude)
+        except Exception:
+            try:
+                return float(value)
+            except Exception:
+                return float(default)
+
+    def v2_15_model_params_m(model):
+        return v2_15_qty(getattr(model, "parameters", 0.0), "param", 0.0) / 1_000_000
+
+    def v2_15_model_gflops(model):
+        return v2_15_qty(getattr(model, "inference_flops", 0.0), "flop", 0.0) / 1_000_000_000
+
+    def v2_15_num(value, digits=1):
+        if not math.isfinite(float(value)):
+            return "not feasible"
+        if abs(value) >= 1000:
+            return f"{value:,.0f}"
+        if abs(value) >= 100:
+            return f"{value:,.1f}"
+        return f"{value:,.{digits}f}"
+
+    def v2_15_pct(value, digits=0):
+        return f"{value * 100:.{digits}f}%"
+
+    def v2_15_status(ok):
+        return "PASS" if ok else "FAIL"
+
+    def v2_15_status_html(ok):
+        color = v2_15_color("GreenLine", "#047857") if ok else v2_15_color("RedLine", "#b42318")
+        bg = v2_15_color("GreenLL", "#ecfdf3") if ok else v2_15_color("RedLL", "#fef3f2")
+        return (
+            f"<span style='display:inline-block; min-width:54px; text-align:center; "
+            f"border:1px solid {color}; background:{bg}; color:{color}; border-radius:999px; "
+            "padding:2px 8px; font-size:0.72rem; font-weight:800;'>"
+            f"{v2_15_status(ok)}</span>"
+        )
+
+    def v2_15_table(headers, rows):
+        head = "".join(f"<th>{html.escape(str(header))}</th>" for header in headers)
+        body_rows = []
+        for row in rows:
+            cells = "".join(f"<td>{cell}</td>" for cell in row)
+            body_rows.append(f"<tr>{cells}</tr>")
+        return mo.Html(
+            f"""
+<div style="overflow-x:auto; margin:12px 0;">
+  <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
+    <thead>
+      <tr style="background:{v2_15_color('Surface2', '#f8fafc')}; color:{v2_15_color('Text', '#1f2937')};">
+        {head}
+      </tr>
+    </thead>
+    <tbody>{"".join(body_rows)}</tbody>
+  </table>
+</div>
+<style>
+  table td, table th {{
+    border:1px solid {v2_15_color('Border', '#d9dee8')};
+    padding:8px 10px;
+    text-align:left;
+    vertical-align:top;
+  }}
+</style>
+"""
+        )
+
+    def v2_15_metric_card(label, value, subvalue="", color=None):
+        accent = color or v2_15_color("BlueLine", "#2563eb")
+        return mo.Html(
+            f"""
+<div style="padding:15px 17px; border:1px solid {v2_15_color('Border', '#d9dee8')};
+            border-radius:8px; min-width:150px; text-align:center; background:white;">
+  <div style="color:{v2_15_color('TextMuted', '#64748b')}; font-size:0.76rem;
+              font-weight:800; text-transform:uppercase;">{html.escape(label)}</div>
+  <div style="font-size:1.55rem; font-weight:850; color:{accent};
+              font-family:ui-monospace, SFMono-Regular, Consolas, monospace; line-height:1.35;">
+    {html.escape(str(value))}
+  </div>
+  <div style="font-size:0.72rem; color:{v2_15_color('TextMuted', '#64748b')};">
+    {html.escape(str(subvalue))}
+  </div>
+</div>
+"""
+        )
+
+    def v2_15_part_banner(letter, title, why, color):
+        return mo.Html(
+            f"""
+<div style="margin:18px 0 14px 0;">
+  <div style="display:flex; align-items:center; gap:12px;">
+    <div style="background:{color}; color:white; border-radius:50%; width:34px; height:34px;
+                display:inline-flex; align-items:center; justify-content:center; font-size:0.92rem;
+                font-weight:850; flex-shrink:0;">{letter}</div>
+    <div style="flex:1; height:2px; background:{v2_15_color('Border', '#d9dee8')};"></div>
+    <div style="font-size:0.72rem; font-weight:800; color:{v2_15_color('TextMuted', '#64748b')};
+                text-transform:uppercase; letter-spacing:0.12em;">Part {letter}</div>
+  </div>
+  <div style="font-size:1.48rem; font-weight:850; color:{v2_15_color('Text', '#172033')};
+              margin-top:8px; line-height:1.2;">{html.escape(title)}</div>
+  <div style="color:{v2_15_color('TextSec', '#475467')}; font-size:0.93rem; margin-top:6px;
+              line-height:1.55; max-width:820px;">{html.escape(why)}</div>
+</div>
+"""
+        )
+
+    def v2_15_reveal_card(title, prediction, actual, detail, kind="info"):
+        palette = {
+            "success": (v2_15_color("GreenLine", "#047857"), v2_15_color("GreenLL", "#ecfdf3")),
+            "warn": (v2_15_color("OrangeLine", "#d97706"), v2_15_color("OrangeLL", "#fffbeb")),
+            "danger": (v2_15_color("RedLine", "#b42318"), v2_15_color("RedLL", "#fef3f2")),
+            "info": (v2_15_color("BlueLine", "#2563eb"), v2_15_color("BlueLL", "#eff6ff")),
+        }
+        color, background = palette.get(kind, palette["info"])
+        return mo.Html(
+            f"""
+<div style="background:{background}; border:1px solid {color}; border-left:5px solid {color};
+            border-radius:8px; padding:14px 18px; margin:12px 0;">
+  <div style="font-size:0.82rem; font-weight:850; color:{color};
+              text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">
+    {html.escape(title)}
+  </div>
+  <div style="font-size:0.9rem; color:{v2_15_color('Text', '#172033')}; line-height:1.65;">
+    You predicted <strong>{html.escape(str(prediction))}</strong>. Actual:
+    <strong>{html.escape(str(actual))}</strong>. {html.escape(str(detail))}
+  </div>
+</div>
+"""
+        )
+
+    def v2_15_failure_card(active, title, detail, recovery):
+        if active:
+            return mo.callout(
+                mo.md(f"**{title}**  \n{detail}  \n\nRecovery path: {recovery}"),
+                kind="danger",
+            )
+        return mo.callout(
+            mo.md(f"**Boundary recovered: {title}**  \nCurrent settings pass. Watch: {detail}"),
+            kind="success",
+        )
+
+    def v2_15_math_peek(title, body):
+        return mo.accordion({title: mo.md(body)})
 
     return (
-        mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
-        go, np, math,
-        CI_QUEBEC, CI_ICELAND, CI_FRANCE, CI_US_AVG, CI_TEXAS,
-        CI_GERMANY, CI_CHINA_AVG, CI_POLAND, CI_INDIA,
-        PUE_LIQUID, PUE_AIR, PUE_LEGACY,
-        H100_EMBODIED_KG, H100_TDP_W, EDGE_TDP_W,
-        DEMAND_DOUBLING_MONTHS, EFFICIENCY_DOUBLING_MONTHS,
-        JEVONS_ELASTICITY_INELASTIC, JEVONS_ELASTICITY_UNIT, JEVONS_ELASTICITY_ELASTIC,
-        DecisionLog,
+        v2_15_color,
+        v2_15_failure_card,
+        v2_15_math_peek,
+        v2_15_metric_card,
+        v2_15_model_gflops,
+        v2_15_model_params_m,
+        v2_15_num,
+        v2_15_part_banner,
+        v2_15_pct,
+        v2_15_qty,
+        v2_15_reveal_card,
+        v2_15_status,
+        v2_15_status_html,
+        v2_15_table,
     )
 
-# ─── CELL 1: HEADER ────────────────────────────────────────────────────────
+
+@app.cell
+def _(v2_15_model_gflops, v2_15_model_params_m, v2_15_qty):
+    def v2_15_track_packet(profile, variant, hardware, model, system):
+        tdp_w = v2_15_qty(getattr(hardware, "tdp", 0.0), "watt", 1.0)
+        battery_wh = v2_15_qty(getattr(hardware, "battery_capacity", 0.0), "watt_hour", 0.0)
+        system_units = getattr(system, "total_accelerators", None) if system is not None else None
+        embodied_registry = getattr(hardware, "embodied_carbon_kg", None)
+
+        base = {
+            "iphone": {
+                "label": "iPhone local assistant feature",
+                "workload_unit": "local assistant sessions/day",
+                "fleet_units": 25000,
+                "active_hours_day": 0.50,
+                "avg_power_w": max(0.8, min(tdp_w * 0.42, 2.2)),
+                "idle_power_w": 0.12,
+                "pue": 1.00,
+                "baseline_region": "US_Avg",
+                "embodied_kg_per_unit": 70.0,
+                "embodied_lifetime_years": 3.0,
+                "energy_budget_kwh_day": max(1.0, 25000 * battery_wh * 0.03 / 1000.0),
+                "carbon_budget_kg_day": 18.0,
+                "embodied_budget_kg_day": 1250.0,
+                "latency_slo_ms": 180.0,
+                "freshness_delay_limit_h": 2.0,
+                "quality_floor_pct": 86.0,
+                "reliability_floor_pct": 95.0,
+                "cost_budget_day": 120.0,
+                "service_name": "interactive local feature",
+                "governance_need": "privacy-safe battery and thermal audit",
+                "failure_story": "local sustainability fails when battery drain or embodied fleet carbon is hidden by per-session averages",
+                "v2_16_implication": "Responsible AI review must include who pays the battery, privacy, and accessibility cost of the policy.",
+            },
+            "oura_ring": {
+                "label": "Oura Ring always-on sensing",
+                "workload_unit": "sensing windows/day",
+                "fleet_units": 100000,
+                "active_hours_day": 6.0,
+                "avg_power_w": max(0.003, min(tdp_w * 0.30, 0.008)),
+                "idle_power_w": 0.0008,
+                "pue": 1.00,
+                "baseline_region": "US_Avg",
+                "embodied_kg_per_unit": 3.0,
+                "embodied_lifetime_years": 3.0,
+                "energy_budget_kwh_day": max(0.5, 100000 * battery_wh * 0.45 / 1000.0),
+                "carbon_budget_kg_day": 2.5,
+                "embodied_budget_kg_day": 210.0,
+                "latency_slo_ms": 500.0,
+                "freshness_delay_limit_h": 8.0,
+                "quality_floor_pct": 80.0,
+                "reliability_floor_pct": 94.0,
+                "cost_budget_day": 55.0,
+                "service_name": "battery-safe sensing cadence",
+                "governance_need": "health-adjacent sensing, comfort, and battery review",
+                "failure_story": "wearable sustainability fails when duty-cycle savings erase signal quality or battery life",
+                "v2_16_implication": "Responsible AI review must account for false alerts, missed signals, comfort, and battery trade-offs.",
+            },
+            "robotaxi": {
+                "label": "RoboTaxi noncritical perception replay",
+                "workload_unit": "fleet replay windows/day",
+                "fleet_units": 400,
+                "active_hours_day": 9.0,
+                "avg_power_w": max(25.0, min(tdp_w * 0.75, 55.0)),
+                "idle_power_w": 9.0,
+                "pue": 1.00,
+                "baseline_region": "US_Avg",
+                "embodied_kg_per_unit": 250.0,
+                "embodied_lifetime_years": 5.0,
+                "energy_budget_kwh_day": 145.0,
+                "carbon_budget_kg_day": 65.0,
+                "embodied_budget_kg_day": 70.0,
+                "latency_slo_ms": 55.0,
+                "freshness_delay_limit_h": 0.25,
+                "quality_floor_pct": 92.0,
+                "reliability_floor_pct": 99.0,
+                "cost_budget_day": 240.0,
+                "service_name": "safety-bounded fleet replay",
+                "governance_need": "safety-case traceability and noncritical deferral review",
+                "failure_story": "autonomy sustainability fails if carbon savings weaken safety margin or replay freshness",
+                "v2_16_implication": "Responsible AI must justify which work is deferrable without hiding rare-event safety risk.",
+            },
+            "cloud_fleet": {
+                "label": "Cloud Fleet inference and evaluation service",
+                "workload_unit": "service batches/day",
+                "fleet_units": int(system_units or 64),
+                "active_hours_day": 20.0,
+                "avg_power_w": max(250.0, min(tdp_w * 0.55, 420.0)),
+                "idle_power_w": 65.0,
+                "pue": 1.12,
+                "baseline_region": "US_Avg",
+                "embodied_kg_per_unit": float(embodied_registry or 164.0),
+                "embodied_lifetime_years": 4.0,
+                "energy_budget_kwh_day": 560.0,
+                "carbon_budget_kg_day": 190.0,
+                "embodied_budget_kg_day": 10.0,
+                "latency_slo_ms": 130.0,
+                "freshness_delay_limit_h": 4.0,
+                "quality_floor_pct": 88.0,
+                "reliability_floor_pct": 97.0,
+                "cost_budget_day": 520.0,
+                "service_name": "SLA-bound production service",
+                "governance_need": "carbon cap, SLA, quality canary, and carbon-price review",
+                "failure_story": "cloud sustainability fails when high utilization or cheap dirty regions break carbon or p99 budgets",
+                "v2_16_implication": "Responsible AI must audit carbon caps alongside subgroup quality, appealability, and explanation overhead.",
+            },
+        }[profile.track_id]
+
+        defaults = variant.defaults
+        base["quality_floor_pct"] = float(defaults.get("quality_floor_pct", base["quality_floor_pct"]))
+        base["latency_slo_ms"] = float(defaults.get("latency_budget_ms", base["latency_slo_ms"]))
+        base["cost_budget_day"] = float(defaults.get("cost_budget", base["cost_budget_day"]))
+        base["hardware_name"] = getattr(hardware, "name", variant.hardware_ref)
+        base["model_name"] = getattr(model, "name", variant.model_ref)
+        base["model_params_m"] = v2_15_model_params_m(model)
+        base["model_gflops"] = v2_15_model_gflops(model)
+        base["hardware_ref"] = variant.hardware_ref
+        base["model_ref"] = variant.model_ref
+        base["system_ref"] = variant.system_ref or "device fleet"
+        base["track_id"] = profile.track_id
+        base["track_label"] = profile.label
+        base["stakeholder"] = variant.stakeholder
+        base["scenario"] = variant.workload_summary
+        base["objective"] = variant.objective
+        base["source_policy"] = profile.source_policy
+        return base
+
+    def v2_15_region_catalog():
+        return {
+            "US_Avg": {
+                "label": "US average grid",
+                "carbon_g_kwh": 429.0,
+                "pue": 1.12,
+                "cost_usd_kwh": 0.105,
+                "latency_add_ms": 0.0,
+                "reliability_pct": 98.0,
+            },
+            "Quebec": {
+                "label": "Quebec hydro-heavy grid",
+                "carbon_g_kwh": 20.0,
+                "pue": 1.06,
+                "cost_usd_kwh": 0.073,
+                "latency_add_ms": 22.0,
+                "reliability_pct": 97.0,
+            },
+            "Iowa": {
+                "label": "Iowa mixed grid",
+                "carbon_g_kwh": 680.0,
+                "pue": 1.12,
+                "cost_usd_kwh": 0.075,
+                "latency_add_ms": 12.0,
+                "reliability_pct": 98.0,
+            },
+            "Poland": {
+                "label": "Poland coal-heavy grid",
+                "carbon_g_kwh": 820.0,
+                "pue": 1.58,
+                "cost_usd_kwh": 0.090,
+                "latency_add_ms": 45.0,
+                "reliability_pct": 96.0,
+            },
+        }
+
+    return v2_15_region_catalog, v2_15_track_packet
+
+
+@app.cell
+def _(v2_15_hardware, v2_15_model, v2_15_profile, v2_15_system, v2_15_track_packet, v2_15_variant):
+    v2_15_packet = v2_15_track_packet(
+        v2_15_profile,
+        v2_15_variant,
+        v2_15_hardware,
+        v2_15_model,
+        v2_15_system,
+    )
+    return (v2_15_packet,)
+
+
+@app.cell
+def _(math, v2_15_region_catalog):
+    def v2_15_part_a_result(packet, workload_mult, utilization_pct):
+        utilization = max(0.20, utilization_pct / 100.0)
+        active_energy = (
+            packet["fleet_units"]
+            * packet["avg_power_w"]
+            * packet["active_hours_day"]
+            * workload_mult
+            / 1000.0
+        )
+        idle_hours = max(0.0, 24.0 - packet["active_hours_day"])
+        idle_energy = packet["fleet_units"] * packet["idle_power_w"] * idle_hours * (1.0 - utilization) / 1000.0
+        it_energy = active_energy + idle_energy
+        facility_energy = it_energy * packet["pue"]
+        region = v2_15_region_catalog()[packet["baseline_region"]]
+        operational_kg = facility_energy * region["carbon_g_kwh"] / 1000.0
+        embodied_kg_day = (
+            packet["fleet_units"]
+            * packet["embodied_kg_per_unit"]
+            / max(1.0, packet["embodied_lifetime_years"] * 365.0)
+        )
+        lifecycle_kg = operational_kg + embodied_kg_day
+        ratios = {
+            "energy": facility_energy / max(1e-9, packet["energy_budget_kwh_day"]),
+            "carbon intensity": operational_kg / max(1e-9, packet["carbon_budget_kg_day"]),
+            "embodied carbon": embodied_kg_day / max(1e-9, packet["embodied_budget_kg_day"]),
+        }
+        if packet["track_id"] in ("iphone", "oura_ring"):
+            battery_wh = packet["energy_budget_kwh_day"] * 1000.0 / max(1, packet["fleet_units"])
+            actual_wh = packet["avg_power_w"] * packet["active_hours_day"] * workload_mult
+            ratios["device energy"] = actual_wh / max(1e-9, battery_wh)
+        binding = max(ratios, key=ratios.get)
+        return {
+            "active_energy_kwh": active_energy,
+            "idle_energy_kwh": idle_energy,
+            "it_energy_kwh": it_energy,
+            "facility_energy_kwh": facility_energy,
+            "operational_kg": operational_kg,
+            "embodied_kg_day": embodied_kg_day,
+            "lifecycle_kg_day": lifecycle_kg,
+            "ratios": ratios,
+            "binding": binding,
+            "fails": any(value > 1.0 for value in ratios.values()),
+            "region": region,
+            "utilization": utilization,
+        }
+
+    def v2_15_part_b_result(packet, workload_mult, utilization_pct, region_id, schedule_id):
+        regions = v2_15_region_catalog()
+        region = regions[region_id]
+        utilization = max(0.20, utilization_pct / 100.0)
+        schedule = {
+            "immediate": {
+                "label": "Immediate serving",
+                "carbon_multiplier": 1.00,
+                "delay_h": 0.0,
+                "latency_multiplier": 1.00,
+                "reliability_penalty": 0.0,
+                "energy_multiplier": 1.00,
+            },
+            "clean_window": {
+                "label": "Wait for a cleaner grid window",
+                "carbon_multiplier": 0.60,
+                "delay_h": 6.0,
+                "latency_multiplier": 1.08,
+                "reliability_penalty": 1.0,
+                "energy_multiplier": 1.01,
+            },
+            "region_shift": {
+                "label": "Route flexible work to selected region",
+                "carbon_multiplier": 0.92,
+                "delay_h": 1.0,
+                "latency_multiplier": 1.00,
+                "reliability_penalty": 0.5,
+                "energy_multiplier": 1.04,
+            },
+            "demand_cap": {
+                "label": "Cap nonurgent demand",
+                "carbon_multiplier": 0.74,
+                "delay_h": 0.5,
+                "latency_multiplier": 0.88,
+                "reliability_penalty": 0.2,
+                "energy_multiplier": 0.78,
+            },
+        }[schedule_id]
+        active_energy = (
+            packet["fleet_units"]
+            * packet["avg_power_w"]
+            * packet["active_hours_day"]
+            * workload_mult
+            / 1000.0
+        )
+        idle_overhead = 0.38 / utilization
+        it_energy = active_energy * (0.72 + idle_overhead) * schedule["energy_multiplier"]
+        facility_energy = it_energy * region["pue"]
+        carbon_kg = facility_energy * region["carbon_g_kwh"] * schedule["carbon_multiplier"] / 1000.0
+        queue_pressure = (utilization * utilization) / max(0.04, 1.0 - utilization)
+        p99_ms = (
+            packet["latency_slo_ms"]
+            * (0.38 + 0.12 * queue_pressure)
+            * schedule["latency_multiplier"]
+            + region["latency_add_ms"]
+        )
+        reliability_pct = region["reliability_pct"] - schedule["reliability_penalty"] - max(0.0, utilization - 0.82) * 18.0
+        delay_ok = schedule["delay_h"] <= packet["freshness_delay_limit_h"]
+        p99_ok = p99_ms <= packet["latency_slo_ms"]
+        reliability_ok = reliability_pct >= packet["reliability_floor_pct"]
+        carbon_ok = carbon_kg <= packet["carbon_budget_kg_day"]
+        service_ok = p99_ok and delay_ok and reliability_ok
+        binding_scores = {
+            "carbon": carbon_kg / max(1e-9, packet["carbon_budget_kg_day"]),
+            "p99/freshness": max(
+                p99_ms / max(1e-9, packet["latency_slo_ms"]),
+                schedule["delay_h"] / max(1e-9, packet["freshness_delay_limit_h"]),
+            ),
+            "reliability": packet["reliability_floor_pct"] / max(1e-9, reliability_pct),
+            "utilization": utilization / 0.85,
+        }
+        binding = max(binding_scores, key=binding_scores.get)
+        return {
+            "region_id": region_id,
+            "region": region,
+            "schedule_id": schedule_id,
+            "schedule": schedule,
+            "utilization": utilization,
+            "facility_energy_kwh": facility_energy,
+            "carbon_kg": carbon_kg,
+            "p99_ms": p99_ms,
+            "reliability_pct": reliability_pct,
+            "delay_h": schedule["delay_h"],
+            "carbon_ok": carbon_ok,
+            "p99_ok": p99_ok,
+            "delay_ok": delay_ok,
+            "reliability_ok": reliability_ok,
+            "service_ok": service_ok,
+            "binding": binding,
+            "binding_scores": binding_scores,
+            "cost_usd": facility_energy * region["cost_usd_kwh"],
+        }
+
+    def v2_15_strategy_candidates(packet, part_b, intensity_pct, governance_ack):
+        intensity = intensity_pct / 100.0
+        base_quality = float(packet["quality_floor_pct"]) + 5.0
+        base_cost = part_b["cost_usd"] + 0.20 * packet["cost_budget_day"]
+        base_latency = part_b["p99_ms"]
+        base_reliability = part_b["reliability_pct"]
+        base_carbon = part_b["carbon_kg"]
+        base_embodied = (
+            packet["fleet_units"]
+            * packet["embodied_kg_per_unit"]
+            / max(1.0, packet["embodied_lifetime_years"] * 365.0)
+        )
+        specs = {
+            "model_efficiency": {
+                "label": "Model efficiency",
+                "energy_mult": 1.0 - 0.42 * intensity,
+                "carbon_mult": 1.0 - 0.42 * intensity,
+                "embodied_mult": 1.0,
+                "quality_delta": -2.0 * intensity,
+                "latency_mult": 1.0 - 0.20 * intensity,
+                "cost_mult": 1.0 - 0.20 * intensity,
+                "reliability_delta": -0.4 * intensity,
+                "governance_required": True,
+                "rejected_reason": "quality regression can erase the sustainability win",
+            },
+            "carbon_aware_schedule": {
+                "label": "Carbon-aware schedule",
+                "energy_mult": 1.0,
+                "carbon_mult": 1.0 - 0.45 * intensity,
+                "embodied_mult": 1.0,
+                "quality_delta": -0.2 * intensity,
+                "latency_mult": 1.0 + 0.18 * intensity,
+                "cost_mult": 1.0 + 0.06 * intensity,
+                "reliability_delta": -1.2 * intensity,
+                "governance_required": False,
+                "rejected_reason": "freshness or p99 can fail when flexible work is delayed",
+            },
+            "utilization_consolidation": {
+                "label": "Utilization consolidation",
+                "energy_mult": 1.0 - 0.30 * intensity,
+                "carbon_mult": 1.0 - 0.30 * intensity,
+                "embodied_mult": 1.0,
+                "quality_delta": 0.0,
+                "latency_mult": 1.0 + 0.24 * intensity,
+                "cost_mult": 1.0 - 0.18 * intensity,
+                "reliability_delta": -1.8 * intensity,
+                "governance_required": False,
+                "rejected_reason": "high utilization can turn saved idle power into p99 or reliability risk",
+            },
+            "lifecycle_extension": {
+                "label": "Extend hardware lifetime",
+                "energy_mult": 1.0 + 0.08 * intensity,
+                "carbon_mult": 1.0 + 0.08 * intensity,
+                "embodied_mult": 1.0 - 0.35 * intensity,
+                "quality_delta": -0.5 * intensity,
+                "latency_mult": 1.0 + 0.07 * intensity,
+                "cost_mult": 1.0 - 0.10 * intensity,
+                "reliability_delta": -1.0 * intensity,
+                "governance_required": True,
+                "rejected_reason": "older hardware can trade embodied savings for reliability and efficiency loss",
+            },
+            "demand_governance": {
+                "label": "Demand governance",
+                "energy_mult": 1.0 - 0.34 * intensity,
+                "carbon_mult": 1.0 - 0.34 * intensity,
+                "embodied_mult": 1.0,
+                "quality_delta": -0.8 * intensity,
+                "latency_mult": 0.90,
+                "cost_mult": 1.0 - 0.28 * intensity,
+                "reliability_delta": 0.4 * intensity,
+                "governance_required": True,
+                "rejected_reason": "usage caps need accountable policy because they decide who receives less service",
+            },
+        }
+        candidates = []
+        for strategy_id, spec in specs.items():
+            carbon_kg = base_carbon * spec["carbon_mult"]
+            embodied_kg = base_embodied * spec["embodied_mult"]
+            quality_pct = base_quality + spec["quality_delta"]
+            latency_ms = base_latency * spec["latency_mult"]
+            cost_usd = base_cost * spec["cost_mult"]
+            reliability_pct = base_reliability + spec["reliability_delta"]
+            governance_ok = (not spec["governance_required"]) or bool(governance_ack)
+            checks = {
+                "carbon": carbon_kg <= packet["carbon_budget_kg_day"],
+                "quality": quality_pct >= packet["quality_floor_pct"],
+                "latency": latency_ms <= packet["latency_slo_ms"],
+                "cost": cost_usd <= packet["cost_budget_day"],
+                "reliability": reliability_pct >= packet["reliability_floor_pct"],
+                "governance": governance_ok,
+            }
+            failed = tuple(name for name, ok in checks.items() if not ok)
+            if failed:
+                binding = failed[0]
+            else:
+                margins = {
+                    "carbon": carbon_kg / max(1e-9, packet["carbon_budget_kg_day"]),
+                    "quality": packet["quality_floor_pct"] / max(1e-9, quality_pct),
+                    "latency": latency_ms / max(1e-9, packet["latency_slo_ms"]),
+                    "cost": cost_usd / max(1e-9, packet["cost_budget_day"]),
+                    "reliability": packet["reliability_floor_pct"] / max(1e-9, reliability_pct),
+                }
+                binding = max(margins, key=margins.get)
+            candidates.append({
+                "strategy_id": strategy_id,
+                "label": spec["label"],
+                "carbon_kg": carbon_kg,
+                "embodied_kg": embodied_kg,
+                "lifecycle_kg": carbon_kg + embodied_kg,
+                "quality_pct": quality_pct,
+                "latency_ms": latency_ms,
+                "cost_usd": cost_usd,
+                "reliability_pct": reliability_pct,
+                "governance_required": spec["governance_required"],
+                "governance_ok": governance_ok,
+                "checks": checks,
+                "passes": all(checks.values()),
+                "failed": failed,
+                "binding": binding,
+                "rejected_reason": spec["rejected_reason"],
+            })
+        recommended = min(
+            (candidate for candidate in candidates if candidate["passes"]),
+            key=lambda candidate: candidate["lifecycle_kg"],
+            default=min(candidates, key=lambda candidate: len(candidate["failed"])),
+        )
+        rejected = max(
+            (candidate for candidate in candidates if candidate["strategy_id"] != recommended["strategy_id"]),
+            key=lambda candidate: (not candidate["passes"], candidate["lifecycle_kg"]),
+        )
+        return {"candidates": candidates, "recommended": recommended, "rejected": rejected}
+
+    def v2_15_policy_candidates(packet, part_b, strategy_packet, carbon_price):
+        recommended = strategy_packet["recommended"]
+        base = {
+            "carbon_kg": part_b["carbon_kg"],
+            "lifecycle_kg": part_b["carbon_kg"]
+            + packet["fleet_units"] * packet["embodied_kg_per_unit"] / max(1.0, packet["embodied_lifetime_years"] * 365.0),
+            "latency_ms": part_b["p99_ms"],
+            "quality_pct": float(packet["quality_floor_pct"]) + 5.0,
+            "reliability_pct": part_b["reliability_pct"],
+            "cost_usd": part_b["cost_usd"] + 0.18 * packet["cost_budget_day"],
+        }
+        specs = {
+            "throughput_first": {
+                "label": "Max-throughput baseline",
+                "carbon_mult": 1.25,
+                "lifecycle_mult": 1.20,
+                "latency_mult": 1.24,
+                "quality_delta": 1.0,
+                "reliability_delta": -1.4,
+                "cost_mult": 1.05,
+                "governance": False,
+                "memo": "rejects carbon accounting until after launch",
+            },
+            "efficiency_guardrail": {
+                "label": "Efficiency with quality canary",
+                "carbon_mult": max(0.55, recommended["carbon_kg"] / max(1e-9, part_b["carbon_kg"])),
+                "lifecycle_mult": 0.78,
+                "latency_mult": 0.92,
+                "quality_delta": -0.6,
+                "reliability_delta": -0.2,
+                "cost_mult": 0.86,
+                "governance": True,
+                "memo": "uses model efficiency but keeps quality and rollback checks",
+            },
+            "carbon_guardrail": {
+                "label": "Carbon guardrail scheduler",
+                "carbon_mult": 0.50 if packet["track_id"] == "cloud_fleet" else 0.62,
+                "lifecycle_mult": 0.68,
+                "latency_mult": 1.05,
+                "quality_delta": -0.4,
+                "reliability_delta": -0.4,
+                "cost_mult": 0.95,
+                "governance": True,
+                "memo": "uses region, time, and admission guardrails before consuming carbon budget",
+            },
+            "lifecycle_guarded": {
+                "label": "Lifecycle guardrail policy",
+                "carbon_mult": 0.64,
+                "lifecycle_mult": 0.58 if packet["track_id"] in ("iphone", "oura_ring") else 0.74,
+                "latency_mult": 1.02,
+                "quality_delta": -0.5,
+                "reliability_delta": -0.6,
+                "cost_mult": 0.92,
+                "governance": True,
+                "memo": "combines carbon-aware operation with hardware lifetime and reuse evidence",
+            },
+        }
+        candidates = []
+        for policy_id, spec in specs.items():
+            carbon_kg = base["carbon_kg"] * spec["carbon_mult"]
+            lifecycle_kg = base["lifecycle_kg"] * spec["lifecycle_mult"]
+            latency_ms = base["latency_ms"] * spec["latency_mult"]
+            quality_pct = base["quality_pct"] + spec["quality_delta"]
+            reliability_pct = base["reliability_pct"] + spec["reliability_delta"]
+            cost_usd = base["cost_usd"] * spec["cost_mult"] + lifecycle_kg / 1000.0 * carbon_price
+            rebound_ok = policy_id != "throughput_first"
+            checks = {
+                "carbon": carbon_kg <= packet["carbon_budget_kg_day"],
+                "quality": quality_pct >= packet["quality_floor_pct"],
+                "latency": latency_ms <= packet["latency_slo_ms"],
+                "cost": cost_usd <= packet["cost_budget_day"],
+                "reliability": reliability_pct >= packet["reliability_floor_pct"],
+                "governance": spec["governance"],
+                "rebound": rebound_ok,
+            }
+            failed = tuple(name for name, ok in checks.items() if not ok)
+            binding = failed[0] if failed else max(
+                {
+                    "carbon": carbon_kg / max(1e-9, packet["carbon_budget_kg_day"]),
+                    "quality": packet["quality_floor_pct"] / max(1e-9, quality_pct),
+                    "latency": latency_ms / max(1e-9, packet["latency_slo_ms"]),
+                    "cost": cost_usd / max(1e-9, packet["cost_budget_day"]),
+                    "reliability": packet["reliability_floor_pct"] / max(1e-9, reliability_pct),
+                },
+                key=lambda key: {
+                    "carbon": carbon_kg / max(1e-9, packet["carbon_budget_kg_day"]),
+                    "quality": packet["quality_floor_pct"] / max(1e-9, quality_pct),
+                    "latency": latency_ms / max(1e-9, packet["latency_slo_ms"]),
+                    "cost": cost_usd / max(1e-9, packet["cost_budget_day"]),
+                    "reliability": packet["reliability_floor_pct"] / max(1e-9, reliability_pct),
+                }[key],
+            )
+            candidates.append({
+                "policy_id": policy_id,
+                "label": spec["label"],
+                "memo": spec["memo"],
+                "carbon_kg": carbon_kg,
+                "lifecycle_kg": lifecycle_kg,
+                "latency_ms": latency_ms,
+                "quality_pct": quality_pct,
+                "cost_usd": cost_usd,
+                "reliability_pct": reliability_pct,
+                "checks": checks,
+                "passes": all(checks.values()),
+                "failed": failed,
+                "binding": binding,
+            })
+        launchable = [candidate for candidate in candidates if candidate["passes"]]
+        selected_default = min(launchable, key=lambda candidate: candidate["lifecycle_kg"]) if launchable else min(
+            candidates,
+            key=lambda candidate: len(candidate["failed"]),
+        )
+        rejected = max(
+            (candidate for candidate in candidates if candidate["policy_id"] != selected_default["policy_id"]),
+            key=lambda candidate: (not candidate["passes"], candidate["lifecycle_kg"]),
+        )
+        return {"candidates": candidates, "recommended": selected_default, "rejected": rejected}
+
+    def v2_15_prediction_key_for_part_b(result):
+        if not result["carbon_ok"]:
+            return "carbon"
+        if not result["p99_ok"] or not result["delay_ok"]:
+            return "service"
+        if not result["reliability_ok"]:
+            return "reliability"
+        return "utilization"
+
+    return (
+        v2_15_part_a_result,
+        v2_15_part_b_result,
+        v2_15_policy_candidates,
+        v2_15_prediction_key_for_part_b,
+        v2_15_strategy_candidates,
+    )
+
 
 @app.cell(hide_code=True)
-def _(mo, LAB_CSS, COLORS):
-    mo.vstack([
-        LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0a1628 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 15
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Carbon Budget
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Energy Wall &middot; Geography &middot; Lifecycle &middot; Jevons Paradox
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                An executive announces: &ldquo;We will make our AI 2&times; more efficient, cutting
-                our carbon footprint in half.&rdquo; The math says otherwise. Efficiency gains can
-                <em>increase</em> total consumption when demand is elastic.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(0,143,69,0.18); color: #6ee7b7;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(0,143,69,0.3);">
-                    5 Parts &middot; ~60 min
-                </span>
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    Chapter 14: Sustainable AI
-                </span>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-fail">2,400,000x Energy Deficit</span>
-                <span class="badge badge-warn">40x Geography Gap</span>
-                <span class="badge badge-info">Embodied Carbon Dominates on Clean Grids</span>
-                <span class="badge badge-ok">Jevons Paradox: Efficiency Backfires</span>
-            </div>
-        </div>
-        """),
-    ])
-    return
-
-# ─── CELL 2: BRIEFING ──────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['GreenLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the energy deficit</strong>: calculate the 2,400,000&times; gap between AI compute demand growth (~3.4-month doubling) and hardware efficiency growth (~24-month doubling) over 7 years.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Apply the Jevons Paradox equation</strong> to show that 2&times; efficiency with elasticity 2.0 produces a 100% <em>increase</em> in total energy, and identify the elasticity threshold where efficiency gains guarantee net reduction.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Design a carbon-aware fleet strategy</strong> combining geographic optimization (40&times; lever), lifecycle management (embodied carbon), temporal scheduling, and absolute carbon caps to achieve a 50% emission reduction target.</div>
-            </div>
-        </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Operational carbon equation (C = E &times; CI &times; PUE) from Sustainable AI chapter &middot;
-                    PUE definition &middot; Jevons Paradox from Sustainable AI chapter
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~60 min</strong><br/>
-                    A: 10 &middot; B: 12 &middot; C: 12 &middot; D: 14 &middot; E: 12
-                </div>
-            </div>
-        </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <div style="margin-top: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                &ldquo;If you double AI efficiency, does total energy consumption go up or down
-                &mdash; and what is the only mechanism that guarantees it goes down?&rdquo;
-            </div>
-        </div>
-    </div>
-    """)
-    return
-
-# ─── CELL 3: RECOMMENDED READING ───────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
-
-    - **Sustainable AI chapter** (energy wall section) -- The 350,000x compute demand growth
-      vs ~1.5x/year efficiency improvement, and the exponential energy deficit.
-    - **Sustainable AI chapter** (carbon footprint calculation) -- Operational carbon equation
-      C = E x CI x PUE, grid carbon intensity table, PUE range 1.06-1.58.
-    - **Sustainable AI chapter** (lifecycle analysis) -- Embodied carbon (150-200 kg CO2eq per H100),
-      the shift from operational to embodied dominance on clean grids.
-    - **Sustainable AI chapter** (implementation solutions) -- Jevons Paradox, demand elasticity,
-      carbon-aware scheduling, and absolute carbon caps.
-    """), kind="info")
-    return
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: WIDGET DEFINITIONS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 4: PART A WIDGETS ──────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    partA_pred = mo.ui.radio(
+def _(mo, v2_15_packet):
+    partA_prediction = mo.ui.radio(
         options={
-            "A) ~10x -- hardware almost keeps up": "10",
-            "B) ~1,000x -- significant but manageable": "1000",
-            "C) ~100,000x+ -- an exponential chasm": "100000",
-            "D) Roughly even -- Moore's Law keeps up": "even",
+            "Device/facility energy becomes the first budget": "energy",
+            "Grid carbon intensity dominates the result": "carbon intensity",
+            "Embodied carbon from hardware dominates": "embodied carbon",
+            "Service quality or latency will bind first": "service guardrail",
         },
-        label="AI compute demand doubles every ~3.4 months. Hardware efficiency doubles every ~24 months. Over 7 years (2012-2019), how large is the gap?",
+        label=f"Before measuring {v2_15_packet['label']}, which sustainability amount do you expect to bind?",
     )
-    partA_years_slider = mo.ui.slider(start=1, stop=10, value=7, step=1, label="Timeline (years)")
-    return (partA_pred, partA_years_slider)
-
-# ─── CELL 5: PART B WIDGETS ──────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    partB_pred = mo.ui.radio(
+    partA_workload = mo.ui.slider(
+        start=0.50,
+        stop=2.50,
+        value=1.00,
+        step=0.05,
+        label="Workload scale (x baseline)",
+    )
+    partA_utilization = mo.ui.slider(
+        start=25,
+        stop=95,
+        value=62,
+        step=1,
+        label="Average useful utilization (%)",
+    )
+    partA_checkpoint = mo.ui.radio(
         options={
-            "A) ~2-3x -- not much variation": "2",
-            "B) ~5-10x -- moderate difference": "5",
-            "C) ~40x -- geography dominates": "40",
-            "D) ~100x -- extreme variation": "100",
+            "Energy budget is the carry-forward amount": "energy",
+            "Carbon intensity is the carry-forward amount": "carbon intensity",
+            "Embodied carbon is the carry-forward amount": "embodied carbon",
+            "The service guardrail blocks sustainability claims": "service guardrail",
         },
-        label="A 10,000 MWh training run. Quebec (hydro, 20 gCO2/kWh) vs Poland (coal, 820 gCO2/kWh). What is the carbon ratio?",
+        label="Checkpoint: which amount should the policy carry forward?",
     )
-    partB_energy_slider = mo.ui.slider(start=1000, stop=100000, value=10000, step=1000, label="Training energy (MWh)")
-    partB_pue_slider = mo.ui.slider(start=1.0, stop=2.0, value=1.12, step=0.02, label="PUE")
-    return (partB_energy_slider, partB_pred, partB_pue_slider)
+    return partA_checkpoint, partA_prediction, partA_utilization, partA_workload
 
-# ─── CELL 6: PART C WIDGETS ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo):
-    partC_pred = mo.ui.radio(
+    partB_prediction = mo.ui.radio(
         options={
-            "A) <5% -- hardware is a rounding error": "5",
-            "B) ~10-15%": "15",
-            "C) ~30-50% -- a major fraction": "40",
-            "D) ~80%+ -- hardware dominates": "80",
+            "Carbon budget will still bind": "carbon",
+            "Service latency or freshness will bind": "service",
+            "Reliability will bind": "reliability",
+            "Utilization headroom will be the main lever": "utilization",
         },
-        label="In a datacenter powered by 100% renewable energy, what fraction of total lifecycle carbon comes from hardware manufacturing?",
+        label="After placement and scheduling, which amount do you expect to limit the plan?",
     )
-    partC_refresh_slider = mo.ui.slider(start=2, stop=5, value=3, step=1, label="Hardware refresh cycle (years)")
-    partC_util_slider = mo.ui.slider(start=30, stop=90, value=60, step=5, label="GPU utilization (%)")
-    partC_gpu_count = mo.ui.slider(start=100, stop=10000, value=1000, step=100, label="GPU count")
-    return (partC_gpu_count, partC_pred, partC_refresh_slider, partC_util_slider)
+    partB_region = mo.ui.dropdown(
+        options={
+            "US average grid": "US_Avg",
+            "Quebec hydro-heavy grid": "Quebec",
+            "Iowa mixed grid": "Iowa",
+            "Poland coal-heavy grid": "Poland",
+        },
+        value="US average grid",
+        label="Execution or offload region",
+    )
+    partB_schedule = mo.ui.dropdown(
+        options={
+            "Immediate serving": "immediate",
+            "Wait for cleaner grid window": "clean_window",
+            "Route flexible work to selected region": "region_shift",
+            "Cap nonurgent demand": "demand_cap",
+        },
+        value="Immediate serving",
+        label="Scheduling policy",
+    )
+    partB_utilization = mo.ui.slider(
+        start=35,
+        stop=96,
+        value=72,
+        step=1,
+        label="Target useful utilization (%)",
+    )
+    partB_checkpoint = mo.ui.radio(
+        options={
+            "Move flexible work to a cleaner region": "region",
+            "Wait for cleaner hours only for nonurgent work": "schedule",
+            "Lower utilization to protect p99 and reliability": "utilization",
+            "Cap demand because efficiency savings rebound": "demand",
+        },
+        label="Checkpoint: what is the next operational lever?",
+    )
+    return partB_checkpoint, partB_prediction, partB_region, partB_schedule, partB_utilization
 
-# ─── CELL 7: PART D WIDGETS ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo):
-    partD_pred = mo.ui.number(
-        start=-80, stop=200, value=-25, step=5,
-        label="You double inference efficiency (cost per query halves). Demand increases 3x (elastic market). What % change in total energy? (negative = decrease)",
+    partC_prediction = mo.ui.radio(
+        options={
+            "Quality regression will reject it": "quality",
+            "Latency or freshness will reject it": "latency",
+            "Cost will reject it": "cost",
+            "Reliability or governance will reject it": "reliability",
+            "Carbon will still reject it": "carbon",
+        },
+        label="Which guardrail is most likely to reject an aggressive mitigation?",
     )
-    partD_eff_slider = mo.ui.slider(start=1.0, stop=10.0, value=2.0, step=0.5, label="Efficiency improvement (x)")
-    partD_elast_slider = mo.ui.slider(start=0.1, stop=3.0, value=2.0, step=0.1, label="Demand elasticity")
-    partD_cap_toggle = mo.ui.switch(label="Carbon cap enabled", value=False)
-    partD_cap_level = mo.ui.slider(start=0.5, stop=2.0, value=1.0, step=0.1, label="Cap level (fraction of baseline)")
-    return (partD_cap_level, partD_cap_toggle, partD_eff_slider, partD_elast_slider, partD_pred)
+    partC_strategy = mo.ui.dropdown(
+        options={
+            "Model efficiency": "model_efficiency",
+            "Carbon-aware schedule": "carbon_aware_schedule",
+            "Utilization consolidation": "utilization_consolidation",
+            "Extend hardware lifetime": "lifecycle_extension",
+            "Demand governance": "demand_governance",
+        },
+        value="Model efficiency",
+        label="Mitigation strategy",
+    )
+    partC_intensity = mo.ui.slider(
+        start=10,
+        stop=100,
+        value=65,
+        step=5,
+        label="Mitigation intensity (%)",
+    )
+    partC_governance = mo.ui.checkbox(
+        value=False,
+        label="Attach governance review and validation evidence",
+    )
+    partC_checkpoint = mo.ui.radio(
+        options={
+            "Use the selected mitigation as the primary lever": "selected",
+            "Use the recommended passing mitigation instead": "recommended",
+            "Reject mitigation until a quality canary is added": "quality_canary",
+            "Reject mitigation until carbon and demand caps are explicit": "carbon_cap",
+        },
+        label="Checkpoint: which mitigation should enter the final policy review?",
+    )
+    return (
+        partC_checkpoint,
+        partC_governance,
+        partC_intensity,
+        partC_prediction,
+        partC_strategy,
+    )
 
-# ─── CELL 8: PART E WIDGETS ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo):
-    partE_geo = mo.ui.dropdown(
-        options={"Poland (820 g/kWh)": 820, "US Average (429 g/kWh)": 429,
-                 "France (56 g/kWh)": 56, "Quebec (20 g/kWh)": 20},
-        value="US Average (429 g/kWh)", label="Primary region:",
+    partD_prediction = mo.ui.radio(
+        options={
+            "Max-throughput baseline": "throughput_first",
+            "Efficiency with quality canary": "efficiency_guardrail",
+            "Carbon guardrail scheduler": "carbon_guardrail",
+            "Lifecycle guardrail policy": "lifecycle_guarded",
+        },
+        label="Which policy do you expect to pass all guardrails?",
     )
-    partE_temporal = mo.ui.slider(start=0, stop=60, value=0, step=5, label="Temporal shift (% of jobs to off-peak)")
-    partE_eff_gain = mo.ui.slider(start=1.0, stop=4.0, value=1.0, step=0.5, label="Efficiency improvement (x)")
-    partE_cap = mo.ui.slider(start=0.3, stop=1.5, value=1.0, step=0.1, label="Carbon cap (fraction of baseline)")
-    return (partE_cap, partE_eff_gain, partE_geo, partE_temporal)
+    partD_policy = mo.ui.dropdown(
+        options={
+            "Max-throughput baseline": "throughput_first",
+            "Efficiency with quality canary": "efficiency_guardrail",
+            "Carbon guardrail scheduler": "carbon_guardrail",
+            "Lifecycle guardrail policy": "lifecycle_guarded",
+        },
+        value="Carbon guardrail scheduler",
+        label="Selected sustainability policy",
+    )
+    partD_carbon_price = mo.ui.slider(
+        start=0,
+        stop=250,
+        value=100,
+        step=10,
+        label="Internal carbon price ($/ton CO2e)",
+    )
+    partD_checkpoint = mo.ui.radio(
+        options={
+            "Approve selected policy with guardrails": "approve",
+            "Revise selected policy before launch": "revise",
+            "Use recommended launchable policy instead": "recommended",
+            "Escalate to governance because trade-offs remain unresolved": "escalate",
+        },
+        label="Checkpoint: what should the launch review do?",
+    )
+    decision_input = mo.ui.text_area(
+        label="Engineering memo note",
+        placeholder="One sentence: selected policy, binding amount, rejected alternative, residual risk.",
+    )
+    return partD_carbon_price, partD_checkpoint, partD_policy, partD_prediction, decision_input
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: SINGLE TABS CELL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 9: TABS ────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math,
-    COLORS, apply_plotly_theme, CI_QUEBEC, CI_ICELAND,
-    CI_FRANCE, CI_US_AVG, CI_TEXAS, CI_GERMANY,
-    CI_CHINA_AVG, CI_POLAND, CI_INDIA, PUE_LIQUID,
-    PUE_AIR, PUE_LEGACY, H100_EMBODIED_KG, H100_TDP_W,
-    DEMAND_DOUBLING_MONTHS, EFFICIENCY_DOUBLING_MONTHS, JEVONS_ELASTICITY_INELASTIC, JEVONS_ELASTICITY_UNIT,
-    JEVONS_ELASTICITY_ELASTIC, partA_pred, partA_years_slider, partB_energy_slider,
-    partB_pred, partB_pue_slider, partC_gpu_count, partC_pred,
-    partC_refresh_slider, partC_util_slider, partD_cap_level, partD_cap_toggle,
-    partD_eff_slider, partD_elast_slider, partD_pred, partE_cap,
-    partE_eff_gain, partE_geo, partE_temporal,
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_arc_context,
+    track_context,
+    v2_15_metadata,
+    v2_15_packet,
+    v2_15_profile,
+    v2_15_variant,
 ):
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART A BUILDER -- The Energy Wall
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_a():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; VP of Infrastructure
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our AI compute demand is doubling every few months, but our hardware
-                roadmap shows efficiency doubling every two years. Over the next decade,
-                how large will this gap actually get?&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Energy Wall
-
-        You expect hardware efficiency to keep pace with AI compute demand &mdash; Moore's
-        Law has always delivered. But AI demand doubles every 3.4 months while efficiency
-        doubles every 24 months. Over 7 years, the gap is not 10x. It is 2,400,000x.
-        """))
-
-        items.append(partA_pred)
-
-        if partA_pred.value is None:
-            items.append(mo.callout(
-                mo.md("**Select your prediction above to unlock the instruments.**"),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        # Instruments
-        items.append(partA_years_slider)
-
-        _years = partA_years_slider.value
-        _t = np.linspace(0, _years, 200)
-
-        # demand(t) = 2^(t * 12 / doubling_months)
-        _demand = 2 ** (_t * 12 / DEMAND_DOUBLING_MONTHS)
-        _efficiency = 2 ** (_t * 12 / EFFICIENCY_DOUBLING_MONTHS)
-        _gap = _demand / _efficiency
-
-        _gap_final = _gap[-1]
-
-        fig_energy = go.Figure()
-        fig_energy.add_trace(go.Scatter(
-            x=_t, y=_demand, name="AI Compute Demand",
-            line=dict(color=COLORS["RedLine"], width=3),
-            fill="tonexty" if False else None,
-        ))
-        fig_energy.add_trace(go.Scatter(
-            x=_t, y=_efficiency, name="Hardware Efficiency",
-            line=dict(color=COLORS["GreenLine"], width=3),
-        ))
-
-        # Shaded gap region
-        fig_energy.add_trace(go.Scatter(
-            x=np.concatenate([_t, _t[::-1]]),
-            y=np.concatenate([_demand, _efficiency[::-1]]),
-            fill="toself", fillcolor="rgba(203,32,45,0.08)",
-            line=dict(width=0), name="Energy Deficit", showlegend=True,
-        ))
-
-        fig_energy.update_layout(
-            height=400,
-            xaxis=dict(title="Years (from 2012)"),
-            yaxis=dict(title="Relative Scale", type="log"),
-            legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center"),
-        )
-        apply_plotly_theme(fig_energy)
-
-        # Annotation note about the caveat
-        _caveat = ("Note: The demand curve represents frontier training run compute growth "
-                   "(Amodei/Hernandez 2018), not total industry energy consumption. "
-                   "Industry-wide growth is substantial but less extreme.")
-
-        items.append(mo.md(f"### The Energy Deficit Over {_years} Years"))
-        items.append(mo.as_html(fig_energy))
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 20px; justify-content: center; margin-top: 12px;">
-            <div style="padding: 16px 24px; border: 2px solid {COLORS['RedLine']}; border-radius: 12px;
-                        text-align: center; min-width: 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Demand Growth</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['RedLine']};">
-                    {_demand[-1]:,.0f}x</div>
-                <div style="font-size: 0.72rem; color: {COLORS['TextSec']};">doubles every {DEMAND_DOUBLING_MONTHS:.1f} months</div>
-            </div>
-            <div style="padding: 16px 24px; border: 2px solid {COLORS['GreenLine']}; border-radius: 12px;
-                        text-align: center; min-width: 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Efficiency Growth</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['GreenLine']};">
-                    {_efficiency[-1]:,.0f}x</div>
-                <div style="font-size: 0.72rem; color: {COLORS['TextSec']};">doubles every {EFFICIENCY_DOUBLING_MONTHS:.0f} months</div>
-            </div>
-            <div style="padding: 16px 24px; border: 2px solid {COLORS['OrangeLine']}; border-radius: 12px;
-                        text-align: center; min-width: 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Energy Deficit</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['OrangeLine']};">
-                    {_gap_final:,.0f}x</div>
-            </div>
-        </div>
-        """))
-        items.append(mo.callout(mo.md(f"*{_caveat}*"), kind="info"))
-
-        # Prediction reveal
-        _correct = partA_pred.value == "100000"
-        _msg = ("You correctly identified the exponential chasm. The gap is ~2,400,000x over 7 years."
-                if _correct else
-                "The gap over 7 years is ~2,400,000x. Students intuitively expect hardware to 'keep up' "
-                "because Moore's Law worked for decades. But AI demand grows 7x faster than efficiency.")
-        items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: The Exponential Energy Deficit": mo.md("""
-**Demand vs. efficiency growth:**
-$$
-\\text{Gap}(t) = \\frac{2^{t / T_{\\text{demand}}}}{2^{t / T_{\\text{eff}}}}
-= 2^{t \\left(\\frac{1}{T_{\\text{demand}}} - \\frac{1}{T_{\\text{eff}}}\\right)}
-$$
-
-**Where:**
-- **$T_{\\text{demand}}$**: Demand doubling time (~3.4 months for AI compute)
-- **$T_{\\text{eff}}$**: Hardware efficiency doubling time (~24 months)
-- **$t$**: Time in months
-
-**At $t = 84$ months (7 years):**
-$$
-\\text{Gap} = 2^{84 \\times (1/3.4 - 1/24)} = 2^{84 \\times 0.253} = 2^{21.2} \\approx 2{,}400{,}000\\times
-$$
-
-Demand grows ~7x faster than efficiency. No amount of hardware improvement
-closes this gap without demand-side intervention.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART B BUILDER -- The Geography of Carbon
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_b():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Head of Sustainability
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;The energy wall is real. You cannot outrun it with better chips. So
-                <em>where</em> you compute and what powers it becomes the dominant variable.
-                Grid carbon intensity varies 40&times; across regions.&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Geography of Carbon
-
-        The energy wall is real. You cannot outrun it with better chips. So *where*
-        you compute and what powers it becomes the dominant variable. Grid carbon intensity
-        varies 40x across regions -- a single site selection decision rivals the
-        entire algorithmic optimization toolkit.
-        """))
-
-        items.append(partB_pred)
-
-        if partB_pred.value is None:
-            items.append(mo.callout(
-                mo.md("**Select your prediction to unlock.**"),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(mo.hstack([partB_energy_slider, partB_pue_slider], justify="start", gap=1))
-
-        _energy = partB_energy_slider.value  # MWh
-        _pue = partB_pue_slider.value
-
-        _regions = ["Quebec\n(Hydro)", "Iceland\n(Geo)", "France\n(Nuclear)", "Germany\n(Mixed)",
-                    "US Avg\n(Mixed)", "Texas\n(Mixed)", "India\n(Coal)", "Poland\n(Coal)"]
-        _cis = [CI_QUEBEC, CI_ICELAND, CI_FRANCE, CI_GERMANY, CI_US_AVG, CI_TEXAS, CI_INDIA, CI_POLAND]
-
-        # C_operational = E_total * CI_grid * PUE (convert g to tonnes: / 1e6)
-        _carbons_t = [_energy * ci * _pue / 1e6 for ci in _cis]
-
-        _min_c = min(_carbons_t)
-        _max_c = max(_carbons_t)
-        _ratio = _max_c / _min_c if _min_c > 0 else 0
-
-        _bar_colors = [COLORS["GreenLine"] if c < _max_c * 0.15 else
-                       COLORS["BlueLine"] if c < _max_c * 0.4 else
-                       COLORS["OrangeLine"] if c < _max_c * 0.7 else
-                       COLORS["RedLine"] for c in _carbons_t]
-
-        fig_geo = go.Figure()
-        fig_geo.add_trace(go.Bar(
-            x=_regions, y=_carbons_t,
-            marker_color=_bar_colors,
-            text=[f"{c:,.0f}t" for c in _carbons_t],
-            textposition="outside",
-        ))
-        fig_geo.update_layout(
-            height=380,
-            yaxis=dict(title="CO2 Emissions (tonnes)"),
-            xaxis=dict(title="Region"),
-        )
-        apply_plotly_theme(fig_geo)
-
-        items.append(mo.md(f"### Carbon Emissions by Region ({_energy:,} MWh, PUE = {_pue:.2f})"))
-        items.append(mo.as_html(fig_geo))
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 20px; justify-content: center; margin-top: 12px;">
-            <div style="padding: 14px 20px; border: 2px solid {COLORS['GreenLine']}; border-radius: 10px;
-                        text-align: center; min-width: 160px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Lowest (Quebec)</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['GreenLine']};">
-                    {_carbons_t[0]:,.0f} t</div>
-            </div>
-            <div style="padding: 14px 20px; border: 2px solid {COLORS['RedLine']}; border-radius: 10px;
-                        text-align: center; min-width: 160px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Highest (Poland)</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['RedLine']};">
-                    {_carbons_t[-1]:,.0f} t</div>
-            </div>
-            <div style="padding: 14px 20px; border: 2px solid {COLORS['OrangeLine']}; border-radius: 10px;
-                        text-align: center; min-width: 160px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Ratio</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['OrangeLine']};">
-                    {_ratio:.0f}x</div>
-            </div>
-        </div>
-        """))
-
-        # Prediction reveal
-        _correct = partB_pred.value == "40"
-        _msg = ("Correct. The Quebec-to-Poland ratio is ~41x. A single site selection decision "
-                "achieves ~25% of the total savings from the entire algorithmic toolkit."
-                if _correct else
-                "The ratio is ~41x. Students anchor on algorithmic speedup scales (2-5x) and do not "
-                "realize that grid carbon varies by more than an order of magnitude.")
-        items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Operational Carbon Equation": mo.md("""
-**Operational carbon:**
-$$
-C_{\\text{op}} = E \\times \\text{CI} \\times \\text{PUE}
-$$
-
-**Where:**
-- **$E$**: Energy consumed (kWh) = Power (kW) $\\times$ Time (h)
-- **$\\text{CI}$**: Carbon intensity of the grid (gCO$_2$/kWh)
-- **$\\text{PUE}$**: Power Usage Effectiveness (total facility power / IT power)
-
-**Geographic lever:**
-$$
-\\frac{C_{\\text{Poland}}}{C_{\\text{Quebec}}} = \\frac{820}{20} = 41\\times
-$$
-
-A single site selection decision provides a 41x carbon reduction --
-larger than most algorithmic optimizations combined.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART C BUILDER -- The Lifecycle Carbon Shift
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_c():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; CFO, Green Compute Inc.
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We moved to Quebec. Operational carbon is near zero. Problem solved?
-                Not quite. When you reduce operational carbon, a different term dominates:
-                the carbon cost of manufacturing the hardware itself.&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Lifecycle Carbon Shift
-
-        In Quebec, operational carbon is low. Problem solved? Not quite. When you reduce
-        operational carbon, a different term dominates: the carbon cost of manufacturing
-        the hardware itself. An H100 has 150-200 kg CO2 embodied.
-        """))
-
-        items.append(partC_pred)
-
-        if partC_pred.value is None:
-            items.append(mo.callout(
-                mo.md("**Select your prediction to unlock.**"),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(mo.hstack([partC_refresh_slider, partC_util_slider, partC_gpu_count], justify="start", gap=1))
-
-        _refresh = partC_refresh_slider.value
-        _util = partC_util_slider.value / 100
-        _gpus = partC_gpu_count.value
-
-        # Embodied carbon over lifecycle
-        _embodied_total = _gpus * H100_EMBODIED_KG / 1000  # tonnes CO2
-        _embodied_annual = _embodied_total / _refresh  # tonnes/year
-
-        # Operational carbon per year
-        # Energy = GPUs * TDP * utilization * hours/year / 1e6 (to MWh)
-        _energy_mwh_year = _gpus * H100_TDP_W * _util * 8760 / 1e6
-
-        # Two scenarios
-        _ops_coal = _energy_mwh_year * CI_POLAND * PUE_LIQUID / 1e6  # tonnes/year
-        _ops_hydro = _energy_mwh_year * CI_QUEBEC * PUE_LIQUID / 1e6  # tonnes/year
-
-        _total_coal = _ops_coal + _embodied_annual
-        _total_hydro = _ops_hydro + _embodied_annual
-
-        _frac_embodied_coal = _embodied_annual / _total_coal * 100 if _total_coal > 0 else 0
-        _frac_embodied_hydro = _embodied_annual / _total_hydro * 100 if _total_hydro > 0 else 0
-
-        fig_life = go.Figure()
-        fig_life.add_trace(go.Bar(
-            name="Operational Carbon", x=["Coal Grid\n(Poland)", "Hydro Grid\n(Quebec)"],
-            y=[_ops_coal, _ops_hydro],
-            marker_color=COLORS["OrangeLine"],
-            text=[f"{_ops_coal:,.0f}t", f"{_ops_hydro:,.0f}t"], textposition="inside",
-        ))
-        fig_life.add_trace(go.Bar(
-            name="Embodied Carbon", x=["Coal Grid\n(Poland)", "Hydro Grid\n(Quebec)"],
-            y=[_embodied_annual, _embodied_annual],
-            marker_color=COLORS["BlueLine"],
-            text=[f"{_embodied_annual:,.0f}t", f"{_embodied_annual:,.0f}t"], textposition="inside",
-        ))
-        fig_life.update_layout(
-            barmode="stack", height=380,
-            yaxis=dict(title="Annual Carbon (tonnes CO2)"),
-            legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center"),
-        )
-        apply_plotly_theme(fig_life)
-
-        items.append(mo.md(f"### Lifecycle Carbon ({_gpus:,} GPUs, {_refresh}-year refresh, {_util*100:.0f}% util)"))
-        items.append(mo.as_html(fig_life))
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 20px; justify-content: center; margin-top: 12px;">
-            <div style="padding: 14px 20px; border: 1px solid {COLORS['Border']}; border-radius: 10px;
-                        text-align: center; min-width: 180px; background: {COLORS['OrangeLL']};">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Coal Grid: Embodied Fraction</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['OrangeLine']};">
-                    {_frac_embodied_coal:.0f}%</div>
-            </div>
-            <div style="padding: 14px 20px; border: 1px solid {COLORS['Border']}; border-radius: 10px;
-                        text-align: center; min-width: 180px; background: {COLORS['BlueLL']};">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Hydro Grid: Embodied Fraction</div>
-                <div style="font-size: 1.6rem; font-weight: 900; color: {COLORS['BlueLine']};">
-                    {_frac_embodied_hydro:.0f}%</div>
-            </div>
-        </div>
-        """))
-        items.append(mo.callout(mo.md(
-            f"On the hydro grid, embodied carbon represents **{_frac_embodied_hydro:.0f}%** of total lifecycle emissions. "
-            "The most effective carbon intervention in a clean-grid datacenter is keeping hardware running longer at higher utilization."
-        ), kind="info"))
-
-        # Prediction reveal
-        _correct = partC_pred.value == "40"
-        _msg = ("Correct. On a clean grid, embodied carbon can represent 30-50%+ of total lifecycle emissions. "
-                "'Green energy = zero carbon' is a myth -- you still pay the manufacturing cost."
-                if _correct else
-                "On a 100% renewable grid, embodied carbon represents 30-50%+ of total lifecycle emissions. "
-                "Students assume 'green energy = zero carbon' and forget the physical carbon cost of fabricating silicon.")
-        items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
-
-        items.append(mo.accordion({
-            "Math Peek: Lifecycle Carbon (Embodied + Operational)": mo.md("""
-**Total lifecycle carbon:**
-$$
-C_{\\text{total}} = C_{\\text{embodied}} + C_{\\text{operational}}
-$$
-
-**Embodied carbon per GPU-year:**
-$$
-C_{\\text{embodied}} = \\frac{C_{\\text{mfg}}}{L_{\\text{refresh}}} \\times N_{\\text{GPUs}}
-$$
-
-**Where:**
-- **$C_{\\text{mfg}}$**: Manufacturing carbon per GPU (~175 kg CO$_2$eq for H100)
-- **$L_{\\text{refresh}}$**: Hardware refresh cycle (years)
-- **$N_{\\text{GPUs}}$**: Number of GPUs in the fleet
-
-**On clean grids** (CI < 50 gCO$_2$/kWh), embodied carbon can exceed 30-50%
-of total lifecycle emissions. "Green energy = zero carbon" is a myth.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART D BUILDER -- The Jevons Trap
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_d():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Chief Sustainability Officer
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;You have optimized where you compute and how long you keep hardware.
-                Your efficiency has doubled. But total energy consumption just went
-                <em>up</em>. Welcome to the Jevons Paradox.&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Jevons Trap
-
-        You have optimized where you compute (geography) and how long you keep hardware
-        (lifecycle). Your efficiency has doubled. But total energy consumption just went
-        *up*. Welcome to the Jevons Paradox -- the most counterintuitive
-        result in sustainability economics, and arguably the most important insight
-        in this entire two-volume curriculum.
-        """))
-
-        # Jevons explanation callout
-        items.append(mo.Html(f"""
-        <div style="background: linear-gradient(135deg, {COLORS['OrangeLL']} 0%, #fff7ed 100%);
-                    border: 2px solid {COLORS['OrangeLine']}; border-radius: 12px;
-                    padding: 24px 28px; margin: 12px 0;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: {COLORS['OrangeLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;">
-                The Jevons Paradox Applied to AI
-            </div>
-            <div style="font-size: 0.95rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <strong>William Stanley Jevons observed in 1865</strong> that James Watt's more efficient
-                steam engine did not reduce coal consumption &mdash; it increased it, because efficiency
-                made steam power cheaper, which expanded its use.<br/><br/>
-                <strong>The AI version:</strong> Making inference more efficient reduces cost-per-query,
-                which stimulates demand. If demand elasticity &gt; 1, total energy consumption
-                <em>increases</em> despite per-unit efficiency gains.<br/><br/>
-                <strong>The formula:</strong><br/>
-                <code style="font-size: 1.1rem; background: white; padding: 6px 12px; border-radius: 6px;
-                             border: 1px solid {COLORS['Border']}; display: inline-block; margin-top: 4px;">
-                    E_total = (E_baseline / Efficiency) &times; V_baseline &times; Efficiency<sup>Elasticity</sup>
-                </code>
-            </div>
-        </div>
-        """))
-
-        items.append(partD_pred)
-        items.append(mo.md("*Enter a percentage: negative for decrease, positive for increase.*"))
-
-        if partD_pred.value is None:
-            items.append(mo.callout(
-                mo.md("**Enter your prediction to unlock the Jevons simulator.**"),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(mo.hstack([partD_eff_slider, partD_elast_slider], justify="start", gap=1))
-        items.append(mo.hstack([partD_cap_toggle, partD_cap_level], justify="start", gap=1))
-
-        _eff = partD_eff_slider.value
-        _elast = partD_elast_slider.value
-        _cap_on = partD_cap_toggle.value
-        _cap = partD_cap_level.value
-
-        # E_total = (E_baseline / eff) * V_baseline * eff^elasticity
-        # Normalize: E_baseline = 1, V_baseline = 1
-        _eff_range = np.linspace(1, 10, 100)
-
-        # Three demand elasticity curves
-        _elasticities = [0.3, 1.0, _elast]
-        _labels = ["Inelastic (0.3)", "Unit-elastic (1.0)", f"Current ({_elast:.1f})"]
-        _colors = [COLORS["GreenLine"], COLORS["BlueLine"], COLORS["OrangeLine"]]
-
-        fig_jevons = go.Figure()
-        for _e, _lab, _col in zip(_elasticities, _labels, _colors):
-            _e_total = (1.0 / _eff_range) * _eff_range ** _e
-            if _cap_on:
-                _e_total = np.minimum(_e_total, _cap)
-            fig_jevons.add_trace(go.Scatter(
-                x=_eff_range, y=_e_total, name=_lab,
-                line=dict(color=_col, width=3 if _e == _elast else 2,
-                          dash="solid" if _e == _elast else "dot"),
-            ))
-
-        # Baseline reference
-        fig_jevons.add_hline(y=1.0, line_dash="dash", line_color=COLORS["TextMuted"],
-                             annotation_text="Baseline energy", annotation_position="top right")
-
-        if _cap_on:
-            fig_jevons.add_hline(y=_cap, line_dash="solid", line_color=COLORS["RedLine"], line_width=2,
-                                 annotation_text=f"Carbon cap ({_cap:.1f}x)", annotation_position="top left")
-
-        # Current operating point
-        _e_current = (1.0 / _eff) * _eff ** _elast
-        if _cap_on:
-            _e_current = min(_e_current, _cap)
-        _pct_change = (_e_current - 1.0) * 100
-
-        fig_jevons.add_trace(go.Scatter(
-            x=[_eff], y=[_e_current], mode="markers",
-            marker=dict(size=16, color=COLORS["RedLine"] if _e_current > 1 else COLORS["GreenLine"],
-                        line=dict(color="white", width=2)),
-            name="Your config",
-        ))
-
-        fig_jevons.update_layout(
-            height=380,
-            xaxis=dict(title="Efficiency Improvement (x)"),
-            yaxis=dict(title="Total Energy (fraction of baseline)", range=[0, max(3, _e_current * 1.3)]),
-            legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center"),
-        )
-        apply_plotly_theme(fig_jevons)
-
-        # Failure state
-        _rebound = _e_current > 1.5
-        _banner = ""
-        if _rebound and not _cap_on:
-            _banner = f"""<div style="background: {COLORS['RedLL']}; border: 2px solid {COLORS['RedLine']};
-                          border-radius: 8px; padding: 14px; text-align: center; margin-bottom: 12px;
-                          font-weight: 700; color: {COLORS['RedLine']}; font-size: 1.1rem;">
-                          JEVONS REBOUND: Total energy is {_pct_change:+.0f}% of baseline</div>"""
-
-        _pct_color = COLORS["RedLine"] if _pct_change > 0 else COLORS["GreenLine"]
-        _direction = "INCREASE" if _pct_change > 0 else "DECREASE"
-
-        if _banner:
-            items.append(mo.Html(_banner))
-        items.append(mo.md(f"### Jevons Paradox (Efficiency = {_eff:.1f}x, Elasticity = {_elast:.1f})"))
-        items.append(mo.as_html(fig_jevons))
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 20px; justify-content: center; margin-top: 16px; flex-wrap: wrap;">
-            <div style="padding: 16px 24px; border: 2px solid {_pct_color}; border-radius: 12px;
-                        text-align: center; min-width: 200px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Net Energy Change</div>
-                <div style="font-size: 2.2rem; font-weight: 900; color: {_pct_color};">
-                    {_pct_change:+.0f}%</div>
-                <div style="font-size: 0.85rem; font-weight: 700; color: {_pct_color};">{_direction}</div>
-            </div>
-            <div style="padding: 16px 24px; border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        text-align: center; min-width: 200px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Per-Query Cost</div>
-                <div style="font-size: 2.2rem; font-weight: 900; color: {COLORS['GreenLine']};">
-                    {1/_eff:.1%}</div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']};">of baseline</div>
-            </div>
-            <div style="padding: 16px 24px; border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        text-align: center; min-width: 200px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Induced Demand</div>
-                <div style="font-size: 2.2rem; font-weight: 900; color: {COLORS['OrangeLine']};">
-                    {_eff ** _elast:.1f}x</div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']};">volume increase</div>
-            </div>
-        </div>
-        """))
-
-        # Prediction reveal
-        _predicted = partD_pred.value
-        _actual = 50  # 2x efficiency, 3x demand = 0.5 * 3 = 1.5x = +50%
-
-        _gap = abs(_predicted - _actual)
-        if _gap < 10:
-            _msg = f"Excellent. You predicted {_predicted:+.0f}%. The actual change is +50%. You grasped the counterintuitive result."
-            _kind = "success"
-        elif _predicted < 0:
-            _msg = (f"You predicted {_predicted:+.0f}% (a decrease). The actual is +50% (an increase). "
-                    "Most students predict savings because they compute 'half the energy per query' but "
-                    "forget to multiply by the 3x demand response. E = 0.5 * 3 = 1.5x baseline = +50%.")
-            _kind = "danger"
-        else:
-            _msg = f"You predicted {_predicted:+.0f}%. The actual is +50%. The Jevons formula: E = (1/2) * 1 * 2^2.0 = 0.5 * 4 = 2.0? No -- with demand 3x, E = 0.5 * 3 = 1.5x."
-            _kind = "warn"
-
-        items.append(mo.callout(mo.md(f"**{_msg}**"), kind=_kind))
-        items.append(mo.accordion({
-            "Math Peek: The Jevons Equation": mo.md("""
-**The full Jevons formula for AI energy:**
-
-```
-E_total = (E_baseline / Efficiency) x V_baseline x Efficiency^Elasticity
-```
-
-At Efficiency = 2x, Elasticity = 2.0:
-
-```
-E_total = (1 / 2) x 1 x 2^2.0 = 0.5 x 4 = 2.0x baseline  (+100% increase!)
-```
-
-The efficiency halves per-query cost, but demand quadruples. Net result: total energy doubles.
-
-**The only escape:** elasticity < 1.0 (inelastic demand) OR an absolute carbon cap.
-When demand is elastic (empirically estimated at 1.5-3.0 for AI inference), efficiency
-without caps guarantees increased consumption.
-
-**Empirical evidence:** OpenAI API pricing dropped ~10x from GPT-3 to GPT-3.5-turbo
-(2022-2023), while API call volume increased ~50-100x. Inference demand is firmly elastic.
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART E BUILDER -- Carbon-Aware Fleet Design
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_e():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['TextMuted']}; background:{COLORS['Surface2']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; VP of Fleet Operations
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Efficiency alone is not enough. You need a fleet-level strategy that combines
-                geography, scheduling, and hard caps. Can you achieve a 50% emission reduction
-                without exceeding a 48-hour project delay?&rdquo;
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Carbon-Aware Fleet Design
-
-        Efficiency alone is not enough. You need a fleet-level strategy that combines
-        geography, scheduling, and hard caps. Can you achieve a 50% emission reduction
-        without exceeding a 48-hour project delay?
-        """))
-
-        # Controls
-        items.append(mo.md("### Configure Your Carbon Strategy"))
-        items.append(mo.hstack([partE_geo, partE_temporal], justify="start", gap=1))
-        items.append(mo.hstack([partE_eff_gain, partE_cap], justify="start", gap=1))
-
-        _ci = partE_geo.value
-        _temporal_pct = partE_temporal.value / 100
-        _eff = partE_eff_gain.value
-        _cap = partE_cap.value
-
-        # Baseline: US Average, no temporal shift, no efficiency, no cap
-        _baseline_ci = CI_US_AVG
-        _baseline_energy = 10000  # MWh (normalized training run)
-        _baseline_carbon = _baseline_energy * _baseline_ci * PUE_AIR / 1e6  # tonnes
-
-        # Geographic savings
-        _geo_carbon = _baseline_energy * _ci * PUE_AIR / 1e6
-        _geo_savings = 1 - (_geo_carbon / _baseline_carbon)
-
-        # Temporal shift: off-peak hours have ~40% lower CI on average
-        _temporal_savings = _temporal_pct * 0.4
-        _after_temporal = _geo_carbon * (1 - _temporal_savings)
-
-        # Efficiency: reduces energy but may trigger Jevons (assume elasticity 1.5 for fleet)
-        _eff_energy = _baseline_energy / _eff
-        _demand_response = _eff ** 1.5  # elastic demand
-        _actual_energy = _eff_energy * _demand_response
-        _after_eff = _actual_energy * _ci * PUE_AIR / 1e6 * (1 - _temporal_savings)
-
-        # Cap
-        _cap_carbon = _baseline_carbon * _cap
-        _final_carbon = min(_after_eff, _cap_carbon)
-
-        _total_reduction = 1 - (_final_carbon / _baseline_carbon)
-        _target_met = _total_reduction >= 0.5
-
-        # Delay estimate (geographic shift adds 0-24h, temporal shift adds 0-24h)
-        _delay_hours = 0
-        if _ci < 100:
-            _delay_hours += 12  # cross-continent latency
-        _delay_hours += _temporal_pct * 24  # waiting for off-peak
-        _delay_ok = _delay_hours <= 48
-
-        _reduction_color = COLORS["GreenLine"] if _target_met else COLORS["RedLine"]
-        _delay_color = COLORS["GreenLine"] if _delay_ok else COLORS["RedLine"]
-
-        _target_banner = ""
-        if _target_met and _delay_ok:
-            _target_banner = f"""<div style="background: {COLORS['GreenLL']}; border: 2px solid {COLORS['GreenLine']};
-                                border-radius: 8px; padding: 14px; text-align: center; margin-bottom: 12px;
-                                font-weight: 700; color: {COLORS['GreenLine']}; font-size: 1.0rem;">
-                                TARGET MET: {_total_reduction:.0%} reduction within {_delay_hours:.0f}h delay</div>"""
-        elif not _target_met:
-            _target_banner = f"""<div style="background: {COLORS['RedLL']}; border: 2px solid {COLORS['RedLine']};
-                                border-radius: 8px; padding: 14px; text-align: center; margin-bottom: 12px;
-                                font-weight: 700; color: {COLORS['RedLine']}; font-size: 1.0rem;">
-                                TARGET MISSED: Only {_total_reduction:.0%} reduction (need 50%)</div>"""
-
-        if _target_banner:
-            items.append(mo.Html(_target_banner))
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 16px; justify-content: center; margin-top: 12px; flex-wrap: wrap;">
-            <div style="padding: 14px 20px; border: 2px solid {_reduction_color}; border-radius: 10px;
-                        text-align: center; min-width: 160px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Carbon Reduction</div>
-                <div style="font-size: 2rem; font-weight: 900; color: {_reduction_color};">
-                    {_total_reduction:.0%}</div>
-                <div style="font-size: 0.72rem; color: {COLORS['TextSec']};">target: 50%</div>
-            </div>
-            <div style="padding: 14px 20px; border: 2px solid {_delay_color}; border-radius: 10px;
-                        text-align: center; min-width: 160px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Project Delay</div>
-                <div style="font-size: 2rem; font-weight: 900; color: {_delay_color};">
-                    {_delay_hours:.0f}h</div>
-                <div style="font-size: 0.72rem; color: {COLORS['TextSec']};">max: 48h</div>
-            </div>
-            <div style="padding: 14px 20px; border: 1px solid {COLORS['Border']}; border-radius: 10px;
-                        text-align: center; min-width: 160px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase;">Final Carbon</div>
-                <div style="font-size: 2rem; font-weight: 900; color: {COLORS['BlueLine']};">
-                    {_final_carbon:,.0f}t</div>
-                <div style="font-size: 0.72rem; color: {COLORS['TextSec']};">baseline: {_baseline_carbon:,.0f}t</div>
-            </div>
-        </div>
-        """))
-        items.append(mo.callout(mo.md(
-            "**Strategy insight:** Efficiency alone fails (Jevons, from Part D). Geographic shift alone "
-            "may add unacceptable latency. Temporal scheduling alone misses the target if the grid has "
-            "no clean windows. Only the combination of geographic shift + temporal scheduling + carbon cap "
-            "reliably hits 50% reduction."
-        ), kind="info"))
-
-        items.append(mo.accordion({
-            "Math Peek: Carbon-Aware Fleet Optimization": mo.md("""
-**Fleet carbon with all levers:**
-$$
-C_{\\text{fleet}} = \\sum_{r \\in \\text{regions}} N_r \\times P_r \\times \\text{CI}_r \\times \\text{PUE}_r \\times t_r
-+ C_{\\text{embodied}}
-$$
-
-**Carbon cap constraint:**
-$$
-C_{\\text{fleet}} \\leq \\alpha \\times C_{\\text{baseline}}, \\quad \\alpha \\in (0, 1]
-$$
-
-**Temporal scheduling savings:**
-$$
-C_{\\text{temporal}} = C_{\\text{baseline}} \\times \\left(1 - f_{\\text{shift}} \\times \\frac{\\text{CI}_{\\text{peak}} - \\text{CI}_{\\text{off}}}{\\text{CI}_{\\text{peak}}}\\right)
-$$
-
-- **$f_{\\text{shift}}$**: Fraction of jobs shifted to off-peak
-- **$\\alpha$**: Carbon cap as fraction of baseline
-
-Only the combination of geographic + temporal + absolute cap reliably
-achieves 50%+ reduction targets.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # SYNTHESIS BUILDER
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_synthesis():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. The energy wall is real and growing.</strong>
-                    AI compute demand has outpaced hardware efficiency by ~2,400,000&times; over 7 years.
-                    You cannot outrun this deficit with better chips alone.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. Geography is the single highest-leverage intervention.</strong>
-                    Grid carbon intensity varies 40&times; (Quebec: 20 vs Poland: 820 gCO2/kWh).
-                    On clean grids, embodied carbon (hardware manufacturing) dominates at 30-50%+.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>3. The Jevons Paradox means efficiency is necessary but not sufficient.</strong>
-                    At demand elasticity &gt;1 (empirically 1.5-3.0 for AI inference), efficiency gains
-                    stimulate demand that overwhelms the savings. Only absolute carbon caps guarantee
-                    net reduction. Sustainable AI requires governance, not just better engineering.
-                </div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 16: The Fairness Budget</strong> -- Carbon caps limit compute.
-                    Fairness monitoring consumes latency. The next lab reveals that mathematical
-                    impossibility governs fairness metrics, and responsible AI infrastructure
-                    has real system costs.
-                </div>
-            </div>
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook Connection
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> Sustainable AI chapter for the full Jevons derivation
-                    and carbon-aware scheduling analysis.<br/>
-                    <strong>Feeds into:</strong> V2-16 Capstone (carbon cap as fleet constraint).
-                </div>
-            </div>
-        </div>
-        """))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # COMPOSE TABS
-    # ─────────────────────────────────────────────────────────────────────
-
-    tabs = mo.ui.tabs({
-        "Part A -- The Energy Wall":            build_part_a(),
-        "Part B -- The Geography of Carbon":    build_part_b(),
-        "Part C -- The Lifecycle Carbon Shift":  build_part_c(),
-        "Part D -- The Jevons Trap":             build_part_d(),
-        "Part E -- Carbon-Aware Fleet Design":   build_part_e(),
-        "Synthesis":                             build_synthesis(),
-    })
-    tabs
+    mo.vstack([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        mo.Html(
+            f"""
+<div style="background:linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
+            border-radius:16px; padding:32px 40px; margin-bottom:8px; color:white;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
+    <div>
+      <div style="font-size:0.72rem; font-weight:800; color:#cbd5e1; text-transform:uppercase;
+                  letter-spacing:0.14em; margin-bottom:8px;">
+        Vol 2 - Lab 15 - Sustainable AI
+      </div>
+      <div style="font-size:2rem; font-weight:850; line-height:1.15; margin-bottom:10px;">
+        The Carbon Budget
+      </div>
+      <div style="font-size:0.96rem; color:#d1d5db; max-width:760px; line-height:1.6;">
+        Sustainability is an amount system. You will measure energy, carbon intensity,
+        utilization, embodied carbon, and guardrails before choosing a carbon-aware
+        policy for {v2_15_packet['track_label']}.
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
+      <span class="badge badge-info">{v2_15_packet['track_label']}</span>
+      <span class="badge badge-info">{v2_15_packet['hardware_ref']}</span>
+      <span class="badge badge-info">{v2_15_packet['model_ref']}</span>
+      <span class="badge badge-warn">4 Parts + Synthesis</span>
+    </div>
+  </div>
+</div>
+"""
+        ),
+        track_context(v2_15_profile),
+        track_arc_context(v2_15_profile, v2_15_metadata.lab_id),
+        source_trace(
+            {
+                "track_id": v2_15_profile.track_id,
+                "scenario_id": v2_15_variant.scenario_id,
+                "hardware_ref": v2_15_variant.hardware_ref,
+                "model_ref": v2_15_variant.model_ref,
+                "system_ref": v2_15_variant.system_ref or "device fleet",
+                "chapter_sources": (
+                    "The Energy Ceiling; Carbon footprint analysis; Geographic and temporal optimization; "
+                    "Google 4 Ms; Fallacies and Pitfalls"
+                ),
+                "notebook_local_helpers": "v2_15_* sustainability amount model",
+                "local_assumptions": (
+                    "track fleet sizes, non-H100 embodied estimates, electricity prices, "
+                    "service budgets, and mitigation multipliers"
+                ),
+            },
+            collapsed=False,
+            summary="Registry-backed track and hardware context plus notebook-local sustainability assumptions.",
+        ),
+    ])
     return
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 10: LEDGER HUD ─────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS, partA_pred, partB_pred, partC_pred, partD_pred, partD_elast_slider, partE_geo, partE_cap):
-    _energy_pred = partA_pred.value if hasattr(partA_pred, 'value') else None
-    _geo_pred = partB_pred.value if hasattr(partB_pred, 'value') else None
-    _lifecycle_pred = partC_pred.value if hasattr(partC_pred, 'value') else None
-    _jevons_pred = partD_pred.value if hasattr(partD_pred, 'value') else None
-    _elasticity = partD_elast_slider.value if hasattr(partD_elast_slider, 'value') else 2.0
-    _geo_choice = partE_geo.value if hasattr(partE_geo, 'value') else "US average"
-    _cap_choice = partE_cap.value if hasattr(partE_cap, 'value') else 1.0
-    ledger.save(chapter=15, design={
-        "partA_energy_deficit_prediction": _energy_pred,
-        "partB_geography_prediction": _geo_pred,
-        "partC_lifecycle_prediction": _lifecycle_pred,
-        "partD_jevons_prediction_pct": _jevons_pred,
-        "partD_elasticity_explored": _elasticity,
-        "partE_geographic_choice": _geo_choice,
-        "partE_carbon_cap": _cap_choice,
-    })
+def _(
+    COLORS,
+    apply_plotly_theme,
+    build_lab_report,
+    decision_input,
+    go,
+    ledger,
+    mo,
+    partA_checkpoint,
+    partA_prediction,
+    partA_utilization,
+    partA_workload,
+    partB_checkpoint,
+    partB_prediction,
+    partB_region,
+    partB_schedule,
+    partB_utilization,
+    partC_checkpoint,
+    partC_governance,
+    partC_intensity,
+    partC_prediction,
+    partC_strategy,
+    partD_carbon_price,
+    partD_checkpoint,
+    partD_policy,
+    partD_prediction,
+    report_export_panel,
+    source_trace,
+    v2_15_chapter,
+    v2_15_color,
+    v2_15_failure_card,
+    v2_15_math_peek,
+    v2_15_metadata,
+    v2_15_metric_card,
+    v2_15_num,
+    v2_15_packet,
+    v2_15_part_a_result,
+    v2_15_part_b_result,
+    v2_15_part_banner,
+    v2_15_pct,
+    v2_15_policy_candidates,
+    v2_15_prediction_key_for_part_b,
+    v2_15_profile,
+    v2_15_region_catalog,
+    v2_15_reveal_card,
+    v2_15_status_html,
+    v2_15_strategy_candidates,
+    v2_15_table,
+    v2_15_variant,
+):
+    def build_part_a():
+        result = v2_15_part_a_result(v2_15_packet, partA_workload.value, partA_utilization.value)
+        predicted = partA_prediction.value or "no prediction yet"
+        actual = result["binding"]
 
-    mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">V2-14: The Carbon Budget</span>
-        <span class="hud-label">LEDGER</span>
-        <span class="hud-active">Saved (ch14)</span>
-        <span class="hud-label">NEXT</span>
-        <span class="hud-value">V2-15: The Fairness Budget</span>
-    </div>
-    """)
+        stack_fig = go.Figure()
+        stack_fig.add_trace(go.Bar(
+            x=["Operational", "Embodied"],
+            y=[result["operational_kg"], result["embodied_kg_day"]],
+            marker_color=[v2_15_color("BlueLine", "#2563eb"), v2_15_color("OrangeLine", "#d97706")],
+            hovertemplate="%{x}: %{y:.2f} kg CO2e/day<extra></extra>",
+        ))
+        stack_fig.add_hline(
+            y=v2_15_packet["carbon_budget_kg_day"],
+            line=dict(color=v2_15_color("RedLine", "#b42318"), width=2, dash="dash"),
+            annotation_text="operational carbon budget",
+            annotation_position="top right",
+        )
+        stack_fig.update_layout(
+            height=330,
+            xaxis=dict(title="Lifecycle term"),
+            yaxis=dict(title="kg CO2e/day"),
+            margin=dict(t=45, b=55, l=60, r=20),
+        )
+        apply_plotly_theme(stack_fig)
+
+        ratios = result["ratios"]
+        rows = [
+            ("Facility energy", f"{v2_15_num(result['facility_energy_kwh'], 2)} kWh/day", f"budget {v2_15_num(v2_15_packet['energy_budget_kwh_day'], 2)}", v2_15_status_html(ratios["energy"] <= 1.0)),
+            ("Operational carbon", f"{v2_15_num(result['operational_kg'], 2)} kg/day", f"budget {v2_15_num(v2_15_packet['carbon_budget_kg_day'], 2)}", v2_15_status_html(ratios["carbon intensity"] <= 1.0)),
+            ("Embodied carbon", f"{v2_15_num(result['embodied_kg_day'], 2)} kg/day", f"budget {v2_15_num(v2_15_packet['embodied_budget_kg_day'], 2)}", v2_15_status_html(ratios["embodied carbon"] <= 1.0)),
+            ("Binding amount", actual, f"{v2_15_num(ratios[actual], 2)}x budget", v2_15_status_html(ratios[actual] <= 1.0)),
+        ]
+
+        return mo.vstack([
+            v2_15_part_banner(
+                "A",
+                "Carbon Is An Amount Stack",
+                "Measure operational energy, grid carbon, and embodied carbon before choosing a mitigation.",
+                v2_15_color("BlueLine", "#2563eb"),
+            ),
+            mo.callout(
+                mo.md(
+                    f"**Scenario:** {v2_15_packet['stakeholder']} is asked to approve "
+                    f"{v2_15_packet['service_name']} for {v2_15_packet['track_label']}. "
+                    "The decision cannot rely on model quality alone; it needs an amount stack."
+                ),
+                kind="info",
+            ),
+            partA_prediction,
+            mo.hstack([partA_workload, partA_utilization], justify="center", gap=2),
+            v2_15_failure_card(
+                result["fails"],
+                f"Binding amount: {actual}",
+                (
+                    f"{actual} is at {v2_15_num(ratios[actual], 2)}x its budget. "
+                    f"Operational carbon is {v2_15_num(result['operational_kg'], 2)} kg/day; "
+                    f"embodied carbon is {v2_15_num(result['embodied_kg_day'], 2)} kg/day."
+                ),
+                "reduce workload, improve useful utilization, change region, or extend hardware lifetime",
+            ),
+            mo.hstack([
+                v2_15_metric_card("Energy", f"{v2_15_num(result['facility_energy_kwh'], 1)} kWh", "facility/day", v2_15_color("BlueLine", "#2563eb")),
+                v2_15_metric_card("Operational", f"{v2_15_num(result['operational_kg'], 1)} kg", "CO2e/day", v2_15_color("OrangeLine", "#d97706")),
+                v2_15_metric_card("Embodied", f"{v2_15_num(result['embodied_kg_day'], 1)} kg", "amortized/day", v2_15_color("PurpleLine", "#7c3aed")),
+                v2_15_metric_card("Binding", actual, "highest budget ratio", v2_15_color("RedLine", "#b42318") if result["fails"] else v2_15_color("GreenLine", "#047857")),
+            ], justify="center", gap=1),
+            mo.ui.plotly(stack_fig),
+            v2_15_table(("Amount", "Measured value", "Budget or meaning", "Status"), rows),
+            v2_15_reveal_card(
+                "Prediction vs actual",
+                predicted,
+                actual,
+                "The binding amount is the largest normalized budget ratio, not necessarily the largest raw number.",
+                "success" if predicted == actual else "warn",
+            ),
+            v2_15_math_peek(
+                "Math Peek / Source Model - energy, carbon, and lifecycle boundary",
+                f"""
+```
+IT_energy_kWh        = units * average_workload_power_W * active_hours / 1000
+facility_energy_kWh  = IT_energy_kWh * PUE
+operational_CO2e_kg  = facility_energy_kWh * grid_intensity_g_per_kWh / 1000
+embodied_CO2e_day    = units * embodied_kg_per_unit / lifetime_days
+lifecycle_CO2e_day   = operational_CO2e_kg + embodied_CO2e_day
+```
+
+Chapter connection: `Carbon footprint analysis` and the lifecycle-estimation
+callout require operational and embodied carbon in the same accounting boundary.
+The hardware/model identity comes from the selected track registry; track fleet
+size and non-H100 embodied values are notebook-local teaching assumptions.
+"""
+            ),
+            partA_checkpoint,
+        ])
+
+    def build_part_b():
+        result = v2_15_part_b_result(
+            v2_15_packet,
+            partA_workload.value,
+            partB_utilization.value,
+            partB_region.value,
+            partB_schedule.value,
+        )
+        actual_key = v2_15_prediction_key_for_part_b(result)
+        region_rows = []
+        for region_id, region in v2_15_region_catalog().items():
+            probe = v2_15_part_b_result(
+                v2_15_packet,
+                partA_workload.value,
+                partB_utilization.value,
+                region_id,
+                partB_schedule.value,
+            )
+            region_rows.append((
+                region["label"],
+                f"{v2_15_num(region['carbon_g_kwh'], 0)} g/kWh",
+                f"{v2_15_num(region['pue'], 2)} PUE",
+                f"{v2_15_num(probe['carbon_kg'], 1)} kg/day",
+                v2_15_status_html(probe["carbon_ok"] and probe["service_ok"]),
+            ))
+
+        bar_fig = go.Figure()
+        bar_fig.add_trace(go.Bar(
+            x=[v2_15_region_catalog()[rid]["label"] for rid in v2_15_region_catalog()],
+            y=[
+                v2_15_part_b_result(v2_15_packet, partA_workload.value, partB_utilization.value, rid, partB_schedule.value)["carbon_kg"]
+                for rid in v2_15_region_catalog()
+            ],
+            marker_color=[
+                v2_15_color("GreenLine", "#047857") if rid == partB_region.value else v2_15_color("BlueLine", "#2563eb")
+                for rid in v2_15_region_catalog()
+            ],
+            hovertemplate="%{x}: %{y:.2f} kg CO2e/day<extra></extra>",
+        ))
+        bar_fig.add_hline(
+            y=v2_15_packet["carbon_budget_kg_day"],
+            line=dict(color=v2_15_color("RedLine", "#b42318"), dash="dash", width=2),
+            annotation_text="carbon budget",
+            annotation_position="top right",
+        )
+        bar_fig.update_layout(height=330, yaxis=dict(title="kg CO2e/day"), margin=dict(t=45, b=80, l=60, r=20))
+        apply_plotly_theme(bar_fig)
+
+        return mo.vstack([
+            v2_15_part_banner(
+                "B",
+                "Placement And Utilization Change The Carbon Bill",
+                "Cleaner grids help only if utilization, freshness, p99 latency, and reliability remain inside the track envelope.",
+                v2_15_color("GreenLine", "#047857"),
+            ),
+            mo.callout(
+                mo.md(
+                    f"**Scenario:** operations wants to run {v2_15_packet['workload_unit']} at higher utilization. "
+                    "You must decide whether region, schedule, or demand governance changes the carbon bill without breaking service."
+                ),
+                kind="info",
+            ),
+            partB_prediction,
+            mo.hstack([partB_region, partB_schedule, partB_utilization], justify="center", gap=2),
+            v2_15_failure_card(
+                (not result["carbon_ok"]) or (not result["service_ok"]),
+                f"Placement/utilization boundary: {result['binding']}",
+                (
+                    f"{result['region']['label']} with {result['schedule']['label']} produces "
+                    f"{v2_15_num(result['carbon_kg'], 2)} kg/day, p99/freshness "
+                    f"{v2_15_num(result['p99_ms'], 1)} ms and {v2_15_num(result['delay_h'], 1)} h delay, "
+                    f"reliability {v2_15_num(result['reliability_pct'], 1)}%."
+                ),
+                "choose a lower-carbon region, lower target utilization, or apply demand governance only to nonurgent work",
+            ),
+            mo.hstack([
+                v2_15_metric_card("Region carbon", f"{v2_15_num(result['region']['carbon_g_kwh'], 0)} g/kWh", result["region"]["label"], v2_15_color("GreenLine", "#047857")),
+                v2_15_metric_card("Utilization", v2_15_pct(result["utilization"]), "useful work", v2_15_color("BlueLine", "#2563eb")),
+                v2_15_metric_card("Carbon", f"{v2_15_num(result['carbon_kg'], 1)} kg", "CO2e/day", v2_15_color("OrangeLine", "#d97706")),
+                v2_15_metric_card("p99/deadline", f"{v2_15_num(result['p99_ms'], 1)} ms", f"limit {v2_15_num(v2_15_packet['latency_slo_ms'], 0)}", v2_15_color("RedLine", "#b42318") if not result["p99_ok"] else v2_15_color("GreenLine", "#047857")),
+            ], justify="center", gap=1),
+            mo.ui.plotly(bar_fig),
+            v2_15_table(("Region", "Grid intensity", "Facility overhead", "Carbon under current controls", "Status"), region_rows),
+            v2_15_reveal_card(
+                "Prediction vs actual",
+                partB_prediction.value or "no prediction yet",
+                actual_key,
+                "Utilization, region, and schedule are evaluated together; the cleanest grid is not launchable if service guardrails fail.",
+                "success" if partB_prediction.value == actual_key else "warn",
+            ),
+            v2_15_math_peek(
+                "Math Peek / Source Model - utilization and carbon-aware placement",
+                f"""
+```
+useful_utilization = useful_work / available_capacity
+IT_energy          = active_energy * (0.72 + 0.38 / useful_utilization)
+carbon_kg          = IT_energy * PUE_region * carbon_intensity_region * schedule_multiplier
+service_ok         = p99 <= SLO and delay <= freshness_limit and reliability >= floor
+```
+
+Chapter connection: the `Geographic and temporal optimization` section says
+where and when a job runs can dominate algorithmic efficiency gains, but the
+service-level guardrails still determine whether the schedule is usable.
+"""
+            ),
+            partB_checkpoint,
+        ])
+
+    def build_part_c():
+        part_b = v2_15_part_b_result(
+            v2_15_packet,
+            partA_workload.value,
+            partB_utilization.value,
+            partB_region.value,
+            partB_schedule.value,
+        )
+        packet = v2_15_strategy_candidates(v2_15_packet, part_b, partC_intensity.value, partC_governance.value)
+        selected = next(item for item in packet["candidates"] if item["strategy_id"] == partC_strategy.value)
+        actual_guardrail = selected["binding"]
+
+        rows = []
+        for item in packet["candidates"]:
+            rows.append((
+                item["label"],
+                f"{v2_15_num(item['lifecycle_kg'], 1)} kg/day",
+                f"{v2_15_num(item['quality_pct'], 1)}%",
+                f"{v2_15_num(item['latency_ms'], 1)} ms",
+                f"${v2_15_num(item['cost_usd'], 1)}",
+                f"{v2_15_num(item['reliability_pct'], 1)}%",
+                item["binding"],
+                v2_15_status_html(item["passes"]),
+            ))
+
+        frontier_fig = go.Figure()
+        frontier_fig.add_trace(go.Scatter(
+            x=[item["lifecycle_kg"] for item in packet["candidates"]],
+            y=[item["quality_pct"] for item in packet["candidates"]],
+            mode="markers+text",
+            text=[item["label"] for item in packet["candidates"]],
+            textposition="top center",
+            marker=dict(
+                size=14,
+                color=[
+                    v2_15_color("GreenLine", "#047857") if item["passes"] else v2_15_color("RedLine", "#b42318")
+                    for item in packet["candidates"]
+                ],
+            ),
+            hovertemplate="%{text}<br>%{x:.2f} kg/day<br>%{y:.2f}% quality<extra></extra>",
+        ))
+        frontier_fig.add_hline(
+            y=v2_15_packet["quality_floor_pct"],
+            line=dict(color=v2_15_color("RedLine", "#b42318"), dash="dash", width=2),
+            annotation_text="quality floor",
+            annotation_position="bottom right",
+        )
+        frontier_fig.update_layout(
+            height=340,
+            xaxis=dict(title="Lifecycle carbon (kg CO2e/day)"),
+            yaxis=dict(title="Quality (%)"),
+            margin=dict(t=45, b=55, l=60, r=20),
+        )
+        apply_plotly_theme(frontier_fig)
+
+        return mo.vstack([
+            v2_15_part_banner(
+                "C",
+                "Mitigation Must Preserve Guardrails",
+                "A sustainability mitigation only counts when it changes the binding amount and still passes quality, latency, cost, reliability, and governance.",
+                v2_15_color("OrangeLine", "#d97706"),
+            ),
+            mo.callout(
+                mo.md(
+                    f"**Scenario:** a review board asks which mitigation should be attached to "
+                    f"{v2_15_packet['service_name']}. You must name the guardrail that can reject it."
+                ),
+                kind="info",
+            ),
+            partC_prediction,
+            mo.hstack([partC_strategy, partC_intensity, partC_governance], justify="center", gap=2),
+            v2_15_failure_card(
+                not selected["passes"],
+                f"Mitigation guardrail: {selected['binding']}",
+                (
+                    f"{selected['label']} has lifecycle carbon {v2_15_num(selected['lifecycle_kg'], 2)} kg/day, "
+                    f"quality {v2_15_num(selected['quality_pct'], 1)}%, latency {v2_15_num(selected['latency_ms'], 1)} ms, "
+                    f"cost ${v2_15_num(selected['cost_usd'], 1)}, reliability {v2_15_num(selected['reliability_pct'], 1)}%."
+                ),
+                "lower intensity, add governance evidence, or choose the recommended passing mitigation",
+            ),
+            mo.hstack([
+                v2_15_metric_card("Selected", selected["label"], "strategy", v2_15_color("BlueLine", "#2563eb")),
+                v2_15_metric_card("Binding", selected["binding"], "guardrail", v2_15_color("RedLine", "#b42318") if not selected["passes"] else v2_15_color("GreenLine", "#047857")),
+                v2_15_metric_card("Recommended", packet["recommended"]["label"], "lowest passing carbon", v2_15_color("GreenLine", "#047857")),
+                v2_15_metric_card("Rejected", packet["rejected"]["label"], "alternative", v2_15_color("OrangeLine", "#d97706")),
+            ], justify="center", gap=1),
+            mo.ui.plotly(frontier_fig),
+            v2_15_table(("Strategy", "Lifecycle carbon", "Quality", "Latency", "Cost/day", "Reliability", "Binding", "Status"), rows),
+            v2_15_reveal_card(
+                "Prediction vs actual",
+                partC_prediction.value or "no prediction yet",
+                actual_guardrail,
+                "The selected strategy is checked against every guardrail, so the blocker may not be carbon.",
+                "success" if partC_prediction.value == actual_guardrail else "warn",
+            ),
+            v2_15_math_peek(
+                "Math Peek / Source Model - mitigation guardrail predicate",
+                f"""
+```
+mitigated_carbon   = carbon_base * strategy_carbon_multiplier
+mitigated_quality  = quality_base + strategy_quality_delta
+mitigated_latency  = latency_base * strategy_latency_multiplier
+mitigated_cost     = cost_base * strategy_cost_multiplier
+launchable_strategy =
+  carbon <= budget and quality >= floor and latency <= SLO and
+  cost <= budget and reliability >= floor and governance_ok
+```
+
+Chapter connection: the Google 4 Ms and engineering guidelines reduce different
+terms. The lab makes the conjunction explicit so a local efficiency win cannot
+hide quality, reliability, or governance debt.
+"""
+            ),
+            partC_checkpoint,
+        ])
+
+    def build_part_d_and_report():
+        part_a = v2_15_part_a_result(v2_15_packet, partA_workload.value, partA_utilization.value)
+        part_b = v2_15_part_b_result(
+            v2_15_packet,
+            partA_workload.value,
+            partB_utilization.value,
+            partB_region.value,
+            partB_schedule.value,
+        )
+        strategy_packet = v2_15_strategy_candidates(v2_15_packet, part_b, partC_intensity.value, partC_governance.value)
+        policy_packet = v2_15_policy_candidates(v2_15_packet, part_b, strategy_packet, partD_carbon_price.value)
+        selected = next(item for item in policy_packet["candidates"] if item["policy_id"] == partD_policy.value)
+        launch_policy = selected if selected["passes"] else policy_packet["recommended"]
+        rejected = policy_packet["rejected"]
+
+        rows = []
+        for item in policy_packet["candidates"]:
+            rows.append((
+                item["label"],
+                f"{v2_15_num(item['carbon_kg'], 1)} kg/day",
+                f"{v2_15_num(item['lifecycle_kg'], 1)} kg/day",
+                f"{v2_15_num(item['quality_pct'], 1)}%",
+                f"{v2_15_num(item['latency_ms'], 1)} ms",
+                f"${v2_15_num(item['cost_usd'], 1)}",
+                item["binding"],
+                v2_15_status_html(item["passes"]),
+            ))
+
+        policy_fig = go.Figure()
+        policy_fig.add_trace(go.Bar(
+            x=[item["label"] for item in policy_packet["candidates"]],
+            y=[item["lifecycle_kg"] for item in policy_packet["candidates"]],
+            marker_color=[
+                v2_15_color("GreenLine", "#047857") if item["passes"] else v2_15_color("RedLine", "#b42318")
+                for item in policy_packet["candidates"]
+            ],
+            hovertemplate="%{x}: %{y:.2f} kg CO2e/day<extra></extra>",
+        ))
+        policy_fig.add_hline(
+            y=v2_15_packet["carbon_budget_kg_day"],
+            line=dict(color=v2_15_color("OrangeLine", "#d97706"), dash="dash", width=2),
+            annotation_text="operational carbon budget reference",
+            annotation_position="top right",
+        )
+        policy_fig.update_layout(height=330, yaxis=dict(title="Lifecycle kg CO2e/day"), margin=dict(t=45, b=95, l=60, r=20))
+        apply_plotly_theme(policy_fig)
+
+        _incomplete = []
+        for label, widget in (
+            ("Part A prediction", partA_prediction),
+            ("Part A checkpoint", partA_checkpoint),
+            ("Part B prediction", partB_prediction),
+            ("Part B checkpoint", partB_checkpoint),
+            ("Part C prediction", partC_prediction),
+            ("Part C checkpoint", partC_checkpoint),
+            ("Part D prediction", partD_prediction),
+            ("Part D checkpoint", partD_checkpoint),
+        ):
+            if widget.value is None:
+                _incomplete.append(label)
+        if not str(decision_input.value).strip():
+            _incomplete.append("Engineering memo note")
+
+        ledger_design = {
+            "track_id": v2_15_profile.track_id,
+            "selected_policy": launch_policy["label"],
+            "student_selected_policy": selected["label"],
+            "binding_amount": part_a["binding"],
+            "binding_policy_guardrail": launch_policy["binding"],
+            "rejected_alternative": rejected["label"],
+            "operational_carbon_kg_day": round(part_a["operational_kg"], 4),
+            "embodied_carbon_kg_day": round(part_a["embodied_kg_day"], 4),
+            "region": part_b["region"]["label"],
+            "schedule": part_b["schedule"]["label"],
+            "utilization": round(part_b["utilization"], 4),
+            "residual_risk": v2_15_packet["failure_story"],
+            "v2_16_responsible_ai_implication": v2_15_packet["v2_16_implication"],
+        }
+        if not _incomplete:
+            ledger.save(track=v2_15_profile.track_id, chapter=v2_15_chapter, design=ledger_design)
+
+        report = build_lab_report(
+            v2_15_metadata,
+            track=v2_15_profile.label,
+            scenario=v2_15_variant.workload_summary,
+            learning_objectives=(
+                "Model operational energy, carbon intensity, utilization, and embodied carbon as separate amounts.",
+                "Find the selected track's binding sustainability amount before optimizing.",
+                "Compare placement and scheduling choices under carbon and service-level guardrails.",
+                "Choose a mitigation strategy that preserves quality, latency, cost, reliability, and governance.",
+                "Export a carbon-aware policy memo with residual risk and V2-16 responsibility implication.",
+            ),
+            predictions={
+                "partA_binding_prediction": partA_prediction.value,
+                "partB_limiting_amount_prediction": partB_prediction.value,
+                "partC_guardrail_prediction": partC_prediction.value,
+                "partD_policy_prediction": partD_prediction.value,
+            },
+            knob_settings={
+                "workload_multiplier": partA_workload.value,
+                "partA_utilization_pct": partA_utilization.value,
+                "region": partB_region.value,
+                "schedule": partB_schedule.value,
+                "partB_utilization_pct": partB_utilization.value,
+                "strategy": partC_strategy.value,
+                "strategy_intensity_pct": partC_intensity.value,
+                "governance_review_attached": bool(partC_governance.value),
+                "policy": partD_policy.value,
+                "carbon_price_usd_per_ton": partD_carbon_price.value,
+            },
+            evidence_summary={
+                "partA_binding_amount": part_a["binding"],
+                "facility_energy_kwh_day": round(part_a["facility_energy_kwh"], 4),
+                "operational_carbon_kg_day": round(part_a["operational_kg"], 4),
+                "embodied_carbon_kg_day": round(part_a["embodied_kg_day"], 4),
+                "partB_region": part_b["region"]["label"],
+                "partB_schedule": part_b["schedule"]["label"],
+                "partB_carbon_kg_day": round(part_b["carbon_kg"], 4),
+                "partB_p99_ms": round(part_b["p99_ms"], 4),
+                "partB_service_ok": part_b["service_ok"],
+                "partC_recommended_strategy": strategy_packet["recommended"]["label"],
+                "partC_selected_strategy": next(item for item in strategy_packet["candidates"] if item["strategy_id"] == partC_strategy.value)["label"],
+                "partD_selected_policy": launch_policy["label"],
+                "partD_student_selected_policy": selected["label"],
+                "partD_binding_guardrail": launch_policy["binding"],
+                "rejected_alternative": rejected["label"],
+            },
+            final_decision={
+                "selected_policy": launch_policy["label"],
+                "binding_amount": part_a["binding"],
+                "binding_policy_guardrail": launch_policy["binding"],
+                "rejected_alternative": rejected["label"],
+                "residual_risk": v2_15_packet["failure_story"],
+                "v2_16_responsible_ai_implication": v2_15_packet["v2_16_implication"],
+            },
+            big_takeaways=(
+                "Sustainability requires amount accounting before optimization.",
+                "Carbon intensity and utilization can dominate per-operation efficiency.",
+                "Embodied carbon and operational carbon trade places across tracks.",
+                "A mitigation is valid only if service and governance guardrails still pass.",
+                "Carbon-aware policy needs demand governance to avoid rebound.",
+            ),
+            reflections={
+                "partA_checkpoint": partA_checkpoint.value,
+                "partB_checkpoint": partB_checkpoint.value,
+                "partC_checkpoint": partC_checkpoint.value,
+                "partD_checkpoint": partD_checkpoint.value,
+                "student_memo_note": str(decision_input.value),
+            },
+            residual_risk=(
+                f"{v2_15_packet['failure_story']} Validate these teaching estimates with measured workload power, "
+                "current grid data, hardware product carbon footprints, quality canaries, and governance review."
+            ),
+            source_trace={
+                "track_id": v2_15_profile.track_id,
+                "scenario_id": v2_15_variant.scenario_id,
+                "hardware_ref": v2_15_variant.hardware_ref,
+                "model_ref": v2_15_variant.model_ref,
+                "system_ref": v2_15_variant.system_ref or "device fleet",
+                "shared_helpers": ("get_lab_track_variant", "get_track_profile", "build_lab_report", "report_export_panel"),
+                "notebook_local_helpers": "v2_15_* amount model",
+                "chapter_sections": (
+                    "Energy Ceiling",
+                    "Carbon footprint analysis",
+                    "Geographic and temporal optimization",
+                    "Google 4 Ms",
+                    "Fallacies and Pitfalls",
+                ),
+            },
+            result_snapshot={
+                "track_packet": v2_15_packet,
+                "part_a": part_a,
+                "part_b": part_b,
+                "part_c": strategy_packet,
+                "part_d": policy_packet,
+                "ledger_design": ledger_design,
+            },
+            incomplete_fields=tuple(_incomplete),
+        )
+
+        return mo.vstack([
+            v2_15_part_banner(
+                "D",
+                "Carbon-Aware Policy Is A Guardrail Bundle",
+                "A launch policy must pass carbon, quality, latency, cost, reliability, governance, and rebound checks together.",
+                v2_15_color("PurpleLine", "#7c3aed"),
+            ),
+            mo.callout(
+                mo.md(
+                    f"**Scenario:** launch review requires a selected policy, rejected alternative, residual risk, "
+                    f"and the V2-16 responsibility implication for {v2_15_packet['track_label']}."
+                ),
+                kind="info",
+            ),
+            partD_prediction,
+            mo.hstack([partD_policy, partD_carbon_price], justify="center", gap=2),
+            v2_15_failure_card(
+                not selected["passes"],
+                f"Policy guardrail: {selected['binding']}",
+                (
+                    f"{selected['label']} has lifecycle carbon {v2_15_num(selected['lifecycle_kg'], 2)} kg/day, "
+                    f"quality {v2_15_num(selected['quality_pct'], 1)}%, latency {v2_15_num(selected['latency_ms'], 1)} ms, "
+                    f"cost ${v2_15_num(selected['cost_usd'], 1)}, reliability {v2_15_num(selected['reliability_pct'], 1)}%."
+                ),
+                f"use {policy_packet['recommended']['label']} or revise failed guardrails before launch",
+            ),
+            mo.hstack([
+                v2_15_metric_card("Selected", launch_policy["label"], "launch policy", v2_15_color("GreenLine", "#047857") if launch_policy["passes"] else v2_15_color("RedLine", "#b42318")),
+                v2_15_metric_card("Binding", launch_policy["binding"], "policy guardrail", v2_15_color("OrangeLine", "#d97706")),
+                v2_15_metric_card("Rejected", rejected["label"], "alternative", v2_15_color("RedLine", "#b42318")),
+                v2_15_metric_card("V2-16", "responsibility", "next implication", v2_15_color("BlueLine", "#2563eb")),
+            ], justify="center", gap=1),
+            mo.ui.plotly(policy_fig),
+            v2_15_table(("Policy", "Operational carbon", "Lifecycle carbon", "Quality", "Latency", "Cost/day", "Binding", "Status"), rows),
+            v2_15_reveal_card(
+                "Prediction vs actual",
+                partD_prediction.value or "no prediction yet",
+                policy_packet["recommended"]["policy_id"],
+                "The recommended policy is the lowest lifecycle-carbon option that passes every launch guardrail.",
+                "success" if partD_prediction.value == policy_packet["recommended"]["policy_id"] else "warn",
+            ),
+            v2_15_math_peek(
+                "Math Peek / Source Model - policy launch predicate",
+                f"""
+```
+launchable =
+  carbon <= carbon_budget and quality >= quality_floor and latency <= SLO and
+  cost + carbon_price * tonnes <= cost_budget and reliability >= floor and
+  governance_ok and rebound_guardrail
+```
+
+Chapter connection: policy changes the objective function. The carbon price
+makes carbon visible in cost, while the rebound guardrail prevents efficiency
+savings from being spent as unconstrained demand growth.
+"""
+            ),
+            partD_checkpoint,
+            decision_input,
+            mo.callout(
+                mo.md(
+                    f"**Synthesis memo:** Use `{launch_policy['label']}`. Binding amount from Part A is "
+                    f"`{part_a['binding']}`; current policy guardrail is `{launch_policy['binding']}`. "
+                    f"Reject `{rejected['label']}`. V2-16 implication: {v2_15_packet['v2_16_implication']}"
+                ),
+                kind="success" if not _incomplete else "warn",
+            ),
+            source_trace(
+                {
+                    "selected_track": v2_15_profile.track_id,
+                    "selected_policy": launch_policy["label"],
+                    "binding_amount": part_a["binding"],
+                    "rejected_alternative": rejected["label"],
+                    "ledger_save": "enabled after required predictions, checkpoints, and memo note are complete",
+                    "report_artifact": "carbon-aware engineering memo",
+                },
+                collapsed=True,
+                summary="Final memo source trace and ledger handoff.",
+            ),
+            mo.md("## Download Report"),
+            report_export_panel(report),
+        ])
+
+    def build_synthesis():
+        return build_part_d_and_report()
+
+    mo.vstack([
+        build_part_a(),
+        build_part_b(),
+        build_part_c(),
+        build_synthesis(),
+        mo.Html(
+            f"""
+<div class="lab-hud">
+  <span class="hud-label">LAB</span>
+  <span class="hud-value">15 &middot; Sustainable AI</span>
+  <span class="hud-label">TRACK</span>
+  <span class="hud-value">{v2_15_profile.label}</span>
+</div>
+"""
+        ),
+    ])
     return
+
 
 if __name__ == "__main__":
     app.run()
