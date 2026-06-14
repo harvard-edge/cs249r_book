@@ -13,6 +13,7 @@ async def _():
     import marimo as mo
     import sys
     import math
+    import html
     from pathlib import Path
     import numpy as np
 
@@ -67,6 +68,7 @@ async def _():
         get_lab_track_variant,
         get_track_profile,
         go,
+        html,
         ledger,
         math,
         mlsysim,
@@ -127,6 +129,354 @@ def _(
     )
 
 
+@app.cell
+def _(batching_tax, cache_capacity, cold_start_latency, html, math, queueing_latency):
+    def v1_13_track_packet(track_id, serving, variant):
+        common = {
+            "stakeholder": variant.stakeholder,
+            "amount_focus": "requests, tail latency, capacity headroom, and recurring cost",
+            "replica_label": "serving replicas",
+            "batch_amount": "requests per batch",
+            "queue_failure": "p99 crosses the SLO before the mean looks alarming",
+            "cost_label": "Cost/request",
+            "cost_unit": "USD/request",
+            "cost_limit": 0.00055,
+            "hourly_cost_per_device": 3.50,
+            "warm_pool_floor": 0.25,
+            "cold_allowance_ms": serving.slo_ms * 20,
+            "policy_guardrail": variant.guardrail_metric,
+            "first_mitigation": "reduce utilization with replicas, smaller batches, or load shedding",
+            "ops_risks": {
+                "arrival_shift": "Arrival traces shift after launch, invalidating the p99 frontier.",
+                "cold_start": "Scale-out cold starts expose users before warm capacity is ready.",
+                "state_growth": f"Live {serving.state_kind} grows faster than capacity planning assumed.",
+            },
+        }
+        overrides = {
+            "iphone": {
+                "amount_focus": "local requests/sec, app p99, energy/request, thermal headroom, and fallback share",
+                "replica_label": "local lanes / bounded fallback paths",
+                "batch_amount": "UI requests per local batch",
+                "queue_failure": "background work makes the app miss its responsiveness budget",
+                "cost_label": "Energy/request",
+                "cost_unit": "mJ/request",
+                "cost_limit": 650.0,
+                "hourly_cost_per_device": 0.0,
+                "warm_pool_floor": 0.0,
+                "cold_allowance_ms": serving.slo_ms * 8,
+                "first_mitigation": "prefer batch size 1-2, cap fallback, and shed noninteractive work",
+                "ops_risks": {
+                    "thermal": "Thermal throttling lengthens service time after sustained use.",
+                    "fallback": "Cloud fallback share grows under burst load and harms privacy or battery.",
+                    "arrival_shift": "Background app work changes the local arrival distribution.",
+                },
+            },
+            "oura_ring": {
+                "amount_focus": "sensor windows, wake duty cycle, data freshness, state bytes, and battery/day",
+                "replica_label": "serving windows / phone-mediated sync lanes",
+                "batch_amount": "sensor windows per wake",
+                "queue_failure": "a sparse queue still misses the sensing cadence when wake windows slip",
+                "cost_label": "Wake energy/window",
+                "cost_unit": "mJ/window",
+                "cost_limit": 45.0,
+                "hourly_cost_per_device": 0.0,
+                "warm_pool_floor": 0.0,
+                "cold_allowance_ms": serving.slo_ms * 8,
+                "first_mitigation": "defer nonurgent sync, keep batch size 1, and preserve duty-cycle slack",
+                "ops_risks": {
+                    "freshness": "Deferred phone sync creates stale summaries before upload.",
+                    "battery": "Radio wakeups dominate the expected energy/window.",
+                    "state_growth": "Sensor window buffers exceed the firmware memory reserve.",
+                },
+            },
+            "robotaxi": {
+                "amount_focus": "frames/sec, p99/p999 deadline, warm spare margin, and power per frame",
+                "replica_label": "perception lanes / warm safety spares",
+                "batch_amount": "sensor frames per scheduler batch",
+                "queue_failure": "a sensor burst crosses the perception deadline and consumes safety margin",
+                "cost_label": "Power cost/frame",
+                "cost_unit": "J/frame",
+                "cost_limit": 2.4,
+                "hourly_cost_per_device": 0.0,
+                "warm_pool_floor": 0.5,
+                "cold_allowance_ms": serving.slo_ms * 4,
+                "first_mitigation": "use batch size 1, bounded queues, priority lanes, and warm fallback",
+                "ops_risks": {
+                    "p999": "Rare sensor bursts push p999 past the perception deadline.",
+                    "fallback": "Fallback perception path lacks enough warm safety margin.",
+                    "power": "Extra warm lanes exceed the vehicle power envelope.",
+                },
+            },
+            "cloud_fleet": {
+                "amount_focus": "QPS, batch size, replicas, utilization, p99 SLA, and cost/request",
+                "replica_label": "API replicas",
+                "batch_amount": "requests per accelerator batch",
+                "queue_failure": "multi-tenant demand drives replicas through the queueing knee",
+                "cost_label": "Cost/request",
+                "cost_unit": "USD/request",
+                "cost_limit": 0.00055,
+                "hourly_cost_per_device": 3.50,
+                "warm_pool_floor": 0.4,
+                "cold_allowance_ms": serving.slo_ms * 20,
+                "first_mitigation": "autoscale earlier, keep a warm pool, or shed/degrade excess requests",
+                "ops_risks": {
+                    "arrival_shift": "Customer traffic shifts from Poisson-like load to synchronized bursts.",
+                    "cold_start": "Scale-out cold starts lengthen p99 during the same event that needs capacity.",
+                    "state_growth": "KV cache growth lowers live concurrency below the admission target.",
+                },
+            },
+        }
+        base_risks = dict(common["ops_risks"])
+        override = overrides.get(track_id, {})
+        override_risks = dict(override.get("ops_risks", {}))
+        packet = dict(common)
+        packet.update(override)
+        packet["ops_risks"] = {**base_risks, **override_risks}
+        return packet
+
+    def v1_13_fmt_amount(value, unit, precision=2):
+        if not math.isfinite(value):
+            return "unstable"
+        if abs(value) >= 100:
+            return f"{value:,.0f} {unit}"
+        if abs(value) >= 10:
+            return f"{value:,.1f} {unit}"
+        return f"{value:,.{precision}f} {unit}"
+
+    def v1_13_metric_card(label, value, detail, color, border=False):
+        border_style = f"2px solid {color}" if border else "1px solid #e2e8f0"
+        return f"""
+        <div style="padding:16px; border:{border_style}; border-radius:10px;
+                    min-width:150px; text-align:center; background:white;
+                    border-top:3px solid {color}; flex:1;">
+            <div style="color:#64748b; font-size:0.78rem; font-weight:700;">{html.escape(str(label))}</div>
+            <div style="font-size:1.55rem; font-weight:800; color:{color};">{html.escape(str(value))}</div>
+            <div style="font-size:0.72rem; color:#64748b;">{html.escape(str(detail))}</div>
+        </div>
+        """
+
+    def v1_13_html_table(headers, rows):
+        header_html = "".join(
+            f"<th style='text-align:left; padding:8px 10px; border-bottom:1px solid #cbd5e1;'>{html.escape(str(h))}</th>"
+            for h in headers
+        )
+        row_html = ""
+        for row in rows:
+            row_html += "<tr>"
+            for cell in row:
+                row_html += (
+                    "<td style='padding:8px 10px; border-bottom:1px solid #e2e8f0; "
+                    f"vertical-align:top;'>{html.escape(str(cell))}</td>"
+                )
+            row_html += "</tr>"
+        return f"""
+        <div style="overflow-x:auto; margin:14px 0;">
+            <table style="width:100%; border-collapse:collapse; background:white; font-size:0.86rem;">
+                <thead><tr>{header_html}</tr></thead>
+                <tbody>{row_html}</tbody>
+            </table>
+        </div>
+        """
+
+    def v1_13_request_cost(serving, packet, *, arrival_qps, service_ms, replicas, warm_pool, buffer_pct, throughput_gain):
+        arrival = max(0.0001, float(arrival_qps))
+        planned_replicas = max(1.0, float(replicas) * (1.0 + max(0.0, buffer_pct) / 100.0))
+        warm = max(0.0, float(warm_pool))
+        if packet["cost_unit"] == "USD/request":
+            hourly = packet["hourly_cost_per_device"]
+            devices = max(1, serving.default_devices_per_replica)
+            standing_units = planned_replicas + 0.35 * warm
+            value = standing_units * devices * hourly / (arrival * 3600.0)
+        else:
+            active_j = serving.tdp_w * (service_ms / 1000.0) / max(1.0, throughput_gain)
+            standby_j = serving.tdp_w * 0.04 * max(0.0, planned_replicas + warm - 1.0) / arrival
+            value_j = active_j + standby_j
+            value = value_j if packet["cost_unit"] == "J/frame" else value_j * 1000.0
+        return {
+            "value": value,
+            "label": packet["cost_label"],
+            "unit": packet["cost_unit"],
+            "limit": packet["cost_limit"],
+            "ok": value <= packet["cost_limit"],
+        }
+
+    def v1_13_policy_candidates(serving, track_id):
+        default_batch = max(1, int(serving.batch_size))
+        default_replicas = max(1, int(serving.replicas))
+        default_warm = max(0, int(serving.warm_pool_replicas))
+        candidates = {
+            "default": {
+                "label": "Track default policy",
+                "batch_size": default_batch,
+                "replicas": default_replicas,
+                "buffer_pct": 0,
+                "warm_pool": default_warm,
+                "demand_multiplier": 1.0,
+                "rationale": "Use the variant defaults as the baseline launch posture.",
+            },
+            "batch_efficiency": {
+                "label": "Batch for throughput",
+                "batch_size": min(64, max(2, default_batch * 2 if default_batch > 1 else 4)),
+                "replicas": default_replicas,
+                "buffer_pct": 10,
+                "warm_pool": default_warm,
+                "demand_multiplier": 1.0,
+                "rationale": "Spend some latency budget to improve throughput per serving unit.",
+            },
+            "tail_headroom": {
+                "label": "Scale for tail headroom",
+                "batch_size": max(1, default_batch // 2),
+                "replicas": max(default_replicas + 1, math.ceil(default_replicas * 1.5)),
+                "buffer_pct": 30,
+                "warm_pool": max(default_warm, 1),
+                "demand_multiplier": 1.0,
+                "rationale": "Buy lower utilization and p99 headroom with more standing capacity.",
+            },
+            "fallback_defer": {
+                "label": "Bounded fallback/defer path",
+                "batch_size": 1,
+                "replicas": default_replicas,
+                "buffer_pct": 15,
+                "warm_pool": default_warm,
+                "demand_multiplier": 0.8,
+                "rationale": "Admit only the urgent path locally and defer or route noncritical work.",
+            },
+        }
+        if track_id == "robotaxi":
+            candidates["fallback_defer"].update({
+                "label": "Priority safety path",
+                "replicas": max(2, default_replicas + 1),
+                "buffer_pct": 35,
+                "warm_pool": max(1, default_warm),
+                "demand_multiplier": 1.0,
+                "rationale": "Keep batch size 1 and reserve a warm safety lane for bursts.",
+            })
+        elif track_id == "oura_ring":
+            candidates["fallback_defer"].update({
+                "label": "Deferred phone sync",
+                "demand_multiplier": 0.65,
+                "rationale": "Serve the local window and defer nonurgent phone-mediated sync.",
+            })
+        elif track_id == "cloud_fleet":
+            candidates["fallback_defer"].update({
+                "label": "Admission control + warm pool",
+                "replicas": default_replicas,
+                "warm_pool": max(2, default_warm),
+                "demand_multiplier": 0.9,
+                "rationale": "Shed/degrade excess traffic while keeping warm replicas for scale-out.",
+            })
+        return candidates
+
+    def v1_13_evaluate_policy(
+        serving,
+        model,
+        packet,
+        candidate,
+        *,
+        cost_multiplier=1.0,
+        capacity_reserve_pct=20,
+    ):
+        batch_size = max(1, int(candidate["batch_size"]))
+        visible_replicas = max(1, int(candidate["replicas"]))
+        buffer_pct = max(0.0, float(candidate["buffer_pct"]))
+        planned_replicas = max(1, math.ceil(visible_replicas * (1 + buffer_pct / 100.0)))
+        arrival_qps = max(0.0001, serving.arrival_qps * float(candidate["demand_multiplier"]))
+        batching = batching_tax(
+            batch_size=batch_size,
+            arrival_qps=arrival_qps,
+            service_ms=serving.service_ms,
+            slo_ms=serving.slo_ms,
+            efficiency_gain=serving.batch_efficiency_gain,
+            replicas=planned_replicas,
+            service_cv=serving.service_cv,
+        )
+        queue = queueing_latency(
+            arrival_qps=arrival_qps / batch_size,
+            service_ms=batching.batched_service_ms,
+            replicas=planned_replicas,
+            service_cv=serving.service_cv,
+            slo_ms=serving.slo_ms,
+        )
+        capacity = cache_capacity(
+            serving,
+            model,
+            context_tokens=serving.context_tokens,
+            precision_bytes=serving.precision_bytes,
+            devices_per_replica=serving.default_devices_per_replica,
+            kv_precision_bytes=serving.kv_precision_bytes,
+        )
+        p99_ms = batching.total_p99_ms
+        live_required = math.inf if not math.isfinite(p99_ms) else max(1, math.ceil(arrival_qps * p99_ms / 1000.0))
+        live_with_reserve = math.inf if not math.isfinite(live_required) else math.ceil(live_required * (1 + capacity_reserve_pct / 100.0))
+        capacity_ok = (not capacity.oom) and capacity.max_concurrent >= live_with_reserve
+        cost = v1_13_request_cost(
+            serving,
+            packet,
+            arrival_qps=arrival_qps,
+            service_ms=batching.batched_service_ms,
+            replicas=planned_replicas,
+            warm_pool=int(candidate["warm_pool"]),
+            buffer_pct=0,
+            throughput_gain=batching.throughput_gain,
+        )
+        cost_limit = cost["limit"] * max(0.1, float(cost_multiplier))
+        cost_ok = cost["value"] <= cost_limit
+        cold = cold_start_latency(
+            serving,
+            precision_bytes=serving.precision_bytes,
+            warm_pool_replicas=int(candidate["warm_pool"]),
+            scale_out_replicas=max(1, planned_replicas - serving.replicas + 1),
+        )
+        warm_ok = (
+            cold.protected_fraction >= packet["warm_pool_floor"]
+            or cold.exposed_first_request_ms <= packet["cold_allowance_ms"]
+        )
+        checks = [
+            ("p99/SLO", batching.slo_ok, f"{p99_ms:.1f} ms <= {serving.slo_ms:g} ms"),
+            ("capacity/state", capacity_ok, f"{live_with_reserve} live <= {capacity.max_concurrent} fit"),
+            (
+                packet["cost_label"],
+                cost_ok,
+                f"{v1_13_fmt_amount(cost['value'], cost['unit'])} <= {v1_13_fmt_amount(cost_limit, cost['unit'])}",
+            ),
+            ("warm scale-out", warm_ok, f"{cold.protected_fraction*100:.0f}% protected"),
+        ]
+        binding = "none - all guardrails pass"
+        for name, ok, detail in checks:
+            if not ok:
+                binding = f"{name}: {detail}"
+                break
+        return {
+            "candidate": candidate,
+            "arrival_qps": arrival_qps,
+            "batching": batching,
+            "queue": queue,
+            "capacity": capacity,
+            "cold": cold,
+            "cost": cost,
+            "cost_limit": cost_limit,
+            "planned_replicas": planned_replicas,
+            "live_required": live_required,
+            "live_with_reserve": live_with_reserve,
+            "capacity_ok": capacity_ok,
+            "cost_ok": cost_ok,
+            "warm_ok": warm_ok,
+            "feasible": batching.slo_ok and capacity_ok and cost_ok and warm_ok,
+            "binding": binding,
+            "checks": checks,
+        }
+
+    return (
+        v1_13_evaluate_policy,
+        v1_13_fmt_amount,
+        v1_13_html_table,
+        v1_13_metric_card,
+        v1_13_policy_candidates,
+        v1_13_request_cost,
+        v1_13_track_packet,
+    )
+
+
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
@@ -157,7 +507,7 @@ def _(
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Queuing &middot; Batching &middot; State/Cache &middot; Cold Start
+                Batching &middot; Queueing &middot; Replicas &middot; Launch Policy
             </p>
             <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
                       max-width: 760px; line-height: 1.65;">
@@ -207,12 +557,12 @@ def _(COLORS, mo, v1_13_serving, v1_13_variant):
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify tail amplification:</strong>
-                    utilization and service-time variance turn a normal service time into a p99 SLO risk.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Separate throughput wins from latency taxes:</strong>
-                    static batching can improve throughput while spending the SLO before inference starts.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Size state and scale-out policy:</strong>
-                    {v1_13_serving.state_kind}, model weights, and cold starts determine safe concurrency.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Measure batching as a trade:</strong>
+                    throughput gain and formation delay land in the same p99 budget.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose queueing tails:</strong>
+                    arrival rate and utilization can fail p99 while mean latency looks fine.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Launch with guardrails:</strong>
+                    replicas, warm capacity, {v1_13_serving.state_kind}, and cost/energy must pass together.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -277,15 +627,14 @@ def _(mo):
 def _(mo, v1_13_serving):
     partA_pred = mo.ui.radio(
         options={
-            "A) Mean latency is enough": "mean",
-            "B) P99 is roughly 2x service time": "2x",
-            "C) P99 explodes near saturation": "tail",
-            "D) Replicas remove queueing entirely": "replicas",
+            "A) Batching only improves throughput": "throughput_only",
+            "B) Batching improves throughput but can spend latency": "tradeoff",
+            "C) Batching only changes memory": "memory_only",
+            "D) Batching removes queueing": "removes_queueing",
         },
         label=(
-            f"{v1_13_serving.label}: {v1_13_serving.arrival_qps:g} QPS, "
-            f"{v1_13_serving.service_ms:g} ms service, "
-            f"{v1_13_serving.replicas} replica(s). What happens to p99?"
+            f"{v1_13_serving.label}: if we batch {v1_13_serving.batch_size} request(s), "
+            "what changes first?"
         ),
     )
     return (partA_pred,)
@@ -293,49 +642,7 @@ def _(mo, v1_13_serving):
 
 @app.cell(hide_code=True)
 def _(mo, v1_13_serving):
-    _capacity_qps = 1000 / v1_13_serving.service_ms * v1_13_serving.replicas
-    _raw_util = min(0.95, max(0.05, v1_13_serving.arrival_qps / _capacity_qps))
-    _default_util = round(round(_raw_util / 0.05) * 0.05, 2)
-    partA_rho = mo.ui.slider(
-        start=0.05,
-        stop=0.95,
-        value=_default_util,
-        step=0.05,
-        label="Server utilization (rho)",
-    )
-    partA_svc = mo.ui.slider(
-        start=1.0,
-        stop=max(200.0, v1_13_serving.service_ms * 3),
-        value=v1_13_serving.service_ms,
-        step=1.0,
-        label="Service time (ms)",
-    )
-    partA_slo = mo.ui.slider(
-        start=10.0,
-        stop=max(500.0, v1_13_serving.slo_ms * 3),
-        value=v1_13_serving.slo_ms,
-        step=10.0,
-        label="SLO budget (ms)",
-    )
-
-    partB_pred = mo.ui.radio(
-        options={
-            "A) Batching always improves p99": "always",
-            "B) Formation delay can consume the SLO": "delay",
-            "C) Batching only changes memory": "memory",
-            "D) Batching removes cold starts": "cold",
-        },
-        label=(
-            f"Batch {v1_13_serving.batch_size} at "
-            f"{v1_13_serving.arrival_qps:g} QPS. What is the first latency tax?"
-        ),
-    )
-    return (partA_rho, partA_slo, partA_svc, partB_pred)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_13_serving):
-    partB_batch = mo.ui.slider(
+    partA_batch = mo.ui.slider(
         start=1,
         stop=64,
         value=v1_13_serving.batch_size,
@@ -352,12 +659,73 @@ def _(mo, v1_13_serving):
         _arr_stop = max(10.0, v1_13_serving.arrival_qps * 4)
         _arr_step = max(1.0, v1_13_serving.arrival_qps / 20)
         _arr_value = v1_13_serving.arrival_qps
+    partA_arr = mo.ui.slider(
+        start=_arr_start,
+        stop=_arr_stop,
+        value=_arr_value,
+        step=_arr_step,
+        label="Arrival rate (QPS)",
+    )
+    partA_slo = mo.ui.slider(
+        start=10,
+        stop=max(500, int(v1_13_serving.slo_ms * 3)),
+        value=int(v1_13_serving.slo_ms),
+        step=5,
+        label="SLO budget (ms)",
+    )
+    partA_checkpoint = mo.ui.radio(
+        options={
+            "Keep this batch size": "keep",
+            "Reduce batching for latency": "reduce",
+            "Reject batching for this track": "reject",
+        },
+        label="Checkpoint: what batching decision belongs in the launch memo?",
+    )
+    return (partA_arr, partA_batch, partA_checkpoint, partA_slo)
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_13_serving):
+    partB_pred = mo.ui.radio(
+        options={
+            "A) Mean latency proves the service is healthy": "mean",
+            "B) Utilization and p99 reveal the failure": "tail",
+            "C) Arrival rate only affects cost": "cost",
+            "D) Replicas remove all queueing": "replicas",
+        },
+        label=(
+            f"{v1_13_serving.label}: average service is {v1_13_serving.service_ms:g} ms. "
+            "Which evidence decides whether traffic is safe?"
+        ),
+    )
+    return (partB_pred,)
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_13_serving):
+    if v1_13_serving.arrival_qps < 1:
+        _arr_start = 0.001
+        _arr_stop = max(0.5, v1_13_serving.arrival_qps * 20)
+        _arr_step = 0.001
+        _arr_value = v1_13_serving.arrival_qps
+    else:
+        _arr_start = max(1.0, v1_13_serving.arrival_qps * 0.25)
+        _arr_stop = max(10.0, v1_13_serving.arrival_qps * 4)
+        _arr_step = max(1.0, v1_13_serving.arrival_qps / 25)
+        _arr_value = v1_13_serving.arrival_qps
     partB_arr = mo.ui.slider(
         start=_arr_start,
         stop=_arr_stop,
         value=_arr_value,
         step=_arr_step,
         label="Arrival rate (QPS)",
+    )
+    partB_svc = mo.ui.slider(
+        start=1.0,
+        stop=max(200.0, v1_13_serving.service_ms * 3),
+        value=v1_13_serving.service_ms,
+        step=1.0,
+        label="Service time (ms)",
     )
     partB_slo = mo.ui.slider(
         start=10,
@@ -366,94 +734,127 @@ def _(mo, v1_13_serving):
         step=5,
         label="SLO budget (ms)",
     )
+    partB_checkpoint = mo.ui.radio(
+        options={
+            "Operate below the queueing knee": "headroom",
+            "Watch mean latency only": "mean",
+            "Accept p99 violations at peak": "accept_tail",
+        },
+        label="Checkpoint: what queueing rule should carry forward?",
+    )
+    return (partB_arr, partB_checkpoint, partB_slo, partB_svc)
 
+
+@app.cell(hide_code=True)
+def _(mo, v1_13_serving):
     partC_pred = mo.ui.radio(
         options={
-            "A) Peak compute sets concurrency": "compute",
-            "B) Weights plus live state/cache set concurrency": "memory",
-            "C) Replicas make memory irrelevant": "replicas",
-            "D) Context/window length does not matter": "context",
+            "A) More replicas always solve the serving problem": "always",
+            "B) Replicas trade p99 headroom against cost and warm capacity": "tradeoff",
+            "C) Replicas change only memory": "memory",
+            "D) Autoscaling has no p99 effect": "none",
         },
         label=(
-            f"{v1_13_serving.model_name} on {v1_13_serving.hardware_name}: "
-            "what limits live requests?"
+            f"{v1_13_serving.label}: should we scale beyond "
+            f"{v1_13_serving.replicas} serving unit(s)?"
         ),
     )
-    return (partB_arr, partB_batch, partB_slo, partC_pred)
+    return (partC_pred,)
 
 
 @app.cell(hide_code=True)
 def _(mo, v1_13_serving):
-    partC_model = mo.ui.dropdown(
-        options={v1_13_serving.model_name: v1_13_serving.model_ref},
-        value=v1_13_serving.model_name,
-        label="Model ref",
-    )
-    partC_prec = mo.ui.dropdown(
-        options={"FP16 (2B)": 2.0, "INT8 (1B)": 1.0, "INT4 (0.5B)": 0.5},
-        value={2.0: "FP16 (2B)", 1.0: "INT8 (1B)", 0.5: "INT4 (0.5B)"}.get(
-            v1_13_serving.precision_bytes,
-            "FP16 (2B)",
-        ),
-        label="Weight precision (bytes)",
-    )
-    partC_ctx = mo.ui.slider(
-        start=256,
-        stop=max(131072, v1_13_serving.context_tokens),
-        value=v1_13_serving.context_tokens,
-        step=256 if v1_13_serving.context_tokens <= 4096 else 2048,
-        label="Context/window length (tokens)",
-    )
-    partC_gpus = mo.ui.dropdown(
-        options={"1 device": 1, "2 devices": 2, "4 devices": 4, "8 devices": 8},
-        value={1: "1 device", 2: "2 devices", 4: "4 devices", 8: "8 devices"}.get(
-            v1_13_serving.default_devices_per_replica,
-            "1 device",
-        ),
-        label="Devices per serving unit",
-    )
-
-    partD_pred = mo.ui.radio(
-        options={
-            "A) Cold start is close to normal service time": "service",
-            "B) Data movement dominates first-request latency": "movement",
-            "C) Warm pools only affect throughput": "throughput",
-            "D) Cold starts are unrelated to SLO": "unrelated",
-        },
-        label=(
-            f"{v1_13_serving.label}: scale out {v1_13_serving.model_name}. "
-            "What dominates the first uncached request?"
-        ),
-    )
-    return (partC_ctx, partC_gpus, partC_model, partC_prec, partD_pred)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_13_serving):
-    partD_scaleout = mo.ui.slider(
+    partC_replicas = mo.ui.slider(
         start=1,
-        stop=16,
-        value=v1_13_serving.scale_out_replicas,
+        stop=max(16, v1_13_serving.replicas * 3),
+        value=v1_13_serving.replicas,
         step=1,
-        label="Scale-out replicas",
+        label="Visible serving units",
     )
-    partD_stor = mo.ui.dropdown(
-        options={
-            "Registry/default storage": "default",
-            "Slow network storage": "nfs",
-            "Cached in host RAM": "ram",
-        },
-        value="Registry/default storage",
-        label="Storage type",
-    )
-    partD_warm_pool = mo.ui.slider(
+    partC_buffer = mo.ui.slider(
         start=0,
-        stop=8,
+        stop=100,
+        value=25,
+        step=5,
+        label="Autoscale headroom (%)",
+    )
+    partC_warm_pool = mo.ui.slider(
+        start=0,
+        stop=max(8, v1_13_serving.scale_out_replicas * 2),
         value=v1_13_serving.warm_pool_replicas,
         step=1,
-        label="Warm pool replicas",
+        label="Warm pool units",
     )
-    return (partD_scaleout, partD_stor, partD_warm_pool)
+    partC_checkpoint = mo.ui.radio(
+        options={
+            "Minimum policy that passes p99": "minimum_pass",
+            "Overprovision for safety": "overprovision",
+            "Keep default and accept risk": "accept_risk",
+        },
+        label="Checkpoint: which replica/autoscale posture should the report use?",
+    )
+    return (partC_buffer, partC_checkpoint, partC_replicas, partC_warm_pool)
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_13_serving):
+    partD_pred = mo.ui.radio(
+        options={
+            "A) Fastest p99 is automatically launchable": "fastest",
+            "B) Lowest cost/request is automatically launchable": "cheapest",
+            "C) Launch requires all SLO, capacity, cost, and guardrails to pass": "all_guardrails",
+            "D) Warm pools are only an operations detail": "warm_later",
+        },
+        label=(
+            f"{v1_13_serving.label}: what makes a serving policy valid enough to launch?"
+        ),
+    )
+    return (partD_pred,)
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_13_policy_candidates, v1_13_serving, v1_13_track_id):
+    _candidates = v1_13_policy_candidates(v1_13_serving, v1_13_track_id)
+    _options = {spec["label"]: key for key, spec in _candidates.items()}
+    partD_policy = mo.ui.dropdown(
+        options=_options,
+        value="Track default policy",
+        label="Selected launch policy",
+    )
+    partD_cost_multiplier = mo.ui.slider(
+        start=0.5,
+        stop=1.5,
+        value=1.0,
+        step=0.05,
+        label="Cost/energy guardrail multiplier",
+    )
+    partD_capacity_reserve = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=20,
+        step=5,
+        label="Live-state reserve (%)",
+    )
+    partD_reject = mo.ui.dropdown(
+        options=_options,
+        value="Batch for throughput",
+        label="Rejected alternative",
+    )
+    partD_ops_risk = mo.ui.radio(
+        options={
+            "Arrival trace shifts after launch": "arrival_shift",
+            "Warm capacity is not ready during scale-out": "cold_start",
+            f"Live {v1_13_serving.state_kind} grows faster than planned": "state_growth",
+        },
+        label="Carry-forward operations risk",
+    )
+    return (
+        partD_capacity_reserve,
+        partD_cost_multiplier,
+        partD_ops_risk,
+        partD_policy,
+        partD_reject,
+    )
 
 
 # ===========================================================================
@@ -472,570 +873,671 @@ def _(
     math,
     mo,
     np,
+    partA_arr,
+    partA_batch,
+    partA_checkpoint,
     partA_pred,
-    partA_rho,
     partA_slo,
-    partA_svc,
     partB_arr,
-    partB_batch,
+    partB_checkpoint,
     partB_pred,
     partB_slo,
-    partC_ctx,
-    partC_gpus,
-    partC_model,
-    partC_prec,
+    partB_svc,
+    partC_buffer,
+    partC_checkpoint,
     partC_pred,
+    partC_replicas,
+    partC_warm_pool,
+    partD_capacity_reserve,
+    partD_cost_multiplier,
+    partD_ops_risk,
+    partD_policy,
     partD_pred,
-    partD_scaleout,
-    partD_stor,
-    partD_warm_pool,
+    partD_reject,
     queueing_latency,
+    v1_13_evaluate_policy,
+    v1_13_fmt_amount,
+    v1_13_html_table,
+    v1_13_metric_card,
+    v1_13_policy_candidates,
+    v1_13_request_cost,
+    v1_13_track_id,
+    v1_13_track_packet,
     v1_13_model,
     v1_13_profile,
     v1_13_serving,
     v1_13_variant,
 ):
-    def _metric_card(label, value, detail, color, border=False):
-        border_style = f"2px solid {color}" if border else "1px solid #e2e8f0"
-        return f"""
-        <div style="padding:16px; border:{border_style}; border-radius:10px;
-                    min-width:150px; text-align:center; background:white;
-                    border-top:3px solid {color}; flex:1;">
-            <div style="color:#64748b; font-size:0.78rem; font-weight:700;">{label}</div>
-            <div style="font-size:1.55rem; font-weight:800; color:{color};">{value}</div>
-            <div style="font-size:0.72rem; color:#64748b;">{detail}</div>
+    v1_13_packet = v1_13_track_packet(v1_13_track_id, v1_13_serving, v1_13_variant)
+    v1_13_candidates = v1_13_policy_candidates(v1_13_serving, v1_13_track_id)
+
+    def v1_13_part_banner(part, title, color, body):
+        return mo.Html(f"""
+        <div style="border-left:4px solid {color}; background:white;
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;
+                    box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size:0.72rem; font-weight:700; color:{color};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Part {part} Concept Module &middot; {v1_13_packet['stakeholder']}
+            </div>
+            <div style="font-weight:800; font-size:1.1rem; color:#0f172a; margin-bottom:6px;">
+                {title}
+            </div>
+            <div style="font-size:0.94rem; color:#334155; line-height:1.6;">{body}</div>
         </div>
-        """
+        """)
+
+    def v1_13_prediction_feedback(actual_key, selected, correct_text, miss_text):
+        if selected == actual_key:
+            return mo.callout(mo.md(correct_text), kind="success")
+        return mo.callout(mo.md(miss_text), kind="warn")
 
     def build_part_a():
         items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Incoming Message &middot; {v1_13_variant.stakeholder}
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "The average request looks fine on {v1_13_serving.label}. Can we trust
-                    that number, or will p99 violate {v1_13_serving.slo_ms:g} ms?"
-                </div>
-            </div>
-            """),
-            mo.md("""
-## Queueing Turns Utilization Into Tail Latency
+            v1_13_part_banner(
+                "A",
+                "Batching Changes Throughput And Latency Together",
+                COLORS["BlueLine"],
+                (
+                    f"{v1_13_serving.label} is deciding whether the default batch policy can launch. "
+                    f"The amount system is {v1_13_packet['amount_focus']}."
+                ),
+            ),
+            mo.md(f"""
+## Concept: Batching Is A Trade, Not A Free Win
 
-The serving wall is not only service time. Once utilization rises, requests wait
-behind other requests. This lab uses the shared `mlsysbook_labs.queueing_latency`
-helper, an M/M/c queue with a service-variability adjustment.
-
-```
-rho = arrival_rate / (replicas * service_rate)
-p99 = service_time + queue_tail(rho, replicas, service_cv)
-```
+A batch can improve throughput per serving unit, but the first request in the
+batch waits while the batch forms. For {v1_13_serving.label}, that wait is paid
+inside the same {v1_13_serving.slo_ms:g} ms p99 budget as model service time.
             """),
             partA_pred,
         ]
         if partA_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the p99 instruments."), kind="warn"))
+            items.append(mo.callout(mo.md("Commit to a batching prediction before opening the latency decomposition."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partA_rho, partA_svc, partA_slo], widths="equal"))
-
-        _svc = partA_svc.value
-        _rho = partA_rho.value
-        _slo = partA_slo.value
-        _replicas = v1_13_serving.replicas
-        _arrival = _rho * _replicas * (1000 / _svc)
-        _queue = queueing_latency(
-            arrival_qps=_arrival,
-            service_ms=_svc,
-            replicas=_replicas,
-            service_cv=v1_13_serving.service_cv,
-            slo_ms=_slo,
-        )
-
-        _rhos = np.linspace(0.05, 0.95, 50)
-        _means = []
-        _p99s = []
-        for _r in _rhos:
-            _q = queueing_latency(
-                arrival_qps=_r * _replicas * (1000 / _svc),
-                service_ms=_svc,
-                replicas=_replicas,
-                service_cv=v1_13_serving.service_cv,
-                slo_ms=_slo,
-            )
-            _means.append(_q.mean_latency_ms if math.isfinite(_q.mean_latency_ms) else None)
-            _p99s.append(_q.p99_latency_ms if math.isfinite(_q.p99_latency_ms) else None)
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_rhos,
-            y=_means,
-            mode="lines",
-            name="Mean latency",
-            line=dict(color=COLORS["BlueLine"], width=2),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_rhos,
-            y=_p99s,
-            mode="lines",
-            name="P99 latency",
-            line=dict(color=COLORS["RedLine"], width=3),
-        ))
-        _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"SLO = {_slo:.0f} ms")
-        _fig.add_trace(go.Scatter(
-            x=[_rho],
-            y=[_queue.p99_latency_ms],
-            mode="markers",
-            name="selected p99",
-            marker=dict(color=COLORS["RedLine"], size=14, symbol="diamond"),
-        ))
-        _fig.update_layout(
-            height=380,
-            xaxis=dict(title="Utilization (rho)", range=[0, 1]),
-            yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=50, r=20, t=60, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _p99_color = COLORS["RedLine"] if not _queue.slo_ok else COLORS["GreenLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Utilization", f"{_queue.utilization:.2f}", f"{_arrival:.2f} QPS arrival", COLORS["OrangeLine"])}
-            {_metric_card("Mean Latency", f"{_queue.mean_latency_ms:.1f} ms", "wait + service", COLORS["BlueLine"])}
-            {_metric_card("P99 Latency", f"{_queue.p99_latency_ms:.1f} ms", f"{_queue.queue_amplifier:.1f}x service", _p99_color, True)}
-            {_metric_card("Wait Probability", f"{_queue.queue_wait_probability*100:.0f}%", "Erlang-C", COLORS["PurpleLine"] if "PurpleLine" in COLORS else COLORS["BlueLine"])}
-        </div>
-        """))
-
-        if not _queue.slo_ok:
-            items.append(mo.callout(mo.md(
-                f"**SLO VIOLATED.** P99 = {_queue.p99_latency_ms:.1f} ms > {_slo:.0f} ms. "
-                f"The mean ({_queue.mean_latency_ms:.1f} ms) hides the one-in-100 experience."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-**Queueing - Live Calculation**
-
-```
-replicas     = {_replicas}
-service time = {_svc:.1f} ms
-arrival      = {_arrival:.2f} QPS
-rho          = {_queue.utilization:.2f}
-mean         = {_queue.mean_latency_ms:.1f} ms
-p95 / p99    = {_queue.p95_latency_ms:.1f} / {_queue.p99_latency_ms:.1f} ms
-```
-*Source: `mlsysbook_labs.queueing_latency`, track `{v1_13_profile.track_id}`.*
-        """))
-
-        if partA_pred.value == "tail":
-            items.append(mo.callout(mo.md("**Correct.** Tail latency is the binding metric once utilization rises."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**The trap is trusting the average.** Replicas help only if they reduce utilization enough; "
-                "p99 still needs direct measurement and SLO headroom."
-            ), kind="warn"))
-        return mo.vstack(items)
-
-    def build_part_b():
-        items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Escalation &middot; Serving Performance Engineer
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Throughput improves when we batch. Does that automatically improve
-                    {v1_13_serving.label} p99?"
-                </div>
-            </div>
-            """),
-            mo.md("""
-## Batching Has a Formation Delay Tax
-
-Static batching waits for requests to arrive before work starts. That waiting
-time is charged to the user's end-to-end latency.
-
-```
-formation_delay = (batch_size - 1) / (2 * arrival_rate)
-total_p99       = formation_delay + batched_service + queue_tail
-```
-            """),
-            partB_pred,
-        ]
-        if partB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the batching instruments."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partB_batch, partB_arr, partB_slo], widths="equal"))
-        _batch = partB_batch.value
-        _arrival = partB_arr.value
-        _slo = partB_slo.value
-        _batching = batching_tax(
-            batch_size=_batch,
-            arrival_qps=_arrival,
+        items.append(mo.hstack([partA_batch, partA_arr, partA_slo], widths="equal"))
+        batch = partA_batch.value
+        arrival = partA_arr.value
+        slo = partA_slo.value
+        result = batching_tax(
+            batch_size=batch,
+            arrival_qps=arrival,
             service_ms=v1_13_serving.service_ms,
-            slo_ms=_slo,
+            slo_ms=slo,
             efficiency_gain=v1_13_serving.batch_efficiency_gain,
             replicas=v1_13_serving.replicas,
             service_cv=v1_13_serving.service_cv,
         )
-
-        _fig = go.Figure()
-        for _name, _value, _color in [
-            ("Formation delay", _batching.formation_delay_ms, COLORS["OrangeLine"]),
-            ("Batched service", _batching.batched_service_ms, COLORS["BlueLine"]),
-            ("Queue p99", _batching.queue_p99_ms, COLORS["RedLine"]),
-        ]:
-            _fig.add_trace(go.Bar(
-                name=_name,
-                x=[_name],
-                y=[_value],
-                marker_color=_color,
-                hovertemplate="%{x}: %{y:.1f} ms<extra></extra>",
+        terms = [
+            ("Formation delay", result.formation_delay_ms, COLORS["OrangeLine"]),
+            ("Batched service", result.batched_service_ms, COLORS["BlueLine"]),
+            ("Queue tail", result.queue_p99_ms, COLORS["RedLine"]),
+        ]
+        binding_term = max(terms, key=lambda item: item[1])[0]
+        fig = go.Figure()
+        for name, value, color in terms:
+            fig.add_trace(go.Bar(
+                x=["Total p99"],
+                y=[value],
+                name=name,
+                marker_color=color,
+                hovertemplate=f"{name}: %{{y:.1f}} ms<extra></extra>",
             ))
-        _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"SLO = {_slo} ms")
-        _fig.update_layout(
-            height=340,
+        fig.add_hline(y=slo, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"SLO = {slo:g} ms")
+        fig.update_layout(
+            barmode="stack",
+            height=330,
             yaxis=dict(title="Latency contribution (ms)", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
+            legend=dict(orientation="h", y=1.16, x=0),
             margin=dict(l=50, r=20, t=60, b=40),
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _total_color = COLORS["GreenLine"] if _batching.slo_ok else COLORS["RedLine"]
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        total_color = COLORS["GreenLine"] if result.slo_ok else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Formation Delay", f"{_batching.formation_delay_ms:.1f} ms", f"{_batching.formation_slo_pct:.0f}% of SLO", COLORS["OrangeLine"])}
-            {_metric_card("Throughput Gain", f"{_batching.throughput_gain:.1f}x", "service amortization", COLORS["BlueLine"])}
-            {_metric_card("Batch Utilization", f"{_batching.utilization:.2f}", "batch queue rho", COLORS["OrangeLine"])}
-            {_metric_card("Total P99", f"{_batching.total_p99_ms:.1f} ms", "formation + service + queue", _total_color, True)}
+            {v1_13_metric_card("Formation Delay", f"{result.formation_delay_ms:.1f} ms", f"{result.formation_slo_pct:.0f}% of SLO", COLORS["OrangeLine"])}
+            {v1_13_metric_card("Throughput Gain", f"{result.throughput_gain:.1f}x", "amortized service", COLORS["BlueLine"])}
+            {v1_13_metric_card("Batch Utilization", f"{result.utilization:.2f}", "effective batch queue", COLORS["OrangeLine"])}
+            {v1_13_metric_card("Total P99", f"{result.total_p99_ms:.1f} ms", binding_term, total_color, True)}
         </div>
         """))
-
-        if not _batching.slo_ok:
+        items.append(mo.Html(v1_13_html_table(
+            ("Term", "Amount", "Decision meaning"),
+            (
+                ("Batch size", batch, v1_13_packet["batch_amount"]),
+                ("Formation delay", f"{result.formation_delay_ms:.1f} ms", "waiting before inference starts"),
+                ("Batched service", f"{result.batched_service_ms:.1f} ms", "service time after throughput gain"),
+                ("Queue p99", f"{result.queue_p99_ms:.1f} ms", "remaining tail delay"),
+                ("Total p99", f"{result.total_p99_ms:.1f} ms", "PASS" if result.slo_ok else "FAIL"),
+            ),
+        )))
+        if result.slo_ok:
             items.append(mo.callout(mo.md(
-                f"**SLO VIOLATED.** Total p99 = {_batching.total_p99_ms:.1f} ms > {_slo:g} ms. "
-                f"Formation delay alone consumes {_batching.formation_slo_pct:.0f}% of the SLO."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-**Batching Tax - Live Calculation**
-
-```
-batch size       = {_batch}
-arrival          = {_arrival:g} QPS
-formation delay  = {_batching.formation_delay_ms:.1f} ms
-batched service  = {_batching.batched_service_ms:.1f} ms
-queue p99        = {_batching.queue_p99_ms:.1f} ms
-total p99        = {_batching.total_p99_ms:.1f} ms
-```
-*Source: `mlsysbook_labs.batching_tax`.*
-        """))
-
-        if partB_pred.value == "delay":
-            items.append(mo.callout(mo.md("**Correct.** Throughput batching has a latency bill: waiting for the batch to form."), kind="success"))
+                f"**Boundary status:** total p99 is {result.total_p99_ms:.1f} ms within the {slo:g} ms SLO. "
+                f"The binding amount is {binding_term.lower()}."
+            ), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Batching is not free.** It can be the right serving policy, but only if formation delay and p99 stay inside the SLO."
-            ), kind="warn"))
+                f"**SLO violated.** Total p99 is {result.total_p99_ms:.1f} ms against {slo:g} ms. "
+                f"Mitigation: reduce batch size, increase arrival-adaptive scheduling, or reserve more capacity."
+            ), kind="danger"))
+        items.append(v1_13_prediction_feedback(
+            "tradeoff",
+            partA_pred.value,
+            "**Correct.** Batching changes throughput and latency at the same time.",
+            "**The batching trap:** throughput improves only after the request pays formation delay and queueing tax.",
+        ))
+        items.append(mo.accordion({
+            "Math Peek / Source Model - batching tax": mo.md(f"""
+```
+formation_delay_ms = (batch_size - 1) / (2 * arrival_qps) * 1000
+batched_service_ms = service_ms * (1 + 0.08*log2(batch_size)) / efficiency_gain
+total_p99_ms       = formation_delay + batched_service + queue_tail
+```
+
+Current values: batch `{batch}`, arrival `{arrival:g}` QPS, total p99
+`{result.total_p99_ms:.1f}` ms. Source helper: `mlsysbook_labs.batching_tax`.
+Chapter anchor: Traffic-Aware Batching Strategy and the batching-tax formula.
+            """)
+        }))
+        items.append(partA_checkpoint)
+        if partA_checkpoint.value is None:
+            items.append(mo.callout(mo.md("Checkpoint: choose how the batching decision should appear in the launch memo."), kind="info"))
+        return mo.vstack(items)
+
+    def build_part_b():
+        items = [
+            v1_13_part_banner(
+                "B",
+                "Utilization And Arrival Rate Create Tail-Latency Failure",
+                COLORS["OrangeLine"],
+                (
+                    f"{v1_13_variant.stakeholder} sees average latency below budget. "
+                    f"The failure to test is: {v1_13_packet['queue_failure']}."
+                ),
+            ),
+            mo.md("""
+## Concept: Queueing Makes Capacity Planning Nonlinear
+
+Requests wait behind other requests. Once arrival rate pushes utilization toward
+1.0, mean latency rises and p99/p999 rise faster. The decision evidence is the
+latency distribution, not the average alone.
+            """),
+            partB_pred,
+        ]
+        if partB_pred.value is None:
+            items.append(mo.callout(mo.md("Commit to a queueing prediction before opening the arrival-rate sweep."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partB_arr, partB_svc, partB_slo], widths="equal"))
+        arrival = partB_arr.value
+        svc = partB_svc.value
+        slo = partB_slo.value
+        selected = queueing_latency(
+            arrival_qps=arrival,
+            service_ms=svc,
+            replicas=v1_13_serving.replicas,
+            service_cv=v1_13_serving.service_cv,
+            slo_ms=slo,
+        )
+        if v1_13_serving.arrival_qps < 1:
+            low = max(0.001, arrival * 0.2)
+            high = max(0.5, arrival * 5)
+        else:
+            low = max(0.1, arrival * 0.25)
+            high = max(arrival * 2.5, v1_13_serving.replicas * (1000.0 / svc) * 1.05)
+        xs = np.linspace(low, high, 60)
+        means = []
+        p95s = []
+        p99s = []
+        p999s = []
+        utils = []
+        for x in xs:
+            q = queueing_latency(
+                arrival_qps=float(x),
+                service_ms=svc,
+                replicas=v1_13_serving.replicas,
+                service_cv=v1_13_serving.service_cv,
+                slo_ms=slo,
+            )
+            means.append(q.mean_latency_ms if math.isfinite(q.mean_latency_ms) else None)
+            p95s.append(q.p95_latency_ms if math.isfinite(q.p95_latency_ms) else None)
+            p99s.append(q.p99_latency_ms if math.isfinite(q.p99_latency_ms) else None)
+            p999s.append(q.p999_latency_ms if math.isfinite(q.p999_latency_ms) else None)
+            utils.append(q.utilization)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=xs, y=means, mode="lines", name="Mean", line=dict(color=COLORS["BlueLine"], width=2)))
+        fig.add_trace(go.Scatter(x=xs, y=p95s, mode="lines", name="P95", line=dict(color=COLORS["OrangeLine"], width=2)))
+        fig.add_trace(go.Scatter(x=xs, y=p99s, mode="lines", name="P99", line=dict(color=COLORS["RedLine"], width=3)))
+        if v1_13_track_id == "robotaxi":
+            fig.add_trace(go.Scatter(x=xs, y=p999s, mode="lines", name="P999", line=dict(color="#7f1d1d", width=2, dash="dot")))
+        fig.add_hline(y=slo, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"SLO = {slo:g} ms")
+        fig.add_trace(go.Scatter(
+            x=[arrival],
+            y=[selected.p99_latency_ms if math.isfinite(selected.p99_latency_ms) else None],
+            mode="markers",
+            name="selected p99",
+            marker=dict(color=COLORS["RedLine"], size=13, symbol="diamond"),
+        ))
+        fig.update_layout(
+            height=370,
+            xaxis=dict(title="Arrival rate (QPS)"),
+            yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.15, x=0),
+            margin=dict(l=50, r=20, t=60, b=40),
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        p99_color = COLORS["GreenLine"] if selected.slo_ok else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            {v1_13_metric_card("Utilization", f"{selected.utilization:.2f}", f"{v1_13_serving.replicas} replica(s)", COLORS["OrangeLine"])}
+            {v1_13_metric_card("Mean", f"{selected.mean_latency_ms:.1f} ms", "wait + service", COLORS["BlueLine"])}
+            {v1_13_metric_card("P99", f"{selected.p99_latency_ms:.1f} ms", f"SLO {slo:g} ms", p99_color, True)}
+            {v1_13_metric_card("P999", f"{selected.p999_latency_ms:.1f} ms", "rare tail", COLORS["RedLine"])}
+        </div>
+        """))
+        rows = []
+        for factor in (0.75, 1.0, 1.25):
+            x = max(0.0001, arrival * factor)
+            q = queueing_latency(
+                arrival_qps=x,
+                service_ms=svc,
+                replicas=v1_13_serving.replicas,
+                service_cv=v1_13_serving.service_cv,
+                slo_ms=slo,
+            )
+            rows.append((f"{x:g} QPS", f"{q.utilization:.2f}", f"{q.mean_latency_ms:.1f} ms", f"{q.p99_latency_ms:.1f} ms", "PASS" if q.slo_ok else "FAIL"))
+        items.append(mo.Html(v1_13_html_table(("Arrival", "Utilization", "Mean", "P99", "SLO"), rows)))
+        if selected.slo_ok:
+            items.append(mo.callout(mo.md(
+                f"**Queueing boundary holds.** P99 is {selected.p99_latency_ms:.1f} ms, but the margin depends on staying below utilization {selected.utilization:.2f}."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Tail failure.** P99 is {selected.p99_latency_ms:.1f} ms > {slo:g} ms at utilization {selected.utilization:.2f}. "
+                f"First mitigation: {v1_13_packet['first_mitigation']}."
+            ), kind="danger"))
+        items.append(v1_13_prediction_feedback(
+            "tail",
+            partB_pred.value,
+            "**Correct.** Utilization and p99 expose the failure that the mean hides.",
+            "**Average latency is incomplete evidence.** The serving chapter uses p95/p99 because queueing tails determine user-visible failure.",
+        ))
+        items.append(mo.accordion({
+            "Math Peek / Source Model - M/M/c tail": mo.md(f"""
+```
+mu       = 1000 / service_ms
+rho      = arrival_qps / (replicas * mu)
+p99      = service_ms + queue_tail(rho, replicas, service_cv)
+Little's Law: live_requests ~= arrival_qps * latency_seconds
+```
+
+Current values: arrival `{arrival:g}` QPS, service `{svc:g}` ms,
+replicas `{v1_13_serving.replicas}`, rho `{selected.utilization:.2f}`,
+p99 `{selected.p99_latency_ms:.1f}` ms. Source helper:
+`mlsysbook_labs.queueing_latency`. Chapter anchor: Queuing Theory for Capacity
+Planning and Tail Latency and Headroom.
+            """)
+        }))
+        items.append(partB_checkpoint)
+        if partB_checkpoint.value is None:
+            items.append(mo.callout(mo.md("Checkpoint: choose the queueing rule that should constrain Part C."), kind="info"))
         return mo.vstack(items)
 
     def build_part_c():
         items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Capacity Review &middot; {v1_13_variant.stakeholder}
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Compute says the accelerator is fast enough. Before we approve the
-                    rollout, how many live requests actually fit in memory?"
-                </div>
-            </div>
-            """),
-            mo.md(f"""
-## Live State/Cache Capacity Sets Concurrency
+            v1_13_part_banner(
+                "C",
+                "Replicas And Autoscaling Trade P99, Utilization, And Cost",
+                COLORS["GreenLine"],
+                (
+                    f"The operations review can add {v1_13_packet['replica_label']}, but every extra unit "
+                    f"has a {v1_13_packet['cost_label'].lower()} and warm-capacity consequence."
+                ),
+            ),
+            mo.md("""
+## Concept: Scale-Out Buys Headroom, Not A Free Guarantee
 
-For this track, the live state is **{v1_13_serving.state_kind}**. A serving unit
-must fit model weights and one state/cache allocation per live request.
-
-```
-weights + live_requests * state_per_request <= device_memory
-```
+Replicas reduce utilization and usually lower p99. They also raise the standing
+capacity bill and create a warm-pool/cold-start obligation during scale-out.
             """),
             partC_pred,
         ]
         if partC_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the state/cache calculator."), kind="warn"))
+            items.append(mo.callout(mo.md("Commit to a replica/autoscaling prediction before opening the frontier."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partC_model, partC_prec, partC_ctx, partC_gpus], widths="equal"))
-        _precision = partC_prec.value
-        _context = partC_ctx.value
-        _devices = partC_gpus.value
-        _capacity = cache_capacity(
-            v1_13_serving,
-            v1_13_model,
-            context_tokens=_context,
-            precision_bytes=_precision,
-            devices_per_replica=_devices,
-            kv_precision_bytes=v1_13_serving.kv_precision_bytes,
-        )
-
-        _max_show = max(3, min(_capacity.max_concurrent + 3, 20))
-        _batches = list(range(1, _max_show + 1))
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            name="Weights",
-            x=[str(_b) for _b in _batches],
-            y=[_capacity.weight_gb] * len(_batches),
-            marker_color=COLORS["BlueLine"],
+        items.append(mo.hstack([partC_replicas, partC_buffer, partC_warm_pool], widths="equal"))
+        batch = max(1, partA_batch.value)
+        arrival = max(0.0001, partB_arr.value)
+        service = partB_svc.value
+        slo = partB_slo.value
+        frontier = []
+        max_visible = max(4, min(32, max(v1_13_serving.replicas * 3, partC_replicas.value + 4)))
+        for visible in range(1, max_visible + 1):
+            planned = max(1, math.ceil(visible * (1 + partC_buffer.value / 100.0)))
+            b = batching_tax(
+                batch_size=batch,
+                arrival_qps=arrival,
+                service_ms=service,
+                slo_ms=slo,
+                efficiency_gain=v1_13_serving.batch_efficiency_gain,
+                replicas=planned,
+                service_cv=v1_13_serving.service_cv,
+            )
+            q = queueing_latency(
+                arrival_qps=arrival / batch,
+                service_ms=b.batched_service_ms,
+                replicas=planned,
+                service_cv=v1_13_serving.service_cv,
+                slo_ms=slo,
+            )
+            cost = v1_13_request_cost(
+                v1_13_serving,
+                v1_13_packet,
+                arrival_qps=arrival,
+                service_ms=b.batched_service_ms,
+                replicas=planned,
+                warm_pool=partC_warm_pool.value,
+                buffer_pct=0,
+                throughput_gain=b.throughput_gain,
+            )
+            cold = cold_start_latency(
+                v1_13_serving,
+                precision_bytes=v1_13_serving.precision_bytes,
+                warm_pool_replicas=partC_warm_pool.value,
+                scale_out_replicas=max(1, planned - v1_13_serving.replicas + 1),
+            )
+            p999 = b.formation_delay_ms + b.batched_service_ms + max(0.0, q.p999_latency_ms - b.batched_service_ms)
+            status = "PASS" if b.slo_ok and cost["value"] <= cost["limit"] else "FAIL"
+            frontier.append({
+                "visible": visible,
+                "planned": planned,
+                "batching": b,
+                "queue": q,
+                "cost": cost,
+                "cold": cold,
+                "p999": p999,
+                "status": status,
+            })
+        selected = frontier[partC_replicas.value - 1]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=[row["planned"] for row in frontier],
+            y=[row["batching"].total_p99_ms for row in frontier],
+            mode="lines+markers",
+            name="P99 latency",
+            line=dict(color=COLORS["RedLine"], width=3),
         ))
-        _fig.add_trace(go.Bar(
-            name=_capacity.state_kind,
-            x=[str(_b) for _b in _batches],
-            y=[_capacity.state_per_request_gb * _b for _b in _batches],
-            marker_color=COLORS["OrangeLine"],
+        fig.add_trace(go.Scatter(
+            x=[row["planned"] for row in frontier],
+            y=[row["cost"]["value"] for row in frontier],
+            mode="lines+markers",
+            name=v1_13_packet["cost_label"],
+            yaxis="y2",
+            line=dict(color=COLORS["BlueLine"], width=2),
         ))
-        _fig.add_hline(
-            y=_capacity.total_memory_gb,
-            line_dash="dash",
-            line_color=COLORS["RedLine"],
-            annotation_text=f"memory = {_capacity.total_memory_gb:.2f} GB",
+        fig.add_hline(y=slo, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"SLO = {slo:g} ms")
+        fig.add_trace(go.Scatter(
+            x=[selected["planned"]],
+            y=[selected["batching"].total_p99_ms],
+            mode="markers",
+            name="selected",
+            marker=dict(color=COLORS["RedLine"], size=14, symbol="diamond"),
+        ))
+        fig.update_layout(
+            height=370,
+            xaxis=dict(title="Planned serving units after autoscale buffer"),
+            yaxis=dict(title="P99 latency (ms)", gridcolor="#f1f5f9"),
+            yaxis2=dict(title=v1_13_packet["cost_unit"], overlaying="y", side="right", showgrid=False),
+            legend=dict(orientation="h", y=1.15, x=0),
+            margin=dict(l=50, r=70, t=60, b=40),
         )
-        _fig.update_layout(
-            barmode="stack",
-            height=380,
-            xaxis=dict(title="Live requests"),
-            yaxis=dict(title="Memory (GB)", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=50, r=20, t=60, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _max_color = COLORS["RedLine"] if _capacity.oom else (COLORS["OrangeLine"] if _capacity.max_concurrent <= 2 else COLORS["GreenLine"])
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        cost_ok = selected["cost"]["value"] <= selected["cost"]["limit"]
+        p99_ok = selected["batching"].slo_ok
+        warm_gap = max(0.0, v1_13_packet["warm_pool_floor"] - selected["cold"].protected_fraction)
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Weights", f"{_capacity.weight_gb:.3g} GB", f"{_precision:g} B/param", COLORS["BlueLine"])}
-            {_metric_card("State / Request", f"{_capacity.state_per_request_gb:.3g} GB", _capacity.state_kind, COLORS["OrangeLine"])}
-            {_metric_card("Available Memory", f"{_capacity.available_gb:.3g} GB", f"{_devices} device(s)", COLORS["BlueLine"])}
-            {_metric_card("Max Live Requests", f"{_capacity.max_concurrent}", "memory-bound", _max_color, True)}
+            {v1_13_metric_card("Planned Units", str(selected["planned"]), f"{partC_buffer.value}% headroom", COLORS["GreenLine"])}
+            {v1_13_metric_card("Utilization", f"{selected['batching'].utilization:.2f}", "after batching", COLORS["OrangeLine"])}
+            {v1_13_metric_card("P99", f"{selected['batching'].total_p99_ms:.1f} ms", f"SLO {slo:g} ms", COLORS["GreenLine"] if p99_ok else COLORS["RedLine"], True)}
+            {v1_13_metric_card(v1_13_packet["cost_label"], v1_13_fmt_amount(selected["cost"]["value"], selected["cost"]["unit"]), f"limit {v1_13_fmt_amount(selected['cost']['limit'], selected['cost']['unit'])}", COLORS["GreenLine"] if cost_ok else COLORS["RedLine"])}
         </div>
         """))
-
-        if _capacity.oom:
+        table_rows = []
+        for row in frontier[: min(8, len(frontier))]:
+            tail_value = f"{row['p999']:.1f} ms" if v1_13_track_id == "robotaxi" else f"{row['queue'].p95_latency_ms:.1f} ms p95"
+            table_rows.append((
+                row["visible"],
+                row["planned"],
+                f"{row['batching'].utilization:.2f}",
+                f"{row['batching'].total_p99_ms:.1f} ms",
+                tail_value,
+                v1_13_fmt_amount(row["cost"]["value"], row["cost"]["unit"]),
+                f"{row['cold'].protected_fraction*100:.0f}% warm",
+                row["status"],
+            ))
+        items.append(mo.Html(v1_13_html_table(
+            ("Visible", "Planned", "Util", "P99", "Tail evidence", v1_13_packet["cost_label"], "Warm pool", "Status"),
+            table_rows,
+        )))
+        if p99_ok and cost_ok and warm_gap <= 0:
             items.append(mo.callout(mo.md(
-                f"**OOM.** Weights ({_capacity.weight_gb:.3g} GB) plus one "
-                f"{_capacity.state_kind} allocation ({_capacity.state_per_request_gb:.3g} GB) "
-                f"exceed {_capacity.total_memory_gb:.3g} GB."
-            ), kind="danger"))
-        elif _capacity.max_concurrent <= 2:
-            items.append(mo.callout(mo.md(
-                f"**Severe concurrency limit.** Only {_capacity.max_concurrent} live request(s) fit. "
-                "Throughput planning must account for memory, not just compute."
-            ), kind="warn"))
-
-        items.append(mo.md(f"""
-**State/Cache Capacity - Live Calculation**
-
-```
-hardware        = {v1_13_serving.hardware_ref}
-model           = {v1_13_serving.model_ref}
-context/window  = {_context:,}
-total memory    = {_capacity.total_memory_gb:.3g} GB
-weights         = {_capacity.weight_gb:.3g} GB
-state/request   = {_capacity.state_per_request_gb:.3g} GB
-max live reqs   = {_capacity.max_concurrent}
-```
-*Source: `mlsysbook_labs.cache_capacity`, with MLSysIM hardware and model refs.*
-        """))
-
-        if partC_pred.value == "memory":
-            items.append(mo.callout(mo.md("**Correct.** Serving concurrency is a memory/state problem before it is a peak-compute problem."), kind="success"))
+                "**Replica frontier passes.** The selected scale posture has p99, cost/energy, and warm-capacity evidence inside guardrails."
+            ), kind="success"))
         else:
-            items.append(mo.callout(mo.md(
-                "**Compute is incomplete evidence.** A serving unit must reserve model weights and live request state/cache."
-            ), kind="warn"))
+            failures = []
+            if not p99_ok:
+                failures.append(f"p99 {selected['batching'].total_p99_ms:.1f} ms > {slo:g} ms")
+            if not cost_ok:
+                failures.append(f"{v1_13_packet['cost_label']} above limit")
+            if warm_gap > 0:
+                failures.append(f"warm-pool coverage short by {warm_gap*100:.0f} percentage points")
+            items.append(mo.callout(mo.md("**Scale policy not launch-ready:** " + "; ".join(failures) + "."), kind="danger"))
+        items.append(v1_13_prediction_feedback(
+            "tradeoff",
+            partC_pred.value,
+            "**Correct.** Replicas lower utilization only by spending capacity, cost, and warm-pool budget.",
+            "**Replica intuition is incomplete.** Scale-out can lower p99, but it can also violate cost/energy or cold-start guardrails.",
+        ))
+        items.append(mo.accordion({
+            "Math Peek / Source Model - replica frontier": mo.md(f"""
+```
+planned_replicas = ceil(visible_replicas * (1 + autoscale_buffer_pct/100))
+capacity_qps     = planned_replicas * 1000 / service_ms
+rho              = arrival_qps / capacity_qps
+cost_per_request = standing_capacity_cost / (arrival_qps * 3600)
+```
+
+Current values: visible `{partC_replicas.value}`, planned `{selected['planned']}`,
+rho `{selected['batching'].utilization:.2f}`, p99 `{selected['batching'].total_p99_ms:.1f}` ms,
+{v1_13_packet['cost_label']} `{v1_13_fmt_amount(selected['cost']['value'], selected['cost']['unit'])}`.
+Source helpers: `queueing_latency`, `batching_tax`, and `cold_start_latency`; cost coefficients are V1-13 scenario assumptions.
+            """)
+        }))
+        items.append(partC_checkpoint)
+        if partC_checkpoint.value is None:
+            items.append(mo.callout(mo.md("Checkpoint: choose the scale posture that should feed the policy gate."), kind="info"))
         return mo.vstack(items)
 
     def build_part_d():
         items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Scale-Out Drill &middot; Operations Lead
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Traffic spikes. New serving units need the model, runtime, and warmup.
-                    Which users see the cold path?"
-                </div>
-            </div>
-            """),
+            v1_13_part_banner(
+                "D",
+                "A Serving Policy Must Pass SLO, Capacity, And Cost Guardrails",
+                COLORS["RedLine"],
+                (
+                    f"The launch memo for {v1_13_serving.label} must pick one policy, reject one alternative, "
+                    f"and protect {v1_13_variant.guardrail_metric}."
+                ),
+            ),
             mo.md("""
-## Cold Start Is Data Movement Plus Runtime Initialization
+## Concept: Feasibility Is A Conjunction
 
-```
-cold_start = weights / min(storage_bw, interconnect_bw)
-           + weights / deserialize_bw
-           + runtime_init + warmup
-```
-
-Warm pools do not make cold starts disappear. They reduce the fraction of
-scale-out replicas whose first request is exposed to the cold path.
+A policy is not launchable because one metric looks good. It must pass p99/SLA,
+live-state capacity, cost or energy, and warm/fallback guardrails under the same
+track workload.
             """),
             partD_pred,
         ]
         if partD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the cold-start calculator."), kind="warn"))
+            items.append(mo.callout(mo.md("Commit to a launch-policy prediction before opening the candidate gate."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partD_scaleout, partD_stor, partD_warm_pool], widths="equal"))
-        _storage_override = {"default": None, "nfs": 1.25, "ram": 50.0}[partD_stor.value]
-        _storage_label = {
-            "default": "registry/default storage",
-            "nfs": "slow network storage",
-            "ram": "cached in host RAM",
-        }[partD_stor.value]
-        _cold = cold_start_latency(
+        items.append(mo.hstack([partD_policy, partD_reject, partD_cost_multiplier, partD_capacity_reserve], widths="equal"))
+        items.append(partD_ops_risk)
+        selected_key = partD_policy.value
+        rejected_key = partD_reject.value
+        selected = v1_13_evaluate_policy(
             v1_13_serving,
-            precision_bytes=v1_13_serving.precision_bytes,
-            storage_bandwidth_gbs=_storage_override,
-            warm_pool_replicas=partD_warm_pool.value,
-            scale_out_replicas=partD_scaleout.value,
+            v1_13_model,
+            v1_13_packet,
+            v1_13_candidates[selected_key],
+            cost_multiplier=partD_cost_multiplier.value,
+            capacity_reserve_pct=partD_capacity_reserve.value,
         )
-
-        _fig = go.Figure()
-        _base = 0.0
-        for _name, _duration_ms, _color in [
-            ("Read weights", _cold.read_ms, COLORS["BlueLine"]),
-            ("Deserialize", _cold.deserialize_ms, COLORS["OrangeLine"]),
-            ("Runtime init", _cold.runtime_init_ms, "#64748b"),
-            ("Warmup", _cold.warmup_ms, COLORS["GreenLine"]),
-        ]:
-            _fig.add_trace(go.Bar(
-                name=_name,
-                x=[_duration_ms / 1000],
-                y=["Cold start"],
-                orientation="h",
-                marker_color=_color,
-                base=_base / 1000,
-                hovertemplate="%{fullData.name}: %{x:.2f} s<extra></extra>",
+        rejected = v1_13_evaluate_policy(
+            v1_13_serving,
+            v1_13_model,
+            v1_13_packet,
+            v1_13_candidates[rejected_key],
+            cost_multiplier=partD_cost_multiplier.value,
+            capacity_reserve_pct=partD_capacity_reserve.value,
+        )
+        candidate_rows = []
+        for key, candidate in v1_13_candidates.items():
+            ev = v1_13_evaluate_policy(
+                v1_13_serving,
+                v1_13_model,
+                v1_13_packet,
+                candidate,
+                cost_multiplier=partD_cost_multiplier.value,
+                capacity_reserve_pct=partD_capacity_reserve.value,
+            )
+            candidate_rows.append((
+                candidate["label"],
+                f"batch {candidate['batch_size']}, repl {ev['planned_replicas']}",
+                f"{ev['batching'].total_p99_ms:.1f} ms",
+                f"{ev['batching'].utilization:.2f}",
+                f"{ev['live_with_reserve']} <= {ev['capacity'].max_concurrent}",
+                v1_13_fmt_amount(ev["cost"]["value"], ev["cost"]["unit"]),
+                "PASS" if ev["feasible"] else ev["binding"],
             ))
-            _base += _duration_ms
-        _fig.add_vline(x=v1_13_serving.slo_ms / 1000, line_dash="dash", line_color=COLORS["RedLine"], annotation_text="p99 SLO")
-        _fig.update_layout(
-            height=260,
-            barmode="stack",
-            xaxis=dict(title="Seconds", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.25, x=0),
-            margin=dict(l=90, r=20, t=50, b=40),
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=[v1_13_candidates[key]["label"] for key in v1_13_candidates],
+            y=[v1_13_evaluate_policy(v1_13_serving, v1_13_model, v1_13_packet, cand, cost_multiplier=partD_cost_multiplier.value, capacity_reserve_pct=partD_capacity_reserve.value)["batching"].total_p99_ms for cand in v1_13_candidates.values()],
+            marker_color=[COLORS["GreenLine"] if v1_13_evaluate_policy(v1_13_serving, v1_13_model, v1_13_packet, cand, cost_multiplier=partD_cost_multiplier.value, capacity_reserve_pct=partD_capacity_reserve.value)["feasible"] else COLORS["RedLine"] for cand in v1_13_candidates.values()],
+            name="candidate p99",
+        ))
+        fig.add_hline(y=v1_13_serving.slo_ms, line_dash="dash", line_color=COLORS["BlueLine"], annotation_text="p99 SLO")
+        fig.update_layout(
+            height=330,
+            xaxis=dict(title="Policy candidate"),
+            yaxis=dict(title="P99 latency (ms)", gridcolor="#f1f5f9"),
+            margin=dict(l=50, r=20, t=60, b=80),
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _cold_color = COLORS["RedLine"] if _cold.exceeds_slo else COLORS["GreenLine"]
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+        items.append(mo.Html(v1_13_html_table(
+            ("Policy", "Config", "P99", "Util", "Live state", v1_13_packet["cost_label"], "Gate"),
+            candidate_rows,
+        )))
+        selected_color = COLORS["GreenLine"] if selected["feasible"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Model Weights", f"{_cold.model_weight_gb:.3g} GB", f"{v1_13_serving.precision_bytes:g} B/param", COLORS["BlueLine"])}
-            {_metric_card("Effective BW", f"{_cold.effective_bandwidth_gbs:.2f} GB/s", _storage_label, COLORS["OrangeLine"])}
-            {_metric_card("Protected", f"{_cold.protected_fraction*100:.0f}%", "warm-pool coverage", COLORS["GreenLine"])}
-            {_metric_card("Exposed First Request", f"{_cold.exposed_first_request_ms/1000:.2f} s", "service + cold path share", _cold_color, True)}
+            {v1_13_metric_card("Selected Policy", selected['candidate']['label'], selected['candidate']['rationale'], selected_color, True)}
+            {v1_13_metric_card("Binding", selected['binding'], "release gate", selected_color)}
+            {v1_13_metric_card("Rejected", rejected['candidate']['label'], rejected['binding'], COLORS["OrangeLine"])}
         </div>
         """))
-
-        if _cold.exceeds_slo:
+        if selected["feasible"]:
             items.append(mo.callout(mo.md(
-                f"**Cold-start SLO risk.** Exposed first-request latency is "
-                f"{_cold.exposed_first_request_ms/1000:.2f} s, above the "
-                f"{v1_13_serving.slo_ms:g} ms p99 SLO."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-**Cold Start - Live Calculation**
-
-```
-weights       = {_cold.model_weight_gb:.3g} GB
-storage path  = {_storage_label}
-effective BW  = min({_cold.storage_bandwidth_gbs:.2f}, {_cold.interconnect_bandwidth_gbs:.2f}) = {_cold.effective_bandwidth_gbs:.2f} GB/s
-read          = {_cold.read_ms/1000:.2f} s
-deserialize   = {_cold.deserialize_ms/1000:.2f} s
-init + warmup = {(_cold.runtime_init_ms + _cold.warmup_ms)/1000:.2f} s
-cold path     = {_cold.cold_start_ms/1000:.2f} s
-```
-*Source: `mlsysbook_labs.cold_start_latency`.*
-        """))
-
-        if partD_pred.value == "movement":
-            items.append(mo.callout(mo.md("**Correct.** Large cold starts are dominated by moving and preparing model state."), kind="success"))
+                f"**Launch gate passes.** {selected['candidate']['label']} satisfies p99, capacity, {v1_13_packet['cost_label'].lower()}, and warm/fallback guardrails."
+            ), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Cold start is a serving SLO problem.** Runtime and data movement can exceed normal inference latency by orders of magnitude."
-            ), kind="warn"))
+                f"**Launch gate fails.** Binding constraint: {selected['binding']}. First mitigation: {v1_13_packet['first_mitigation']}."
+            ), kind="danger"))
+        items.append(v1_13_prediction_feedback(
+            "all_guardrails",
+            partD_pred.value,
+            "**Correct.** A serving policy launches only when all guardrails pass together.",
+            "**Single-metric launch decisions are unsafe.** Fastest or cheapest policies can still fail capacity, warm-start, or track guardrails.",
+        ))
+        risk_text = v1_13_packet["ops_risks"].get(partD_ops_risk.value, "Select a carry-forward operations risk.")
+        items.append(mo.accordion({
+            "Math Peek / Source Model - constrained policy gate": mo.md(f"""
+```
+feasible = p99_ok and capacity_ok and cost_ok and warm_start_ok
+live_required = ceil(arrival_qps * p99_ms / 1000 * (1 + reserve_pct/100))
+```
+
+Selected policy: `{selected['candidate']['label']}`. Binding constraint:
+`{selected['binding']}`. Rejected alternative: `{rejected['candidate']['label']}`.
+Carry-forward risk: {risk_text}
+
+Source helpers: `batching_tax`, `queueing_latency`, `cache_capacity`, and
+`cold_start_latency`; V1-13 notebook-local policy scoring supplies the conjunction
+and track-specific cost/energy labels.
+            """)
+        }))
         return mo.vstack(items)
 
     def build_synthesis():
+        selected_key = partD_policy.value
+        rejected_key = partD_reject.value
+        selected = v1_13_evaluate_policy(
+            v1_13_serving,
+            v1_13_model,
+            v1_13_packet,
+            v1_13_candidates[selected_key],
+            cost_multiplier=partD_cost_multiplier.value,
+            capacity_reserve_pct=partD_capacity_reserve.value,
+        )
+        rejected = v1_13_evaluate_policy(
+            v1_13_serving,
+            v1_13_model,
+            v1_13_packet,
+            v1_13_candidates[rejected_key],
+            cost_multiplier=partD_cost_multiplier.value,
+            capacity_reserve_pct=partD_capacity_reserve.value,
+        )
+        risk_text = v1_13_packet["ops_risks"].get(partD_ops_risk.value, "No carry-forward risk selected yet.")
+        memo_rows = (
+            ("Selected policy", selected["candidate"]["label"], selected["candidate"]["rationale"]),
+            ("Binding constraint", selected["binding"], "all guardrails pass" if selected["feasible"] else "mitigation required"),
+            ("Rejected alternative", rejected["candidate"]["label"], rejected["binding"]),
+            ("P99/SLO evidence", f"{selected['batching'].total_p99_ms:.1f} ms / {v1_13_serving.slo_ms:g} ms", "PASS" if selected["batching"].slo_ok else "FAIL"),
+            ("Utilization", f"{selected['batching'].utilization:.2f}", "after batching and replicas"),
+            (v1_13_packet["cost_label"], v1_13_fmt_amount(selected["cost"]["value"], selected["cost"]["unit"]), f"limit {v1_13_fmt_amount(selected['cost_limit'], selected['cost']['unit'])}"),
+            ("Capacity/state", f"{selected['live_with_reserve']} live <= {selected['capacity'].max_concurrent} fit", selected["capacity"].state_kind),
+            ("Carry-forward ops risk", risk_text, "feeds Lab 14 operations planning"),
+        )
         return mo.vstack([
-            mo.md("## Key Takeaways"),
+            mo.md("## Serving Launch Memo"),
             mo.callout(mo.md(
-                f"**1. Tail latency is the serving metric for {v1_13_serving.label}.** "
-                "Mean latency is not enough evidence for an interactive, safety, wearable, or SLA-bound system."
+                "**Chapter invariant:** serving is a latency distribution plus a capacity system. "
+                "Batching, queueing, replicas, live state, warm capacity, and cost must be judged together."
             ), kind="info"),
+            mo.Html(v1_13_html_table(("Memo field", "Decision/evidence", "Report framing"), memo_rows)),
             mo.callout(mo.md(
-                "**2. Batching is a policy, not a free win.** Formation delay, queueing, and SLO budget decide whether it helps."
-            ), kind="info"),
-            mo.callout(mo.md(
-                f"**3. Live state and cold starts are source-of-truth calculations.** "
-                f"This lab uses the selected track inputs to compute {v1_13_serving.state_kind}, memory, and scale-out evidence."
-            ), kind="info"),
-            mo.Html(f"""
-            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        What's Next
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab 14: ML Operations</strong> - your model shipped. Now
-                        the challenge is detecting drift, regressions, and operational failure
-                        before dashboards create false confidence.
-                    </div>
-                </div>
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Report Focus
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        Your report should name the selected track, p99 SLO, batching policy,
-                        memory-bound concurrency, warm-pool coverage, and residual risk.
-                    </div>
-                </div>
-            </div>
-            """),
+                f"**Final report frame for {v1_13_serving.label}:** choose `{selected['candidate']['label']}`, "
+                f"name `{selected['binding']}` as the binding constraint, reject `{rejected['candidate']['label']}`, "
+                f"and carry forward: {risk_text}"
+            ), kind="success" if selected["feasible"] else "warn"),
         ])
 
     _tabs = mo.ui.tabs({
-        "Part A: Queueing Explosion": build_part_a(),
-        "Part B: Batching Tax": build_part_b(),
-        "Part C: State/Cache Wall": build_part_c(),
-        "Part D: Cold Start": build_part_d(),
+        "Part A: Batching Trade-off": build_part_a(),
+        "Part B: Queueing Tail": build_part_b(),
+        "Part C: Replica Frontier": build_part_c(),
+        "Part D: Policy Gate": build_part_d(),
         "Synthesis": build_synthesis(),
     })
     _tabs
@@ -1050,16 +1552,75 @@ cold path     = {_cold.cold_start_ms/1000:.2f} s
 @app.cell(hide_code=True)
 def _(
     COLORS,
+    batching_tax,
     ledger,
     mo,
+    partA_arr,
+    partA_batch,
+    partA_checkpoint,
     partA_pred,
+    partA_slo,
+    partB_arr,
+    partB_checkpoint,
     partB_pred,
+    partB_slo,
+    partB_svc,
+    partC_buffer,
+    partC_checkpoint,
     partC_pred,
+    partC_replicas,
+    partC_warm_pool,
+    partD_capacity_reserve,
+    partD_cost_multiplier,
+    partD_ops_risk,
+    partD_policy,
     partD_pred,
+    partD_reject,
+    queueing_latency,
+    v1_13_evaluate_policy,
+    v1_13_policy_candidates,
+    v1_13_track_id,
+    v1_13_track_packet,
+    v1_13_model,
     v1_13_profile,
     v1_13_serving,
     v1_13_variant,
 ):
+    _packet = v1_13_track_packet(v1_13_track_id, v1_13_serving, v1_13_variant)
+    _candidates = v1_13_policy_candidates(v1_13_serving, v1_13_track_id)
+    _batching = batching_tax(
+        batch_size=partA_batch.value,
+        arrival_qps=partA_arr.value,
+        service_ms=v1_13_serving.service_ms,
+        slo_ms=partA_slo.value,
+        efficiency_gain=v1_13_serving.batch_efficiency_gain,
+        replicas=v1_13_serving.replicas,
+        service_cv=v1_13_serving.service_cv,
+    )
+    _queue = queueing_latency(
+        arrival_qps=partB_arr.value,
+        service_ms=partB_svc.value,
+        replicas=v1_13_serving.replicas,
+        service_cv=v1_13_serving.service_cv,
+        slo_ms=partB_slo.value,
+    )
+    _selected = v1_13_evaluate_policy(
+        v1_13_serving,
+        v1_13_model,
+        _packet,
+        _candidates[partD_policy.value],
+        cost_multiplier=partD_cost_multiplier.value,
+        capacity_reserve_pct=partD_capacity_reserve.value,
+    )
+    _rejected = v1_13_evaluate_policy(
+        v1_13_serving,
+        v1_13_model,
+        _packet,
+        _candidates[partD_reject.value],
+        cost_multiplier=partD_cost_multiplier.value,
+        capacity_reserve_pct=partD_capacity_reserve.value,
+    )
+
     if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
         ledger.save(chapter=13, design={
             "chapter": "v1_13",
@@ -1068,10 +1629,32 @@ def _(
             "hardware_ref": v1_13_serving.hardware_ref,
             "model_ref": v1_13_serving.model_ref,
             "completed": True,
-            "p99_latency_prediction": partA_pred.value,
-            "batching_tax_prediction": partB_pred.value,
-            "state_cache_prediction": partC_pred.value,
-            "cold_start_prediction": partD_pred.value,
+            "part_a_batch_prediction": partA_pred.value,
+            "part_a_batch_decision": partA_checkpoint.value,
+            "batch_size": partA_batch.value,
+            "batch_total_p99_ms": round(_batching.total_p99_ms, 3),
+            "batch_throughput_gain": round(_batching.throughput_gain, 3),
+            "part_b_queue_prediction": partB_pred.value,
+            "part_b_queue_decision": partB_checkpoint.value,
+            "arrival_qps": round(partB_arr.value, 3),
+            "utilization": round(_queue.utilization, 4),
+            "queue_p99_ms": round(_queue.p99_latency_ms, 3),
+            "queue_slo_ok": _queue.slo_ok,
+            "part_c_replica_prediction": partC_pred.value,
+            "part_c_replica_decision": partC_checkpoint.value,
+            "visible_replicas": partC_replicas.value,
+            "autoscale_buffer_pct": partC_buffer.value,
+            "warm_pool_units": partC_warm_pool.value,
+            "part_d_policy_prediction": partD_pred.value,
+            "selected_policy": _selected["candidate"]["label"],
+            "selected_policy_feasible": _selected["feasible"],
+            "binding_constraint": _selected["binding"],
+            "rejected_alternative": _rejected["candidate"]["label"],
+            "rejected_alternative_binding": _rejected["binding"],
+            "carry_forward_ops_risk": _packet["ops_risks"].get(partD_ops_risk.value, partD_ops_risk.value),
+            "cost_label": _packet["cost_label"],
+            "cost_per_request": round(_selected["cost"]["value"], 8),
+            "cost_unit": _selected["cost"]["unit"],
         })
 
     mo.Html(f"""
@@ -1083,8 +1666,8 @@ def _(
         <span style="flex:1;"></span>
         <span class="hud-label">SLO</span>
         <span class="hud-value">{v1_13_serving.slo_ms:g} ms p99</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">ACTIVE</span>
+        <span class="hud-label">POLICY</span>
+        <span class="hud-active">{_selected['candidate']['label']}</span>
     </div>
     """)
     return
@@ -1094,153 +1677,187 @@ def _(
 def _(
     batching_tax,
     build_lab_report,
-    cache_capacity,
-    cold_start_latency,
     mo,
+    partA_arr,
+    partA_batch,
+    partA_checkpoint,
     partA_pred,
-    partA_rho,
     partA_slo,
-    partA_svc,
     partB_arr,
-    partB_batch,
+    partB_checkpoint,
     partB_pred,
     partB_slo,
-    partC_ctx,
-    partC_gpus,
-    partC_prec,
+    partB_svc,
+    partC_buffer,
+    partC_checkpoint,
     partC_pred,
+    partC_replicas,
+    partC_warm_pool,
+    partD_capacity_reserve,
+    partD_cost_multiplier,
+    partD_ops_risk,
+    partD_policy,
     partD_pred,
-    partD_scaleout,
-    partD_stor,
-    partD_warm_pool,
+    partD_reject,
     queueing_latency,
     report_export_panel,
+    v1_13_evaluate_policy,
+    v1_13_fmt_amount,
     v1_13_metadata,
     v1_13_model,
+    v1_13_policy_candidates,
     v1_13_profile,
     v1_13_serving,
+    v1_13_track_id,
+    v1_13_track_packet,
     v1_13_variant,
 ):
-    _arrival = partA_rho.value * v1_13_serving.replicas * (1000 / partA_svc.value)
-    _queue = queueing_latency(
-        arrival_qps=_arrival,
-        service_ms=partA_svc.value,
-        replicas=v1_13_serving.replicas,
-        service_cv=v1_13_serving.service_cv,
-        slo_ms=partA_slo.value,
-    )
+    _packet = v1_13_track_packet(v1_13_track_id, v1_13_serving, v1_13_variant)
+    _candidates = v1_13_policy_candidates(v1_13_serving, v1_13_track_id)
     _batching = batching_tax(
-        batch_size=partB_batch.value,
-        arrival_qps=partB_arr.value,
+        batch_size=partA_batch.value,
+        arrival_qps=partA_arr.value,
         service_ms=v1_13_serving.service_ms,
-        slo_ms=partB_slo.value,
+        slo_ms=partA_slo.value,
         efficiency_gain=v1_13_serving.batch_efficiency_gain,
         replicas=v1_13_serving.replicas,
         service_cv=v1_13_serving.service_cv,
     )
-    _capacity = cache_capacity(
+    _queue = queueing_latency(
+        arrival_qps=partB_arr.value,
+        service_ms=partB_svc.value,
+        replicas=v1_13_serving.replicas,
+        service_cv=v1_13_serving.service_cv,
+        slo_ms=partB_slo.value,
+    )
+    _selected = v1_13_evaluate_policy(
         v1_13_serving,
         v1_13_model,
-        context_tokens=partC_ctx.value,
-        precision_bytes=partC_prec.value,
-        devices_per_replica=partC_gpus.value,
-        kv_precision_bytes=v1_13_serving.kv_precision_bytes,
+        _packet,
+        _candidates[partD_policy.value],
+        cost_multiplier=partD_cost_multiplier.value,
+        capacity_reserve_pct=partD_capacity_reserve.value,
     )
-    _storage_override = {"default": None, "nfs": 1.25, "ram": 50.0}[partD_stor.value]
-    _cold = cold_start_latency(
+    _rejected = v1_13_evaluate_policy(
         v1_13_serving,
-        precision_bytes=v1_13_serving.precision_bytes,
-        storage_bandwidth_gbs=_storage_override,
-        warm_pool_replicas=partD_warm_pool.value,
-        scale_out_replicas=partD_scaleout.value,
+        v1_13_model,
+        _packet,
+        _candidates[partD_reject.value],
+        cost_multiplier=partD_cost_multiplier.value,
+        capacity_reserve_pct=partD_capacity_reserve.value,
     )
+    _risk_text = _packet["ops_risks"].get(partD_ops_risk.value, "No carry-forward operations risk selected yet.")
 
     _incomplete = []
     if partA_pred.value is None:
-        _incomplete.append("Part A queueing prediction")
+        _incomplete.append("Part A batching prediction")
+    if partA_checkpoint.value is None:
+        _incomplete.append("Part A batching checkpoint")
     if partB_pred.value is None:
-        _incomplete.append("Part B batching prediction")
+        _incomplete.append("Part B queueing prediction")
+    if partB_checkpoint.value is None:
+        _incomplete.append("Part B queueing checkpoint")
     if partC_pred.value is None:
-        _incomplete.append("Part C state/cache prediction")
+        _incomplete.append("Part C replica prediction")
+    if partC_checkpoint.value is None:
+        _incomplete.append("Part C replica checkpoint")
     if partD_pred.value is None:
-        _incomplete.append("Part D cold-start prediction")
+        _incomplete.append("Part D policy prediction")
+    if partD_ops_risk.value is None:
+        _incomplete.append("Synthesis carry-forward risk")
 
     _report = build_lab_report(
         v1_13_metadata,
         track=v1_13_profile.label,
         scenario=v1_13_variant.workload_summary,
         learning_objectives=(
-            "Quantify how utilization and service variability amplify p99 latency.",
-            "Evaluate batching as a throughput/latency trade-off rather than a free win.",
-            "Compute live state/cache capacity and cold-start exposure for the selected track.",
+            "Explain why batching changes throughput and latency at the same time.",
+            "Use arrival rate and utilization to diagnose queueing and p99 failures.",
+            "Choose replicas/autoscaling with p99, capacity, and cost evidence.",
+            "Write a serving launch memo with selected policy, binding constraint, rejected alternative, and ops risk.",
         ),
         predictions={
-            "queueing_tail_latency": partA_pred.value,
-            "batching_tax": partB_pred.value,
-            "state_cache_wall": partC_pred.value,
-            "cold_start_tax": partD_pred.value,
+            "batching_tradeoff": partA_pred.value,
+            "queueing_tail_failure": partB_pred.value,
+            "replica_autoscale_tradeoff": partC_pred.value,
+            "launch_policy_validity": partD_pred.value,
         },
         knob_settings={
-            "rho": partA_rho.value,
-            "service_ms": partA_svc.value,
-            "partA_slo_ms": partA_slo.value,
-            "batch_size": partB_batch.value,
-            "batch_arrival_qps": partB_arr.value,
-            "batch_slo_ms": partB_slo.value,
-            "context_tokens": partC_ctx.value,
-            "precision_bytes": partC_prec.value,
-            "devices_per_serving_unit": partC_gpus.value,
-            "storage_mode": partD_stor.value,
-            "warm_pool_replicas": partD_warm_pool.value,
-            "scale_out_replicas": partD_scaleout.value,
+            "part_a_batch_size": partA_batch.value,
+            "part_a_arrival_qps": partA_arr.value,
+            "part_a_slo_ms": partA_slo.value,
+            "part_a_checkpoint": partA_checkpoint.value,
+            "part_b_arrival_qps": partB_arr.value,
+            "part_b_service_ms": partB_svc.value,
+            "part_b_slo_ms": partB_slo.value,
+            "part_b_checkpoint": partB_checkpoint.value,
+            "part_c_visible_replicas": partC_replicas.value,
+            "part_c_autoscale_buffer_pct": partC_buffer.value,
+            "part_c_warm_pool_units": partC_warm_pool.value,
+            "part_c_checkpoint": partC_checkpoint.value,
+            "part_d_selected_policy": _selected["candidate"]["label"],
+            "part_d_rejected_alternative": _rejected["candidate"]["label"],
+            "part_d_cost_multiplier": partD_cost_multiplier.value,
+            "part_d_capacity_reserve_pct": partD_capacity_reserve.value,
+            "part_d_ops_risk": _risk_text,
         },
         evidence_summary={
             "hardware_ref": v1_13_serving.hardware_ref,
             "model_ref": v1_13_serving.model_ref,
-            "arrival_qps": round(_arrival, 3),
-            "queue_p99_ms": round(_queue.p99_latency_ms, 3),
-            "queue_slo_ok": _queue.slo_ok,
             "batch_total_p99_ms": round(_batching.total_p99_ms, 3),
-            "formation_delay_ms": round(_batching.formation_delay_ms, 3),
-            "state_kind": _capacity.state_kind,
-            "state_per_request_gb": round(_capacity.state_per_request_gb, 6),
-            "max_live_requests": _capacity.max_concurrent,
-            "cold_start_ms": round(_cold.cold_start_ms, 3),
-            "exposed_first_request_ms": round(_cold.exposed_first_request_ms, 3),
+            "batch_throughput_gain": round(_batching.throughput_gain, 3),
+            "batch_slo_ok": _batching.slo_ok,
+            "queue_utilization": round(_queue.utilization, 4),
+            "queue_p99_ms": round(_queue.p99_latency_ms, 3),
+            "queue_p999_ms": round(_queue.p999_latency_ms, 3),
+            "queue_slo_ok": _queue.slo_ok,
+            "selected_policy_p99_ms": round(_selected["batching"].total_p99_ms, 3),
+            "selected_policy_utilization": round(_selected["batching"].utilization, 4),
+            "selected_policy_capacity_fit": f"{_selected['live_with_reserve']} <= {_selected['capacity'].max_concurrent}",
+            "selected_policy_cost": v1_13_fmt_amount(_selected["cost"]["value"], _selected["cost"]["unit"]),
+            "selected_policy_feasible": _selected["feasible"],
+            "binding_constraint": _selected["binding"],
+            "rejected_alternative": _rejected["candidate"]["label"],
+            "rejected_alternative_binding": _rejected["binding"],
+            "carry_forward_ops_risk": _risk_text,
         },
         final_decision=(
-            f"Use the {v1_13_variant.assumptions.get('serving_policy', 'selected serving policy')} "
-            f"only if p99, batching delay, {_capacity.state_kind}, and warm-pool evidence "
-            f"protect {v1_13_variant.guardrail_metric}."
+            f"Use `{_selected['candidate']['label']}` for {v1_13_serving.label} only if the launch gate remains "
+            f"consistent with binding constraint `{_selected['binding']}`. Reject `{_rejected['candidate']['label']}` because `{_rejected['binding']}`."
         ),
         big_takeaways=(
-            "Average latency is not a serving SLO.",
-            "Batching improves throughput only after paying a formation-delay tax.",
-            "Weights, live state/cache, and cold starts must be included in capacity plans.",
+            "Batching follows traffic and spends latency while buying throughput.",
+            "Arrival rate and utilization make p99/p999 the serving evidence, not the mean.",
+            "Replicas and autoscaling buy headroom by spending cost, energy, or warm spare capacity.",
+            "A launch policy is feasible only when SLO, capacity, cost, and track guardrails pass together.",
         ),
         reflections={
             "track_policy": v1_13_serving.serving_policy,
+            "selected_policy": _selected["candidate"]["label"],
+            "binding_constraint": _selected["binding"],
+            "rejected_alternative": _rejected["candidate"]["label"],
             "validation_tests": v1_13_serving.validation_tests,
-            "residual_question": "Which production traces or hardware counters would you collect before launch?",
+            "carry_forward_ops_risk": _risk_text,
         },
         residual_risk=(
             "The helper models are teaching estimates. Production deployment still needs real arrival traces, "
-            "service-time histograms, p99/p999 replay, hardware counters, memory telemetry, and warm-pool drills."
+            "service-time histograms, p99/p999 replay, hardware counters, capacity telemetry, cost validation, and warm-pool drills."
         ),
         source_trace={
             "track_id": v1_13_profile.track_id,
             "scenario_id": v1_13_variant.scenario_id,
             "hardware_ref": v1_13_variant.hardware_ref,
             "model_ref": v1_13_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.serving",
+            "shared_helpers": ("batching_tax", "queueing_latency", "cache_capacity", "cold_start_latency"),
+            "notebook_local_helpers": ("v1_13_track_packet", "v1_13_policy_candidates", "v1_13_evaluate_policy"),
             "source_policy": v1_13_profile.source_policy,
         },
         result_snapshot={
             "serving_profile": v1_13_serving,
-            "queueing": _queue,
             "batching": _batching,
-            "capacity": _capacity,
-            "cold_start": _cold,
+            "queueing": _queue,
+            "selected_policy": _selected,
+            "rejected_policy": _rejected,
         },
         incomplete_fields=tuple(_incomplete),
     )
@@ -1250,7 +1867,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-13 report is generated locally from the selected track, MLSysIM hardware/model refs, "
-                "and shared `mlsysbook_labs.serving` calculations."
+                "shared serving helpers, and notebook-local V1-13 policy scoring."
             ),
             kind="info",
         ),

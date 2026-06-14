@@ -3,13 +3,8 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-# ═════════════════════════════════════════════════════════════════════════════
-# CELL 0: SETUP
-# ═════════════════════════════════════════════════════════════════════════════
 
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
+# CELL 0: SETUP
 
 @app.cell
 async def _():
@@ -48,8 +43,8 @@ async def _():
         source_trace,
         sustained_benchmark,
         tail_latency,
-        track_context,
         track_arc_context,
+        track_context,
         track_selector,
     )
 
@@ -57,13 +52,30 @@ async def _():
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, amdahl_speedup,
-        apply_plotly_theme, benchmark_track_profile, build_lab_report,
-        get_lab_metadata, get_lab_track_variant, get_track_profile, go,
-        ledger, math, metric_gate, mo, np, report_export_panel,
-        resolve_mlsysim_ref, source_trace, sustained_benchmark,
-        tail_latency, track_context,
-        track_arc_context, track_selector,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        amdahl_speedup,
+        apply_plotly_theme,
+        benchmark_track_profile,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        ledger,
+        math,
+        metric_gate,
+        mo,
+        np,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        sustained_benchmark,
+        tail_latency,
+        track_arc_context,
+        track_context,
+        track_selector,
     )
 
 
@@ -110,19 +122,432 @@ def _(
         v1_12_variant,
     )
 
-# ═════════════════════════════════════════════════════════════════════════════
+
+# NOTEBOOK-LOCAL SUPPORT
+
+@app.cell
+def _(math, np, sustained_benchmark, tail_latency):
+    def v1_12_track_packet(benchmark, variant):
+        common = {
+            "stakeholder": variant.stakeholder,
+            "headline_scope": "headline benchmark",
+            "score_threshold": 75,
+            "cv_limit_pct": 5.0,
+            "ci_limit_pct": 5.0,
+            "source_note": (
+                "Track identity and hardware/model refs come from the lab registry. "
+                "Protocol scores are notebook-local teaching estimates."
+            ),
+        }
+        tracks = {
+            "iphone": {
+                "production_question": "Can this on-device feature survive a sustained user session?",
+                "easy_scope": "cold-run latency on a freshly started phone",
+                "production_scope": "10-minute sustained device run with battery and thermal evidence",
+                "selected_metric": "sustained p95 UX latency",
+                "guardrail_label": "battery drain and thermal headroom",
+                "amount_line_a": "The amount system is p95 latency in ms, battery percent/hour, and thermal headroom.",
+                "amount_line_b": "Discard cold/cache warmup, then measure enough sustained samples to see thermal drift.",
+                "amount_line_c": "A mean latency win is blocked if p95 UX latency or battery/thermal limits fail.",
+                "amount_line_d": "Runs are comparable only with the same device class, ambient, run length, battery state, and p95 evidence.",
+                "warmup_floor": 10,
+                "sample_floor": 20,
+                "failure_unit": "bad UI frames per second",
+                "accepted_comparison": "same-device sustained run",
+                "rejected_comparison": "short cold-run latency claim",
+                "conditions": (
+                    ("same_workload", "same sustained user workload"),
+                    ("same_warmup", "same warmup discard"),
+                    ("same_samples", "same sample count and duration"),
+                    ("same_hardware", "same phone, ambient, and battery state"),
+                    ("same_guardrail", "same p95, battery, and thermal guardrails"),
+                ),
+            },
+            "oura_ring": {
+                "production_question": "Can always-on sensing fit the overnight energy and memory window?",
+                "easy_scope": "isolated single-inference loop",
+                "production_scope": "24-hour duty-cycle replay with SRAM, flash, OTA, and energy accounting",
+                "selected_metric": "energy per sensing window",
+                "guardrail_label": "SRAM/flash fit and battery days",
+                "amount_line_a": "The amount system is uJ/window, wake windows/day, SRAM KB, flash KB, and OTA payload.",
+                "amount_line_b": "Many small windows are needed because each measurement is tiny and noise can dominate.",
+                "amount_line_c": "A latency win is blocked if energy/window, SRAM, or flash exceeds the wearable envelope.",
+                "amount_line_d": "Runs are comparable only with the same sensing cadence, memory accounting, and energy boundary.",
+                "warmup_floor": 8,
+                "sample_floor": 30,
+                "failure_unit": "energy budget multiplier",
+                "accepted_comparison": "same duty-cycle replay",
+                "rejected_comparison": "isolated inference latency claim",
+                "conditions": (
+                    ("same_workload", "same duty-cycle replay"),
+                    ("same_warmup", "same sensor/window warmup discard"),
+                    ("same_samples", "same number of replay windows"),
+                    ("same_hardware", "same SRAM, flash, and firmware build"),
+                    ("same_guardrail", "same energy, OTA, SRAM, and flash guardrails"),
+                ),
+            },
+            "robotaxi": {
+                "production_question": "Can perception meet the deadline during bursts and rare events?",
+                "easy_scope": "average FPS on ordinary frames",
+                "production_scope": "synchronized sensor-burst and rare-event replay",
+                "selected_metric": "p99/p999 perception deadline",
+                "guardrail_label": "rare-event recall and safety margin",
+                "amount_line_a": "The amount system is p99/p999 latency, frame deadline, burst multiplier, and replay count.",
+                "amount_line_b": "Rare-event and p999 claims need more samples than average-frame claims.",
+                "amount_line_c": "Average FPS is blocked if p99/p999 misses the deadline or rare-event recall drops.",
+                "amount_line_d": "Runs are comparable only with the same sensor mix, deadline, rare-event count, and recall floor.",
+                "warmup_floor": 12,
+                "sample_floor": 50,
+                "failure_unit": "frames over deadline",
+                "accepted_comparison": "same sensor-burst replay",
+                "rejected_comparison": "average-frame FPS claim",
+                "conditions": (
+                    ("same_workload", "same synchronized sensor burst"),
+                    ("same_warmup", "same perception stack warmup"),
+                    ("same_samples", "same rare-event replay count"),
+                    ("same_hardware", "same vehicle compute and sensor configuration"),
+                    ("same_guardrail", "same p99/p999 deadline and recall guardrail"),
+                ),
+            },
+            "cloud_fleet": {
+                "production_question": "Can the fleet satisfy load, SLA, utilization, and cost/request?",
+                "easy_scope": "peak Offline throughput at the largest batch",
+                "production_scope": "Server-style load test with p99, utilization, quality, and cost/request",
+                "selected_metric": "SLA-compliant p99 at production load",
+                "guardrail_label": "utilization, quality, and cost/request",
+                "amount_line_a": "The amount system is QPS, p99 latency, utilization, replicas, and dollars/request.",
+                "amount_line_b": "Load tests need enough request samples to estimate p99 and utilization with confidence.",
+                "amount_line_c": "Peak throughput is blocked if p99, utilization, quality, or cost/request fails.",
+                "amount_line_d": "Runs are comparable only with the same demand trace, replica budget, SLA, and cost model.",
+                "warmup_floor": 10,
+                "sample_floor": 40,
+                "failure_unit": "SLA misses per second",
+                "accepted_comparison": "same production load trace",
+                "rejected_comparison": "peak Offline throughput claim",
+                "conditions": (
+                    ("same_workload", "same load trace and arrival model"),
+                    ("same_warmup", "same warmup and cache state"),
+                    ("same_samples", "same request count"),
+                    ("same_hardware", "same replica budget and accelerator class"),
+                    ("same_guardrail", "same p99, quality, utilization, and cost guardrails"),
+                ),
+            },
+        }
+        packet = dict(common)
+        packet.update(tracks.get(benchmark.track_id, tracks["iphone"]))
+        return packet
+
+    def v1_12_metric_cards(COLORS, cards):
+        html = ['<div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">']
+        for label, value, note, color in cards:
+            html.append(
+                f"""
+                <div style="padding:14px 16px; border:1px solid #e2e8f0; border-radius:8px;
+                            background:white; border-top:3px solid {color}; flex:1; min-width:180px;">
+                    <div style="color:#64748b; font-size:0.74rem; font-weight:700;
+                                text-transform:uppercase; letter-spacing:0.08em;">{label}</div>
+                    <div style="font-size:1.35rem; font-weight:800; color:{color}; margin-top:4px;">{value}</div>
+                    <div style="font-size:0.76rem; color:#64748b; margin-top:4px;">{note}</div>
+                </div>
+                """
+            )
+        html.append("</div>")
+        return "".join(html)
+
+    def v1_12_html_table(rows, columns):
+        def escape(value):
+            return (
+                str(value)
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+
+        header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+        body_rows = []
+        for row in rows:
+            body_rows.append(
+                "<tr>" + "".join(f"<td>{escape(row.get(column, ''))}</td>" for column in columns) + "</tr>"
+            )
+        body = "".join(body_rows)
+        return f"""
+        <table style="width:100%; border-collapse:collapse; margin:12px 0; font-size:0.86rem;">
+            <thead>
+                <tr style="background:#f8fafc; color:#334155; text-align:left;">{header}</tr>
+            </thead>
+            <tbody>{body}</tbody>
+        </table>
+        <style>
+        table th, table td {{
+            border: 1px solid #e2e8f0;
+            padding: 8px 10px;
+            vertical-align: top;
+        }}
+        </style>
+        """
+
+    def v1_12_validity_result(benchmark, packet, workload_match_pct, metric_choice):
+        workload_score = max(0.0, min(1.0, workload_match_pct / 100))
+        metric_scores = {"headline": 0.35, "production": 1.0, "guardrail": 0.85}
+        metric_score = metric_scores.get(metric_choice or "headline", 0.35)
+        duration_score = 0.25 + 0.75 * workload_score
+        guardrail_score = 1.0 if metric_choice in {"production", "guardrail"} else 0.30
+        validity = 100 * (
+            0.35 * workload_score
+            + 0.30 * metric_score
+            + 0.20 * duration_score
+            + 0.15 * guardrail_score
+        )
+        valid = validity >= packet["score_threshold"]
+        easy_score = 42
+        tail = tail_latency(
+            base_ms=benchmark.tail_base_ms,
+            sigma=benchmark.tail_sigma,
+            slo_ms=benchmark.tail_slo_ms,
+        )
+        sustained = sustained_benchmark(
+            peak_value=benchmark.burst_value,
+            tdp_w=benchmark.tdp_w,
+            duration_s=benchmark.default_duration_s,
+            ambient_c=benchmark.default_ambient_c,
+            cooling=benchmark.default_cooling,
+        )
+        track = benchmark.track_id
+        if track == "iphone":
+            production_value = (
+                f"p95 {tail.p95_ms:.0f} ms, sustained {sustained.sustained_value:.0f} {benchmark.metric_unit}, "
+                f"battery {3.5 + 0.045 * workload_match_pct:.1f}%/h"
+            )
+        elif track == "oura_ring":
+            production_value = f"{70 + 0.55 * workload_match_pct:.0f} uJ/window, 236 KB SRAM"
+        elif track == "robotaxi":
+            production_value = (
+                f"p99 {tail.p99_ms:.0f} ms, p999 {tail.p999_ms:.0f} ms, "
+                f"sustained {sustained.sustained_value:.0f} {benchmark.metric_unit}"
+            )
+        else:
+            production_value = (
+                f"p99 {tail.p99_ms:.0f} ms, sustained {sustained.sustained_value:.0f} {benchmark.metric_unit}, "
+                f"utilization {55 + 0.30 * workload_match_pct:.0f}%"
+            )
+        selected_metric = {
+            "headline": benchmark.benchmark_claim,
+            "production": packet["selected_metric"],
+            "guardrail": packet["guardrail_label"],
+        }.get(metric_choice or "headline", benchmark.benchmark_claim)
+        rows = (
+            {
+                "Benchmark": "Headline",
+                "Workload": packet["easy_scope"],
+                "Metric": benchmark.benchmark_claim,
+                "Measured amount": f"{benchmark.burst_value:g} {benchmark.metric_unit}",
+                "Decision support": "Reject",
+            },
+            {
+                "Benchmark": "Production-like",
+                "Workload": packet["production_scope"],
+                "Metric": packet["selected_metric"],
+                "Measured amount": production_value,
+                "Decision support": "Accept" if valid else "Incomplete",
+            },
+        )
+        return {
+            "easy_score": easy_score,
+            "validity_score": validity,
+            "valid": valid,
+            "selected_metric": selected_metric,
+            "production_value": production_value,
+            "rows": rows,
+        }
+
+    def v1_12_confidence_result(benchmark, packet, warmup, samples, jitter_pct):
+        sample_count = max(1, int(samples))
+        total = min(120, max(warmup + sample_count + 8, 12))
+        base = max(1.0, float(benchmark.tail_base_ms))
+        drift_map = {
+            "iphone": 0.035,
+            "oura_ring": 0.004,
+            "robotaxi": 0.025,
+            "cloud_fleet": 0.018,
+        }
+        drift_per_iter = drift_map.get(benchmark.track_id, 0.01)
+        values = []
+        for i in range(total):
+            warmup_penalty = 0.22 * math.exp(-i / 6.0)
+            jitter = (jitter_pct / 100.0) * (math.sin(1.7 * i) + 0.35 * math.cos(0.4 * i))
+            drift = drift_per_iter * i
+            values.append(base * (1 + warmup_penalty + jitter) + drift)
+        start = min(max(0, int(warmup)), total - 1)
+        stop = min(total, start + sample_count)
+        measured = values[start:stop]
+        n = len(measured)
+        mean = float(np.mean(measured))
+        std = float(np.std(measured, ddof=1)) if n > 1 else 0.0
+        cv_pct = (std / mean * 100) if mean else 0.0
+        ci_half = 1.96 * std / math.sqrt(n) if n else 0.0
+        ci_pct = (ci_half / mean * 100) if mean else 0.0
+        run_rule_ok = warmup >= packet["warmup_floor"] and n >= packet["sample_floor"]
+        confidence_ok = (
+            run_rule_ok
+            and cv_pct <= packet["cv_limit_pct"]
+            and ci_pct <= packet["ci_limit_pct"]
+        )
+        rows = (
+            {"Check": "Warmup discard", "Measured": f"{warmup} iterations", "Limit": f">= {packet['warmup_floor']}", "Verdict": "PASS" if warmup >= packet["warmup_floor"] else "FAIL"},
+            {"Check": "Measured samples", "Measured": f"{n}", "Limit": f">= {packet['sample_floor']}", "Verdict": "PASS" if n >= packet["sample_floor"] else "FAIL"},
+            {"Check": "Coefficient of variation", "Measured": f"{cv_pct:.1f}%", "Limit": f"<= {packet['cv_limit_pct']:.1f}%", "Verdict": "PASS" if cv_pct <= packet["cv_limit_pct"] else "FAIL"},
+            {"Check": "95% CI half-width", "Measured": f"+/- {ci_half:.1f} ms ({ci_pct:.1f}%)", "Limit": f"<= {packet['ci_limit_pct']:.1f}% of mean", "Verdict": "PASS" if ci_pct <= packet["ci_limit_pct"] else "FAIL"},
+        )
+        return {
+            "values": values,
+            "measured": measured,
+            "mean": mean,
+            "std": std,
+            "cv_pct": cv_pct,
+            "ci_half": ci_half,
+            "ci_pct": ci_pct,
+            "confidence_ok": confidence_ok,
+            "run_rule_ok": run_rule_ok,
+            "rows": rows,
+        }
+
+    def v1_12_guardrail_result(benchmark, packet, sigma, stress):
+        tail = tail_latency(
+            base_ms=benchmark.tail_base_ms,
+            sigma=sigma,
+            slo_ms=benchmark.tail_slo_ms,
+        )
+        rows = [
+            {"Metric": "Mean latency", "Measured": f"{tail.mean_ms:.0f} ms", "Limit": "not sufficient alone", "Verdict": "INFO"},
+            {"Metric": "P95 latency", "Measured": f"{tail.p95_ms:.0f} ms", "Limit": "track context", "Verdict": "INFO"},
+            {"Metric": "P99 latency", "Measured": f"{tail.p99_ms:.0f} ms", "Limit": f"<= {benchmark.tail_slo_ms:g} ms", "Verdict": "PASS" if tail.p99_ms <= benchmark.tail_slo_ms else "FAIL"},
+            {"Metric": "P99.9 latency", "Measured": f"{tail.p999_ms:.0f} ms", "Limit": "tail evidence", "Verdict": "INFO"},
+        ]
+        blocked_metrics = []
+        track = benchmark.track_id
+        if track == "iphone":
+            p95_limit = benchmark.p99_max_ms
+            battery = 3.2 + 4.1 * stress + max(0, tail.p95_ms - p95_limit) * 0.02
+            thermal = 34 + 10 * stress + max(0, sigma - 0.6) * 10
+            extra = (
+                ("p95 UX latency", tail.p95_ms, p95_limit, "ms"),
+                ("battery drain", battery, 7.0, "%/h"),
+                ("skin temperature proxy", thermal, 43.0, "C"),
+            )
+            failure_rate = f"{tail.violation_pct / 100 * 60:.1f} bad UI frames/s at 60 FPS"
+        elif track == "oura_ring":
+            energy = 75 * stress * (1 + sigma / 2)
+            sram = 180 + 60 * stress + 12 * sigma
+            flash = 720 + 180 * stress
+            extra = (
+                ("energy per window", energy, 120.0, "uJ"),
+                ("SRAM footprint", sram, 256.0, "KB"),
+                ("flash plus OTA payload", flash, 1024.0, "KB"),
+            )
+            failure_rate = f"{energy / 120.0:.2f}x energy/window budget"
+        elif track == "robotaxi":
+            recall = 96.5 - 2.5 * stress - max(0, sigma - 0.55) * 6
+            extra = (
+                ("p99 deadline", tail.p99_ms, benchmark.p99_max_ms, "ms"),
+                ("p999 deadline", tail.p999_ms, benchmark.tail_slo_ms, "ms"),
+                ("rare-event recall", recall, 92.0, "% min"),
+            )
+            failure_rate = f"{tail.violation_pct:.2f}% frames over {benchmark.tail_slo_ms:g} ms"
+        else:
+            utilization = min(0.99, 0.55 + 0.25 * stress + max(0, sigma - 0.6) * 0.10)
+            cost = 0.0011 * stress * (1 + max(0, sigma - 0.6) * 0.35)
+            quality = 91.8 - max(0, stress - 1) * 2
+            extra = (
+                ("p99 SLA latency", tail.p99_ms, benchmark.p99_max_ms, "ms"),
+                ("utilization", utilization * 100, 82.0, "%"),
+                ("cost/request", cost, 0.0018, "$"),
+                ("quality floor", quality, 90.0, "% min"),
+            )
+            failure_rate = f"{tail.violation_pct / 100 * benchmark.throughput_min:.1f} SLA misses/s"
+        for label, measured, limit, unit in extra:
+            if "min" in unit:
+                ok = measured >= limit
+                limit_text = f">= {limit:g} {unit.replace(' min', '')}"
+            else:
+                ok = measured <= limit
+                limit_text = f"<= {limit:g} {unit}"
+            if not ok:
+                blocked_metrics.append(label)
+            rows.append(
+                {
+                    "Metric": label,
+                    "Measured": f"{measured:.3f} {unit}" if unit == "$" else f"{measured:.1f} {unit.replace(' min', '')}",
+                    "Limit": limit_text,
+                    "Verdict": "PASS" if ok else "FAIL",
+                }
+            )
+        blocked = bool(blocked_metrics or tail.p99_ms > benchmark.tail_slo_ms)
+        return {
+            "tail": tail,
+            "blocked": blocked,
+            "blocked_metrics": tuple(blocked_metrics),
+            "failure_rate": failure_rate,
+            "rows": tuple(rows),
+        }
+
+    def v1_12_fairness_result(packet, controls):
+        conditions = packet["conditions"]
+        missing = tuple(label for key, label in conditions if not controls.get(key, False))
+        controlled = len(conditions) - len(missing)
+        index = 100 * controlled / len(conditions)
+        reportable = not missing
+        rows = (
+            {
+                "Comparison": packet["rejected_comparison"],
+                "Reported win": "larger headline number",
+                "Run-rule state": "missing production evidence",
+                "Reportable": "No",
+            },
+            {
+                "Comparison": packet["accepted_comparison"],
+                "Reported win": "smaller but controlled improvement",
+                "Run-rule state": f"{controlled}/{len(conditions)} controls satisfied",
+                "Reportable": "Yes" if reportable else "Not yet",
+            },
+        )
+        return {
+            "index": index,
+            "missing": missing,
+            "reportable": reportable,
+            "rows": rows,
+            "accepted": packet["accepted_comparison"] if reportable else "No comparison is reportable yet",
+            "rejected": packet["rejected_comparison"],
+        }
+
+    return (
+        v1_12_confidence_result,
+        v1_12_fairness_result,
+        v1_12_guardrail_result,
+        v1_12_html_table,
+        v1_12_metric_cards,
+        v1_12_track_packet,
+        v1_12_validity_result,
+    )
+
+
+@app.cell
+def _(v1_12_benchmark, v1_12_track_packet, v1_12_variant):
+    v1_12_packet = v1_12_track_packet(v1_12_benchmark, v1_12_variant)
+    return (v1_12_packet,)
+
+
 # CELL 1: HEADER
-# ═════════════════════════════════════════════════════════════════════════════
+
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
     LAB_CSS,
     mo,
-    source_trace,
+    track_arc_context,
     track_context,
-        track_arc_context,
     v1_12_benchmark,
     v1_12_metadata,
+    v1_12_packet,
     v1_12_profile,
     v1_12_variant,
 ):
@@ -130,48 +555,31 @@ def _(
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
+        <div style="background: linear-gradient(135deg, #111827 0%, #1f2937 58%, #0f3b3e 100%);
+                    padding: 34px 42px; border-radius: 14px; color: white;
+                    box-shadow: 0 8px 30px rgba(0,0,0,0.30);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
+                        color: #9ca3af; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 12
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
+            <h1 style="margin: 0 0 10px 0; font-size: 2.35rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1;">
-                The Benchmarking Trap
+                Performance Benchmarking
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Amdahl &middot; Thermal Cliff &middot; Multi-Metric &middot; Tail Latency
+            <p style="margin: 0 0 10px 0; font-size: 1.05rem; font-weight: 600;
+                      color: #a7f3d0; letter-spacing: 0.03em; font-family: 'SF Mono', monospace;">
+                Workload validity &middot; Confidence &middot; Tail guardrails &middot; Fair comparison
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                {v1_12_variant.workload_summary} Your job is to make the benchmark
-                honest: expose {v1_12_benchmark.hidden_failure_metric}, not only
-                the headline claim.
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #d1d5db;
+                      max-width: 760px; line-height: 1.65;">
+                {v1_12_variant.workload_summary} Your job is to turn the benchmark claim
+                <strong>{v1_12_benchmark.benchmark_claim}</strong> into reportable evidence
+                for: {v1_12_packet["production_question"]}
             </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts &middot; ~52 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_12_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_12_benchmark.hardware_ref}
-                </span>
-            </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Amdahl's Law</span>
-                <span class="badge badge-warn">Thermal Throttle</span>
-                <span class="badge badge-fail">Tail Latency</span>
+                <span class="badge badge-info">Shared A/B/C/D concept sequence</span>
+                <span class="badge badge-warn">{v1_12_profile.label}</span>
+                <span class="badge badge-fail">{v1_12_benchmark.hidden_failure_metric}</span>
             </div>
         </div>
         """),
@@ -180,9 +588,9 @@ def _(
     ])
     return
 
-# ═════════════════════════════════════════════════════════════════════════════
+
 # CELL 2: BRIEFING
-# ═════════════════════════════════════════════════════════════════════════════
+
 @app.cell(hide_code=True)
 def _(COLORS, mo):
     mo.Html(f"""
@@ -190,943 +598,793 @@ def _(COLORS, mo):
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Apply Amdahl's Law to system speedup</strong> &mdash;
-                    a 10x inference speedup with 45% non-inference overhead yields only 2.0x
-                    end-to-end improvement.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose thermal throttling</strong> &mdash;
-                    vendor burst benchmarks at 30 FPS degrade to 15 FPS sustained in
-                    fanless enclosures after thermal steady-state.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Distinguish average from tail latency</strong> &mdash;
-                    50 ms average latency can hide 500 ms p99 that violates a 200 ms SLO
-                    for 1% of requests.</div>
-            </div>
+        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+            Chapter Invariant
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Iron Law from the ML Systems chapter &middot;
-                    Roofline model from the Hardware Acceleration chapter
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~52 min</strong><br/>
-                    A: ~12 &middot; B: ~12 &middot; C: ~10 &middot; D: ~12 min
-                </div>
-            </div>
+        <div style="font-size: 1.02rem; color: {COLORS['Text']}; line-height: 1.65; font-weight: 600;">
+            Measurement changes decisions. A benchmark is only valid when workload,
+            warmup, variance, tail behavior, and comparison rules match the deployment question.
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                &ldquo;A vendor claims 10x faster inference, 30 FPS sustained, 50 ms average
-                latency. Which of these numbers can you trust in production?&rdquo;
-            </div>
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 16px -28px 0 -28px;
+                    padding: 16px 28px 0 28px; display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+                    gap:16px; font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.55;">
+            <div><strong>Part A:</strong> benchmark validity depends on matching the production workload and metric.</div>
+            <div><strong>Part B:</strong> warmup, variance, and sample size determine confidence.</div>
+            <div><strong>Part C:</strong> averages can hide tail and guardrail failures.</div>
+            <div><strong>Part D:</strong> fair comparison requires controlled conditions and reportable evidence.</div>
         </div>
     </div>
     """)
     return
 
-# ═════════════════════════════════════════════════════════════════════════════
-# CELL 3: READING
-# ═════════════════════════════════════════════════════════════════════════════
 
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
+# CELL 3: READING
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
+    **Recommended Reading** -- Complete these chapter anchors before the lab:
 
-    - **Chapter 12: Performance Benchmarking** -- Amdahl's Law for systems, thermal
-      throttling model, multi-metric SLO gates, and latency distributions.
-    - **Chapter 11: Hardware Acceleration** -- Roofline model and hardware constraints.
+    - **Benchmarks as proxies** and **Benchmarking Granularity** for workload and metric validity.
+    - **Micro-benchmarking rules** and **Statistical and methodological issues** for warmup, variance, and confidence.
+    - **Latency and tail latency** plus **Fallacies and Pitfalls** for average-vs-tail failures.
+    - **Benchmark Components**, **Run Rules**, and **MLPerf execution scenarios** for fair comparison.
     """), kind="info")
     return
 
-# ═════════════════════════════════════════════════════════════════════════════
-# CELL 4: TABS (Parts A-D + Synthesis)
-# ═════════════════════════════════════════════════════════════════════════════
+
+# CELL 4: WIDGETS
+
 @app.cell(hide_code=True)
-def _(
-    apply_plotly_theme, go, mo, v1_12_benchmark,
-):
-    # ── Widgets ───────────────────────────────────────────────────────────
+def _(mo, v1_12_benchmark, v1_12_packet):
     pA_pred = mo.ui.radio(
         options={
-            "A) ~10x (the new GPU is 10x faster)": "10x",
-            "B) ~5x (about half speeds up)": "5x",
-            "C) ~2.0x (Amdahl's Law caps the gain)": "2x",
-            "D) ~1.5x (even worse than expected)": "1_5x",
+            "A) Accept the headline result because it is standardized": "accept_headline",
+            "B) Reject until workload and metric match deployment": "match_deployment",
+            "C) Use the highest throughput metric because it is easiest to compare": "throughput",
+            "D) Cannot decide without a model accuracy score": "accuracy_only",
         },
         label=(
-            f"Replace {v1_12_benchmark.component_label} with a "
-            f"{v1_12_benchmark.default_speedup:g}x faster implementation. "
-            f"{v1_12_benchmark.default_serial_pct:g}% of the pipeline is outside that component. "
-            "End-to-end speedup?"
+            f"Part A prediction: {v1_12_benchmark.benchmark_claim} is available. "
+            f"Can it answer: {v1_12_packet['production_question']}"
         ),
     )
-    return (pA_pred,)
+    pA_workload = mo.ui.slider(
+        start=30,
+        stop=100,
+        value=55,
+        step=5,
+        label="Production workload match (%)",
+    )
+    pA_metric = mo.ui.radio(
+        options={
+            f"Headline metric: {v1_12_benchmark.benchmark_claim}": "headline",
+            f"Production metric: {v1_12_packet['selected_metric']}": "production",
+            f"Guardrail metric: {v1_12_packet['guardrail_label']}": "guardrail",
+        },
+        value=f"Production metric: {v1_12_packet['selected_metric']}",
+        label="Metric used for the deployment decision",
+    )
+    pA_decision = mo.ui.radio(
+        options={
+            "Report the production-like benchmark only": "production",
+            "Report the headline benchmark": "headline",
+            "Report both without qualifying scope": "both",
+        },
+        label="Checkpoint: which result belongs in the report?",
+    )
+    return (pA_decision, pA_metric, pA_pred, pA_workload)
+
 
 @app.cell(hide_code=True)
-def _(mo, v1_12_benchmark):
-    pA_speedup = mo.ui.slider(
-        start=1,
-        stop=100,
-        value=int(v1_12_benchmark.default_speedup),
-        step=1,
-        label=f"{v1_12_benchmark.component_label} speedup (x)",
-    )
-    pA_serial = mo.ui.slider(
-        start=5,
-        stop=80,
-        value=int(v1_12_benchmark.default_serial_pct),
-        step=5,
-        label="Unchanged pipeline fraction (%)",
-    )
-
+def _(mo, v1_12_packet):
     pB_pred = mo.ui.radio(
         options={
-            "A) ~28 FPS (minor degradation)": "28",
-            "B) ~24 FPS (some throttling)": "24",
-            "C) ~15 FPS (thermal throttle halves performance)": "15",
-            "D) ~8 FPS (severe throttling)": "8",
+            "A) One clean run is enough": "one",
+            "B) Five runs with no warmup discard are enough": "five_no_warmup",
+            "C) Discard warmup and report repeated-run confidence": "warmup_confidence",
+            "D) Skip offline confidence and rely on production incidents": "prod_only",
         },
-        label=(
-            f"{v1_12_benchmark.benchmark_claim}. What sustained "
-            f"{v1_12_benchmark.metric_unit} do you expect after the full benchmark protocol?"
-        ),
+        label="Part B prediction: what run rule makes the benchmark claim believable?",
     )
-    return (pA_serial, pA_speedup, pB_pred)
+    pB_warmup = mo.ui.slider(
+        start=0,
+        stop=40,
+        value=v1_12_packet["warmup_floor"],
+        step=2,
+        label="Warmup iterations discarded",
+    )
+    pB_samples = mo.ui.slider(
+        start=3,
+        stop=80,
+        value=max(20, v1_12_packet["sample_floor"]),
+        step=1,
+        label="Measured sample count",
+    )
+    pB_jitter = mo.ui.slider(
+        start=1,
+        stop=20,
+        value=6,
+        step=1,
+        label="Environment jitter (%)",
+    )
+    pB_decision = mo.ui.radio(
+        options={
+            "Claim is confident enough for release": "confident",
+            "Claim is underpowered or noisy": "noisy",
+            "Claim needs a different production metric": "wrong_metric",
+        },
+        label="Checkpoint: what confidence verdict goes in the report?",
+    )
+    return (pB_decision, pB_jitter, pB_pred, pB_samples, pB_warmup)
+
 
 @app.cell(hide_code=True)
-def _(mo, v1_12_benchmark):
-    pB_time = mo.ui.slider(start=0, stop=900, value=v1_12_benchmark.default_duration_s, step=10, label="Benchmark duration (seconds)")
-    pB_ambient = mo.ui.slider(start=20, stop=45, value=int(v1_12_benchmark.default_ambient_c), step=1, label="Ambient temp (C)")
-    pB_cooling = mo.ui.dropdown(
-        options={"Active fan": "active", "Passive heatsink": "passive", "Fanless": "fanless"},
-        value={"active": "Active fan", "passive": "Passive heatsink", "fanless": "Fanless"}[v1_12_benchmark.default_cooling],
-        label="Cooling type",
-    )
-
+def _(mo, v1_12_benchmark, v1_12_packet):
     pC_pred = mo.ui.radio(
         options={
-            "A) Yes -- highest accuracy is always best": "yes",
-            "B) Probably -- other metrics secondary": "probably",
-            "C) No -- violates latency SLO (p99 > 100 ms)": "no_latency",
-            "D) No -- violates power budget (> 5 W)": "no_power",
+            "A) The mean is enough if it is under budget": "mean_enough",
+            "B) Tail percentile evidence is required": "tail_required",
+            "C) The guardrail can be checked later": "guardrail_later",
+            "D) Only accuracy can block deployment": "accuracy_only",
         },
         label=(
-            f"Config A has the best headline metric for {v1_12_benchmark.label}. "
-            f"Is it deployable under {v1_12_benchmark.guardrail_metric}?"
+            f"Part C prediction: the mean looks healthy. Does that prove "
+            f"{v1_12_packet['guardrail_label']} is safe?"
         ),
     )
-    return (pB_ambient, pB_cooling, pB_time, pC_pred)
+    pC_sigma = mo.ui.slider(
+        start=0.1,
+        stop=1.5,
+        value=v1_12_benchmark.tail_sigma,
+        step=0.05,
+        label="Tail heaviness (sigma)",
+    )
+    pC_stress = mo.ui.slider(
+        start=0.6,
+        stop=1.8,
+        value=1.0,
+        step=0.1,
+        label="Guardrail stress multiplier",
+    )
+    pC_decision = mo.ui.radio(
+        options={
+            "Block release on tail or guardrail evidence": "block",
+            "Approve because the mean passed": "approve_mean",
+            "Approve with no guardrail in scope": "no_guardrail",
+        },
+        label="Checkpoint: what blocks or approves the release?",
+    )
+    return (pC_decision, pC_pred, pC_sigma, pC_stress)
+
 
 @app.cell(hide_code=True)
-def _(mo, v1_12_benchmark):
-    pC_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
-    pC_precision = mo.ui.dropdown(
-        options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
-        value="FP32",
-        label="Precision",
-    )
-
+def _(mo, v1_12_packet):
     pD_pred = mo.ui.radio(
         options={
-            "A) Yes -- 200 ms is 4x the average": "yes",
-            "B) Probably -- p99 ~2x the average": "probably",
-            "C) No -- p99 ~500 ms due to heavy tail": "no",
-            "D) Cannot determine": "unknown",
+            "A) The larger headline number wins": "headline",
+            "B) The controlled comparison wins even if the gain is smaller": "controlled",
+            "C) Both comparisons are reportable": "both",
+            "D) Neither comparison is useful for deployment": "neither",
         },
-        label=(
-            f"{v1_12_benchmark.label}: average latency looks acceptable. "
-            f"Does it satisfy {v1_12_benchmark.tail_slo_ms:g} ms p99?"
-        ),
+        label="Part D prediction: which comparison is fair enough to report?",
     )
-    return (pC_batch, pC_precision, pD_pred)
+    pD_same_workload = mo.ui.checkbox(value=False, label=v1_12_packet["conditions"][0][1])
+    pD_same_warmup = mo.ui.checkbox(value=True, label=v1_12_packet["conditions"][1][1])
+    pD_same_samples = mo.ui.checkbox(value=False, label=v1_12_packet["conditions"][2][1])
+    pD_same_hardware = mo.ui.checkbox(value=True, label=v1_12_packet["conditions"][3][1])
+    pD_same_guardrail = mo.ui.checkbox(value=False, label=v1_12_packet["conditions"][4][1])
+    pD_decision = mo.ui.radio(
+        options={
+            "Report only the controlled comparison": "controlled",
+            "Report the headline-only comparison": "headline",
+            "Withhold the comparison until missing evidence is collected": "withhold",
+        },
+        label="Checkpoint: which comparison enters the benchmark report?",
+    )
+    return (
+        pD_decision,
+        pD_pred,
+        pD_same_guardrail,
+        pD_same_hardware,
+        pD_same_samples,
+        pD_same_warmup,
+        pD_same_workload,
+    )
 
-# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
-@app.cell(hide_code=True)
-def _(mo, v1_12_benchmark):
-    pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=v1_12_benchmark.tail_sigma, step=0.05, label="Tail heaviness (sigma)")
-    pD_slo = mo.ui.slider(start=10, stop=500, value=int(v1_12_benchmark.tail_slo_ms), step=10, label="SLO threshold (ms)")
-    return (pD_sigma, pD_slo)
+
+# CELL 5: TABS
 
 @app.cell(hide_code=True)
 def _(
-    COLORS, amdahl_speedup, apply_plotly_theme, go, math, metric_gate,
-    mo, np, pA_pred, pA_serial, pA_speedup,
-    pB_ambient, pB_cooling, pB_pred, pB_time,
-    pC_batch, pC_precision, pC_pred, pD_pred,
-    pD_sigma, pD_slo, sustained_benchmark, tail_latency,
-    v1_12_benchmark, v1_12_profile, v1_12_variant,
+    COLORS,
+    amdahl_speedup,
+    apply_plotly_theme,
+    go,
+    mo,
+    np,
+    pA_decision,
+    pA_metric,
+    pA_pred,
+    pA_workload,
+    pB_decision,
+    pB_jitter,
+    pB_pred,
+    pB_samples,
+    pB_warmup,
+    pC_decision,
+    pC_pred,
+    pC_sigma,
+    pC_stress,
+    pD_decision,
+    pD_pred,
+    pD_same_guardrail,
+    pD_same_hardware,
+    pD_same_samples,
+    pD_same_warmup,
+    pD_same_workload,
+    v1_12_benchmark,
+    v1_12_confidence_result,
+    v1_12_fairness_result,
+    v1_12_guardrail_result,
+    v1_12_html_table,
+    v1_12_metric_cards,
+    v1_12_packet,
+    v1_12_validity_result,
+    v1_12_variant,
 ):
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART A: The Amdahl Ceiling
-    # ─────────────────────────────────────────────────────────────────────
     def build_part_a():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; {v1_12_variant.stakeholder}
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;The benchmark claim is: {v1_12_benchmark.benchmark_claim}. The team says a
-                faster {v1_12_benchmark.component_label} makes the whole system faster. What
-                end-to-end speedup should we actually expect?&rdquo;
-            </div>
-        </div>
-        """))
-        items.append(mo.md("""
-        ## Amdahl's Law: Component Speedup is Not System Speedup
-
-        ```
-        System Speedup = 1 / (f_serial + f_parallel / S)
-        ```
-
-        Where f_serial is the fraction of time NOT affected by the speedup.
-        The selected track's default component speedup and unchanged-pipeline fraction yield:
-
-        ```
-        Speedup = 1 / (serial_fraction + accelerated_fraction / component_speedup)
-        ```
-
-        The other 8x of hardware investment is wasted on a bottleneck that has already moved.
-        """))
-        items.append(pA_pred)
-        if pA_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the Amdahl simulator."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([pA_speedup, pA_serial], justify="start"))
-
-        _S = pA_speedup.value
-        _amdahl = amdahl_speedup(component_speedup=_S, serial_pct=pA_serial.value)
-        _f = _amdahl.serial_fraction
-        _system_speedup = _amdahl.system_speedup
-        _asymptote = _amdahl.asymptote
-        _wasted = _amdahl.wasted_speedup_pct
-
-        # Amdahl curve
-        _speeds = np.arange(1, 101)
-        _sys_speeds = [1.0 / (_f + (1 - _f) / s) for s in _speeds]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_speeds.tolist(), y=_sys_speeds, mode="lines",
-            line=dict(color=COLORS["BlueLine"], width=3),
-            name="System Speedup",
-        ))
-        _fig.add_hline(y=_asymptote, line_dash="dash", line_color=COLORS["RedLine"],
-                       annotation_text=f"Asymptote: {_asymptote:.1f}x")
-        _fig.add_trace(go.Scatter(
-            x=[_S], y=[_system_speedup], mode="markers",
-            marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
-            name=f"Your GPU: {_S}x",
-        ))
-        _fig.update_layout(
-            height=340,
-            xaxis=dict(title="Component Speedup (x)"),
-            yaxis=dict(title="System Speedup (x)", range=[0, max(_asymptote * 1.2, 5)]),
-            legend=dict(orientation="h", y=1.12, x=0),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        # Before/after waterfall
-        _t_pre = _f
-        _t_inf_before = 1 - _f
-        _t_inf_after = (1 - _f) / _S
-        _total_before = 1.0
-        _total_after = _t_pre + _t_inf_after
-
-        _fig2 = go.Figure()
-        _fig2.add_trace(go.Bar(name="Preprocessing", x=["Before", "After"],
-            y=[_t_pre * 100, _t_pre * 100], marker_color=COLORS["OrangeLine"]))
-        _fig2.add_trace(go.Bar(name="Inference", x=["Before", "After"],
-            y=[_t_inf_before * 100, _t_inf_after * 100], marker_color=COLORS["BlueLine"]))
-        _fig2.update_layout(
-            barmode="stack", height=280,
-            yaxis=dict(title="Time (% of original)"),
-            legend=dict(orientation="h", y=1.12, x=0),
-        )
-        apply_plotly_theme(_fig2)
-        items.append(mo.as_html(_fig2))
-
-        _new_pre_frac = _amdahl.new_serial_pct
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">System Speedup</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_system_speedup:.2f}x</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">not {_S}x</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Wasted Speedup</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['RedLine']};">{_wasted:.0f}%</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">of hardware investment</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">New Bottleneck</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">{_new_pre_frac:.0f}%</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">preprocessing (was {_f*100:.0f}%)</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md(f"""
-**Amdahl's Law -- Live Calculation**
-
-```
-f_serial = {_f:.2f} (non-inference fraction)
-S        = {_S}x (inference speedup)
-System   = 1 / ({_f:.2f} + {1-_f:.2f}/{_S}) = 1 / {_f + (1-_f)/_S:.3f} = {_system_speedup:.2f}x
-Asymptote = 1 / {_f:.2f} = {_asymptote:.1f}x (cannot exceed this regardless of S)
-```
-*Source: `mlsysbook_labs.amdahl_speedup`, applied to `{v1_12_benchmark.component_label}`.*
-        """))
-
-        if pA_pred.value == "2x":
-            items.append(mo.callout(mo.md(f"**Correct.** A {_S}x component speedup yields only "
-                f"{_system_speedup:.1f}x system speedup. The {_f*100:.0f}% preprocessing fraction "
-                f"is now {_new_pre_frac:.0f}% of total time. The bottleneck has moved."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"**The system speedup is only {_system_speedup:.1f}x, not {_S}x.** "
-                f"Amdahl's Law: the {_f*100:.0f}% serial fraction caps the gain at {_asymptote:.1f}x. "
-                "The $30K GPU upgrade delivered 2x, not 10x."), kind="warn"))
-        items.append(mo.accordion({
-            "Math Peek: Amdahl's Law": mo.md("""
-**Formula:**
-$$
-\\text{Speedup}_{\\text{system}} = \\frac{1}{(1 - f) + \\frac{f}{S}}
-$$
-
-Asymptotic limit as $S \\to \\infty$:
-$$
-\\text{Speedup}_{\\max} = \\frac{1}{1 - f}
-$$
-
-**Variables:**
-- **$f$**: fraction of execution time that is parallelizable/accelerated
-- **$S$**: speedup of the accelerated portion
-- **$1 - f$**: serial (non-accelerated) fraction
-
-With 45% serial overhead, even infinite inference speedup caps at $1/0.45 = 2.2\\times$ system-level improvement.
-""")
-        }))
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART B: Thermal Cliff
-    # ─────────────────────────────────────────────────────────────────────
-    def build_part_b():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; {v1_12_variant.stakeholder}
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;The benchmark says {v1_12_benchmark.benchmark_claim}. In production we see
-                {v1_12_benchmark.hidden_failure_metric}. Is the benchmark wrong, or is the
-                deployment defective?&rdquo;
-            </div>
-        </div>
-        """))
-        items.append(mo.md("""
-        ## Peak vs. Sustained: The Thermal Cliff
-
-        Vendor benchmarks are **burst** measurements. Production runs are **sustained**.
-
-        ```
-        T_junction(t) = T_ambient + (TDP / G_thermal) x (1 - exp(-t / tau))
-        ```
-
-        When junction temperature exceeds T_throttle (~85C), the chip reduces clock
-        frequency. In a fanless enclosure at 35C ambient, thermal throttling can halve
-        sustained throughput within 5 minutes.
-        """))
-        items.append(pB_pred)
-        if pB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the thermal simulator."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([pB_time, pB_ambient, pB_cooling], justify="start"))
-
-        _t = pB_time.value  # seconds
-        _t_amb = pB_ambient.value
-        _cooling = pB_cooling.value
-        _tdp = v1_12_benchmark.tdp_w
-
-        # Thermal conductance by cooling type (W/K)
-        _g_thermal = {"active": 5.0, "passive": 2.0, "fanless": 0.8}[_cooling]
-        _tau = {"active": 120, "passive": 60, "fanless": 30}[_cooling]  # thermal time constant (s)
-        _t_throttle = 85  # throttle threshold (C)
-
-        _peak_fps = v1_12_benchmark.burst_value
-        _thermal = sustained_benchmark(
-            peak_value=_peak_fps,
-            tdp_w=_tdp,
-            duration_s=_t,
-            ambient_c=_t_amb,
-            cooling=_cooling,
-            throttle_c=_t_throttle,
-        )
-        _t_junction = _thermal.junction_temp_c
-        _throttled = _thermal.throttled
-        _sustained_fps = _thermal.sustained_value
-
-        # Time series
-        _times = np.linspace(0, 600, 200)
-        _temps = [_t_amb + (_tdp / _g_thermal) * (1 - math.exp(-t / _tau)) for t in _times]
-        _fps_series = []
-        for _temp in _temps:
-            if _temp > _t_throttle:
-                _tf = max(0.3, 1.0 - (_temp - _t_throttle) / 50.0)
-                _fps_series.append(_peak_fps * _tf)
-            else:
-                _fps_series.append(_peak_fps)
-
-        from plotly.subplots import make_subplots
-        _fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                            subplot_titles=("Junction Temperature", "Throughput (FPS)"),
-                            vertical_spacing=0.12)
-
-        _fig.add_trace(go.Scatter(x=_times.tolist(), y=_temps, mode="lines",
-            line=dict(color=COLORS["OrangeLine"], width=2), name="Temperature", showlegend=False), row=1, col=1)
-        _fig.add_hline(y=_t_throttle, line_dash="dash", line_color=COLORS["RedLine"],
-                       annotation_text=f"Throttle: {_t_throttle}C", row=1, col=1)
-        _fig.add_trace(go.Scatter(x=[_t], y=[_t_junction], mode="markers",
-            marker=dict(size=12, color=COLORS["RedLine"], symbol="diamond"),
-            name="Current", showlegend=False), row=1, col=1)
-
-        _fig.add_trace(go.Scatter(x=_times.tolist(), y=_fps_series, mode="lines",
-            line=dict(color=COLORS["BlueLine"], width=2), name="FPS", showlegend=False), row=2, col=1)
-        _fig.add_trace(go.Scatter(x=[_t], y=[_sustained_fps], mode="markers",
-            marker=dict(size=12, color=COLORS["RedLine"], symbol="diamond"),
-            name="Current", showlegend=False), row=2, col=1)
-
-        _fig.update_layout(height=380, margin=dict(l=50, r=20, t=40, b=40))
-        _fig.update_xaxes(title_text="Time (seconds)", row=2, col=1)
-        _fig.update_yaxes(title_text="Temperature (C)", row=1, col=1)
-        _fig.update_yaxes(title_text="FPS", row=2, col=1)
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _fps_color = COLORS["RedLine"] if _sustained_fps < 20 else (COLORS["OrangeLine"] if _sustained_fps < 25 else COLORS["GreenLine"])
-        _temp_color = COLORS["RedLine"] if _t_junction > _t_throttle else COLORS["GreenLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {_temp_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Junction Temp</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_temp_color};">{_t_junction:.0f}C</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{"THROTTLING" if _throttled else "normal"}</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {_fps_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Sustained FPS</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_fps_color};">{_sustained_fps:.0f} FPS</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">claim: {_peak_fps:g} {v1_12_benchmark.metric_unit}</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Performance Loss</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{(1 - _sustained_fps/_peak_fps)*100:.0f}%</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">vs peak burst</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md(f"""
-**Thermal Model -- Live Calculation** (`{_cooling}, {_t_amb}C ambient, t={_t}s`)
-
-```
-T_junction = {_t_amb} + ({_tdp} / {_g_thermal:.1f}) x (1 - exp(-{_t} / {_tau}))
-           = {_t_junction:.1f}C  {"(> 85C = THROTTLING)" if _throttled else "(< 85C = normal)"}
-FPS        = {_sustained_fps:.0f} (vendor peak: {_peak_fps:.0f})
-```
-*Source: `mlsysbook_labs.sustained_benchmark`, using `{v1_12_benchmark.hardware_ref}` TDP.*
-        """))
-
-        if pB_pred.value == "15":
-            items.append(mo.callout(mo.md("**Correct.** In a fanless enclosure at 35C, thermal throttling "
-                "halves sustained performance after steady-state. Vendor benchmarks are 1-minute burst "
-                "measurements that never reach thermal equilibrium."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md("**Sustained FPS drops dramatically.** "
-                "Scrub the time slider forward to 300+ seconds. In fanless enclosures, "
-                "thermal throttling kicks in within minutes."), kind="warn"))
-        items.append(mo.accordion({
-            "Math Peek: Thermal Throttling Model": mo.md("""
-**Formula (junction temperature over time):**
-$$
-T_j(t) = T_{\\text{amb}} + \\Delta T_{\\max} \\left(1 - e^{-t/\\tau}\\right)
-$$
-
-Throttling kicks in when $T_j > T_{\\text{throttle}}$:
-$$
-\\text{FPS}_{\\text{sustained}} = \\text{FPS}_{\\text{burst}} \\times \\frac{T_{\\text{throttle}} - T_{\\text{amb}}}{\\Delta T_{\\max}}
-$$
-
-**Variables:**
-- **$T_{\\text{amb}}$**: ambient temperature
-- **$\\Delta T_{\\max}$**: steady-state temperature rise at full power
-- **$\\tau$**: thermal time constant (seconds, depends on heatsink mass)
-- **$T_{\\text{throttle}}$**: junction temperature limit triggering clock reduction
-
-Vendor benchmarks run for $t \\ll \\tau$, never reaching thermal equilibrium. Sustained performance requires $t \\gg \\tau$.
-""")
-        }))
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART C: Multi-Metric Trap
-    # ─────────────────────────────────────────────────────────────────────
-    def build_part_c():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; {v1_12_variant.stakeholder}
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We picked the configuration with the best headline metric. It passed the easy
-                benchmark, but production exposes {v1_12_benchmark.hidden_failure_metric}.
-                Which guardrail did the benchmark fail to measure?&rdquo;
-            </div>
-        </div>
-        """))
-        items.append(mo.md("""
-        ## The Multi-Metric Trap
-
-        The configuration with the best single metric (accuracy) violates **other**
-        deployment gates (latency, power, throughput). Production deployment requires
-        passing **all** SLOs simultaneously.
-
-        | SLO Gate | Threshold |
-        |----------|-----------|
-        | Accuracy | > {v1_12_benchmark.accuracy_min_pct:g}% |
-        | P99 Latency | < {v1_12_benchmark.p99_max_ms:g} ms |
-        | Power | < {v1_12_benchmark.power_max_w:g} W |
-        | Throughput | > {v1_12_benchmark.throughput_min:g} {v1_12_benchmark.metric_unit} |
-        """))
-        items.append(pC_pred)
-        if pC_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the multi-metric analyzer."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([pC_batch, pC_precision], justify="start"))
-
-        _batch = pC_batch.value
-        _prec = pC_precision.value
-
-        # Model configurations
-        _bpp = {"fp32": 4, "fp16": 2, "int8": 1}
-        _acc_map = {"fp32": 94.0, "fp16": 93.8, "int8": 91.0}
-        _acc = _acc_map[_prec]
-
-        _precision_latency = {"fp32": 1.25, "fp16": 1.0, "int8": 0.75}[_prec]
-        _latency = (v1_12_benchmark.tail_base_ms * _precision_latency / max(1, _batch ** 0.35)) + 0.5
-        _p99 = _latency * (1 + 2.5 * v1_12_benchmark.tail_sigma)
-
-        # Throughput
-        _qps = _batch / (_latency / 1000) if _latency > 0 else 0
-
-        # Power (scales with batch and precision)
-        _base_power = max(0.001, min(v1_12_benchmark.power_max_w * 0.75, v1_12_benchmark.tdp_w))
-        _power = _base_power * (1 + 0.3 * math.log2(max(_batch, 1))) * _bpp[_prec] / 2
-
-        # SLO checks
-        _gate = metric_gate(
-            accuracy_pct=_acc,
-            p99_latency_ms=_p99,
-            power_w=_power,
-            throughput=_qps,
-            thresholds={
-                "accuracy_min_pct": v1_12_benchmark.accuracy_min_pct,
-                "p99_max_ms": v1_12_benchmark.p99_max_ms,
-                "power_max_w": v1_12_benchmark.power_max_w,
-                "throughput_min": v1_12_benchmark.throughput_min,
-            },
-        )
-        _slo_acc = _acc > v1_12_benchmark.accuracy_min_pct
-        _slo_lat = _p99 < v1_12_benchmark.p99_max_ms
-        _slo_power = _power < v1_12_benchmark.power_max_w
-        _slo_qps = _qps > v1_12_benchmark.throughput_min
-        _all_pass = _gate.all_pass
-
-        # Radar chart
-        _radar_r = [
-            min(_acc / 94 * 100, 100),
-            min((100 / _p99) * 100, 100) if _p99 > 0 else 0,
-            min((5 / _power) * 100, 100) if _power > 0 else 0,
-            min(_qps / 1200 * 100, 100),
-        ]
-        _radar_r.append(_radar_r[0])  # close the polygon
-        _radar_theta = ["Accuracy", "Latency", "Power", "Throughput", "Accuracy"]
-
-        _fig = go.Figure()
-        # SLO ring (all at normalized threshold)
-        _slo_ring = [90/94*100, 100, 100, 500/1200*100, 90/94*100]
-        _fig.add_trace(go.Scatterpolar(
-            r=_slo_ring, theta=_radar_theta, mode="lines",
-            line=dict(color=COLORS["GreenLine"], width=2, dash="dash"),
-            name="SLO Threshold",
-        ))
-        _fig.add_trace(go.Scatterpolar(
-            r=_radar_r, theta=_radar_theta, mode="lines+markers",
-            line=dict(color=COLORS["BlueLine"] if _all_pass else COLORS["RedLine"], width=2),
-            fill="toself", fillcolor=f"rgba(0,99,149,0.15)" if _all_pass else f"rgba(203,32,45,0.15)",
-            name="Your Config",
-        ))
-        _fig.update_layout(
-            height=350,
-            polar=dict(radialaxis=dict(range=[0, 110])),
-            legend=dict(orientation="h", y=-0.1, x=0),
-        )
-        items.append(mo.as_html(_fig))
-
-        if not _all_pass:
-            _violations = []
-            _violations = list(_gate.violations)
-            items.append(mo.callout(mo.md(
-                f"**DEPLOYMENT BLOCKED.** Violated SLOs: {', '.join(_violations)}."
-            ), kind="danger"))
-
-        _pass_badge = lambda ok: f'<span style="color:{COLORS["GreenLine"]}; font-weight:700;">PASS</span>' if ok else f'<span style="color:{COLORS["RedLine"]}; font-weight:700;">FAIL</span>'
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:12px 16px; border:1px solid #e2e8f0; border-radius:10px;
-                        background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem;">Accuracy</div>
-                <div style="font-size:1.2rem; font-weight:700;">{_acc:.1f}%</div>
-                <div>{_pass_badge(_slo_acc)}</div>
-            </div>
-            <div style="padding:12px 16px; border:1px solid #e2e8f0; border-radius:10px;
-                        background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem;">P99 Latency</div>
-                <div style="font-size:1.2rem; font-weight:700;">{_p99:.0f} ms</div>
-                <div>{_pass_badge(_slo_lat)}</div>
-            </div>
-            <div style="padding:12px 16px; border:1px solid #e2e8f0; border-radius:10px;
-                        background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem;">Power</div>
-                <div style="font-size:1.2rem; font-weight:700;">{_power:.1f} W</div>
-                <div>{_pass_badge(_slo_power)}</div>
-            </div>
-            <div style="padding:12px 16px; border:1px solid #e2e8f0; border-radius:10px;
-                        background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem;">Throughput</div>
-                <div style="font-size:1.2rem; font-weight:700;">{_qps:.0f} QPS</div>
-                <div>{_pass_badge(_slo_qps)}</div>
-            </div>
-        </div>
-        """))
-
-        if pC_pred.value == "no_latency":
-            items.append(mo.callout(mo.md("**Correct.** The highest-accuracy configuration violates "
-                "the latency SLO. Production deployment requires passing ALL gates simultaneously."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md("**Accuracy alone is not enough.** Try INT8 precision to see "
-                "which configuration passes all four SLO gates simultaneously."), kind="warn"))
-        items.append(mo.accordion({
-            "Math Peek: Multi-Metric SLO Gate": mo.md("""
-**Formula (deployment feasibility):**
-$$
-\\text{Deploy} = \\bigwedge_{i=1}^{K} \\left( m_i \\leq \\text{SLO}_i \\right)
-$$
-
-A configuration must pass ALL gates simultaneously:
-$$
-\\text{Accuracy} \\geq A_{\\min} \\;\\wedge\\; \\text{Latency}_{p99} \\leq L_{\\max} \\;\\wedge\\; \\text{Power} \\leq P_{\\max} \\;\\wedge\\; \\text{Memory} \\leq M_{\\max}
-$$
-
-**Variables:**
-- **$m_i$**: measured metric for gate $i$
-- **$\\text{SLO}_i$**: service-level objective threshold for gate $i$
-- **$K$**: number of SLO gates (typically 3-5)
-
-The highest-accuracy configuration often violates latency or power constraints. Production deployment is a conjunction, not a maximization.
-""")
-        }))
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART D: Tail Latency Diagnostic
-    # ─────────────────────────────────────────────────────────────────────
-    def build_part_d():
-        items = []
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid #6366f1; background:#f0f4ff;
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:#6366f1;
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; {v1_12_variant.stakeholder}
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;The benchmark reports a healthy average for {v1_12_benchmark.label}. But the
-                production claim depends on p99. What does the tail say about
-                {v1_12_benchmark.guardrail_metric}?&rdquo;
-            </div>
-        </div>
-        """))
-        items.append(mo.md("""
-        ## Tail Latency: Average Hides Catastrophic Tails
-
-        Real inference latency follows a **log-normal distribution** with a heavy right tail.
-        Average latency is actively misleading because it hides the distribution shape.
-
-        ```
-        latency_sample = base_latency x exp(N(0, sigma^2))
-        p99 = base_latency x exp(2.326 x sigma)
-        ```
-
-        At sigma=0.8, p99 is ~6.4x the median. A "50 ms average" system can have a
-        500 ms p99 that violates a 200 ms SLO for 1% of requests.
-        """))
-        items.append(pD_pred)
-        if pD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the latency distribution."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([pD_sigma, pD_slo], justify="start"))
-
-        _sigma = pD_sigma.value
-        _slo = pD_slo.value
-        _base = v1_12_benchmark.tail_base_ms
-
-        # Generate log-normal distribution
-        np.random.seed(42)
-        _n_samples = 10000
-        _samples = _base * np.exp(np.random.normal(0, _sigma, _n_samples))
-
-        _tail = tail_latency(base_ms=_base, sigma=_sigma, slo_ms=_slo)
-        _mean = _tail.mean_ms
-        _p50 = _tail.p50_ms
-        _p95 = _tail.p95_ms
-        _p99 = _tail.p99_ms
-        _p999 = _tail.p999_ms
-        _violation_pct = _tail.violation_pct
-        _slo_ok = _tail.slo_ok
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Histogram(
-            x=_samples.tolist(), nbinsx=100,
-            marker_color=COLORS["BlueLine"], opacity=0.7,
-            name="Latency Distribution",
-        ))
-        _fig.add_vline(x=_mean, line_dash="dash", line_color=COLORS["BlueLine"],
-                       annotation_text=f"Mean: {_mean:.0f} ms")
-        _fig.add_vline(x=_p99, line_dash="solid", line_color=COLORS["RedLine"],
-                       annotation_text=f"P99: {_p99:.0f} ms")
-        _fig.add_vline(x=_slo, line_dash="dot", line_color=COLORS["GreenLine"],
-                       annotation_text=f"SLO: {_slo} ms")
-        _fig.update_layout(
-            height=340,
-            xaxis=dict(title="Latency (ms)", range=[0, min(max(_samples) * 0.8, 1000)]),
-            yaxis=dict(title="Count"),
-            showlegend=False,
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _v_color = COLORS["GreenLine"] if _slo_ok else COLORS["RedLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Mean</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_mean:.0f} ms</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">P99</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_p99:.0f} ms</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_p99/_mean:.1f}x the mean</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {_v_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">SLO ({_slo} ms)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_v_color};">
-                    {"PASS" if _slo_ok else "FAIL"}</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">{_violation_pct:.1f}% violations</div>
-            </div>
-        </div>
-        """))
-
-        if not _slo_ok:
-            items.append(mo.callout(mo.md(
-                f"**SLO VIOLATED.** P99 = {_p99:.0f} ms exceeds the {_slo} ms threshold. "
-                f"{_violation_pct:.1f}% of requests fail. At 10K QPS, that is "
-                f"{_violation_pct/100*10000:.0f} failures per second."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-**Tail Latency -- Live Calculation** (`sigma={_sigma:.2f}`)
-
-```
-Base latency:  {_base:.0f} ms
-Distribution:  log-normal, sigma = {_sigma:.2f}
-Mean:          {_mean:.0f} ms
-P50:           {_p50:.0f} ms
-P95:           {_p95:.0f} ms
-P99:           {_p99:.0f} ms  ({_p99/_mean:.1f}x mean)
-P99.9:         {_p999:.0f} ms
-SLO ({_slo} ms): {"PASS" if _slo_ok else "FAIL"} ({_violation_pct:.1f}% violations)
-```
-*Source: `mlsysbook_labs.tail_latency`, using `{v1_12_benchmark.hidden_failure_metric}` scenario defaults.*
-        """))
-
-        if pD_pred.value == "no":
-            items.append(mo.callout(mo.md(f"**Correct.** P99 = {_p99:.0f} ms, well above the 200 ms SLO. "
-                "Average latency hides the heavy tail. Real inference distributions are log-normal, "
-                "where p99 can be 5-10x the mean."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"**Average latency is actively misleading.** "
-                f"P99 ({_p99:.0f} ms) is {_p99/_mean:.1f}x the mean ({_mean:.0f} ms). "
-                "Adjust sigma to see how tail heaviness affects SLO compliance."), kind="warn"))
-        items.append(mo.accordion({
-            "Math Peek: Log-Normal Tail Latency": mo.md("""
-**Formula (P99 of log-normal distribution):**
-$$
-P_{99} = e^{\\mu + 2.326 \\cdot \\sigma}
-$$
-
-Ratio of P99 to mean:
-$$
-\\frac{P_{99}}{\\text{Mean}} = e^{2.326\\sigma - \\sigma^2/2}
-$$
-
-**Variables:**
-- **$\\mu$**: log-scale location parameter
-- **$\\sigma$**: log-scale shape parameter (tail heaviness)
-- **2.326**: z-score for 99th percentile of standard normal
-
-At $\\sigma = 0.8$ (typical for inference), $P_{99}/\\text{Mean} \\approx 5\\text{-}10\\times$. A 50 ms mean hides a 250-500 ms P99.
-""")
-        }))
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # SYNTHESIS
-    # ─────────────────────────────────────────────────────────────────────
-    def build_synthesis():
-        return mo.vstack([
-            mo.md("---"),
+        items = [
             mo.Html(f"""
-            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                    Key Takeaways
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Part A Concept Module &middot; Benchmark validity
                 </div>
-                <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                    <div style="margin-bottom: 10px;">
-                        <strong>1. Component speedup is not system speedup.</strong>
-                        Amdahl's Law: a 10x inference speedup with 45% serial overhead yields
-                        only 2.0x end-to-end improvement. The bottleneck has already moved.
-                    </div>
-                    <div style="margin-bottom: 10px;">
-                        <strong>2. Vendor benchmarks are burst, not sustained.</strong>
-                        Thermal throttling halves throughput in fanless enclosures within minutes.
-                        Always measure at thermal steady-state, not in a 1-minute demo.
-                    </div>
-                    <div>
-                        <strong>3. Average latency hides catastrophic tails.</strong>
-                        A 50 ms average can mask a 500 ms p99. Production SLOs require
-                        measuring p99/p99.9, not the mean.
-                    </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;{v1_12_variant.stakeholder}: The claim is {v1_12_benchmark.benchmark_claim}.
+                    I need to know whether it answers: {v1_12_packet['production_question']}&rdquo;
                 </div>
             </div>
             """),
+            mo.md(f"""
+            ## Valid Benchmarks Match Workload And Metric
+
+            A benchmark is not a universal number. It is evidence for one workload,
+            one metric, and one decision boundary. For this track, the production
+            boundary is: **{v1_12_packet['production_scope']}**.
+            """),
+            pA_pred,
+        ]
+        if pA_pred.value is None:
+            items.append(mo.callout(mo.md("Commit to a validity prediction before opening the evidence."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pA_workload, pA_metric], justify="start"))
+        metric_choice = pA_metric.value or "headline"
+        result = v1_12_validity_result(
+            v1_12_benchmark,
+            v1_12_packet,
+            pA_workload.value,
+            metric_choice,
+        )
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=["Headline", "Production-like"],
+            y=[result["easy_score"], result["validity_score"]],
+            marker_color=[COLORS["OrangeLine"], COLORS["BlueLine"] if result["valid"] else COLORS["RedLine"]],
+            text=[f"{result['easy_score']:.0f}", f"{result['validity_score']:.0f}"],
+            textposition="outside",
+        ))
+        fig.add_hline(
+            y=v1_12_packet["score_threshold"],
+            line_dash="dash",
+            line_color=COLORS["GreenLine"],
+            annotation_text=f"Report threshold: {v1_12_packet['score_threshold']}",
+        )
+        fig.update_layout(height=320, yaxis=dict(title="Validity score", range=[0, 105]), showlegend=False)
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+
+        amdahl = amdahl_speedup(
+            component_speedup=v1_12_benchmark.default_speedup,
+            serial_pct=v1_12_benchmark.default_serial_pct,
+        )
+        items.append(mo.Html(v1_12_metric_cards(COLORS, (
+            ("Selected Metric", result["selected_metric"], "metric used for the deployment decision", COLORS["BlueLine"]),
+            ("Validity Score", f"{result['validity_score']:.0f}/100", "weighted workload/metric/run-rule overlap", COLORS["GreenLine"] if result["valid"] else COLORS["RedLine"]),
+            ("Amdahl Cross-Check", f"{amdahl.system_speedup:.2f}x", f"{v1_12_benchmark.default_speedup:g}x component speedup after pipeline overhead", COLORS["OrangeLine"]),
+        ))))
+        items.append(mo.Html(v1_12_html_table(result["rows"], ("Benchmark", "Workload", "Metric", "Measured amount", "Decision support"))))
+        items.append(mo.callout(
+            mo.md(f"You predicted `{pA_pred.value}`; actual benchmark evidence must match deployment workload and metric."),
+            kind="info",
+        ))
+
+        if pA_pred.value == "match_deployment":
+            items.append(mo.callout(mo.md("**Correct.** The valid benchmark is the one whose workload and metric match the deployment question."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Consequence:** the headline number misses {v1_12_benchmark.hidden_failure_metric}. "
+                "A benchmark can be precise and still answer the wrong question."
+            ), kind="warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: Validity Overlap": mo.md(f"""
+            The local validity score weights four overlaps:
+
+            ```
+            validity = 0.35*workload + 0.30*metric + 0.20*duration + 0.15*guardrail
+            ```
+
+            Workload match is `{pA_workload.value}%`. The selected metric is
+            `{result["selected_metric"]}`. This mirrors the chapter claim that
+            benchmark results are proxies whose boundaries must be named.
+
+            Source model: Chapter sections on benchmarks as proxies, Benchmarking
+            Granularity, MLPerf execution scenarios, and `mlsysbook_labs.amdahl_speedup`
+            for the component-vs-end-to-end cross-check.
+            """)
+        }))
+        items.append(pA_decision)
+        if pA_decision.value is None:
+            items.append(mo.callout(mo.md("Checkpoint: choose which benchmark result belongs in the final report."), kind="info"))
+        return mo.vstack(items)
+
+    def build_part_b():
+        items = [
             mo.Html(f"""
-            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        What's Next
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab 13:</strong> The Tail Latency Trap -- the tail you measured
-                        in Part D explodes under load. Queuing theory explains why utilization
-                        above 70% is dangerous.
-                    </div>
+            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Part B Concept Module &middot; Confidence
                 </div>
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Textbook &amp; TinyTorch
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the Performance Benchmarking chapter for Amdahl's Law derivation
-                        and thermal models.<br/>
-                        <strong>Build:</strong> TinyTorch Module 12 -- benchmark harness with
-                        percentile tracking.
-                    </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;The benchmark number looks precise. Is the run rule strong enough to
+                    publish it for {v1_12_benchmark.label}?&rdquo;
+                </div>
+            </div>
+            """),
+            mo.md(f"""
+            ## Warmup, Variance, And Sample Size Set Confidence
+
+            {v1_12_packet["amount_line_b"]} A reportable benchmark needs warmup
+            discard, repeated samples, coefficient of variation, and a confidence
+            interval rather than a single impressive run.
+            """),
+            pB_pred,
+        ]
+        if pB_pred.value is None:
+            items.append(mo.callout(mo.md("Commit to a confidence prediction before opening the run-rule controls."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pB_warmup, pB_samples, pB_jitter], justify="start"))
+        result = v1_12_confidence_result(
+            v1_12_benchmark,
+            v1_12_packet,
+            pB_warmup.value,
+            pB_samples.value,
+            pB_jitter.value,
+        )
+        xs = list(range(len(result["values"])))
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=xs,
+            y=result["values"],
+            mode="lines+markers",
+            line=dict(color=COLORS["BlueLine"], width=2),
+            marker=dict(size=5),
+            name="observed run value",
+        ))
+        if pB_warmup.value > 0:
+            fig.add_vrect(
+                x0=-0.5,
+                x1=pB_warmup.value - 0.5,
+                fillcolor=COLORS["OrangeLine"],
+                opacity=0.14,
+                line_width=0,
+                annotation_text="discarded warmup",
+            )
+        fig.add_hline(y=result["mean"], line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"measured mean {result['mean']:.1f}")
+        fig.update_layout(height=330, xaxis=dict(title="Iteration"), yaxis=dict(title="Measured latency proxy (ms)"))
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+
+        items.append(mo.Html(v1_12_metric_cards(COLORS, (
+            ("Measured Samples", f"{pB_samples.value}", f"floor: {v1_12_packet['sample_floor']}", COLORS["BlueLine"]),
+            ("CV", f"{result['cv_pct']:.1f}%", f"limit: {v1_12_packet['cv_limit_pct']:.1f}%", COLORS["GreenLine"] if result["cv_pct"] <= v1_12_packet["cv_limit_pct"] else COLORS["RedLine"]),
+            ("95% CI", f"+/- {result['ci_half']:.1f} ms", f"{result['ci_pct']:.1f}% of mean", COLORS["GreenLine"] if result["confidence_ok"] else COLORS["RedLine"]),
+        ))))
+        items.append(mo.Html(v1_12_html_table(result["rows"], ("Check", "Measured", "Limit", "Verdict"))))
+
+        if result["confidence_ok"]:
+            items.append(mo.callout(mo.md("**Confidence gate passes.** The run rule is strong enough to support a bounded benchmark claim."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Confidence gate fails.** A precise-looking number can be underpowered, noisy, or polluted by warmup artifacts."
+            ), kind="danger"))
+
+        if pB_pred.value == "warmup_confidence":
+            items.append(mo.callout(mo.md("**Correct.** Warmup plus repeated-run confidence is the minimum credible rule."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md("The chapter's warmup and variance rules reject single-run claims."), kind="warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: CV And Confidence": mo.md(f"""
+            ```
+            CV = sigma_run / mean_run
+            95% CI half-width = 1.96 * sigma_run / sqrt(n)
+            ```
+
+            Current values:
+
+            ```
+            mean = {result["mean"]:.2f} ms
+            sigma = {result["std"]:.2f} ms
+            n = {pB_samples.value}
+            CV = {result["cv_pct"]:.2f}%
+            CI = +/- {result["ci_half"]:.2f} ms
+            ```
+
+            Source model: Chapter micro-benchmarking rules and statistical
+            confidence discussion.
+            """)
+        }))
+        items.append(pB_decision)
+        if pB_decision.value is None:
+            items.append(mo.callout(mo.md("Checkpoint: choose the confidence verdict for the benchmark report."), kind="info"))
+        return mo.vstack(items)
+
+    def build_part_c():
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Part C Concept Module &middot; Tail and guardrails
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;The mean looks good, but production incidents mention
+                    {v1_12_benchmark.hidden_failure_metric}. What did the average hide?&rdquo;
+                </div>
+            </div>
+            """),
+            mo.md(f"""
+            ## Averages Hide Tail And Guardrail Failures
+
+            {v1_12_packet["amount_line_c"]} This module keeps the concept
+            shared across tracks: the mean can pass while the deployment guardrail fails.
+            """),
+            pC_pred,
+        ]
+        if pC_pred.value is None:
+            items.append(mo.callout(mo.md("Commit to a mean-vs-tail prediction before opening the distribution."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pC_sigma, pC_stress], justify="start"))
+        result = v1_12_guardrail_result(v1_12_benchmark, v1_12_packet, pC_sigma.value, pC_stress.value)
+        tail = result["tail"]
+        rng = np.random.default_rng(12012)
+        samples = v1_12_benchmark.tail_base_ms * np.exp(rng.normal(0, pC_sigma.value, 6000))
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=samples.tolist(),
+            nbinsx=90,
+            marker_color=COLORS["BlueLine"],
+            opacity=0.72,
+            name="latency samples",
+        ))
+        fig.add_vline(x=tail.mean_ms, line_dash="dash", line_color=COLORS["BlueLine"], annotation_text=f"mean {tail.mean_ms:.0f} ms")
+        fig.add_vline(x=tail.p99_ms, line_dash="solid", line_color=COLORS["RedLine"], annotation_text=f"p99 {tail.p99_ms:.0f} ms")
+        fig.add_vline(x=v1_12_benchmark.tail_slo_ms, line_dash="dot", line_color=COLORS["GreenLine"], annotation_text=f"limit {v1_12_benchmark.tail_slo_ms:g} ms")
+        fig.update_layout(
+            height=340,
+            xaxis=dict(title="Latency sample (ms)", range=[0, min(max(tail.p999_ms * 1.15, tail.mean_ms * 4), 1200)]),
+            yaxis=dict(title="Count"),
+            showlegend=False,
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+
+        verdict_color = COLORS["RedLine"] if result["blocked"] else COLORS["GreenLine"]
+        items.append(mo.Html(v1_12_metric_cards(COLORS, (
+            ("Mean", f"{tail.mean_ms:.0f} ms", "headline average", COLORS["BlueLine"]),
+            ("P99", f"{tail.p99_ms:.0f} ms", f"limit {v1_12_benchmark.tail_slo_ms:g} ms", COLORS["RedLine"] if tail.p99_ms > v1_12_benchmark.tail_slo_ms else COLORS["GreenLine"]),
+            ("Guardrail", "BLOCK" if result["blocked"] else "PASS", result["failure_rate"], verdict_color),
+        ))))
+        items.append(mo.Html(v1_12_html_table(result["rows"], ("Metric", "Measured", "Limit", "Verdict"))))
+
+        if result["blocked"]:
+            items.append(mo.callout(mo.md(
+                f"**Release blocked.** Mean latency does not cover {v1_12_packet['guardrail_label']}. "
+                f"Failure consequence: {result['failure_rate']}."
+            ), kind="danger"))
+        else:
+            items.append(mo.callout(mo.md("**Guardrails pass under this setting.** The report still needs tail evidence, not only the mean."), kind="success"))
+
+        if pC_pred.value == "tail_required":
+            items.append(mo.callout(mo.md("**Correct.** Percentile and guardrail evidence decides production viability."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md("The average is not a release gate when the deployment question is percentile or guardrail based."), kind="warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: Log-Normal Tail": mo.md(f"""
+            ```
+            p_q = base_latency * exp(z_q * sigma)
+            p99 uses z = 2.326
+            p99.9 uses z = 3.09
+            ```
+
+            Current source model:
+
+            ```
+            base = {v1_12_benchmark.tail_base_ms:.1f} ms
+            sigma = {pC_sigma.value:.2f}
+            mean = {tail.mean_ms:.1f} ms
+            p99 = {tail.p99_ms:.1f} ms
+            p99.9 = {tail.p999_ms:.1f} ms
+            ```
+
+            Source helper: `mlsysbook_labs.tail_latency`. Chapter anchor:
+            latency and tail latency plus single-metric fallacies.
+            """)
+        }))
+        items.append(pC_decision)
+        if pC_decision.value is None:
+            items.append(mo.callout(mo.md("Checkpoint: choose the tail/guardrail decision for the report."), kind="info"))
+        return mo.vstack(items)
+
+    def build_part_d():
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Part D Concept Module &middot; Fair comparison
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Two benchmark submissions disagree. Which comparison can be reported
+                    without overstating the evidence?&rdquo;
+                </div>
+            </div>
+            """),
+            mo.md(f"""
+            ## Fair Comparison Requires Controlled Conditions
+
+            {v1_12_packet["amount_line_d"]} A larger number loses if it is
+            measured under easier rules or omits the guardrail evidence.
+            """),
+            pD_pred,
+        ]
+        if pD_pred.value is None:
+            items.append(mo.callout(mo.md("Commit to a comparison prediction before opening the fairness audit."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.vstack([
+            mo.hstack([pD_same_workload, pD_same_warmup, pD_same_samples], justify="start"),
+            mo.hstack([pD_same_hardware, pD_same_guardrail], justify="start"),
+        ]))
+        controls = {
+            "same_workload": pD_same_workload.value,
+            "same_warmup": pD_same_warmup.value,
+            "same_samples": pD_same_samples.value,
+            "same_hardware": pD_same_hardware.value,
+            "same_guardrail": pD_same_guardrail.value,
+        }
+        result = v1_12_fairness_result(v1_12_packet, controls)
+        labels = [label for _, label in v1_12_packet["conditions"]]
+        values = [1 if controls[key] else 0 for key, _ in v1_12_packet["conditions"]]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=labels,
+            y=values,
+            marker_color=[COLORS["GreenLine"] if value else COLORS["RedLine"] for value in values],
+            text=["controlled" if value else "missing" for value in values],
+            textposition="outside",
+        ))
+        fig.update_layout(height=340, yaxis=dict(title="Control present", range=[0, 1.25]), showlegend=False)
+        fig.update_xaxes(tickangle=-20)
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+
+        items.append(mo.Html(v1_12_metric_cards(COLORS, (
+            ("Fairness Index", f"{result['index']:.0f}%", "controlled conditions / required conditions", COLORS["GreenLine"] if result["reportable"] else COLORS["RedLine"]),
+            ("Accepted", result["accepted"], "comparison eligible for report", COLORS["BlueLine"]),
+            ("Rejected", result["rejected"], "headline-only comparison", COLORS["OrangeLine"]),
+        ))))
+        items.append(mo.Html(v1_12_html_table(result["rows"], ("Comparison", "Reported win", "Run-rule state", "Reportable"))))
+
+        if result["reportable"]:
+            items.append(mo.callout(mo.md(
+                f"**Comparison is reportable.** The headline-only comparison is still rejected; "
+                f"the report can use {v1_12_packet['accepted_comparison']}."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Comparison withheld.** Missing evidence: " + ", ".join(result["missing"])
+            ), kind="danger"))
+
+        if pD_pred.value == "controlled":
+            items.append(mo.callout(mo.md("**Correct.** Fair comparisons are governed by run rules, not headline size."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md("The faster number is not reportable unless the workload, run rules, and guardrails match."), kind="warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: Fair Comparison Index": mo.md(f"""
+            ```
+            fair_comparison_index = controlled_conditions / required_conditions
+            ```
+
+            Current index:
+
+            ```
+            controlled = {len(v1_12_packet["conditions"]) - len(result["missing"])}
+            required = {len(v1_12_packet["conditions"])}
+            index = {result["index"]:.0f}%
+            ```
+
+            Source model: Chapter Benchmark Components, System Specifications,
+            Run Rules, and MLPerf reference-vs-submission validation.
+            """)
+        }))
+        items.append(pD_decision)
+        if pD_decision.value is None:
+            items.append(mo.callout(mo.md("Checkpoint: choose the comparison decision for the final report."), kind="info"))
+        return mo.vstack(items)
+
+    def build_synthesis():
+        a_result = v1_12_validity_result(
+            v1_12_benchmark,
+            v1_12_packet,
+            pA_workload.value,
+            pA_metric.value or "headline",
+        )
+        b_result = v1_12_confidence_result(
+            v1_12_benchmark,
+            v1_12_packet,
+            pB_warmup.value,
+            pB_samples.value,
+            pB_jitter.value,
+        )
+        c_result = v1_12_guardrail_result(
+            v1_12_benchmark,
+            v1_12_packet,
+            pC_sigma.value,
+            pC_stress.value,
+        )
+        d_result = v1_12_fairness_result(
+            v1_12_packet,
+            {
+                "same_workload": pD_same_workload.value,
+                "same_warmup": pD_same_warmup.value,
+                "same_samples": pD_same_samples.value,
+                "same_hardware": pD_same_hardware.value,
+                "same_guardrail": pD_same_guardrail.value,
+            },
+        )
+        incomplete = []
+        for label, widget in (
+            ("Part A prediction", pA_pred),
+            ("Part A checkpoint", pA_decision),
+            ("Part B prediction", pB_pred),
+            ("Part B checkpoint", pB_decision),
+            ("Part C prediction", pC_pred),
+            ("Part C checkpoint", pC_decision),
+            ("Part D prediction", pD_pred),
+            ("Part D checkpoint", pD_decision),
+        ):
+            if widget.value is None:
+                incomplete.append(label)
+        rows = (
+            {"Report field": "Selected metric", "Evidence": a_result["selected_metric"]},
+            {"Report field": "Confidence", "Evidence": "confident" if b_result["confidence_ok"] else f"not yet confident: CV {b_result['cv_pct']:.1f}%, CI {b_result['ci_pct']:.1f}%"},
+            {"Report field": "Tail/guardrail", "Evidence": "blocked" if c_result["blocked"] else "passes under selected stress"},
+            {"Report field": "Rejected comparison", "Evidence": d_result["rejected"]},
+            {"Report field": "Claim scope", "Evidence": v1_12_packet["production_scope"]},
+        )
+        return mo.vstack([
+            mo.md("""
+            ## Synthesis: Benchmark Report
+
+            The durable lesson is not that one metric is always best. The report is
+            valid only when metric, confidence, tail/guardrail evidence, and
+            comparison rules match the deployment question.
+            """),
+            mo.Html(v1_12_html_table(rows, ("Report field", "Evidence"))),
+            mo.callout(
+                mo.md(
+                    "Incomplete fields: " + ", ".join(incomplete)
+                    if incomplete
+                    else "All concept-module predictions and checkpoints are complete."
+                ),
+                kind="warn" if incomplete else "success",
+            ),
+            mo.Html(f"""
+            <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                        border-radius:8px; padding:18px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
+                    Track-specific report frame
+                </div>
+                <div style="font-size:0.92rem; color:{COLORS['Text']}; line-height:1.7;">
+                    For <strong>{v1_12_benchmark.label}</strong>, accept the benchmark claim only
+                    within the scope <strong>{v1_12_packet['production_scope']}</strong>, with
+                    selected metric <strong>{a_result['selected_metric']}</strong>, confidence
+                    verdict <strong>{"confident" if b_result["confidence_ok"] else "not confident"}</strong>,
+                    guardrail verdict <strong>{"blocked" if c_result["blocked"] else "passes"}</strong>,
+                    and rejected comparison <strong>{d_result['rejected']}</strong>.
                 </div>
             </div>
             """),
         ])
 
-    _tabs = mo.ui.tabs({
-        "Part A: Amdahl Ceiling": build_part_a(),
-        "Part B: Thermal Cliff": build_part_b(),
-        "Part C: Multi-Metric Trap": build_part_c(),
-        "Part D: Tail Latency": build_part_d(),
+    tabs = mo.ui.tabs({
+        "Part A: Validity": build_part_a(),
+        "Part B: Confidence": build_part_b(),
+        "Part C: Tail/Guardrail": build_part_c(),
+        "Part D: Fairness": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    _tabs
+    tabs
     return
 
-# ═════════════════════════════════════════════════════════════════════════════
-# CELL 5: LEDGER HUD
-# ═════════════════════════════════════════════════════════════════════════════
 
-# ===========================================================================
-# ZONE D: LEDGER HUD
-# ===========================================================================
+# CELL 6: LEDGER HUD
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, v1_12_benchmark, v1_12_profile, v1_12_variant):
-    if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None:
+def _(
+    COLORS,
+    ledger,
+    mo,
+    pA_decision,
+    pA_metric,
+    pA_pred,
+    pA_workload,
+    pB_decision,
+    pB_jitter,
+    pB_pred,
+    pB_samples,
+    pB_warmup,
+    pC_decision,
+    pC_pred,
+    pC_sigma,
+    pC_stress,
+    pD_decision,
+    pD_pred,
+    pD_same_guardrail,
+    pD_same_hardware,
+    pD_same_samples,
+    pD_same_warmup,
+    pD_same_workload,
+    v1_12_benchmark,
+    v1_12_confidence_result,
+    v1_12_fairness_result,
+    v1_12_guardrail_result,
+    v1_12_packet,
+    v1_12_profile,
+    v1_12_validity_result,
+    v1_12_variant,
+):
+    _a_result = v1_12_validity_result(v1_12_benchmark, v1_12_packet, pA_workload.value, pA_metric.value or "headline")
+    _b_result = v1_12_confidence_result(v1_12_benchmark, v1_12_packet, pB_warmup.value, pB_samples.value, pB_jitter.value)
+    _c_result = v1_12_guardrail_result(v1_12_benchmark, v1_12_packet, pC_sigma.value, pC_stress.value)
+    _d_result = v1_12_fairness_result(v1_12_packet, {
+        "same_workload": pD_same_workload.value,
+        "same_warmup": pD_same_warmup.value,
+        "same_samples": pD_same_samples.value,
+        "same_hardware": pD_same_hardware.value,
+        "same_guardrail": pD_same_guardrail.value,
+    })
+    completed = all(widget.value is not None for widget in (
+        pA_pred, pA_decision, pB_pred, pB_decision, pC_pred, pC_decision, pD_pred, pD_decision
+    ))
+    if completed:
         ledger.save(chapter=12, design={
             "lab": "perf_bench",
             "track_id": v1_12_profile.track_id,
@@ -1134,10 +1392,16 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, v1_12_benchmark, v
             "hardware_ref": v1_12_benchmark.hardware_ref,
             "model_ref": v1_12_benchmark.model_ref,
             "completed": True,
-            "amdahl_speedup_prediction": pA_pred.value,
-            "thermal_sustained_fps": pB_pred.value,
-            "multi_metric_slo_verdict": pC_pred.value,
-            "tail_latency_slo_met": pD_pred.value,
+            "selected_metric": _a_result["selected_metric"],
+            "validity_score": round(_a_result["validity_score"], 2),
+            "confidence_ok": _b_result["confidence_ok"],
+            "cv_pct": round(_b_result["cv_pct"], 2),
+            "ci_half_width": round(_b_result["ci_half"], 2),
+            "tail_guardrail_blocked": _c_result["blocked"],
+            "failure_rate": _c_result["failure_rate"],
+            "fair_comparison_index": round(_d_result["index"], 2),
+            "accepted_comparison": _d_result["accepted"],
+            "rejected_comparison": _d_result["rejected"],
         })
     mo.Html(f"""
     <div class="lab-hud">
@@ -1146,160 +1410,167 @@ def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, v1_12_benchmark, v
         <span class="hud-label">TRACK</span>
         <span class="hud-value">{v1_12_profile.label}</span>
         <span style="flex:1;"></span>
-        <span class="hud-label">CH</span>
-        <span class="hud-value">12</span>
         <span class="hud-label">STATUS</span>
-        <span class="hud-active">COMPLETE</span>
+        <span class="hud-active">{"COMPLETE" if completed else "IN PROGRESS"}</span>
     </div>
     """)
     return
 
 
-# ─── DOWNLOADABLE TRACK REPORT ──────────────────────────────────────────────
+# DOWNLOADABLE TRACK REPORT
+
 @app.cell(hide_code=True)
 def _(
-    amdahl_speedup,
     build_lab_report,
-    math,
-    metric_gate,
     mo,
+    pA_decision,
+    pA_metric,
     pA_pred,
-    pA_serial,
-    pA_speedup,
-    pB_ambient,
-    pB_cooling,
+    pA_workload,
+    pB_decision,
+    pB_jitter,
     pB_pred,
-    pB_time,
-    pC_batch,
-    pC_precision,
+    pB_samples,
+    pB_warmup,
+    pC_decision,
     pC_pred,
+    pC_sigma,
+    pC_stress,
+    pD_decision,
     pD_pred,
-    pD_sigma,
-    pD_slo,
+    pD_same_guardrail,
+    pD_same_hardware,
+    pD_same_samples,
+    pD_same_warmup,
+    pD_same_workload,
     report_export_panel,
-    sustained_benchmark,
-    tail_latency,
     v1_12_benchmark,
+    v1_12_confidence_result,
+    v1_12_fairness_result,
+    v1_12_guardrail_result,
     v1_12_metadata,
+    v1_12_packet,
     v1_12_profile,
+    v1_12_validity_result,
     v1_12_variant,
 ):
-    _amdahl = amdahl_speedup(component_speedup=pA_speedup.value, serial_pct=pA_serial.value)
-    _thermal = sustained_benchmark(
-        peak_value=v1_12_benchmark.burst_value,
-        tdp_w=v1_12_benchmark.tdp_w,
-        duration_s=pB_time.value,
-        ambient_c=pB_ambient.value,
-        cooling=pB_cooling.value,
-    )
-    _bpp = {"fp32": 4, "fp16": 2, "int8": 1}
-    _acc_map = {"fp32": 94.0, "fp16": 93.8, "int8": 91.0}
-    _precision_latency = {"fp32": 1.25, "fp16": 1.0, "int8": 0.75}
-    _prec = pC_precision.value
-    _batch = pC_batch.value
-    _latency = (v1_12_benchmark.tail_base_ms * _precision_latency[_prec] / max(1, _batch ** 0.35)) + 0.5
-    _p99 = _latency * (1 + 2.5 * v1_12_benchmark.tail_sigma)
-    _throughput = _batch / (_latency / 1000) if _latency > 0 else 0
-    _base_power = max(0.001, min(v1_12_benchmark.power_max_w * 0.75, v1_12_benchmark.tdp_w))
-    _power = _base_power * (1 + 0.3 * math.log2(max(_batch, 1))) * _bpp[_prec] / 2
-    _gate = metric_gate(
-        accuracy_pct=_acc_map[_prec],
-        p99_latency_ms=_p99,
-        power_w=_power,
-        throughput=_throughput,
-        thresholds={
-            "accuracy_min_pct": v1_12_benchmark.accuracy_min_pct,
-            "p99_max_ms": v1_12_benchmark.p99_max_ms,
-            "power_max_w": v1_12_benchmark.power_max_w,
-            "throughput_min": v1_12_benchmark.throughput_min,
-        },
-    )
-    _tail = tail_latency(base_ms=v1_12_benchmark.tail_base_ms, sigma=pD_sigma.value, slo_ms=pD_slo.value)
+    a_result = v1_12_validity_result(v1_12_benchmark, v1_12_packet, pA_workload.value, pA_metric.value or "headline")
+    b_result = v1_12_confidence_result(v1_12_benchmark, v1_12_packet, pB_warmup.value, pB_samples.value, pB_jitter.value)
+    c_result = v1_12_guardrail_result(v1_12_benchmark, v1_12_packet, pC_sigma.value, pC_stress.value)
+    d_result = v1_12_fairness_result(v1_12_packet, {
+        "same_workload": pD_same_workload.value,
+        "same_warmup": pD_same_warmup.value,
+        "same_samples": pD_same_samples.value,
+        "same_hardware": pD_same_hardware.value,
+        "same_guardrail": pD_same_guardrail.value,
+    })
 
-    _incomplete = []
-    if pA_pred.value is None:
-        _incomplete.append("Part A Amdahl prediction")
-    if pB_pred.value is None:
-        _incomplete.append("Part B sustained benchmark prediction")
-    if pC_pred.value is None:
-        _incomplete.append("Part C multi-metric prediction")
-    if pD_pred.value is None:
-        _incomplete.append("Part D tail-latency prediction")
+    incomplete = []
+    for label, widget in (
+        ("Part A prediction", pA_pred),
+        ("Part A checkpoint", pA_decision),
+        ("Part B prediction", pB_pred),
+        ("Part B checkpoint", pB_decision),
+        ("Part C prediction", pC_pred),
+        ("Part C checkpoint", pC_decision),
+        ("Part D prediction", pD_pred),
+        ("Part D checkpoint", pD_decision),
+    ):
+        if widget.value is None:
+            incomplete.append(label)
 
-    _report = build_lab_report(
+    report = build_lab_report(
         v1_12_metadata,
         track=v1_12_profile.label,
         scenario=v1_12_variant.workload_summary,
         learning_objectives=(
-            "Explain why component benchmark speedup does not equal system speedup.",
-            "Compare burst benchmark claims with sustained deployment behavior.",
-            "Design a benchmark protocol with multi-metric guardrails and tail latency.",
+            "Select a benchmark metric that matches the deployment workload.",
+            "Use warmup, variance, and sample size to judge confidence.",
+            "Reject mean-only evidence when tail or guardrail metrics fail.",
+            "Report only comparisons with controlled run rules.",
         ),
         predictions={
-            "amdahl_speedup": pA_pred.value,
-            "sustained_benchmark": pB_pred.value,
-            "multi_metric_gate": pC_pred.value,
-            "tail_latency": pD_pred.value,
+            "validity": pA_pred.value,
+            "confidence": pB_pred.value,
+            "tail_guardrail": pC_pred.value,
+            "fairness": pD_pred.value,
         },
         knob_settings={
-            "component_speedup": pA_speedup.value,
-            "serial_pct": pA_serial.value,
-            "duration_s": pB_time.value,
-            "ambient_c": pB_ambient.value,
-            "cooling": pB_cooling.value,
-            "batch": pC_batch.value,
-            "precision": pC_precision.value,
-            "tail_sigma": pD_sigma.value,
-            "tail_slo_ms": pD_slo.value,
+            "workload_match_pct": pA_workload.value,
+            "metric_choice": pA_metric.value,
+            "warmup_discard": pB_warmup.value,
+            "sample_count": pB_samples.value,
+            "jitter_pct": pB_jitter.value,
+            "tail_sigma": pC_sigma.value,
+            "guardrail_stress": pC_stress.value,
+            "fairness_controls": {
+                "same_workload": pD_same_workload.value,
+                "same_warmup": pD_same_warmup.value,
+                "same_samples": pD_same_samples.value,
+                "same_hardware": pD_same_hardware.value,
+                "same_guardrail": pD_same_guardrail.value,
+            },
+        },
+        binding_constraints={
+            "production_question": v1_12_packet["production_question"],
+            "selected_metric": a_result["selected_metric"],
+            "guardrail_metric": v1_12_packet["guardrail_label"],
+            "confidence_gate": b_result["confidence_ok"],
+            "tail_guardrail_blocked": c_result["blocked"],
+            "fair_comparison_reportable": d_result["reportable"],
         },
         evidence_summary={
-            "hardware_ref": v1_12_benchmark.hardware_ref,
-            "model_ref": v1_12_benchmark.model_ref,
-            "benchmark_claim": v1_12_benchmark.benchmark_claim,
-            "hidden_failure_metric": v1_12_benchmark.hidden_failure_metric,
-            "system_speedup": round(_amdahl.system_speedup, 3),
-            "sustained_value": round(_thermal.sustained_value, 3),
-            "sustained_loss_pct": round(_thermal.loss_pct, 3),
-            "multi_metric_pass": _gate.all_pass,
-            "multi_metric_violations": _gate.violations,
-            "p99_ms": round(_tail.p99_ms, 3),
-            "tail_slo_ok": _tail.slo_ok,
-            "tail_violation_pct": round(_tail.violation_pct, 3),
+            "validity_score": round(a_result["validity_score"], 3),
+            "production_value": a_result["production_value"],
+            "cv_pct": round(b_result["cv_pct"], 3),
+            "ci_half_width": round(b_result["ci_half"], 3),
+            "tail_p99_ms": round(c_result["tail"].p99_ms, 3),
+            "tail_p999_ms": round(c_result["tail"].p999_ms, 3),
+            "failure_rate": c_result["failure_rate"],
+            "fair_comparison_index": round(d_result["index"], 3),
+            "rejected_comparison": d_result["rejected"],
         },
         final_decision=(
-            f"Accept the benchmark claim only if the protocol includes {v1_12_benchmark.hidden_failure_metric} "
-            f"and passes {v1_12_variant.guardrail_metric}."
+            f"Accept the benchmark claim only for {v1_12_packet['production_scope']} "
+            f"using {a_result['selected_metric']}, confidence evidence, tail/guardrail evidence, "
+            f"and rejection of {d_result['rejected']}."
         ),
         big_takeaways=(
-            "A benchmark claim is only valid for the workload and duration it measured.",
-            "Single-metric wins can fail production guardrails.",
-            "Tail and sustained behavior must be measured, not inferred from averages or bursts.",
+            "Benchmark validity is a workload-and-metric claim.",
+            "Confidence requires warmup, repeated samples, and variance reporting.",
+            "Tail and guardrail failures can be hidden by averages.",
+            "Fair comparisons need controlled run rules and reportable evidence.",
         ),
         reflections={
-            "benchmark_scope": v1_12_variant.assumptions.get("protocol_scope", "production-like benchmark"),
-            "moved_bottleneck": f"Amdahl system speedup is {_amdahl.system_speedup:.2f}x.",
-            "residual_risk": "Benchmark protocol still needs real workload traces and hardware counters.",
+            "report_scope": v1_12_packet["production_scope"],
+            "rejected_comparison": d_result["rejected"],
+            "residual_risk": "Teaching estimates still need production traces and hardware counters before launch.",
         },
         residual_risk=(
-            "Teaching estimates must be validated with production workload traces, thermal steady-state runs, "
-            "p99/p999 latency, quality regression, and cost or battery measurements."
+            "Notebook calculations are scenario estimates. A production benchmark still needs real traces, "
+            "instrumented hardware, repeated runs, and a signed-off run-rule protocol."
         ),
         source_trace={
             "track_id": v1_12_profile.track_id,
             "scenario_id": v1_12_variant.scenario_id,
             "hardware_ref": v1_12_variant.hardware_ref,
             "model_ref": v1_12_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.benchmarking",
+            "shared_helpers": ("benchmark_track_profile", "amdahl_speedup", "sustained_benchmark", "tail_latency"),
+            "notebook_local_helpers": (
+                "v1_12_validity_result",
+                "v1_12_confidence_result",
+                "v1_12_guardrail_result",
+                "v1_12_fairness_result",
+            ),
             "source_policy": v1_12_profile.source_policy,
         },
         result_snapshot={
-            "benchmark_profile": v1_12_benchmark,
-            "amdahl": _amdahl,
-            "sustained": _thermal,
-            "metric_gate": _gate,
-            "tail_latency": _tail,
+            "validity": a_result,
+            "confidence": b_result,
+            "tail_guardrail": c_result,
+            "fairness": d_result,
         },
-        incomplete_fields=tuple(_incomplete),
+        incomplete_fields=tuple(incomplete),
     )
 
     mo.vstack([
@@ -1307,13 +1578,14 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-12 report is generated locally from the selected track, MLSysIM hardware/model refs, "
-                "and shared `mlsysbook_labs.benchmarking` calculations."
+                "shared benchmarking helpers, and notebook-local `v1_12_` protocol calculations."
             ),
             kind="info",
         ),
-        report_export_panel(_report),
+        report_export_panel(report),
     ])
     return
+
 
 if __name__ == "__main__":
     app.run()

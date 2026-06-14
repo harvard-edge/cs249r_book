@@ -1,172 +1,293 @@
 # V1-16 Track Plan: The Architect's Audit
 
-## Purpose
+## Chapter Invariant
 
-This capstone synthesizes Volume 1. Students replay their ledger, inspect how earlier decisions imply an end-to-end architecture, perturb assumptions, and write a final architecture memo.
+Single-machine ML system design requires diagnosing the binding D-A-M/system
+amount, optimizing the layer that actually relieves that amount, deploying only
+inside the measured operating envelope, and defending the residual risk that
+remains.
 
-## Shared Pedagogy
+This is the Volume I capstone. The selected track changes persona, thresholds,
+evidence emphasis, failure mode, and report framing, but the Part A/B/C/D
+concept sequence is shared across every track.
 
-- Students learn that architecture is the accumulated result of prior constraints.
-- They audit sensitivity rather than merely summarize choices.
-- They revise one decision and state a durable ML systems principle.
+## Reading Map
 
-## Lab Flow
+| Lab module | Conclusion anchor | Chapter claim used in the lab |
+|---|---|---|
+| Opening | Purpose; Synthesizing ML Systems | The system is the model; D-A-M decisions propagate across the stack. |
+| Part A | Lighthouse models: Constraint propagation; Thirteen Quantitative Invariants | Evidence from earlier chapters identifies the amount that currently binds. |
+| Part B | Optimize invariants; Integrated framework; Fallacies and Pitfalls | Local optimization can move complexity downstream rather than remove it. |
+| Part C | Deploy invariants; Production reality; Robust AI systems | A design is valid only inside a latency, memory, energy, quality, and evidence envelope. |
+| Part D | Journey Forward; Engineering responsibility; Fallacies and Pitfalls | A final design report must include rejected alternatives, source trace, and residual risk. |
+| Synthesis | Summary; Horizon note from node to fleet | Volume I's single-machine design handoff names the scale question for Volume II. |
 
-### Opening - Architecture Audit Brief
+## Concept Inventory
 
-Common narrative:
-- The student is now the system architect for the track they selected in Lab 00.
-- The task is to defend the architecture implied by the ledger.
+### Accepted Concepts
 
-Track realization:
-- iPhone: architecture memo defends on-device privacy, thermal limits, and mobile UX.
-- Oura Ring: architecture memo defends tiny memory, battery life, sensing, and OTA updates.
-- RoboTaxi: architecture memo defends safety-critical latency, reliability, and rare-event evidence.
-- Cloud Fleet: architecture memo defends SLA, cost, utilization, and operational scale.
+| Concept | Reason for inclusion | Module |
+|---|---|---|
+| Binding D-A-M/system amount diagnosis | Makes the capstone more than a summary; students use accumulated evidence to name what is actually scarce. | Part A |
+| Right-lever optimization | Connects iron law, Pareto frontier, Amdahl, and conservation of complexity to a concrete design lever. | Part B |
+| Operating envelope validation | Forces students to treat deployment as a bounded claim with validation evidence. | Part C |
+| Defensible design report | Produces the final Volume I artifact with rejected alternatives, source trace, and residual risk. | Part D |
+| Carry-forward to scale | Connects Volume I single-machine reasoning to Volume II resource-boundary changes. | Synthesis |
 
-### Part A - Ledger Replay
+### Rejected Or Deferred Concepts
 
-Common pattern:
-- Load actual or preset ledger.
-- Render architecture map from prior decisions.
-
-Track realization:
-- iPhone map includes model, runtime, device constraints, privacy, and monitoring.
-- Oura Ring map includes sensing, tiny inference, OTA, battery, and cloud handoff.
-- RoboTaxi map includes sensors, local inference, fallback, validation, and fleet learning.
-- Cloud Fleet map includes model, serving, data, infrastructure, ops, and cost.
-
-### Part B - Sensitivity Audit
-
-Common pattern:
-- Perturb workload, model, hardware, or constraint assumptions.
-- Show fragility heatmap.
-
-Track realization:
-- iPhone perturb battery age, device thermal state, and model size.
-- Oura Ring perturb sampling cadence, flash headroom, and battery target.
-- RoboTaxi perturb sensor count, weather mix, and p99 deadline.
-- Cloud Fleet perturb demand, sequence length, cost, and carbon intensity.
-
-### Part C - Architecture Memo
-
-Common pattern:
-- Student revises one decision and writes final top risk and mitigation.
-
-Track realization:
-- iPhone memo focuses on sustained on-device deployment.
-- Oura Ring memo focuses on reliable tiny wearable operation.
-- RoboTaxi memo focuses on safety case and latency margin.
-- Cloud Fleet memo focuses on scalable production economics.
-
-## Implementation Requirements
-
-- Capstone must read real ledger entries or load track-specific presets.
-- Track profile should drive architecture map labels and sensitivity knobs.
-- Report export should produce an architecture memo, not a generic lab summary.
-
-## Ledger And Report
-
-Save:
-- final architecture map
-- most fragile assumption
-- revised decision
-- durable principle
-- final top risk and mitigation
-
-Report target:
-- A Volume 1 architecture memo for the selected track.
-
-## Detailed Planning Addendum
-
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
-
-### Planning Focus
-
-Primary concept:
-- ledger replay, sensitivity audit, and architecture memo.
-
-Minimum classroom demo:
-- load a preset track ledger, perturb one assumption, and revise one architecture decision.
-
-Completion path:
-- replay ledger, run sensitivity audit, revise one decision, export architecture memo.
-
-## Instructor Assignment Modes
-
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
-
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
-
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
-
-## Expected Track Outcomes
-
-| Track | Expected outcome |
+| Concept | Disposition |
 |---|---|
-| iPhone | Produces mobile architecture memo around privacy, thermal/battery, runtime, and monitoring. |
-| Oura Ring | Produces tiny wearable memo around sensing, memory, battery, OTA, and sync. |
-| RoboTaxi | Produces safety-critical edge memo around latency, reliability, validation, and rare events. |
-| Cloud Fleet | Produces production architecture memo around SLA, cost, utilization, ops, and carbon. |
+| Full distributed-systems reliability design | Deferred to Volume II; this lab only names the carry-forward question. |
+| Re-teaching all thirteen invariants separately | Rejected; the lab uses selected invariants as source models inside concept modules. |
+| Track-specific concept paths | Rejected by design rule; tracks instantiate the same concepts with different envelopes. |
+| Free-form architecture essay as the main activity | Rejected; structured predictions, controls, evidence, and checkpoints drive the report. |
+| Adding shared MLSysIM or lab-helper APIs | Rejected for Wave 4 ownership; new support remains notebook-local with `v1_16_` prefixes. |
 
-## Common Misconceptions
+## Shared Concept Modules
 
-- Capstone is a summary rather than an audit.
-- Earlier decisions do not constrain later architecture.
-- A design is robust if it works for one workload.
-- Residual risk is optional.
+### Part A - Concept Module: Diagnose The Binding Amount
 
-## Data And Solver Contracts
+Chapter claim:
+- The system is the model, and constraint propagation across data, algorithms,
+  machines, and operations determines what can be deployed.
 
-Needed inputs:
-- `track_id`
-- `ledger_entries`
-- `sensitivity_knobs`
-- `architecture_decisions`
-- `risk_thresholds`
+Student prior:
+- The capstone should summarize prior answers, or the model choice alone is the
+  architecture.
 
-Needed outputs:
-- `architecture_map`
-- `fragility_heatmap`
+Storyline:
+1. Scenario: the track stakeholder asks for a final ship/no-ship architecture
+   audit using the student's ledger plus labeled track presets.
+2. Prediction: student predicts whether Data, Algorithm, Machine, or System
+   amount is binding.
+3. Manipulation: student raises or lowers the evidence floor that controls how
+   strongly missing ledger coverage counts as system evidence debt.
+4. Evidence: a bar chart and table score all four amounts using track pressure,
+   ledger constraint hits, and preset evidence debt.
+5. Consequence: if ledger coverage is below the selected floor, the notebook
+   marks an evidence-gap boundary that must appear in the report.
+6. Math Peek/source model: binding score = track pressure + ledger hits +
+   evidence-gap penalty; source trace points to D-A-M, Lighthouse propagation,
+   and the local `v1_16_amount_scores` helper.
+7. Checkpoint: student records whether the first action should attack the
+   binding amount, patch the easiest subsystem, ignore presets, or choose a
+   model-only fix.
+
+Ledger output:
+- `binding_amount_prediction`
+- `evidence_floor_pct`
+- `binding_amount_actual`
+- `binding_amount_score_pct`
+- `part_a_checkpoint`
+
+### Part B - Concept Module: Optimize The Right Lever
+
+Chapter claim:
+- Complexity is conserved. Pulling the wrong lever creates downstream debt even
+  when a local metric improves.
+
+Student prior:
+- Any local improvement is progress, especially if it improves a visible model
+  or hardware metric.
+
+Storyline:
+1. Scenario: the stakeholder proposes one optimization lever before the report
+   is finalized.
+2. Prediction: student predicts that the defensible lever must relieve the
+   binding amount and check downstream debt.
+3. Manipulation: student chooses a track-specific lever and varies intervention
+   intensity.
+4. Evidence: a relief-vs-debt chart and table show binding relief, downstream
+   debt, debt boundary, and status.
+5. Consequence: a reversible failure appears when debt exceeds the track
+   boundary or the lever targets the wrong amount.
+6. Math Peek/source model: net margin = binding relief - downstream debt,
+   connected to Pareto frontier, Amdahl's Law, and conservation of complexity.
+7. Checkpoint: student records the lever policy that goes into the design memo.
+
+Ledger output:
+- `optimization_prediction`
+- `optimization_lever`
+- `optimization_intensity_pct`
+- `optimization_status`
+- `downstream_debt_pct`
+- `part_b_checkpoint`
+
+### Part C - Concept Module: Deploy Inside The Operating Envelope
+
+Chapter claim:
+- Deployment claims are statistical and operational: validation evidence,
+  latency budgets, drift/skew, and guardrails define the valid envelope.
+
+Student prior:
+- A design that works at one nominal setting can be deployed broadly.
+
+Storyline:
+1. Scenario: the stakeholder asks whether the chosen design can ship under the
+   track's real operating constraints.
+2. Prediction: student predicts whether fragility is universal or
+   track-specific.
+3. Manipulation: student perturbs workload, model growth, guardrail tightening,
+   and evidence confidence.
+4. Evidence: a sensitivity chart and exact table show value, limit, risk,
+   status, and mitigation for each axis.
+5. Consequence: the notebook marks an envelope failure when any axis crosses its
+   track-specific limit.
+6. Math Peek/source model: deployable iff every stress axis passes and
+   validation confidence is above the floor; source trace points to the
+   existing `sensitivity_audit` helper and conclusion deployment invariants.
+7. Checkpoint: student records whether to ship, revise, add validation, or
+   reject the release.
+
+Ledger output:
+- `sensitivity_prediction`
+- `workload_multiplier`
+- `model_growth_pct`
+- `guardrail_tightening_pct`
+- `evidence_confidence_pct`
+- `operating_envelope_status`
+- `most_fragile_axis`
+- `part_c_checkpoint`
+
+### Part D - Concept Module: Defend The Complete Design Report
+
+Chapter claim:
+- A systems design is not defensible unless it names the decision, rejected
+  alternatives, evidence source trace, validation plan, and residual risk.
+
+Student prior:
+- The final memo should simply state the preferred design and declare success.
+
+Storyline:
+1. Scenario: the architecture review board asks for the final Volume I memo.
+2. Prediction: student predicts that the memo must revise a decision, reject an
+   alternative, and name residual risk.
+3. Manipulation: student chooses the revised decision, rejected alternative,
+   top residual risk, and mitigation evidence.
+4. Evidence: a completeness table scores decision, rejected alternative, source
+   trace, ledger replay, operating envelope, validation, and residual risk.
+5. Consequence: the report fails if the rejected alternative is missing, the
+   residual risk is absent, or the operating envelope is invalid.
+6. Math Peek/source model: defensible report = decision + rejected alternative +
+   source trace + residual risk + validation evidence.
+7. Checkpoint: student records whether the report is defensible, needs more
+   validation, needs a different lever, or should not ship.
+
+Ledger output:
+- `memo_prediction`
 - `revised_decision`
+- `rejected_alternative`
+- `top_residual_risk`
+- `mitigation_evidence`
+- `report_completeness_pct`
+- `part_d_checkpoint`
+
+### Synthesis - Volume I Final Report And Volume II Handoff
+
+Student experience:
+1. Replay the binding amount from Part A.
+2. Replay the optimization lever and downstream debt from Part B.
+3. Replay the operating envelope and most fragile axis from Part C.
+4. Replay the report defense from Part D.
+5. Export the final Volume I architecture memo.
+6. Name the carry-forward question for Volume II: what changes when the binding
+   quantity is no longer bounded by one local machine?
+
+Ledger output:
+- `volume_i_final_decision`
+- `volume_i_residual_risk`
+- `volume_ii_carry_forward_question`
+
+## Track Narratives
+
+The tracks instantiate the same modules with different persona, constraints,
+thresholds, evidence emphasis, failure mode, and report framing.
+
+| Track | Persona | Amount emphasis | Operating envelope | Natural failure | Report frame |
+|---|---|---|---|---|---|
+| iPhone | Mobile systems architect shipping a local feature | Machine/System amounts: battery, thermal, NPU coverage, privacy-safe evidence, UX p99 | Battery, thermal, privacy, accessibility, p99 interaction latency | Thermal throttle, CPU/GPU fallback, privacy-safe telemetry gaps, accessibility regression | Local feature design memo |
+| Oura Ring | Wearable firmware/TinyML architect | Machine amount dominates: SRAM, flash, duty cycle, radio wake, firmware growth | SRAM/flash fit, OTA payload, battery regression, sensor-contact cohorts, privacy | SRAM/flash overflow, duty-cycle miss, OTA payload overrun, false alert drift | Firmware/TinyML design memo |
+| RoboTaxi | Safety/perception architect | System/Data amounts: rare-event replay, p99/p999 latency, fallback validation, safety trace | Rare-event recall, p99/p999 deadline, power margin, fallback reliability | Safety margin miss, rare-event recall regression, invalid fallback, tail-latency breach | Safety/perception case |
+| Cloud Fleet | Platform/SRE architect | System/Machine amounts: SLA, utilization, KV cache, cost/request, carbon, monitoring | p99 SLA, cost/request, utilization headroom, quality canary, carbon budget | Queue/SLA breach, negative economics, carbon/cost overrun, silent quality drift | Production service design memo |
+
+## Mechanics And Evidence Plan
+
+| Module | Controls | Evidence | Failure or boundary | Why this mechanic is used |
+|---|---|---|---|---|
+| Part A | Binding prediction radio, evidence-floor slider, checkpoint radio | Binding amount bar chart and ledger evidence table | Ledger coverage below evidence floor creates evidence-gap boundary | Diagnoses the bottleneck from accumulated evidence. |
+| Part B | Optimization prediction radio, lever dropdown, intensity slider, checkpoint radio | Relief-vs-debt chart and lever audit table | Downstream debt exceeds boundary or lever misses binding amount | Shows local gains can create system debt. |
+| Part C | Sensitivity prediction radio, four stress sliders, checkpoint radio | Risk bar chart and exact sensitivity table | Any axis exceeds limit or evidence confidence falls below floor | Forces boundary finding inside the operating envelope. |
+| Part D | Memo prediction radio, revision/rejection/risk/mitigation dropdowns, checkpoint radio | Report completeness table and memo summary | Missing rejected alternative, source trace, residual risk, or invalid envelope | Converts observations into a defensible design report. |
+| Synthesis | No new controls; replays prior module outputs | Final report card and export panel | Incomplete predictions/checkpoints prevent completed ledger status | Produces carry-forward evidence. |
+
+Every decision-driving visual has a table fallback. Color is never the only
+status indicator: every pass/fail row includes label, value, limit, unit or
+evidence, and mitigation.
+
+## Source And Ledger Plan
+
+Existing helpers/modules:
+- `capstone_track_profile`
+- `replay_ledger`
+- `sensitivity_audit`
 - `architecture_memo`
+- `build_lab_report`
+- `report_export_panel`
+- `source_trace`
+- `track_selector`
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+Notebook-local helpers:
+- `v1_16_track_lens`
+- `v1_16_amount_scores`
+- `v1_16_binding_amount`
+- `v1_16_lever_catalog`
+- `v1_16_lever_options`
+- `v1_16_default_lever`
+- `v1_16_lever_audit`
+- `v1_16_report_audit`
+- `v1_16_volume_ii_question`
 
-## Single Source Of Truth Requirements
+Design Ledger fields:
+- selected track, scenario, hardware/model refs
+- binding amount prediction, actual binding amount, evidence floor, score
+- optimization lever, intensity, downstream debt, optimization status
+- operating envelope values, most fragile axis, feasibility status
+- revised decision, rejected alternative, residual risk, mitigation evidence
+- Part A/B/C/D checkpoints
+- Volume II carry-forward question
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+Report fields:
+- learning objectives tied to concept modules
+- predictions and checkpoints
+- knob settings and selected alternatives
+- evidence summary from ledger replay, amount diagnosis, lever audit,
+  sensitivity audit, report audit, and memo
+- final decision and residual risk
+- source trace with helper names and registry refs
 
-## Accessibility And Fallback Requirements
+## Implementation Risks
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+| Risk | Mitigation |
+|---|---|
+| Shared helper changes would affect other workers | Do not edit shared helpers; keep support local to the notebook. |
+| Capstone becomes track-specific concept branching | Keep a single A/B/C/D sequence and make only persona, thresholds, levers, and evidence track-specific. |
+| Ledger gaps make student evidence sparse | Label presets, expose coverage, and treat missing coverage as report evidence debt. |
+| Too many controls dilute the concept modules | Keep each module to one prediction, one primary manipulation set, and one checkpoint. |
+| Report export omits new evidence | Update the report snapshot, evidence summary, and incomplete-field checks. |
 
-## Rubric Sketch
+## Depth Audit
 
-- Ledger evidence is used.
-- Sensitivity result changes or validates a decision.
-- Top risk is concrete.
-- Memo is track-specific and defensible.
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Part A | 3 | 3 | 3 | 3 | 3 | 3 | Pass: prediction, manipulation, binding evidence, boundary, Math Peek, checkpoint. |
+| Part B | 3 | 3 | 3 | 3 | 3 | 3 | Pass: lever choice, intensity manipulation, debt failure, Math Peek, checkpoint. |
+| Part C | 3 | 3 | 3 | 3 | 3 | 3 | Pass: four stress controls, envelope boundary, source-backed sensitivity helper, checkpoint. |
+| Part D | 3 | 3 | 3 | 3 | 3 | 3 | Pass: report decision controls, completeness evidence, failure boundary, source trace, checkpoint. |
+| Synthesis | 3 | 3 | 3 | 2 | 3 | 3 | Pass: replays evidence and names Volume II handoff. |
 
-## Continuous Improvement Notes
-
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+Minimum acceptance:
+- No dimension below 2.
+- At least three dimensions at 3 in every module.
+- Reversible failure states exist in Parts A, B, C, and D.
+- Synthesis ties the final report to the chapter invariant and Volume II scale.

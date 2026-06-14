@@ -1,175 +1,287 @@
-# V1-01 Track Plan: The AI Triad
+# V1-01 Track Plan: ML Introduction / AI Triad
 
-## Purpose
+## Chapter Invariant
 
-This lab teaches Data, Algorithm, and Machine coupling. The same model quality problem can be caused by data coverage, architecture choice, or deployment hardware, and the correct intervention depends on the selected track.
+ML systems differ from traditional software because behavior emerges from coupled
+Data, Algorithm, and Machine quantities over a lifecycle. Code can stay fixed
+while quality changes, and the correct intervention depends on which axis binds
+inside the selected deployment track.
 
-## Shared Pedagogy
+## Reading Map
 
-- Students diagnose which part of the D-A-M triad is actually binding.
-- They predict whether data, model, or machine investment gives the best first improvement.
-- They compare interventions under a fixed engineering budget.
-- They save a defensible first fix, including why the other two fixes are weaker.
+| Lab module | Chapter anchor | Chapter claim or formula |
+|---|---|---|
+| Opening | Purpose; AI Moment | ML systems manage statistical uncertainty and physical constraints at the same time. |
+| Part A | Data-Centric Paradigm Shift; ML vs. Traditional Software | Software 2.0 degrades silently; data-defined behavior can change without code changes. |
+| Part B | Defining ML Systems; D-A-M taxonomy | Data, Algorithm, and Machine are interdependent; the binding axis determines the first useful intervention. |
+| Part C | ML vs. Traditional Software; Iron Law; Deployment Case Studies | Training is throughput-optimized, inference is latency-optimized, and they require different evidence. |
+| Part D | ML System Lifecycle; Deployment Spectrum; Five-Pillar Framework | Lifecycle decisions must respond to monitoring evidence under track-specific constraints. |
+| Synthesis | Summary; Fallacies and Pitfalls | D-A-M bottlenecks migrate, learned behavior decays silently, and engineering is continuous co-design. |
 
-## Lab Flow
+## Concept Inventory
 
-### Opening - Track-Specific System Brief
+Accepted concepts:
 
-Common narrative:
-- The team has a model that works in a demo but fails in the target deployment.
-- The student must identify whether the failure is mainly data, algorithm, or machine.
+- Software 2.0 / Data as Source Code: behavior is learned, not explicitly coded.
+- Silent degradation and the degradation equation: quality can decay without a code diff.
+- D-A-M taxonomy: the same symptom can bind on Data, Algorithm, or Machine.
+- Moving bottleneck: optimizing one axis can expose another.
+- Training-serving divide: training and inference have different amount systems and evidence.
+- Lifecycle feedback loop: monitoring evidence sends the system back to data, training, deployment, or operations.
 
-Track realization:
-- iPhone: demo model works plugged in but drains battery and heats the phone in normal use.
-- Oura Ring: model looks accurate offline but cannot fit or run at the needed sampling cadence.
-- RoboTaxi: perception model has strong average accuracy but weak rare-hazard behavior under latency pressure.
-- Cloud Fleet: model quality is acceptable but serving cost and utilization make the deployment unsustainable.
+Rejected or deferred concepts:
 
-### Part A - Diagnose Data, Algorithm, Machine
+- AI history and AI winters: useful context, but weaker direct lab consequence.
+- Detailed bitter-lesson chronology: saved for later scale and architecture labs.
+- Full iron-law derivation: referenced as Math Peek only; deeper arithmetic belongs to later foundations labs.
+- Five-pillar organization chart: used as decision vocabulary, not taught as a standalone taxonomy here.
 
-Common pattern:
-- Sliders alter data quality, model size/architecture, and hardware budget.
-- The simulator reports active bottleneck and whether the current configuration is feasible.
+## Track Narratives
 
-Track realization:
-- iPhone emphasizes thermal throttling and NPU use.
-- Oura Ring emphasizes memory footprint and sensing cadence.
-- RoboTaxi emphasizes p99 latency and rare-event recall.
-- Cloud Fleet emphasizes cost per request and accelerator utilization.
+Tracks are lenses, not skins. The selected track changes controls, thresholds,
+evidence, failure language, and report wording.
 
-### Part B - Intervention Frontier
+| Track | Stakeholder | Binding constraints | Primary evidence | Natural failure |
+|---|---|---|---|---|
+| iPhone | Mobile product engineer | Battery, thermal, local privacy, UX responsiveness | sustained latency, energy/use, privacy-safe cohort coverage | thermal throttle or visible UX lag |
+| Oura Ring | Wearable firmware engineer | SRAM/flash, sensing cadence, duty cycle, battery | SRAM/flash fit, wake time/window, duty-cycle percentage | firmware or duty-cycle violation |
+| RoboTaxi | Safety/perception engineer | rare-hazard recall, p99/p999 latency, safety margin | rare-event replay, tail latency, recall floor | safety margin miss |
+| Cloud Fleet | Fleet service owner | cost/request, utilization, p99 SLA, carbon | load test, cost/request, utilization, SLO | SLO breach or negative unit economics |
 
-Common pattern:
-- Students allocate a fixed budget across data collection, model change, and hardware upgrade.
-- The plot shows accuracy, latency, cost, and feasibility movement.
+Comparison rule:
 
-Track realization:
-- iPhone compares better on-device data, smaller model, and NPU-aware runtime.
-- Oura Ring compares better signal processing, compression, and MCU/flash assumptions.
-- RoboTaxi compares rare-event data, model specialization, and edge accelerator headroom.
-- Cloud Fleet compares data quality, batching/runtime work, and more accelerators.
+- Part B compares the selected track with a contrasting track using the same
+  D-A-M readiness values. iPhone compares against Oura Ring, Oura Ring and
+  RoboTaxi compare against Cloud Fleet, and Cloud Fleet compares against Oura
+  Ring. The comparison demonstrates that the same raw scores can produce a
+  different binding axis because the deployment envelope changes.
 
-### Part C - Defensible Fix
+## Concept Modules
 
-Common pattern:
-- Student chooses one first intervention and records evidence.
-- The decision card must state what would invalidate the choice.
+### Part A: Concept Module - Model behavior is not normal software behavior
 
-Track realization:
-- iPhone decision should defend user experience under battery and thermal constraints.
-- Oura Ring decision should defend days-long operation and OTA feasibility.
-- RoboTaxi decision should defend safety-critical tail behavior.
-- Cloud Fleet decision should defend production economics and SLA compliance.
+Chapter claim:
 
-## Implementation Requirements
+- ML systems can silently degrade as the production distribution moves away
+  from the training distribution even when code, infrastructure, and serving
+  health remain unchanged.
 
-- Replace generic deployment labels with canonical track profiles.
-- The D-A-M result object should include `binding_axis`, `primary_metric`, and `guardrail_metric`.
-- Track variants should provide stakeholder text, default workload, and acceptable thresholds.
+Student prior:
 
-## Ledger And Report
+- "If code and dashboards are green, behavior is unchanged."
 
-Save:
-- selected track profile
-- predicted binding D-A-M axis
-- chosen intervention
-- result snapshot after intervention
-- rejected alternatives and residual risk
+Storyline:
 
-Report target:
-- A one-page triad diagnosis memo explaining the first fix the student would defend.
+1. Scenario: the track stakeholder receives a quality complaint while crash logs
+   and infrastructure health remain clean.
+2. Prediction: the student predicts whether quality can fall without a code
+   change and what signal should trigger action.
+3. Manipulation: the student changes drift pressure, months in production, and
+   monitoring cadence.
+4. Evidence: a quality-vs-threshold chart and table show silent quality loss
+   while code health remains fixed.
+5. Consequence: the module names the track-specific violated guardrail.
+6. Math Peek: Accuracy(t) ~= Accuracy_0 - lambda * D(P_t || P_0).
+7. Checkpoint: the student chooses the first response, such as drift monitoring,
+   cohort audit, or retraining trigger.
 
-## Detailed Planning Addendum
+Mechanics:
 
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
+- Structured prediction radio.
+- Drift pressure slider, months slider, monitoring cadence dropdown.
+- Threshold line chart plus table fallback.
+- Reversible failure banner when quality falls below the track floor.
 
-### Planning Focus
+Ledger output:
 
-Primary concept:
-- Data, Algorithm, Machine coupling and first-intervention choice.
+- silent_degradation_prediction
+- drift_pressure_pct
+- months_in_production
+- monitoring_cadence
+- observed_quality_pct
+- quality_floor_pct
+- silent_failure_response
 
-Minimum classroom demo:
-- compare the D-A-M diagnosis for Oura Ring and Cloud Fleet, then show how the best intervention changes.
+### Part B: Concept Module - The binding axis changes the correct intervention
 
-Completion path:
-- make a D-A-M bottleneck prediction, run the intervention frontier, choose one intervention, record rejected alternatives.
+Chapter claim:
 
-## Instructor Assignment Modes
+- The D-A-M taxonomy is a diagnostic framework. Data determines learned
+  behavior, Algorithm determines representational and computational demand, and
+  Machine determines the feasible execution envelope.
 
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
+Student prior:
 
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
+- "Accuracy failure is a model problem" or "hardware upgrades fix everything."
 
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
+Storyline:
 
-## Expected Track Outcomes
+1. Scenario: the selected track has a demo that works but fails in deployment.
+2. Prediction: the student predicts which D-A-M axis will bind.
+3. Manipulation: the student changes data, algorithm, and machine readiness.
+4. Evidence: a readiness-vs-threshold chart and table identify the binding axis.
+5. Consequence: a track comparison table shows why the same scores bind
+   differently in a second track.
+6. Math Peek: Cost is proportional to Model Size times Dataset Size divided by
+   Hardware Efficiency, so axes couple rather than optimize independently.
+7. Checkpoint: the student records a final binding-axis diagnosis.
 
-| Track | Expected outcome |
-|---|---|
-| iPhone | Likely defends a model/runtime or data-quality intervention that protects battery, privacy, and UX. |
-| Oura Ring | Likely discovers that machine limits force a smaller model or better signal preprocessing before more data helps. |
-| RoboTaxi | Likely prioritizes rare-event data and latency-aware architecture rather than generic accuracy improvement. |
-| Cloud Fleet | Likely balances data/model improvements against serving cost and utilization. |
+Mechanics:
 
-## Common Misconceptions
+- Prediction radio.
+- Three readiness sliders.
+- Binding-axis chart, threshold markers, violation table.
+- Selected-track versus comparison-track table.
 
-- Accuracy failure is always a model problem.
-- Hardware upgrades fix data coverage.
-- More data always beats better deployment design.
-- The triad axes can be optimized independently.
+Ledger output:
 
-## Data And Solver Contracts
+- predicted_binding_axis
+- final_binding_axis
+- comparison_track
+- primary_metric
+- guardrail_metric
+- data_algorithm_machine_scores
 
-Needed inputs:
-- `track_id`
-- `hardware_ref`
-- `data_quality`
-- `model_scale`
-- `hardware_budget`
-- `intervention_budget`
+### Part C: Concept Module - Training and inference produce different evidence
 
-Needed outputs:
-- `binding_axis`
-- `intervention_frontier`
-- `selected_intervention`
-- `rejected_alternatives`
+Chapter claim:
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+- Training is throughput-optimized, while inference is latency- and envelope-
+  optimized. A training success is not deployment evidence.
 
-## Single Source Of Truth Requirements
+Student prior:
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+- "If the training run converged, deployment is proven."
 
-## Accessibility And Fallback Requirements
+Storyline:
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+1. Scenario: the training report looks acceptable, but the deployment owner asks
+   for runtime evidence.
+2. Prediction: the student predicts which evidence should authorize shipment.
+3. Manipulation: the student changes model scale and operating pressure.
+4. Evidence: side-by-side training and inference amount systems show different
+   units, limits, and pass/fail results.
+5. Consequence: the module names the selected track's deployment failure.
+6. Math Peek: T ~= D_vol/BW + O/(R_peak * eta_hw) + L_lat; training spends
+   throughput budgets, inference spends request/window budgets.
+7. Checkpoint: the student chooses the evidence packet to attach to the memo.
 
-## Rubric Sketch
+Mechanics:
 
-- Diagnosis names the binding D-A-M axis.
-- Intervention is tied to evidence.
-- Rejected alternatives are explained.
-- Residual risk is track-specific.
+- Structured prediction radio.
+- Model-scale slider and pressure slider.
+- Stacked bar/threshold chart for training versus inference quantities.
+- Evidence table with units and decision language.
 
-## Continuous Improvement Notes
+Ledger output:
 
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+- training_inference_prediction
+- model_scale_pct
+- operating_pressure_pct
+- training_amount
+- inference_amount
+- selected_evidence_packet
+
+### Part D: Concept Module - Lifecycle decisions choose the first defensible fix
+
+Chapter claim:
+
+- The lifecycle loops back from monitoring to data collection, training,
+  deployment, or operations. The first fix must satisfy the selected track's
+  constraints rather than maximize a generic metric.
+
+Student prior:
+
+- "Spend evenly" or "pick the cheapest/highest-accuracy fix."
+
+Storyline:
+
+1. Scenario: the stakeholder has one engineering budget for the next lifecycle
+   loop.
+2. Prediction: the student predicts the budget strategy.
+3. Manipulation: the student allocates budget across Data, Algorithm, and
+   Machine and selects the intervention to defend.
+4. Evidence: the frontier chart shows post-intervention scores, remaining
+   binding axis, rejected alternatives, and failure state.
+5. Consequence: the module names the track-specific risk of choosing the wrong
+   first fix.
+6. Math Peek: lifecycle evidence chooses the constraint to relieve first; local
+   optimization can expose a new bottleneck.
+7. Checkpoint: the student chooses the validation test that would invalidate the
+   decision.
+
+Mechanics:
+
+- Budget-strategy prediction radio.
+- Three budget sliders plus selected intervention dropdown.
+- Post-intervention frontier chart and table.
+- Reversible failure banner when the selected plan leaves a threshold violated.
+- Validation evidence dropdown.
+
+Ledger output:
+
+- budget_strategy_prediction
+- intervention_budget_split
+- selected_intervention
+- best_intervention
+- rejected_alternatives
+- validation_evidence
+- residual_binding_axis
+
+### Synthesis: Concept Module - Triad diagnosis memo and carry-forward risk
+
+Chapter invariant:
+
+- A machine learning system does what its data, arithmetic, and hardware permit,
+  not what its source code intends.
+
+Storyline:
+
+1. The student reviews silent degradation, binding-axis diagnosis, training vs.
+   inference evidence, and lifecycle intervention evidence.
+2. The notebook generates a track-specific triad diagnosis memo.
+3. The student selects a carry-forward risk for future labs.
+4. The Design Ledger saves the selected track, diagnosis, evidence packet, first
+   fix, rejected alternatives, and risk.
+
+## Mechanics And Evidence Plan
+
+| Module | Controls | Graphs/tables | Failure or boundary | Evidence saved |
+|---|---|---|---|---|
+| Part A | prediction, drift, months, cadence, response | degradation line chart, table | quality below track floor | observed quality and response |
+| Part B | prediction, D/A/M readiness, diagnosis | threshold bar chart, comparison table | readiness below threshold | binding axis and comparison |
+| Part C | prediction, model scale, pressure, evidence packet | amount-system bar chart, table | inference limit miss despite training pass | selected evidence packet |
+| Part D | prediction, D/A/M budgets, selected fix, validation | frontier bar chart, table | remaining binding axis | first fix and validation |
+| Synthesis | carry-forward risk | memo card, report export | incomplete report lock | ledger/report artifact |
+
+Source and trace policy:
+
+- Existing `mlsysbook_labs.triad` helpers remain the source for profile,
+  diagnosis, and frontier logic.
+- Existing lab variant metadata remains the source for track stakeholder,
+  model, hardware, primary metric, guardrail metric, thresholds, default scores,
+  interventions, and validation tests.
+- New notebook-local teaching models are prefixed with `v1_01_` and source-
+  traced to the Introduction chapter formulas and anchors.
+- No shared helpers, tests, implementation notes, or other labs are edited.
+
+## Depth Audit
+
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Part A | 3 | 3 | 3 | 3 | 3 | 2 | Pass |
+| Part B | 3 | 3 | 3 | 3 | 3 | 3 | Pass |
+| Part C | 3 | 3 | 3 | 3 | 3 | 2 | Pass |
+| Part D | 3 | 3 | 3 | 3 | 3 | 3 | Pass |
+| Synthesis | 3 | 3 | 3 | 2 | 3 | 3 | Pass |
+
+Acceptance checks:
+
+- No dimension is below 2.
+- Each Part has scenario, prediction, manipulation, evidence, consequence,
+  Math Peek/source model, and checkpoint/report decision.
+- At least one reversible failure exists in Part A and Part D.
+- The selected track changes controls, thresholds, evidence, and report language.
+- Two-track comparison appears in Part B.
+- Synthesis ties all modules back to the chapter invariant and saves a carry-
+  forward risk.

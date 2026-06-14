@@ -1,172 +1,193 @@
 # V2-14 Track Plan: The Robustness Budget
 
-## Purpose
+## Chapter Invariant
 
-This lab teaches robustness as a budget: distribution shift, silent errors, robust training, augmentation, ensembling, abstention, monitoring, fallback, and defense stack costs.
+Robustness is an amount system: a deployed model buys bounded behavior under shift
+by spending finite stress coverage, hardening compute, monitoring attention, and
+fallback capacity. Under-spending creates silent residual failure; over-spending
+consumes latency, cost, energy, clean quality, and sustainability headroom.
 
-## Shared Pedagogy
+## Reading Map
 
-- Students predict which robustness defense gives the best value.
-- They compare clean accuracy, robust accuracy, latency, cost, and monitoring burden.
-- They choose a defense stack and expected tax.
+| Lab module | Chapter source | Claim used in the lab |
+|---|---|---|
+| Part A - Shift exposure and failure cost | The Silent Failure Problem; Quantitative drift detection; PSI thresholds | Average-case accuracy hides distributional stress; PSI/KL/KS-style monitors translate shift into an operational response. |
+| Part B - Robustness budget allocation | Drift response framework; failsafe and uncertainty footnotes; hardening strategy footnote | Coverage, retraining, monitoring, and fallback are different spending accounts; each catches different failures. |
+| Part C - Robustness tax frontier | Adversarial defenses; robustness tax example; uncertainty compute footnote | Robustness improves worst-case behavior by paying latency, compute, energy, clean-quality, and regression taxes. |
+| Part D - Robustness policy gate | Defense-in-depth workflow; fallacies and pitfalls; summary | A policy must name guardrails, rejected alternatives, and residual failure rather than claiming universal robustness. |
+| Synthesis - Robustness budget memo | Summary; From resilience to sustainability | The final memo carries the binding amount and residual risk into V2-15 sustainability. |
 
-## Lab Flow
+## Accepted Concept Inventory
 
-### Opening - Robustness Brief
+| Concept | Why it stays | Module |
+|---|---|---|
+| Silent failure | It makes robustness operational: uptime can be green while model behavior is wrong. | A |
+| Distribution shift measurement | PSI and threshold bands create a manipulative amount model. | A |
+| Failure consequence asymmetry | Same shift score has different meaning for iPhone, Oura, RoboTaxi, and Cloud Fleet. | A |
+| Budgeted defense accounts | Students must allocate a fixed amount across coverage, retraining, monitoring, and fallback. | B |
+| Defense tax | The chapter explicitly says robustness is bought with accuracy, compute, energy, latency, and validation cost. | C |
+| Policy gate with residual risk | Robustness is bounded to a threat model and operating envelope. | D |
 
-Common narrative:
-- Robustness failures may be silent until damage accumulates.
-- The selected track changes the failure mode and acceptable fallback.
+## Rejected Or Compressed Concepts
 
-Track realization:
-- iPhone: robustness covers device context, lighting/audio variation, and user behavior.
-- Oura Ring: robustness covers sensor contact, physiology, activity, and firmware variation.
-- RoboTaxi: robustness covers weather, rare objects, adversarial conditions, and safety fallback.
-- Cloud Fleet: robustness covers distribution shift, abuse, tenant variation, and model updates.
-
-### Part A - Robustness Tax
-
-Common pattern:
-- Add robust training, augmentation, ensembling, abstention, or fallback.
-- Show clean/robust accuracy, latency, energy, and cost.
-
-Track realization:
-- iPhone robustness tax appears as battery/latency.
-- Oura Ring robustness tax appears as memory/energy.
-- RoboTaxi robustness tax appears as p99 latency and validation burden.
-- Cloud Fleet robustness tax appears as cost, capacity, and throughput.
-
-### Part B - Drift/Silent Error Timeline
-
-Common pattern:
-- Timeline shows shift onset, detection, accumulated harm, and response.
-
-Track realization:
-- iPhone drift appears through user context and telemetry.
-- Oura Ring drift appears through sensor quality and delayed health labels.
-- RoboTaxi drift appears through geography/weather and near misses.
-- Cloud Fleet drift appears through online metrics, abuse, and delayed labels.
-
-### Part C - Defense Stack
-
-Common pattern:
-- Student chooses defenses, fallback, and monitoring signal.
-
-Track realization:
-- iPhone stack includes local fallback and context monitors.
-- Oura Ring stack includes sensor-quality gates and safe summaries.
-- RoboTaxi stack includes abstention/degraded mode and safety monitors.
-- Cloud Fleet stack includes guardrails, monitoring, and rollback.
-
-## Implementation Requirements
-
-- Track variants need failure taxonomy and fallback mechanism.
-- Robustness result should show tax and new bottleneck.
-- Report should include monitoring assumption.
-
-## Ledger And Report
-
-Save:
-- predicted robustness defense
-- selected defense stack
-- robustness tax
-- fallback policy
-- monitoring assumption
-
-Report target:
-- A robustness defense plan for the selected track.
-
-## Detailed Planning Addendum
-
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
-
-### Planning Focus
-
-Primary concept:
-- robustness tax, drift timeline, defense stack, fallback, and monitoring assumption.
-
-Minimum classroom demo:
-- add robustness defenses and show latency/cost tax for RoboTaxi and Cloud Fleet.
-
-Completion path:
-- predict best defense, inspect robustness tax, analyze drift timeline, choose defense stack.
-
-## Instructor Assignment Modes
-
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
-
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
-
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
-
-## Expected Track Outcomes
-
-| Track | Expected outcome |
+| Concept | Treatment |
 |---|---|
-| iPhone | Chooses context monitors/fallbacks that protect quality without draining battery. |
-| Oura Ring | Chooses sensor-quality gates and safe summaries under memory/energy limits. |
-| RoboTaxi | Chooses defense/fallback for weather/rare-object shifts with p99 and safety tax visible. |
-| Cloud Fleet | Chooses monitoring/guardrails/rollback for distribution shift and abuse at scale. |
+| Full adversarial attack taxonomy | Compressed into threat-model fit and Math Peek because the lab focus is budgeting, not attack mechanics. |
+| Certified radius derivation | Mentioned in Math Peek/source trace; not a separate module because it would become a math-only detour. |
+| Data poisoning internals | Appears as one residual failure case and source-trace item; V2-13 already establishes adversarial/security boundaries. |
+| Detailed KS/chi-square statistics | PSI is the primary manipulative signal; KS/KL are referenced as escalation evidence. |
+| Federated adaptation mechanics | Deferred to Edge Intelligence and privacy labs; here it is an adaptation cost note. |
 
-## Common Misconceptions
+## Track Plan
 
-- Robustness improves without cost.
-- Clean accuracy predicts robust accuracy.
-- Silent errors are immediately visible.
-- One defense handles every shift.
+Tracks realize the same concepts with different personas, constraints, thresholds,
+failure costs, evidence emphasis, and report framing.
 
-## Data And Solver Contracts
+| Track | Persona | Likely shift | Highest failure cost | Binding robustness amount |
+|---|---|---|---|---|
+| iPhone | Mobile product engineer | Lighting, acoustics, device/user context | Battery drain, privacy-sensitive wrong action, visible UX regression | Latency and battery headroom for monitors/fallback |
+| Oura Ring | Wearable firmware engineer | Sensor contact, physiology, activity seasonality, firmware variance | Missed health signal, false wellness summary, battery depletion | SRAM/energy and delayed labels |
+| RoboTaxi | Autonomous vehicle platform engineer | Weather, occlusion, rare objects, physical adversarial artifacts | Safety recall miss, p99 deadline miss, unsafe fallback | Rare-event coverage and deterministic fallback |
+| Cloud Fleet | Fleet service owner | Tenant/user mix, abuse, prompt/data distribution, model updates | SLO breach, bad decisions at scale, rollback blast radius | Monitoring coverage, capacity, cost/request, and carbon |
 
-Needed inputs:
-- `track_id`
-- `shift_type`
-- `defense_stack`
-- `fallback_policy`
-- `monitoring_signal`
-- `robustness_budget`
+## Concept Modules
 
-Needed outputs:
-- `robustness_tax`
-- `clean_vs_robust_metric`
-- `drift_timeline`
-- `defense_plan`
+### Part A - Concept Module: Shift Exposure Has A Cost
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+Chapter claim:
+- Robustness measures bounded behavior under distribution shift, adversarial perturbation, and system faults, not held-out i.i.d. accuracy.
+- PSI thresholds separate negligible, minor, moderate, and major shift bands.
 
-## Single Source Of Truth Requirements
+Student prior:
+- "If the model is accurate and the service is healthy, robustness is probably fine."
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+Activity beats:
+1. Scenario: a track-specific owner sees green latency/uptime but worries about silent failure.
+2. Prediction: choose which shift will dominate and which cost matters most.
+3. Manipulation: change shift type, stress exposure, and failure-cost multiplier.
+4. Evidence: PSI-style cohort shift chart plus expected harm metric.
+5. Consequence: the same shift score maps to different operational decisions by track.
+6. Math/source beat: PSI and expected-loss model.
+7. Checkpoint: choose monitor, investigate, retrain, or fallback-first response.
 
-## Accessibility And Fallback Requirements
+Ledger output:
+- Track, selected shift, predicted failure mode, PSI, response tier, failure cost.
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+### Part B - Concept Module: Robustness Budget Is Allocated, Not Added
 
-## Rubric Sketch
+Chapter claim:
+- Hardening, drift monitoring, retraining, uncertainty, and fallback each spend resources and catch different failure modes.
 
-- Defense maps to failure mode.
-- Tax is quantified.
-- Fallback and monitor are explicit.
-- Monitoring assumption is realistic.
+Student prior:
+- "Spend more on the strongest defense and the system becomes robust."
 
-## Continuous Improvement Notes
+Activity beats:
+1. Scenario: the same owner has 100 robustness points to allocate.
+2. Prediction: choose which account will reduce residual failure most.
+3. Manipulation: allocate points across stress coverage, retraining, monitoring, and fallback.
+4. Evidence: budget bar and residual-risk decomposition.
+5. Consequence: over-budget or under-funded accounts expose a named residual failure.
+6. Math/source beat: diminishing-return risk reduction and fixed budget.
+7. Checkpoint: choose the account to protect before spending more elsewhere.
 
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+Ledger output:
+- Budget allocation, over/under budget, residual risk, underfunded account, binding account.
+
+### Part C - Concept Module: Robustness Has A Tax Frontier
+
+Chapter claim:
+- Adversarial training, certification, uncertainty sampling, ensembles, and guardrails improve worst-case behavior while taxing clean quality, latency, cost, energy, and regression risk.
+
+Student prior:
+- "The more robust option is always the better engineering option."
+
+Activity beats:
+1. Scenario: release review compares hardening strategies.
+2. Prediction: choose which tax will bind first.
+3. Manipulation: choose defense family, strength, and uncertainty samples.
+4. Evidence: robustness-gain versus tax frontier and candidate table.
+5. Consequence: a design can improve stress behavior while failing latency, energy, cost, or clean-quality guardrails.
+6. Math/source beat: robust objective and robustness-tax formulas.
+7. Checkpoint: choose whether to harden, monitor, fallback, or defer.
+
+Ledger output:
+- Selected defense, strength, uncertainty samples, robustness gain, tax terms, binding tax.
+
+### Part D - Concept Module: A Robustness Policy Has Guardrails And Residual Failure
+
+Chapter claim:
+- Robustness is threat-model-bound; robust systems combine detection, defense, fallback, and regular testing while naming residual risks.
+
+Student prior:
+- "A policy can be declared robust if it passes one stress test."
+
+Activity beats:
+1. Scenario: governance review asks for one shippable policy.
+2. Prediction: choose which policy candidate survives all guardrails.
+3. Manipulation: select a policy, guardrail strictness, and residual failure case.
+4. Evidence: policy gate table with latency, cost, quality, coverage, fallback, and residual-risk status.
+5. Consequence: rejected alternatives fail for a specific amount, not a generic preference.
+6. Math/source beat: feasibility as a conjunction of guardrails.
+7. Checkpoint: choose the final policy objective.
+
+Ledger output:
+- Selected policy, guardrail strictness, rejected alternative, residual failure case, binding amount.
+
+## Mechanics Plan
+
+| Module | Controls | Evidence | Failure state |
+|---|---|---|---|
+| A | Shift prediction radios, shift dropdown, stress exposure slider, failure-cost slider | PSI cohort chart, source table, expected harm cards | Major shift or high expected harm warning |
+| B | Budget prediction radio, four allocation sliders, checkpoint | Stacked budget chart, residual-risk decomposition table | Over-budget and underfunded account warning |
+| C | Tax prediction radio, defense dropdown, strength slider, uncertainty sample slider | Frontier scatter/bar chart, candidate table | Tax guardrail violation for latency/cost/energy/quality |
+| D | Policy prediction radio, policy dropdown, guardrail strictness slider, residual-case dropdown | Policy gate table, decision memo | Feasibility conjunction fails |
+| Synthesis | Local decision text plus export panel | Robustness budget memo | Missing predictions/checkpoints marked incomplete |
+
+## Evidence Plan
+
+The report must contain:
+- Selected track and scenario.
+- Part A shift exposure, PSI tier, and failure-cost evidence.
+- Part B budget allocation and residual-risk evidence.
+- Part C tax frontier evidence and binding tax.
+- Part D selected policy, guardrails, rejected alternative, and residual failure case.
+- V2-15 implication: extra robustness compute/monitoring/fallback becomes an energy and carbon budget input.
+
+## Source Trace
+
+Notebook-local helpers are prefixed `v2_14_` because shared MLSysIM support does
+not yet expose typed robustness-budget result objects. The source trace records:
+
+- `book/quarto/contents/vol2/robust_ai/robust_ai.qmd`
+- `v2_14_shift_exposure`
+- `v2_14_budget_result`
+- `v2_14_defense_result`
+- `v2_14_policy_result`
+- Track profile and lab variant refs from `mlsysbook_labs`
+- Chapter formulas: PSI, robust minimax objective, feasibility conjunction
+
+## Implementation Risks
+
+| Risk | Mitigation |
+|---|---|
+| No shared robustness solver exists yet. | Use notebook-local helpers with explicit source trace and keep them prefixed `v2_14_`. |
+| Track thresholds are scenario constants rather than registry values. | Tie them to existing track profiles and variant guardrails; document them in Math Peek/source trace. |
+| Four budget sliders can exceed 100 points. | Make over-budget a reversible failure state and keep the report evidence explicit. |
+| Robustness-tax coefficients are teaching proxies. | Label them as proxy costs anchored to chapter claims about robustness tax and UQ compute. |
+| Other workers may edit adjacent labs. | Only edit `lab_14_robust_ai.py` and this track-plan. |
+
+## Depth Audit
+
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability | Pass notes |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Part A | 3 | 3 | 3 | 3 | 3 | 3 | Prediction, manipulation, PSI evidence, cost consequence, Math Peek, checkpoint. |
+| Part B | 3 | 3 | 3 | 3 | 3 | 3 | Fixed-budget allocation with reversible over-budget and underfunded-account failures. |
+| Part C | 3 | 3 | 3 | 3 | 3 | 3 | Defense frontier exposes robustness gain versus tax guardrails. |
+| Part D | 3 | 3 | 3 | 3 | 3 | 3 | Policy gate requires guardrails, rejected alternative, residual failure, and report framing. |
+| Synthesis | 3 | 3 | 3 | 2 | 3 | 3 | Memo carries selected policy, binding amount, residual risk, and V2-15 implication. |
+
+Minimum gates:
+- Every module has at least five activity beats.
+- At least one reversible failure exists in Parts A-D.
+- The same concept sequence is shared across tracks.
+- Track differences change constraints, thresholds, failure cost, and report wording.

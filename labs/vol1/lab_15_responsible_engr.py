@@ -34,15 +34,12 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         build_lab_report,
-        carbon_budget,
-        explanation_overhead,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         metric_conflict,
         report_export_panel,
         resolve_mlsysim_ref,
-        responsibility_budget,
         responsibility_track_profile,
         source_trace,
         track_context,
@@ -59,8 +56,6 @@ async def _():
         LAB_CSS,
         apply_plotly_theme,
         build_lab_report,
-        carbon_budget,
-        explanation_overhead,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
@@ -72,7 +67,6 @@ async def _():
         np,
         report_export_panel,
         resolve_mlsysim_ref,
-        responsibility_budget,
         responsibility_track_profile,
         source_trace,
         track_context,
@@ -132,7 +126,7 @@ def _(
     mo,
     source_trace,
     track_context,
-        track_arc_context,
+    track_arc_context,
     v1_15_metadata,
     v1_15_profile,
     v1_15_resp,
@@ -151,16 +145,16 @@ def _(
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1;">
-                No Free Fairness
+                Responsible Release Gate
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Metric Conflict &middot; Responsibility Budget &middot; Explainability Tax &middot; Carbon
+                Metric Thresholds &middot; Privacy Budget &middot; Blast Radius &middot; Audit Trail
             </p>
             <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
                       max-width: 780px; line-height: 1.65;">
-                {v1_15_variant.workload_summary} Responsible engineering is not an
-                afterthought; it is a measurable systems constraint.
+                {v1_15_variant.workload_summary} Responsible engineering turns
+                people, policy, evidence, and blast radius into release gates.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
@@ -205,12 +199,12 @@ def _(COLORS, mo, v1_15_resp):
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Name the harmed party:</strong>
-                    identify who pays when the selected track fails responsibly.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Quantify metric conflict:</strong>
-                    show why one aggregate metric cannot satisfy every subgroup or context.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Budget responsibility:</strong>
-                    connect privacy, explanations, robustness, monitoring, and carbon to systems overhead.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Choose a threshold policy:</strong>
+                    show which stakeholder absorbs false-positive or false-negative harm.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Budget privacy evidence:</strong>
+                    connect epsilon, minimization, retention, and consent to deployability.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Gate the release:</strong>
+                    bound safety risk, blast radius, rollback, and audit accountability.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -272,13 +266,21 @@ def _(mo, v1_15_resp):
     partA_pred = mo.ui.radio(
         options={
             "A) Aggregate quality is enough if it stays high": "aggregate",
-            "B) The subgroup gap can violate the obligation even when aggregate quality looks good": "gap",
-            "C) Lowering the threshold always fixes the harmed party": "threshold",
-            "D) Audits are only needed after deployment incidents": "incident",
+            "B) The threshold can trade false-positive and false-negative harm across stakeholders": "threshold_tradeoff",
+            "C) Raising the threshold always protects the harmed party": "raise_threshold",
+            "D) Governance can decide the threshold after launch": "after_launch",
         },
-        label=f"{v1_15_resp.label}: what is the first responsibility risk for {v1_15_resp.harmed_party}?",
+        label=f"{v1_15_resp.label}: what is the first release risk for {v1_15_resp.harmed_party}?",
     )
-    return (partA_pred,)
+    partA_policy = mo.ui.radio(
+        options={
+            "Hold release until the subgroup gap is within target": "hold_for_gap",
+            "Ship the shared threshold and monitor after launch": "ship_monitor",
+            "Use a track-specific mitigation before release": "mitigate_before_release",
+        },
+        label="Checkpoint: threshold policy for the release memo",
+    )
+    return (partA_policy, partA_pred)
 
 
 @app.cell(hide_code=True)
@@ -301,111 +303,136 @@ def _(mo, v1_15_resp):
 
     partB_pred = mo.ui.radio(
         options={
-            "A) Add every control at maximum strength": "max",
-            "B) Choose controls until the gap closes and budgets still pass": "balanced",
-            "C) Explanations are free if they are only generated for some users": "free_explanations",
-            "D) Monitoring changes governance but not system cost": "monitoring_free",
+            "A) Collect more raw data because more evidence is always safer": "more_raw",
+            "B) Minimize retained data while keeping enough audit evidence": "minimize_with_evidence",
+            "C) Differential privacy only changes the report wording": "privacy_text",
+            "D) Consent and retention can be checked after deployment": "after_deploy",
         },
-        label=f"How should {v1_15_resp.stakeholder} budget responsibility controls?",
+        label=f"How should {v1_15_resp.stakeholder} balance privacy and evidence?",
     )
     return (partA_base_a, partA_base_b, partA_threshold, partB_pred)
 
 
 @app.cell(hide_code=True)
 def _(mo, v1_15_resp):
-    partB_privacy = mo.ui.slider(start=0, stop=100, value=60, step=5, label="Privacy / consent strength")
-    partB_explain = mo.ui.slider(
+    _epsilon_default = 2.0 if v1_15_resp.track_id in {"iphone", "oura_ring"} else 4.0
+    _retention_default = 14 if v1_15_resp.track_id in {"iphone", "oura_ring"} else 30
+    partB_epsilon = mo.ui.slider(start=0.5, stop=12.0, value=_epsilon_default, step=0.5, label="Privacy budget epsilon")
+    partB_retention = mo.ui.slider(start=1, stop=180, value=_retention_default, step=1, label="Retained evidence days")
+    partB_raw_pct = mo.ui.slider(
         start=0,
         stop=100,
-        value=int(v1_15_resp.explanation_coverage_pct),
+        value=25,
         step=5,
-        label="Explanation coverage (%)",
+        label="Raw / sensitive evidence retained (%)",
     )
-    partB_robustness = mo.ui.slider(start=0, stop=100, value=70, step=5, label="Robustness / mitigation strength")
-    partB_monitoring = mo.ui.slider(start=0, stop=100, value=60, step=5, label="Audit / monitoring strength")
+    partB_local_pct = mo.ui.slider(start=0, stop=100, value=70, step=5, label="Local or federated processing (%)")
+    partB_decision = mo.ui.radio(
+        options={
+            "Deploy with this privacy evidence policy": "deploy_privacy_policy",
+            "Revise collection to increase audit evidence": "revise_evidence",
+            "Hold for consent, retention, or data-card review": "hold_privacy_review",
+        },
+        label="Checkpoint: privacy evidence decision",
+    )
 
     partC_pred = mo.ui.radio(
         options={
-            "A) The explanation method only affects the report text": "text_only",
-            "B) Explanations add latency proportional to the method and feature count": "latency",
-            "C) SHAP is always safe for online serving": "always_safe",
-            "D) Explanations remove the need for subgroup audits": "replace_audit",
+            "A) Average quality is enough if the track metric is strong": "average_quality",
+            "B) Safety threshold, canary size, rollback, and fallback bound blast radius": "blast_radius",
+            "C) A bigger canary always gives safer evidence": "bigger_canary",
+            "D) Human review can replace predeployment safety thresholds": "human_replaces_gate",
         },
-        label=f"What does explainability cost on {v1_15_resp.hardware_name}?",
+        label=f"What makes a staged {v1_15_resp.label} release acceptable?",
     )
-    return (partB_explain, partB_monitoring, partB_privacy, partB_robustness, partC_pred)
+    return (partB_decision, partB_epsilon, partB_local_pct, partB_raw_pct, partB_retention, partC_pred)
 
 
 @app.cell(hide_code=True)
 def _(mo, v1_15_resp):
-    partC_features = mo.ui.slider(
-        start=5,
+    _safety_default = max(85.0, min(99.0, v1_15_resp.baseline_quality_pct - 1.0))
+    _rollback_default = 3 if v1_15_resp.track_id == "robotaxi" else 15
+    partC_safety_threshold = mo.ui.slider(
+        start=85.0,
+        stop=99.5,
+        value=_safety_default,
+        step=0.5,
+        label="Minimum rare-event / safety evidence (%)",
+    )
+    partC_canary_pct = mo.ui.slider(start=1, stop=50, value=10, step=1, label="Initial canary exposure (%)")
+    partC_rollback_minutes = mo.ui.slider(
+        start=1,
         stop=120,
-        value=v1_15_resp.explanation_features,
-        step=5,
-        label="Explanation features / trace factors",
+        value=_rollback_default,
+        step=1,
+        label="Rollback or mitigation time (minutes)",
     )
-    partC_method = mo.ui.dropdown(
+    partC_human_review = mo.ui.slider(start=0, stop=100, value=70, step=5, label="Fallback / human-review coverage (%)")
+    partC_decision = mo.ui.radio(
         options={
-            "None": "none",
-            "Feature Importance": "feature_importance",
-            "LIME": "lime",
-            "Trace Replay": "trace_replay",
-            "SHAP": "shap",
+            "Canary only within the blast-radius cap": "canary",
+            "Hold release until safety evidence clears the floor": "hold_safety",
+            "Expand release because aggregate quality is strong": "expand",
         },
-        value={
-            "none": "None",
-            "feature_importance": "Feature Importance",
-            "lime": "LIME",
-            "trace_replay": "Trace Replay",
-            "shap": "SHAP",
-        }.get(v1_15_resp.explanation_method, "SHAP"),
-        label="Explanation method",
-    )
-    partC_coverage = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=int(v1_15_resp.explanation_coverage_pct),
-        step=5,
-        label="Online explanation coverage (%)",
+        label="Checkpoint: safety release decision",
     )
 
     partD_pred = mo.ui.radio(
         options={
-            "A) Carbon is dominated by one training run": "one_train",
-            "B) Retraining cadence and explanation coverage can dominate the footprint": "cadence",
-            "C) Grid carbon intensity does not matter for the same model": "grid_irrelevant",
-            "D) Carbon accounting is separate from responsible engineering": "separate",
+            "A) A model card is enough accountability": "model_card",
+            "B) Lineage, immutable logs, decision context, and owner sign-off make evidence accountable": "governance_stack",
+            "C) Audit logs only need aggregate counters": "aggregate_logs",
+            "D) Governance can be reconstructed manually after an incident": "manual_after",
         },
-        label=f"What changes the carbon budget for {v1_15_resp.label}?",
+        label=f"What makes the {v1_15_resp.label} release evidence accountable?",
     )
-    return (partC_coverage, partC_features, partC_method, partD_pred)
+    return (
+        partC_canary_pct,
+        partC_decision,
+        partC_human_review,
+        partC_pred,
+        partC_rollback_minutes,
+        partC_safety_threshold,
+        partD_pred,
+    )
 
 
 @app.cell(hide_code=True)
 def _(mo, v1_15_resp):
-    partD_retrains = mo.ui.slider(
+    _retention_default = 730 if v1_15_resp.track_id in {"robotaxi", "cloud_fleet"} else 365
+    partD_lineage = mo.ui.slider(start=0, stop=100, value=80, step=5, label="Lineage coverage (%)")
+    partD_log_retention = mo.ui.slider(
         start=1,
-        stop=52,
-        value=v1_15_resp.retrain_frequency_per_year,
+        stop=2190,
+        value=_retention_default,
+        step=30,
+        label="Immutable audit retention (days)",
+    )
+    partD_context = mo.ui.slider(start=0, stop=100, value=75, step=5, label="Prediction decision-context logging (%)")
+    partD_access_review = mo.ui.slider(
+        start=1,
+        stop=90,
+        value=30,
         step=1,
-        label="Retrains per year",
+        label="Access review cadence (days)",
     )
-    partD_explain = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=int(v1_15_resp.explanation_coverage_pct),
-        step=5,
-        label="Explanation coverage for carbon (%)",
+    partD_owner = mo.ui.radio(
+        options={
+            "No named owner yet": "none",
+            "Single accountable owner named": "single_owner",
+            "Cross-functional owner and reviewer named": "cross_functional",
+        },
+        label="Accountable release owner",
     )
-    partD_grid_ci = mo.ui.slider(
-        start=20,
-        stop=800,
-        value=int(v1_15_resp.grid_ci_g_per_kwh),
-        step=10,
-        label="Grid carbon intensity (gCO2/kWh)",
+    partD_decision = mo.ui.radio(
+        options={
+            "Sign off with accountable audit trail": "sign_off",
+            "Hold for missing lineage or decision context": "hold_governance",
+            "Ship with documented manual reconstruction risk": "manual_risk",
+        },
+        label="Checkpoint: governance decision",
     )
-    return (partD_explain, partD_grid_ci, partD_retrains)
+    return (partD_access_review, partD_context, partD_decision, partD_lineage, partD_log_retention, partD_owner)
 
 
 # ===========================================================================
@@ -417,35 +444,42 @@ def _(mo, v1_15_resp):
 def _(
     COLORS,
     apply_plotly_theme,
-    carbon_budget,
-    explanation_overhead,
     go,
     metric_conflict,
     mo,
     np,
     partA_base_a,
     partA_base_b,
+    partA_policy,
     partA_pred,
     partA_threshold,
-    partB_explain,
-    partB_monitoring,
+    partB_decision,
+    partB_epsilon,
+    partB_local_pct,
     partB_pred,
-    partB_privacy,
-    partB_robustness,
-    partC_coverage,
-    partC_features,
-    partC_method,
+    partB_raw_pct,
+    partB_retention,
+    partC_canary_pct,
+    partC_decision,
+    partC_human_review,
     partC_pred,
-    partD_explain,
-    partD_grid_ci,
+    partC_rollback_minutes,
+    partC_safety_threshold,
+    partD_access_review,
+    partD_context,
+    partD_decision,
+    partD_lineage,
+    partD_log_retention,
+    partD_owner,
     partD_pred,
-    partD_retrains,
-    responsibility_budget,
     v1_15_profile,
     v1_15_resp,
     v1_15_variant,
 ):
-    def _metric_card(label, value, detail, color, border=False):
+    def v1_15_clamp(value, low, high):
+        return max(low, min(high, float(value)))
+
+    def v1_15_metric_card(label, value, detail, color, border=False):
         border_style = f"2px solid {color}" if border else "1px solid #e2e8f0"
         return f"""
         <div style="padding:16px; border:{border_style}; border-radius:10px;
@@ -457,36 +491,262 @@ def _(
         </div>
         """
 
-    def build_part_a():
+    def v1_15_track_policy(profile):
+        policies = {
+            "iphone": {
+                "epsilon_limit": 3.0,
+                "max_retention_days": 30,
+                "min_local_pct": 70,
+                "min_evidence_confidence": 70,
+                "privacy_risk_cap": 55,
+                "safety_floor_pct": 90.0,
+                "canary_risk_pp": 0.05,
+                "harm_multiplier": 0.08,
+                "blast_cap_units": 250,
+                "rollback_max_minutes": 30,
+                "human_review_min_pct": 60,
+                "audit_retention_days": 365,
+                "audit_ready_min": 80,
+                "evidence_label": "privacy-safe accessibility evidence",
+                "blast_unit": "affected sessions",
+                "audit_owner": "mobile release owner",
+            },
+            "oura_ring": {
+                "epsilon_limit": 2.0,
+                "max_retention_days": 30,
+                "min_local_pct": 80,
+                "min_evidence_confidence": 65,
+                "privacy_risk_cap": 45,
+                "safety_floor_pct": 92.0,
+                "canary_risk_pp": 0.07,
+                "harm_multiplier": 0.15,
+                "blast_cap_units": 25,
+                "rollback_max_minutes": 60,
+                "human_review_min_pct": 70,
+                "audit_retention_days": 730,
+                "audit_ready_min": 85,
+                "evidence_label": "consented biosignal evidence",
+                "blast_unit": "wearer-days at risk",
+                "audit_owner": "wearable risk owner",
+            },
+            "robotaxi": {
+                "epsilon_limit": 6.0,
+                "max_retention_days": 90,
+                "min_local_pct": 40,
+                "min_evidence_confidence": 90,
+                "privacy_risk_cap": 65,
+                "safety_floor_pct": 98.0,
+                "canary_risk_pp": 0.08,
+                "harm_multiplier": 0.05,
+                "blast_cap_units": 50,
+                "rollback_max_minutes": 5,
+                "human_review_min_pct": 95,
+                "audit_retention_days": 2190,
+                "audit_ready_min": 95,
+                "evidence_label": "rare-event replay evidence",
+                "blast_unit": "road-user exposures",
+                "audit_owner": "safety case owner",
+            },
+            "cloud_fleet": {
+                "epsilon_limit": 5.0,
+                "max_retention_days": 90,
+                "min_local_pct": 20,
+                "min_evidence_confidence": 75,
+                "privacy_risk_cap": 60,
+                "safety_floor_pct": 92.0,
+                "canary_risk_pp": 0.04,
+                "harm_multiplier": 0.05,
+                "blast_cap_units": 100_000,
+                "rollback_max_minutes": 30,
+                "human_review_min_pct": 50,
+                "audit_retention_days": 1095,
+                "audit_ready_min": 90,
+                "evidence_label": "tenant/language cohort evidence",
+                "blast_unit": "requests or users affected",
+                "audit_owner": "platform governance owner",
+            },
+        }
+        return policies.get(profile.track_id, policies["iphone"])
+
+    def v1_15_approval_rate(base_rate_pct, fpr_pct, fnr_pct):
+        base_rate = v1_15_clamp(base_rate_pct, 1.0, 99.0) / 100.0
+        fpr = v1_15_clamp(fpr_pct, 0.0, 100.0) / 100.0
+        tpr = 1.0 - v1_15_clamp(fnr_pct, 0.0, 100.0) / 100.0
+        return (base_rate * tpr + (1.0 - base_rate) * fpr) * 100.0
+
+    def v1_15_privacy_result(profile, policy, epsilon, retention_days, raw_pct, local_pct):
+        epsilon = v1_15_clamp(epsilon, 0.1, 20.0)
+        retention_days = int(v1_15_clamp(retention_days, 1, 3650))
+        raw_pct = v1_15_clamp(raw_pct, 0.0, 100.0)
+        local_pct = v1_15_clamp(local_pct, 0.0, 100.0)
+
+        raw_records = profile.inference_events_per_day * (raw_pct / 100.0) * retention_days
+        evidence_volume_score = min(26.0, np.log10(max(raw_records, 1.0)) * 4.2)
+        dp_noise_penalty = max(0.0, policy["epsilon_limit"] - epsilon) * 4.0
+        minimization_penalty = local_pct * 0.05 + max(0.0, 35.0 - raw_pct) * 0.15
+        retention_credit = min(retention_days, policy["max_retention_days"]) / policy["max_retention_days"] * 12.0
+        evidence_confidence = v1_15_clamp(
+            38.0 + evidence_volume_score + raw_pct * 0.15 + retention_credit - dp_noise_penalty - minimization_penalty,
+            0.0,
+            100.0,
+        )
+        membership_risk = v1_15_clamp(
+            10.0
+            + raw_pct * 0.35
+            + min(1.5, retention_days / policy["max_retention_days"]) * 20.0
+            + (epsilon / policy["epsilon_limit"]) * 25.0
+            - local_pct * 0.18,
+            0.0,
+            100.0,
+        )
+        model_evidence_delta = -dp_noise_penalty * 0.22 - local_pct * 0.015 - max(0.0, 35.0 - raw_pct) * 0.04
+        effective_records = raw_records * (epsilon / (epsilon + 2.0)) * (1.0 - local_pct / 300.0)
+        violations = []
+        if epsilon > policy["epsilon_limit"]:
+            violations.append("epsilon budget exceeded")
+        if retention_days > policy["max_retention_days"]:
+            violations.append("retention exceeds minimization policy")
+        if local_pct < policy["min_local_pct"]:
+            violations.append("local/federated processing below track floor")
+        if evidence_confidence < policy["min_evidence_confidence"]:
+            violations.append("audit evidence below confidence floor")
+        if membership_risk > policy["privacy_risk_cap"]:
+            violations.append("membership-inference risk above cap")
+        return {
+            "epsilon": epsilon,
+            "epsilon_limit": policy["epsilon_limit"],
+            "retention_days": retention_days,
+            "max_retention_days": policy["max_retention_days"],
+            "raw_pct": raw_pct,
+            "local_pct": local_pct,
+            "raw_records": raw_records,
+            "effective_records": effective_records,
+            "evidence_confidence": evidence_confidence,
+            "min_evidence_confidence": policy["min_evidence_confidence"],
+            "membership_risk": membership_risk,
+            "privacy_risk_cap": policy["privacy_risk_cap"],
+            "model_evidence_delta": model_evidence_delta,
+            "deployable": not violations,
+            "violations": tuple(violations),
+        }
+
+    def v1_15_safety_result(profile, policy, threshold_pct, canary_pct, rollback_minutes, human_review_pct):
+        threshold_pct = v1_15_clamp(threshold_pct, 80.0, 100.0)
+        canary_pct = v1_15_clamp(canary_pct, 0.1, 100.0)
+        rollback_minutes = v1_15_clamp(rollback_minutes, 0.5, 240.0)
+        human_review_pct = v1_15_clamp(human_review_pct, 0.0, 100.0)
+        rare_event_score = v1_15_clamp(
+            profile.baseline_quality_pct
+            - canary_pct * policy["canary_risk_pp"]
+            + human_review_pct * 0.025
+            - max(0.0, rollback_minutes - policy["rollback_max_minutes"]) * 0.02,
+            0.0,
+            100.0,
+        )
+        risk_rate = max(0.0005, ((100.0 - rare_event_score) / 100.0) * policy["harm_multiplier"])
+        affected_units = profile.inference_events_per_day * (canary_pct / 100.0) * risk_rate
+        violations = []
+        if threshold_pct < policy["safety_floor_pct"]:
+            violations.append("selected threshold below track safety floor")
+        if rare_event_score < threshold_pct:
+            violations.append("rare-event evidence below selected threshold")
+        if affected_units > policy["blast_cap_units"]:
+            violations.append("blast-radius cap exceeded")
+        if rollback_minutes > policy["rollback_max_minutes"]:
+            violations.append("rollback or mitigation too slow")
+        if human_review_pct < policy["human_review_min_pct"]:
+            violations.append("fallback/human review below minimum")
+        return {
+            "threshold_pct": threshold_pct,
+            "track_floor_pct": policy["safety_floor_pct"],
+            "canary_pct": canary_pct,
+            "rollback_minutes": rollback_minutes,
+            "rollback_max_minutes": policy["rollback_max_minutes"],
+            "human_review_pct": human_review_pct,
+            "human_review_min_pct": policy["human_review_min_pct"],
+            "rare_event_score": rare_event_score,
+            "affected_units": affected_units,
+            "blast_cap_units": policy["blast_cap_units"],
+            "release_ok": not violations,
+            "violations": tuple(violations),
+        }
+
+    def v1_15_governance_result(profile, policy, lineage_pct, retention_days, context_pct, access_review_days, owner_value):
+        lineage_pct = v1_15_clamp(lineage_pct, 0.0, 100.0)
+        retention_days = int(v1_15_clamp(retention_days, 1, 3650))
+        context_pct = v1_15_clamp(context_pct, 0.0, 100.0)
+        access_review_days = int(v1_15_clamp(access_review_days, 1, 365))
+        owner_score = {"none": 0.0, "single_owner": 75.0, "cross_functional": 100.0}.get(owner_value, 0.0)
+        retention_score = v1_15_clamp(retention_days / policy["audit_retention_days"] * 100.0, 0.0, 100.0)
+        access_score = v1_15_clamp(100.0 - max(0, access_review_days - 7) * 1.2, 0.0, 100.0)
+        readiness = (
+            lineage_pct * 0.30
+            + context_pct * 0.25
+            + retention_score * 0.20
+            + access_score * 0.10
+            + owner_score * 0.15
+        )
+        audit_events_per_year = profile.inference_events_per_day * 365 * (context_pct / 100.0)
+        violations = []
+        if readiness < policy["audit_ready_min"]:
+            violations.append("audit readiness below release gate")
+        if lineage_pct < 80:
+            violations.append("lineage coverage below 80%")
+        if context_pct < 75:
+            violations.append("decision-context logging below 75%")
+        if retention_days < policy["audit_retention_days"]:
+            violations.append("immutable log retention below track obligation")
+        if owner_value in {None, "none"}:
+            violations.append("no accountable owner named")
+        return {
+            "lineage_pct": lineage_pct,
+            "retention_days": retention_days,
+            "required_retention_days": policy["audit_retention_days"],
+            "context_pct": context_pct,
+            "access_review_days": access_review_days,
+            "owner_value": owner_value,
+            "owner_score": owner_score,
+            "retention_score": retention_score,
+            "access_score": access_score,
+            "readiness": readiness,
+            "audit_ready_min": policy["audit_ready_min"],
+            "audit_events_per_year": audit_events_per_year,
+            "release_accountable": not violations,
+            "violations": tuple(violations),
+        }
+
+    v1_15_policy = v1_15_track_policy(v1_15_profile)
+
+    def v1_15_build_part_a():
         items = [
             mo.Html(f"""
             <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
                         border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
                 <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
                             text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Responsibility Brief &middot; {v1_15_variant.stakeholder}
+                    Threshold Release Brief &middot; {v1_15_variant.stakeholder}
                 </div>
                 <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Aggregate quality is high. Can we ship, or does the responsibility
-                    obligation require a subgroup audit first?"
+                    "Aggregate quality is high. Which threshold policy can ship without
+                    hiding harm to {v1_15_resp.harmed_party}?"
                 </div>
             </div>
             """),
             mo.md(f"""
-## Part A: Metric Conflict
+## Part A: Thresholds Encode Values
 
-**What you need to know.** A high aggregate metric can hide a harmed subgroup or
-context. For this track, the harmed party is **{v1_15_resp.harmed_party}** and
-the obligation is **{v1_15_resp.obligation}**.
+**Scenario.** You are the **{v1_15_resp.stakeholder}**. The release board asks
+whether one shared threshold is acceptable for **{v1_15_resp.subgroup_a}** and
+**{v1_15_resp.subgroup_b}**.
 
-The simulator compares two subgroups or contexts with different base rates and
-a shared threshold. The point is not to claim the formula is a production audit;
-the point is to make the conflict visible before the design memo is written.
+**Concept.** Thresholds encode values. Moving the threshold changes who absorbs
+false-positive and false-negative harm; the aggregate score does not decide that
+for you.
             """),
             partA_pred,
         ]
         if partA_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the subgroup metric audit."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the threshold audit."), kind="warn"))
             return mo.vstack(items)
 
         items.append(mo.hstack([partA_base_a, partA_base_b, partA_threshold], widths="equal"))
@@ -497,14 +757,18 @@ the point is to make the conflict visible before the design memo is written.
             threshold=partA_threshold.value,
         )
 
-        _metrics = ["Accuracy", "FPR", "FNR", "PPV"]
+        _approval_a = v1_15_approval_rate(_conflict.base_rate_a_pct, _conflict.fpr_a_pct, _conflict.fnr_a_pct)
+        _approval_b = v1_15_approval_rate(_conflict.base_rate_b_pct, _conflict.fpr_b_pct, _conflict.fnr_b_pct)
+        _metrics = ["Approval/Action", "Accuracy", "FPR", "FNR", "PPV"]
         _a_values = [
+            _approval_a,
             _conflict.accuracy_a_pct,
             _conflict.fpr_a_pct,
             _conflict.fnr_a_pct,
             _conflict.ppv_a_pct,
         ]
         _b_values = [
+            _approval_b,
             _conflict.accuracy_b_pct,
             _conflict.fpr_b_pct,
             _conflict.fnr_b_pct,
@@ -524,25 +788,28 @@ the point is to make the conflict visible before the design memo is written.
         items.append(mo.as_html(_fig))
 
         _gap_color = COLORS["RedLine"] if _conflict.fpr_gap_pp > v1_15_resp.target_gap_pp else COLORS["GreenLine"]
+        _threshold_harm = "false-negative misses" if partA_threshold.value >= 0.50 else "false-positive interventions"
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Accuracy Gap", f"{_conflict.accuracy_gap_pp:.1f} pp", "aggregate can look stable", COLORS["BlueLine"])}
-            {_metric_card("FPR Gap", f"{_conflict.fpr_gap_pp:.1f} pp", f"target {v1_15_resp.target_gap_pp:.1f} pp", _gap_color, True)}
-            {_metric_card("PPV Gap", f"{_conflict.ppv_gap_pp:.1f} pp", "different user impact", COLORS["OrangeLine"])}
-            {_metric_card("Audit Signal", "required", v1_15_resp.audit_signal, COLORS["RedLine"])}
+            {v1_15_metric_card("Accuracy Gap", f"{_conflict.accuracy_gap_pp:.1f} pp", "aggregate can look stable", COLORS["BlueLine"])}
+            {v1_15_metric_card("FPR Gap", f"{_conflict.fpr_gap_pp:.1f} pp", f"target {v1_15_resp.target_gap_pp:.1f} pp", _gap_color, True)}
+            {v1_15_metric_card("PPV Gap", f"{_conflict.ppv_gap_pp:.1f} pp", "different stakeholder value", COLORS["OrangeLine"])}
+            {v1_15_metric_card("Threshold Bias", _threshold_harm, v1_15_resp.audit_signal, COLORS["RedLine"])}
         </div>
         """))
 
         items.append(mo.md(f"""
-**Metric Table - Live Values**
+**Evidence Table - Live Values**
 
 | Metric | {v1_15_resp.subgroup_a} | {v1_15_resp.subgroup_b} |
 |---|---:|---:|
 | Base/context rate | {_conflict.base_rate_a_pct:.1f}% | {_conflict.base_rate_b_pct:.1f}% |
+| Approval/action rate | {_approval_a:.1f}% | {_approval_b:.1f}% |
 | Accuracy | {_conflict.accuracy_a_pct:.1f}% | {_conflict.accuracy_b_pct:.1f}% |
 | False positive rate | {_conflict.fpr_a_pct:.1f}% | {_conflict.fpr_b_pct:.1f}% |
 | False negative rate | {_conflict.fnr_a_pct:.1f}% | {_conflict.fnr_b_pct:.1f}% |
 | Positive predictive value | {_conflict.ppv_a_pct:.1f}% | {_conflict.ppv_b_pct:.1f}% |
+| Shared threshold | {partA_threshold.value:.2f} | {partA_threshold.value:.2f} |
 
 *Source: `mlsysbook_labs.metric_conflict`, track `{v1_15_profile.track_id}`.*
         """))
@@ -556,318 +823,478 @@ the point is to make the conflict visible before the design memo is written.
                 f"**Gap within target.** {_conflict.conflict_summary} The audit still belongs in the report."
             ), kind="success"))
 
-        if partA_pred.value == "gap":
-            items.append(mo.callout(mo.md("**Correct.** Responsibility starts with who can be harmed by an aggregate metric."), kind="success"))
+        items.append(mo.accordion({
+            "Math Peek: threshold metrics and value trade-offs": mo.md(f"""
+For each group, the notebook computes:
+
+`TPR = TP / (TP + FN)`, `FPR = FP / (FP + TN)`, and
+`PPV = TP / (TP + FP)`.
+
+The chapter's fairness section shows why demographic parity, equal opportunity,
+equalized odds, and calibration can conflict when base/context rates differ. In
+this lab, a release fails the Part A gate when
+`abs(FPR_A - FPR_B) > {v1_15_resp.target_gap_pp:.1f} pp`.
+            """)
+        }))
+
+        if partA_pred.value == "threshold_tradeoff":
+            items.append(mo.callout(mo.md("**Correct.** The threshold is a policy choice expressed as a number."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Aggregate quality is insufficient.** The report must name the harmed party, gap, audit signal, and residual harm."
+                "**Aggregate quality is insufficient.** The report must name which threshold policy protects the harmed stakeholder and which residual error remains."
             ), kind="warn"))
+        items.append(partA_policy)
+        if partA_policy.value is None:
+            items.append(mo.callout(mo.md("Choose a threshold policy so the release memo records a decision, not only a metric."), kind="warn"))
         return mo.vstack(items)
 
-    def build_part_b():
+    def v1_15_build_part_b():
         items = [
             mo.Html(f"""
             <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
                         border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
                 <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
                             text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Budget Review &middot; {v1_15_resp.stakeholder}
+                    Privacy Evidence Review &middot; {v1_15_resp.stakeholder}
                 </div>
                 <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Add privacy, explanations, robustness, and monitoring. Which
-                    combination closes the gap without breaking the system?"
+                    "What evidence can we keep, and what must be minimized, before
+                    this release is deployable?"
                 </div>
             </div>
             """),
             mo.md(f"""
-## Part B: Responsibility Budget
+## Part B: Privacy Budget Changes Evidence
 
-**What you need to know.** Responsibility controls are technical controls. They
-change latency, energy, cost, quality, and governance delay. The track-specific
-guardrail is **{v1_15_resp.guardrail_metric}**.
+**Scenario.** The release needs **{v1_15_policy['evidence_label']}**. Privacy,
+consent, retention, and local processing decide whether that evidence is lawful
+and strong enough to use.
+
+**Concept.** Privacy budgets and data minimization change model evidence. Strong
+privacy can reduce deployability risk, but it can also make the audit too weak
+to support the release decision.
             """),
             partB_pred,
         ]
         if partB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the responsibility budget."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the privacy evidence budget."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partB_privacy, partB_explain, partB_robustness, partB_monitoring], widths="equal"))
-        _budget = responsibility_budget(
+        items.append(mo.hstack([partB_epsilon, partB_retention, partB_raw_pct, partB_local_pct], widths="equal"))
+        _privacy = v1_15_privacy_result(
             v1_15_resp,
-            privacy_level=partB_privacy.value,
-            explanation_coverage_pct=partB_explain.value,
-            robustness_level=partB_robustness.value,
-            monitoring_level=partB_monitoring.value,
+            v1_15_policy,
+            partB_epsilon.value,
+            partB_retention.value,
+            partB_raw_pct.value,
+            partB_local_pct.value,
         )
         _ratios = [
-            _budget.latency_ms / _budget.latency_slo_ms,
-            _budget.energy_factor / v1_15_resp.max_energy_factor,
-            _budget.cost_factor / v1_15_resp.max_cost_factor,
-            _budget.fairness_gap_pp / max(0.1, _budget.target_gap_pp),
+            _privacy["epsilon"] / _privacy["epsilon_limit"],
+            _privacy["retention_days"] / _privacy["max_retention_days"],
+            _privacy["evidence_confidence"] / max(1.0, _privacy["min_evidence_confidence"]),
+            _privacy["membership_risk"] / max(1.0, _privacy["privacy_risk_cap"]),
         ]
-        _names = ["Latency/SLO", "Energy/Budget", "Cost/Budget", "Gap/Target"]
-        _colors = [COLORS["GreenLine"] if _r <= 1 else COLORS["RedLine"] for _r in _ratios]
+        _names = ["Epsilon/Limit", "Retention/Limit", "Evidence/Floor", "Privacy Risk/Cap"]
+        _colors = [
+            COLORS["GreenLine"] if _ratios[0] <= 1 else COLORS["RedLine"],
+            COLORS["GreenLine"] if _ratios[1] <= 1 else COLORS["RedLine"],
+            COLORS["GreenLine"] if _ratios[2] >= 1 else COLORS["RedLine"],
+            COLORS["GreenLine"] if _ratios[3] <= 1 else COLORS["RedLine"],
+        ]
         _fig = go.Figure()
         _fig.add_trace(go.Bar(x=_names, y=_ratios, marker_color=_colors, opacity=0.9))
-        _fig.add_hline(y=1.0, line_dash="dash", line_color="#64748b", annotation_text="budget boundary")
+        _fig.add_hline(y=1.0, line_dash="dash", line_color="#64748b", annotation_text="release boundary")
         _fig.update_layout(
             height=340,
-            yaxis=dict(title="Ratio to allowed budget", gridcolor="#f1f5f9"),
+            yaxis=dict(title="Ratio to policy boundary", gridcolor="#f1f5f9"),
             margin=dict(l=60, r=20, t=40, b=40),
         )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _status_color = COLORS["GreenLine"] if _budget.feasible else COLORS["RedLine"]
+        _status_color = COLORS["GreenLine"] if _privacy["deployable"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Latency", f"{_budget.latency_ms:.1f} ms", f"SLO {_budget.latency_slo_ms:.0f} ms", COLORS["BlueLine"])}
-            {_metric_card("Energy Factor", f"{_budget.energy_factor:.2f}x", f"max {v1_15_resp.max_energy_factor:.1f}x", COLORS["OrangeLine"])}
-            {_metric_card("Gap", f"{_budget.fairness_gap_pp:.1f} pp", f"target {_budget.target_gap_pp:.1f} pp", COLORS["RedLine"])}
-            {_metric_card("Policy", "PASS" if _budget.feasible else "FAIL", ", ".join(_budget.violations) or "no violations", _status_color, True)}
+            {v1_15_metric_card("Epsilon", f"{_privacy['epsilon']:.1f}", f"limit {_privacy['epsilon_limit']:.1f}", COLORS["BlueLine"])}
+            {v1_15_metric_card("Evidence", f"{_privacy['evidence_confidence']:.1f}%", f"floor {_privacy['min_evidence_confidence']:.0f}%", COLORS["OrangeLine"])}
+            {v1_15_metric_card("Retained Records", f"{_privacy['raw_records']:,.0f}", f"{_privacy['retention_days']} days", COLORS["RedLine"])}
+            {v1_15_metric_card("Privacy Gate", "PASS" if _privacy["deployable"] else "FAIL", ", ".join(_privacy["violations"]) or "no violations", _status_color, True)}
         </div>
         """))
 
         items.append(mo.md(f"""
-**Budget Table - Live Values**
+**Privacy Evidence Table - Live Values**
 
 | Quantity | Value |
 |---|---:|
-| Privacy strength | {_budget.privacy_level:.0f}% |
-| Explanation coverage | {_budget.explanation_coverage_pct:.0f}% |
-| Robustness strength | {_budget.robustness_level:.0f}% |
-| Monitoring strength | {_budget.monitoring_level:.0f}% |
-| Estimated quality | {_budget.estimated_quality_pct:.1f}% |
-| Quality delta | {_budget.quality_delta_pp:+.1f} pp |
-| Cost factor | {_budget.cost_factor:.2f}x |
-| Governance delay | {_budget.governance_delay_days:.1f} days |
+| Epsilon budget used | {_privacy['epsilon']:.1f} / {_privacy['epsilon_limit']:.1f} |
+| Retention days | {_privacy['retention_days']} / {_privacy['max_retention_days']} |
+| Raw or sensitive evidence retained | {_privacy['raw_pct']:.0f}% |
+| Local/federated processing | {_privacy['local_pct']:.0f}% |
+| Raw retained evidence records | {_privacy['raw_records']:,.0f} |
+| Effective audit evidence records | {_privacy['effective_records']:,.0f} |
+| Evidence confidence | {_privacy['evidence_confidence']:.1f}% |
+| Model-evidence delta | {_privacy['model_evidence_delta']:+.2f} pp |
+| Membership-inference risk index | {_privacy['membership_risk']:.1f} / {_privacy['privacy_risk_cap']:.0f} |
+| Deployability | {"PASS" if _privacy['deployable'] else "FAIL"} |
 
-*Source: `mlsysbook_labs.responsibility_budget`.*
+*Source model: notebook-local `v1_15_privacy_result`; chapter anchors: differential privacy, data minimization, retention, and membership-inference validation.*
         """))
 
-        if not _budget.feasible:
+        if not _privacy["deployable"]:
             items.append(mo.callout(mo.md(
-                "**Budget violation:** " + ", ".join(_budget.violations) + ". Reduce coverage, change method, or increase the system budget."
+                "**Privacy/evidence boundary hit:** " + ", ".join(_privacy["violations"]) + ". Change epsilon, retention, raw collection, or local processing before release."
             ), kind="danger"))
 
-        if partB_pred.value == "balanced" and _budget.feasible:
-            items.append(mo.callout(mo.md("**Correct.** A responsible system names a target and keeps the overhead budget visible."), kind="success"))
+        items.append(mo.accordion({
+            "Math Peek: epsilon, minimization, and evidence": mo.md(f"""
+Differential privacy bounds each record's influence:
+
+`Pr[M(D)=o] <= exp(epsilon) * Pr[M(D')=o]`.
+
+The teaching model treats deployability as a conjunction:
+
+`epsilon <= {v1_15_policy['epsilon_limit']:.1f}`,
+`retention <= {v1_15_policy['max_retention_days']} days`,
+`evidence_confidence >= {v1_15_policy['min_evidence_confidence']:.0f}%`,
+and `membership_risk <= {v1_15_policy['privacy_risk_cap']:.0f}`.
+
+Data minimization reduces privacy risk, but it also changes how much evidence
+the model audit can use.
+            """)
+        }))
+
+        if partB_pred.value == "minimize_with_evidence":
+            items.append(mo.callout(mo.md("**Correct.** Privacy is a deployability gate because it changes both risk and usable evidence."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Responsibility is not a maximum-controls checkbox.** The defensible point is the smallest control stack that satisfies the obligation and the system budgets."
+                "**More raw data is not automatically more responsible.** The defensible point minimizes retained data while preserving enough audit evidence to justify release."
             ), kind="warn"))
+        items.append(partB_decision)
+        if partB_decision.value is None:
+            items.append(mo.callout(mo.md("Choose a privacy evidence decision for the memo."), kind="warn"))
         return mo.vstack(items)
 
-    def build_part_c():
+    def v1_15_build_part_c():
         items = [
             mo.Html(f"""
             <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
                         border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
                 <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
                             text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Explanation Requirement &middot; {v1_15_resp.stakeholder}
+                    Safety Release Gate &middot; {v1_15_resp.stakeholder}
                 </div>
                 <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "We need a usable explanation. Can it run online, or does it
-                    belong in an asynchronous audit/report path?"
+                    "If the release is wrong, how many people or decisions are
+                    touched before rollback stops the harm?"
                 </div>
             </div>
             """),
             mo.md(f"""
-## Part C: Explainability Tax
+## Part C: Safety Thresholds Bound Blast Radius
 
-**What you need to know.** Explanations consume model evaluations, trace replay,
-or feature passes. The same pedagogical idea becomes different across tracks:
-mobile and wearable systems feel latency and battery, RoboTaxi feels p99 safety,
-and cloud feels SLA and fleet cost.
+**Scenario.** The selected track wants a staged release. The release is only
+acceptable if the safety evidence clears the selected threshold and the canary
+cannot harm more than the track's blast-radius cap.
+
+**Concept.** Safety is not the average model score. It is a release gate that
+combines rare-event evidence, exposure size, fallback coverage, and rollback
+time.
             """),
             partC_pred,
         ]
         if partC_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the explanation calculator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the safety release gate."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partC_method, partC_features, partC_coverage], widths="equal"))
-        _explain = explanation_overhead(
+        items.append(mo.hstack([partC_safety_threshold, partC_canary_pct, partC_rollback_minutes, partC_human_review], widths="equal"))
+        _safety = v1_15_safety_result(
             v1_15_resp,
-            method=partC_method.value,
-            features=partC_features.value,
-            coverage_pct=partC_coverage.value,
+            v1_15_policy,
+            partC_safety_threshold.value,
+            partC_canary_pct.value,
+            partC_rollback_minutes.value,
+            partC_human_review.value,
         )
-
-        _method_labels = {
-            "none": "None",
-            "feature_importance": "Feature Importance",
-            "lime": "LIME",
-            "trace_replay": "Trace Replay",
-            "shap": "SHAP",
-        }
-        _methods = ["none", "feature_importance", "lime", "trace_replay", "shap"]
-        _latencies = [
-            explanation_overhead(v1_15_resp, method=_method, features=partC_features.value, coverage_pct=partC_coverage.value).total_latency_ms
-            for _method in _methods
+        _ratios = [
+            _safety["rare_event_score"] / max(1.0, _safety["threshold_pct"]),
+            _safety["affected_units"] / max(1.0, _safety["blast_cap_units"]),
+            _safety["rollback_minutes"] / max(1.0, _safety["rollback_max_minutes"]),
+            _safety["human_review_pct"] / max(1.0, _safety["human_review_min_pct"]),
         ]
-        _colors = [COLORS["GreenLine"] if _lat <= v1_15_resp.latency_slo_ms else COLORS["RedLine"] for _lat in _latencies]
+        _names = ["Evidence/Threshold", "Blast/Cap", "Rollback/Limit", "Fallback/Min"]
+        _colors = [
+            COLORS["GreenLine"] if _ratios[0] >= 1 else COLORS["RedLine"],
+            COLORS["GreenLine"] if _ratios[1] <= 1 else COLORS["RedLine"],
+            COLORS["GreenLine"] if _ratios[2] <= 1 else COLORS["RedLine"],
+            COLORS["GreenLine"] if _ratios[3] >= 1 else COLORS["RedLine"],
+        ]
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(x=[_method_labels[_m] for _m in _methods], y=_latencies, marker_color=_colors, opacity=0.9))
-        _fig.add_hline(y=v1_15_resp.latency_slo_ms, line_dash="dash", line_color=COLORS["BlueLine"], annotation_text="latency SLO")
+        _fig.add_trace(go.Bar(x=_names, y=_ratios, marker_color=_colors, opacity=0.9))
+        _fig.add_hline(y=1.0, line_dash="dash", line_color=COLORS["BlueLine"], annotation_text="release boundary")
         _fig.update_layout(
             height=340,
-            yaxis=dict(title="Total explanation path latency (ms)", gridcolor="#f1f5f9"),
+            yaxis=dict(title="Ratio to release gate", gridcolor="#f1f5f9"),
             margin=dict(l=60, r=20, t=40, b=40),
         )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _slo_color = COLORS["GreenLine"] if _explain.slo_ok else COLORS["RedLine"]
+        _gate_color = COLORS["GreenLine"] if _safety["release_ok"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Base Latency", f"{_explain.base_latency_ms:.1f} ms", v1_15_resp.hardware_name, COLORS["BlueLine"])}
-            {_metric_card("Multiplier", f"{_explain.multiplier:.1f}x", _method_labels.get(_explain.method, _explain.method), COLORS["OrangeLine"])}
-            {_metric_card("Total Latency", f"{_explain.total_latency_ms:.1f} ms", f"SLO {_explain.slo_ms:.0f} ms", _slo_color, True)}
-            {_metric_card("p99 Added", f"{_explain.p99_added_ms:.1f} ms", f"{_explain.coverage_pct:.0f}% coverage", COLORS["RedLine"])}
+            {v1_15_metric_card("Safety Evidence", f"{_safety['rare_event_score']:.1f}%", f"threshold {_safety['threshold_pct']:.1f}%", COLORS["BlueLine"])}
+            {v1_15_metric_card("Blast Radius", f"{_safety['affected_units']:,.0f}", f"cap {_safety['blast_cap_units']:,.0f}", COLORS["OrangeLine"])}
+            {v1_15_metric_card("Rollback", f"{_safety['rollback_minutes']:.0f} min", f"limit {_safety['rollback_max_minutes']:.0f} min", COLORS["RedLine"])}
+            {v1_15_metric_card("Release Gate", "PASS" if _safety["release_ok"] else "FAIL", ", ".join(_safety["violations"]) or "no violations", _gate_color, True)}
         </div>
         """))
 
         items.append(mo.md(f"""
-**Explanation Table - Live Values**
+**Safety And Blast-Radius Table - Live Values**
 
 | Quantity | Value |
 |---|---:|
-| Method | {_method_labels.get(_explain.method, _explain.method)} |
-| Features / trace factors | {_explain.features} |
-| Base latency | {_explain.base_latency_ms:.1f} ms |
-| Explanation latency | {_explain.explanation_latency_ms:.1f} ms |
-| Total latency | {_explain.total_latency_ms:.1f} ms |
-| p99 added at coverage | {_explain.p99_added_ms:.1f} ms |
-| SLO status | {"PASS" if _explain.slo_ok else "FAIL"} |
+| Selected safety threshold | {_safety['threshold_pct']:.1f}% |
+| Track safety floor | {_safety['track_floor_pct']:.1f}% |
+| Rare-event evidence score | {_safety['rare_event_score']:.1f}% |
+| Initial canary exposure | {_safety['canary_pct']:.0f}% |
+| Estimated blast radius | {_safety['affected_units']:,.0f} {v1_15_policy['blast_unit']} |
+| Blast-radius cap | {_safety['blast_cap_units']:,.0f} {v1_15_policy['blast_unit']} |
+| Rollback or mitigation time | {_safety['rollback_minutes']:.0f} minutes |
+| Fallback / human-review coverage | {_safety['human_review_pct']:.0f}% |
+| Release status | {"PASS" if _safety['release_ok'] else "FAIL"} |
 
-*Source: `mlsysbook_labs.explanation_overhead`.*
+*Source model: notebook-local `v1_15_safety_result`; chapter anchors: silent failures, predeployment assessment, rollback, kill switches, and incident response.*
         """))
 
-        if not _explain.slo_ok:
+        if not _safety["release_ok"]:
             items.append(mo.callout(mo.md(
-                f"**SLO violation.** {_method_labels.get(_explain.method, _explain.method)} adds enough work to exceed the track latency guardrail. Use async explanations, sampling, a lighter method, or a larger serving budget."
+                "**Release boundary hit:** " + ", ".join(_safety["violations"]) + ". Reduce exposure, improve fallback, speed rollback, or hold the release."
             ), kind="danger"))
 
-        if partC_pred.value == "latency":
-            items.append(mo.callout(mo.md("**Correct.** Explainability is a systems path with latency, cost, and coverage choices."), kind="success"))
+        items.append(mo.accordion({
+            "Math Peek: blast radius release gate": mo.md(f"""
+The teaching release gate is a conjunction:
+
+`rare_event_score >= selected_threshold`,
+`selected_threshold >= track_safety_floor`,
+`affected_units <= blast_radius_cap`,
+`rollback_minutes <= rollback_limit`, and
+`fallback_coverage >= fallback_floor`.
+
+Here, affected units are approximated as:
+
+`events_per_day * canary_share * residual_risk_rate`.
+
+The chapter's silent-failure and incident-response sections motivate this: a
+green uptime dashboard does not bound harm unless detection, rollback, and
+exposure are part of the release gate.
+            """)
+        }))
+
+        if partC_pred.value == "blast_radius":
+            items.append(mo.callout(mo.md("**Correct.** A safe release is bounded by threshold, exposure, fallback, and rollback."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Explanation is not just report text.** The method and coverage determine whether the responsible design still satisfies the system guardrails."
+                "**Average quality is not enough.** The release memo must show the rare-event threshold and how far harm can spread before mitigation."
             ), kind="warn"))
+        items.append(partC_decision)
+        if partC_decision.value is None:
+            items.append(mo.callout(mo.md("Choose the safety release decision for the memo."), kind="warn"))
         return mo.vstack(items)
 
-    def build_part_d():
+    def v1_15_build_part_d():
         items = [
             mo.Html(f"""
             <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
                         border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
                 <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
                             text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Sustainability Review &middot; {v1_15_resp.stakeholder}
+                    Governance Sign-Off &middot; {v1_15_resp.stakeholder}
                 </div>
                 <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "The responsible stack needs retraining and explanations. What
-                    is the annual carbon footprint of that decision?"
+                    "Can an auditor reconstruct which data, model, threshold, and
+                    owner produced this release decision?"
                 </div>
             </div>
             """),
-            mo.md("""
-## Part D: Carbon Ledger
+            mo.md(f"""
+## Part D: Audit Trail Makes Evidence Accountable
 
-**What you need to know.** Responsibility can require more retraining, more
-audits, more explanation calls, and more governance work. Carbon is not a reason
-to ignore harm, but it is part of the design budget and should be reported.
+**Scenario.** The release board has technical evidence from Parts A-C. Now it
+needs an accountable trail: lineage, immutable logs, prediction context, access
+review, and an owner.
+
+**Concept.** Governance converts evidence into a decision someone can audit,
+contest, repair, or roll back. The track owner is **{v1_15_policy['audit_owner']}**.
             """),
             partD_pred,
         ]
         if partD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the carbon ledger."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the audit readiness gate."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partD_retrains, partD_explain, partD_grid_ci], widths="equal"))
-        _carbon = carbon_budget(
+        items.append(mo.hstack([partD_lineage, partD_log_retention, partD_context, partD_access_review, partD_owner], widths="equal"))
+        _governance = v1_15_governance_result(
             v1_15_resp,
-            retrain_frequency_per_year=partD_retrains.value,
-            explanation_coverage_pct=partD_explain.value,
-            grid_ci_g_per_kwh=partD_grid_ci.value,
+            v1_15_policy,
+            partD_lineage.value,
+            partD_log_retention.value,
+            partD_context.value,
+            partD_access_review.value,
+            partD_owner.value,
         )
 
+        _components = {
+            "Lineage": _governance["lineage_pct"],
+            "Decision Context": _governance["context_pct"],
+            "Retention": _governance["retention_score"],
+            "Access Review": _governance["access_score"],
+            "Owner": _governance["owner_score"],
+        }
+        _colors = [COLORS["GreenLine"] if _value >= 75 else COLORS["RedLine"] for _value in _components.values()]
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(name="Baseline", x=["Baseline"], y=[_carbon.baseline_kgco2_per_year], marker_color=COLORS["GreenLine"], opacity=0.9))
-        _fig.add_trace(go.Bar(name="Retraining", x=["Responsible stack"], y=[_carbon.retraining_kwh_per_year * _carbon.grid_ci_g_per_kwh / 1000.0], marker_color=COLORS["BlueLine"], opacity=0.9))
-        _fig.add_trace(go.Bar(name="Serving", x=["Responsible stack"], y=[_carbon.base_serving_kwh_per_year * _carbon.grid_ci_g_per_kwh / 1000.0], marker_color=COLORS["OrangeLine"], opacity=0.9))
-        _fig.add_trace(go.Bar(name="Explanations", x=["Responsible stack"], y=[_carbon.explanation_kwh_per_year * _carbon.grid_ci_g_per_kwh / 1000.0], marker_color=COLORS["RedLine"], opacity=0.9))
+        _fig.add_trace(go.Bar(x=list(_components.keys()), y=list(_components.values()), marker_color=_colors, opacity=0.9))
+        _fig.add_hline(y=_governance["audit_ready_min"], line_dash="dash", line_color=COLORS["BlueLine"], annotation_text="readiness gate")
         _fig.update_layout(
-            barmode="stack",
             height=340,
-            yaxis=dict(title="Annual carbon (kg CO2)", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=60, r=20, t=60, b=40),
+            yaxis=dict(title="Component score (%)", gridcolor="#f1f5f9", range=[0, 105]),
+            margin=dict(l=60, r=20, t=40, b=40),
         )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
+        _governance_color = COLORS["GreenLine"] if _governance["release_accountable"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Baseline", f"{_carbon.baseline_kgco2_per_year:.1f} kg", "train once + serving", COLORS["GreenLine"])}
-            {_metric_card("Responsible Stack", f"{_carbon.total_kgco2_per_year:.1f} kg", "retrain + serve + explain", COLORS["RedLine"], True)}
-            {_metric_card("Multiplier", f"{_carbon.carbon_multiplier:.1f}x", f"{_carbon.retrain_frequency_per_year} retrains/year", COLORS["OrangeLine"])}
-            {_metric_card("Grid", f"{_carbon.grid_ci_g_per_kwh:.0f}", "gCO2/kWh", COLORS["BlueLine"])}
+            {v1_15_metric_card("Readiness", f"{_governance['readiness']:.1f}%", f"gate {_governance['audit_ready_min']:.0f}%", COLORS["BlueLine"])}
+            {v1_15_metric_card("Log Retention", f"{_governance['retention_days']:,} days", f"required {_governance['required_retention_days']:,}", COLORS["OrangeLine"])}
+            {v1_15_metric_card("Audit Events", f"{_governance['audit_events_per_year']:,.0f}", "decision contexts/year", COLORS["RedLine"])}
+            {v1_15_metric_card("Governance", "PASS" if _governance["release_accountable"] else "FAIL", ", ".join(_governance["violations"]) or "no violations", _governance_color, True)}
         </div>
         """))
 
         items.append(mo.md(f"""
-**Carbon Table - Live Values**
+**Governance Evidence Table - Live Values**
 
 | Quantity | Value |
 |---|---:|
-| Training energy per run | {_carbon.train_energy_kwh:.1f} kWh |
-| Retraining energy / year | {_carbon.retraining_kwh_per_year:.1f} kWh |
-| Base serving energy / year | {_carbon.base_serving_kwh_per_year:.3f} kWh |
-| Explanation energy / year | {_carbon.explanation_kwh_per_year:.3f} kWh |
-| Total energy / year | {_carbon.total_kwh_per_year:.1f} kWh |
-| Baseline carbon / year | {_carbon.baseline_kgco2_per_year:.1f} kg CO2 |
-| Responsible carbon / year | {_carbon.total_kgco2_per_year:.1f} kg CO2 |
+| Lineage coverage | {_governance['lineage_pct']:.0f}% |
+| Prediction decision-context logging | {_governance['context_pct']:.0f}% |
+| Immutable audit retention | {_governance['retention_days']:,} days |
+| Required audit retention | {_governance['required_retention_days']:,} days |
+| Access review cadence | every {_governance['access_review_days']} days |
+| Owner score | {_governance['owner_score']:.0f}% |
+| Audit readiness | {_governance['readiness']:.1f}% |
+| Audit events/year | {_governance['audit_events_per_year']:,.0f} |
+| Accountable release | {"PASS" if _governance['release_accountable'] else "FAIL"} |
 
-*Source: `mlsysbook_labs.carbon_budget`; hardware TDP from `{v1_15_resp.hardware_ref}`.*
+*Source model: notebook-local `v1_15_governance_result`; chapter anchors: lineage, audit infrastructure, decision-time logging, and regulatory contestability.*
         """))
 
-        if partD_pred.value == "cadence":
-            items.append(mo.callout(mo.md("**Correct.** Retraining cadence, explanation coverage, and grid intensity are all design knobs."), kind="success"))
+        if not _governance["release_accountable"]:
+            items.append(mo.callout(mo.md(
+                "**Governance boundary hit:** " + ", ".join(_governance["violations"]) + ". The evidence cannot yet support accountable release sign-off."
+            ), kind="danger"))
+
+        items.append(mo.accordion({
+            "Math Peek: audit volume and reconstructability": mo.md(f"""
+Audit infrastructure must make a release decision reconstructable:
+
+`audit_events_per_year = decisions_per_day * 365 * context_logging_share`.
+
+Governance readiness combines lineage, decision context, retention, access
+review, and owner sign-off. The chapter's audit section emphasizes that
+prediction-time logs need feature values, model version, threshold, and output;
+lineage alone cannot answer why a particular decision happened.
+            """)
+        }))
+
+        if partD_pred.value == "governance_stack":
+            items.append(mo.callout(mo.md("**Correct.** Accountability requires reconstructable evidence and a named owner."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Carbon is part of the responsible design budget.** It does not replace the harmed-party analysis, but it must be reported."
+                "**Documentation alone is not accountability.** A memo needs lineage, immutable logs, prediction context, and a decision owner."
             ), kind="warn"))
+        items.append(partD_decision)
+        if partD_decision.value is None:
+            items.append(mo.callout(mo.md("Choose the governance decision for the memo."), kind="warn"))
         return mo.vstack(items)
 
-    def build_synthesis():
+    def v1_15_build_synthesis():
+        _conflict = metric_conflict(
+            v1_15_resp,
+            base_rate_a_pct=partA_base_a.value,
+            base_rate_b_pct=partA_base_b.value,
+            threshold=partA_threshold.value,
+        )
+        _privacy = v1_15_privacy_result(
+            v1_15_resp,
+            v1_15_policy,
+            partB_epsilon.value,
+            partB_retention.value,
+            partB_raw_pct.value,
+            partB_local_pct.value,
+        )
+        _safety = v1_15_safety_result(
+            v1_15_resp,
+            v1_15_policy,
+            partC_safety_threshold.value,
+            partC_canary_pct.value,
+            partC_rollback_minutes.value,
+            partC_human_review.value,
+        )
+        _governance = v1_15_governance_result(
+            v1_15_resp,
+            v1_15_policy,
+            partD_lineage.value,
+            partD_log_retention.value,
+            partD_context.value,
+            partD_access_review.value,
+            partD_owner.value,
+        )
+        _all_gates = (
+            _conflict.fpr_gap_pp <= v1_15_resp.target_gap_pp
+            and _privacy["deployable"]
+            and _safety["release_ok"]
+            and _governance["release_accountable"]
+        )
+        _final_status = "READY FOR RESPONSIBLE CANARY" if _all_gates else "HOLD OR REVISE RELEASE"
+        _status_color = COLORS["GreenLine"] if _all_gates else COLORS["RedLine"]
         return mo.vstack([
-            mo.md("## Key Takeaways"),
+            mo.md("## Synthesis: Responsible Release Memo"),
             mo.callout(mo.md(
-                f"**1. Responsibility starts with a named harmed party.** For {v1_15_resp.label}, that is {v1_15_resp.harmed_party}."
-            ), kind="info"),
-            mo.callout(mo.md(
-                f"**2. A responsible system has evidence.** The audit signal is {v1_15_resp.audit_signal}."
-            ), kind="info"),
-            mo.callout(mo.md(
-                "**3. There is no free fairness.** Privacy, explanations, robustness, monitoring, and carbon all create measurable system overhead."
+                f"**Chapter invariant.** Responsible ML constraints include people and policy. For {v1_15_resp.label}, the release decision is governed by threshold harm, privacy evidence, safety blast radius, and audit accountability."
             ), kind="info"),
             mo.Html(f"""
+            <div style="border:2px solid {_status_color}; border-radius:12px; padding:18px 22px;
+                        background:white; margin:8px 0 16px 0;">
+                <div style="font-size:0.72rem; font-weight:800; color:{_status_color};
+                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
+                    Release Decision
+                </div>
+                <div style="font-size:1.25rem; font-weight:850; color:{_status_color};">
+                    {_final_status}
+                </div>
+                <div style="font-size:0.88rem; color:{COLORS['TextSec']}; margin-top:8px; line-height:1.6;">
+                    Harmed stakeholder: {v1_15_resp.harmed_party}. Residual risk:
+                    {v1_15_resp.residual_harm}
+                </div>
+            </div>
             <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
                 <div style="flex: 1; min-width: 280px; background: white;
                             border: 1px solid {COLORS['Border']}; border-radius: 12px;
                             padding: 20px 24px;">
                     <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                                 text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Responsible Decision Memo
+                        Memo Must State
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        Submit the track, harmed party, obligation, metric conflict,
-                        control budget, explanation policy, carbon budget, audit
-                        signal, and residual harm.
+                        Threshold {partA_threshold.value:.2f}; FPR gap {_conflict.fpr_gap_pp:.1f} pp;
+                        epsilon {_privacy['epsilon']:.1f}; safety threshold {_safety['threshold_pct']:.1f}%;
+                        blast radius {_safety['affected_units']:,.0f}; audit readiness {_governance['readiness']:.1f}%.
                     </div>
                 </div>
                 <div style="flex: 1; min-width: 280px; background: white;
@@ -875,27 +1302,48 @@ to ignore harm, but it is part of the design budget and should be reported.
                             padding: 20px 24px;">
                     <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                                 text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Next Lab
+                        Carry-Forward Capstone Constraint
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        Lab 16 combines the Volume I constraints into one deployment
-                        decision. The responsibility policy becomes one of the binding
-                        constraints rather than a separate checklist.
+                        Lab 16 must treat this responsible release policy as a binding
+                        constraint: no final architecture can ship without threshold,
+                        privacy, safety, and audit evidence at least as strong as this memo.
                     </div>
                 </div>
             </div>
             """),
+            mo.md(f"""
+**Report decisions selected**
+
+| Module | Checkpoint decision |
+|---|---|
+| Threshold policy | `{partA_policy.value}` |
+| Privacy evidence | `{partB_decision.value}` |
+| Safety release | `{partC_decision.value}` |
+| Governance | `{partD_decision.value}` |
+
+The memo should name the harmed stakeholder, the residual risk owner, and the
+specific threshold or policy that will carry forward into the capstone audit.
+            """),
         ])
 
+    def build_synthesis():
+        return v1_15_build_synthesis()
+
     _tabs = mo.ui.tabs({
-        "Part A: Metric Conflict": build_part_a(),
-        "Part B: Responsibility Budget": build_part_b(),
-        "Part C: Explainability Tax": build_part_c(),
-        "Part D: Carbon Ledger": build_part_d(),
+        "Part A: Threshold Values": v1_15_build_part_a(),
+        "Part B: Privacy Evidence": v1_15_build_part_b(),
+        "Part C: Safety Gate": v1_15_build_part_c(),
+        "Part D: Audit Trail": v1_15_build_part_d(),
         "Synthesis": build_synthesis(),
     })
     _tabs
-    return
+    return (
+        v1_15_governance_result,
+        v1_15_privacy_result,
+        v1_15_safety_result,
+        v1_15_track_policy,
+    )
 
 
 # ===========================================================================
@@ -907,15 +1355,41 @@ to ignore harm, but it is part of the design budget and should be reported.
 def _(
     ledger,
     mo,
+    partA_policy,
     partA_pred,
+    partA_threshold,
+    partB_decision,
+    partB_epsilon,
+    partB_local_pct,
     partB_pred,
+    partB_raw_pct,
+    partB_retention,
+    partC_canary_pct,
+    partC_decision,
+    partC_human_review,
     partC_pred,
+    partC_rollback_minutes,
+    partC_safety_threshold,
+    partD_decision,
+    partD_lineage,
+    partD_log_retention,
+    partD_owner,
     partD_pred,
     v1_15_profile,
     v1_15_resp,
     v1_15_variant,
 ):
     if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
+        _completed = all(
+            value is not None
+            for value in (
+                partA_policy.value,
+                partB_decision.value,
+                partC_decision.value,
+                partD_decision.value,
+                partD_owner.value,
+            )
+        )
         ledger.save(chapter=15, design={
             "chapter": "v1_15",
             "track_id": v1_15_profile.track_id,
@@ -925,11 +1399,28 @@ def _(
             "harmed_party": v1_15_resp.harmed_party,
             "obligation": v1_15_resp.obligation,
             "audit_signal": v1_15_resp.audit_signal,
-            "completed": True,
-            "metric_conflict_prediction": partA_pred.value,
-            "budget_prediction": partB_pred.value,
-            "explainability_prediction": partC_pred.value,
-            "carbon_prediction": partD_pred.value,
+            "completed": _completed,
+            "threshold_prediction": partA_pred.value,
+            "threshold_value": partA_threshold.value,
+            "threshold_policy": partA_policy.value,
+            "privacy_prediction": partB_pred.value,
+            "privacy_epsilon": partB_epsilon.value,
+            "privacy_retention_days": partB_retention.value,
+            "privacy_raw_pct": partB_raw_pct.value,
+            "privacy_local_pct": partB_local_pct.value,
+            "privacy_decision": partB_decision.value,
+            "safety_prediction": partC_pred.value,
+            "safety_threshold_pct": partC_safety_threshold.value,
+            "safety_canary_pct": partC_canary_pct.value,
+            "safety_rollback_minutes": partC_rollback_minutes.value,
+            "safety_human_review_pct": partC_human_review.value,
+            "safety_decision": partC_decision.value,
+            "governance_prediction": partD_pred.value,
+            "audit_lineage_pct": partD_lineage.value,
+            "audit_retention_days": partD_log_retention.value,
+            "audit_owner": partD_owner.value,
+            "governance_decision": partD_decision.value,
+            "carry_forward_constraint": "threshold, privacy, safety, and audit gates must pass in the V1 capstone",
         })
 
     mo.Html(f"""
@@ -951,99 +1442,138 @@ def _(
 @app.cell(hide_code=True)
 def _(
     build_lab_report,
-    carbon_budget,
-    explanation_overhead,
     metric_conflict,
     mo,
     partA_base_a,
     partA_base_b,
+    partA_policy,
     partA_pred,
     partA_threshold,
-    partB_explain,
-    partB_monitoring,
+    partB_decision,
+    partB_epsilon,
+    partB_local_pct,
     partB_pred,
-    partB_privacy,
-    partB_robustness,
-    partC_coverage,
-    partC_features,
-    partC_method,
+    partB_raw_pct,
+    partB_retention,
+    partC_canary_pct,
+    partC_decision,
+    partC_human_review,
     partC_pred,
-    partD_explain,
-    partD_grid_ci,
+    partC_rollback_minutes,
+    partC_safety_threshold,
+    partD_access_review,
+    partD_context,
+    partD_decision,
+    partD_lineage,
+    partD_log_retention,
+    partD_owner,
     partD_pred,
-    partD_retrains,
     report_export_panel,
-    responsibility_budget,
+    v1_15_governance_result,
     v1_15_metadata,
+    v1_15_privacy_result,
     v1_15_profile,
     v1_15_resp,
+    v1_15_safety_result,
+    v1_15_track_policy,
     v1_15_variant,
 ):
+    _policy = v1_15_track_policy(v1_15_profile)
     _conflict = metric_conflict(
         v1_15_resp,
         base_rate_a_pct=partA_base_a.value,
         base_rate_b_pct=partA_base_b.value,
         threshold=partA_threshold.value,
     )
-    _budget = responsibility_budget(
+    _privacy = v1_15_privacy_result(
         v1_15_resp,
-        privacy_level=partB_privacy.value,
-        explanation_coverage_pct=partB_explain.value,
-        robustness_level=partB_robustness.value,
-        monitoring_level=partB_monitoring.value,
+        _policy,
+        partB_epsilon.value,
+        partB_retention.value,
+        partB_raw_pct.value,
+        partB_local_pct.value,
     )
-    _explain = explanation_overhead(
+    _safety = v1_15_safety_result(
         v1_15_resp,
-        method=partC_method.value,
-        features=partC_features.value,
-        coverage_pct=partC_coverage.value,
+        _policy,
+        partC_safety_threshold.value,
+        partC_canary_pct.value,
+        partC_rollback_minutes.value,
+        partC_human_review.value,
     )
-    _carbon = carbon_budget(
+    _governance = v1_15_governance_result(
         v1_15_resp,
-        retrain_frequency_per_year=partD_retrains.value,
-        explanation_coverage_pct=partD_explain.value,
-        grid_ci_g_per_kwh=partD_grid_ci.value,
+        _policy,
+        partD_lineage.value,
+        partD_log_retention.value,
+        partD_context.value,
+        partD_access_review.value,
+        partD_owner.value,
     )
 
     _incomplete = []
     if partA_pred.value is None:
-        _incomplete.append("Part A metric conflict prediction")
+        _incomplete.append("Part A threshold prediction")
+    if partA_policy.value is None:
+        _incomplete.append("Part A threshold policy")
     if partB_pred.value is None:
-        _incomplete.append("Part B responsibility budget prediction")
+        _incomplete.append("Part B privacy prediction")
+    if partB_decision.value is None:
+        _incomplete.append("Part B privacy evidence decision")
     if partC_pred.value is None:
-        _incomplete.append("Part C explainability prediction")
+        _incomplete.append("Part C safety prediction")
+    if partC_decision.value is None:
+        _incomplete.append("Part C safety release decision")
     if partD_pred.value is None:
-        _incomplete.append("Part D carbon prediction")
+        _incomplete.append("Part D governance prediction")
+    if partD_decision.value is None:
+        _incomplete.append("Part D governance decision")
+    if partD_owner.value is None:
+        _incomplete.append("Part D accountable owner")
+
+    _release_ready = (
+        _conflict.fpr_gap_pp <= v1_15_resp.target_gap_pp
+        and _privacy["deployable"]
+        and _safety["release_ok"]
+        and _governance["release_accountable"]
+    )
 
     _report = build_lab_report(
         v1_15_metadata,
         track=v1_15_profile.label,
         scenario=v1_15_variant.workload_summary,
         learning_objectives=(
-            "Name the harmed party, obligation, and audit signal for the selected track.",
-            "Quantify subgroup or context metric conflict before accepting aggregate quality.",
-            "Budget responsibility controls as latency, energy, cost, quality, governance, and carbon overhead.",
+            "Choose a threshold policy that makes stakeholder error trade-offs explicit.",
+            "Budget privacy, minimization, retention, and evidence before deployment.",
+            "Gate release with safety thresholds, blast radius, rollback, and accountable audit evidence.",
         ),
         predictions={
-            "metric_conflict": partA_pred.value,
-            "responsibility_budget": partB_pred.value,
-            "explainability_tax": partC_pred.value,
-            "carbon_ledger": partD_pred.value,
+            "threshold_values": partA_pred.value,
+            "privacy_budget": partB_pred.value,
+            "safety_blast_radius": partC_pred.value,
+            "governance_audit": partD_pred.value,
         },
         knob_settings={
             "base_rate_a_pct": partA_base_a.value,
             "base_rate_b_pct": partA_base_b.value,
             "threshold": partA_threshold.value,
-            "privacy_level": partB_privacy.value,
-            "explanation_coverage_budget_pct": partB_explain.value,
-            "robustness_level": partB_robustness.value,
-            "monitoring_level": partB_monitoring.value,
-            "explanation_method": partC_method.value,
-            "explanation_features": partC_features.value,
-            "explanation_coverage_online_pct": partC_coverage.value,
-            "retrains_per_year": partD_retrains.value,
-            "explanation_coverage_carbon_pct": partD_explain.value,
-            "grid_ci_g_per_kwh": partD_grid_ci.value,
+            "threshold_policy": partA_policy.value,
+            "epsilon": partB_epsilon.value,
+            "retention_days": partB_retention.value,
+            "raw_sensitive_evidence_pct": partB_raw_pct.value,
+            "local_federated_processing_pct": partB_local_pct.value,
+            "privacy_decision": partB_decision.value,
+            "safety_threshold_pct": partC_safety_threshold.value,
+            "canary_exposure_pct": partC_canary_pct.value,
+            "rollback_minutes": partC_rollback_minutes.value,
+            "fallback_human_review_pct": partC_human_review.value,
+            "safety_decision": partC_decision.value,
+            "lineage_pct": partD_lineage.value,
+            "audit_retention_days": partD_log_retention.value,
+            "decision_context_logging_pct": partD_context.value,
+            "access_review_days": partD_access_review.value,
+            "accountable_owner": partD_owner.value,
+            "governance_decision": partD_decision.value,
         },
         evidence_summary={
             "harmed_party": v1_15_resp.harmed_party,
@@ -1053,46 +1583,65 @@ def _(
             "model_ref": v1_15_resp.model_ref,
             "fpr_gap_pp": round(_conflict.fpr_gap_pp, 3),
             "target_gap_pp": v1_15_resp.target_gap_pp,
-            "responsibility_budget_feasible": _budget.feasible,
-            "budget_violations": _budget.violations,
-            "explanation_total_latency_ms": round(_explain.total_latency_ms, 3),
-            "explanation_slo_ok": _explain.slo_ok,
-            "annual_carbon_kgco2": round(_carbon.total_kgco2_per_year, 3),
-            "carbon_multiplier": round(_carbon.carbon_multiplier, 3),
+            "privacy_epsilon": round(_privacy["epsilon"], 3),
+            "privacy_epsilon_limit": _privacy["epsilon_limit"],
+            "privacy_evidence_confidence_pct": round(_privacy["evidence_confidence"], 3),
+            "privacy_membership_risk": round(_privacy["membership_risk"], 3),
+            "privacy_deployable": _privacy["deployable"],
+            "privacy_violations": _privacy["violations"],
+            "safety_rare_event_score_pct": round(_safety["rare_event_score"], 3),
+            "safety_threshold_pct": round(_safety["threshold_pct"], 3),
+            "blast_radius_units": round(_safety["affected_units"], 3),
+            "blast_radius_cap_units": _safety["blast_cap_units"],
+            "safety_release_ok": _safety["release_ok"],
+            "safety_violations": _safety["violations"],
+            "audit_readiness_pct": round(_governance["readiness"], 3),
+            "audit_ready_min_pct": _governance["audit_ready_min"],
+            "audit_events_per_year": round(_governance["audit_events_per_year"], 3),
+            "release_accountable": _governance["release_accountable"],
+            "governance_violations": _governance["violations"],
+            "release_ready": _release_ready,
         },
         final_decision=(
-            f"Protect {v1_15_resp.harmed_party} by treating {v1_15_resp.obligation} "
-            f"as a system constraint, auditing with {v1_15_resp.audit_signal}, "
-            "and reporting residual harm explicitly."
+            f"{'Proceed to responsible canary' if _release_ready else 'Hold or revise release'} for "
+            f"{v1_15_resp.label}: threshold {partA_threshold.value:.2f}, epsilon {_privacy['epsilon']:.1f}, "
+            f"safety threshold {_safety['threshold_pct']:.1f}%, blast radius {_safety['affected_units']:,.0f}, "
+            f"audit readiness {_governance['readiness']:.1f}%."
         ),
         big_takeaways=(
-            "A high aggregate metric can hide the harmed party.",
-            "Responsibility controls have measurable latency, energy, cost, quality, governance, and carbon overhead.",
-            "The report artifact is a decision memo, not a checklist of slogans.",
+            "Thresholds encode stakeholder values and error trade-offs.",
+            "Privacy and minimization change both risk and the evidence available for release.",
+            "Safety, blast radius, and auditability are release gates, not after-launch paperwork.",
         ),
         reflections={
             "report_artifact": v1_15_resp.report_artifact,
             "validation_tests": v1_15_resp.validation_tests,
             "residual_harm_owner": v1_15_resp.residual_harm,
+            "carry_forward_capstone_constraint": "V1 capstone release must satisfy the selected threshold, privacy, safety, and audit policy.",
         },
         residual_risk=(
             f"{v1_15_resp.residual_harm} Teaching estimates must be validated with "
-            "track-specific audits, representative cohorts, and deployment evidence."
+            "track-specific audits, representative cohorts, privacy review, safety canaries, and deployment evidence."
         ),
         source_trace={
             "track_id": v1_15_profile.track_id,
             "scenario_id": v1_15_variant.scenario_id,
             "hardware_ref": v1_15_variant.hardware_ref,
             "model_ref": v1_15_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.responsibility",
+            "shared_helper": "mlsysbook_labs.metric_conflict",
+            "notebook_local_helpers": (
+                "v1_15_privacy_result",
+                "v1_15_safety_result",
+                "v1_15_governance_result",
+            ),
             "source_policy": v1_15_profile.source_policy,
         },
         result_snapshot={
             "responsibility_profile": v1_15_resp,
             "metric_conflict": _conflict,
-            "responsibility_budget": _budget,
-            "explanation_overhead": _explain,
-            "carbon_budget": _carbon,
+            "privacy_budget": _privacy,
+            "safety_release_gate": _safety,
+            "governance_readiness": _governance,
         },
         incomplete_fields=tuple(_incomplete),
     )
@@ -1102,7 +1651,7 @@ def _(
         mo.callout(
             mo.md(
                 "This V1-15 report is generated locally from the selected track, MLSysIM hardware/model refs, "
-                "and shared `mlsysbook_labs.responsibility` calculations."
+                "shared `mlsysbook_labs.metric_conflict`, and notebook-local `v1_15_` release-gate calculations."
             ),
             kind="info",
         ),

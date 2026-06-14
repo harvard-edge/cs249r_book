@@ -9,21 +9,21 @@ app = marimo.App(width="full")
 # Volume II, Chapter: Edge Intelligence (edge_intelligence.qmd)
 #
 # Four Parts (~55 minutes):
-#   Part A — The Memory Amplification Tax (10 min)
-#             On-device training requires 4-12x more memory than inference.
-#             Prediction: how much memory does full fine-tuning require?
+#   Part A — On-Device Limits Bound Local Learning (10 min)
+#             Device memory and energy budgets decide what can adapt locally.
+#             Prediction: which resource binds first?
 #
-#   Part B — The Adaptation Strategy Selector (10 min)
-#             LoRA reduces storage for multi-context personalization by 200x.
-#             Prediction: total LoRA storage for 10 user contexts?
+#   Part B — Federated Updates Are Not Free Privacy (15 min)
+#             FedAvg trades rounds, bytes, staleness, privacy, and convergence.
+#             Prediction: which federated cost dominates?
 #
-#   Part C — The Battery Drain Reality (10 min)
-#             Accelerator choice changes energy budget use.
-#             Prediction: energy budget used per local session.
+#   Part C — Intermittent Evidence Becomes First-Order (10 min)
+#             Duty cycle and connectivity decide whether evidence is fresh enough.
+#             Prediction: how many usable update windows survive?
 #
-#   Part D — The Federation Paradox (15 min)
-#             Non-IID data causes 4-8x communication rounds explosion.
-#             Merges original Parts D+E: federation + communication-compression.
+#   Part D — Deployment Policy Is A Guardrail Bundle (15 min)
+#             Energy, memory, privacy, update, and quality guardrails must all pass.
+#             Prediction: which guardrail binds the selected policy?
 #
 # Hardware: selected canonical track hardware from MLSysIM
 # Design Ledger: chapter="v2_11"
@@ -154,7 +154,7 @@ def _(
     mo,
     source_trace,
     track_context,
-        track_arc_context,
+    track_arc_context,
     v2_11_device,
     v2_11_metadata,
     v2_11_profile,
@@ -177,13 +177,13 @@ def _(
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.1rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Memory &middot; Adaptation &middot; Battery &middot; Federation
+                Local budgets &middot; Federated updates &middot; Intermittent evidence &middot; Guardrails
             </p>
             <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
                       max-width: 700px; line-height: 1.65;">
-                {v2_11_variant.workload_summary} The thermodynamic question is whether
-                memory, energy, latency, privacy, and communication leave enough margin
-                for the selected edge architecture.
+                {v2_11_variant.workload_summary} The chapter question is whether moving
+                intelligence outward leaves enough memory, energy, privacy, connectivity,
+                update, and quality margin for a deployable edge policy.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
@@ -228,14 +228,14 @@ def _(COLORS, mo, v2_11_device, v2_11_profile):
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the training memory amplification tax</strong> &mdash;
-                    calculate that full fine-tuning requires 4-12x more memory than inference due to gradients,
-                    optimizer state, and activations.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Compare adaptation strategies</strong> &mdash; discover that
-                    LoRA reduces multi-context storage by 200x while preserving 95% of fine-tuning quality.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Predict federated communication cost</strong> &mdash; determine
-                    that non-IID data causes 4-8x more communication rounds than IID, and that gradient
-                    compression is the natural engineering response.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Find the on-device boundary</strong> &mdash;
+                    calculate whether local learning fits the selected track's memory and energy envelope.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Tune the federated update loop</strong> &mdash;
+                    compare local epochs, communication, privacy overhead, staleness, and convergence.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Measure intermittent evidence</strong> &mdash;
+                    turn duty cycle and connectivity into usable update windows and evidence freshness.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Write a guardrailed edge policy</strong> &mdash;
+                    choose a policy that satisfies memory, energy, privacy, update, and quality thresholds.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -246,8 +246,8 @@ def _(COLORS, mo, v2_11_device, v2_11_profile):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Training memory breakdown from the Edge Intelligence chapter &middot;
-                    LoRA rank decomposition &middot; FedAvg algorithm
+                    Edge resource amplification &middot; FedAvg algorithm &middot; client scheduling &middot;
+                    production edge guardrails
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -269,10 +269,9 @@ def _(COLORS, mo, v2_11_device, v2_11_profile):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;On-device training is 'just inference with a backward pass.' Why does it
-                require 4-12x more memory, consume the {v2_11_device.energy_budget_label}
-                on CPU, and need 4-8x more communication rounds when data is non-IID
-                for {v2_11_profile.label}?&rdquo;
+                &ldquo;When intelligence moves to {v2_11_profile.label}, which amount becomes
+                binding first: local memory, local energy, federated communication,
+                privacy overhead, intermittent evidence, or quality guardrails?&rdquo;
             </div>
         </div>
     </div>
@@ -285,13 +284,220 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** &mdash; Complete before this lab:
 
-    - **Training Memory Amplification** &mdash; The 4-12x memory multiplier from activations,
-      gradients, and optimizer state (the Edge Intelligence chapter).
-    - **Adaptation Strategies** &mdash; LoRA, bias-only, and full fine-tuning trade-offs.
-    - **On-Device Energy** &mdash; CPU vs accelerator power and latency for adaptation.
-    - **Federated Learning** &mdash; FedAvg, non-IID data impact, gradient compression.
+    - **Design Constraints** &mdash; the 4-12x resource amplification from gradients,
+      optimizer state, activations, bandwidth, and energy.
+    - **Federated Learning Algorithms** &mdash; FedAvg, non-IID drift, local epochs,
+      update compression, and privacy-preserving aggregation.
+    - **Federated Systems at Scale** &mdash; client scheduling, over-selection,
+      intermittent availability, and stale updates.
+    - **Production Integration** &mdash; monitoring, validation, rollback, compliance,
+      and guardrail policies for adaptive edge systems.
     """), kind="info")
     return
+
+
+@app.cell
+def _(energy_drain, federated_communication, training_memory_breakdown):
+    def v2_11_track_thresholds(track_id):
+        _thresholds = {
+            "iphone": {
+                "freshness_hours": 24.0,
+                "daily_energy_pct": 5.0,
+                "quality_floor": 0.90,
+                "privacy_epsilon": 8.0,
+                "min_updates": 2.0,
+            },
+            "oura_ring": {
+                "freshness_hours": 12.0,
+                "daily_energy_pct": 2.0,
+                "quality_floor": 0.86,
+                "privacy_epsilon": 5.0,
+                "min_updates": 1.0,
+            },
+            "robotaxi": {
+                "freshness_hours": 6.0,
+                "daily_energy_pct": 3.0,
+                "quality_floor": 0.95,
+                "privacy_epsilon": 4.0,
+                "min_updates": 4.0,
+            },
+            "cloud_fleet": {
+                "freshness_hours": 4.0,
+                "daily_energy_pct": 10.0,
+                "quality_floor": 0.92,
+                "privacy_epsilon": 10.0,
+                "min_updates": 6.0,
+            },
+        }
+        return _thresholds.get(track_id, _thresholds["iphone"])
+
+    def v2_11_intermittency_result(track_id, duty_pct, connectivity_pct, windows_per_day, target):
+        _success_by_target = {"cpu": 0.72, "gpu": 0.82, "npu": 0.90}
+        _threshold = v2_11_track_thresholds(track_id)
+        _eligible = windows_per_day * (duty_pct / 100.0) * (connectivity_pct / 100.0)
+        _success = _eligible * _success_by_target.get(target, 0.80)
+        _missed = max(windows_per_day - _success, 0.0)
+        _evidence_age = 24.0 / _success if _success > 0 else float("inf")
+        _stale = _evidence_age > _threshold["freshness_hours"]
+        _decision = "promote" if (not _stale and _success >= _threshold["min_updates"]) else "defer"
+        return {
+            "eligible_windows": _eligible,
+            "usable_updates": _success,
+            "missed_windows": _missed,
+            "evidence_age_hours": _evidence_age,
+            "freshness_limit_hours": _threshold["freshness_hours"],
+            "min_updates": _threshold["min_updates"],
+            "stale": _stale,
+            "decision": _decision,
+        }
+
+    def v2_11_policy_candidates(
+        device,
+        track_id,
+        params_m,
+        batch_size,
+        energy_target,
+        duty_pct,
+        connectivity_pct,
+        windows_per_day,
+        beta,
+        local_epochs,
+        compression,
+        privacy_epsilon,
+    ):
+        _threshold = v2_11_track_thresholds(track_id)
+        _intermittent = v2_11_intermittency_result(
+            track_id,
+            duty_pct,
+            connectivity_pct,
+            windows_per_day,
+            energy_target,
+        )
+        _comm = federated_communication(
+            device,
+            beta=beta,
+            local_epochs=local_epochs,
+            compression=compression,
+        )
+        _energy = energy_drain(device, target=energy_target)
+        _policy_specs = [
+            {
+                "policy_id": "full_local",
+                "label": "Full local fine-tune",
+                "strategy": "full",
+                "federated": False,
+                "privacy_mode": "local_raw_private",
+                "quality": 0.97,
+                "energy_multiplier": 1.8,
+                "update_age_factor": 1.4,
+                "rejected_reason": "full fine-tuning spends the largest local memory and energy amounts",
+            },
+            {
+                "policy_id": "lora_federated",
+                "label": "LoRA local + compressed FL",
+                "strategy": "lora",
+                "federated": True,
+                "privacy_mode": "secure_agg_dp",
+                "quality": 0.92,
+                "energy_multiplier": 1.0,
+                "update_age_factor": 1.0,
+                "rejected_reason": "compressed federation is usually viable but can still miss freshness",
+            },
+            {
+                "policy_id": "bias_local",
+                "label": "Bias-only local fallback",
+                "strategy": "bias",
+                "federated": False,
+                "privacy_mode": "local_only",
+                "quality": 0.84,
+                "energy_multiplier": 0.45,
+                "update_age_factor": 0.8,
+                "rejected_reason": "bias-only updates protect resources but may miss the quality floor",
+            },
+            {
+                "policy_id": "cloud_raw",
+                "label": "Cloud raw-data retrain",
+                "strategy": "inference",
+                "federated": False,
+                "privacy_mode": "raw_upload",
+                "quality": 0.96,
+                "energy_multiplier": 0.25,
+                "update_age_factor": 0.6,
+                "rejected_reason": "raw upload violates the edge privacy premise for sensitive tracks",
+            },
+        ]
+
+        _rows = []
+        for _spec in _policy_specs:
+            _strategy = _spec["strategy"] if _spec["strategy"] != "inference" else "bias"
+            _memory = training_memory_breakdown(
+                params_m=params_m,
+                batch_size=batch_size,
+                strategy=_strategy,
+                available_memory_mb=device.available_memory_mb,
+            )
+            _memory_mb = _memory.inference_mb if _spec["strategy"] == "inference" else _memory.total_mb
+            _daily_energy_pct = _energy.budget_used_pct * _intermittent["usable_updates"] * _spec["energy_multiplier"]
+            _evidence_age = _intermittent["evidence_age_hours"] * _spec["update_age_factor"]
+            _privacy_ok = (
+                _spec["privacy_mode"] in ("local_raw_private", "local_only")
+                or (_spec["privacy_mode"] == "secure_agg_dp" and privacy_epsilon <= _threshold["privacy_epsilon"])
+            )
+            _comm_ok = True
+            if _spec["federated"]:
+                _comm_ok = _comm.noniid_rounds <= 8 * device.iid_rounds
+            _checks = {
+                "memory": _memory_mb <= device.available_memory_mb,
+                "energy": _daily_energy_pct <= _threshold["daily_energy_pct"],
+                "privacy": _privacy_ok,
+                "update": _evidence_age <= _threshold["freshness_hours"] and _comm_ok,
+                "quality": _spec["quality"] >= _threshold["quality_floor"],
+            }
+            _order = ["memory", "energy", "privacy", "update", "quality"]
+            _failed = [name for name in _order if not _checks[name]]
+            _binding = _failed[0] if _failed else min(
+                {
+                    "memory": device.available_memory_mb - _memory_mb,
+                    "energy": _threshold["daily_energy_pct"] - _daily_energy_pct,
+                    "privacy": _threshold["privacy_epsilon"] - privacy_epsilon if _spec["federated"] else 99.0,
+                    "update": _threshold["freshness_hours"] - _evidence_age,
+                    "quality": _spec["quality"] - _threshold["quality_floor"],
+                },
+                key=lambda name: {
+                    "memory": (device.available_memory_mb - _memory_mb) / max(device.available_memory_mb, 1e-9),
+                    "energy": (_threshold["daily_energy_pct"] - _daily_energy_pct) / max(_threshold["daily_energy_pct"], 1e-9),
+                    "privacy": (_threshold["privacy_epsilon"] - privacy_epsilon) / max(_threshold["privacy_epsilon"], 1e-9) if _spec["federated"] else 99.0,
+                    "update": (_threshold["freshness_hours"] - _evidence_age) / max(_threshold["freshness_hours"], 1e-9),
+                    "quality": (_spec["quality"] - _threshold["quality_floor"]) / max(_threshold["quality_floor"], 1e-9),
+                }[name],
+            )
+            _rows.append({
+                **_spec,
+                "memory_mb": _memory_mb,
+                "daily_energy_pct": _daily_energy_pct,
+                "privacy_epsilon": privacy_epsilon if _spec["federated"] else 0.0,
+                "evidence_age_hours": _evidence_age,
+                "noniid_rounds": _comm.noniid_rounds if _spec["federated"] else 0.0,
+                "total_communication_mb": _comm.total_communication_mb if _spec["federated"] else 0.0,
+                "passes": all(_checks.values()),
+                "checks": _checks,
+                "binding": _binding,
+                "failed_guardrails": _failed,
+                "threshold": _threshold,
+            })
+        return {
+            "threshold": _threshold,
+            "intermittent": _intermittent,
+            "communication": _comm,
+            "energy": _energy,
+            "policies": _rows,
+        }
+
+    return (
+        v2_11_intermittency_result,
+        v2_11_policy_candidates,
+        v2_11_track_thresholds,
+    )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ZONE B: WIDGET DEFINITIONS
@@ -302,15 +508,14 @@ def _(mo):
 def _(mo, v2_11_device):
     pA_pred = mo.ui.radio(
         options={
-            "A: Gradients add only a small amount": "A",
-            "B: Training is roughly 2x inference": "B",
-            "C: Training is often 5-9x inference": "C",
-            "D: Training is always impossible at the edge": "D",
+            "Memory, because backward pass state multiplies the inference footprint": "memory",
+            "Energy, because every local update drains the device budget": "energy",
+            "Privacy, because raw data cannot leave the device": "privacy",
+            "None; if inference runs locally, learning should fit too": "none",
         },
         label=(
             f"A {v2_11_device.default_model_params_m:g}M-parameter model is being adapted "
-            f"for {v2_11_device.label}. How much memory does full fine-tuning with Adam "
-            "typically require relative to inference?"
+            f"for {v2_11_device.label}. Which on-device amount do you expect to bind first?"
         ),
     )
     return (pA_pred,)
@@ -334,33 +539,31 @@ def _(mo, v2_11_device):
 
     pB_pred = mo.ui.radio(
         options={
-            "A: ~200 MB -- half the full model cost": "A",
-            "B: ~100 MB -- 4x savings": "B",
-            "C: ~42 MB -- nearly 10x savings": "C",
-            "D: ~4 MB -- adapters are negligible": "D",
+            "More local epochs will always reduce total communication": "more_epochs",
+            "Compression will reduce bytes but can add convergence rounds": "compression_tradeoff",
+            "Secure aggregation and DP protect privacy at no systems cost": "free_privacy",
+            "Stale and non-IID updates can dominate the federation plan": "staleness",
         },
         label=(
-            f"You need to store personalized models for {v2_11_device.default_contexts} "
-            "contexts. Full fine-tuning stores a complete model per context. "
-            "LoRA stores only adapter weights. What shape should the storage curve have?"
+            "The fleet cannot send raw data to the cloud. Which federated-update "
+            "trade-off will shape the policy first?"
         ),
     )
     return (pA_batch, pA_params, pA_strategy, pB_pred)
 
-# ─── CELL 6: PART B CONTROLS + PART C WIDGETS ────────────────────────────────
+# ─── CELL 6: PART B PRIVACY + PART C WIDGETS ─────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, v2_11_device):
     pB_contexts = mo.ui.slider(
-        start=1, stop=20, value=v2_11_device.default_contexts, step=1,
-        label="Number of user contexts",
+        start=1, stop=20, value=5, step=1,
+        label="Privacy budget epsilon (lower = stronger DP)",
     )
 
     pC_pred = mo.ui.number(
-        start=0.1, stop=50.0, value=None, step=0.1,
+        start=0.0, stop=24.0, value=None, step=0.1,
         label=(
-            f"A local adaptation session runs against the {v2_11_device.energy_budget_label}. "
-            "What percentage of that budget does one CPU session consume? "
-            "(Account for throttling or scheduling overhead extending duration 2-3x.)"
+            f"{v2_11_device.label} has 8 candidate update windows per day. "
+            "With intermittent duty cycle and connectivity, how many usable evidence windows survive?"
         ),
     )
     return (pB_contexts, pC_pred)
@@ -368,26 +571,37 @@ def _(mo, v2_11_device):
 # ─── CELL 7: PART C CONTROLS + PART D WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, v2_11_device):
+    pC_duty = mo.ui.slider(
+        start=1, stop=100, value=35, step=1,
+        label="Duty-cycle eligibility (%)",
+    )
+    pC_connectivity = mo.ui.slider(
+        start=1, stop=100, value=60, step=1,
+        label="Connectivity availability (%)",
+    )
+    pC_windows = mo.ui.slider(
+        start=1, stop=24, value=8, step=1,
+        label="Candidate update windows/day",
+    )
     pC_target = mo.ui.radio(
         options={"CPU": "cpu", "GPU": "gpu", v2_11_device.accelerator_label: "npu"},
-        value="CPU",
-        label="Execution target",
+        value=v2_11_device.accelerator_label,
+        label="Local execution target",
         inline=True,
     )
 
     pD_pred = mo.ui.radio(
         options={
-            "A: 60-80 rounds -- modest increase": "A",
-            "B: 100-150 rounds -- 2-3x more": "B",
-            "C: 200-400 rounds -- 4-8x more": "C",
-            "D: 1000+ rounds -- effectively never converges": "D",
+            "Memory will reject the policy": "memory",
+            "Energy or duty cycle will reject the policy": "energy",
+            "Privacy or update freshness will reject the policy": "privacy_update",
+            "Quality will reject the policy": "quality",
         },
         label=(
-            f"Non-IID edge data (beta=0.5). IID convergence takes {v2_11_device.iid_rounds} rounds. "
-            "How many rounds does non-IID require to reach the same accuracy?"
+            "Before opening the policy table, which guardrail do you expect to bind first?"
         ),
     )
-    return (pC_target, pD_pred)
+    return (pC_connectivity, pC_duty, pC_target, pC_windows, pD_pred)
 
 # ─── CELL 8: PART D CONTROLS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -407,10 +621,20 @@ def _(mo):
             "INT4 quantized (8x reduction)": "int4",
             "Top-K sparse (10x reduction)": "topk",
         },
-        value="No compression",
-        label="Gradient compression",
+        value="INT8 quantized (4x reduction)",
+        label="Federated update compression",
     )
-    return (pD_beta, pD_compress, pD_epochs)
+    pD_policy = mo.ui.dropdown(
+        options={
+            "Full local fine-tune": "full_local",
+            "LoRA local + compressed FL": "lora_federated",
+            "Bias-only local fallback": "bias_local",
+            "Cloud raw-data retrain": "cloud_raw",
+        },
+        value="LoRA local + compressed FL",
+        label="Candidate deployment policy",
+    )
+    return (pD_beta, pD_compress, pD_epochs, pD_policy)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ZONE C: ALL PARTS AS TABS (SINGLE CELL)
@@ -423,12 +647,15 @@ def _(
     mo, np, ledger, adaptation_storage, energy_drain,
     federated_communication, training_memory_breakdown,
     pA_batch, pA_params, pA_pred,
-    pA_strategy, pB_contexts, pB_pred, pC_pred,
-    pC_target, pD_beta, pD_compress, pD_epochs,
-    pD_pred, v2_11_device, v2_11_profile, v2_11_variant,
+    pA_strategy, pB_contexts, pB_pred, pC_connectivity,
+    pC_duty, pC_pred, pC_target, pC_windows,
+    pD_beta, pD_compress, pD_epochs, pD_policy,
+    pD_pred, v2_11_device, v2_11_intermittency_result,
+    v2_11_policy_candidates, v2_11_profile, v2_11_track_thresholds,
+    v2_11_variant,
 ):
     # ─────────────────────────────────────────────────────────────────────
-    # PART A BUILDER -- The Memory Amplification Tax
+    # PART A BUILDER -- On-Device Limits Bound Local Learning
     # ─────────────────────────────────────────────────────────────────────
 
     def build_part_a():
@@ -464,13 +691,13 @@ def _(
             </div>
             <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
                         margin-top: 8px; line-height: 1.2;">
-                The Memory Amplification Tax
+                On-Device Limits Bound Local Learning
             </div>
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
                 A model that comfortably runs inference on one deployment target may not learn
-                on that same target. Full fine-tuning requires 4-12x more memory due to gradients,
-                optimizer state, and activation caching.
+                on that same target. Local learning spends active memory, energy, and privacy
+                budget at the edge before federation ever begins.
             </div>
         </div>
         """))
@@ -504,6 +731,15 @@ def _(
         _infer_mb = _memory.inference_mb
         _amplification = _memory.amplification
         _oom = not _memory.fits_memory
+        _threshold = v2_11_track_thresholds(v2_11_profile.track_id)
+        _cpu_energy = energy_drain(v2_11_device, target="cpu")
+        _binding_actual = (
+            "memory"
+            if _oom else
+            "energy"
+            if _cpu_energy.budget_used_pct > _threshold["daily_energy_pct"] else
+            "none"
+        )
 
         # Stacked bar chart
         _fig = go.Figure()
@@ -538,6 +774,30 @@ def _(
         apply_plotly_theme(_fig)
 
         items.append(mo.as_html(_fig))
+
+        _evidence_rows = [
+            ("Inference footprint", f"{_infer_mb:.2f} MB", "Model weights for local inference."),
+            ("Training footprint", f"{_total_mb:.2f} MB", "Weights + gradients + optimizer state + activations."),
+            ("Active memory budget", f"{v2_11_device.available_memory_mb:g} MB", f"{v2_11_profile.label} track envelope."),
+            ("CPU energy/session", f"{_cpu_energy.budget_used_pct:.2f}%", f"Share of {v2_11_device.energy_budget_label} per local session."),
+            ("Daily energy guardrail", f"{_threshold['daily_energy_pct']:.1f}%", "Policy limit used again in Part D."),
+        ]
+        _evidence_html = "".join(
+            f"<tr><td>{name}</td><td><strong>{value}</strong></td><td>{note}</td></tr>"
+            for name, value, note in _evidence_rows
+        )
+        items.append(mo.Html(f"""
+        <table style="width:100%; border-collapse:collapse; margin:14px 0; font-size:0.88rem;">
+            <thead>
+                <tr style="background:#f8fafc; color:#475569;">
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Amount</th>
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Measured value</th>
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Why it matters</th>
+                </tr>
+            </thead>
+            <tbody>{_evidence_html}</tbody>
+        </table>
+        """))
 
         # OOM banner
         if _oom:
@@ -587,30 +847,35 @@ Total         = {_total_mb:.2f} MB ({_amplification:.1f}x inference)
 """))
 
         # Reveal
-        if pA_pred.value == "C":
+        if pA_pred.value == _binding_actual:
             _msg = (
-                "**Correct.** Full fine-tuning with Adam requires 5-9x more memory than inference. "
-                "Gradients equal the model size, Adam adds 2x more for momentum and variance, and "
-                "activations scale with batch size and depth. The model that *runs* on the device "
-                "cannot *learn* on the device without LoRA or similar adaptation."
+                f"**Correct binding amount for this setting: {_binding_actual}.** "
+                "The device boundary is an amount-system boundary, not a label. "
+                "A feasible edge policy must clear this local constraint before it can join the fleet."
             )
             _kind = "success"
-        elif pA_pred.value == "B":
+        elif pA_pred.value == "none":
             _msg = (
-                "**You forgot optimizer state and activations.** Training is not 'inference + gradients.' "
-                "Adam stores two additional copies of every trainable parameter (momentum and variance). "
-                "Activations cached for the backward pass scale with batch size. Total: 5-9x, not 2x."
+                "**Inference feasibility did not prove learning feasibility.** "
+                "Training adds gradients, optimizer state, activation storage, and sustained energy draw. "
+                f"Actual binding amount for the current setting: {_binding_actual}."
             )
             _kind = "warn"
         else:
             _msg = (
-                "**Full fine-tuning with Adam requires ~200-360 MB for a 10M-param model.** "
-                "Weights (40 MB) + Gradients (40 MB) + Optimizer State (80 MB) + Activations (~40-200 MB). "
-                "That is 5-9x the inference footprint, depending on batch size."
+                f"**Actual binding amount for this setting: {_binding_actual}.** "
+                f"Training uses {_total_mb:.2f} MB against a {v2_11_device.available_memory_mb:g} MB "
+                f"active memory budget; CPU adaptation uses {_cpu_energy.budget_used_pct:.2f}% "
+                f"of the {v2_11_device.energy_budget_label} per session."
             )
             _kind = "warn"
 
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+        items.append(mo.callout(mo.md(
+            f"**Part A checkpoint:** Carry `{_strategy}` into the policy review. "
+            f"The current local boundary is `{_binding_actual}` with {_total_mb:.2f} MB "
+            f"of training memory and {_amplification:.1f}x amplification over inference."
+        ), kind="info"))
 
         items.append(mo.accordion({
             "Math Peek: Training Memory Amplification": mo.md("""
@@ -636,7 +901,7 @@ $$
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
-    # PART B BUILDER -- The Adaptation Strategy Selector
+    # PART B BUILDER -- Federated Updates Trade Communication, Staleness, Privacy, and Convergence
     # ─────────────────────────────────────────────────────────────────────
 
     def build_part_b():
@@ -649,9 +914,9 @@ $$
                 text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
         Incoming Message &middot; {v2_11_variant.stakeholder}</div>
     <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-        &ldquo;I keep hearing that LoRA solves the on-device fine-tuning problem, but nobody tells me
-        the actual memory numbers. For a 350M model, how much storage does LoRA rank-16 really save
-        compared to full fine-tuning? And does bias-only tuning even move the needle on accuracy?&rdquo;</div>
+        &ldquo;Legal will not let raw data leave {v2_11_profile.label}, but product still wants
+        population learning. If we use federated updates, how many rounds and bytes do we spend
+        after non-IID drift, compression loss, privacy overhead, and stale updates?&rdquo;</div>
     <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
         &mdash; {v2_11_variant.stakeholder} &middot; {v2_11_profile.label}</div>
 </div>
@@ -668,17 +933,17 @@ $$
                 <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
                 <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em;">
-                    Part B &middot; 10 min</div>
+                    Part B &middot; 15 min</div>
             </div>
             <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
                         margin-top: 8px; line-height: 1.2;">
-                The Adaptation Strategy Selector
+                Federated Updates Are Not Free Privacy
             </div>
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
-                LoRA makes fine-tuning fit in memory. But the storage advantage is even more
-                dramatic for multi-context personalization: 10 user profiles require 400 MB
-                with full fine-tuning but only ~42 MB with LoRA adapters.
+                Federated learning protects raw data locality, but the update loop still spends
+                communication rounds, upload bytes, privacy overhead, and freshness budget. More
+                local work can reduce communication until non-IID drift makes convergence worse.
             </div>
         </div>
         """))
@@ -688,112 +953,200 @@ $$
         items.append(pB_pred)
 
         if pB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the storage comparison."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the federated-update simulator."), kind="warn"))
             return mo.vstack(items)
 
         # Controls
-        items.append(pB_contexts)
+        items.append(mo.hstack([pD_beta, pD_epochs, pD_compress, pB_contexts], gap="1.2rem"))
 
-        _n_ctx = pB_contexts.value
-        _model_mb = v2_11_device.default_model_params_m * 1e6 * 4 / (1024 * 1024)
-        _storage = adaptation_storage(contexts=_n_ctx, model_mb=_model_mb)
-        _full_total = _storage.full_total_mb
-        _lora_total = _storage.lora_total_mb
-        _bias_total = _storage.bias_total_mb
+        _beta = pD_beta.value
+        _E = pD_epochs.value
+        _compress = pD_compress.value
+        _epsilon = pB_contexts.value
+        _threshold = v2_11_track_thresholds(v2_11_profile.track_id)
+        _comm = federated_communication(
+            v2_11_device,
+            beta=_beta,
+            local_epochs=_E,
+            compression=_compress,
+        )
+        _iid_rounds = _comm.iid_rounds
+        _noniid_rounds = _comm.noniid_rounds
+        _compressed_rounds = _comm.compressed_rounds
+        _secure_agg_overhead = 1.10
+        _privacy_multiplier = 1.0 + max((_threshold["privacy_epsilon"] / max(_epsilon, 0.1)) - 1.0, 0.0) * 0.20
+        _stale_rounds = _compressed_rounds * _privacy_multiplier
+        _bytes_per_round = _comm.compressed_bytes_per_round_mb * _secure_agg_overhead
+        _total_comm_mb = _stale_rounds * _bytes_per_round
+        _freshness_round_limit = 8 * _iid_rounds
+        _privacy_ok = _epsilon <= _threshold["privacy_epsilon"]
+        _fresh_enough = _stale_rounds <= _freshness_round_limit
 
-        _ctx_range = np.arange(1, 21)
-        _storage_curve = [adaptation_storage(contexts=int(_ctx), model_mb=_model_mb) for _ctx in _ctx_range]
-        _full_curve = [_result.full_total_mb for _result in _storage_curve]
-        _lora_curve = [_result.lora_total_mb for _result in _storage_curve]
-        _bias_curve = [_result.bias_total_mb for _result in _storage_curve]
+        _round_max = int(min(max(_stale_rounds * 1.25, 200), 2500))
+        _round_range = np.arange(1, _round_max + 1)
+        _iid_acc = np.clip(0.90 * (1 - np.exp(-_round_range / _iid_rounds * 3)), 0, 0.95)
+        _noniid_rate = _iid_rounds / max(_noniid_rounds, 1e-9)
+        _noniid_acc = np.clip(0.90 * (1 - np.exp(-_round_range / (_iid_rounds / _noniid_rate) * 3)), 0, 0.92)
+        _privacy_rate = _iid_rounds / max(_stale_rounds, 1e-9)
+        _privacy_acc = np.clip(0.90 * (1 - np.exp(-_round_range / (_iid_rounds / _privacy_rate) * 3)), 0, 0.91)
 
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(
-            x=_ctx_range, y=_full_curve, mode="lines+markers",
-            name="Full Fine-Tuning", line=dict(color=COLORS["RedLine"], width=3),
+            x=_round_range, y=_iid_acc, mode="lines",
+            name="IID baseline", line=dict(color=COLORS["GreenLine"], width=3),
         ))
         _fig.add_trace(go.Scatter(
-            x=_ctx_range, y=_lora_curve, mode="lines+markers",
-            name="LoRA (rank-16)", line=dict(color=COLORS["GreenLine"], width=3),
+            x=_round_range, y=_noniid_acc, mode="lines",
+            name=f"Non-IID beta={_beta}", line=dict(color=COLORS["RedLine"], width=3),
         ))
         _fig.add_trace(go.Scatter(
-            x=_ctx_range, y=_bias_curve, mode="lines+markers",
-            name="Bias-Only", line=dict(color=COLORS["BlueLine"], width=3),
+            x=_round_range, y=_privacy_acc, mode="lines",
+            name=f"{_comm.compression_label} + privacy overhead",
+            line=dict(color=COLORS["BlueLine"], width=2, dash="dash"),
         ))
+        _fig.add_vline(
+            x=_freshness_round_limit,
+            line_dash="dot",
+            line_color=COLORS["OrangeLine"],
+            annotation_text="freshness budget",
+            annotation_position="top right",
+        )
+        _fig.add_hline(y=0.90, line_dash="dot", line_color="#94a3b8",
+                       annotation_text="Target accuracy: 90%")
         _fig.update_layout(
-            height=340,
-            xaxis=dict(title="Number of User Contexts"),
-            yaxis=dict(title="Total Storage (MB)"),
-            legend=dict(orientation="h", y=-0.2),
+            height=380,
+            xaxis=dict(title="Communication Rounds"),
+            yaxis=dict(title="Accuracy", range=[0, 1]),
+            legend=dict(orientation="h", y=-0.2, font_size=11),
             margin=dict(l=50, r=20, t=30, b=80),
         )
         apply_plotly_theme(_fig)
 
-        _savings = _storage.lora_savings_ratio
+        _round_ratio = _stale_rounds / max(_iid_rounds, 1e-9)
+        _r_color = COLORS["RedLine"] if _round_ratio > 8 else COLORS["OrangeLine"] if _round_ratio > 4 else COLORS["GreenLine"]
 
         items.append(mo.as_html(_fig))
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Full Storage ({_n_ctx} ctx)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_full_total:.0f} MB</div>
+                        text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">IID Rounds</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_iid_rounds}</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">LoRA Storage ({_n_ctx} ctx)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_lora_total:.0f} MB</div>
+                        text-align:center; background:white; border-top:3px solid {_r_color}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Stale-Aware Rounds</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_r_color};">{_stale_rounds:.0f}</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Savings Ratio</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_savings:.0f}x</div>
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total Upload</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">
+                    {_total_comm_mb/1024:.1f} GB</div>
             </div>
         </div>"""))
 
+        _fed_rows = [
+            ("Non-IID rounds", f"{_noniid_rounds:.0f}", "Extra rounds from heterogeneous local data."),
+            ("Compressed rounds", f"{_compressed_rounds:.0f}", f"After {_comm.compression_label} update compression."),
+            ("Privacy multiplier", f"{_privacy_multiplier:.2f}x", "Stronger DP noise slows useful convergence."),
+            ("Bytes per round", f"{_bytes_per_round:.1f} MB", "Compressed update plus secure aggregation overhead."),
+            ("Freshness budget", f"{_freshness_round_limit:.0f} rounds", "Track policy limit before updates are too stale."),
+        ]
+        _fed_table = "".join(
+            f"<tr><td>{name}</td><td><strong>{value}</strong></td><td>{note}</td></tr>"
+            for name, value, note in _fed_rows
+        )
+        items.append(mo.Html(f"""
+        <table style="width:100%; border-collapse:collapse; margin:14px 0; font-size:0.88rem;">
+            <thead>
+                <tr style="background:#f8fafc; color:#475569;">
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Federated amount</th>
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Value</th>
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Interpretation</th>
+                </tr>
+            </thead>
+            <tbody>{_fed_table}</tbody>
+        </table>
+        """))
+
+        if not _privacy_ok:
+            items.append(mo.callout(mo.md(
+                f"**Privacy guardrail miss.** Epsilon {_epsilon:.1f} exceeds the "
+                f"{v2_11_profile.label} limit of {_threshold['privacy_epsilon']:.1f}. "
+                "Keeping raw data local is not enough; update privacy must also be bounded."
+            ), kind="danger"))
+        elif not _fresh_enough:
+            items.append(mo.callout(mo.md(
+                f"**Freshness miss.** The stale-aware plan needs {_stale_rounds:.0f} rounds, "
+                f"above the {_freshness_round_limit:.0f}-round freshness budget. Reduce local epochs, "
+                "change compression, or keep the policy local until more representative clients arrive."
+            ), kind="danger"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Federated update is inside the teaching envelope.** The plan spends "
+                f"{_stale_rounds:.0f} stale-aware rounds and {_total_comm_mb/1024:.1f} GB of uploads "
+                f"while satisfying epsilon <= {_threshold['privacy_epsilon']:.1f}."
+            ), kind="success"))
+
         # Reveal
-        if pB_pred.value == "C":
+        _actual_tradeoff = "staleness" if not _fresh_enough else "compression_tradeoff"
+        if pB_pred.value == _actual_tradeoff:
             _msg = (
-                f"**Correct shape.** LoRA adapters stay close to 1% of model size. "
-                f"For {_n_ctx} contexts on {v2_11_profile.label}, full fine-tuning uses "
-                f"{_full_total:.2f} MB while LoRA uses {_lora_total:.2f} MB."
+                f"**Correct.** The current federation plan is governed by `{_actual_tradeoff}`. "
+                f"It spends {_stale_rounds:.0f} stale-aware rounds, {_bytes_per_round:.1f} MB/round, "
+                f"and {_total_comm_mb/1024:.1f} GB total upload."
             )
             _kind = "success"
+        elif pB_pred.value == "free_privacy":
+            _msg = (
+                "**Federation is not free privacy.** Secure aggregation adds protocol overhead, "
+                "differential privacy adds noise that can require more rounds, and weak epsilon "
+                "values can fail the track policy."
+            )
+            _kind = "warn"
         else:
             _msg = (
-                f"**LoRA adapters are small because they avoid copying the full model per context.** "
-                f"Here the base model is {_model_mb:.2f} MB. Full fine-tuning for {_n_ctx} "
-                f"contexts reaches {_full_total:.2f} MB, while LoRA reaches {_lora_total:.2f} MB."
+                f"**Actual governing trade-off: `{_actual_tradeoff}`.** Local epochs, compression, "
+                "privacy, and stale evidence interact; improving one amount can move the cost to another."
             )
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+        items.append(mo.callout(mo.md(
+            f"**Part B checkpoint:** Carry `{_comm.compression_label}` updates with "
+            f"E={_E}, beta={_beta}, epsilon={_epsilon:.1f}, and {_stale_rounds:.0f} stale-aware rounds "
+            "into the final policy review."
+        ), kind="info"))
 
         items.append(mo.accordion({
-            "Math Peek: LoRA Storage Savings": mo.md("""
+            "Math Peek: FedAvg Rounds, Bytes, and Privacy Cost": mo.md(f"""
 **Formula:**
 $$
-M_{\\text{LoRA}} = M_{\\text{base}} + K \\times r \\times (d_{\\text{in}} + d_{\\text{out}}) \\times 2
+\\theta^{{t+1}} = \\sum_k \\frac{{n_k}}{{n}}\\theta_k^{{t+1}}
 $$
 
-**Where:**
-- **$M_{\\text{base}}$**: Base model weights (shared, stored once)
-- **$K$**: Number of user contexts (adapters)
-- **$r$**: LoRA rank (typically 4-16)
-- **$d_{\\text{in}}, d_{\\text{out}}$**: Dimensions of the adapted weight matrices
-- Factor of 2: bytes per FP16 parameter
-
-**Savings ratio** vs. full fine-tuning ($K$ separate models):
+**Convergence and communication model:**
+$$
+R_{{\\text{{edge}}}} \\approx R_{{\\text{{IID}}}} \\times \\text{{non-IID penalty}} \\times
+\\text{{compression penalty}} \\times \\text{{privacy penalty}}
+$$
 
 $$
-\\text{Ratio} = \\frac{K \\times M_{\\text{base}}}{M_{\\text{base}} + K \\times r/d \\times M_{\\text{base}}} \\approx \\frac{K}{1 + K \\times 0.01} \\approx 10\\times \\text{ at } K{=}10
+C_{{\\text{{total}}}} = R_{{\\text{{edge}}}} \\times
+N_{{\\text{{clients}}}} \\times |\\Delta\\theta|_{{\\text{{compressed}}}}
 $$
+
+**Current source model:** `mlsysbook_labs.federated_communication` gives the
+non-IID and compression terms from `{v2_11_device.hardware_ref}`. This notebook
+adds a local teaching estimate for secure aggregation overhead (1.10x) and
+privacy-noise round inflation ({_privacy_multiplier:.2f}x).
 """)
         }))
 
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
-    # PART C BUILDER -- The Battery Drain Reality
+    # PART C BUILDER -- Duty Cycle And Connectivity Make Intermittent Evidence First-Order
     # ─────────────────────────────────────────────────────────────────────
 
     def build_part_c():
@@ -806,10 +1159,9 @@ $$
                 text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
         Incoming Message &middot; {v2_11_variant.stakeholder}</div>
     <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-        &ldquo;Product wants local adaptation for {v2_11_profile.label}, but the available
-        {v2_11_device.energy_budget_label} is only {v2_11_device.energy_budget_wh:g} Wh.
-        How much does one local session consume, and when should we move work to
-        {v2_11_device.accelerator_label} or off-device?&rdquo;</div>
+        &ldquo;The local update ran once in the lab, but production only sees updates when the device
+        is awake, connected, eligible, and not stale. How much usable evidence reaches the fleet
+        before the next policy decision?&rdquo;</div>
     <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
         &mdash; {v2_11_variant.stakeholder} &middot; {v2_11_profile.label}</div>
 </div>
@@ -830,151 +1182,197 @@ $$
             </div>
             <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
                         margin-top: 8px; line-height: 1.2;">
-                The Battery Drain Reality
+                Intermittent Evidence Becomes First-Order
             </div>
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
-                LoRA makes fine-tuning fit in memory. But does it make it practical? A fine-tuning
-                session that visibly drains the energy budget is a product-killing feature,
-                not a product feature. The execution target changes the equation entirely.
+                Edge learning is not continuous just because the code can run. Duty cycle,
+                connectivity, execution success, and straggler cutoffs decide whether fresh
+                local evidence reaches the coordinator.
             </div>
         </div>
         """))
 
         # Prediction
         items.append(mo.md("### Your Prediction"))
-        items.append(mo.md(f"*Enter budget-use percentage for one CPU session on {v2_11_profile.label}:*"))
+        items.append(mo.md(f"*Estimate usable evidence windows per day for {v2_11_profile.label}:*"))
         items.append(pC_pred)
 
         if pC_pred.value is None:
-            items.append(mo.callout(mo.md("Enter your prediction to unlock the energy budget simulator."), kind="warn"))
+            items.append(mo.callout(mo.md("Enter your prediction to unlock the intermittent-evidence simulator."), kind="warn"))
             return mo.vstack(items)
 
         # Controls
-        items.append(pC_target)
+        items.append(mo.hstack([pC_duty, pC_connectivity, pC_windows, pC_target], gap="1.2rem"))
 
         _target = pC_target.value
+        _result = v2_11_intermittency_result(
+            v2_11_profile.track_id,
+            pC_duty.value,
+            pC_connectivity.value,
+            pC_windows.value,
+            _target,
+        )
         _energy = energy_drain(v2_11_device, target=_target)
-        _power = _energy.power_w
-        _duration = _energy.duration_s
-        _energy_wh = _energy.energy_wh
-        _drain_pct = _energy.budget_used_pct
-        _sessions_per_charge = _energy.sessions_per_budget
-
-        # Comparison bars
-        _target_keys = ["cpu", "gpu", "npu"]
-        _results = [energy_drain(v2_11_device, target=_key) for _key in _target_keys]
-        _targets = [_result.label for _result in _results]
-        _drains = []
-        for _t in ["cpu", "gpu", "npu"]:
-            _drains.append(energy_drain(v2_11_device, target=_t).budget_used_pct)
+        _daily_energy_pct = _energy.budget_used_pct * _result["usable_updates"]
+        _duty_values = np.arange(1, 101)
+        _usable_curve = [
+            v2_11_intermittency_result(
+                v2_11_profile.track_id,
+                int(_duty),
+                pC_connectivity.value,
+                pC_windows.value,
+                _target,
+            )["usable_updates"]
+            for _duty in _duty_values
+        ]
+        _age_curve = [
+            min(
+                v2_11_intermittency_result(
+                    v2_11_profile.track_id,
+                    int(_duty),
+                    pC_connectivity.value,
+                    pC_windows.value,
+                    _target,
+                )["evidence_age_hours"],
+                72,
+            )
+            for _duty in _duty_values
+        ]
 
         _fig = go.Figure()
-        _bar_colors = [COLORS["RedLine"] if d > 5 else COLORS["OrangeLine"] if d > 1 else COLORS["GreenLine"]
-                       for d in _drains]
-        _fig.add_trace(go.Bar(
-            x=_targets, y=_drains, marker_color=_bar_colors,
-            text=[f"{d:.1f}%" for d in _drains], textposition="outside",
+        _fig.add_trace(go.Scatter(
+            x=_duty_values,
+            y=_usable_curve,
+            mode="lines",
+            name="Usable updates/day",
+            line=dict(color=COLORS["GreenLine"], width=3),
+            yaxis="y",
         ))
-        _fig.add_hline(y=1.0, line_dash="dash", line_color=COLORS["GreenLine"],
-                       annotation_text="Target: <1% per session")
+        _fig.add_trace(go.Scatter(
+            x=_duty_values,
+            y=_age_curve,
+            mode="lines",
+            name="Evidence age (hours)",
+            line=dict(color=COLORS["RedLine"], width=3),
+            yaxis="y2",
+        ))
+        _fig.add_vline(
+            x=pC_duty.value,
+            line_dash="dash",
+            line_color=COLORS["BlueLine"],
+            annotation_text="current duty cycle",
+        )
+        _fig.add_hline(
+            y=_result["min_updates"],
+            line_dash="dot",
+            line_color=COLORS["GreenLine"],
+            annotation_text="min usable updates",
+        )
         _fig.update_layout(
-            height=340,
-            yaxis=dict(title=f"{v2_11_device.energy_budget_label.title()} Used per Session (%)"),
-            margin=dict(l=50, r=20, t=30, b=40),
+            height=380,
+            xaxis=dict(title="Duty-cycle eligibility (%)"),
+            yaxis=dict(title="Usable updates/day"),
+            yaxis2=dict(title="Evidence age (hours)", overlaying="y", side="right"),
+            legend=dict(orientation="h", y=-0.2),
+            margin=dict(l=50, r=50, t=30, b=80),
         )
         apply_plotly_theme(_fig)
 
         items.append(mo.as_html(_fig))
 
-        # Failure state
-        _drain_color = COLORS["RedLine"] if _drain_pct > 5 else COLORS["OrangeLine"] if _drain_pct > 1 else COLORS["GreenLine"]
-        if _drain_pct > 5:
-            items.append(mo.callout(mo.md(
-                f"**Product-killing energy budget use.** {_drain_pct:.1f}% per session means only "
-                f"{_sessions_per_charge:.0f} sessions per {v2_11_device.energy_budget_label}. "
-                "Users or operators will disable this feature."
-            ), kind="danger"))
-        elif _drain_pct > 1:
-            items.append(mo.callout(mo.md(
-                f"**Marginal.** {_drain_pct:.1f}% per session is noticeable. "
-                f"{_sessions_per_charge:.0f} sessions per {v2_11_device.energy_budget_label}. "
-                f"Consider {v2_11_device.accelerator_label} for production deployment."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**Viable.** {_drain_pct:.2f}% per session. {_sessions_per_charge:.0f} sessions per "
-                f"{v2_11_device.energy_budget_label}. This is a product feature, not a budget drain."
-            ), kind="success"))
-
-        # Cards
+        _age = _result["evidence_age_hours"]
+        _age_display = "infinite" if not math.isfinite(_age) else f"{_age:.1f} h"
+        _age_color = COLORS["RedLine"] if _result["stale"] else COLORS["GreenLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {_drain_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Budget Use ({_energy.label})</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_drain_color};">{_drain_pct:.2f}%</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Duration</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_duration:.1f}s</div>
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Eligible Windows</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_result['eligible_windows']:.2f}/day</div>
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Sessions/Charge</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">
-                    {_sessions_per_charge:.0f}</div>
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Usable Updates</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_result['usable_updates']:.2f}/day</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        text-align:center; background:white; border-top:3px solid {_age_color}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Evidence Age</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_age_color};">{_age_display}</div>
             </div>
         </div>"""))
 
-        # Prediction comparison
-        _predicted = pC_pred.value if pC_pred.value else 0
-        _cpu_drain = _drains[0]
+        _rows = [
+            ("Candidate windows/day", f"{pC_windows.value}", "How often the scheduler could attempt an update."),
+            ("Duty-cycle eligibility", f"{pC_duty.value}%", "Fraction of windows where the device may spend energy."),
+            ("Connectivity availability", f"{pC_connectivity.value}%", "Fraction of windows with usable network state."),
+            ("Missed windows/day", f"{_result['missed_windows']:.2f}", "Windows lost to sleep, link loss, or execution failure."),
+            ("Daily local energy", f"{_daily_energy_pct:.2f}%", f"Share of {v2_11_device.energy_budget_label} spent by usable updates."),
+        ]
+        _table = "".join(
+            f"<tr><td>{name}</td><td><strong>{value}</strong></td><td>{note}</td></tr>"
+            for name, value, note in _rows
+        )
+        items.append(mo.Html(f"""
+        <table style="width:100%; border-collapse:collapse; margin:14px 0; font-size:0.88rem;">
+            <thead>
+                <tr style="background:#f8fafc; color:#475569;">
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Intermittent amount</th>
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Value</th>
+                    <th style="text-align:left; padding:9px; border:1px solid #e2e8f0;">Consequence</th>
+                </tr>
+            </thead>
+            <tbody>{_table}</tbody>
+        </table>
+        """))
 
-        items.append(mo.md(f"""
-**Energy Budget Formula**
+        _prediction_error = abs((pC_pred.value or 0) - _result["usable_updates"])
+        if _result["stale"]:
+            items.append(mo.callout(mo.md(
+                f"**Stale evidence failure.** Evidence age is {_age_display}, above the "
+                f"{_result['freshness_limit_hours']:.1f} h freshness limit. The policy should defer "
+                "promotion or improve eligibility before trusting this evidence."
+            ), kind="danger"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Fresh enough.** Evidence age is {_age_display} against a "
+                f"{_result['freshness_limit_hours']:.1f} h limit. Your prediction missed by "
+                f"{_prediction_error:.2f} usable update windows/day."
+            ), kind="success"))
 
-```
-Energy      = Power x Duration = {_power:.1f}W x {_duration:.1f}s = {_energy_wh:.4f} Wh
-Budget (%)  = Energy / Budget x 100 = {_energy_wh:.4f} / {v2_11_device.energy_budget_wh:g} x 100 = {_drain_pct:.2f}%
-Sessions    = 100% / {_drain_pct:.2f}% = {_sessions_per_charge:.0f}
-```
-
-You predicted: {_predicted:.1f}%. Actual CPU budget use: {_cpu_drain:.1f}%.
-
-*Source: `mlsysbook_labs.energy_drain`, using `{v2_11_device.hardware_ref}`.*
-"""))
+        items.append(mo.callout(mo.md(
+            f"**Part C checkpoint:** `{_result['decision']}` with "
+            f"{_result['usable_updates']:.2f} usable updates/day, {_age_display} evidence age, "
+            f"and {_daily_energy_pct:.2f}% daily {v2_11_device.energy_budget_label} use."
+        ), kind="info"))
 
         items.append(mo.accordion({
-            "Math Peek: Energy per Inference and Battery Drain": mo.md("""
-**Dynamic power consumption:**
+            "Math Peek: Intermittent Evidence Product": mo.md(f"""
+**Eligibility model:**
 $$
-P = C \\cdot V^2 \\cdot f
-$$
-
-**Where:**
-- **$C$**: Switching capacitance (depends on circuit activity)
-- **$V$**: Supply voltage
-- **$f$**: Clock frequency
-
-**Energy per session and budget use:**
-$$
-E_{\\text{session}} = P \\times t_{\\text{duration}} \\quad \\text{(Wh)}
-$$
-$$
-\\text{BudgetUse}(\\%) = \\frac{E_{\\text{session}}}{E_{\\text{budget}}} \\times 100
+U = W \\times d \\times c \\times s
 $$
 
-**Accelerator advantage:** A specialized local accelerator achieves the same computation
-at lower effective switching cost, yielding large energy-efficiency gains over CPU for ML workloads.
+where $W$ is candidate update windows/day, $d$ is duty-cycle eligibility,
+$c$ is connectivity availability, and $s$ is execution success for the selected target.
+
+**Evidence age:**
+$$
+A_{{\\text{{evidence}}}} = \\frac{{24}}{{U}}
+$$
+
+The chapter's client-scheduling section explains why plugged-in, idle, connected,
+and non-straggling clients dominate federated evidence. This notebook-local
+`v2_11_intermittency_result` helper turns those eligibility filters into the
+amount carried into the policy guardrails.
 """)
         }))
 
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
-    # PART D BUILDER -- The Federation Paradox
+    # PART D BUILDER -- Edge Deployment Policy Is A Guardrail Bundle
     # ─────────────────────────────────────────────────────────────────────
 
     def build_part_d():
@@ -987,9 +1385,9 @@ at lower effective switching cost, yielding large energy-efficiency gains over C
                 text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
         Incoming Message &middot; {v2_11_variant.stakeholder}</div>
     <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-        &ldquo;Legal says we cannot send raw user data to the cloud, so we are betting on federated learning.
-        But my engineers warn that with only 50 heterogeneous devices per round, the model may never converge.
-        How many federation rounds does it actually take, and when does communication cost exceed centralized training?&rdquo;</div>
+        &ldquo;We have local feasibility, a federated update plan, and intermittent evidence. Now pick one
+        deployment policy we can defend: it must satisfy memory, energy, privacy, update freshness,
+        and quality guardrails at the same time.&rdquo;</div>
     <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
         &mdash; {v2_11_variant.stakeholder} &middot; {v2_11_profile.label}</div>
 </div>
@@ -1010,14 +1408,13 @@ at lower effective switching cost, yielding large energy-efficiency gains over C
             </div>
             <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
                         margin-top: 8px; line-height: 1.2;">
-                The Federation Paradox
+                Edge Deployment Policy Is A Guardrail Bundle
             </div>
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
-                Federated learning keeps data on-device. But non-IID data (each user types
-                differently) causes 4-8x more communication rounds than IID. Gradient compression
-                is the natural engineering response &mdash; but aggressive compression can add
-                rounds, creating a U-shaped optimum in total communication cost.
+                A policy is deployable only if every guardrail passes together. A high-quality
+                policy can still fail memory, energy, privacy, update freshness, or operational
+                rollback requirements.
             </div>
         </div>
         """))
@@ -1027,146 +1424,147 @@ at lower effective switching cost, yielding large energy-efficiency gains over C
         items.append(pD_pred)
 
         if pD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the federation simulator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your guardrail prediction to unlock the policy review."), kind="warn"))
             return mo.vstack(items)
 
         # Controls
-        items.append(mo.hstack([pD_beta, pD_epochs, pD_compress], gap="1.5rem"))
+        items.append(mo.hstack([pD_policy, pA_strategy, pC_target], gap="1.2rem"))
 
-        _beta = pD_beta.value
-        _E = pD_epochs.value
-        _compress = pD_compress.value
-        _comm = federated_communication(
+        _policy_packet = v2_11_policy_candidates(
             v2_11_device,
-            beta=_beta,
-            local_epochs=_E,
-            compression=_compress,
+            v2_11_profile.track_id,
+            pA_params.value,
+            pA_batch.value,
+            pC_target.value,
+            pC_duty.value,
+            pC_connectivity.value,
+            pC_windows.value,
+            pD_beta.value,
+            pD_epochs.value,
+            pD_compress.value,
+            pB_contexts.value,
         )
-        _iid_rounds = _comm.iid_rounds
-        _noniid_rounds = _comm.noniid_rounds
-        _compressed_rounds = _comm.compressed_rounds
-        _compressed_bytes = _comm.compressed_bytes_per_round_mb
-        _total_comm_mb = _comm.total_communication_mb
-        _drift_penalty = _comm.drift_penalty
-        _noniid_multiplier = _comm.round_multiplier / max(_drift_penalty, 1e-9)
-
-        # Build convergence curves
-        _round_range = np.arange(1, int(max(_noniid_rounds * 1.5, 200)))
-        # IID accuracy curve: 1 - exp(-r / R_iid) * (1 - target)
-        _iid_acc = 0.90 * (1 - np.exp(-_round_range / _iid_rounds * 3))
-        _iid_acc = np.clip(_iid_acc, 0, 0.95)
-        # Non-IID curve: slower convergence
-        _noniid_rate = _iid_rounds / _noniid_rounds
-        _noniid_acc = 0.90 * (1 - np.exp(-_round_range / (_iid_rounds / _noniid_rate) * 3))
-        _noniid_acc = np.clip(_noniid_acc, 0, 0.92)
-        # Compressed curve: slightly worse convergence rate
-        _comp_rate = _iid_rounds / _compressed_rounds
-        _comp_acc = 0.90 * (1 - np.exp(-_round_range / (_iid_rounds / _comp_rate) * 3))
-        _comp_acc = np.clip(_comp_acc, 0, 0.91)
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_round_range, y=_iid_acc, mode="lines",
-            name="IID baseline", line=dict(color=COLORS["GreenLine"], width=3),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_round_range, y=_noniid_acc, mode="lines",
-            name=f"Non-IID (beta={_beta})", line=dict(color=COLORS["RedLine"], width=3),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=_round_range, y=_comp_acc, mode="lines",
-            name=f"Non-IID + {_comm.compression_label} compression",
-            line=dict(color=COLORS["BlueLine"], width=2, dash="dash"),
-        ))
-        _fig.add_hline(y=0.90, line_dash="dot", line_color="#94a3b8",
-                       annotation_text="Target accuracy: 90%")
-        _fig.update_layout(
-            height=380,
-            xaxis=dict(title="Communication Rounds"),
-            yaxis=dict(title="Accuracy", range=[0, 1]),
-            legend=dict(orientation="h", y=-0.2, font_size=11),
-            margin=dict(l=50, r=20, t=30, b=80),
+        _policies = _policy_packet["policies"]
+        _selected = next(
+            (_policy for _policy in _policies if _policy["policy_id"] == pD_policy.value),
+            _policies[1],
         )
-        apply_plotly_theme(_fig)
+        _passing = [_policy for _policy in _policies if _policy["passes"]]
+        _recommended = _passing[0] if _passing else min(_policies, key=lambda policy: len(policy["failed_guardrails"]))
+        _rejected = next(
+            (_policy for _policy in _policies if _policy["policy_id"] != _selected["policy_id"] and not _policy["passes"]),
+            _policies[0],
+        )
 
-        _round_ratio = _comm.round_multiplier
-        _r_color = COLORS["RedLine"] if _round_ratio > 5 else COLORS["OrangeLine"] if _round_ratio > 2 else COLORS["GreenLine"]
+        _guardrail_names = ["memory", "energy", "privacy", "update", "quality"]
+        _chart = go.Figure()
+        for _policy in _policies:
+            _chart.add_trace(go.Bar(
+                x=_guardrail_names,
+                y=[1 if _policy["checks"][_name] else 0 for _name in _guardrail_names],
+                name=_policy["label"],
+            ))
+        _chart.update_layout(
+            barmode="group",
+            height=340,
+            yaxis=dict(title="Guardrail pass", tickvals=[0, 1], ticktext=["fail", "pass"], range=[0, 1.2]),
+            xaxis=dict(title="Guardrail"),
+            legend=dict(orientation="h", y=-0.25, font_size=10),
+            margin=dict(l=50, r=20, t=30, b=90),
+        )
+        apply_plotly_theme(_chart)
+        items.append(mo.as_html(_chart))
 
-        items.append(mo.as_html(_fig))
+        def _status_cell(_ok):
+            return "<strong style='color:#16a34a;'>pass</strong>" if _ok else "<strong style='color:#dc2626;'>fail</strong>"
+
+        _rows = []
+        for _policy in _policies:
+            _rows.append(
+                "<tr>"
+                f"<td><strong>{_policy['label']}</strong></td>"
+                f"<td>{_policy['memory_mb']:.1f} MB / {v2_11_device.available_memory_mb:g} MB<br/>{_status_cell(_policy['checks']['memory'])}</td>"
+                f"<td>{_policy['daily_energy_pct']:.2f}% / {_policy['threshold']['daily_energy_pct']:.1f}%<br/>{_status_cell(_policy['checks']['energy'])}</td>"
+                f"<td>{_policy['privacy_mode']}<br/>{_status_cell(_policy['checks']['privacy'])}</td>"
+                f"<td>{_policy['evidence_age_hours']:.1f} h / {_policy['threshold']['freshness_hours']:.1f} h<br/>{_status_cell(_policy['checks']['update'])}</td>"
+                f"<td>{_policy['quality']:.2f} / {_policy['threshold']['quality_floor']:.2f}<br/>{_status_cell(_policy['checks']['quality'])}</td>"
+                f"<td>{_policy['binding']}</td>"
+                "</tr>"
+            )
+        _table = "".join(_rows)
         items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">IID Rounds</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_iid_rounds}</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {_r_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Non-IID Rounds</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_r_color};">{_noniid_rounds:.0f}</div>
-            </div>
-            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
-                        text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total Comm</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_total_comm_mb/1024:.1f} GB</div>
-            </div>
-        </div>"""))
+        <table style="width:100%; border-collapse:collapse; margin:14px 0; font-size:0.82rem;">
+            <thead>
+                <tr style="background:#f8fafc; color:#475569;">
+                    <th style="text-align:left; padding:8px; border:1px solid #e2e8f0;">Policy</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #e2e8f0;">Memory</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #e2e8f0;">Energy/day</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #e2e8f0;">Privacy</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #e2e8f0;">Update</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #e2e8f0;">Quality</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #e2e8f0;">Binding</th>
+                </tr>
+            </thead>
+            <tbody>{_table}</tbody>
+        </table>
+        """))
 
-        items.append(mo.md(f"""
-**Federation Physics** (beta={_beta}, E={_E}, compression={_comm.compression_label})
-
-```
-Non-IID multiplier  = {_noniid_multiplier:.1f}x
-Drift penalty (E={_E}) = {_drift_penalty:.2f}x
-Non-IID rounds      = {_iid_rounds} x {_noniid_multiplier:.1f} x {_drift_penalty:.2f} = {_noniid_rounds:.0f}
-Bytes/round          = {_compressed_bytes:.1f} MB ({_comm.compression_label})
-Total communication  = {_compressed_rounds:.0f} x {_compressed_bytes:.1f} MB = {_total_comm_mb/1024:.1f} GB
-```
-*Source: `mlsysbook_labs.federated_communication`, using `{v2_11_device.hardware_ref}`.*
-"""))
-
-        # Reveal
-        if pD_pred.value == "C":
+        _selected_status = "passes" if _selected["passes"] else "fails"
+        _binding_for_prediction = "privacy_update" if _selected["binding"] in ("privacy", "update") else _selected["binding"]
+        if pD_pred.value == _binding_for_prediction:
             _msg = (
-                "**Correct.** Non-IID data at beta=0.5 requires 4-8x more communication rounds. "
-                "The heterogeneity penalty is not linear -- it grows inversely with beta. "
-                "Gradient compression (INT8) reduces per-round bytes by 4x but can add rounds "
-                "due to information loss, creating a U-shaped optimum in total communication cost."
+                f"**Correct.** `{_selected['label']}` {_selected_status} with "
+                f"`{_selected['binding']}` as the binding guardrail."
             )
             _kind = "success"
         else:
             _msg = (
-                "**Non-IID data requires 4-8x more rounds.** At beta=0.5, the heterogeneity penalty "
-                "multiplies the baseline 50 rounds by ~7x to ~350 rounds. Students underestimate "
-                "this because they think 'more rounds just means a bit slower.' But each round "
-                "requires a full model upload from every participating client."
+                f"**Actual binding guardrail: `{_selected['binding']}`.** "
+                f"`{_selected['label']}` {_selected_status}; the recommended policy is "
+                f"`{_recommended['label']}`."
             )
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        if _selected["passes"]:
+            items.append(mo.callout(mo.md(
+                f"**Launchable teaching policy.** Select `{_selected['label']}` and reject "
+                f"`{_rejected['label']}` because {_rejected['rejected_reason']}."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Policy not launchable yet.** `{_selected['label']}` fails "
+                f"{', '.join(_selected['failed_guardrails'])}. Use `{_recommended['label']}` "
+                "or revise earlier controls until all guardrails pass."
+            ), kind="danger"))
+
+        items.append(mo.callout(mo.md(
+            f"**Part D checkpoint:** Memo decision = `{_recommended['label']}`; binding edge amount = "
+            f"`{_recommended['binding']}`; rejected alternative = `{_rejected['label']}`; V2-12 implication = "
+            "monitor eligibility, rollback, privacy budget, and stale evidence as fleet operations signals."
+        ), kind="info"))
+
         items.append(mo.accordion({
-            "Math Peek: FedAvg Convergence under Non-IID Data": mo.md("""
-**Convergence rounds scaling:**
+            "Math Peek: Guardrail Feasibility Predicate": mo.md(f"""
+**Policy predicate:**
 $$
-R_{\\text{non-IID}} = R_{\\text{IID}} \\times \\left(1 + \\frac{\\sigma^2_{\\text{het}}}{\\beta^2}\\right)
-$$
-
-**Where:**
-- **$R_{\\text{IID}}$**: Baseline rounds under IID data distribution
-- **$\\beta$**: Dirichlet concentration parameter (lower = more heterogeneous)
-- **$\\sigma^2_{\\text{het}}$**: Variance of local data distributions across clients
-
-**Communication cost per round:**
-$$
-C_{\\text{round}} = N_{\\text{clients}} \\times |\\theta| \\times b_{\\text{precision}}
+\\text{{launchable}} =
+M \\le M_{{\\max}} \\land E_{{\\text{{day}}}} \\le E_{{\\max}} \\land
+\\varepsilon \\le \\varepsilon_{{\\max}} \\land A_{{\\text{{evidence}}}} \\le A_{{\\max}} \\land
+Q \\ge Q_{{\\min}}
 $$
 
-- **$N_{\\text{clients}}$**: Number of participating devices
-- **$|\\theta|$**: Model parameter count
-- **$b_{\\text{precision}}$**: Bytes per parameter (2 for FP16, reduced by compression)
+The policy table evaluates that predicate for each candidate policy. The amounts come from:
 
-**Gradient compression** reduces $b_{\\text{precision}}$ by 4-10x (INT8, Top-K sparsification).
+- `mlsysbook_labs.training_memory_breakdown` for local memory.
+- `mlsysbook_labs.energy_drain` for per-update energy.
+- `mlsysbook_labs.federated_communication` for federated rounds and bytes.
+- Notebook-local `v2_11_intermittency_result` and `v2_11_policy_candidates` for
+  freshness and integrated guardrail checks.
+
+The production-integration section of the chapter is the source claim: edge
+deployment is a policy bundle with validation, rollback, privacy, and resource
+guards, not a single model artifact.
 """)
         }))
 
@@ -1178,6 +1576,31 @@ $$
 
     def build_synthesis():
         items = []
+        _policy_packet = v2_11_policy_candidates(
+            v2_11_device,
+            v2_11_profile.track_id,
+            pA_params.value,
+            pA_batch.value,
+            pC_target.value,
+            pC_duty.value,
+            pC_connectivity.value,
+            pC_windows.value,
+            pD_beta.value,
+            pD_epochs.value,
+            pD_compress.value,
+            pB_contexts.value,
+        )
+        _policies = _policy_packet["policies"]
+        _selected = next(
+            (_policy for _policy in _policies if _policy["policy_id"] == pD_policy.value),
+            _policies[1],
+        )
+        _passing = [_policy for _policy in _policies if _policy["passes"]]
+        _recommended = _passing[0] if _passing else min(_policies, key=lambda policy: len(policy["failed_guardrails"]))
+        _rejected = next(
+            (_policy for _policy in _policies if _policy["policy_id"] != _recommended["policy_id"] and not _policy["passes"]),
+            _policies[0],
+        )
 
         items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
@@ -1188,23 +1611,46 @@ $$
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
-                    <strong>1. Training memory is 4-12x inference memory.</strong>
-                    Gradients, Adam optimizer state (2x params), and activation caching create a
-                    memory amplification tax that makes the model that runs on a device unable to
-                    learn on it without adaptation strategies like LoRA.
+                    <strong>1. On-device learning is bounded by local amounts.</strong>
+                    The model that runs on the edge may still fail local learning when memory,
+                    energy, or privacy becomes binding.
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>2. The hardware execution target determines viability.</strong>
-                    CPU adaptation can consume measurable energy budget per session.
-                    Specialized acceleration can be dramatically more energy-efficient. Same
-                    algorithm, different viability.
+                    <strong>2. Federated updates move, not remove, cost.</strong>
+                    Raw data stays local, but rounds, upload bytes, stale updates, and privacy
+                    noise still determine convergence.
                 </div>
                 <div>
-                    <strong>3. Non-IID data is the federation wall.</strong>
-                    Heterogeneous client data causes 4-8x more communication rounds. Gradient
-                    compression helps but introduces a U-shaped trade-off: too aggressive and
-                    convergence degrades, requiring even more rounds.
+                    <strong>3. Deployment policy is the integrated decision.</strong>
+                    The selected policy must pass memory, energy, privacy, update freshness, and
+                    quality guardrails together.
                 </div>
+            </div>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                        border-radius:10px; padding:16px; border-top:3px solid {COLORS['GreenLine']};">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                    Selected policy</div>
+                <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                    {_recommended['label']}</div>
+            </div>
+            <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                        border-radius:10px; padding:16px; border-top:3px solid {COLORS['OrangeLine']};">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                    Binding edge amount</div>
+                <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                    {_recommended['binding']}</div>
+            </div>
+            <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                        border-radius:10px; padding:16px; border-top:3px solid {COLORS['RedLine']};">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                    Rejected alternative</div>
+                <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                    {_rejected['label']}</div>
             </div>
         </div>
         """))
@@ -1215,23 +1661,23 @@ $$
           <div class="mlsysbook-grid">
             <div class="mlsysbook-field">
               <strong>Prediction thread</strong>
-              Compare the memory, storage, energy, and federation predictions against
-              the computed result before writing the report.
+              Compare the local-boundary, federation, intermittency, and policy
+              predictions against the computed result before writing the memo.
             </div>
             <div class="mlsysbook-field">
               <strong>Evidence summary</strong>
-              Use the active memory budget, adaptation storage curve, energy budget
-              use, and non-IID round count as the evidence set.
+              Use active memory, stale-aware federated rounds, usable update windows,
+              and the guardrail table as the evidence set.
             </div>
             <div class="mlsysbook-field">
               <strong>Decision</strong>
-              Choose the adaptation strategy, execution target, and communication
-              policy that you would defend for {v2_11_profile.label}.
+              Memo policy: {_recommended['label']} for {v2_11_profile.label};
+              binding amount: {_recommended['binding']}.
             </div>
             <div class="mlsysbook-field">
               <strong>Residual risk</strong>
-              State which measurement or rollout validation would still be needed
-              before treating the edge architecture as deployable.
+              V2-12 operations must monitor eligibility, privacy budget, stale
+              evidence, rollback, and cohort-level quality after launch.
             </div>
           </div>
         </div>
@@ -1247,11 +1693,10 @@ $$
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-12: The Silent Fleet</strong> &mdash; You learned to adapt
-                    on a single device. Now manage 200 models in production where silent failures
-                    cost $1M/day and operational complexity grows quadratically with model count.
-                    Carry forward the prediction, budget controls, evidence summary, decision,
-                    report reflection, and residual risk from this edge architecture review.
+                    <strong>Lab V2-12: The Silent Fleet</strong> &mdash; Carry forward the
+                    selected edge/federated policy, binding amount, rejected alternative, and
+                    operations implication. The next problem is keeping that heterogeneous fleet
+                    observable, rollback-ready, and within policy as devices drift.
                 </div>
             </div>
             <div style="flex: 1; min-width: 280px; background: white;
@@ -1277,10 +1722,10 @@ $$
     # ─────────────────────────────────────────────────────────────────────
 
     tabs = mo.ui.tabs({
-        "Part A -- The Memory Amplification Tax":   build_part_a(),
-        "Part B -- The Adaptation Strategy Selector": build_part_b(),
-        "Part C -- The Battery Drain Reality":       build_part_c(),
-        "Part D -- The Federation Paradox":          build_part_d(),
+        "Part A -- On-Device Limits":                build_part_a(),
+        "Part B -- Federated Update Trade-Offs":     build_part_b(),
+        "Part C -- Intermittent Evidence":           build_part_c(),
+        "Part D -- Guardrailed Edge Policy":         build_part_d(),
         "Synthesis":                                  build_synthesis(),
     })
     tabs
@@ -1296,36 +1741,77 @@ def _(
     COLORS,
     ledger,
     mo,
+    pA_batch,
+    pA_params,
     pA_pred,
     pA_strategy,
+    pB_contexts,
     pB_pred,
+    pC_connectivity,
+    pC_duty,
     pC_pred,
     pC_target,
+    pC_windows,
+    pD_beta,
     pD_pred,
     pD_compress,
+    pD_epochs,
+    pD_policy,
     v2_11_device,
+    v2_11_policy_candidates,
     v2_11_profile,
     v2_11_variant,
 ):
     _mem_pred = pA_pred.value if hasattr(pA_pred, 'value') else None
     _adapt = pA_strategy.value if hasattr(pA_strategy, 'value') else "full"
-    _lora_pred = pB_pred.value if hasattr(pB_pred, 'value') else None
-    _drain_pred = pC_pred.value if hasattr(pC_pred, 'value') else None
-    _exec_target = pC_target.value if hasattr(pC_target, 'value') else "cpu"
-    _fed_pred = pD_pred.value if hasattr(pD_pred, 'value') else None
+    _fed_pred = pB_pred.value if hasattr(pB_pred, 'value') else None
+    _evidence_pred = pC_pred.value if hasattr(pC_pred, 'value') else None
+    _exec_target = pC_target.value if hasattr(pC_target, 'value') else "npu"
+    _policy_pred = pD_pred.value if hasattr(pD_pred, 'value') else None
     _compress = pD_compress.value if hasattr(pD_compress, 'value') else "none"
+    _policy_choice = pD_policy.value if hasattr(pD_policy, 'value') else "lora_federated"
+    _packet = v2_11_policy_candidates(
+        v2_11_device,
+        v2_11_profile.track_id,
+        pA_params.value,
+        pA_batch.value,
+        _exec_target,
+        pC_duty.value,
+        pC_connectivity.value,
+        pC_windows.value,
+        pD_beta.value,
+        pD_epochs.value,
+        _compress,
+        pB_contexts.value,
+    )
+    _policies = _packet["policies"]
+    _selected = next((_policy for _policy in _policies if _policy["policy_id"] == _policy_choice), _policies[1])
+    _passing = [_policy for _policy in _policies if _policy["passes"]]
+    _recommended = _passing[0] if _passing else min(_policies, key=lambda policy: len(policy["failed_guardrails"]))
+    _rejected = next(
+        (_policy for _policy in _policies if _policy["policy_id"] != _recommended["policy_id"] and not _policy["passes"]),
+        _policies[0],
+    )
     ledger.save(chapter=11, design={
         "chapter": "v2_11",
         "track_id": v2_11_profile.track_id,
         "scenario_id": v2_11_variant.scenario_id,
         "hardware_ref": v2_11_device.hardware_ref,
-        "partA_memory_prediction": _mem_pred,
+        "partA_local_boundary_prediction": _mem_pred,
         "partA_adaptation_strategy": _adapt,
-        "partB_lora_prediction": _lora_pred,
-        "partC_drain_prediction_pct": _drain_pred,
+        "partB_federation_prediction": _fed_pred,
+        "partB_privacy_epsilon": pB_contexts.value,
+        "partB_compression_choice": _compress,
+        "partC_usable_window_prediction": _evidence_pred,
         "partC_execution_target": _exec_target,
-        "partD_federation_prediction": _fed_pred,
-        "partD_compression_choice": _compress,
+        "partC_duty_cycle_pct": pC_duty.value,
+        "partC_connectivity_pct": pC_connectivity.value,
+        "partC_windows_per_day": pC_windows.value,
+        "partD_guardrail_prediction": _policy_pred,
+        "selected_edge_policy": _recommended["policy_id"],
+        "binding_edge_amount": _recommended["binding"],
+        "rejected_alternative": _rejected["policy_id"],
+        "v2_12_ops_implication": "Monitor eligibility, privacy budget, stale evidence, rollback, and cohort quality.",
     })
 
     mo.Html(f"""
@@ -1340,10 +1826,12 @@ def _(
             <span style="color: {COLORS['BlueLine']};">{v2_11_profile.label}</span><br/>
             <span style="color: #64748b;">memory_amplification:</span>
             <span style="color: {COLORS['RedLine']};">4-12x</span><br/>
-            <span style="color: #64748b;">best_strategy:</span>
-            <span style="color: {COLORS['GreenLine']};">LoRA + {v2_11_device.accelerator_label}</span><br/>
-            <span style="color: #64748b;">federation_penalty:</span>
-            <span style="color: {COLORS['OrangeLine']};">4-8x rounds (non-IID)</span>
+            <span style="color: #64748b;">selected_policy:</span>
+            <span style="color: {COLORS['GreenLine']};">{_recommended['label']}</span><br/>
+            <span style="color: #64748b;">binding_edge_amount:</span>
+            <span style="color: {COLORS['OrangeLine']};">{_recommended['binding']}</span><br/>
+            <span style="color: #64748b;">rejected_alternative:</span>
+            <span style="color: {COLORS['RedLine']};">{_rejected['label']}</span>
         </div>
     </div>
     """)
@@ -1353,7 +1841,6 @@ def _(
 # ─── DOWNLOADABLE TRACK REPORT ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    adaptation_storage,
     build_lab_report,
     energy_drain,
     federated_communication,
@@ -1364,16 +1851,22 @@ def _(
     pA_strategy,
     pB_contexts,
     pB_pred,
+    pC_connectivity,
+    pC_duty,
     pC_pred,
     pC_target,
+    pC_windows,
     pD_beta,
     pD_compress,
     pD_epochs,
+    pD_policy,
     pD_pred,
     report_export_panel,
     training_memory_breakdown,
     v2_11_device,
+    v2_11_intermittency_result,
     v2_11_metadata,
+    v2_11_policy_candidates,
     v2_11_profile,
     v2_11_variant,
 ):
@@ -1383,14 +1876,41 @@ def _(
         strategy=pA_strategy.value,
         available_memory_mb=v2_11_device.available_memory_mb,
     )
-    _model_mb = v2_11_device.default_model_params_m * 1e6 * 4 / (1024 * 1024)
-    _storage = adaptation_storage(contexts=pB_contexts.value, model_mb=_model_mb)
     _energy = energy_drain(v2_11_device, target=pC_target.value)
     _comm = federated_communication(
         v2_11_device,
         beta=pD_beta.value,
         local_epochs=pD_epochs.value,
         compression=pD_compress.value,
+    )
+    _intermittent = v2_11_intermittency_result(
+        v2_11_profile.track_id,
+        pC_duty.value,
+        pC_connectivity.value,
+        pC_windows.value,
+        pC_target.value,
+    )
+    _policy_packet = v2_11_policy_candidates(
+        v2_11_device,
+        v2_11_profile.track_id,
+        pA_params.value,
+        pA_batch.value,
+        pC_target.value,
+        pC_duty.value,
+        pC_connectivity.value,
+        pC_windows.value,
+        pD_beta.value,
+        pD_epochs.value,
+        pD_compress.value,
+        pB_contexts.value,
+    )
+    _policies = _policy_packet["policies"]
+    _selected = next((_policy for _policy in _policies if _policy["policy_id"] == pD_policy.value), _policies[1])
+    _passing = [_policy for _policy in _policies if _policy["passes"]]
+    _recommended = _passing[0] if _passing else min(_policies, key=lambda policy: len(policy["failed_guardrails"]))
+    _rejected = next(
+        (_policy for _policy in _policies if _policy["policy_id"] != _recommended["policy_id"] and not _policy["passes"]),
+        _policies[0],
     )
 
     _incomplete = []
@@ -1399,35 +1919,39 @@ def _(
     if pB_pred.value is None:
         _incomplete.append("Part B prediction")
     if pC_pred.value is None:
-        _incomplete.append("Part C energy prediction")
+        _incomplete.append("Part C intermittent-evidence prediction")
     if pD_pred.value is None:
-        _incomplete.append("Part D federation prediction")
+        _incomplete.append("Part D guardrail prediction")
 
     _report = build_lab_report(
         v2_11_metadata,
         track=v2_11_profile.label,
         scenario=v2_11_variant.workload_summary,
         learning_objectives=(
-            "Quantify edge training memory amplification for the selected track.",
-            "Compare full fine-tuning, LoRA, and bias-only adaptation storage.",
-            f"Estimate local energy budget use on {v2_11_profile.label}.",
-            "Explain why non-IID edge data increases communication rounds.",
+            "Find the local memory and energy boundary for the selected edge track.",
+            "Explain the federated trade-off among communication, staleness, privacy, and convergence.",
+            "Convert duty cycle and connectivity into usable intermittent evidence.",
+            "Select an edge/federated deployment policy that satisfies guardrails.",
         ),
         predictions={
-            "memory_amplification": pA_pred.value,
-            "lora_storage_shape": pB_pred.value,
-            "energy_budget_prediction_pct": pC_pred.value,
-            "federation_round_prediction": pD_pred.value,
+            "local_binding_amount": pA_pred.value,
+            "federated_update_tradeoff": pB_pred.value,
+            "usable_evidence_windows_per_day": pC_pred.value,
+            "guardrail_binding_prediction": pD_pred.value,
         },
         knob_settings={
             "model_params_m": pA_params.value,
             "batch_size": pA_batch.value,
             "adaptation_strategy": pA_strategy.value,
-            "contexts": pB_contexts.value,
+            "privacy_epsilon": pB_contexts.value,
             "execution_target": pC_target.value,
+            "duty_cycle_pct": pC_duty.value,
+            "connectivity_pct": pC_connectivity.value,
+            "candidate_windows_per_day": pC_windows.value,
             "heterogeneity_beta": pD_beta.value,
             "local_epochs": pD_epochs.value,
             "compression": pD_compress.value,
+            "candidate_policy": pD_policy.value,
         },
         evidence_summary={
             "hardware_ref": v2_11_device.hardware_ref,
@@ -1435,19 +1959,24 @@ def _(
             "active_memory_budget_mb": v2_11_device.available_memory_mb,
             "training_memory_mb": round(_memory.total_mb, 3),
             "training_fits": _memory.fits_memory,
-            "lora_storage_mb": round(_storage.lora_total_mb, 3),
-            "energy_budget_used_pct": round(_energy.budget_used_pct, 3),
+            "energy_budget_used_pct_per_update": round(_energy.budget_used_pct, 3),
             "noniid_rounds": round(_comm.noniid_rounds, 1),
             "total_communication_mb": round(_comm.total_communication_mb, 3),
+            "usable_updates_per_day": round(_intermittent["usable_updates"], 3),
+            "evidence_age_hours": round(_intermittent["evidence_age_hours"], 3),
+            "selected_edge_policy": _recommended["policy_id"],
+            "binding_edge_amount": _recommended["binding"],
+            "rejected_alternative": _rejected["policy_id"],
         },
         final_decision=(
-            f"Use {pA_strategy.value} adaptation with {pC_target.value} execution for "
-            f"{v2_11_profile.label}, while treating non-IID communication as the residual scaling wall."
+            f"Use {_recommended['label']} for {v2_11_profile.label}; binding edge amount is "
+            f"{_recommended['binding']}. Reject {_rejected['label']} because "
+            f"{_rejected['rejected_reason']}."
         ),
         big_takeaways=(
-            "Edge feasibility is a joint memory, energy, latency, privacy, and communication decision.",
-            "The same equations lead to different conclusions for iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.",
-            "Federation protects data locality but does not make communication free.",
+            "Edge feasibility is a joint memory, energy, privacy, update, and quality decision.",
+            "Federated learning preserves raw-data locality but spends rounds, bytes, and privacy budget.",
+            "Intermittent evidence determines whether an apparently feasible policy can be trusted in production.",
         ),
         reflections={
             "diagnosis": (
@@ -1456,16 +1985,16 @@ def _(
             ),
             "tradeoff": (
                 f"The selected path optimizes {v2_11_variant.primary_metric} while guarding "
-                f"{v2_11_variant.guardrail_metric}."
+                f"{v2_11_variant.guardrail_metric}; policy table selected {_recommended['label']}."
             ),
             "residual_risk": (
-                "The helper uses first-order teaching estimates; production deployment still needs measured "
-                "device traces and rollout validation."
+                "V2-12 operations must monitor eligibility, stale evidence, privacy-budget composition, "
+                "rollback triggers, and cohort quality."
             ),
         },
         residual_risk=(
-            "The report records source-traced estimates, not measured hardware traces. "
-            "Validate on representative devices before deployment."
+            "The report records first-order teaching estimates, not measured hardware traces. "
+            "Validate on representative devices and carry the policy into V2-12 fleet operations."
         ),
         source_trace={
             "track_id": v2_11_profile.track_id,
@@ -1478,9 +2007,10 @@ def _(
         result_snapshot={
             "device": v2_11_device,
             "memory": _memory,
-            "storage": _storage,
             "energy": _energy,
             "communication": _comm,
+            "intermittent": _intermittent,
+            "policy": _policy_packet,
         },
         incomplete_fields=tuple(_incomplete),
     )

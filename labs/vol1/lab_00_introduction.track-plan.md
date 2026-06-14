@@ -1,189 +1,352 @@
 # V1-00 Track Plan: The Architect's Portal
 
-## Purpose
+## Chapter Invariant
 
-This orientation lab teaches the course ritual: choose a canonical system track, make predictions before seeing simulator output, inspect evidence, save decisions to the ledger, and carry that identity forward. It is the only lab whose primary job is to explain the track mechanism itself.
+MLSys labs teach deployed behavior under operating envelopes; track choice makes
+those constraints real. A model is not treated as finished when it scores well in
+isolation. It becomes an engineering object only after a stakeholder, workload,
+machine, metric, guardrail, failure mode, and report obligation are attached.
 
-## Shared Pedagogy
+Lab 00 is a special-case orientation. It avoids advanced physics instruments, but
+it still asks students to practice the lab ritual: commit to a prior, inspect a
+track-specific envelope, connect evidence to a decision, and save a ledger entry
+that future labs can replay.
 
-- Students learn that the same ML idea means different engineering work in different deployment contexts.
-- The lab should make the track choice feel consequential, not decorative.
-- The selected track becomes the default for later labs through the Design Ledger.
-- Every track should expose hardware, workload, constraints, and one expected bottleneck before any detailed chapter content begins.
+## Reading Map
 
-## Canonical Tracks
+| Lab module | Reading anchor | Claim used in the lab |
+|---|---|---|
+| Opening | `book/quarto/contents/vol1/index.qmd` | Volume I establishes AI engineering as co-design of Data, Algorithm, and Machine under statistical and computational constraints. |
+| Part A | `book/quarto/contents/vol1/introduction/introduction.qmd`, Purpose and AI Moment | ML systems are data-shaped behavior running under physical constraint; deployment is not a late detail. |
+| Part B | Introduction, Defining ML Systems, D-A-M taxonomy, deployment spectrum | A deployment context changes which axis binds and which evidence a stakeholder accepts. |
+| Part C | Introduction, ML System Lifecycle and fallacies | Later labs repeat a cycle: case, prediction, manipulation, evidence, decision, report. |
+| Part D | Introduction, deployment shapes lifecycle, summary takeaways | Decisions persist because deployed systems are maintained through monitoring, updates, and accountable reports. |
+| Synthesis | Introduction, chapter connection to ML Systems | Physical laws determine where a model can run; operating envelopes turn abstract reasoning into design constraints. |
 
-| Track | Category | Hardware source | Primary constraints |
-|---|---|---|---|
-| iPhone | Mobile ML | `Hardware.Mobile.iPhone15Pro` | Battery, thermal envelope, memory, on-device latency, privacy |
-| Oura Ring | TinyML / wearable | `Hardware.Tiny.OuraRing` | SRAM/flash, battery life, sampling cadence, OTA payload size |
-| RoboTaxi | Edge AI | `Hardware.Edge.RoboTaxi` | Safety-critical p99 latency, local compute, power, reliability |
-| Cloud Fleet | Cloud/Fleet | Cloud fleet profile backed initially by `Hardware.Cloud.H100` | Throughput, p99 latency, cost, utilization, carbon |
+## Concept Inventory
 
-## Lab Flow
+Accepted concepts:
 
-### Opening - Pick A System Identity
+- ML systems labs are about deployed behavior, not isolated model metrics.
+- A track is an operating envelope with stakeholder, constraints, metrics,
+  guardrails, failure modes, and report framing.
+- The repeated lab workflow is case -> prediction -> manipulation -> evidence ->
+  decision -> report.
+- Ledger/report continuity makes each lab decision available to later labs.
+- The selected track changes amount-system reasoning by changing which quantity
+  is scarce first: battery, SRAM, p99 latency, cost, utilization, carbon, or
+  another operating limit.
 
-Common pattern:
-- Present the four canonical tracks as the only student-facing choices.
-- Show that each track maps to a real hardware profile and a default scenario.
-- Save `track_id`, `category`, `hardware_ref`, and `scenario_id` to the ledger.
+Rejected or deferred concepts:
 
-Track realization:
-- iPhone: a privacy-preserving mobile app that must run useful inference without heating the device.
-- Oura Ring: an always-on wearable sensor that must last for days and accept small OTA updates.
-- RoboTaxi: an autonomous vehicle perception loop where tail latency is a safety requirement.
-- Cloud Fleet: a production service where scale, cost, utilization, and carbon dominate.
+- Detailed iron-law calculations. Deferred to later Volume I labs because Lab 00
+  is orientation.
+- Advanced physics instruments such as roofline, queueing curves, CDFs, or power
+  simulators. Deferred until students have a technical chapter target.
+- Free-form career exploration. Rejected because tracks are learning lenses, not
+  career identities.
+- Full hardware registry refactoring. Rejected for this wave because shared
+  helpers and registries are outside ownership.
+- Track switching policy and instructor-locked URL modes. Deferred because the
+  current task owns only the Lab 00 notebook and plan.
 
-### Part A - Constraint Portrait
+## Concept Modules
 
-Common pattern:
-- Compare memory, compute, power, latency, privacy, reliability, and cost headroom.
-- Use the same visual grammar for all tracks so students can compare regimes.
+### Part A: Concept Module - Deployed Behavior Is The Object
 
-Track realization:
-- iPhone highlights battery and thermal headroom.
-- Oura Ring highlights SRAM/flash and energy budget.
-- RoboTaxi highlights p99 latency and reliability.
-- Cloud Fleet highlights cost, throughput, and carbon.
+- Chapter claim: ML systems differ from model-only ML because learned behavior
+  must satisfy physical and operational constraints after deployment.
+- Reading connection: Purpose, AI Moment, Defining ML Systems.
+- Student prior: "If the model is accurate, the main work is done."
+- Productive failure: The student initially treats the lab as model tuning or
+  device memorization, then sees that the correct answer is evidence-backed
+  systems decision-making.
+- Track lens: all tracks appear only as examples; no track choice yet.
 
-### Part B - Same Model, Different World
+Storyline beats:
 
-Common pattern:
-- Run one reference model or workload against all tracks.
-- Show feasible, marginal, and infeasible outcomes.
-- The learning moment is that feasibility is contextual.
+1. Scenario: a student joins an MLSys lab sequence and is asked what work the
+   notebook will require.
+2. Prediction: choose what the labs are mainly practicing.
+3. Manipulation: compare isolated model thinking against deployed-system
+   thinking in a guided contrast card.
+4. Evidence: feedback explains which parts of a real deployment sit outside the
+   model score.
+5. Consequence: a model that works in a notebook can still fail a stakeholder's
+   operating envelope.
+6. Source/math peek: the notebook points back to the chapter definition that
+   behavior depends on data quality, algorithm choice, and machine capacity.
+7. Checkpoint: students must identify evidence-backed systems decisions as the
+   goal before Part B unlocks.
 
-Track realization:
-- iPhone may fit the model but fail sustained thermal limits.
-- Oura Ring likely fails memory or OTA payload size without compression.
-- RoboTaxi may fit compute but fail p99 or rare-event guardrails.
-- Cloud Fleet fits technically but exposes cost and utilization trade-offs.
+Mechanics:
 
-### Part C - Engineering Lens
+- Structured radio prediction.
+- Contrast cards for isolated model vs deployed system.
+- Feedback callout that names the misconception.
+- Reading/source accordion in the notebook text.
 
-Common pattern:
-- Student commits to one track and predicts the first bottleneck they expect to revisit across the course.
-- The ledger stores the commitment and the initial bottleneck hypothesis.
+Evidence and ledger:
 
-Track realization:
-- iPhone commitment: defend battery and privacy.
-- Oura Ring commitment: defend memory and battery life.
-- RoboTaxi commitment: defend p99 latency and reliability.
-- Cloud Fleet commitment: defend throughput, cost, and carbon.
+- Evidence: selected orientation answer and correctness.
+- Ledger field: `orientation_goal_answer`, `orientation_goal_correct`.
+- Downstream use: establishes that later reports should argue from deployed
+  evidence, not from a model score alone.
 
-## Implementation Requirements
+Depth gate:
 
-- Add a canonical `TrackProfile` registry before refactoring the notebook.
-- The selector should return the canonical profile, not free-form hardware.
-- The lab must render hardware facts from MLSysIM and narrative facts from the track profile.
-- Reports should include the selected track and a first "why this track changes the answer" statement.
-- Lab 00 is the canonical track-selection surface: it writes the canonical `track_id`
-  to the Design Ledger, and later labs use that value as their default track.
+- Activity count: 5+.
+- Has prediction: yes.
+- Has manipulation: yes, through guided comparison and check feedback.
+- Has failure/boundary: yes, conceptual boundary between model-only and
+  deployed-system answers.
+- Has source connection: yes.
+- Track-specific consequence: introduced but not yet selected.
 
-## Ledger And Report
+### Part B: Concept Module - A Track Is An Operating Envelope
 
-Save:
-- `track_id`
-- `category`
-- `hardware_ref`
-- `scenario_id`
-- initial bottleneck prediction
-- one-sentence rationale for the chosen track
+- Chapter claim: The deployment spectrum changes constraints, metrics, update
+  paths, monitoring, and acceptable evidence.
+- Reading connection: D-A-M taxonomy, deployment spectrum, efficiency priorities
+  by context, deployment shapes lifecycle.
+- Student prior: "Tracks are cosmetic labels or device themes."
+- Productive failure: The student selects only narrative/device fields or also
+  selects the chapter objective as track-specific, then feedback separates the
+  shared concept from the track-specific envelope.
+- Track lens: iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
 
-Report target:
-- A short orientation memo explaining the selected track and the constraint the student expects to manage throughout Volume 1.
+Storyline beats:
 
-## Detailed Planning Addendum
+1. Scenario: four students must defend the same MLSys idea to different
+   stakeholders.
+2. Prediction: select which parts of later labs should change with the track.
+3. Manipulation: inspect four track cards with different stakeholder, metrics,
+   guardrails, dominant constraints, likely failure, and report frame.
+4. Evidence: a correctness table shows which selected fields belong to the
+   operating envelope and which must remain shared.
+5. Consequence: the same model idea becomes a battery decision, memory decision,
+   safety decision, or fleet economics decision depending on track.
+6. Source/math peek: D-A-M and deployment spectrum anchors explain why the
+   machine and mission change the feasible answer.
+7. Checkpoint: students must identify story, hardware assumptions, metrics,
+   guardrails, and report framing as track-specific before Part C.
 
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
+Track narratives:
 
-### Planning Focus
+| Track | Stakeholder | Constraint emphasis | Failure mode | Report framing |
+|---|---|---|---|---|
+| iPhone | Mobile product engineer / UX director | Battery, thermal envelope, unified memory, privacy, interactive latency | Thermal throttle, battery drain, or sluggish local UX | Local-device readiness memo: prove responsiveness, privacy, and sustained comfort. |
+| Oura Ring | Wearable firmware engineer / hardware lead | SRAM, flash, duty cycle, sampling cadence, OTA payload, battery | SRAM or flash overflow, duty-cycle violation, or radio wakeup budget miss | Firmware fit memo: prove the model, sensing window, update package, and battery budget fit together. |
+| RoboTaxi | Autonomous vehicle platform engineer / safety director | p99/p999 latency, rare-event recall, redundancy, sensor bandwidth, power | Deadline miss, safety-margin miss, or unsupported fallback path | Safety evidence memo: prove worst-case latency, rare-event behavior, and fallback before deployment. |
+| Cloud Fleet | Fleet service owner / CTO | Throughput, p99 SLA, utilization, cost/request, capacity, carbon | SLO breach, queue explosion, negative ROI, or carbon budget miss | Fleet operations memo: prove SLA, economics, utilization, and sustainability at production scale. |
 
-Primary concept:
-- track selection, lab ritual, prediction discipline, ledger identity.
+Mechanics:
 
-Minimum classroom demo:
-- show all four track cards, run the same-model comparison, and save one track to the ledger.
+- Multi-select orientation check.
+- Track cards populated from canonical profiles plus local orientation story
+  fields.
+- Table-like feedback for correct, missing, and wrong selections.
+- Track-specific consequence callout.
 
-Completion path:
-- choose one canonical track, inspect constraint portrait, complete same-model comparison, save bottleneck hypothesis.
+Evidence and ledger:
 
-## Instructor Assignment Modes
+- Evidence: selected track-change fields, correctness feedback, inspected cards.
+- Ledger field: `track_change_selections`.
+- Downstream use: later labs read `track_id`, hardware refs, metrics, guardrails,
+  dominant constraints, expected failure mode, and report frame.
 
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
+Depth gate:
 
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
+- Activity count: 6+.
+- Has prediction: yes.
+- Has manipulation: yes, inspect/compare cards and revise checkbox choices.
+- Has failure/boundary: yes, failure modes differ by operating envelope.
+- Has source connection: yes.
+- Track-specific consequence: yes for all four tracks.
 
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
+### Part C: Concept Module - Labs Repeat Prediction, Manipulation, Evidence, Decision
 
-## Expected Track Outcomes
+- Chapter claim: ML systems are maintained through lifecycle loops, monitoring,
+  and evidence rather than one-time deployment.
+- Reading connection: ML system lifecycle, fallacies and pitfalls.
+- Student prior: "Interactive labs are mainly sliders and charts."
+- Productive failure: The student chooses to tune first or download a report
+  before decisions, then feedback reinforces the workflow order.
+- Track lens: selected later; Part C shows the common ritual.
 
-| Track | Expected outcome |
-|---|---|
-| iPhone | Recognizes Mobile ML as a privacy/battery/thermal system rather than just a smaller cloud model. |
-| Oura Ring | Recognizes TinyML/wearable ML as a memory, battery, sampling, and OTA-constrained system. |
-| RoboTaxi | Recognizes Edge AI as local, safety-critical, p99/reliability-constrained inference. |
-| Cloud Fleet | Recognizes Cloud/Fleet as a throughput, cost, utilization, carbon, and operations system. |
+Storyline beats:
 
-## Common Misconceptions
+1. Scenario: a later lab opens with a stakeholder case and asks the student to
+   diagnose a failure.
+2. Prediction: choose the repeated workflow order.
+3. Manipulation: move a simple orientation slider that changes evidence strength
+   and decision readiness without simulating advanced physics.
+4. Evidence: live preview and component tour show which notebook elements record
+   priors, change evidence, reveal optional details, and support reports.
+5. Consequence: tuning without a case or report without evidence produces an
+   indefensible memo.
+6. Source/math peek: optional details preview explains how later labs attach
+   formulas, definitions, or source claims.
+7. Checkpoint: students must identify case -> prediction -> manipulation ->
+   evidence -> decision -> report as the repeated order.
 
-- Tracks are cosmetic labels.
-- The same model has the same feasibility everywhere.
-- Cloud is always the default best answer.
-- A student can switch tracks casually without changing later reports.
+Mechanics:
 
-## Data And Solver Contracts
+- Structured radio workflow check.
+- `mo.ui.tabs` component tour.
+- Simple slider with live qualitative status.
+- Optional detail accordion.
+- Completion banner naming the repeated loop.
 
-Needed inputs:
-- `track_id`
-- `hardware_ref`
-- `model_ref`
-- `constraint_summary`
-- `scenario_id`
+Evidence and ledger:
 
-Needed outputs:
-- `selected_track_profile`
-- `constraint_portrait`
-- `feasibility_matrix`
-- `initial_bottleneck_hypothesis`
+- Evidence: workflow answer and correctness; live slider status is visible but
+  not an advanced measurement.
+- Ledger field: `lab_workflow_answer`, `lab_workflow_correct`.
+- Downstream use: prepares students for later prediction locks and evidence
+  tables.
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+Depth gate:
 
-## Single Source Of Truth Requirements
+- Activity count: 6+.
+- Has prediction: yes.
+- Has manipulation: yes, live slider in the component tour.
+- Has failure/boundary: yes, workflow order fails if report precedes evidence.
+- Has source connection: yes.
+- Track-specific consequence: deferred to Part D.
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+### Part D: Concept Module - Ledger Continuity Makes Decisions Carry Forward
 
-## Accessibility And Fallback Requirements
+- Chapter claim: ML systems are lifecycle objects; deployment decisions must be
+  recorded so future evaluation, monitoring, and redesign can reuse them.
+- Reading connection: ML system lifecycle, deployment shapes lifecycle, summary
+  takeaways.
+- Student prior: "A report is just the end of the lab."
+- Productive failure: The student may treat the track choice as a page state;
+  the notebook shows it becomes a ledger entry future labs read.
+- Track lens: selected track.
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+Storyline beats:
 
-## Rubric Sketch
+1. Scenario: a future lab needs a default operating envelope before it can pick
+   scenario thresholds.
+2. Prediction: the selected track implies a first bottleneck and stakeholder
+   evidence standard.
+3. Manipulation: choose a canonical track and write a brief decision rationale.
+4. Evidence: track context, stakeholder message, course arc, and ledger HUD show
+   what was saved.
+5. Consequence: changing tracks later changes prior ledger context and report
+   continuity.
+6. Source/math peek: source trace records hardware and system refs from MLSysIM
+   or canonical lab metadata.
+7. Checkpoint: the report unlocks only after orientation checks and track
+   selection complete.
 
-- Track choice is saved and justified.
-- Student can explain why the track changes constraints.
-- Prediction is made before reveal.
-- Ledger fields are complete.
+Mechanics:
 
-## Continuous Improvement Notes
+- Canonical track radio selector.
+- DecisionLog text area for rationale.
+- Track context and arc cards.
+- Ledger save and HUD.
+- Report export panel.
 
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+Evidence and ledger:
+
+- Evidence: selected track profile, hardware ref, system ref, dominant
+  constraints, stakeholder quote, first bottleneck, rationale, report snapshot.
+- Ledger fields: existing `track_id`, `track_label`, `track_category`,
+  `hardware_ref`, `system_ref`, `primary_metrics`, `guardrail_metrics`,
+  `dominant_constraints`, plus Lab 00 continuity fields for likely failure,
+  report frame, first bottleneck, and rationale.
+- Downstream use: Lab 01 and beyond can default to the selected track and frame
+  future reports around the saved operating envelope.
+
+Depth gate:
+
+- Activity count: 6+.
+- Has prediction: yes, first bottleneck and report frame are made explicit.
+- Has manipulation: yes, track choice and rationale.
+- Has failure/boundary: yes, selected likely failure mode.
+- Has source connection: yes, hardware/system refs and report source trace.
+- Track-specific consequence: yes.
+
+### Synthesis: The Selected Track Shapes Amount-System Reasoning
+
+- Chapter invariant restated: MLSys reasoning is amount-system reasoning under
+  an operating envelope. Every future quantity has a different meaning depending
+  on the selected track.
+- Student output: explain which track was chosen, what constraint will keep
+  returning, why notebook success is not deployment success, and how the later
+  workflow produces evidence.
+- Report output: a local orientation memo with track, scenario, predictions,
+  evidence summary, final decision, takeaways, residual risk, and source trace.
+- Ledger output: durable track identity and Lab 00 completion context.
+
+## Mechanics Plan
+
+| Need | Mechanic | Why it fits Lab 00 |
+|---|---|---|
+| Productive failure | Radio checks for lab purpose and workflow | Students commit before seeing feedback without advanced computation. |
+| Context transfer | Four canonical track cards | Same course invariant appears under four operating envelopes. |
+| Track specificity | Local orientation story map plus canonical track profiles | Keeps stakeholder, constraints, failure, and report frame distinct. |
+| Manipulation | Guided checkbox set and simple live slider | Students revise choices and see evidence status change without physics instruments. |
+| Evidence | Feedback table, track cards, report preview, HUD | Evidence is textual and structured because Lab 00 is orientation. |
+| Source trace | Accordion/source language and report source trace | Connects chapter claims and registry refs without exposing shared internals. |
+| Ledger continuity | `DesignLedger.save` plus HUD and report export | Makes the selected envelope available to future labs. |
+
+## Evidence Plan
+
+Student-visible evidence:
+
+- Correctness feedback for the goal of MLSys labs.
+- Correctness feedback for which track fields should change.
+- Track cards with stakeholder, metrics, guardrails, constraints, failure mode,
+  and report frame.
+- Workflow check feedback.
+- Live orientation evidence preview in the interface tour.
+- Track-specific stakeholder message and course arc after selection.
+- Downloadable report and ledger HUD.
+
+Ledger/report evidence:
+
+- Selected track and canonical refs.
+- Orientation predictions and correctness.
+- Track-specific fields selected by the student.
+- Recurring workflow answer and correctness.
+- First bottleneck / likely failure mode for the chosen operating envelope.
+- Rationale from the decision log when provided.
+- Source trace for track id, hardware ref, system ref, profile source policy, and
+  report builder.
+
+## Implementation Risks
+
+- Shared registry limitation: `TrackProfile` does not currently include explicit
+  failure mode or report frame fields. Mitigation: keep a Lab 00-local helper
+  with `v1_00_` prefix and do not edit shared schemas.
+- Orientation depth vs. overload: adding too many technical claims would turn
+  Lab 00 into Lab 01. Mitigation: use guided choices, cards, preview states, and
+  report/ledger continuity rather than physics solvers.
+- Parallel worker risk: other workers may edit other labs. Mitigation: edit only
+  `labs/vol1/lab_00_introduction.py` and this plan.
+- WASM behavior risk: preserve existing bootstrap and ledger save shape.
+- Report contract risk: keep `build_lab_report` schema keywords intact.
+
+## Depth Audit
+
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability | Pass? |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Part A | 3 | 3 | 2 | 2 | 2 | 2 | Yes |
+| Part B | 3 | 3 | 3 | 3 | 3 | 2 | Yes |
+| Part C | 3 | 3 | 2 | 3 | 2 | 2 | Yes |
+| Part D | 3 | 3 | 3 | 3 | 3 | 3 | Yes |
+| Synthesis | 3 | 3 | 3 | 3 | 3 | 3 | Yes |
+
+Rubric notes:
+
+- No dimension is below 2.
+- At least three dimensions score 3 in Parts B, D, and Synthesis.
+- Reversible failure state is conceptual in Lab 00: wrong workflow or track-field
+  assumptions can be corrected before the report unlocks. Advanced physical
+  failure states begin in later labs.
+- Synthesis ties all modules back to the invariant that deployed behavior is
+  governed by the operating envelope.

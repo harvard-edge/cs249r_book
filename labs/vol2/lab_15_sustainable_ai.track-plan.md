@@ -1,172 +1,256 @@
 # V2-15 Track Plan: The Carbon Budget
 
-## Purpose
+## Chapter Invariant
 
-This lab teaches sustainability: operational energy, carbon geography, embodied carbon, lifecycle analysis, placement, time shifting, utilization, rebound effects, and carbon-aware policy.
+Sustainable AI is an amount system: a fleet is valid only when energy, carbon
+intensity, utilization, embodied carbon, quality, latency, cost, reliability,
+and governance all fit inside the operating envelope.
 
-## Shared Pedagogy
+The lab should make students stop treating sustainability as a reporting
+afterthought. They must measure an energy/carbon stack, find the binding
+sustainability amount, then choose a carbon-aware policy that does not break
+service guardrails.
 
-- Students predict whether efficiency or clean energy alone solves the carbon problem.
-- They compare operational and lifecycle carbon.
-- They choose carbon-aware scheduling, placement, compression, caps, or demand policy.
+## Reading Map
 
-## Lab Flow
+| Lab part | Chapter source | Chapter claim used |
+|---|---|---|
+| Opening | `The Energy Ceiling` | Power, cooling, water, carbon, and hardware lifetime are hard design constraints, not public-relations labels. |
+| Part A | `Carbon footprint analysis`, `Lifecycle carbon estimation` | Workload carbon is energy times grid intensity, with facility PUE and embodied carbon included in the lifecycle boundary. |
+| Part B | `Geographic and temporal optimization`, `Facility-level power metrics` | Utilization and placement change useful energy per job, while region and time change carbon intensity. |
+| Part C | `Why optimization techniques save energy`, `Case study: Google's framework`, `Engineering guidelines` | Mitigation works only when it changes the dominant term and survives quality, latency, cost, reliability, and governance checks. |
+| Part D | `Policy, Regulation, and the Path Forward`, `Fallacies and Pitfalls` | Carbon-aware policy changes the objective function; efficiency alone can be defeated by rebound or lifecycle omissions. |
+| Synthesis | `Summary` | A sustainable architecture accounts for training, serving, embodied carbon, grid mix, hardware lifetime, and demand growth together. |
 
-### Opening - Sustainability Brief
+## Concept Inventory
 
-Common narrative:
-- Energy and carbon are systems properties, not just hardware properties.
-- The selected track changes the dominant sustainability term.
+Accepted concepts:
 
-Track realization:
-- iPhone: battery energy and device fleet scale matter; privacy can prevent centralization.
-- Oura Ring: tiny per-device energy matters because always-on operation and fleet scale accumulate.
-- RoboTaxi: vehicle compute power and fleet operation matter, but safety constraints limit savings.
-- Cloud Fleet: datacenter energy, grid carbon, utilization, and embodied carbon dominate.
+- Energy is a physical amount measured in joules or kWh; carbon is energy
+  multiplied by grid intensity and facility overhead.
+- PUE is necessary but insufficient because it omits grid carbon intensity,
+  embodied carbon, water, and workload-level utilization.
+- Utilization has two sides: low utilization wastes idle infrastructure, while
+  excessive utilization can break p99 latency, freshness, or reliability.
+- Embodied and operational carbon can trade places as the dominant lifecycle
+  term depending on grid mix, hardware lifetime, fleet size, and workload duty
+  cycle.
+- Mitigation strategies are not interchangeable. Model efficiency, scheduling,
+  utilization consolidation, hardware lifetime, and demand governance each move
+  different amounts and can create different regressions.
+- Carbon-aware policy is a guardrail bundle, not a green preference.
 
-### Part A - Energy/Carbon Measurement
+Rejected or synthesis-only concepts:
 
-Common pattern:
-- Stack operational energy and carbon for workload, hardware, utilization, and region.
+- Detailed CMOS derivations beyond the power proportionality needed for source
+  trace. The lab focuses on system-level amounts rather than circuit design.
+- Full water-usage accounting. WUE is named as a risk, but the student-facing
+  simulator keeps the quantitative model to energy, carbon, utilization, and
+  embodied carbon.
+- Regulatory taxonomy depth. Policy appears as the final objective function and
+  governance gate, not a compliance survey.
+- Offsets. They are rejected as a policy alternative in narrative, but not made
+  a quantitative candidate because the chapter's preferred action is direct
+  reduction.
 
-Track realization:
-- iPhone computes per-session and fleet battery/energy implications.
-- Oura Ring computes duty-cycle energy and battery-life carbon proxy.
-- RoboTaxi computes vehicle-local compute energy over operating hours.
-- Cloud Fleet computes datacenter energy and carbon by region/PUE.
+## Track Plan
 
-### Part B - Placement/Lifecycle Frontier
+Tracks keep the same concept sequence but change persona, constraints, binding
+amount, failure mode, evidence emphasis, and memo framing.
 
-Common pattern:
-- Compare geography, time shifting, utilization, embodied carbon, latency, and reliability.
+| Track | Stakeholder | Sustainability lens | Likely binding amount | Failure mode | Memo framing |
+|---|---|---|---|---|---|
+| iPhone | Mobile product engineer | Device battery, thermal headroom, local/cloud split, privacy-safe measurement | device energy or embodied fleet carbon | battery/thermal budget miss or cloud offload privacy risk | carbon-aware mobile feature memo with battery and privacy guardrails |
+| Oura Ring | Wearable firmware engineer | Tiny duty cycle, radio/sync cadence, battery replacement pressure, manufacturing share | battery duty-cycle energy or embodied fleet carbon | battery-life miss, sampling cadence miss, or sync policy failure | wearable sustainability memo with sensing quality and user-comfort guardrails |
+| RoboTaxi | Autonomous vehicle platform engineer | Vehicle-local safety compute, noncritical deferral, fleet operating hours, safety reliability | operational power under safety guardrails | p99/safety margin miss if compute is deferred too aggressively | safety-critical carbon memo with rejected deferral/offload alternative |
+| Cloud Fleet | Fleet service owner | Datacenter energy, PUE, utilization, region carbon intensity, carbon price, rebound | operational carbon intensity and utilization | carbon budget miss, p99 SLO breach, or rebound through uncapped demand | carbon-aware fleet operating policy with cost/SLA/quality guardrails |
 
-Track realization:
-- iPhone compares local inference versus cloud offload.
-- Oura Ring compares local tiny inference versus phone/cloud handoff.
-- RoboTaxi compares local safety compute versus cloud/fleet processing for noncritical tasks.
-- Cloud Fleet compares regions, utilization, hardware refresh, and carbon-aware scheduling.
+## Concept Modules
 
-### Part C - Carbon-Aware Policy
+### Part A: Concept Module - Carbon Is An Amount Stack
 
-Common pattern:
-- Student chooses policy and accepted trade-off.
+Chapter claim:
+- Sustainable AI starts with workload-level accounting: operational energy,
+  PUE, grid intensity, and embodied carbon are measured before optimization.
 
-Track realization:
-- iPhone policy balances battery, privacy, and offload.
-- Oura Ring policy balances battery life and update/sync cadence.
-- RoboTaxi policy balances safety latency and noncritical workload deferral.
-- Cloud Fleet policy balances carbon, cost, latency, and demand rebound.
+Student prior:
+- "The greenest option is whichever uses less electricity per inference."
 
-## Implementation Requirements
+Activity beats:
+1. Scenario: the selected track stakeholder must approve a workload before
+   expansion.
+2. Prediction: choose which amount will bind first: device/facility energy,
+   carbon intensity, embodied carbon, or service guardrail.
+3. Manipulation: adjust workload scale and utilization assumptions.
+4. Evidence: inspect a stacked operational/embodied carbon chart and exact
+   table.
+5. Consequence: a reversible budget banner names the binding amount and the
+   first recovery lever.
+6. Math Peek: `facility_energy = IT_energy x PUE` and
+   `operational_carbon = facility_energy x grid_intensity`.
+7. Checkpoint: record the binding sustainability amount for downstream policy.
 
-- Track variants need energy unit and carbon-relevant scenario.
-- Device energy values must come from hardware/profile data or sourced estimates.
-- Cloud Fleet needs grid-region provenance.
+Ledger fields:
+- `partA_binding_amount`
+- `partA_operational_kg`
+- `partA_embodied_kg`
+- `partA_energy_kwh`
 
-## Ledger And Report
+### Part B: Concept Module - Placement And Utilization Change The Carbon Bill
 
-Save:
-- predicted dominant carbon/energy term
-- selected carbon policy
-- operational/lifecycle result
-- trade-off accepted
-- rebound or hidden-cost risk
+Chapter claim:
+- Region and time can change carbon emissions by order-of-magnitude factors,
+  but high utilization and deferred scheduling can break service guardrails.
 
-Report target:
-- A sustainability policy memo for the selected track.
+Student prior:
+- "Higher utilization and cleaner regions always improve sustainability."
 
-## Detailed Planning Addendum
+Activity beats:
+1. Scenario: operations asks whether to consolidate work, defer it to a clean
+   window, or move it to a cleaner region.
+2. Prediction: identify which amount will become limiting when utilization and
+   placement are changed.
+3. Manipulation: choose region, scheduling policy, and utilization target.
+4. Evidence: compare region matrix, carbon bar chart, p99/freshness guardrail,
+   and exact numbers.
+5. Consequence: a carbon-budget or service-level failure appears and can be
+   recovered by moving controls.
+6. Math Peek: useful-energy overhead scales with utilization and
+   `carbon = kWh x gCO2/kWh`.
+7. Checkpoint: choose whether placement, schedule, or utilization is the next
+   lever.
 
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
+Ledger fields:
+- `partB_region`
+- `partB_schedule`
+- `partB_utilization`
+- `partB_carbon_kg`
+- `partB_service_ok`
 
-### Planning Focus
+### Part C: Concept Module - Mitigation Must Preserve Guardrails
 
-Primary concept:
-- energy, carbon, lifecycle, placement, time shifting, and rebound policy.
+Chapter claim:
+- The 4 Ms and engineering guidelines reduce different terms; a mitigation is
+  sustainable only if quality, latency, cost, reliability, and governance still
+  pass.
 
-Minimum classroom demo:
-- compare Cloud Fleet regional carbon with iPhone/Oura battery-scale energy framing.
+Student prior:
+- "Efficiency is always the best mitigation."
 
-Completion path:
-- predict dominant carbon/energy term, inspect lifecycle/placement frontier, choose carbon-aware policy.
+Activity beats:
+1. Scenario: a review board asks for one mitigation strategy, not a wish list.
+2. Prediction: identify the guardrail most likely to reject an aggressive
+   mitigation.
+3. Manipulation: select mitigation strategy, intensity, and whether governance
+   review is attached.
+4. Evidence: inspect strategy table and selected-strategy guardrail badges.
+5. Consequence: selected mitigation can fail quality, latency, cost,
+   reliability, governance, or carbon.
+6. Math Peek: mitigation changes multipliers on energy, carbon, embodied
+   carbon, and service metrics, then applies a conjunction predicate.
+7. Checkpoint: choose the mitigation and rejected alternative to carry forward.
 
-## Instructor Assignment Modes
+Ledger fields:
+- `partC_strategy`
+- `partC_binding_guardrail`
+- `partC_quality_pct`
+- `partC_latency_ms`
+- `partC_cost`
+- `partC_reliability_pct`
 
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
+### Part D: Concept Module - Carbon-Aware Policy Is A Guardrail Bundle
 
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
+Chapter claim:
+- Policy, carbon pricing, reporting, and demand governance change the
+  optimization objective; efficiency without usage governance can rebound.
 
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
+Student prior:
+- "Pick the lowest-carbon point and declare the system sustainable."
 
-## Expected Track Outcomes
+Activity beats:
+1. Scenario: launch review requires one policy, a rejected alternative, and a
+   responsibility handoff.
+2. Prediction: choose which policy will pass all guardrails.
+3. Manipulation: select a policy and carbon price.
+4. Evidence: inspect a launchability table and selected-policy summary.
+5. Consequence: a nonlaunchable policy names failed guardrails and the safer
+   alternative.
+6. Math Peek: launchability is a conjunction over carbon, quality, latency,
+   cost, reliability, and governance.
+7. Checkpoint: save policy, binding amount, rejected alternative, residual
+   risk, and V2-16 implication.
 
-| Track | Expected outcome |
-|---|---|
-| iPhone | Balances local battery energy, privacy, and offload carbon/latency. |
-| Oura Ring | Balances always-on duty cycle, battery life, and sync/update cadence. |
-| RoboTaxi | Balances local safety compute with noncritical workload deferral and fleet operations. |
-| Cloud Fleet | Balances region, PUE, utilization, embodied carbon, cost, and SLA. |
+Ledger fields:
+- `selected_policy`
+- `binding_amount`
+- `rejected_alternative`
+- `residual_risk`
+- `v2_16_responsible_ai_implication`
 
-## Common Misconceptions
+## Synthesis
 
-- Efficiency always lowers total energy.
-- Green energy means zero carbon.
-- Embodied carbon is negligible.
-- Carbon policy is independent of latency/reliability.
+Students export a carbon-aware engineering memo with:
 
-## Data And Solver Contracts
+1. Selected track and scenario.
+2. Binding sustainability amount from Part A.
+3. Region, utilization, and schedule evidence from Part B.
+4. Mitigation selected in Part C and guardrail evidence.
+5. Final policy from Part D, rejected alternative, residual risk, and V2-16
+   responsible-AI implication.
 
-Needed inputs:
-- `track_id`
-- `energy_per_workload`
-- `utilization`
-- `region`
-- `pue`
-- `embodied_carbon`
-- `demand_elasticity`
+## Mechanics Plan
 
-Needed outputs:
-- `energy_carbon_stack`
-- `placement_frontier`
-- `lifecycle_result`
-- `carbon_policy`
+| Need | Mechanic | Evidence |
+|---|---|---|
+| Commit prior | `mo.ui.radio` prediction in each part | Prediction-vs-actual reveal |
+| Boundary finding | sliders for workload, utilization, mitigation intensity, carbon price | Failure/recovery callout with value, limit, and mitigation |
+| Placement comparison | region dropdown plus region matrix | Carbon intensity and PUE table |
+| Guardrail conjunction | strategy/policy tables with pass/fail labels | Named failed guardrails |
+| Source trace | `source_trace` and Math Peek accordions | Formula, registry, and chapter source map |
+| Synthesis | `DesignLedger.save`, `build_lab_report`, `report_export_panel` | Downloadable memo and JSON snapshot |
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+## Evidence Plan
 
-## Single Source Of Truth Requirements
+Every part produces exact table values in addition to charts:
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+- Part A: operational kWh, operational kg CO2e, embodied kg CO2e, lifecycle kg
+  CO2e, budget ratios, binding amount.
+- Part B: chosen region, grid intensity, PUE, utilization, schedule delay, p99
+  or freshness, carbon, service status.
+- Part C: strategy-level carbon, quality, latency, cost, reliability,
+  governance status, binding guardrail.
+- Part D: policy launchability, failed guardrails, selected policy, rejected
+  alternative, residual risk.
 
-## Accessibility And Fallback Requirements
+## Implementation Notes
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+- Use existing track selector, canonical track profiles, generic
+  `v2_15_carbon_budget` variant, `DesignLedger`, `build_lab_report`,
+  `report_export_panel`, `track_context`, `track_arc_context`, and
+  `source_trace`.
+- Add notebook-local helpers only, all prefixed `v2_15_`.
+- Do not modify shared helpers or tests in this wave.
+- Hardware power, battery, embodied H100 carbon, model refs, grid carbon
+  intensity, and PUE should come from MLSysIM where available. Track-specific
+  fleet sizes, local embodied estimates for non-H100 devices, region electricity
+  prices, and service budgets are notebook-local teaching assumptions and must
+  be exposed in the source trace.
 
-## Rubric Sketch
+## Depth Audit
 
-- Operational and lifecycle terms are distinguished.
-- Policy includes trade-off.
-- Rebound/hidden cost is named.
-- Assumptions are sourced.
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Part A | 3 | 3 | 3 | 3 | 3 | 2 | Pass |
+| Part B | 3 | 3 | 3 | 3 | 3 | 2 | Pass |
+| Part C | 3 | 3 | 3 | 3 | 3 | 2 | Pass |
+| Part D | 3 | 3 | 3 | 3 | 3 | 2 | Pass |
+| Synthesis | 3 | 3 | 3 | 2 | 3 | 2 | Pass |
 
-## Continuous Improvement Notes
-
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+Acceptance notes:
+- Each part has at least five student-facing beats.
+- Part B and Part D include reversible failure states.
+- Track differences change persona, assumptions, guardrails, failure, and memo
+  framing.
+- The main residual risk is that a reusable sustainability solver does not yet
+  exist in `mlsysbook_labs`; notebook-local helpers should be promoted only
+  after the wave stabilizes the API shape.

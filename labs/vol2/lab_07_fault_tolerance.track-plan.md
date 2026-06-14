@@ -1,173 +1,299 @@
 # V2-07 Track Plan: When Failure Is Routine
 
-## Purpose
+## Chapter Invariant
 
-This lab teaches failure probability, MTBF, fleet size, job duration, checkpointing, recovery overhead, retries, replication, and serving reliability.
+At fleet scale, failures become routine; MTBF, checkpoint interval, lost work,
+recovery time, and redundancy are design amounts rather than after-the-fact
+incident notes.
 
-## Shared Pedagogy
+The lab uses one shared Part A/B/C/D concept sequence for every track. Tracks do
+not introduce different concepts. The selected track changes persona,
+constraints, thresholds, evidence emphasis, failure mode, and memo framing.
 
-- Students predict probability of clean completion or uninterrupted service.
-- They sweep fleet size, job duration, MTBF, checkpoint interval, and recovery policy.
-- They choose a resilience policy and name uncovered failures.
+## Reading Map
 
-## Lab Flow
+| Lab module | Chapter anchor | Claim or formula used |
+|---|---|---|
+| Opening | Purpose and Failure Analysis at Scale | Scale transforms component failure from rare event to routine fleet condition. |
+| Part A | The mathematics of inevitable failure | `R_system(t) = exp(-N lambda t)` and `MTBF_system = MTBF_component / N`. |
+| Part B | The Young-Daly law and Checkpoint interval from failure analysis | `tau_opt = sqrt(2 * T_write * MTBF_system)`; too-frequent and too-rare checkpoints both waste work. |
+| Part C | Checkpointing, Recovery procedures, Warm restart vs cold restart | Lost work, recovery time, storage history, and write bandwidth trade against one another. |
+| Part D | Serving fault tolerance, Redundancy and replication, Graceful degradation | Replication improves availability only when cost, failover latency, and guardrails remain feasible. |
+| Synthesis | Summary and From resilience to resource management | Checkpointing, elasticity, and redundancy create the reliability plan that orchestration must schedule in V2-08. |
 
-### Opening - Failure Budget Brief
+## Concept Inventory
 
-Common narrative:
-- At scale, rare failures become routine.
-- The selected track changes what counts as failure and recovery.
+Accepted concepts:
 
-Track realization:
-- iPhone: failures are app crashes, OS/device variability, battery, and rollout regressions.
-- Oura Ring: failures are battery depletion, sensor dropout, firmware rollback, and sync gaps.
-- RoboTaxi: failures are safety-critical perception, sensor degradation, and vehicle downtime.
-- Cloud Fleet: failures are accelerator/node/job/service failures and checkpoint storms.
+- Fleet-level MTBF collapses as independent components are added.
+- Clean-completion probability is an amount produced by fleet size, component
+  MTBF, and mission duration.
+- Checkpoint interval has an optimum, not a maximum or minimum.
+- Checkpoint policy must budget save overhead, expected rework, and restart
+  overhead separately.
+- Recovery policy trades state history, write bandwidth, storage footprint,
+  recovery time, and failure coverage.
+- Redundancy helps only when recovery objectives, cost budgets, performance
+  budgets, and guardrail metrics all pass together.
+- The synthesis memo must name the binding failure amount and reject a tempting
+  alternative.
 
-### Part A - Failure Exposure
+Rejected or deferred concepts:
 
-Common pattern:
-- Sweep device/fleet/job size and duration.
-- Show probability of clean completion or failure-free operation.
+- Full hardware fault taxonomy: used as failure-mode vocabulary, not a separate
+  activity.
+- Detailed SDC detection algorithms: mentioned in policy coverage and Math Peek,
+  deferred to deeper reliability/debugging work.
+- Full distributed checkpoint protocols such as two-phase commit: referenced in
+  source notes, not simulated.
+- Fault injection tooling details: appears as validation requirement, not a
+  separate tool tutorial.
+- Complete serving architecture design: narrowed to redundancy, state loss, and
+  graceful degradation guardrails.
 
-Track realization:
-- iPhone sweeps deployed device population and update duration.
-- Oura Ring sweeps wearable fleet, battery state, and firmware rollout.
-- RoboTaxi sweeps vehicle count, hours driven, and sensor/compute failures.
-- Cloud Fleet sweeps accelerators, training duration, and service replicas.
+## Concept Modules
 
-### Part B - Recovery Frontier
+### Part A: Concept Module - Aggregate MTBF Falls as Fleet Size Grows
 
-Common pattern:
-- Compare checkpointing, retries, replication, fallback, and rollback.
-- Plot useful work versus recovery overhead.
+Chapter claim:
+- Individual component reliability does not compose by intuition. For independent
+  components, aggregate failure rate grows with fleet size, so
+  `MTBF_system = MTBF_component / N`.
 
-Track realization:
-- iPhone uses staged rollout, rollback, and local fallback.
-- Oura Ring uses firmware rollback, sync retry, and safe-mode inference.
-- RoboTaxi uses redundant sensors/compute, degraded mode, and fleet halt rules.
-- Cloud Fleet uses checkpoint interval, async checkpointing, replication, and retries.
+Student prior:
+- "A reliable component stays reliable when deployed in a large fleet."
 
-### Part C - Resilience Policy
+Track lens:
+- iPhone: mobile product engineer watches a staged rollout across many phones.
+- Oura Ring: wearable firmware engineer watches sensing or sync gaps across a
+  tiny battery fleet.
+- RoboTaxi: safety platform engineer watches vehicle-hours accumulate across a
+  live fleet.
+- Cloud Fleet: SRE watches accelerator-hours accumulate during a training or
+  service window.
 
-Common pattern:
-- Student records covered and uncovered failures.
+Activity beats:
+1. Scenario: a named track stakeholder must decide whether the current fleet can
+   complete a mission window without a visible failure.
+2. Prediction: structured radio asks how MTBF changes when fleet size grows 10x.
+3. Manipulation: fleet-size and duration sliders change aggregate exposure.
+4. Evidence: log-scale MTBF curve plus exact table show current MTBF, expected
+   failures, and clean-run probability.
+5. Consequence: failure banner appears when expected failures exceed one or clean
+   probability misses the track target.
+6. Math Peek/source model: exponential reliability and inverse MTBF scaling.
+7. Checkpoint: student chooses the planning amount that should drive recovery
+   design.
 
-Track realization:
-- iPhone policy protects user experience and data loss.
-- Oura Ring policy protects battery/sensing continuity.
-- RoboTaxi policy protects safety and controlled degradation.
-- Cloud Fleet policy protects job/service availability and cost.
+Evidence saved:
+- fleet size, duration, component MTBF, system MTBF, expected failures,
+  clean-run probability, binding exposure amount.
 
-## Implementation Requirements
+### Part B: Concept Module - Checkpoint Interval Has an Optimum
 
-- Track variants need failure taxonomy and MTBF/incident assumptions.
-- Recovery result should distinguish retry, rollback, checkpoint, replication, and fallback.
-- Reports should require uncovered failure mode.
+Chapter claim:
+- The Young-Daly interval balances checkpoint write overhead against expected
+  lost work. Making checkpoints infinitely frequent or rare both loses capacity.
 
-## Ledger And Report
+Student prior:
+- "More checkpointing is always safer" or "the longest possible interval
+  maximizes useful work."
 
-Save:
-- predicted failure exposure
-- selected recovery policy
-- overhead/cost
-- covered failures
-- uncovered failures
+Track lens:
+- All tracks use the same Young-Daly mechanism. Track defaults change checkpoint
+  write time, state size, overhead threshold, and what "wasted work" means.
 
-Report target:
-- A resilience playbook for the selected track.
+Activity beats:
+1. Scenario: the stakeholder must set a checkpoint/rollback cadence before
+   production failure pressure rises.
+2. Prediction: structured radio asks which interval policy is safest.
+3. Manipulation: checkpoint write time and chosen interval sliders expose the
+   U-shaped tax.
+4. Evidence: Young-Daly curve decomposes save overhead, rework overhead, and
+   total waste.
+5. Consequence: warning banner names whether the current interval is too
+   frequent, too rare, or near optimum.
+6. Math Peek/source model: `tau_opt = sqrt(2 * T_write * MTBF_system)` and
+   `waste = T_write/tau + tau/(2*MTBF)`.
+7. Checkpoint: student chooses the operational fix if the checkpoint tax exceeds
+   the track threshold.
 
-## Detailed Planning Addendum
+Evidence saved:
+- write time, chosen interval, optimal interval, total waste percent, dominant
+  side of the U-curve.
 
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
+### Part C: Concept Module - Lost Work and Recovery Policy Trade Storage, Write Bandwidth, Time, and Resilience
 
-### Planning Focus
+Chapter claim:
+- A recovery plan is not just "restore from checkpoint." The policy must account
+  for lost work since the last checkpoint, detection, restart, loading, warmup,
+  checkpoint history, and failure-mode coverage.
 
-Primary concept:
-- failure exposure, recovery frontier, and resilience policy.
+Student prior:
+- "Once checkpointing exists, every failure has the same recovery path."
 
-Minimum classroom demo:
-- sweep fleet size/job duration and compare vehicle fleet versus accelerator fleet exposure.
+Track lens:
+- iPhone: staged rollout rollback and local fallback must cap user-visible bad
+  sessions without excessive device or CDN storage.
+- Oura Ring: firmware rollback and safe mode must protect overnight sensing
+  while respecting flash/radio energy.
+- RoboTaxi: degraded mode and redundant state must preserve safety margin during
+  sensor or compute faults.
+- Cloud Fleet: checkpoint, warm restart, and replicated state must keep training
+  or service goodput inside RTO and storage budgets.
 
-Completion path:
-- predict failure exposure, compare recovery options, choose resilience policy and uncovered failures.
+Activity beats:
+1. Scenario: an incident arrives; the stakeholder must choose the least costly
+   recovery path that still covers the failure.
+2. Prediction: structured radio asks which amount usually dominates the failure
+   cost.
+3. Manipulation: recovery-policy, checkpoint-history, and write-bandwidth
+   controls expose storage/write/recovery trade-offs.
+4. Evidence: policy table compares lost work, recovery time, storage footprint,
+   write bandwidth, coverage, and feasibility.
+5. Consequence: boundary callout names the violated objective if storage,
+   bandwidth, or recovery objective fails.
+6. Math Peek/source model:
+   `T_failure = lost_work + T_detect + T_restart + T_load + T_warmup`; history
+   and replication change storage and coverage.
+7. Checkpoint: student chooses which failure type remains uncovered and what
+   validation drill is required.
 
-## Instructor Assignment Modes
+Evidence saved:
+- selected policy, lost-work minutes, recovery minutes, storage GB, write GB/s,
+  covered failure classes, uncovered failure class, policy feasibility.
 
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
+### Part D: Concept Module - A Fault-Tolerance Plan Must Satisfy Recovery Objective, Cost, and Performance Guardrails
 
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
+Chapter claim:
+- Redundancy and graceful degradation are only valid if they meet recovery
+  objectives without violating cost, latency/performance, quality, or safety
+  guardrails.
 
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
+Student prior:
+- "More replicas or the strongest safety path is automatically the best plan."
 
-## Expected Track Outcomes
+Track lens:
+- iPhone: responsiveness, quality, battery/thermal headroom, and staged rollback.
+- Oura Ring: signal quality, flash/radio budget, and offline safe mode.
+- RoboTaxi: safety margin, tail latency, and fail-closed degraded operation.
+- Cloud Fleet: SLA, cost, utilization, and capacity headroom.
 
-| Track | Expected outcome |
-|---|---|
-| iPhone | Uses staged rollout, rollback, and local fallback for app/model failures. |
-| Oura Ring | Uses firmware rollback, safe mode, sync retry, and battery/sensor failure handling. |
-| RoboTaxi | Uses redundancy, degraded mode, halt rules, and safety incident response. |
-| Cloud Fleet | Uses checkpointing, retries, replication, and job/service recovery. |
+Activity beats:
+1. Scenario: a design review demands one plan that passes all guardrails.
+2. Prediction: structured radio asks which guardrail most often rejects the
+   naive plan.
+3. Manipulation: plan and replica count controls let the student test best-effort,
+   graceful degradation, and redundant safety paths.
+4. Evidence: guardrail table and availability chart show recovery, cost,
+   latency/performance, quality, and guardrail pass/fail state.
+5. Consequence: red failure state appears until all guardrails pass; the binding
+   amount is named.
+6. Math Peek/source model: `A_system = 1 - (1 - A_single)^k` plus
+   `feasible = recovery_ok and cost_ok and performance_ok and guardrail_ok`.
+7. Checkpoint: student selects the final plan and rejected alternative.
 
-## Common Misconceptions
+Evidence saved:
+- final plan, replica count, availability, failover/recovery time, cost, latency,
+  quality, guardrail, binding failure amount, rejected alternative.
 
-- Rare failures stay rare at scale.
-- Retries are free.
-- Checkpointing only helps.
-- Covered failure means all failure risk is gone.
+## Synthesis: Reliability Memo
 
-## Data And Solver Contracts
+Student output:
+- A reliability memo with checkpoint/replication policy, binding failure amount,
+  rejected alternative, and V2-08 orchestration implication.
 
-Needed inputs:
+Required memo fields:
+- selected track and stakeholder
+- checkpoint interval and recovery policy
+- replication or graceful-degradation plan
+- binding failure amount from Parts A-D
+- rejected alternative and why it failed
+- validation drill
+- carry-forward orchestration implication for V2-08
+
+Ledger output:
 - `track_id`
+- `scenario_id`
 - `fleet_size`
-- `duration`
-- `mtbf`
-- `checkpoint_interval`
-- `recovery_strategy`
+- `system_mtbf_h`
+- `checkpoint_interval_min`
+- `young_daly_interval_min`
+- `checkpoint_tax_pct`
+- `recovery_policy`
+- `lost_work_min`
+- `recovery_time_min`
+- `replication_plan`
+- `replica_count`
+- `binding_failure_amount`
+- `rejected_alternative`
+- `v2_08_orchestration_implication`
 
-Needed outputs:
-- `failure_probability`
-- `recovery_frontier`
-- `useful_work`
-- `resilience_policy`
+## Track Narratives
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+| Track | Persona | Constraints | Failure mode | Evidence emphasis | Report frame |
+|---|---|---|---|---|---|
+| iPhone | Mobile product engineer | battery, thermal, responsiveness, quality, privacy | bad rollout, app crash, offline fallback miss | user-visible failure probability, rollback latency, quality guardrail | mobile reliability memo for staged rollout and local fallback |
+| Oura Ring | Wearable firmware engineer | SRAM/flash, battery, radio duty cycle, signal quality | firmware rollback, sensor dropout, sync gap | overnight sensing continuity, flash/storage footprint, recovery under radio budget | wearable safe-mode and rollback memo |
+| RoboTaxi | Autonomous vehicle platform engineer | p99/p999 latency, safety margin, sensor/compute redundancy | perception compute fault, sensor degradation, degraded-mode entry | safety margin, failover time, redundancy guardrail | safety recovery memo with fail-closed alternative |
+| Cloud Fleet | Fleet service owner | SLA, throughput, utilization, cost, capacity headroom | accelerator/node failure, checkpoint storm, replica failure | aggregate MTBF, checkpoint tax, RTO, cost/SLA pass state | SRE reliability memo for training/service fleet |
 
-## Single Source Of Truth Requirements
+## Mechanics Plan
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+| Belt | Concrete mechanics | Why used |
+|---|---|---|
+| Opening | track selector, track context, reading map, invariant card | Frames the same concept sequence through the selected track. |
+| Prediction | `mo.ui.radio` in each module | Forces prior commitment before evidence is shown. |
+| Control | fleet, duration, checkpoint write, interval, policy, history, bandwidth, plan, replicas | Manipulates the design amounts named in the invariant. |
+| Evidence | Plotly MTBF curve, Young-Daly curve, policy tables, availability/guardrail charts | Makes the decision boundary visible and auditable. |
+| Failure | callouts with explicit value, limit, unit, and mitigation | Creates reversible failures students can fix with controls. |
+| Source | Math Peek accordions and source-model text | Ties each module to chapter formulas and assumptions. |
+| Decision | checkpoint radio controls and final memo fields | Converts evidence into a track-specific decision. |
+| Ledger | `DesignLedger.save` plus report export panel | Carries reliability amounts into V2-08 orchestration. |
 
-## Accessibility And Fallback Requirements
+## Evidence and Ledger Plan
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+Every chart that drives a decision has a table fallback with exact values. Color
+is not the only pass/fail signal; callouts state the violated amount, limit,
+unit, and mitigation. The final report contains all selected values even if the
+student does not inspect the visual.
 
-## Rubric Sketch
+The binding amount is selected by severity from:
+- expected failures during the mission window
+- checkpoint tax percent
+- recovery objective miss
+- storage or write-bandwidth miss
+- cost miss
+- latency/performance miss
+- quality or guardrail miss
 
-- Exposure is quantified.
-- Recovery overhead is included.
-- Policy matches failure taxonomy.
-- Uncovered failure is explicit.
+The synthesis stores that binding amount in the Design Ledger so V2-08 can
+interpret it as a scheduling/orchestration requirement.
 
-## Continuous Improvement Notes
+## Implementation Risks
 
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+| Risk | Mitigation |
+|---|---|
+| Existing shared renderer is too generic for concept modules | Replace only this notebook with explicit local helpers; preserve bootstrap, track selector, report, and ledger patterns. |
+| Fault-tolerance solvers are not exposed as shared MLSysIM APIs for every track | Use notebook-local `v2_07_` helpers with formulas tied directly to chapter anchors and track registry defaults. |
+| Scenario thresholds are partly local because shared variant metadata is generic | Keep thresholds notebook-local, prefix helpers, and expose assumptions in Math Peek/source text. |
+| Parallel workers may edit other labs | Restrict edits to `lab_07_fault_tolerance.py` and this track plan only. |
+| Checkpointing is training-centric while tracks include devices and serving | Keep the concept sequence identical but interpret checkpoint as rollback/snapshot/state preservation for each track. |
+
+## Depth Audit
+
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Part A - Aggregate MTBF | 3 | 3 | 3 | 3 | 3 | 3 | Pass: prediction, fleet/duration manipulation, MTBF chart/table, boundary, Math Peek, checkpoint. |
+| Part B - Checkpoint optimum | 3 | 3 | 3 | 3 | 3 | 3 | Pass: prediction, write/interval manipulation, Young-Daly curve, consequence, Math Peek, checkpoint. |
+| Part C - Recovery policy | 3 | 3 | 3 | 3 | 3 | 2 | Pass: prediction, policy/history/bandwidth manipulation, policy table, failure boundary, Math Peek, checkpoint; local thresholds documented. |
+| Part D - Guardrail plan | 3 | 3 | 3 | 3 | 3 | 2 | Pass: prediction, plan/replica manipulation, availability/guardrail evidence, reversible failure, Math Peek, final plan. |
+| Synthesis - Reliability memo | 3 | 3 | 3 | 3 | 3 | 3 | Pass: memo binds evidence to invariant, rejected alternative, and V2-08 orchestration implication. |
+
+Minimum acceptance check:
+- No dimension below 2.
+- Every module includes prediction, manipulation, evidence, consequence,
+  Math Peek/source model, and checkpoint/report decision.
+- Reversible failure states appear in Parts A-D.
+- Synthesis ties checkpointing, recovery policy, and redundancy back to the
+  chapter invariant and V2-08 orchestration.

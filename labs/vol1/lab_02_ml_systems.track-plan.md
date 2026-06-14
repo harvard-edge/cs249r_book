@@ -1,173 +1,400 @@
 # V1-02 Track Plan: Physics of Deployment
 
-## Purpose
+Status: Wave 1 concept-module audit packet. This plan preserves the current
+pilot concept-module implementation and patches gaps instead of redesigning the
+lab structure.
 
-This lab teaches that deployment is constrained by physical limits: memory, compute, bandwidth, power, energy, distance, and latency. Track selection changes which physical wall appears first.
+Owned notebook: `labs/vol1/lab_02_ml_systems.py`
 
-## Shared Pedagogy
+## Chapter Invariant
 
-- Students predict the first wall before running the solver.
-- They sweep a workload knob until feasibility breaks.
-- They choose a placement or mitigation strategy based on the binding physical limit.
+ML systems are simultaneous data, algorithm, and machine systems. Changing one
+physical amount changes which constraint binds.
 
-## Lab Flow
+For this chapter, the durable lesson is that deployment is not a late packaging
+choice. Memory, compute, bandwidth, energy, power, latency, and cost form an
+operating envelope. The same model and data become a different system when that
+envelope changes.
 
-### Opening - Physical Constraint Brief
+## Reading Map
 
-Common narrative:
-- A model that seems reasonable in isolation must be deployed into a physical system.
-- The student must identify the first non-negotiable wall.
+| Lab module | Chapter anchor | Claim or formula used |
+|---|---|---|
+| Opening | `Deployment Paradigm Framework` and chapter purpose | Physical constraints determine where an ML model can run; D-A-M axes jointly determine what is possible. |
+| Part A | `Physical Constraints: Why Paradigms Exist` | Physical laws create hard feasibility boundaries; amounts have units and budgets. |
+| Part B | `Analyzing Workloads` and `The bottleneck principle` | Iron Law: `T = D / BW + O / R + L`; optimizing a non-binding term gives limited speedup. |
+| Part C | `Paradigm Selection` and quantitative trade-off analysis | Each paradigm is a distinct operating envelope, so the same workload fails differently by context. |
+| Part D | `Decision framework` and `Hybrid Architectures` | A valid deployment satisfies all constraints together and may need hybrid placement to mitigate the binding wall. |
+| Synthesis | `Summary`, `Fallacies and Pitfalls`, and Lab 03 bridge | No single paradigm solves all ML problems; the selected design and binding constraint become workflow requirements. |
 
-Track realization:
-- iPhone: sustained thermal power and battery are as important as raw NPU TOPS.
-- Oura Ring: SRAM/flash and energy per inference dominate.
-- RoboTaxi: p99 perception-to-decision latency and local reliability dominate.
-- Cloud Fleet: power, cost, memory bandwidth, and service latency dominate.
+## Concept Inventory
 
-### Part A - First Wall
+Accepted concepts:
 
-Common pattern:
-- Evaluate the current scenario against track hardware.
-- Display headroom for memory, compute, bandwidth, power, latency, and energy.
+| Concept | Module | Why accepted |
+|---|---|---|
+| Amounts have units and budgets | Part A | Students must compare actual resource demand with physical limits before expressing preference. |
+| The Iron Law decomposes latency | Part B | Students must identify whether compute, memory/bandwidth, network, or fixed overhead is worth optimizing. |
+| Context changes the binding axis | Part C | Students must see iPhone, Oura Ring, RoboTaxi, and Cloud Fleet produce different first walls. |
+| A valid design lives inside an operating envelope | Part D | Students must choose a placement plus mitigation that satisfies all constraints at once. |
+| Binding constraint carries forward | Synthesis | Lab 03 uses the selected design and first wall as workflow inputs. |
 
-Track realization:
-- iPhone first wall may be thermal or battery drain.
-- Oura Ring first wall may be SRAM, flash, or energy.
-- RoboTaxi first wall may be p99 latency or sensor-to-compute bandwidth.
-- Cloud Fleet first wall may be memory bandwidth, cost, or p99 under load.
+Rejected or deferred concepts:
 
-### Part B - Physics Curve
-
-Common pattern:
-- Sweep the expensive variable and plot threshold crossings.
-- Use the same visual grammar across tracks.
-
-Track realization:
-- iPhone sweeps frame rate, model size, or sustained inference duration.
-- Oura Ring sweeps sampling cadence, model size, or OTA payload.
-- RoboTaxi sweeps frame resolution, sensor count, or perception deadline.
-- Cloud Fleet sweeps request rate, batch size, or sequence length.
-
-### Part C - Deployment Choice
-
-Common pattern:
-- Choose local, edge, cloud, hybrid, or simplification.
-- Record the avoided wall and new risk.
-
-Track realization:
-- iPhone may stay on-device for privacy but simplify the model.
-- Oura Ring may do tiny inference locally and defer heavy analysis.
-- RoboTaxi must keep safety-critical inference local and offload noncritical tasks.
-- Cloud Fleet may shard, batch, cache, or use regional placement.
-
-## Implementation Requirements
-
-- Hardware facts must come from MLSysIM hardware registry.
-- Scenario thresholds live in track variants, not notebook constants.
-- The solver output should name the first violated wall and the mitigation candidates.
-
-## Ledger And Report
-
-Save:
-- predicted first wall
-- actual first wall
-- sweep knob and threshold value
-- placement/mitigation decision
-- residual risk
-
-Report target:
-- A physics-of-deployment memo explaining why the selected track changes the feasible system design.
-
-## Detailed Planning Addendum
-
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
-
-### Planning Focus
-
-Primary concept:
-- physical walls and placement feasibility.
-
-Minimum classroom demo:
-- sweep one workload knob and show first wall differences for Oura Ring versus RoboTaxi.
-
-Completion path:
-- predict first wall, run the physics sweep, select placement/mitigation, save first violated constraint.
-
-## Instructor Assignment Modes
-
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
-
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
-
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
-
-## Expected Track Outcomes
-
-| Track | Expected outcome |
+| Concept | Reason |
 |---|---|
-| iPhone | Likely identifies thermal power, battery, or memory as the deployment wall. |
-| Oura Ring | Likely identifies SRAM, flash, sampling energy, or OTA payload as the first wall. |
-| RoboTaxi | Likely identifies p99 deadline, sensor bandwidth, or local power/reliability as the first wall. |
-| Cloud Fleet | Likely identifies memory bandwidth, p99 under load, power/cost, or utilization as the first wall. |
+| Pareto frontier optimization | Deferred to later optimization/compression labs; this lab is about feasibility before preference. |
+| Roofline analysis | Deferred to hardware acceleration; adding roofline here would distract from deployment envelopes. |
+| P99/P999 latency histograms | Deferred to benchmarking and serving labs; V1-02 uses latency budgets and first-wall diagnosis. |
+| Detailed fleet scheduling | Deferred to Volume II; Cloud Fleet appears here as a deployment envelope, not a scheduler. |
+| Model compression recipes | Deferred to Lab 10; mitigation may mention simplification or quantization but does not teach compression mechanics. |
 
-## Common Misconceptions
+## Concept Modules
 
-- Deployment limits are software preferences.
-- Average latency is enough.
-- Distance/network can be ignored.
-- Power and energy are the same constraint.
+### Part A: Amounts Have Units And Budgets
 
-## Data And Solver Contracts
+Chapter claim: physical constraints decide which deployments are possible before
+preference or model ambition matters.
 
-Needed inputs:
-- `track_id`
-- `hardware_ref`
-- `workload_knob`
-- `placement_choice`
-- `constraint_thresholds`
+Track lens:
 
-Needed outputs:
-- `first_wall`
-- `threshold_crossing`
-- `placement_feasibility`
-- `mitigation_candidates`
+- Primary lens: selected student track.
+- Stakeholder: track-specific profile stakeholder.
+- Decision: decide whether the default placement fits the selected track's
+  memory, flash/OTA, latency, energy, power, bandwidth, and cost limits.
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+Student prior:
 
-## Single Source Of Truth Requirements
+- Expected belief: cloud, faster hardware, or preference can usually solve the
+  deployment problem.
+- Productive failure: a preferred placement is infeasible because one unitful
+  budget is already over the limit.
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+Storyline beats:
 
-## Accessibility And Fallback Requirements
+1. Scenario: stakeholder and release request are shown from the track variant.
+2. Prediction: radio locks the predicted first wall.
+3. Manipulation: workload slider plus placement selector.
+4. Evidence: headroom table with value, limit, unit, feasibility, and first wall.
+5. Consequence: reversible failure card names the violated amount and recovery
+   action when any constraint fails.
+6. Math Peek/source: `max(value_i / limit_i) <= 1` and
+   `evaluate_deployment_envelope()` / `sweep_deployment_knob()` trace.
+7. Checkpoint: saves prediction, measured wall, workload value, and placement.
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+Mechanics:
 
-## Rubric Sketch
+- Controls: `mo.ui.radio`, workload slider, placement dropdown.
+- Evidence: constraint headroom table, sweep crossing, failure card.
+- Failure state: workload or placement can push the envelope into a visible wall,
+  then recover by reducing workload or changing placement.
 
-- Prediction names a physical resource.
-- Sweep evidence supports wall identification.
-- Placement choice avoids one wall but names new risk.
-- Values are sourced from MLSysIM/profile metadata.
+Ledger output:
 
-## Continuous Improvement Notes
+- `partA_predicted_wall`
+- `partA_actual_wall`
+- `partA_workload_value`
+- `partA_placement_id`
 
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+### Part B: The Iron Law Decomposes Latency
+
+Chapter claim: end-to-end latency is the sum of data movement, computation, and
+fixed overhead; the useful optimization is the one that touches the active term.
+
+Track lens:
+
+- Primary lens: selected student track.
+- Decision: decide whether a compute upgrade or offload change actually reduces
+  total system latency.
+
+Student prior:
+
+- Expected belief: a 2x compute upgrade gives nearly 2x lower latency.
+- Productive failure: total latency barely moves because memory/bandwidth,
+  network, or fixed overhead remains binding.
+
+Storyline beats:
+
+1. Scenario: stakeholder proposes faster compute or offload.
+2. Prediction: radio locks the expected system-level speedup class.
+3. Manipulation: compute multiplier, memory/bandwidth multiplier, placement.
+4. Evidence: Plotly waterfall decomposes compute, memory/bandwidth,
+   placement/network, and overhead terms.
+5. Consequence: reveal card compares baseline and upgraded latency, actual
+   speedup, and active term.
+6. Math Peek/source: `T = D / BW + O / R + L`; source trace marks the waterfall
+   as a chapter-model approximation built from the envelope result.
+7. Checkpoint: saves predicted speedup class, actual speedup, and active term.
+
+Mechanics:
+
+- Controls: `mo.ui.radio`, two sliders, placement dropdown.
+- Evidence: latency waterfall and term ledger.
+- Failure/boundary: compute-only upgrades can fail pedagogically by leaving a
+  non-compute term binding.
+
+Ledger output:
+
+- `partB_predicted_speedup`
+- `partB_actual_speedup`
+- `partB_active_term`
+
+### Part C: Context Changes The Binding Axis
+
+Chapter claim: each deployment paradigm is a distinct operating envelope, so the
+same feature has different first walls across contexts.
+
+Track lens:
+
+- Primary lens: all four tracks compared side by side.
+- Decision: identify which track has the least normalized headroom for the same
+  normalized stress and placement strategy.
+
+Student prior:
+
+- Expected belief: the best model or placement is universal.
+- Productive failure: a strategy that survives one track fails on another
+  because the binding axis moved.
+
+Storyline beats:
+
+1. Scenario: release review compares the same feature across iPhone, Oura Ring,
+   RoboTaxi, and Cloud Fleet.
+2. Prediction: radio locks the expected tightest track.
+3. Manipulation: normalized stress slider and comparable placement strategy.
+4. Evidence: all-track envelope table plus active-track sweep plot.
+5. Consequence: reveal card names the tightest track and first walls by track.
+6. Math Peek/source: `headroom_i = (limit_i - value_i) / limit_i` with helper
+   source trace.
+7. Checkpoint: saves tightest track, first walls by track, and worst headroom by
+   track.
+
+Mechanics:
+
+- Controls: `mo.ui.radio`, stress slider, placement-strategy dropdown.
+- Evidence: comparison table, threshold plot, first-wall dictionary.
+- Boundary: active-track sweep marks the crossing where the selected track fails.
+
+Ledger output:
+
+- `partC_tightest_track`
+- `partC_first_walls_by_track`
+- `partC_worst_headroom_by_track`
+
+### Part D: A Valid Design Lives Inside An Operating Envelope
+
+Chapter claim: a shippable design must satisfy all constraints simultaneously
+and carry a mitigation for the binding wall.
+
+Track lens:
+
+- Primary lens: selected student track.
+- Decision: pick one placement and mitigation under stress, then explain the
+  residual risk.
+
+Student prior:
+
+- Expected belief: once the wall is found, choose the fastest placement.
+- Productive failure: the fastest path can still violate another constraint or
+  introduce a new operational risk.
+
+Storyline beats:
+
+1. Scenario: stakeholder asks for one shippable deployment choice.
+2. Prediction: radio locks the placement expected to survive stress.
+3. Manipulation: stress workload, design placement, mitigation selector.
+4. Evidence: placement review table and before/after mitigation table.
+5. Consequence: reveal and failure cards show whether the design is shippable
+   and name residual risk.
+6. Math Peek/source: conjunction of all constraint checks plus
+   `deployment_mitigation()` trace.
+7. Checkpoint: saves placement, binding constraint, mitigation, and residual
+   risk.
+
+Mechanics:
+
+- Controls: `mo.ui.radio`, stress slider, placement dropdown, mitigation dropdown.
+- Evidence: feasibility table before and after mitigation.
+- Failure state: stress setting can create a reversible constraint violation;
+  mitigation and placement change the review result without hiding residual risk.
+
+Ledger output:
+
+- `partD_placement_id`
+- `partD_binding_constraint`
+- `partD_mitigation`
+- `partD_recommended_mitigation`
+- `residual_risk`
+
+### Synthesis: Selected Design Carries To Lab 03
+
+Chapter invariant restated: changing a physical amount changes which constraint
+binds, and the binding constraint determines the deployment design.
+
+Student product:
+
+1. Three takeaways tied to the chapter invariant.
+2. Prediction-vs-measurement comparison from Part A.
+3. Lab 03 pointer: workflow design must expose the selected design's binding
+   constraint before release review.
+4. Local report export using `build_lab_report()` and `report_export_panel()`.
+
+Future ledger use:
+
+- Lab 03 can read `track_id`, `scenario_id`, selected placement, binding
+  constraint, mitigation, residual risk, and first-wall evidence.
+
+## Track Narratives And Required Differences
+
+All four tracks remain selectable because context shift is the point of V1-02.
+They differ in persona, constraints, thresholds, consequences, and report
+framing through `get_track_profile()` plus
+`get_lab_track_variant("v1_02_physics_of_deployment", track_id)`.
+
+| Track | Persona | Constraint emphasis | Threshold/workload | Consequence | Report framing |
+|---|---|---|---|---|---|
+| iPhone | Mobile product engineer | Thermal power, battery, on-device latency, unified memory, privacy | Sustained frame rate in FPS; 33 ms latency, 4.5 W power, 0.85 mJ energy, 512 MB memory budget | Thermal soak or battery drain forces frame-rate, quality, or local-fast-path fallback | Local UX and privacy memo: defend whether on-device, cloud, or prefilter/cloud fallback preserves responsiveness. |
+| Oura Ring | Wearable firmware engineer | SRAM, flash/OTA, duty-cycle energy, BLE/phone availability | Classification windows per minute; 0.512 MB memory, 1.2 MB flash/OTA, 0.12 mJ energy, 0.018 W power | Firmware or energy wall blocks always-on sensing unless cadence, window, or OTA payload is reduced | Firmware envelope memo: defend ring-only, phone handoff, or summary upload without breaking always-on sensing. |
+| RoboTaxi | Autonomous vehicle platform engineer | Vehicle-local p99 latency, sensor bandwidth, power, safety margin, reliability | Active sensor streams; 35 ms latency, 180 GB/s bandwidth, 60 W power, 8192 MB memory | Safety-critical loop cannot rely on cloud; latency or sensor bandwidth miss becomes a safety-case failure | Safety-path design memo: defend local, roadside assist, or fleet cloud placement while keeping control local. |
+| Cloud Fleet | Fleet service owner | SLA, memory bandwidth, utilization, cost/request, power/carbon | Requests per second per GPU; 120 ms latency, 2500 GB/s bandwidth, 650 W power, $0.040 per 1K requests | Cost/SLA/bandwidth wall forces batching, caching, regional placement, or tiering | Fleet service memo: defend central GPU, regional cache, or batch queue under SLA and cost evidence. |
+
+## Mechanics Plan
+
+Opening belt:
+
+- Track selector seeded from Design Ledger.
+- Header, learning objectives, reading connection, track context, and track arc.
+
+Prediction belt:
+
+- One structured radio prediction per concept module.
+- Evidence is gated behind the prediction value in each part.
+
+Control belt:
+
+- Part A: workload and placement.
+- Part B: compute multiplier, memory/bandwidth multiplier, placement.
+- Part C: normalized stress and comparable placement strategy.
+- Part D: stress workload, placement, mitigation.
+
+Evidence belt:
+
+- Part A: constraint headroom table and first crossing.
+- Part B: latency waterfall and term ledger.
+- Part C: all-track table plus active-track sweep.
+- Part D: placement feasibility table plus mitigation review.
+
+Failure belt:
+
+- `v1_02_failure_card()` names value, limit, unit, and recovery action.
+- Part A and Part D expose reversible failure states through workload and
+  placement controls.
+
+Source belt:
+
+- Math Peek appears in every part.
+- `source_trace()` names helper API, profile, hardware/model references, and
+  whether a calculation is a helper result or a notebook-local approximation.
+
+Decision and ledger belt:
+
+- Each part writes checkpoint fields.
+- Final HUD saves only after all four predictions are complete.
+- Report export serializes predictions, knobs, evidence, decision, residual
+  risk, and source trace.
+
+## Evidence And Ledger Plan
+
+Evidence required from the notebook:
+
+| Evidence | Current implementation |
+|---|---|
+| Prediction-vs-actual overlay | Reveal cards in Parts A-D. |
+| Boundary or failure state | Part A and Part D failure cards; Part C threshold plot. |
+| Value, limit, unit, and threshold | Constraint tables and failure cards. |
+| Chapter formula/source connection | Math Peek plus `source_trace()` per part. |
+| Design decision | Part D placement/mitigation checkpoint and synthesis. |
+| Future-lab handoff | Ledger design and report snapshot. |
+
+Ledger schema:
+
+```json
+{
+  "track_id": "...",
+  "scenario_id": "...",
+  "partA_predicted_wall": "...",
+  "partA_actual_wall": "...",
+  "partA_workload_value": 0.0,
+  "partA_placement_id": "...",
+  "partB_predicted_speedup": "...",
+  "partB_actual_speedup": 0.0,
+  "partB_active_term": "...",
+  "partC_tightest_track": "...",
+  "partC_first_walls_by_track": {},
+  "partC_worst_headroom_by_track": {},
+  "partD_placement_id": "...",
+  "partD_binding_constraint": "...",
+  "partD_mitigation": "...",
+  "partD_recommended_mitigation": "...",
+  "residual_risk": "...",
+  "completed": true
+}
+```
+
+## Notebook Depth Audit
+
+Depth-gate result after reading the current notebook:
+
+| Module | Scenario | Prediction | Manipulation | Evidence | Consequence/failure | Math/source | Checkpoint | Result |
+|---|---|---|---|---|---|---|---|---|
+| Part A | Pass | Pass | Pass | Pass | Pass: reversible envelope failure card | Pass | Pass | Meets concept-module depth gate. |
+| Part B | Pass | Pass | Pass | Pass | Pass: non-bottleneck speedup reveal | Pass | Pass | Meets concept-module depth gate. |
+| Part C | Pass | Pass | Pass | Pass | Pass: tightest-track reveal plus threshold plot | Pass | Pass | Meets concept-module depth gate; wording should keep consequence explicit. |
+| Part D | Pass | Pass | Pass | Pass | Pass: shippability and residual-risk review | Pass | Pass | Meets concept-module depth gate. |
+| Synthesis | Pass | n/a | n/a | Pass | Pass: carries binding constraint to Lab 03 | n/a | Ledger/report | Meets handoff requirement. |
+
+Rubric score:
+
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability |
+|---|---:|---:|---:|---:|---:|---:|
+| Part A | 3 | 3 | 3 | 3 | 3 | 3 |
+| Part B | 3 | 3 | 2 | 3 | 3 | 3 |
+| Part C | 3 | 3 | 3 | 3 | 3 | 3 |
+| Part D | 3 | 3 | 3 | 3 | 3 | 3 |
+
+Acceptance notes:
+
+- No module has a score below 2.
+- At least one reversible failure state is present.
+- Every part has structured prediction, manipulation, Math Peek/source model,
+  evidence, consequence, and checkpoint.
+- Part B track specificity is lower than the other modules because the Iron Law
+  mechanics are intentionally shared; the placement terms and selected track
+  profile still change the numbers and active term.
+
+## Implementation Risks And Guardrails
+
+Preserve:
+
+- Existing WASM bootstrap and local wheel paths.
+- Local helper prefix `v1_02_`.
+- Shared helper contracts in `mlsysbook_labs.deployment`, `tracks`, `variants`,
+  and `reports`.
+- `mo.ui.tabs` structure and Design Ledger/report export.
+
+Risks:
+
+- `LatencyWaterfall` is not used directly; the notebook uses a Plotly waterfall
+  because the Part B model is an envelope-derived chapter approximation rather
+  than an `Engine.solve()` performance profile. The source trace must keep that
+  label visible.
+- Track thresholds live in variant metadata. Do not move them into notebook
+  constants.
+- Other workers may edit other lab files in parallel; keep V1-02 edits scoped to
+  this owned notebook and plan.
+
+Minimum verification:
+
+```bash
+python3 -m py_compile labs/vol1/lab_02_ml_systems.py
+```

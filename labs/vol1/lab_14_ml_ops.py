@@ -35,7 +35,6 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         build_lab_report,
-        debt_cascade,
         drift_visibility,
         get_lab_metadata,
         get_lab_track_variant,
@@ -60,7 +59,6 @@ async def _():
         LAB_CSS,
         apply_plotly_theme,
         build_lab_report,
-        debt_cascade,
         drift_visibility,
         get_lab_metadata,
         get_lab_track_variant,
@@ -134,7 +132,7 @@ def _(
     mo,
     source_trace,
     track_context,
-        track_arc_context,
+    track_arc_context,
     v1_14_metadata,
     v1_14_ops,
     v1_14_profile,
@@ -157,7 +155,7 @@ def _(
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Drift Visibility &middot; Retraining Cadence &middot; Rollback &middot; Debt Cascade
+                Deployed Behavior &middot; Thresholds &middot; Rollback &middot; Error Budget
             </p>
             <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
                       max-width: 760px; line-height: 1.65;">
@@ -273,12 +271,12 @@ def _(mo):
 def _(mo, v1_14_ops):
     partA_pred = mo.ui.radio(
         options={
-            "A) Quality is still healthy because uptime is green": "healthy",
-            "B) True quality has fallen before labels fully show it": "silent",
-            "C) Labels always arrive before quality degrades": "labels",
-            "D) Drift only matters after a crash": "crash",
+            "A) Uptime and latency are enough because the service is green": "infra",
+            "B) Offline validation is enough until the next model release": "offline",
+            "C) Deployed behavior signals must be monitored before labels arrive": "deployed",
+            "D) Delayed labels are the only signal that matters": "labels",
         },
-        label=f"{v1_14_ops.label}: what happens when {v1_14_ops.drift_source} accumulates?",
+        label=f"{v1_14_ops.label}: which signal should own first detection when {v1_14_ops.drift_source} accumulates?",
     )
     return (partA_pred,)
 
@@ -309,14 +307,13 @@ def _(mo, v1_14_ops):
 
     partB_pred = mo.ui.radio(
         options={
-            "A) Current cadence is fine": "current",
-            "B) T* is shorter than current cadence": "shorter",
-            "C) T* is longer because monitoring is expensive": "longer",
-            "D) Retraining cadence cannot be computed": "unknown",
+            "A) Set the tightest possible threshold; earlier alerts are always safer": "tight",
+            "B) Calibrate the threshold against false alarms and missed damage": "calibrate",
+            "C) Set a loose threshold to protect the on-call rotation": "loose",
+            "D) Wait for a user-facing incident before tuning thresholds": "reactive",
         },
         label=(
-            f"Retrain cost ${v1_14_ops.retrain_cost:,.0f}; drift cost "
-            f"${v1_14_ops.drift_cost_per_day:,.0f}/day. What cadence should ops use?"
+            f"{v1_14_ops.label}: how should ops choose the PSI alert threshold?"
         ),
     )
     return (partA_days, partA_rate, partA_threshold, partB_pred)
@@ -324,89 +321,264 @@ def _(mo, v1_14_ops):
 
 @app.cell(hide_code=True)
 def _(mo, v1_14_ops):
-    partB_retrain_cost = mo.ui.slider(
-        start=1_000,
-        stop=max(500_000, int(v1_14_ops.retrain_cost * 3)),
-        value=int(v1_14_ops.retrain_cost),
-        step=1_000,
-        label="Retraining cost ($)",
-    )
-    partB_drift_cost = mo.ui.slider(
-        start=100,
-        stop=max(20_000, int(v1_14_ops.drift_cost_per_day * 3)),
-        value=int(v1_14_ops.drift_cost_per_day),
-        step=100,
-        label="Drift cost ($/day)",
-    )
-    partB_current = mo.ui.slider(
-        start=1,
-        stop=120,
-        value=v1_14_ops.current_cadence_days,
-        step=1,
-        label="Current cadence (days)",
-    )
-
-    partC_pred = mo.ui.radio(
-        options={
-            "A) Loose alerts and rare retraining minimize cost": "loose",
-            "B) Balanced threshold, cadence, canary, and rollback": "balanced",
-            "C) Canary is unnecessary if metrics are good": "no_canary",
-            "D) Rollback can wait until the next release train": "slow_rollback",
-        },
-        label=f"Which policy protects {v1_14_ops.guardrail_metric}?",
-    )
-    return (partB_current, partB_drift_cost, partB_retrain_cost, partC_pred)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_14_ops):
-    partC_threshold = mo.ui.slider(
+    partB_threshold = mo.ui.slider(
         start=0.05,
         stop=0.50,
         value=v1_14_ops.alert_threshold_psi,
         step=0.01,
-        label="Policy threshold (PSI)",
+        label="Candidate threshold (PSI)",
     )
-    partC_cadence = mo.ui.slider(
-        start=1,
-        stop=120,
-        value=v1_14_ops.current_cadence_days,
-        step=1,
-        label="Policy cadence (days)",
+    partB_review_cost = mo.ui.slider(
+        start=100,
+        stop=5000,
+        value=700,
+        step=100,
+        label="Alert review cost ($)",
     )
-    partC_canary = mo.ui.slider(start=0, stop=50, value=10, step=5, label="Canary traffic (%)")
-    partC_rollback = mo.ui.slider(start=1, stop=72, value=8, step=1, label="Rollback exposure (hours)")
+    partB_false_alarm_rate = mo.ui.slider(
+        start=0.5,
+        stop=20.0,
+        value=4.0,
+        step=0.5,
+        label="False alarms at default (/year)",
+    )
 
-    partD_pred = mo.ui.radio(
+    partC_pred = mo.ui.radio(
         options={
-            "A) Debt is linear in missed cycles": "linear",
-            "B) Debt compounds and cascades downstream": "compound",
-            "C) Debt disappears after rollback": "rollback",
-            "D) Downstream models are unaffected": "isolated",
+            "A) Full rollout is acceptable because validation already passed": "full_rollout",
+            "B) Small canary plus tested rollback and fallback limits blast radius": "staged",
+            "C) Large canary is best because it gathers evidence fastest": "large_canary",
+            "D) Rollback can wait for the next scheduled release window": "slow_rollback",
         },
-        label=f"What happens if {v1_14_ops.label} misses several retraining cycles?",
+        label=f"What release policy protects {v1_14_ops.guardrail_metric}?",
     )
-    return (partC_cadence, partC_canary, partC_rollback, partC_threshold, partD_pred)
+    return (partB_false_alarm_rate, partB_review_cost, partB_threshold, partC_pred)
 
 
 @app.cell(hide_code=True)
 def _(mo, v1_14_ops):
-    partD_missed = mo.ui.slider(start=1, stop=6, value=3, step=1, label="Missed retraining cycles")
-    partD_downstream = mo.ui.slider(
-        start=0,
-        stop=8,
-        value=v1_14_ops.downstream_models,
+    partC_canary = mo.ui.slider(start=0, stop=50, value=10, step=5, label="Canary traffic (%)")
+    partC_rollback = mo.ui.slider(start=0.25, stop=72, value=8, step=0.25, label="Rollback exposure (hours)")
+    partC_fallback = mo.ui.slider(start=0, stop=100, value=80, step=5, label="Fallback coverage (%)")
+
+    partD_pred = mo.ui.radio(
+        options={
+            "A) Minimize monitoring cost; the cheapest policy wins": "cheap",
+            "B) Spend error budget across detection, staleness, rollback, and ownership": "budget",
+            "C) Automate retraining and remove human ownership": "auto",
+            "D) Reuse one policy across every deployment track": "same",
+        },
+        label=f"What makes a defensible {v1_14_ops.label} operations policy?",
+    )
+    return (partC_canary, partC_fallback, partC_rollback, partD_pred)
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_14_ops):
+    partD_threshold = mo.ui.slider(
+        start=0.05,
+        stop=0.50,
+        value=v1_14_ops.alert_threshold_psi,
+        step=0.01,
+        label="Runbook threshold (PSI)",
+    )
+    partD_cadence = mo.ui.slider(
+        start=1,
+        stop=120,
+        value=v1_14_ops.current_cadence_days,
         step=1,
-        label="Dependent downstream models",
+        label="Retraining cadence (days)",
     )
-    partD_base_loss = mo.ui.slider(
-        start=0.5,
-        stop=5.0,
-        value=v1_14_ops.base_loss_pp,
-        step=0.5,
-        label="Base loss per missed cycle (pp)",
+    partD_canary = mo.ui.slider(start=0, stop=50, value=10, step=5, label="Runbook canary (%)")
+    partD_rollback = mo.ui.slider(start=0.25, stop=72, value=8, step=0.25, label="Runbook rollback (hours)")
+    return (partD_cadence, partD_canary, partD_rollback, partD_threshold)
+
+
+@app.cell
+def _():
+    def v1_14_track_amounts(v1_14_profile, v1_14_ops):
+        defaults = {
+            "iphone": {
+                "unit_label": "million app sessions exposed",
+                "daily_units": 24.0,
+                "allowed_blast_radius": 1.5,
+                "rollback_limit_hours": 12.0,
+                "default_fallback_pct": 85.0,
+                "fallback_label": "remote kill switch coverage",
+                "blind_spot": "privacy sampling can miss cohort-specific thermal or battery regressions",
+                "carry_forward_risk": "mobile owner must revalidate privacy-safe telemetry before Lab 15 responsibility review",
+                "error_budget_days": 18.0,
+                "attention_budget_hours": 24.0,
+                "review_hours": 1.5,
+                "impact_cost_per_unit": 1600.0,
+            },
+            "oura_ring": {
+                "unit_label": "thousand device-nights exposed",
+                "daily_units": 280.0,
+                "allowed_blast_radius": 4.0,
+                "rollback_limit_hours": 24.0,
+                "default_fallback_pct": 80.0,
+                "fallback_label": "OTA holdout and firmware fallback coverage",
+                "blind_spot": "delayed health labels can miss physiology shifts until the next labeled study",
+                "carry_forward_risk": "firmware owner must carry duty-cycle and false-alert risk into the next review",
+                "error_budget_days": 30.0,
+                "attention_budget_hours": 18.0,
+                "review_hours": 2.0,
+                "impact_cost_per_unit": 900.0,
+            },
+            "robotaxi": {
+                "unit_label": "thousand autonomous miles exposed",
+                "daily_units": 40.0,
+                "allowed_blast_radius": 0.25,
+                "rollback_limit_hours": 1.0,
+                "default_fallback_pct": 95.0,
+                "fallback_label": "geofenced safety fallback coverage",
+                "blind_spot": "rare-event drift can hide inside aggregate replay pass rates",
+                "carry_forward_risk": "safety board must own unresolved rare-event recall risk",
+                "error_budget_days": 6.0,
+                "attention_budget_hours": 40.0,
+                "review_hours": 3.0,
+                "impact_cost_per_unit": 60000.0,
+            },
+            "cloud_fleet": {
+                "unit_label": "million requests exposed",
+                "daily_units": 120.0,
+                "allowed_blast_radius": 3.0,
+                "rollback_limit_hours": 4.0,
+                "default_fallback_pct": 80.0,
+                "fallback_label": "registry pin and traffic failback coverage",
+                "blind_spot": "aggregate SLO dashboards can hide one tenant or cohort regression",
+                "carry_forward_risk": "SRE and ML owner must carry cost/request and tenant-quality risk forward",
+                "error_budget_days": 10.0,
+                "attention_budget_hours": 32.0,
+                "review_hours": 1.0,
+                "impact_cost_per_unit": 5000.0,
+            },
+        }
+        amounts = dict(defaults.get(v1_14_profile.track_id, defaults["cloud_fleet"]))
+        amounts["track_label"] = v1_14_ops.label
+        amounts["guardrail_metric"] = v1_14_ops.guardrail_metric
+        return amounts
+
+    def v1_14_threshold_economics(
+        v1_14_ops,
+        amounts,
+        *,
+        threshold_psi,
+        alert_review_cost,
+        false_alarm_rate,
+    ):
+        threshold = max(0.0001, float(threshold_psi))
+        default_threshold = max(0.0001, float(v1_14_ops.alert_threshold_psi))
+        rate = max(0.00001, float(v1_14_ops.drift_rate_psi_per_day))
+        breach_psi = max(
+            0.0,
+            (v1_14_ops.baseline_quality_pct - v1_14_ops.quality_floor_pct)
+            / max(0.0001, v1_14_ops.quality_loss_per_psi),
+        )
+        quality_breach_day = breach_psi / rate if breach_psi > 0 else 0.0
+        detection_day = threshold / rate + v1_14_ops.label_delay_days
+        missed_days = max(0.0, detection_day - quality_breach_day)
+        false_alarms = max(0.0, float(false_alarm_rate)) * (default_threshold / threshold) ** 1.35
+        false_alarm_cost = false_alarms * max(0.0, float(alert_review_cost))
+        attention_hours = false_alarms * amounts["review_hours"]
+        missed_damage_cost = missed_days * v1_14_ops.drift_cost_per_day * 12
+        monitoring_cost = v1_14_ops.monitoring_cost_per_day * 365 * (default_threshold / threshold) ** 0.25
+        total_cost = false_alarm_cost + missed_damage_cost + monitoring_cost
+        too_tight = attention_hours > amounts["attention_budget_hours"]
+        too_loose = missed_days > max(v1_14_ops.label_delay_days, amounts["error_budget_days"] / 2)
+        if too_loose:
+            failure_mode = "missed degradation dominates"
+        elif too_tight:
+            failure_mode = "alert fatigue dominates"
+        else:
+            failure_mode = "balanced threshold"
+        return {
+            "threshold_psi": threshold,
+            "detection_day": detection_day,
+            "quality_breach_day": quality_breach_day,
+            "missed_days": missed_days,
+            "false_alarms_per_year": false_alarms,
+            "attention_hours": attention_hours,
+            "false_alarm_cost": false_alarm_cost,
+            "missed_damage_cost": missed_damage_cost,
+            "monitoring_cost": monitoring_cost,
+            "total_cost": total_cost,
+            "failure_mode": failure_mode,
+            "feasible": not (too_tight or too_loose),
+        }
+
+    def v1_14_rollout_risk(
+        amounts,
+        *,
+        canary_pct,
+        rollback_hours,
+        fallback_pct,
+    ):
+        canary = max(0.0, min(100.0, float(canary_pct)))
+        rollback = max(0.0, float(rollback_hours))
+        fallback = max(0.0, min(100.0, float(fallback_pct)))
+        exposed_units = (
+            amounts["daily_units"]
+            * (canary / 100)
+            * (rollback / 24)
+            * (1 - fallback / 100)
+        )
+        blast_radius_cost = exposed_units * amounts["impact_cost_per_unit"]
+        if rollback <= 1 / 60:
+            rollback_tier = "immediate"
+        elif rollback <= 0.25:
+            rollback_tier = "rapid"
+        elif rollback <= 4:
+            rollback_tier = "delayed"
+        else:
+            rollback_tier = "extended"
+        violations = []
+        if exposed_units > amounts["allowed_blast_radius"]:
+            violations.append("blast radius above track budget")
+        if rollback > amounts["rollback_limit_hours"]:
+            violations.append("rollback window above track limit")
+        if fallback < amounts["default_fallback_pct"] * 0.75:
+            violations.append("fallback coverage too small")
+        return {
+            "canary_pct": canary,
+            "rollback_hours": rollback,
+            "fallback_pct": fallback,
+            "rollback_tier": rollback_tier,
+            "exposed_units": exposed_units,
+            "blast_radius_cost": blast_radius_cost,
+            "feasible": not violations,
+            "violations": tuple(violations),
+        }
+
+    def v1_14_error_budget(amounts, threshold_result, policy_result, rollout_result):
+        rows = [
+            ("Detection delay", max(0.0, threshold_result["missed_days"])),
+            ("Stale model", max(0.0, policy_result.stale_days)),
+            ("Rollback exposure", max(0.0, rollout_result["rollback_hours"] / 24)),
+            ("Residual blind spot", max(0.0, amounts["error_budget_days"] * 0.15)),
+        ]
+        total_days = sum(value for _, value in rows)
+        binding_risk = max(rows, key=lambda item: item[1])[0]
+        feasible = (
+            total_days <= amounts["error_budget_days"]
+            and policy_result.feasible
+            and rollout_result["feasible"]
+        )
+        return {
+            "rows": rows,
+            "total_days": total_days,
+            "budget_days": amounts["error_budget_days"],
+            "binding_risk": binding_risk,
+            "feasible": feasible,
+        }
+
+    return (
+        v1_14_error_budget,
+        v1_14_rollout_risk,
+        v1_14_threshold_economics,
+        v1_14_track_amounts,
     )
-    return (partD_base_loss, partD_downstream, partD_missed)
 
 
 # ===========================================================================
@@ -418,10 +590,8 @@ def _(mo, v1_14_ops):
 def _(
     COLORS,
     apply_plotly_theme,
-    debt_cascade,
     drift_visibility,
     go,
-    math,
     mo,
     np,
     ops_policy,
@@ -429,22 +599,26 @@ def _(
     partA_pred,
     partA_rate,
     partA_threshold,
-    partB_current,
-    partB_drift_cost,
+    partB_false_alarm_rate,
     partB_pred,
-    partB_retrain_cost,
-    partC_cadence,
+    partB_review_cost,
+    partB_threshold,
     partC_canary,
+    partC_fallback,
     partC_pred,
     partC_rollback,
-    partC_threshold,
-    partD_base_loss,
-    partD_downstream,
-    partD_missed,
+    partD_cadence,
+    partD_canary,
     partD_pred,
+    partD_rollback,
+    partD_threshold,
     retraining_cadence,
+    v1_14_error_budget,
     v1_14_ops,
     v1_14_profile,
+    v1_14_rollout_risk,
+    v1_14_threshold_economics,
+    v1_14_track_amounts,
     v1_14_variant,
 ):
     def _metric_card(label, value, detail, color, border=False):
@@ -458,6 +632,8 @@ def _(
             <div style="font-size:0.72rem; color:#64748b;">{detail}</div>
         </div>
         """
+
+    _amounts = v1_14_track_amounts(v1_14_profile, v1_14_ops)
 
     def build_part_a():
         items = [
@@ -475,11 +651,11 @@ def _(
             </div>
             """),
             mo.md("""
-## Model Health Can Fail While Infrastructure Health Stays Green
+## Concept Module A - Deployed Behavior Is The Monitor
 
-Drift monitoring needs both a true quality estimate and a delayed observed signal.
-The key operations risk is the gap between quality crossing a guardrail and the
-monitoring signal becoming actionable.
+Uptime, latency, and offline validation can stay green while deployed behavior
+drifts. The monitor has to include production telemetry, delayed labels, and the
+track guardrail that users actually experience.
             """),
             partA_pred,
         ]
@@ -539,6 +715,42 @@ monitoring signal becoming actionable.
         </div>
         """))
 
+        _signal_rows = [
+            ("Infrastructure health", "uptime/latency green", "Necessary but cannot observe statistical drift."),
+            ("Offline model metric", f"last validated at {v1_14_ops.baseline_quality_pct:.1f}%", "Stale once the deployed population moves."),
+            ("Deployed behavior", v1_14_ops.monitoring_signal, f"Track guardrail: {v1_14_ops.guardrail_metric}."),
+            ("Delayed labels", f"{v1_14_ops.label_delay_days} day delay", "Confirms drift after the proxy has already carried risk."),
+        ]
+        _rows_html = "".join(
+            f"""
+            <tr>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_name}</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value}</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_meaning}</td>
+            </tr>
+            """
+            for _name, _value, _meaning in _signal_rows
+        )
+        items.append(mo.Html(f"""
+        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
+                    padding:14px 16px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
+                Evidence Table &middot; Signal Stack
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
+                <thead>
+                    <tr style="background:#f8fafc;">
+                        <th style="text-align:left; padding:8px 10px;">Signal</th>
+                        <th style="text-align:left; padding:8px 10px;">Amount</th>
+                        <th style="text-align:left; padding:8px 10px;">Operational meaning</th>
+                    </tr>
+                </thead>
+                <tbody>{_rows_html}</tbody>
+            </table>
+        </div>
+        """))
+
         if _result.quality_breached and not _result.alert_triggered:
             items.append(mo.callout(mo.md(
                 f"**Silent degradation window.** Quality has crossed the floor, but the alert has not fired. "
@@ -557,14 +769,27 @@ true quality      = {_result.true_quality_pct:.1f}%
 observed quality  = {_result.observed_quality_pct:.1f}%
 damage cost       = ${_result.accumulated_damage_cost:,.0f}
 ```
-*Source: `mlsysbook_labs.drift_visibility`, track `{v1_14_profile.track_id}`.*
+**Math Peek / Source Model**
+
+```
+quality(t) ~= A0 - lambda * PSI(t)
+detection delay = alert_day - quality_breach_day
+```
+
+*Source: `mlsysbook_labs.drift_visibility`; chapter sections on observable
+degradation and model/infrastructure monitoring.*
         """))
 
-        if partA_pred.value == "silent":
-            items.append(mo.callout(mo.md("**Correct.** Delayed labels and proxy metrics mean true quality can fall first."), kind="success"))
+        items.append(mo.callout(mo.md(
+            f"**Checkpoint.** Carry `{v1_14_ops.monitoring_signal}` into the runbook as the deployed-behavior signal, "
+            f"with `{_amounts['blind_spot']}` named as the residual blind spot."
+        ), kind="info"))
+
+        if partA_pred.value == "deployed":
+            items.append(mo.callout(mo.md("**Correct.** Deployed behavior proxies are the early signal; delayed labels confirm the diagnosis later."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**The server can be healthy while the model is stale.** Model health needs drift and delayed-label monitoring."
+                "**The server can be healthy while the model is stale.** Model health needs deployed-behavior telemetry and delayed-label confirmation."
             ), kind="warn"))
         return mo.vstack(items)
 
@@ -575,84 +800,153 @@ damage cost       = ${_result.accumulated_damage_cost:,.0f}
                         border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
                 <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
                             text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Cadence Review &middot; ML Platform Lead
+                    Alert Review &middot; {v1_14_variant.stakeholder}
                 </div>
                 <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Retrain too often and we waste resources. Retrain too slowly and stale-model
-                    risk accumulates. What is the operating cadence?"
+                    "The default PSI threshold is creating pages. If we loosen it, what
+                    degradation will we miss?"
                 </div>
             </div>
             """),
-            mo.md("""
-## Retraining Cadence Has a Square-Root Optimum
+            mo.md(f"""
+## Concept Module B - Thresholds Spend Attention
 
-```
-T* = sqrt(2 * retrain_cost / drift_cost_per_day)
-```
+The chapter gives PSI > 0.2 as a useful starting point for feature-distribution
+drift, but a threshold is an operating policy. Tight thresholds spend on-call
+attention; loose thresholds spend quality, safety, battery, or SLO budget.
 
-The total annual cost curve is U-shaped: retraining cost falls with longer
-intervals, while stale-model risk rises with longer intervals.
+Track amount system: **{_amounts['unit_label']}**, attention budget
+**{_amounts['attention_budget_hours']:.0f} review hours/year**.
             """),
             partB_pred,
         ]
         if partB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the cadence optimizer."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the threshold sweep."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partB_retrain_cost, partB_drift_cost, partB_current], widths="equal"))
-        _cadence = retraining_cadence(
-            retrain_cost=partB_retrain_cost.value,
-            drift_cost_per_day=partB_drift_cost.value,
-            current_days=partB_current.value,
+        items.append(mo.hstack([partB_threshold, partB_review_cost, partB_false_alarm_rate], widths="equal"))
+        _threshold = v1_14_threshold_economics(
+            v1_14_ops,
+            _amounts,
+            threshold_psi=partB_threshold.value,
+            alert_review_cost=partB_review_cost.value,
+            false_alarm_rate=partB_false_alarm_rate.value,
         )
-        _days = np.linspace(1, 120, 240)
-        _costs = []
-        for _d in _days:
-            _retrain = 365 / _d * partB_retrain_cost.value
-            _stale = partB_drift_cost.value * 365 * _d / 2
-            _costs.append(_retrain + _stale)
+        _thresholds = np.linspace(0.05, 0.50, 120)
+        _total_costs = []
+        _false_costs = []
+        _missed_costs = []
+        for _candidate in _thresholds:
+            _r = v1_14_threshold_economics(
+                v1_14_ops,
+                _amounts,
+                threshold_psi=float(_candidate),
+                alert_review_cost=partB_review_cost.value,
+                false_alarm_rate=partB_false_alarm_rate.value,
+            )
+            _total_costs.append(_r["total_cost"])
+            _false_costs.append(_r["false_alarm_cost"])
+            _missed_costs.append(_r["missed_damage_cost"])
 
         _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=_days, y=_costs, name="Total annual cost", line=dict(color=COLORS["RedLine"], width=3)))
-        _fig.add_vline(x=_cadence.optimal_days, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text=f"T* = {_cadence.optimal_days:.1f} d")
-        _fig.add_vline(x=partB_current.value, line_dash="dot", line_color=COLORS["OrangeLine"], annotation_text="current")
+        _fig.add_trace(go.Scatter(x=_thresholds, y=_total_costs, name="Total threshold cost", line=dict(color=COLORS["RedLine"], width=3)))
+        _fig.add_trace(go.Scatter(x=_thresholds, y=_false_costs, name="False-alarm cost", line=dict(color=COLORS["BlueLine"], width=2, dash="dot")))
+        _fig.add_trace(go.Scatter(x=_thresholds, y=_missed_costs, name="Missed-damage cost", line=dict(color=COLORS["OrangeLine"], width=2, dash="dash")))
+        _fig.add_vline(x=partB_threshold.value, line_dash="dot", line_color="#64748b", annotation_text=f"{partB_threshold.value:.2f} PSI")
+        _fig.add_vline(x=v1_14_ops.alert_threshold_psi, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text="track default")
         _fig.update_layout(
             height=360,
-            xaxis=dict(title="Retraining interval (days)"),
-            yaxis=dict(title="Annual cost ($)", gridcolor="#f1f5f9"),
-            margin=dict(l=60, r=20, t=50, b=40),
+            xaxis=dict(title="PSI alert threshold"),
+            yaxis=dict(title="Annualized cost ($)", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=60, r=20, t=60, b=40),
         )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _factor_color = COLORS["RedLine"] if _cadence.current_too_slow_factor > 2 else COLORS["GreenLine"]
+        _status_color = COLORS["GreenLine"] if _threshold["feasible"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Optimal T*", f"{_cadence.optimal_days:.1f} d", "sqrt(2C/Cd)", COLORS["GreenLine"], True)}
-            {_metric_card("Retrains / Year", f"{_cadence.retrains_per_year:.1f}", "at T*", COLORS["BlueLine"])}
-            {_metric_card("Current Factor", f"{_cadence.current_too_slow_factor:.1f}x", f"current {partB_current.value} d", _factor_color)}
-            {_metric_card("Annual Savings", f"${_cadence.savings_vs_current:,.0f}", "vs current cadence", COLORS["OrangeLine"])}
+            {_metric_card("Detection Day", f"{_threshold['detection_day']:.1f}", "threshold/rate + delay", COLORS["BlueLine"])}
+            {_metric_card("False Alarms", f"{_threshold['false_alarms_per_year']:.1f}/yr", f"{_threshold['attention_hours']:.1f} review hr", COLORS["OrangeLine"])}
+            {_metric_card("Missed Damage", f"${_threshold['missed_damage_cost']:,.0f}", f"{_threshold['missed_days']:.1f} missed days", COLORS["RedLine"])}
+            {_metric_card("Threshold", _threshold["failure_mode"], f"{partB_threshold.value:.2f} PSI", _status_color, True)}
         </div>
         """))
 
-        items.append(mo.md(f"""
-**Retraining Cadence - Live Calculation**
-
-```
-retrain cost = ${partB_retrain_cost.value:,.0f}
-drift cost   = ${partB_drift_cost.value:,.0f}/day
-T*           = sqrt(2 * {partB_retrain_cost.value:,.0f} / {partB_drift_cost.value:,.0f})
-             = {_cadence.optimal_days:.1f} days
-current      = {partB_current.value} days ({_cadence.current_too_slow_factor:.1f}x T*)
-```
-*Source: `mlsysbook_labs.retraining_cadence`.*
+        _scenario_values = [
+            ("Tight", max(0.05, v1_14_ops.alert_threshold_psi * 0.5)),
+            ("Track default", v1_14_ops.alert_threshold_psi),
+            ("Loose", min(0.50, v1_14_ops.alert_threshold_psi * 1.75)),
+        ]
+        _scenario_rows = []
+        for _name, _value in _scenario_values:
+            _r = v1_14_threshold_economics(
+                v1_14_ops,
+                _amounts,
+                threshold_psi=_value,
+                alert_review_cost=partB_review_cost.value,
+                false_alarm_rate=partB_false_alarm_rate.value,
+            )
+            _scenario_rows.append(f"""
+            <tr>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_name}</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value:.2f}</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_r['false_alarms_per_year']:.1f}/yr</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_r['missed_days']:.1f} d</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_r['failure_mode']}</td>
+            </tr>
+            """)
+        items.append(mo.Html(f"""
+        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
+                    padding:14px 16px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['OrangeLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
+                Evidence Table &middot; Threshold Choices
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
+                <thead>
+                    <tr style="background:#f8fafc;">
+                        <th style="text-align:left; padding:8px 10px;">Policy</th>
+                        <th style="text-align:left; padding:8px 10px;">PSI</th>
+                        <th style="text-align:left; padding:8px 10px;">False alarms</th>
+                        <th style="text-align:left; padding:8px 10px;">Missed days</th>
+                        <th style="text-align:left; padding:8px 10px;">Failure mode</th>
+                    </tr>
+                </thead>
+                <tbody>{''.join(_scenario_rows)}</tbody>
+            </table>
+        </div>
         """))
 
-        if partB_pred.value == "shorter" and _cadence.current_too_slow_factor > 1:
-            items.append(mo.callout(mo.md("**Correct.** The current cadence is slower than the cost/risk optimum."), kind="success"))
+        if not _threshold["feasible"]:
+            items.append(mo.callout(mo.md(
+                f"**Reversible failure state.** This threshold is not defensible because `{_threshold['failure_mode']}`. "
+                f"Move the PSI slider until both review attention and missed degradation fit the {v1_14_ops.label} budget."
+            ), kind="danger"))
+
+        items.append(mo.md(f"""
+**Math Peek / Source Model**
+
+```
+detection_day = threshold / drift_rate + label_delay
+false alarms  ~= base false alarms * (default_threshold / threshold)^1.35
+total cost    = false alarm cost + missed damage cost + monitoring cost
+```
+
+*Source: chapter feature-distribution thresholds and monitoring cost model;
+notebook-local `v1_14_threshold_economics`.*
+        """))
+
+        items.append(mo.callout(mo.md(
+            f"**Checkpoint.** Carry `{partB_threshold.value:.2f} PSI` into the runbook only if it avoids both alert fatigue and missed degradation."
+        ), kind="info"))
+
+        if partB_pred.value == "calibrate":
+            items.append(mo.callout(mo.md("**Correct.** A threshold is a policy that trades false alarms against missed degradation."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Cadence is computable.** Use the square-root law, then validate with track-specific rollout and guardrail costs."
+                "**Thresholds are not universal constants.** Tune the PSI boundary against the track's attention budget and degradation cost."
             ), kind="warn"))
         return mo.vstack(items)
 
@@ -663,16 +957,16 @@ current      = {partB_current.value} days ({_cadence.current_too_slow_factor:.1f
                         border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
                 <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
                             text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Policy Review &middot; {v1_14_variant.stakeholder}
+                    Release Review &middot; {v1_14_variant.stakeholder}
                 </div>
                 <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Choose the monitor threshold, retraining cadence, canary, and rollback window.
-                    What policy is defensible?"
+                    "The candidate model passed validation. How much production exposure
+                    should it get before rollback has to fire?"
                 </div>
             </div>
             """),
             mo.md(f"""
-## Operations Policy Combines Monitoring, Rollout, Rollback, And Escalation
+## Concept Module C - Rollback Limits Blast Radius
 
 For **{v1_14_ops.label}**, rollback is:
 
@@ -680,73 +974,124 @@ For **{v1_14_ops.label}**, rollback is:
 {v1_14_ops.rollback_policy}
 ```
 
-The policy must make cost visible without hiding residual risk.
+Canary traffic, rollback time, and fallback coverage define the amount of
+production behavior at risk before recovery. The same concept appears as a
+kill switch on iPhone, OTA rollback for Oura, geofenced fallback for RoboTaxi,
+and registry-pinned traffic rollback for Cloud Fleet.
             """),
             partC_pred,
         ]
         if partC_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the policy scorer."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the rollout risk instrument."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partC_threshold, partC_cadence, partC_canary, partC_rollback], widths="equal"))
-        _policy = ops_policy(
-            v1_14_ops,
-            threshold_psi=partC_threshold.value,
-            cadence_days=partC_cadence.value,
+        items.append(mo.hstack([partC_canary, partC_rollback, partC_fallback], widths="equal"))
+        _rollout = v1_14_rollout_risk(
+            _amounts,
             canary_pct=partC_canary.value,
             rollback_hours=partC_rollback.value,
+            fallback_pct=partC_fallback.value,
         )
+        _hours = np.linspace(0.25, 72, 120)
+        _exposed = [
+            v1_14_rollout_risk(
+                _amounts,
+                canary_pct=partC_canary.value,
+                rollback_hours=float(_hour),
+                fallback_pct=partC_fallback.value,
+            )["exposed_units"]
+            for _hour in _hours
+        ]
 
         _fig = go.Figure()
-        for _name, _value, _color in [
-            ("Monitoring", _policy.annual_monitoring_cost, COLORS["BlueLine"]),
-            ("Retraining", _policy.annual_retrain_cost, COLORS["OrangeLine"]),
-            ("Residual risk", _policy.annual_risk_cost, COLORS["RedLine"]),
-        ]:
-            _fig.add_trace(go.Bar(x=[_name], y=[_value], name=_name, marker_color=_color))
+        _fig.add_trace(go.Scatter(x=_hours, y=_exposed, name="Blast radius", line=dict(color=COLORS["RedLine"], width=3)))
+        _fig.add_hline(y=_amounts["allowed_blast_radius"], line_dash="dash", line_color=COLORS["GreenLine"], annotation_text="track budget")
+        _fig.add_vline(x=partC_rollback.value, line_dash="dot", line_color="#64748b", annotation_text=f"{partC_rollback.value:g} h")
         _fig.update_layout(
-            height=330,
-            yaxis=dict(title="Annual policy cost ($)", gridcolor="#f1f5f9"),
-            showlegend=False,
-            margin=dict(l=60, r=20, t=40, b=40),
+            height=350,
+            xaxis=dict(title="Rollback exposure window (hours)"),
+            yaxis=dict(title=_amounts["unit_label"], gridcolor="#f1f5f9"),
+            margin=dict(l=70, r=20, t=50, b=40),
         )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
-        _policy_color = COLORS["GreenLine"] if _policy.feasible else COLORS["RedLine"]
+        _rollout_color = COLORS["GreenLine"] if _rollout["feasible"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Detection Day", f"{_policy.expected_detection_day:.1f}", "threshold/rate + delay", COLORS["BlueLine"])}
-            {_metric_card("Stale Days", f"{_policy.stale_days:.1f}", "cadence beyond T*", COLORS["OrangeLine"])}
-            {_metric_card("Total Annual Cost", f"${_policy.total_annual_cost:,.0f}", "monitor + retrain + risk", COLORS["RedLine"])}
-            {_metric_card("Policy Status", "PASS" if _policy.feasible else "FAIL", ", ".join(_policy.violations) or "no violations", _policy_color, True)}
+            {_metric_card("Canary", f"{_rollout['canary_pct']:.0f}%", "traffic under test", COLORS["BlueLine"])}
+            {_metric_card("Rollback Tier", _rollout["rollback_tier"], f"{_rollout['rollback_hours']:g} hours", COLORS["OrangeLine"])}
+            {_metric_card("Blast Radius", f"{_rollout['exposed_units']:.2f}", _amounts["unit_label"], COLORS["RedLine"])}
+            {_metric_card("Release Status", "PASS" if _rollout["feasible"] else "FAIL", ", ".join(_rollout["violations"]) or "inside budget", _rollout_color, True)}
         </div>
         """))
 
-        if not _policy.feasible:
+        _tier_rows = [
+            ("Immediate", "&lt; 1 minute", "hot standby / instant traffic switch"),
+            ("Rapid", "&lt; 15 minutes", "registry redeploy, cache clear, session restart"),
+            ("Delayed", "&lt; 4 hours", "business metric rollback with state handling"),
+            ("Extended", "&gt; 4 hours", "exposure grows faster than the control loop can recover"),
+        ]
+        _tier_rows_html = "".join(
+            f"""
+            <tr>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_tier}</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_target}</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_meaning}</td>
+            </tr>
+            """
+            for _tier, _target, _meaning in _tier_rows
+        )
+        items.append(mo.Html(f"""
+        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
+                    padding:14px 16px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
+                Evidence Table &middot; Rollback Tiers
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
+                <thead>
+                    <tr style="background:#f8fafc;">
+                        <th style="text-align:left; padding:8px 10px;">Tier</th>
+                        <th style="text-align:left; padding:8px 10px;">Recovery target</th>
+                        <th style="text-align:left; padding:8px 10px;">State handling</th>
+                    </tr>
+                </thead>
+                <tbody>{_tier_rows_html}</tbody>
+            </table>
+        </div>
+        """))
+
+        if not _rollout["feasible"]:
             items.append(mo.callout(mo.md(
-                "**Policy violations:** " + ", ".join(_policy.violations) + ". Tighten the threshold, cadence, canary, or rollback window."
+                "**Reversible failure state.** " + ", ".join(_rollout["violations"]) +
+                ". Reduce canary traffic, shorten rollback exposure, or increase fallback coverage."
             ), kind="danger"))
 
         items.append(mo.md(f"""
-**Ops Policy - Live Calculation**
+**Math Peek / Source Model**
 
 ```
-threshold      = {partC_threshold.value:.2f} PSI
-cadence        = {partC_cadence.value} days
-canary         = {partC_canary.value}%
-rollback       = {partC_rollback.value} hours
-escalation     = {v1_14_ops.escalation_policy}
-annual cost    = ${_policy.total_annual_cost:,.0f}
+blast radius = daily units * canary share * rollback hours / 24 * unprotected share
+             = {_amounts['daily_units']:.1f} * {partC_canary.value / 100:.2f} * {partC_rollback.value / 24:.3f} * {(1 - partC_fallback.value / 100):.2f}
+             = {_rollout['exposed_units']:.2f} {_amounts['unit_label']}
 ```
-*Source: `mlsysbook_labs.ops_policy`.*
+
+*Source: chapter rollback strategy table and staged deployment discussion;
+notebook-local `v1_14_rollout_risk`.*
         """))
 
-        if partC_pred.value == "balanced" and _policy.feasible:
-            items.append(mo.callout(mo.md("**Correct.** A defensible policy couples monitoring, cadence, canary, rollback, and owner escalation."), kind="success"))
+        items.append(mo.callout(mo.md(
+            f"**Checkpoint.** Runbook rollback rule: `{v1_14_ops.rollback_policy}` with "
+            f"{partC_canary.value}% canary, {partC_rollback.value:g} hour rollback exposure, and "
+            f"{partC_fallback.value}% {_amounts['fallback_label']}."
+        ), kind="info"))
+
+        if partC_pred.value == "staged" and _rollout["feasible"]:
+            items.append(mo.callout(mo.md("**Correct.** Rollout size only becomes safe when rollback and fallback bound the exposed behavior."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Ops policy is a system design.** A green metric without canary, rollback, and owner escalation is not enough."
+                "**A green aggregate canary is not the policy.** Blast radius and recovery time decide whether the rollout is operationally safe."
             ), kind="warn"))
         return mo.vstack(items)
 
@@ -757,101 +1102,196 @@ annual cost    = ${_policy.total_annual_cost:,.0f}
                         border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
                 <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
                             text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Incident Review &middot; ML Risk Assessment
+                    Runbook Review &middot; {v1_14_variant.stakeholder}
                 </div>
                 <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "We missed several retraining cycles. Is this just linear debt,
-                    or does it compound through downstream systems?"
+                    "You have one policy memo. Which detection, retraining, canary,
+                    rollback, and ownership choices fit the error budget?"
                 </div>
             </div>
             """),
-            mo.md("""
-## ML Technical Debt Compounds
+            mo.md(f"""
+## Concept Module D - Error Budget Is A Policy Choice
 
-Each missed cycle makes the next update harder because the distribution shift is
-larger. Downstream models that consume stale predictions add cascade loss.
+The final policy spends an explicit error budget. Detection delay spends days
+before the alert fires. Slow retraining spends stale-model exposure. Rollback
+spends blast-radius exposure. Residual blind spots spend owner attention.
+
+Track budget: **{_amounts['error_budget_days']:.1f} equivalent days** for
+{v1_14_ops.guardrail_metric}.
             """),
             partD_pred,
         ]
         if partD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the debt cascade simulator."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your prediction to unlock the policy ledger."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([partD_missed, partD_downstream, partD_base_loss], widths="equal"))
-        _debt = debt_cascade(
-            missed_cycles=partD_missed.value,
-            downstream_models=partD_downstream.value,
-            base_loss_pp=partD_base_loss.value,
+        items.append(mo.hstack([partD_threshold, partD_cadence, partD_canary, partD_rollback], widths="equal"))
+        _threshold = v1_14_threshold_economics(
+            v1_14_ops,
+            _amounts,
+            threshold_psi=partD_threshold.value,
+            alert_review_cost=partB_review_cost.value,
+            false_alarm_rate=partB_false_alarm_rate.value,
+        )
+        _policy = ops_policy(
+            v1_14_ops,
+            threshold_psi=partD_threshold.value,
+            cadence_days=partD_cadence.value,
+            canary_pct=partD_canary.value,
+            rollback_hours=partD_rollback.value,
+        )
+        _rollout = v1_14_rollout_risk(
+            _amounts,
+            canary_pct=partD_canary.value,
+            rollback_hours=partD_rollback.value,
+            fallback_pct=_amounts["default_fallback_pct"],
+        )
+        _budget = v1_14_error_budget(_amounts, _threshold, _policy, _rollout)
+        _cadence = retraining_cadence(
+            retrain_cost=v1_14_ops.retrain_cost,
+            drift_cost_per_day=v1_14_ops.drift_cost_per_day,
+            current_days=partD_cadence.value,
         )
 
-        _cycles = list(range(1, partD_missed.value + 1))
-        _linear = [partD_base_loss.value * _c for _c in _cycles]
-        _compound = [
-            debt_cascade(missed_cycles=_c, downstream_models=0, base_loss_pp=partD_base_loss.value).compound_loss_pp
-            for _c in _cycles
-        ]
-        _cascade = [
-            debt_cascade(missed_cycles=_c, downstream_models=partD_downstream.value, base_loss_pp=partD_base_loss.value).total_loss_pp
-            for _c in _cycles
-        ]
-
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(name="Linear", x=[str(_c) for _c in _cycles], y=_linear, marker_color=COLORS["BlueLine"], opacity=0.55))
-        _fig.add_trace(go.Bar(name="Compound", x=[str(_c) for _c in _cycles], y=_compound, marker_color=COLORS["OrangeLine"], opacity=0.75))
-        _fig.add_trace(go.Bar(name="+ Cascade", x=[str(_c) for _c in _cycles], y=_cascade, marker_color=COLORS["RedLine"], opacity=0.9))
+        _colors = [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["RedLine"], COLORS["GreenLine"]]
+        for (_name, _value), _color in zip(_budget["rows"], _colors):
+            _fig.add_trace(go.Bar(x=["Error budget"], y=[_value], name=_name, marker_color=_color))
+        _fig.add_trace(go.Scatter(
+            x=["Error budget"],
+            y=[_budget["budget_days"]],
+            mode="markers+text",
+            name="Budget limit",
+            text=[f"budget {_budget['budget_days']:.1f} d"],
+            textposition="top center",
+            marker=dict(color="#0f172a", size=11, symbol="line-ew"),
+        ))
         _fig.update_layout(
-            barmode="group",
-            height=360,
-            xaxis=dict(title="Missed cycles"),
-            yaxis=dict(title="Accumulated quality loss (pp)", gridcolor="#f1f5f9"),
+            barmode="stack",
+            height=350,
+            yaxis=dict(title="Equivalent error-budget days", gridcolor="#f1f5f9"),
             legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=50, r=20, t=60, b=40),
+            margin=dict(l=70, r=20, t=60, b=40),
         )
         apply_plotly_theme(_fig)
         items.append(mo.as_html(_fig))
 
+        _budget_color = COLORS["GreenLine"] if _budget["feasible"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Linear Loss", f"{_debt.linear_loss_pp:.1f} pp", "missed * base", COLORS["BlueLine"])}
-            {_metric_card("Compound Loss", f"{_debt.compound_loss_pp:.1f} pp", "superlinear drift", COLORS["OrangeLine"])}
-            {_metric_card("Cascade Loss", f"{_debt.cascade_loss_pp:.1f} pp", f"{_debt.downstream_models} downstream", COLORS["RedLine"])}
-            {_metric_card("Debt Multiplier", f"{_debt.debt_multiplier:.1f}x", "vs one missed cycle", COLORS["RedLine"], True)}
+            {_metric_card("T*", f"{_cadence.optimal_days:.1f} d", "economic cadence", COLORS["GreenLine"])}
+            {_metric_card("Budget Used", f"{_budget['total_days']:.1f} d", f"limit {_budget['budget_days']:.1f} d", COLORS["RedLine"])}
+            {_metric_card("Binding Risk", _budget["binding_risk"], "largest budget term", COLORS["OrangeLine"])}
+            {_metric_card("Policy Status", "PASS" if _budget["feasible"] else "FAIL", ", ".join(_policy.violations + _rollout["violations"]) or "inside budget", _budget_color, True)}
         </div>
         """))
 
-        items.append(mo.md(f"""
-**Debt Cascade - Live Calculation**
-
-```
-missed cycles = {_debt.missed_cycles}
-downstream    = {_debt.downstream_models}
-base loss     = {_debt.base_loss_pp:.1f} pp
-linear loss   = {_debt.linear_loss_pp:.1f} pp
-actual loss   = {_debt.total_loss_pp:.1f} pp
-multiplier    = {_debt.debt_multiplier:.1f}x
-```
-*Source: `mlsysbook_labs.debt_cascade`.*
+        _budget_rows_html = "".join(
+            f"""
+            <tr>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_name}</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value:.2f} d</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value / max(0.0001, _budget['budget_days']) * 100:.0f}%</td>
+            </tr>
+            """
+            for _name, _value in _budget["rows"]
+        )
+        items.append(mo.Html(f"""
+        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
+                    padding:14px 16px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
+                Evidence Table &middot; Error-Budget Ledger
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
+                <thead>
+                    <tr style="background:#f8fafc;">
+                        <th style="text-align:left; padding:8px 10px;">Budget term</th>
+                        <th style="text-align:left; padding:8px 10px;">Equivalent days</th>
+                        <th style="text-align:left; padding:8px 10px;">Budget share</th>
+                    </tr>
+                </thead>
+                <tbody>{_budget_rows_html}</tbody>
+            </table>
+        </div>
         """))
 
-        if partD_pred.value == "compound":
-            items.append(mo.callout(mo.md("**Correct.** Missed cycles compound and downstream dependencies cascade the loss."), kind="success"))
+        if not _budget["feasible"]:
+            _violations = ", ".join(_policy.violations + _rollout["violations"]) or "error budget overspent"
+            items.append(mo.callout(mo.md(
+                f"**Reversible failure state.** This runbook overspends the {_amounts['error_budget_days']:.1f}-day track budget: {_violations}."
+            ), kind="danger"))
+
+        items.append(mo.md(f"""
+**Math Peek / Source Model**
+
+```
+T* = sqrt(2 * retrain_cost / drift_cost_per_day)
+   = sqrt(2 * {v1_14_ops.retrain_cost:,.0f} / {v1_14_ops.drift_cost_per_day:,.0f})
+   = {_cadence.optimal_days:.1f} days
+
+monitoring cost = C_ingest + C_storage + C_compute + C_alert
+policy cost     = ${_policy.total_annual_cost:,.0f}/year
+```
+
+*Source: chapter cost-aware automation, monitoring cost model, and on-call
+practice sections; shared `mlsysbook_labs.ops_policy` and notebook-local
+`v1_14_error_budget`.*
+        """))
+
+        items.append(mo.callout(mo.md(
+            f"**Checkpoint.** Final runbook: alert at `{partD_threshold.value:.2f} PSI`, retrain every "
+            f"`{partD_cadence.value} days`, canary `{partD_canary.value}%`, rollback within "
+            f"`{partD_rollback.value:g} hours`, and carry `{_amounts['carry_forward_risk']}`."
+        ), kind="info"))
+
+        if partD_pred.value == "budget" and _budget["feasible"]:
+            items.append(mo.callout(mo.md("**Correct.** A defensible policy spends the error budget deliberately and names who owns the residual risk."), kind="success"))
         else:
             items.append(mo.callout(mo.md(
-                "**Debt is not linear.** Missed retraining increases drift and propagates stale predictions downstream."
+                "**Operations policy is not just cost minimization.** It must allocate detection, stale-model, rollout, rollback, and ownership risk under the track budget."
             ), kind="warn"))
         return mo.vstack(items)
 
     def build_synthesis():
+        _threshold = v1_14_threshold_economics(
+            v1_14_ops,
+            _amounts,
+            threshold_psi=partD_threshold.value,
+            alert_review_cost=partB_review_cost.value,
+            false_alarm_rate=partB_false_alarm_rate.value,
+        )
+        _policy = ops_policy(
+            v1_14_ops,
+            threshold_psi=partD_threshold.value,
+            cadence_days=partD_cadence.value,
+            canary_pct=partD_canary.value,
+            rollback_hours=partD_rollback.value,
+        )
+        _rollout = v1_14_rollout_risk(
+            _amounts,
+            canary_pct=partD_canary.value,
+            rollback_hours=partD_rollback.value,
+            fallback_pct=_amounts["default_fallback_pct"],
+        )
+        _budget = v1_14_error_budget(_amounts, _threshold, _policy, _rollout)
+        _status = "approved" if _budget["feasible"] else "not yet approved"
         return mo.vstack([
-            mo.md("## Key Takeaways"),
+            mo.md("## Synthesis - Operations Runbook Memo"),
             mo.callout(mo.md(
-                f"**1. Model health needs track-specific signals.** For {v1_14_ops.label}, the signal is {v1_14_ops.monitoring_signal}."
+                f"**Chapter invariant.** Production ML is a control loop: monitor deployed behavior, "
+                f"calibrate the alert threshold, limit rollout blast radius, and spend error budget deliberately."
             ), kind="info"),
             mo.callout(mo.md(
-                "**2. Retraining cadence is an economics and risk calculation.** T* balances fixed retraining cost against stale-model risk."
+                f"**Runbook status: {_status}.** Alert at `{partD_threshold.value:.2f} PSI`; retrain every "
+                f"`{partD_cadence.value} days`; canary `{partD_canary.value}%`; rollback within "
+                f"`{partD_rollback.value:g} hours`; expected budget use `{_budget['total_days']:.1f}` of "
+                f"`{_budget['budget_days']:.1f}` equivalent days."
             ), kind="info"),
             mo.callout(mo.md(
-                "**3. Operations policy is the student artifact.** It must name threshold, cadence, canary, rollback, escalation, and residual blind spot."
+                f"**Residual blind spot.** {_amounts['blind_spot']} "
+                f"Carry-forward responsibility risk: {_amounts['carry_forward_risk']}."
             ), kind="info"),
             mo.Html(f"""
             <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
@@ -864,7 +1304,8 @@ multiplier    = {_debt.debt_multiplier:.1f}x
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
                         <strong>Lab 15: Responsible Engineering</strong> - after operations
-                        policy, the next question is whose outcomes and constraints are protected.
+                        policy, the next question is whose outcomes and constraints are protected
+                        by the remaining blind spot.
                     </div>
                 </div>
                 <div style="flex: 1; min-width: 280px; background: white;
@@ -875,8 +1316,8 @@ multiplier    = {_debt.debt_multiplier:.1f}x
                         Report Focus
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        Submit a compact incident-prevention policy for {v1_14_ops.label}
-                        with evidence from each part.
+                        Submit an operations runbook memo for {v1_14_ops.label} with alert
+                        threshold, rollback rule, residual blind spot, and carry-forward owner risk.
                     </div>
                 </div>
             </div>
@@ -884,10 +1325,10 @@ multiplier    = {_debt.debt_multiplier:.1f}x
         ])
 
     _tabs = mo.ui.tabs({
-        "Part A: Drift Visibility": build_part_a(),
-        "Part B: Retraining Cadence": build_part_b(),
-        "Part C: Ops Policy": build_part_c(),
-        "Part D: Debt Cascade": build_part_d(),
+        "Part A: Deployed Behavior": build_part_a(),
+        "Part B: Threshold Trade-off": build_part_b(),
+        "Part C: Rollout & Rollback": build_part_c(),
+        "Part D: Error Budget Policy": build_part_d(),
         "Synthesis": build_synthesis(),
     })
     _tabs
@@ -903,14 +1344,24 @@ multiplier    = {_debt.debt_multiplier:.1f}x
 def _(
     ledger,
     mo,
+    partB_threshold,
+    partC_canary,
+    partC_fallback,
+    partC_rollback,
+    partD_cadence,
+    partD_canary,
     partA_pred,
     partB_pred,
     partC_pred,
     partD_pred,
+    partD_rollback,
+    partD_threshold,
     v1_14_ops,
     v1_14_profile,
+    v1_14_track_amounts,
     v1_14_variant,
 ):
+    _amounts = v1_14_track_amounts(v1_14_profile, v1_14_ops)
     if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
         ledger.save(chapter=14, design={
             "chapter": "v1_14",
@@ -919,10 +1370,21 @@ def _(
             "hardware_ref": v1_14_ops.hardware_ref,
             "model_ref": v1_14_ops.model_ref,
             "completed": True,
-            "drift_visibility_prediction": partA_pred.value,
-            "retraining_cadence_prediction": partB_pred.value,
-            "ops_policy_prediction": partC_pred.value,
-            "debt_cascade_prediction": partD_pred.value,
+            "deployed_behavior_prediction": partA_pred.value,
+            "threshold_tradeoff_prediction": partB_pred.value,
+            "rollout_rollback_prediction": partC_pred.value,
+            "error_budget_prediction": partD_pred.value,
+            "part_b_threshold_psi": partB_threshold.value,
+            "part_c_canary_pct": partC_canary.value,
+            "part_c_rollback_hours": partC_rollback.value,
+            "part_c_fallback_pct": partC_fallback.value,
+            "runbook_threshold_psi": partD_threshold.value,
+            "runbook_retraining_cadence_days": partD_cadence.value,
+            "runbook_canary_pct": partD_canary.value,
+            "runbook_rollback_hours": partD_rollback.value,
+            "rollback_rule": v1_14_ops.rollback_policy,
+            "residual_blind_spot": _amounts["blind_spot"],
+            "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
         })
 
     mo.Html(f"""
@@ -933,7 +1395,7 @@ def _(
         <span class="hud-value">{v1_14_profile.label}</span>
         <span style="flex:1;"></span>
         <span class="hud-label">MONITOR</span>
-        <span class="hud-value">{v1_14_ops.alert_threshold_psi:.2f} PSI</span>
+        <span class="hud-value">{partD_threshold.value:.2f} PSI</span>
         <span class="hud-label">STATUS</span>
         <span class="hud-active">ACTIVE</span>
     </div>
@@ -944,7 +1406,6 @@ def _(
 @app.cell(hide_code=True)
 def _(
     build_lab_report,
-    debt_cascade,
     drift_visibility,
     mo,
     ops_policy,
@@ -952,89 +1413,117 @@ def _(
     partA_pred,
     partA_rate,
     partA_threshold,
-    partB_current,
-    partB_drift_cost,
+    partB_false_alarm_rate,
     partB_pred,
-    partB_retrain_cost,
-    partC_cadence,
+    partB_review_cost,
+    partB_threshold,
     partC_canary,
+    partC_fallback,
     partC_pred,
     partC_rollback,
-    partC_threshold,
-    partD_base_loss,
-    partD_downstream,
-    partD_missed,
+    partD_cadence,
+    partD_canary,
     partD_pred,
+    partD_rollback,
+    partD_threshold,
     report_export_panel,
     retraining_cadence,
+    v1_14_error_budget,
     v1_14_metadata,
     v1_14_ops,
     v1_14_profile,
+    v1_14_rollout_risk,
+    v1_14_threshold_economics,
+    v1_14_track_amounts,
     v1_14_variant,
 ):
+    _amounts = v1_14_track_amounts(v1_14_profile, v1_14_ops)
     _drift = drift_visibility(
         v1_14_ops,
         days_since_deploy=partA_days.value,
         drift_rate_psi_per_day=partA_rate.value,
         alert_threshold_psi=partA_threshold.value,
     )
+    _threshold = v1_14_threshold_economics(
+        v1_14_ops,
+        _amounts,
+        threshold_psi=partB_threshold.value,
+        alert_review_cost=partB_review_cost.value,
+        false_alarm_rate=partB_false_alarm_rate.value,
+    )
+    _runbook_threshold = v1_14_threshold_economics(
+        v1_14_ops,
+        _amounts,
+        threshold_psi=partD_threshold.value,
+        alert_review_cost=partB_review_cost.value,
+        false_alarm_rate=partB_false_alarm_rate.value,
+    )
+    _rollout = v1_14_rollout_risk(
+        _amounts,
+        canary_pct=partC_canary.value,
+        rollback_hours=partC_rollback.value,
+        fallback_pct=partC_fallback.value,
+    )
+    _runbook_rollout = v1_14_rollout_risk(
+        _amounts,
+        canary_pct=partD_canary.value,
+        rollback_hours=partD_rollback.value,
+        fallback_pct=_amounts["default_fallback_pct"],
+    )
     _cadence = retraining_cadence(
-        retrain_cost=partB_retrain_cost.value,
-        drift_cost_per_day=partB_drift_cost.value,
-        current_days=partB_current.value,
+        retrain_cost=v1_14_ops.retrain_cost,
+        drift_cost_per_day=v1_14_ops.drift_cost_per_day,
+        current_days=partD_cadence.value,
     )
     _policy = ops_policy(
         v1_14_ops,
-        threshold_psi=partC_threshold.value,
-        cadence_days=partC_cadence.value,
-        canary_pct=partC_canary.value,
-        rollback_hours=partC_rollback.value,
+        threshold_psi=partD_threshold.value,
+        cadence_days=partD_cadence.value,
+        canary_pct=partD_canary.value,
+        rollback_hours=partD_rollback.value,
     )
-    _debt = debt_cascade(
-        missed_cycles=partD_missed.value,
-        downstream_models=partD_downstream.value,
-        base_loss_pp=partD_base_loss.value,
-    )
+    _budget = v1_14_error_budget(_amounts, _runbook_threshold, _policy, _runbook_rollout)
 
     _incomplete = []
     if partA_pred.value is None:
-        _incomplete.append("Part A drift visibility prediction")
+        _incomplete.append("Part A deployed-behavior prediction")
     if partB_pred.value is None:
-        _incomplete.append("Part B retraining cadence prediction")
+        _incomplete.append("Part B threshold trade-off prediction")
     if partC_pred.value is None:
-        _incomplete.append("Part C ops policy prediction")
+        _incomplete.append("Part C rollout/rollback prediction")
     if partD_pred.value is None:
-        _incomplete.append("Part D debt cascade prediction")
+        _incomplete.append("Part D error-budget prediction")
 
     _report = build_lab_report(
         v1_14_metadata,
         track=v1_14_profile.label,
         scenario=v1_14_variant.workload_summary,
         learning_objectives=(
-            "Explain why model quality can degrade while infrastructure metrics stay green.",
-            "Compute a retraining cadence from retraining cost and stale-model risk.",
-            "Write an operations policy with monitoring, canary, rollback, escalation, and residual risk.",
+            "Explain why monitoring must measure deployed behavior, not only model or infrastructure metrics.",
+            "Calibrate a drift threshold by trading false alarms against missed degradation.",
+            "Limit release blast radius with canary, rollback, and fallback policy.",
+            "Spend error budget deliberately in an operations runbook memo.",
         ),
         predictions={
-            "drift_visibility": partA_pred.value,
-            "retraining_cadence": partB_pred.value,
-            "ops_policy": partC_pred.value,
-            "debt_cascade": partD_pred.value,
+            "deployed_behavior": partA_pred.value,
+            "threshold_tradeoff": partB_pred.value,
+            "rollout_rollback": partC_pred.value,
+            "error_budget_policy": partD_pred.value,
         },
         knob_settings={
             "days_since_deploy": partA_days.value,
             "drift_rate_psi_per_day": partA_rate.value,
-            "alert_threshold_psi": partA_threshold.value,
-            "retrain_cost": partB_retrain_cost.value,
-            "drift_cost_per_day": partB_drift_cost.value,
-            "current_cadence_days": partB_current.value,
-            "policy_threshold_psi": partC_threshold.value,
-            "policy_cadence_days": partC_cadence.value,
-            "policy_canary_pct": partC_canary.value,
-            "policy_rollback_hours": partC_rollback.value,
-            "missed_cycles": partD_missed.value,
-            "downstream_models": partD_downstream.value,
-            "base_loss_pp": partD_base_loss.value,
+            "part_a_alert_threshold_psi": partA_threshold.value,
+            "part_b_threshold_psi": partB_threshold.value,
+            "alert_review_cost": partB_review_cost.value,
+            "false_alarm_rate_per_year": partB_false_alarm_rate.value,
+            "part_c_canary_pct": partC_canary.value,
+            "part_c_rollback_hours": partC_rollback.value,
+            "part_c_fallback_pct": partC_fallback.value,
+            "runbook_threshold_psi": partD_threshold.value,
+            "runbook_cadence_days": partD_cadence.value,
+            "runbook_canary_pct": partD_canary.value,
+            "runbook_rollback_hours": partD_rollback.value,
         },
         evidence_summary={
             "hardware_ref": v1_14_ops.hardware_ref,
@@ -1045,28 +1534,45 @@ def _(
             "observed_psi": round(_drift.observed_psi, 4),
             "true_quality_pct": round(_drift.true_quality_pct, 3),
             "alert_day": _drift.alert_day,
+            "part_a_detection_delay_days": _drift.detection_delay_days,
+            "part_b_threshold_psi": round(_threshold["threshold_psi"], 3),
+            "part_b_false_alarm_cost": round(_threshold["false_alarm_cost"], 2),
+            "part_b_missed_damage_cost": round(_threshold["missed_damage_cost"], 2),
+            "part_b_failure_mode": _threshold["failure_mode"],
+            "part_c_blast_radius_units": round(_rollout["exposed_units"], 4),
+            "part_c_unit_label": _amounts["unit_label"],
+            "part_c_rollback_tier": _rollout["rollback_tier"],
             "optimal_cadence_days": round(_cadence.optimal_days, 3),
-            "policy_feasible": _policy.feasible,
+            "runbook_policy_feasible": _budget["feasible"],
+            "error_budget_days": round(_budget["total_days"], 3),
+            "binding_risk": _budget["binding_risk"],
             "policy_violations": _policy.violations,
-            "debt_multiplier": round(_debt.debt_multiplier, 3),
+            "rollout_violations": _runbook_rollout["violations"],
+            "residual_blind_spot": _amounts["blind_spot"],
+            "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
         },
         final_decision=(
-            f"Adopt {v1_14_ops.monitoring_signal}; retrain near T*; use "
-            f"{v1_14_ops.rollback_policy}; escalate through {v1_14_ops.escalation_policy}."
+            f"Runbook memo: alert at {partD_threshold.value:.2f} PSI; retrain every "
+            f"{partD_cadence.value} days; canary {partD_canary.value}% with rollback within "
+            f"{partD_rollback.value:g} hours using {v1_14_ops.rollback_policy}; escalate through "
+            f"{v1_14_ops.escalation_policy}."
         ),
         big_takeaways=(
-            "Infrastructure health and model health are separate axes.",
-            "Delayed labels create a silent degradation window.",
-            "Operations policy must include monitoring, cadence, canary, rollback, escalation, and residual blind spot.",
+            "Monitoring must measure deployed behavior, not only model or infrastructure metrics.",
+            "Drift thresholds allocate operational attention and missed-degradation risk.",
+            "Rollout and rollback policy control blast radius and recovery time.",
+            "A runbook spends error budget deliberately and names residual ownership risk.",
         ),
         reflections={
             "report_artifact": v1_14_ops.report_artifact,
             "validation_tests": v1_14_ops.validation_tests,
-            "residual_blind_spot": "Proxy monitors and delayed labels can still miss abrupt regime changes.",
+            "rollback_rule": v1_14_ops.rollback_policy,
+            "residual_blind_spot": _amounts["blind_spot"],
+            "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
         },
         residual_risk=(
             "Teaching estimates must be validated with real production traces, label-delay audits, "
-            "cohort canaries, rollback drills, and post-deployment quality reviews."
+            "cohort canaries, rollback drills, post-deployment quality reviews, and owner handoff checks."
         ),
         source_trace={
             "track_id": v1_14_profile.track_id,
@@ -1074,14 +1580,22 @@ def _(
             "hardware_ref": v1_14_variant.hardware_ref,
             "model_ref": v1_14_variant.model_ref,
             "shared_helper": "mlsysbook_labs.ops",
+            "notebook_local_helpers": (
+                "v1_14_track_amounts",
+                "v1_14_threshold_economics",
+                "v1_14_rollout_risk",
+                "v1_14_error_budget",
+            ),
             "source_policy": v1_14_profile.source_policy,
         },
         result_snapshot={
             "ops_profile": v1_14_ops,
             "drift_visibility": _drift,
+            "threshold_economics": _threshold,
+            "rollout_risk": _rollout,
             "retraining_cadence": _cadence,
             "ops_policy": _policy,
-            "debt_cascade": _debt,
+            "error_budget": _budget,
         },
         incomplete_fields=tuple(_incomplete),
     )

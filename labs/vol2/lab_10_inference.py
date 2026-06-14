@@ -3,36 +3,27 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # LAB V2-10: THE INFERENCE ECONOMY
 #
-# Chapter: Inference at Scale (@sec-inference-at-scale)
-# Core Invariant: Recurring inference cost eclipses one-time setup cost. Live
-#                 state/cache memory often binds concurrency before peak compute.
-#                 Continuous batching or duty-cycle scheduling transforms a
-#                 stop-and-go assembly line into a flowing pipeline. The design
-#                 challenge requires jointly optimizing precision, scheduling,
-#                 and serving units under the selected track's guardrail.
+# Chapter invariant: production inference is a coupled queueing, memory/state,
+# and economics problem. Mean throughput does not imply a usable service; serving
+# policies must satisfy memory, latency tail, quality, thermal/power, and cost
+# guardrails at the same time.
 #
-# Tabbed Structure (35-40 minutes):
-#   Part A — The Serving Cost Inversion (12-15 min)
-#             Recurring cost crosses one-time budget. Scheduling trades latency
-#             for throughput along a hockey stick.
-#
-#   Part B — The KV Cache Wall + Fleet Design Challenge (20-25 min)
-#             State/cache memory sets concurrency. Precision + continuous
-#             scheduling + right serving-unit count reduces recurring cost.
-#
-# Track source-of-truth:
-#   Hardware, model, and scenario defaults resolve through MLSysIM and
-#   mlsysbook_labs track variants. Notebook code composes and renders them.
-# ─────────────────────────────────────────────────────────────────────────────
+# Packet modules:
+#   Part A - Cost Inversion Calibration
+#   Part B - State/KV Cache Wall
+#   Part C - Batching Under Variance
+#   Part D - Serving Design Challenge
+#   Synthesis
+# -----------------------------------------------------------------------------
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
-# ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
+# --- CELL 0: SETUP ------------------------------------------------------------
 @app.cell
 async def _():
     import marimo as mo
@@ -59,8 +50,8 @@ async def _():
     from mlsysim.labs.components import DecisionLog
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
-        build_lab_report,
         batching_result,
+        build_lab_report,
         cost_crossover,
         get_lab_metadata,
         get_lab_track_variant,
@@ -69,10 +60,9 @@ async def _():
         report_export_panel,
         resolve_mlsysim_ref,
         serving_plan,
-        source_trace,
         state_capacity,
-        track_context,
         track_arc_context,
+        track_context,
         track_selector,
     )
 
@@ -80,12 +70,30 @@ async def _():
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS, COLORS, DecisionLog, LAB_CSS, apply_plotly_theme,
-        batching_result, build_lab_report, cost_crossover, get_lab_metadata,
-        get_lab_track_variant, get_track_profile, go, inference_economy_profile,
-        ledger, math, mo, np, report_export_panel, resolve_mlsysim_ref,
-        serving_plan, source_trace, state_capacity, track_context,
-        track_arc_context, track_selector,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        DecisionLog,
+        LAB_CSS,
+        apply_plotly_theme,
+        batching_result,
+        build_lab_report,
+        cost_crossover,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        inference_economy_profile,
+        ledger,
+        math,
+        mo,
+        np,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        serving_plan,
+        state_capacity,
+        track_arc_context,
+        track_context,
+        track_selector,
     )
 
 
@@ -132,16 +140,368 @@ def _(
         v2_10_variant,
     )
 
-# ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
+
+# --- CELL 1: NOTEBOOK-LOCAL HELPERS -----------------------------------------
+@app.cell
+def _(COLORS, math, mo):
+    def v2_10_fmt_currency(value, unit):
+        if unit == "USD":
+            return f"${value:,.0f}"
+        if abs(value) >= 1000:
+            return f"{value:,.0f} {unit}"
+        if abs(value) >= 1:
+            return f"{value:,.2f} {unit}"
+        return f"{value:.4f} {unit}"
+
+    def v2_10_fmt_duration_days(days):
+        if not math.isfinite(days):
+            return "never in the first year"
+        if days < 14:
+            return f"{days:.1f} days"
+        if days < 365:
+            return f"{days / 7:.1f} weeks"
+        return f"{days / 365:.1f} years"
+
+    def v2_10_fmt_ms(value):
+        if not math.isfinite(value):
+            return "not feasible"
+        if abs(value) >= 1000:
+            return f"{value / 1000:.2f} s"
+        return f"{value:.1f} ms"
+
+    def v2_10_crossover_bucket(days):
+        if not math.isfinite(days) or days > 365:
+            return "never"
+        if days <= 14:
+            return "days"
+        if days <= 70:
+            return "weeks"
+        return "months"
+
+    def v2_10_prediction_bucket_days(bucket):
+        return {"days": 7.0, "weeks": 35.0, "months": 180.0, "never": 365.0}.get(bucket, 35.0)
+
+    def v2_10_capacity_bucket(max_concurrent):
+        if max_concurrent <= 1:
+            return "one"
+        if max_concurrent <= 4:
+            return "few"
+        if max_concurrent <= 32:
+            return "modest"
+        return "many"
+
+    def v2_10_precision_label(precision_bytes):
+        labels = {2.0: "FP16", 1.0: "INT8", 0.5: "INT4"}
+        return labels.get(float(precision_bytes), f"{precision_bytes:g} bytes")
+
+    def v2_10_schedule_label(policy):
+        return {
+            "no_batching": "No batching / immediate serving",
+            "static": "Static batching",
+            "dynamic": "Dynamic batching",
+            "continuous": "Continuous batching",
+        }.get(policy, str(policy))
+
+    def v2_10_phase_label(phase):
+        return {
+            "prefill": "Prefill / input-pass amount",
+            "decode": "Decode / output-loop amount",
+        }.get(phase, str(phase))
+
+    def v2_10_phase_amounts(profile, prefill_tokens, decode_tokens, precision_bytes):
+        weight_gb = max(0.001, profile.model_params_b * precision_bytes)
+        bandwidth_gbs = max(1.0, profile.memory_bandwidth_gbs)
+        if profile.track_id == "cloud_fleet":
+            prefill_ms = (
+                max(1.0, 0.10 * profile.slo_ms)
+                + 0.015 * (prefill_tokens / 1024) ** 2 * max(1.0, profile.model_params_b / 7)
+            )
+            tpot_ms = weight_gb / bandwidth_gbs * 1000
+            decode_ms = decode_tokens * tpot_ms
+            input_unit = "prompt tokens"
+            output_unit = "generated tokens"
+        else:
+            track_scalars = {
+                "iphone": (0.010, 0.022),
+                "oura_ring": (0.090, 0.180),
+                "robotaxi": (0.004, 0.035),
+            }
+            input_scale, output_scale = track_scalars.get(profile.track_id, (0.010, 0.030))
+            prefill_ms = max(1.0, 0.18 * profile.slo_ms) + prefill_tokens * input_scale
+            decode_ms = max(0.5, decode_tokens * output_scale + decode_tokens * weight_gb / bandwidth_gbs * 12)
+            tpot_ms = decode_ms / max(1, decode_tokens)
+            input_unit = "input/window units"
+            output_unit = "output/decision steps"
+        binding_phase = "prefill" if prefill_ms >= decode_ms else "decode"
+        return {
+            "prefill_ms": prefill_ms,
+            "decode_ms": decode_ms,
+            "tpot_ms": tpot_ms,
+            "weight_gb": weight_gb,
+            "decode_read_gb": decode_tokens * weight_gb,
+            "binding_phase": binding_phase,
+            "input_unit": input_unit,
+            "output_unit": output_unit,
+        }
+
+    def v2_10_policy_multiplier(track_id, policy):
+        table = {
+            "cloud_fleet": {"no_batching": 0.8, "static": 1.0, "dynamic": 1.8, "continuous": 3.0},
+            "iphone": {"no_batching": 1.0, "static": 1.1, "dynamic": 1.5, "continuous": 1.4},
+            "oura_ring": {"no_batching": 0.8, "static": 1.0, "dynamic": 1.35, "continuous": 1.05},
+            "robotaxi": {"no_batching": 1.0, "static": 0.95, "dynamic": 1.15, "continuous": 1.05},
+        }
+        return table.get(track_id, table["cloud_fleet"]).get(policy, 1.0)
+
+    def v2_10_track_schedule_note(track_id):
+        if track_id == "robotaxi":
+            return "For RoboTaxi, batching is a deadline-sensitive streaming admission decision, not a broad LLM-style batching win."
+        if track_id == "oura_ring":
+            return "For Oura Ring, the schedule is a duty-cycle and handoff policy; always-on scheduling can waste the battery budget."
+        if track_id == "iphone":
+            return "For iPhone, small dynamic batches can help background work, but interactive paths often prefer immediate local inference."
+        return "For Cloud Fleet, continuous batching can help when mixed request lengths and sufficient volume justify scheduler overhead."
+
+    def v2_10_scheduling_rows(track_id, batch_size, avg_len, max_len, fill_factor, slo_ms):
+        ratio = max(1.0, max_len / max(1, avg_len))
+        padding_waste = max(0.0, min(1.0, 1 - avg_len / max(1, max_len)))
+        base_ms = max(1.0, 0.25 * slo_ms)
+        overhead = {
+            "cloud_fleet": {"no_batching": 2, "static": 12, "dynamic": 18, "continuous": 26},
+            "iphone": {"no_batching": 1, "static": 8, "dynamic": 12, "continuous": 24},
+            "oura_ring": {"no_batching": 8, "static": 18, "dynamic": 28, "continuous": 72},
+            "robotaxi": {"no_batching": 0, "static": 10, "dynamic": 6, "continuous": 18},
+        }.get(track_id, {"no_batching": 2, "static": 12, "dynamic": 18, "continuous": 26})
+
+        rows = []
+        raw_rows = (
+            ("no_batching", 1.0, 0.0, base_ms * 1.1 + overhead["no_batching"]),
+            ("static", float(batch_size), padding_waste, base_ms * ratio + overhead["static"] + batch_size * 0.5),
+            ("dynamic", batch_size * (1 + padding_waste * 0.70) * min(0.95, fill_factor + 0.10), padding_waste * 0.45, base_ms * math.sqrt(ratio) + overhead["dynamic"]),
+            ("continuous", batch_size * ratio * fill_factor, 0.0, base_ms * (1.10 if ratio > 2 else 1.25) + overhead["continuous"] + batch_size * 0.25),
+        )
+        for policy, throughput, waste, tail_ms in raw_rows:
+            risk_pct = max(0.0, (tail_ms - slo_ms) / max(1.0, slo_ms) * 100)
+            score = throughput / (1.0 + risk_pct / 35.0)
+            if track_id == "robotaxi" and policy == "continuous":
+                score *= 0.55
+            if track_id == "robotaxi" and policy == "no_batching":
+                score *= 1.35
+            if track_id == "oura_ring" and policy == "continuous":
+                score *= 0.55
+            if track_id == "oura_ring" and policy == "dynamic":
+                score *= 1.25
+            rows.append({
+                "policy": policy,
+                "label": v2_10_schedule_label(policy),
+                "throughput": throughput,
+                "waste_pct": waste * 100,
+                "tail_ms": tail_ms,
+                "risk_pct": risk_pct,
+                "score": score,
+            })
+        winner = max(rows, key=lambda row: row["score"])["policy"]
+        return rows, winner
+
+    def v2_10_serving_latency_ms(track_id, slo_ms, policy, utilization, oom=False):
+        if oom:
+            return math.inf
+        overhead = {
+            "no_batching": 0.04,
+            "static": 0.42,
+            "dynamic": 0.22,
+            "continuous": 0.14,
+        }.get(policy, 0.22)
+        if track_id == "robotaxi" and policy in ("static", "continuous"):
+            overhead += 0.30
+        if track_id == "oura_ring" and policy == "continuous":
+            overhead += 0.25
+        return slo_ms * (0.35 + 0.25 * min(0.99, utilization) + overhead)
+
+    def v2_10_binding_constraint(memory_ok, slo_ok, cost_ok, quality_ok):
+        if not memory_ok:
+            return "memory/state"
+        if not slo_ok:
+            return "SLO/deadline"
+        if not quality_ok:
+            return "quality guardrail"
+        if not cost_ok:
+            return "recurring cost"
+        return "none - all guardrails pass"
+
+    def v2_10_rejected_alternative(track_id, binding_constraint):
+        if binding_constraint == "memory/state":
+            return "Rejected single-unit FP16 long-context policy: state/cache memory does not fit beside weights."
+        if binding_constraint == "SLO/deadline":
+            return "Rejected minimal static policy: queueing and scheduler delay spend the p99/deadline budget."
+        if binding_constraint == "quality guardrail":
+            return "Rejected lowest-precision policy: quality risk is too high for this track."
+        if binding_constraint == "recurring cost":
+            return "Rejected overprovisioned FP16 policy: it passes latency by spending too much recurring cost or power."
+        defaults = {
+            "cloud_fleet": "Rejected single-unit FP16 static policy: KV/cache headroom is fragile and p99 risk is high.",
+            "iphone": "Rejected always-local overprovisioned policy: battery and thermal cost are not justified.",
+            "oura_ring": "Rejected always-on continuous schedule: duty cycle and battery budget are too fragile.",
+            "robotaxi": "Rejected broad continuous batching policy: the safety path needs deadline-first streaming behavior.",
+        }
+        return defaults.get(track_id, "Rejected alternative: it fails the selected track's binding guardrail.")
+
+    def v2_10_edge_implication(track_id, binding_constraint):
+        if track_id == "cloud_fleet":
+            return (
+                "V2-11 asks which parts of this policy can move toward edge devices when HBM, "
+                "NVLink, and always-on connectivity disappear."
+            )
+        if track_id == "iphone":
+            return "V2-11 turns the same policy into an on-device privacy, battery, and intermittent-offload problem."
+        if track_id == "oura_ring":
+            return "V2-11 tightens the same policy around SRAM, duty cycle, phone handoff, and local sensing quality."
+        if track_id == "robotaxi":
+            return "V2-11 keeps the safety loop local and asks what fleet/cloud work can tolerate intermittent handoff."
+        return f"V2-11 moves the binding amount, currently {binding_constraint}, into a smaller edge envelope."
+
+    def v2_10_part_banner(letter, title, duration, why, color):
+        return mo.Html(f"""
+        <div style="margin:12px 0 16px 0;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="background:{color}; color:white; border-radius:50%;
+                            width:32px; height:32px; display:inline-flex; align-items:center;
+                            justify-content:center; font-size:0.9rem; font-weight:800;
+                            flex-shrink:0;">{letter}</div>
+                <div style="flex:1; height:2px; background:{COLORS['Border']};"></div>
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.12em;">
+                    Part {letter} &middot; {duration}</div>
+            </div>
+            <div style="font-size:1.5rem; font-weight:800; color:{COLORS['Text']};
+                        margin-top:8px; line-height:1.2;">{title}</div>
+            <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
+                        line-height:1.55; max-width:760px;">{why}</div>
+        </div>
+        """)
+
+    def v2_10_stakeholder_card(persona, quote, color, background):
+        return mo.Html(f"""
+        <div style="border-left:4px solid {color}; background:{background};
+                    border-radius:0 8px 8px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{color};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; {persona}
+            </div>
+            <div style="font-style:italic; font-size:1rem; color:#1e293b; line-height:1.65;">
+                "{quote}"
+            </div>
+        </div>
+        """)
+
+    def v2_10_metric_card(label, value, subvalue="", color=None):
+        _color = color or COLORS["BlueLine"]
+        return mo.Html(f"""
+        <div style="padding:16px 18px; border:1px solid {COLORS['Border']}; border-radius:8px;
+                    min-width:150px; text-align:center; background:white;">
+            <div style="color:{COLORS['TextMuted']}; font-size:0.76rem; font-weight:700;
+                        text-transform:uppercase;">{label}</div>
+            <div style="font-size:1.7rem; font-weight:800; color:{_color}; font-family:monospace;
+                        line-height:1.35;">{value}</div>
+            <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{subvalue}</div>
+        </div>
+        """)
+
+    def v2_10_reveal_card(title, prediction, actual, detail, kind="info"):
+        palette = {
+            "success": (COLORS["GreenLine"], COLORS["GreenLL"]),
+            "warn": (COLORS["OrangeLine"], COLORS["OrangeLL"]),
+            "danger": (COLORS["RedLine"], COLORS["RedLL"]),
+            "info": (COLORS["BlueLine"], COLORS["BlueLL"]),
+        }
+        color, background = palette.get(kind, palette["info"])
+        return mo.Html(f"""
+        <div style="background:{background}; border:1px solid {color}; border-left:5px solid {color};
+                    border-radius:8px; padding:14px 18px; margin:12px 0;">
+            <div style="font-size:0.82rem; font-weight:800; color:{color};
+                        text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">
+                {title}
+            </div>
+            <div style="font-size:0.9rem; color:{COLORS['Text']}; line-height:1.65;">
+                You predicted <strong>{prediction}</strong>. Actual: <strong>{actual}</strong>. {detail}
+            </div>
+        </div>
+        """)
+
+    def v2_10_failure_card(active, title, detail, recovery):
+        if active:
+            return mo.callout(
+                mo.md(f"**{title}**  \n{detail}  \n\nRecovery path: {recovery}"),
+                kind="danger",
+            )
+        return mo.callout(
+            mo.md(f"**Recovered boundary: {title}**  \nCurrent settings pass. Boundary to watch: {detail}"),
+            kind="success",
+        )
+
+    def v2_10_math_peek(title, body):
+        return mo.accordion({title: mo.md(body)})
+
+    def v2_10_table_html(headers, rows):
+        _head = "".join(f"<th>{header}</th>" for header in headers)
+        _rows = []
+        for row in rows:
+            _cells = "".join(f"<td>{cell}</td>" for cell in row)
+            _rows.append(f"<tr>{_cells}</tr>")
+        return mo.Html(f"""
+        <div style="overflow-x:auto; margin:10px 0;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
+            <thead><tr style="background:{COLORS['Surface2']}; color:{COLORS['Text']};">{_head}</tr></thead>
+            <tbody>{''.join(_rows)}</tbody>
+        </table>
+        </div>
+        <style>
+            table td, table th {{
+                border:1px solid {COLORS['Border']};
+                padding:8px 10px;
+                text-align:left;
+                vertical-align:top;
+            }}
+        </style>
+        """)
+
+    return (
+        v2_10_binding_constraint,
+        v2_10_capacity_bucket,
+        v2_10_crossover_bucket,
+        v2_10_edge_implication,
+        v2_10_failure_card,
+        v2_10_fmt_currency,
+        v2_10_fmt_duration_days,
+        v2_10_fmt_ms,
+        v2_10_math_peek,
+        v2_10_metric_card,
+        v2_10_part_banner,
+        v2_10_phase_amounts,
+        v2_10_phase_label,
+        v2_10_policy_multiplier,
+        v2_10_precision_label,
+        v2_10_prediction_bucket_days,
+        v2_10_rejected_alternative,
+        v2_10_reveal_card,
+        v2_10_schedule_label,
+        v2_10_scheduling_rows,
+        v2_10_serving_latency_ms,
+        v2_10_stakeholder_card,
+        v2_10_table_html,
+        v2_10_track_schedule_note,
+    )
+
+
+# --- CELL 2: HEADER -----------------------------------------------------------
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
     COLORS,
     LAB_CSS,
     mo,
-    source_trace,
+    track_arc_context,
     track_context,
-        track_arc_context,
     v2_10_inference,
     v2_10_metadata,
     v2_10_profile,
@@ -151,30 +511,28 @@ def _(
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
-                    border-radius: 16px; padding: 32px 40px; margin-bottom: 8px;
-                    border: 1px solid #2d3748;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+        <div style="background:linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
+                    border-radius:16px; padding:32px 40px; margin-bottom:8px;
+                    border:1px solid #2d3748;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
                 <div>
-                    <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
-                                text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 8px;">
+                    <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
+                                text-transform:uppercase; letter-spacing:0.14em; margin-bottom:8px;">
                         Vol 2 &middot; Lab 10 &middot; Inference at Scale
                     </div>
-                    <div style="font-size: 2.0rem; font-weight: 800; color: #f1f5f9; line-height: 1.15; margin-bottom: 10px;">
+                    <div style="font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.15; margin-bottom:10px;">
                         The Inference Economy
                     </div>
-                    <div style="font-size: 0.95rem; color: #94a3b8; max-width: 640px; line-height: 1.6;">
-                        {v2_10_variant.workload_summary} Inference cost is the recurring
-                        constraint: {v2_10_inference.cost_label}, state/cache memory,
-                        batching, and replicas or local schedules determine whether the
-                        selected track can meet {v2_10_variant.guardrail_metric}.
+                    <div style="font-size:0.95rem; color:#94a3b8; max-width:680px; line-height:1.6;">
+                        {v2_10_variant.workload_summary} You will test cost, state/cache memory,
+                        batching under variance, and release guardrails for {v2_10_inference.label}.
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
+                <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
                     <span class="badge badge-info">{v2_10_profile.label}</span>
                     <span class="badge badge-info">{v2_10_inference.hardware_ref}</span>
                     <span class="badge badge-info">{v2_10_inference.model_name}</span>
-                    <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
+                    <span class="badge badge-warn">45-55 minutes &middot; 4 Parts + Synthesis</span>
                 </div>
             </div>
         </div>
@@ -184,236 +542,322 @@ def _(
     ])
     return
 
-# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+
+# --- CELL 3: BRIEFING ---------------------------------------------------------
 @app.cell(hide_code=True)
-def _(mo, COLORS, v2_10_inference, v2_10_variant):
+def _(COLORS, mo, v2_10_inference, v2_10_variant):
     mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+    <div style="border-left:4px solid {COLORS['BlueLine']};
+                background:white; border-radius:0 8px 8px 0;
+                padding:20px 28px; margin:8px 0 16px 0;
+                box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="margin-bottom:16px;">
+            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
                 Learning Objectives
             </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the cost inversion:</strong> calculate when cumulative {v2_10_inference.cost_label} exceeds the one-time track budget.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose the state/cache wall:</strong> compute how many concurrent requests fit in {v2_10_inference.hardware_name} memory.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Design an inference plan:</strong> jointly optimize precision, batching, and replicas or local scheduling under {v2_10_variant.guardrail_metric}.</div>
+            <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
+                <div>1. <strong>Quantify recurring serving cost:</strong> calculate when {v2_10_inference.cost_label} exceeds the setup budget.</div>
+                <div>2. <strong>Diagnose state memory:</strong> compute how {v2_10_inference.state_kind} caps concurrent sessions.</div>
+                <div>3. <strong>Compare scheduling policies:</strong> explain why batching depends on variance, volume, and {v2_10_variant.guardrail_metric}.</div>
+                <div>4. <strong>Design a serving policy:</strong> choose precision, scheduling, routing, and serving units that satisfy all guardrails.</div>
             </div>
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+        <div style="border-top:1px solid {COLORS['Border']}; margin:0 -28px; padding:0 28px;"></div>
+        <div style="display:flex; gap:32px; margin-top:16px; margin-bottom:16px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:220px;">
+                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
                     Prerequisites
                 </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    State/cache formula from the Inference at Scale chapter &middot;
-                    Queuing theory (Kingman's formula) from the Fleet Orchestration chapter
+                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
+                    Inference economics &middot; state/KV cache memory &middot; static, dynamic, and iteration-level scheduling &middot; p99/SLO guardrails
                 </div>
             </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+            <div style="flex:0 0 180px;">
+                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
                     Duration
                 </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35-40 min</strong><br/>
-                    Part A: ~12 min &middot; Part B: ~25 min
+                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
+                    <strong>45-55 min</strong><br/>
+                    4 parts &middot; ~10-15 min each
                 </div>
             </div>
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="margin-top: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+        <div style="border-top:1px solid {COLORS['Border']}; margin:0 -28px; padding:0 28px;"></div>
+        <div style="margin-top:16px;">
+            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
                 Core Question
             </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                "For {v2_10_inference.label}, when does recurring {v2_10_inference.cost_label}
-                exceed the one-time budget, and which state/cache or batching constraint
-                determines whether the system can serve locally or at fleet scale?"
+            <div style="font-size:1.05rem; color:{COLORS['Text']}; font-weight:600;
+                        line-height:1.5; font-style:italic;">
+                "If average throughput looks good, what still prevents {v2_10_inference.label}
+                from shipping under {v2_10_variant.guardrail_metric}?"
             </div>
         </div>
     </div>
     """)
     return
 
-# ─── CELL 3: RECOMMENDED READING ──────────────────────────────────────────────
+
+# --- CELL 4: RECOMMENDED READING --------------------------------------------
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete before this lab:
 
-    - **The Inference at Scale chapter** -- Serving economics, state/cache scaling, continuous batching
-    - The state/cache section -- `KV = 2 * L * H * S * B * P` for transformer KV cache
-    - The Continuous Batching section -- Static vs iteration-level scheduling
-    - The Queuing Theory section from the Fleet Orchestration chapter -- Kingman's formula
+    - The Inference at Scale chapter sections on serving economics and state/KV cache scaling.
+    - The continuous batching section contrasting static padding with iteration-level scheduling.
+    - The serving policy discussion on SLOs, cost/request, quality, and operational guardrails.
     """), kind="info")
     return
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: WIDGET DEFINITIONS
-# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 4: Part A widgets ──────────────────────────────────────────────────
+# ============================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ============================================================================
+
+# --- CELL 5: PART A WIDGETS --------------------------------------------------
 @app.cell(hide_code=True)
 def _(mo, v2_10_inference):
-    # -- Part A prediction --
     partA_prediction = mo.ui.radio(
         options={
-            "A) 6 months -- training dominates for a long time": "A",
-            "B) 3 months -- serving catches up gradually": "B",
-            "C) Weeks or days -- recurring inference cost grows fast": "C",
-            "D) Never -- training is always more expensive": "D",
+            "A) Days -- recurring serving crosses almost immediately": "days",
+            "B) Weeks -- serving overtakes setup during early rollout": "weeks",
+            "C) Months -- setup cost dominates for a quarter or more": "months",
+            "D) Never in the first year -- setup remains dominant": "never",
         },
         label=(
-            f"{v2_10_inference.label}: at {v2_10_inference.demand_qps:g} events/s and "
-            f"{v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}/event, "
-            f"when does cumulative {v2_10_inference.cost_label} exceed the one-time budget?"
+            f"{v2_10_inference.label}: when does cumulative {v2_10_inference.cost_label} "
+            "exceed the one-time setup/training budget?"
         ),
     )
-    return (partA_prediction,)
-
-# ─── CELL 5: Part A controls + Part A reflection + Part B prediction ─────────
-@app.cell(hide_code=True)
-def _(mo, v2_10_inference):
+    partA_phase_prediction = mo.ui.radio(
+        options={
+            "A) Prefill / input pass -- prompt or window processing controls the first response": "prefill",
+            "B) Decode / output loop -- repeated output steps control the live service": "decode",
+        },
+        label=(
+            f"{v2_10_inference.label}: which amount system is more likely to bind "
+            "after the request is live?"
+        ),
+    )
     _qps = v2_10_inference.demand_qps
     _unit_cost = v2_10_inference.cost_per_event
-    a1_qps = mo.ui.number(
+    _prefill_default = max(16, min(v2_10_inference.context_tokens, 8192))
+    _prefill_step = max(1, _prefill_default // 16)
+    _decode_default = max(1, min(512, max(8, v2_10_inference.context_tokens // 8)))
+    _decode_step = max(1, _decode_default // 16)
+    partA_qps = mo.ui.number(
         start=0.0,
         stop=max(_qps * 10, 1.0),
         value=_qps,
         step=max(_qps / 20, 0.01),
         label="Demand rate (events/s)",
     )
-    a1_cost_query = mo.ui.number(
+    partA_cost_per_event = mo.ui.number(
         start=0.0,
         stop=max(_unit_cost * 10, 0.001),
         value=_unit_cost,
         step=max(_unit_cost / 20, 0.000001),
         label=f"Cost per event ({v2_10_inference.cost_unit})",
     )
-    a1_weeks = mo.ui.slider(start=1, stop=52, value=v2_10_inference.horizon_weeks, step=1, label="Deployment duration (weeks)")
-    a1_optimization = mo.ui.slider(start=0, stop=50, value=0, step=5, label="Inference optimization (%)")
-
-    # -- Part A reflection --
-    partA_reflection = mo.ui.radio(
+    partA_horizon_weeks = mo.ui.slider(
+        start=1,
+        stop=52,
+        value=v2_10_inference.horizon_weeks,
+        step=1,
+        label="Planning horizon (weeks)",
+    )
+    partA_optimization_pct = mo.ui.slider(
+        start=0,
+        stop=50,
+        value=10,
+        step=5,
+        label="Recurring optimization (%)",
+    )
+    partA_prefill_tokens = mo.ui.slider(
+        start=max(1, _prefill_step),
+        stop=max(_prefill_default * 4, _prefill_default + _prefill_step),
+        value=_prefill_default,
+        step=_prefill_step,
+        label="Prefill/input tokens or window units",
+    )
+    partA_decode_tokens = mo.ui.slider(
+        start=1,
+        stop=max(_decode_default * 4, 16),
+        value=_decode_default,
+        step=_decode_step,
+        label="Decode/output tokens or decision steps",
+    )
+    partA_checkpoint = mo.ui.radio(
         options={
-            "A) Reduce QPS by throttling users": "A",
-            "B) Optimize inference efficiency (quantization, batching, caching)": "B",
-            "C) Train a smaller model": "C",
-            "D) Increase the price per query": "D",
+            "A) Ignore inference cost until next year's budget cycle": "ignore",
+            "B) Track cost/event and prioritize recurring efficiency": "optimize",
+            "C) Only reduce launch setup cost": "setup_only",
+            "D) Reduce demand even if quality and access suffer": "throttle",
         },
-        label="What is the highest-ROI lever for controlling total cost of ownership?",
+        label="Checkpoint: what design lever should the platform owner carry forward?",
+    )
+    return (
+        partA_checkpoint,
+        partA_cost_per_event,
+        partA_decode_tokens,
+        partA_phase_prediction,
+        partA_prefill_tokens,
+        partA_horizon_weeks,
+        partA_optimization_pct,
+        partA_prediction,
+        partA_qps,
     )
 
-    # -- Part B prediction --
+
+# --- CELL 6: PART B WIDGETS --------------------------------------------------
+@app.cell(hide_code=True)
+def _(mo, v2_10_inference, v2_10_variant):
     partB_prediction = mo.ui.radio(
         options={
-            "A) Many requests -- memory is not the constraint": "A",
-            "B) A modest batch -- state/cache overhead is visible": "B",
-            "C) Only a few requests -- memory is tighter than expected": "C",
-            "D) About one request -- live state/cache dominates memory": "D",
+            "A) Many sessions -- if weights fit, serving fits": "many",
+            "B) Tens of sessions -- state is visible but not binding": "modest",
+            "C) A few sessions -- state/cache is the first wall": "few",
+            "D) One or zero sessions -- memory fails immediately": "one",
         },
         label=(
             f"{v2_10_inference.model_name} on {v2_10_inference.hardware_name}: "
-            f"with {v2_10_inference.state_kind}, how many concurrent requests fit?"
+            "how many concurrent sessions fit before memory fails?"
         ),
     )
-    return (a1_cost_query, a1_optimization, a1_qps, a1_weeks, partA_reflection, partB_prediction)
-
-# ─── CELL 6: Part B controls + Part B reflection ────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, v2_10_inference, v2_10_variant):
     _precision_default = float(v2_10_variant.defaults.get("precision_bytes", 2.0))
-    _precision_label = {
+    _precision_label_default = {
         2.0: "FP16 (2 bytes)",
         1.0: "INT8 (1 byte)",
         0.5: "INT4 (0.5 bytes)",
     }.get(_precision_default, "FP16 (2 bytes)")
-    a2_precision = mo.ui.dropdown(
-        options={"FP16 (2 bytes)": 2, "INT8 (1 byte)": 1, "INT4 (0.5 bytes)": 0.5},
-        value=_precision_label,
+    partB_precision = mo.ui.dropdown(
+        options={"FP16 (2 bytes)": 2.0, "INT8 (1 byte)": 1.0, "INT4 (0.5 bytes)": 0.5},
+        value=_precision_label_default,
         label="Weight precision",
     )
     _context = v2_10_inference.context_tokens
-    _context_step = max(128, min(2048, _context // 8))
-    a2_context_len = mo.ui.slider(
+    _context_step = max(128, min(4096, _context // 8 if _context >= 1024 else _context))
+    partB_context_tokens = mo.ui.slider(
         start=max(128, _context_step),
         stop=max(_context * 2, _context_step * 2),
         value=_context,
         step=_context_step,
-        label="State/cache context window",
+        label="Context/state window",
     )
-    a2_n_gpus = mo.ui.slider(
+    partB_devices = mo.ui.slider(
         start=1,
         stop=max(8, v2_10_inference.default_devices_per_replica),
         value=v2_10_inference.default_devices_per_replica,
         step=1,
         label="Devices per serving unit",
     )
-
-    # -- Part B reflection --
-    partB_reflection = mo.ui.radio(
+    partB_checkpoint = mo.ui.radio(
         options={
-            "A) Reduce precision to free memory for live state/cache slots": "A",
-            "B) Add peak compute without changing memory capacity": "B",
-            "C) Replace the model with a much smaller one": "C",
-            "D) Spill live state/cache to slower off-device memory": "D",
+            "A) Lower weight precision to free live state memory": "precision",
+            "B) Add compute-only accelerators": "compute",
+            "C) Ignore state because the model weights fit": "ignore_state",
+            "D) Spill state/cache to slow off-device memory first": "spill",
         },
-        label=f"What is the most effective way to increase concurrent capacity for {v2_10_inference.state_kind}?",
+        label=f"Checkpoint: what is the first capacity lever for {v2_10_inference.state_kind}?",
     )
-    return (a2_context_len, a2_n_gpus, a2_precision, partB_reflection)
+    return (
+        partB_checkpoint,
+        partB_context_tokens,
+        partB_devices,
+        partB_precision,
+        partB_prediction,
+    )
 
-# ─── CELL 6b: Part C prediction + controls ─────────────────────────────────
+
+# --- CELL 7: PART C WIDGETS --------------------------------------------------
 @app.cell(hide_code=True)
 def _(mo, v2_10_inference):
     partC_prediction = mo.ui.radio(
         options={
-            "A) 1.5x -- modest improvement over static batching": "A",
-            "B) 2-4x -- continuous batching fills freed slots immediately": "B",
-            "C) 10x -- batching is the dominant optimization": "C",
-            "D) No improvement -- batching does not affect memory-bound workloads": "D",
+            "A) No batching / immediate serving": "no_batching",
+            "B) Static batching": "static",
+            "C) Dynamic batching": "dynamic",
+            "D) Continuous batching": "continuous",
         },
-        label=f"You switch {v2_10_inference.label} from static scheduling to continuous scheduling. What throughput improvement do you expect for mixed request lengths?",
+        label="Which scheduling policy wins for this workload after variance and SLO risk are counted?",
     )
-    c1_avg_len = mo.ui.slider(start=256, stop=65536, value=4096, step=256, label="Average output length (tokens)")
-    c1_max_len = mo.ui.slider(start=2048, stop=131072, value=32768, step=2048, label="Max context length (tokens)")
-    c1_batch_size = mo.ui.slider(start=1, stop=32, value=8, step=1, label="Static batch size")
-    partC_reflection = mo.ui.radio(
+    _context = max(64, v2_10_inference.context_tokens)
+    _avg_default = max(64, min(4096, _context))
+    _max_default = max(_avg_default * 4, _context)
+    partC_avg_len = mo.ui.slider(
+        start=max(16, _avg_default // 8),
+        stop=max(_avg_default * 8, 512),
+        value=_avg_default,
+        step=max(16, _avg_default // 16),
+        label="Average request/window length",
+    )
+    partC_max_len = mo.ui.slider(
+        start=max(64, _avg_default),
+        stop=max(_max_default * 4, _avg_default * 2),
+        value=_max_default,
+        step=max(64, _max_default // 16),
+        label="Max request/window length",
+    )
+    partC_batch_size = mo.ui.slider(
+        start=1,
+        stop=32,
+        value=8,
+        step=1,
+        label="Batch size / live slots",
+    )
+    partC_fill_factor = mo.ui.slider(
+        start=0.50,
+        stop=0.95,
+        value=v2_10_inference.batching_fill_factor,
+        step=0.05,
+        label="Scheduler fill factor",
+    )
+    partC_slo_ms = mo.ui.slider(
+        start=max(5, int(v2_10_inference.slo_ms * 0.25)),
+        stop=max(10, int(v2_10_inference.slo_ms * 3)),
+        value=int(v2_10_inference.slo_ms),
+        step=max(1, int(v2_10_inference.slo_ms / 20)),
+        label="SLO / deadline (ms)",
+    )
+    partC_checkpoint = mo.ui.radio(
         options={
-            "A) Static batching is fine -- just increase batch size": "A",
-            "B) Continuous batching is strictly better because it eliminates padding waste and fills freed slots with new requests": "B",
-            "C) Continuous batching only helps with short requests": "C",
-            "D) The choice between static and continuous batching depends on model size": "D",
+            "A) Use the same continuous scheduler for every workload": "always_continuous",
+            "B) Pick the simplest policy that meets SLO and uses capacity well": "conditional",
+            "C) Always avoid batching because it adds latency": "never_batch",
+            "D) Maximize batch size and ignore tail latency": "max_batch",
         },
-        label="Why is continuous batching the standard for production LLM serving?",
+        label="Checkpoint: what rule should be used in production?",
     )
-    return (c1_avg_len, c1_batch_size, c1_max_len, partC_prediction, partC_reflection)
+    return (
+        partC_avg_len,
+        partC_batch_size,
+        partC_checkpoint,
+        partC_fill_factor,
+        partC_max_len,
+        partC_prediction,
+        partC_slo_ms,
+    )
 
-# ─── CELL 6c: Part D prediction + controls ─────────────────────────────────
+
+# --- CELL 8: PART D WIDGETS --------------------------------------------------
 @app.cell(hide_code=True)
 def _(mo, v2_10_inference, v2_10_variant):
     partD_prediction = mo.ui.radio(
         options={
-            "A) 200 replicas of FP16 with static batching -- brute force": "A",
-            "B) 50 replicas of INT4 with continuous batching -- optimized per-replica throughput": "B",
-            "C) 100 replicas of FP16 with continuous batching -- balanced approach": "C",
-            "D) 25 replicas of INT4 with static batching -- minimize replica count": "D",
+            "A) Overprovisioned FP16 static policy -- safe but expensive": "overprovisioned",
+            "B) Single-unit FP16 long-context policy -- memory fails": "memory_fail",
+            "C) Minimal static policy -- SLO/deadline fails": "slo_fail",
+            "D) Guardrail-balanced policy -- best feasible option": "best_feasible",
         },
-        label=(
-            f"Design: meet {v2_10_inference.demand_qps:g} events/s under "
-            f"{v2_10_inference.slo_ms:g} ms for {v2_10_inference.label}. "
-            "Which configuration is the best economic shape?"
-        ),
+        label="Release review: which serving policy survives all guardrails?",
     )
     _target = v2_10_inference.demand_qps
-    d1_target_qps = mo.ui.number(
+    partD_target_qps = mo.ui.number(
         start=0.01,
         stop=max(_target * 10, 1.0),
         value=_target,
@@ -421,1173 +865,1173 @@ def _(mo, v2_10_inference, v2_10_variant):
         label="Target events/s",
     )
     _precision_default = float(v2_10_variant.defaults.get("precision_bytes", 2.0))
-    _precision_label = {
+    _precision_label_default = {
         2.0: "FP16 (2 bytes)",
         1.0: "INT8 (1 byte)",
         0.5: "INT4 (0.5 bytes)",
     }.get(_precision_default, "FP16 (2 bytes)")
-    d1_quant = mo.ui.dropdown(
+    if v2_10_inference.track_id == "cloud_fleet":
+        _precision_label_default = "INT4 (0.5 bytes)"
+    partD_precision = mo.ui.dropdown(
         options={"FP16 (2 bytes)": 2.0, "INT8 (1 byte)": 1.0, "INT4 (0.5 bytes)": 0.5},
-        value=_precision_label,
-        label="Weight quantization",
+        value=_precision_label_default,
+        label="Release precision",
     )
-    d1_batching = mo.ui.dropdown(
-        options={"Static": 1.0, "Continuous": 3.0},
-        value="Continuous",
-        label="Batching strategy",
+    _default_policy = "Continuous batching" if v2_10_inference.track_id == "cloud_fleet" else "Dynamic batching"
+    if v2_10_inference.track_id == "robotaxi":
+        _default_policy = "No batching / immediate serving"
+    partD_schedule = mo.ui.dropdown(
+        options={
+            "No batching / immediate serving": "no_batching",
+            "Static batching": "static",
+            "Dynamic batching": "dynamic",
+            "Continuous batching": "continuous",
+        },
+        value=_default_policy,
+        label="Scheduling policy",
     )
-    d1_gpus_per_replica = mo.ui.slider(
+    partD_devices = mo.ui.slider(
         start=1,
         stop=max(8, v2_10_inference.default_devices_per_replica),
         value=v2_10_inference.default_devices_per_replica,
         step=1,
         label="Devices per serving unit",
     )
-    partD_reflection = mo.ui.radio(
+    partD_routing = mo.ui.dropdown(
         options={
-            "A) Minimize replica count to reduce management overhead": "A",
-            "B) Minimize recurring cost subject to demand, latency, and guardrails": "B",
-            "C) Maximize batch size for best utilization": "C",
-            "D) Use the largest serving unit to maximize memory": "D",
+            "Single route": "single_route",
+            "Priority routing": "priority_routing",
+            "Warm pool / handoff": "warm_pool",
         },
-        label="What is the correct objective function for fleet design?",
+        value="Priority routing",
+        label="Routing / handoff",
     )
-    return (d1_batching, d1_gpus_per_replica, d1_quant, d1_target_qps, partD_prediction, partD_reflection)
+    partD_checkpoint = mo.ui.radio(
+        options={
+            "A) Minimize replicas even if p99 rises": "replicas",
+            "B) Minimize recurring cost subject to every guardrail": "guardrails",
+            "C) Maximize batch size first": "batch",
+            "D) Use the largest serving unit available": "largest",
+        },
+        label="Checkpoint: what objective should the release review enforce?",
+    )
+    return (
+        partD_checkpoint,
+        partD_devices,
+        partD_precision,
+        partD_prediction,
+        partD_routing,
+        partD_schedule,
+        partD_target_qps,
+    )
 
-# ═══════════════════════════════════════════════════════════════════════════════
+
+# ============================================================================
 # ZONE C: SINGLE TABS CELL
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, batching_result, cost_crossover,
-    go, math, mo, np, serving_plan, state_capacity,
-    a1_cost_query, a1_optimization, a1_qps,
-    a1_weeks, a2_context_len, a2_n_gpus,
-    a2_precision, c1_avg_len, c1_batch_size, c1_max_len,
-    d1_batching, d1_gpus_per_replica, d1_quant, d1_target_qps,
-    partA_prediction, partA_reflection, partB_prediction, partB_reflection,
-    partC_prediction, partC_reflection, partD_prediction, partD_reflection,
-    v2_10_inference, v2_10_model, v2_10_profile, v2_10_variant,
+    COLORS,
+    apply_plotly_theme,
+    batching_result,
+    cost_crossover,
+    go,
+    math,
+    mo,
+    np,
+    serving_plan,
+    state_capacity,
+    v2_10_binding_constraint,
+    v2_10_capacity_bucket,
+    v2_10_crossover_bucket,
+    v2_10_edge_implication,
+    v2_10_failure_card,
+    v2_10_fmt_currency,
+    v2_10_fmt_duration_days,
+    v2_10_fmt_ms,
+    v2_10_math_peek,
+    v2_10_metric_card,
+    v2_10_part_banner,
+    v2_10_phase_amounts,
+    v2_10_phase_label,
+    v2_10_policy_multiplier,
+    v2_10_precision_label,
+    v2_10_prediction_bucket_days,
+    v2_10_rejected_alternative,
+    v2_10_reveal_card,
+    v2_10_schedule_label,
+    v2_10_scheduling_rows,
+    v2_10_serving_latency_ms,
+    v2_10_stakeholder_card,
+    v2_10_table_html,
+    v2_10_track_schedule_note,
+    partA_checkpoint,
+    partA_cost_per_event,
+    partA_decode_tokens,
+    partA_phase_prediction,
+    partA_prefill_tokens,
+    partA_horizon_weeks,
+    partA_optimization_pct,
+    partA_prediction,
+    partA_qps,
+    partB_checkpoint,
+    partB_context_tokens,
+    partB_devices,
+    partB_precision,
+    partB_prediction,
+    partC_avg_len,
+    partC_batch_size,
+    partC_checkpoint,
+    partC_fill_factor,
+    partC_max_len,
+    partC_prediction,
+    partC_slo_ms,
+    partD_checkpoint,
+    partD_devices,
+    partD_precision,
+    partD_prediction,
+    partD_routing,
+    partD_schedule,
+    partD_target_qps,
+    v2_10_inference,
+    v2_10_model,
+    v2_10_profile,
+    v2_10_variant,
 ):
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART A: THE SERVING COST INVERSION
-    # ═════════════════════════════════════════════════════════════════════════
-
     def build_part_a():
-        items = []
+        items = [
+            v2_10_part_banner(
+                "A",
+                "Prefill/Decode Amount Split",
+                "10-12 min",
+                "A live request is not one amount. Prefill/input work, decode/output work, and recurring event cost bind different parts of the service.",
+                COLORS["BlueLine"],
+            ),
+            v2_10_stakeholder_card(
+                "Platform finance lead",
+                f"{v2_10_variant.stakeholder}: separate the first-response input work from the recurring output loop, then tell me when the recurring side becomes larger.",
+                COLORS["BlueLine"],
+                COLORS["BlueLL"],
+            ),
+            mo.md(f"""
+The selected track runs a continuing inference loop. The setup or training budget is
+**{v2_10_fmt_currency(v2_10_inference.setup_cost, v2_10_inference.cost_unit)}**, while each event costs
+**{v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}** before optimization.
 
-        # ── Stakeholder message ────────────────────────────────────────────
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; VP of Engineering
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "{v2_10_variant.stakeholder}: the one-time budget is visible, but
-                recurring {v2_10_inference.cost_label} keeps accumulating. When does
-                the operating side dominate for {v2_10_inference.label}?"
-            </div>
-        </div>
-        """))
+Commit to both predictions before using the calculator.
+"""),
+            partA_prediction,
+            partA_phase_prediction,
+        ]
+        if partA_prediction.value is None or partA_phase_prediction.value is None:
+            items.append(mo.callout(mo.md("Select both Part A predictions to unlock the cost and phase evidence."), kind="warn"))
+            return mo.vstack(items)
 
-        # ── Concept introduction ───────────────────────────────────────────
         _default_cost = cost_crossover(
             setup_cost=v2_10_inference.setup_cost,
             demand_qps=v2_10_inference.demand_qps,
             cost_per_event=v2_10_inference.cost_per_event,
         )
-        items.append(mo.md(f"""
-    Inference economy is a recurring-cost problem. For the **{v2_10_profile.label}** track,
-    the cost unit is **{v2_10_inference.cost_unit}**, and the recurring metric is
-    **{v2_10_inference.cost_label}**.
-
-    At the default demand:
-
-    ```
-    Daily recurring cost = {v2_10_inference.demand_qps:g} events/s x 86,400 s/day
-                         x {v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}/event
-                         = {_default_cost.daily_cost:,.2f} {v2_10_inference.cost_unit}/day
-    Crossover = {v2_10_inference.setup_cost:,.2f} / {_default_cost.weekly_cost:,.2f}
-              = {_default_cost.crossover_weeks:.1f} weeks
-    ```
-
-    Higher demand or higher per-event cost moves the crossover earlier.
-        """))
-
-        # ── Prediction lock ────────────────────────────────────────────────
-        items.append(partA_prediction)
-        if partA_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part A instruments."), kind="warn"))
-            return mo.vstack(items)
-
-        # ── Controls ───────────────────────────────────────────────────────
-        items.append(mo.md("### Serving Cost Calculator"))
-        items.append(mo.hstack([
-            mo.vstack([a1_qps, a1_cost_query]),
-            mo.vstack([a1_weeks, a1_optimization]),
-        ], justify="center", gap=2))
-
-        # ── Instruments ────────────────────────────────────────────────────
-        _qps = a1_qps.value
-        _cpq = a1_cost_query.value
-        _weeks = a1_weeks.value
-        _opt_pct = a1_optimization.value / 100
-
         _cost = cost_crossover(
             setup_cost=v2_10_inference.setup_cost,
-            demand_qps=_qps,
-            cost_per_event=_cpq,
-            optimization_pct=a1_optimization.value,
+            demand_qps=partA_qps.value,
+            cost_per_event=partA_cost_per_event.value,
+            optimization_pct=partA_optimization_pct.value,
         )
-        _daily_cost = _cost.daily_cost
-        _weekly_cost = _cost.weekly_cost
-        _crossover_weeks = _cost.crossover_weeks
-        _crossover_days = _cost.crossover_days
-        _annual_savings = _cost.annual_savings
-
-        # ── Cost curves ───────────────────────────────────────────────
+        _weeks = partA_horizon_weeks.value
         _week_range = np.arange(0, _weeks + 1)
-        _training_line = [v2_10_inference.setup_cost] * len(_week_range)
-        _serving_cumulative = [w * _weekly_cost for w in _week_range]
+        _setup_line = [v2_10_inference.setup_cost] * len(_week_range)
+        _serving_line = [week * _cost.weekly_cost for week in _week_range]
+        _phase = v2_10_phase_amounts(
+            v2_10_inference,
+            partA_prefill_tokens.value,
+            partA_decode_tokens.value,
+            float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
+        )
 
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(
-            x=_week_range, y=_training_line, mode="lines",
-            name=f"One-time budget ({v2_10_inference.cost_unit})", line=dict(color=COLORS["BlueLine"], width=2.5, dash="dash"),
-            hovertemplate="Week %{x}: $%{y:,.0f}<extra></extra>",
+            x=_week_range,
+            y=_setup_line,
+            mode="lines",
+            name="Setup/training budget",
+            line=dict(color=COLORS["BlueLine"], width=2.5, dash="dash"),
+            hovertemplate="Week %{x}: %{y:,.0f}<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
-            x=_week_range, y=_serving_cumulative, mode="lines",
-            name="Cumulative serving cost", line=dict(color=COLORS["RedLine"], width=2.5),
-            fill="tonexty", fillcolor="rgba(203,32,45,0.1)",
-            hovertemplate="Week %{x}: $%{y:,.0f}<extra></extra>",
+            x=_week_range,
+            y=_serving_line,
+            mode="lines",
+            name="Cumulative serving cost",
+            line=dict(color=COLORS["RedLine"], width=2.5),
+            fill="tonexty",
+            fillcolor="rgba(203,32,45,0.10)",
+            hovertemplate="Week %{x}: %{y:,.0f}<extra></extra>",
         ))
-        if _crossover_weeks <= _weeks:
-            _fig.add_vline(x=_crossover_weeks, line=dict(color=COLORS["OrangeLine"], width=2, dash="dot"),
-                           annotation_text=f"Crossover: week {_crossover_weeks:.1f}",
-                           annotation_position="top left")
-
+        if _cost.crossover_weeks <= _weeks:
+            _fig.add_vline(
+                x=_cost.crossover_weeks,
+                line=dict(color=COLORS["OrangeLine"], width=2, dash="dot"),
+                annotation_text=f"crossover {v2_10_fmt_duration_days(_cost.crossover_days)}",
+                annotation_position="top left",
+            )
         _fig.update_layout(
             height=340,
-            xaxis=dict(title="Weeks Since Deployment"),
-            yaxis=dict(title=f"Cumulative Cost ({v2_10_inference.cost_unit})"),
+            xaxis=dict(title="Weeks since deployment"),
+            yaxis=dict(title=f"Cumulative cost ({v2_10_inference.cost_unit})"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             margin=dict(t=40, b=50, l=70, r=20),
         )
         apply_plotly_theme(_fig)
 
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Serving Cost Model
-            </div>
-            <div>Daily recurring cost = {_qps:g} events/s &times; 86,400 s/day &times; {_cpq:g} {v2_10_inference.cost_unit}/event &times; (1 - {_opt_pct:.0%}) = <strong>{_daily_cost:,.2f} {v2_10_inference.cost_unit}/day</strong></div>
-            <div>Crossover at week <strong>{_crossover_weeks:.1f}</strong> ({_crossover_days:.0f} days)</div>
-            <div>Annual recurring cost: <strong>{_daily_cost * 365:,.2f} {v2_10_inference.cost_unit}</strong></div>
-            {'<div>Annual savings from ' + str(a1_optimization.value) + '% optimization: <strong style=color:' + COLORS["GreenLine"] + ';>' + f"{_annual_savings:,.2f} " + v2_10_inference.cost_unit + '</strong></div>' if _opt_pct > 0 else ''}
-        </div>
-        """))
+        _phase_fig = go.Figure()
+        _phase_fig.add_trace(go.Bar(
+            x=["Prefill / input pass", "Decode / output loop"],
+            y=[_phase["prefill_ms"], _phase["decode_ms"]],
+            marker_color=[
+                COLORS["BlueLine"] if _phase["binding_phase"] == "prefill" else COLORS["BlueLL"],
+                COLORS["RedLine"] if _phase["binding_phase"] == "decode" else COLORS["RedLL"],
+            ],
+            text=[v2_10_fmt_ms(_phase["prefill_ms"]), v2_10_fmt_ms(_phase["decode_ms"])],
+            textposition="auto",
+            hovertemplate="%{x}: %{y:.2f} ms<extra></extra>",
+        ))
+        _phase_fig.update_layout(
+            height=280,
+            xaxis=dict(title="Request phase amount"),
+            yaxis=dict(title="Teaching latency proxy (ms)"),
+            margin=dict(t=30, b=55, l=70, r=20),
+        )
+        apply_plotly_theme(_phase_fig)
 
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Crossover</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">wk {_crossover_weeks:.0f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">serving &gt; training</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Daily Cost</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['RedLine']}; font-family:monospace;">{_daily_cost:.1f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{v2_10_inference.cost_unit}/day</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Annual Savings</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_annual_savings:.1f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{a1_optimization.value}% optimization</div>
-            </div>
-        </div>
-        """))
+        _actual_bucket = v2_10_crossover_bucket(_default_cost.crossover_days)
+        _pred_days = v2_10_prediction_bucket_days(partA_prediction.value)
+        _gap = _default_cost.crossover_days / _pred_days if _pred_days > 0 and math.isfinite(_default_cost.crossover_days) else math.inf
+        _gap_text = "The category matches the default case." if partA_prediction.value == _actual_bucket else f"The default crossover is about {_gap:.1f}x your representative estimate."
+        _phase_detail = (
+            f"Prefill/input uses {partA_prefill_tokens.value:,} {_phase['input_unit']}; "
+            f"decode/output uses {partA_decode_tokens.value:,} {_phase['output_unit']} "
+            f"and about {_phase['decode_read_gb']:,.1f} GB of model-byte reads in this proxy."
+        )
 
-        items.append(mo.ui.plotly(_fig))
+        items.extend([
+            mo.md("### Manipulate the phase amounts and recurring loop"),
+            mo.hstack([
+                mo.vstack([partA_qps, partA_cost_per_event, partA_horizon_weeks, partA_optimization_pct]),
+                mo.vstack([partA_prefill_tokens, partA_decode_tokens]),
+            ], justify="center", gap=2),
+            mo.hstack([
+                v2_10_metric_card("Crossover", v2_10_fmt_duration_days(_cost.crossover_days), "serving > setup", COLORS["OrangeLine"]),
+                v2_10_metric_card("Daily recurring", v2_10_fmt_currency(_cost.daily_cost, v2_10_inference.cost_unit), "after optimization", COLORS["RedLine"]),
+                v2_10_metric_card("Annual savings", v2_10_fmt_currency(_cost.annual_savings, v2_10_inference.cost_unit), f"{partA_optimization_pct.value}% optimization", COLORS["GreenLine"]),
+            ], justify="center", gap=1),
+            mo.hstack([
+                v2_10_metric_card("Binding phase", _phase["binding_phase"].title(), "current phase controls", COLORS["BlueLine"] if _phase["binding_phase"] == "prefill" else COLORS["RedLine"]),
+                v2_10_metric_card("Prefill/input", v2_10_fmt_ms(_phase["prefill_ms"]), f"{partA_prefill_tokens.value:,} {_phase['input_unit']}", COLORS["BlueLine"]),
+                v2_10_metric_card("Decode/output", v2_10_fmt_ms(_phase["decode_ms"]), f"{partA_decode_tokens.value:,} {_phase['output_unit']}", COLORS["RedLine"]),
+            ], justify="center", gap=1),
+            mo.ui.plotly(_fig),
+            mo.ui.plotly(_phase_fig),
+            v2_10_reveal_card(
+                "Prediction vs actual",
+                partA_prediction.value.replace("_", " "),
+                f"{_actual_bucket} ({v2_10_fmt_duration_days(_default_cost.crossover_days)})",
+                _gap_text,
+                "success" if partA_prediction.value == _actual_bucket else "warn",
+            ),
+            v2_10_reveal_card(
+                "Phase prediction vs actual",
+                v2_10_phase_label(partA_phase_prediction.value),
+                v2_10_phase_label(_phase["binding_phase"]),
+                _phase_detail,
+                "success" if partA_phase_prediction.value == _phase["binding_phase"] else "warn",
+            ),
+            v2_10_math_peek(
+                "Math Peek / Source Model - phase split and serving cost",
+                f"""
+```
+C_total(t) = C_setup + C_event * QPS * seconds * t
+C_serving_day = QPS * 86400 * C_event * (1 - optimization_pct)
+t_crossover = C_setup / C_serving_day
 
-        # ── Reveal ─────────────────────────────────────────────────────────
-        if partA_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                f"**Correct.** The default crossover for this track is {_default_cost.crossover_weeks:.1f} weeks. "
-                "The same recurring-cost math applies to the selected track: once a local "
-                "or fleet inference loop runs continuously, small per-event costs compound quickly."
-            ), kind="success"))
-        elif partA_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Far too conservative.** Students anchor on how expensive training *felt* "
-                "but underestimate the relentless compounding of per-query cost at scale. "
-                f"For this track, the default crossover is {_default_cost.crossover_weeks:.1f} weeks."
-            ), kind="warn"))
-        elif partA_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**In the right direction but too slow.** 3 months is possible at very low "
-                "demand, but recurring inference cost often crosses the one-time budget quickly."
-            ), kind="warn"))
-        elif partA_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Categorically wrong.** Training is a one-time cost; serving is a continuous "
-                f"operating expense. At this track's default demand, recurring {v2_10_inference.cost_label} "
-                "eventually dominates. This is why inference optimization is high leverage."
-            ), kind="warn"))
+TTFT proxy ~= f(prompt/input amount)
+TPOT proxy ~= model_bytes / memory_bandwidth
+decode_loop ~= output_steps * TPOT
+```
 
-        # ── MathPeek ───────────────────────────────────────────────────────
-        items.append(mo.accordion({
-            "Governing equations -- serving cost model": mo.md("""
-        **Recurring Inference Cost**
+Source model: `cost_crossover()` from `mlsysbook_labs.inference`, using the selected track profile:
+setup cost = {v2_10_inference.setup_cost:g}, demand = {v2_10_inference.demand_qps:g} events/s,
+cost/event = {v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}.
 
-        ```
-        C_operation(t) = demand_rate * seconds_per_day * cost_per_event * t_days
-        ```
-
-        **Crossover Condition**
-
-        ```
-        C_setup = C_operation(t_crossover)
-        t_crossover = C_setup / (demand_rate * 86400 * cost_per_event)
-        ```
-
-        **ROI of Inference Optimization**
-
-        ```
-        Annual_savings = demand_rate * 86400 * 365 * cost_per_event * optimization_fraction
-        ```
-
-        Use the selected track's cost unit: cloud uses dollars, device tracks use energy units.
-            """)
-        }))
-
-        # ── Reflection ─────────────────────────────────────────────────────
-        items.append(partA_reflection)
-        if partA_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
-        elif partA_reflection.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Inference optimization directly reduces cost_per_query. "
-                f"At the selected demand, a 10% improvement saves {_cost.annual_savings:.2f} "
-                f"{v2_10_inference.cost_unit}/year. Precision, scheduling, and state/cache "
-                "management are the primary levers."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Inference optimization is the highest-ROI lever** because it reduces "
-                "cost_per_query without reducing service quality or user access. "
-                "Quantization + continuous batching can achieve 2-4x cost reduction."
-            ), kind="warn"))
-
+The prefill/decode split is a notebook-local teaching proxy tied to the chapter's
+TTFT/TPOT and prefill/decode source claims. For non-LLM tracks it maps to input
+window processing versus recurring output or decision-loop work.
+""",
+            ),
+            partA_checkpoint,
+        ])
+        if partA_checkpoint.value == "optimize":
+            items.append(mo.callout(mo.md("Checkpoint saved: recurring cost/event is the lever to carry forward."), kind="success"))
+        elif partA_checkpoint.value is not None:
+            items.append(mo.callout(mo.md("Cost inversion means the recurring term deserves first-class design attention."), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART B: THE KV CACHE WALL AND FLEET DESIGN
-    # ═════════════════════════════════════════════════════════════════════════
-
     def build_part_b():
-        items = []
-
-        # ── Stakeholder message ────────────────────────────────────────────
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; Inference Platform Lead
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "{v2_10_variant.stakeholder}: the model fits, but the live state/cache
-                grows with requests. How many concurrent requests fit before
-                {v2_10_inference.hardware_name} memory becomes the wall?"
-            </div>
-        </div>
-        """))
-
-        # ── Concept introduction ───────────────────────────────────────────
-        _default_state = state_capacity(
-            v2_10_inference,
-            v2_10_model,
-            context_tokens=v2_10_inference.context_tokens,
-            precision_bytes=float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
-            devices_per_replica=v2_10_inference.default_devices_per_replica,
-        )
-        items.append(mo.md(f"""
-    Stateful serving has a memory wall. For transformers this is the KV cache;
-    for the device tracks it is the live activation, sensor-window, or runtime
-    buffer state that must fit beside model weights.
-
-    For **{v2_10_profile.label}**:
-
-    - Hardware memory: **{_default_state.total_memory_gb:.3g} GB**
-    - Model weights at default precision: **{_default_state.weight_gb:.3g} GB**
-    - Per-request {v2_10_inference.state_kind}: **{_default_state.state_per_request_gb:.3g} GB**
-    - Max concurrent requests: **{_default_state.max_concurrent}**
-        """))
-
-        # ── Prediction lock ────────────────────────────────────────────────
-        items.append(partB_prediction)
+        items = [
+            v2_10_part_banner(
+                "B",
+                "State/KV Cache Wall",
+                "10-12 min",
+                "Fitting model weights is not the same as fitting a live service. State grows with context and concurrency.",
+                COLORS["GreenLine"],
+            ),
+            v2_10_stakeholder_card(
+                "Inference platform lead",
+                f"{v2_10_variant.stakeholder}: the model artifact loads, but live {v2_10_inference.state_kind} grows beside the weights. How many sessions fit before memory becomes the wall?",
+                COLORS["GreenLine"],
+                COLORS["GreenLL"],
+            ),
+            mo.md(f"""
+For transformer serving, the state term is KV cache. For device tracks, the same
+slot is runtime state such as activation buffers, sensor windows, or local cache.
+The lesson is identical: **weights are only one memory term**.
+"""),
+            partB_prediction,
+        ]
         if partB_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part B instruments."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your state-capacity prediction to unlock Part B."), kind="warn"))
             return mo.vstack(items)
-
-        # ── Controls ───────────────────────────────────────────────────────
-        items.append(mo.md("### State/Cache Memory Wall Explorer"))
-        items.append(mo.hstack([
-            mo.vstack([a2_precision]),
-            mo.vstack([a2_context_len, a2_n_gpus]),
-        ], justify="center", gap=2))
-
-        # ── Instruments ────────────────────────────────────────────────────
-        _bytes_per_elem = a2_precision.value
-        _seq_len = a2_context_len.value
-        _devices = a2_n_gpus.value
 
         _state = state_capacity(
             v2_10_inference,
             v2_10_model,
-            context_tokens=_seq_len,
-            precision_bytes=_bytes_per_elem,
-            devices_per_replica=_devices,
+            context_tokens=partB_context_tokens.value,
+            precision_bytes=partB_precision.value,
+            devices_per_replica=partB_devices.value,
         )
-        _total_hbm_gb = _state.total_memory_gb
-        _weight_gb = _state.weight_gb
-        _available_gb = _state.available_gb
-        _kv_per_req_gb = _state.state_per_request_gb
-        _max_concurrent = _state.max_concurrent
+        _actual_bucket = v2_10_capacity_bucket(_state.max_concurrent)
         _oom = _state.oom
-
-        # ── Stacked memory chart ──────────────────────────────────────────────
-        _n_requests = list(range(0, min(_max_concurrent + 3, 20)))
-        _weight_vals = [_weight_gb] * len(_n_requests)
-        _kv_vals = [n * _kv_per_req_gb for n in _n_requests]
-        _total_vals = [w + k for w, k in zip(_weight_vals, _kv_vals)]
+        _chart_slots = list(range(0, max(3, min(_state.max_concurrent + 4, 24))))
+        _weight_vals = [_state.weight_gb] * len(_chart_slots)
+        _state_vals = [slot * _state.state_per_request_gb for slot in _chart_slots]
+        _total_vals = [w + s for w, s in zip(_weight_vals, _state_vals)]
 
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(x=_n_requests, y=_weight_vals, name="Model weights",
-                               marker_color=COLORS["BlueLine"],
-                               hovertemplate="Requests %{x}: %{y:.1f} GB<extra></extra>"))
-        _kv_colors = [COLORS["GreenLine"] if t <= _total_hbm_gb else COLORS["RedLine"] for t in _total_vals]
-        _fig.add_trace(go.Bar(x=_n_requests, y=_kv_vals, name="State/cache",
-                               marker_color=_kv_colors,
-                               hovertemplate="Requests %{x}: %{y:.1f} GB<extra></extra>"))
-        _fig.add_hline(y=_total_hbm_gb, line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
-                       annotation_text=f"Total memory: {_total_hbm_gb:.3g} GB", annotation_position="top right")
+        _fig.add_trace(go.Bar(
+            x=_chart_slots,
+            y=_weight_vals,
+            name="Model weights",
+            marker_color=COLORS["BlueLine"],
+            hovertemplate="%{x} sessions: %{y:.2f} GB weights<extra></extra>",
+        ))
+        _fig.add_trace(go.Bar(
+            x=_chart_slots,
+            y=_state_vals,
+            name=_state.state_kind,
+            marker_color=[COLORS["GreenLine"] if total <= _state.total_memory_gb else COLORS["RedLine"] for total in _total_vals],
+            hovertemplate="%{x} sessions: %{y:.2f} GB state<extra></extra>",
+        ))
+        _fig.add_hline(
+            y=_state.total_memory_gb,
+            line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
+            annotation_text=f"memory limit {_state.total_memory_gb:.2g} GB",
+            annotation_position="top right",
+        )
         _fig.update_layout(
-            height=300, barmode="stack",
-            xaxis=dict(title="Concurrent Requests"),
-            yaxis=dict(title="Memory (GB)", range=[0, max(max(_total_vals) * 1.1, _total_hbm_gb * 1.1)]),
+            height=320,
+            barmode="stack",
+            xaxis=dict(title="Concurrent sessions"),
+            yaxis=dict(title="Memory (GB)", range=[0, max(_state.total_memory_gb * 1.15, max(_total_vals or [0]) * 1.10)]),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(t=40, b=50, l=50, r=20),
+            margin=dict(t=40, b=50, l=55, r=20),
         )
         apply_plotly_theme(_fig)
 
-        # ── OOM banner ────────────────────────────────────────────────────────
-        _oom_banner = ""
-        if _oom:
-            _oom_banner = f"""
-            <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
-                        border-radius:10px; padding:14px 18px; margin:10px 0;">
-                <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
-                    OOM &mdash; Cannot Serve Even 1 Request
-                </div>
-                <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
-                    State/cache per request ({_kv_per_req_gb:.3g} GB) exceeds available memory ({_available_gb:.3g} GB).<br>
-                    Reduce context length, add devices, use quantization, or change the serving policy.
-                </div>
-            </div>
-            """
+        _detail = (
+            f"{_state.weight_gb:.3g} GB weights + one {_state.state_kind} "
+            f"({_state.state_per_request_gb:.3g} GB) must fit inside {_state.total_memory_gb:.3g} GB."
+        )
+        _gap_detail = "The bucket matches the computed capacity." if partB_prediction.value == _actual_bucket else f"Computed max concurrency is {_state.max_concurrent}, so the memory wall is {_actual_bucket}."
 
-        _conc_color = COLORS["RedLine"] if _max_concurrent <= 1 else (COLORS["OrangeLine"] if _max_concurrent <= 4 else COLORS["GreenLine"])
+        items.extend([
+            mo.md("### Manipulate precision, context, and serving-unit memory"),
+            mo.hstack([
+                mo.vstack([partB_precision]),
+                mo.vstack([partB_context_tokens, partB_devices]),
+            ], justify="center", gap=2),
+            v2_10_failure_card(
+                _oom,
+                "OOM - state/cache wall reached",
+                f"{_detail} Available memory after weights is {_state.available_gb:.3g} GB.",
+                "reduce context length, lower weight precision, or add devices per serving unit",
+            ),
+            mo.hstack([
+                v2_10_metric_card("Max concurrent", str(_state.max_concurrent), "sessions", COLORS["RedLine"] if _oom else COLORS["GreenLine"]),
+                v2_10_metric_card("Weights", f"{_state.weight_gb:.2g} GB", v2_10_precision_label(partB_precision.value), COLORS["BlueLine"]),
+                v2_10_metric_card("State/session", f"{_state.state_per_request_gb:.2g} GB", _state.state_kind, COLORS["OrangeLine"]),
+                v2_10_metric_card("Available", f"{_state.available_gb:.2g} GB", "after weights", COLORS["GreenLine"] if _state.available_gb > 0 else COLORS["RedLine"]),
+            ], justify="center", gap=1),
+            mo.ui.plotly(_fig),
+            v2_10_reveal_card(
+                "Prediction vs actual",
+                partB_prediction.value.replace("_", " "),
+                f"{_actual_bucket} ({_state.max_concurrent} sessions)",
+                _gap_detail,
+                "success" if partB_prediction.value == _actual_bucket else "warn",
+            ),
+            v2_10_math_peek(
+                "Math Peek / Source Model - state and KV cache",
+                f"""
+```
+M_KV = 2 * layers * hidden_dim * sequence * bytes * batch
+M_total = M_weights + batch * M_state_per_request
+max_concurrent = floor((M_device - M_weights) / M_state_per_request)
+```
 
-        items.append(mo.Html(f"""
-        {_oom_banner}
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; State/Cache Memory Wall
-            </div>
-            <div>{v2_10_inference.state_kind} per request = <strong>{_kv_per_req_gb:.3g} GB</strong></div>
-            <div>Weights = {v2_10_inference.model_params_b:.3g}B params &times; {_bytes_per_elem:g} bytes = <strong>{_weight_gb:.3g} GB</strong></div>
-            <div>Available memory = {_total_hbm_gb:.3g} - {_weight_gb:.3g} = <strong>{_available_gb:.3g} GB</strong></div>
-            <div>Max concurrent = floor({_available_gb:.3g} / {_kv_per_req_gb:.3g}) = <strong style="color:{_conc_color};">{_max_concurrent}</strong></div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Max Concurrent</div>
-                <div style="font-size:2rem; font-weight:800; color:{_conc_color}; font-family:monospace;">{_max_concurrent}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">requests</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">State/Request</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_kv_per_req_gb:.2g}GB</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Weights</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">{_weight_gb:.2g}GB</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Available</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_available_gb:.2g}GB</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # ── Reveal ─────────────────────────────────────────────────────────
-        if partB_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Correct.** In the selected track, the active bottleneck is the state/cache wall: "
-                f"{v2_10_inference.state_kind} leaves room for {_max_concurrent} concurrent requests."
-            ), kind="success"))
-        elif partB_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Too optimistic.** It is easy to focus on peak compute and forget live state/cache. "
-                f"For this track, max concurrency is {_max_concurrent} before memory becomes the wall."
-            ), kind="warn"))
-        elif partB_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Sometimes right.** A modest batch fits when state/cache per request is small enough. "
-                f"With the selected settings, the computed capacity is {_max_concurrent}."
-            ), kind="warn"))
-        elif partB_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Close for some configurations.** The important move is to compute the memory frontier, "
-                f"not guess from hardware class. Here the frontier is {_max_concurrent} requests."
-            ), kind="warn"))
-
-        # ── MathPeek ───────────────────────────────────────────────────────
-        items.append(mo.accordion({
-            "Governing equations -- state/cache and inference-plan design": mo.md("""
-        **State/Cache Formula**
-
-        ```
-        transformer_KV_bytes = 2 * num_layers * hidden_dim * seq_len * batch_size * bytes_per_elem
-        ```
-
-        - Factor 2: one K tensor + one V tensor per layer
-        - KV cache is often stored at higher precision than quantized weights
-        - Grows linearly with seq_len and batch_size
-        - Device tracks may substitute measured activation, sensor-window, or runtime state per request
-
-        **Memory Constraint**
-
-        ```
-        W + B * state_per_request <= total_memory
-        Max_batch = floor((total_memory - W) / state_per_request)
-        ```
-
-        **Continuous Batching Throughput**
-
-        ```
-        Throughput_continuous = Throughput_static * (avg_len / max_len) * fill_factor
-        ```
-
-        - Static batching wastes (1 - avg/max) fraction of accelerator cycles
-        - Continuous batching fills freed slots immediately: fill_factor = 2-4x
-            """)
-        }))
-
-        # ── Reflection ─────────────────────────────────────────────────────
-        items.append(partB_reflection)
-        if partB_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
-        elif partB_reflection.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Lower precision reduces model weight memory, which frees capacity "
-                f"for {v2_10_inference.state_kind}. If memory is the active wall, those freed bytes "
-                "translate into more live slots or more safety headroom."
-            ), kind="success"))
-        elif partB_reflection.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Does not address the binding constraint.** The bottleneck is memory, not "
-                "compute. More peak compute does not help if state/cache fills available memory."
-            ), kind="warn"))
-        elif partB_reflection.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Effective but changes the product.** A smaller model can fit better, but it also "
-                "changes quality, safety, or product behavior. Treat that as a model-selection decision."
-            ), kind="warn"))
-        elif partB_reflection.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Usually a last resort.** Spilling live state/cache to slower memory can preserve "
-                "capacity but often violates latency, energy, or reliability guardrails."
-            ), kind="warn"))
-
+For non-transformer tracks, the profile supplies a fixed runtime/state buffer per request
+instead of transformer KV cache. Source model: `state_capacity()` from
+`mlsysbook_labs.inference`, hardware ref `{v2_10_inference.hardware_ref}`,
+model ref `{v2_10_inference.model_ref}`.
+""",
+            ),
+            partB_checkpoint,
+        ])
+        if partB_checkpoint.value == "precision":
+            items.append(mo.callout(mo.md("Checkpoint saved: reduce memory pressure before adding compute-only capacity."), kind="success"))
+        elif partB_checkpoint.value is not None:
+            items.append(mo.callout(mo.md("The first question is whether the live state term fits beside weights; compute is secondary when memory is binding."), kind="warn"))
         return mo.vstack(items)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART C: CONTINUOUS BATCHING
-    # ═════════════════════════════════════════════════════════════════════════
 
     def build_part_c():
-        items = []
+        items = [
+            v2_10_part_banner(
+                "C",
+                "Batching Under Variance",
+                "10-12 min",
+                "Continuous batching is a policy with overheads and prerequisites, not a universal production answer.",
+                COLORS["OrangeLine"],
+            ),
+            v2_10_stakeholder_card(
+                "Serving scheduler owner",
+                f"{v2_10_variant.stakeholder}: requests arrive with different lengths and deadline pressure. Which scheduling policy wins after padding waste and tail risk are both counted?",
+                COLORS["OrangeLine"],
+                COLORS["OrangeLL"],
+            ),
+            mo.md(f"""
+{v2_10_track_schedule_note(v2_10_inference.track_id)}
 
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['OrangeLine']}; background: {COLORS['OrangeLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['OrangeLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; ML Serving Engineer
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "{v2_10_variant.stakeholder}: static scheduling waits for the slowest
-                or longest request. Most {v2_10_inference.label} work is shorter than
-                the worst case. How much throughput do we recover if freed slots are
-                filled immediately?"
-            </div>
-        </div>
-        """))
-
-        # Concept framing
-        items.append(mo.md("""
-    **Static batching** pads all requests to `max_len` and processes them together.
-    When a short request finishes, the accelerator slot sits idle until all requests
-    in the batch complete. Waste = `1 - avg_len / max_len`.
-
-    **Continuous batching** (iteration-level scheduling) processes one token per iteration.
-    When a request finishes, its slot is immediately filled by a new request.
-
-    The throughput advantage:
-    - Static: effective throughput = batch_size / max_len_time (includes padding waste)
-    - Continuous: effective throughput = batch_size / avg_len_time * fill_factor
-
-    The fill_factor (2-4x) comes from:
-    1. No padding waste: compute only on real tokens
-    2. Immediate slot filling: no idle accelerator cycles between requests
-    3. Higher effective batch occupancy over time
-        """))
-
-        # Prediction lock
-        items.append(partC_prediction)
+Commit to a scheduling policy before seeing the throughput and SLO-risk table.
+"""),
+            partC_prediction,
+        ]
         if partC_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part C instruments."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your scheduling prediction to unlock Part C."), kind="warn"))
             return mo.vstack(items)
 
-        # Controls
-        items.append(mo.md("### Continuous vs Static Batching Simulator"))
-        items.append(mo.hstack([c1_avg_len, c1_max_len, c1_batch_size], justify="center", gap=2))
+        _avg = partC_avg_len.value
+        _max = max(partC_max_len.value, _avg)
+        _batch = partC_batch_size.value
+        _fill = partC_fill_factor.value
+        _slo = partC_slo_ms.value
+        _batching = batching_result(avg_len=_avg, max_len=_max, batch_size=_batch, fill_factor=_fill)
+        _rows, _winner = v2_10_scheduling_rows(v2_10_inference.track_id, _batch, _avg, _max, _fill, _slo)
+        _winner_row = next(row for row in _rows if row["policy"] == _winner)
 
-        _avg = c1_avg_len.value
-        _max = c1_max_len.value
-        _batch = c1_batch_size.value
-
-        _batching = batching_result(
-            avg_len=_avg,
-            max_len=_max,
-            batch_size=_batch,
-            fill_factor=v2_10_inference.batching_fill_factor,
-        )
-        _padding_waste = _batching.padding_waste_pct / 100
-        _static_throughput = _batching.static_throughput
-        _continuous_throughput = _batching.continuous_throughput
-        _speedup = _batching.speedup
-
-        # Chart: throughput vs avg_len ratio
         _ratios = np.linspace(0.05, 1.0, 50)
         _static_tp = [_batch for _ in _ratios]
-        _continuous_tp = [_batch * (1 / r) * v2_10_inference.batching_fill_factor for r in _ratios]
-
+        _continuous_tp = [_batch * (1 / ratio) * _fill for ratio in _ratios]
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(
-            x=_ratios * 100, y=_static_tp, mode="lines",
-            name="Static batching", line=dict(color=COLORS["RedLine"], width=2.5),
-            hovertemplate="%{x:.0f}%%: %{y:.1f} req/cycle<extra></extra>",
+            x=_ratios * 100,
+            y=_static_tp,
+            mode="lines",
+            name="Static batching",
+            line=dict(color=COLORS["BlueLine"], width=2.5),
+            hovertemplate="%{x:.0f}% avg/max: %{y:.1f}<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
-            x=_ratios * 100, y=_continuous_tp, mode="lines",
-            name="Continuous batching", line=dict(color=COLORS["GreenLine"], width=2.5),
-            hovertemplate="%{x:.0f}%%: %{y:.1f} req/cycle<extra></extra>",
+            x=_ratios * 100,
+            y=_continuous_tp,
+            mode="lines",
+            name="Continuous batching formula",
+            line=dict(color=COLORS["GreenLine"], width=2.5),
+            hovertemplate="%{x:.0f}% avg/max: %{y:.1f}<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
-            x=[_avg / _max * 100], y=[_continuous_throughput],
-            mode="markers", marker=dict(size=14, color=COLORS["OrangeLine"], symbol="diamond"),
-            name="Current config",
-            hovertemplate="%{x:.0f}%%: %{y:.1f} req/cycle<extra></extra>",
+            x=[_avg / _max * 100],
+            y=[_batching.continuous_throughput],
+            mode="markers",
+            marker=dict(size=14, color=COLORS["OrangeLine"], symbol="diamond"),
+            name="Current workload",
+            hovertemplate="%{x:.0f}% avg/max: %{y:.1f}<extra></extra>",
         ))
         _fig.update_layout(
-            height=300,
-            xaxis=dict(title="Avg Length / Max Length (%)"),
-            yaxis=dict(title="Effective Throughput (requests/cycle)"),
+            height=310,
+            xaxis=dict(title="Average length / max length (%)"),
+            yaxis=dict(title="Relative throughput units"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(t=40, b=50, l=50, r=20),
+            margin=dict(t=40, b=50, l=55, r=20),
         )
         apply_plotly_theme(_fig)
 
-        _waste_color = COLORS["RedLine"] if _padding_waste > 0.5 else (COLORS["OrangeLine"] if _padding_waste > 0.2 else COLORS["GreenLine"])
-        _speedup_color = COLORS["GreenLine"] if _speedup > 2 else (COLORS["OrangeLine"] if _speedup > 1.3 else COLORS["RedLine"])
+        _table_rows = []
+        for row in _rows:
+            _status = "SLO risk" if row["risk_pct"] > 0 else "passes"
+            _color = COLORS["RedLine"] if row["risk_pct"] > 0 else COLORS["GreenLine"]
+            _winner_badge = "best score" if row["policy"] == _winner else ""
+            _table_rows.append((
+                row["label"],
+                f"{row['throughput']:.1f}",
+                f"{row['waste_pct']:.1f}%",
+                f"{row['tail_ms']:.1f} ms",
+                f"<span style='color:{_color}; font-weight:700;'>{_status}</span> {_winner_badge}",
+            ))
 
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Batching Strategy Comparison
-            </div>
-            <div>Avg length: {_avg:,} tokens &mdash; Max length: {_max:,} tokens</div>
-            <div>Padding waste (static): <strong style="color:{_waste_color};">{_padding_waste*100:.1f}%</strong></div>
-            <div>Static throughput: <strong>{_static_throughput:.0f}</strong> req/cycle &mdash;
-                 Continuous: <strong style="color:{COLORS['GreenLine']};">{_continuous_throughput:.1f}</strong> req/cycle</div>
-            <div>Speedup: <strong style="color:{_speedup_color};">{_speedup:.1f}x</strong></div>
-        </div>
-        """))
+        _continuous_row = next(row for row in _rows if row["policy"] == "continuous")
+        _continuous_overhead_failure = _continuous_row["risk_pct"] > 0
+        _static_waste_failure = _batching.padding_waste_pct > 50 and _winner != "static"
+        _detail = (
+            f"waste = 1 - avg_len / max_len = {_batching.padding_waste_pct:.1f}%; "
+            f"TP_continuous = batch_size * (max_len / avg_len) * fill_factor = {_batching.continuous_throughput:.1f}."
+        )
+        _prediction_detail = "That policy wins for the current settings." if partC_prediction.value == _winner else "The score changes because throughput, padding waste, scheduler overhead, and deadline risk interact."
 
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Speedup</div>
-                <div style="font-size:2rem; font-weight:800; color:{_speedup_color}; font-family:monospace;">{_speedup:.1f}x</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Padding Waste</div>
-                <div style="font-size:2rem; font-weight:800; color:{_waste_color}; font-family:monospace;">{_padding_waste*100:.0f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">static only</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Continuous TP</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_continuous_throughput:.0f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">req/cycle</div>
-            </div>
-        </div>
-        """))
+        items.extend([
+            mo.md("### Manipulate request variance, fill factor, and deadline"),
+            mo.hstack([
+                mo.vstack([partC_avg_len, partC_max_len]),
+                mo.vstack([partC_batch_size, partC_fill_factor, partC_slo_ms]),
+            ], justify="center", gap=2),
+            v2_10_failure_card(
+                _continuous_overhead_failure,
+                "SLO/deadline violation - scheduler overhead dominates",
+                f"Continuous batching estimates {_continuous_row['tail_ms']:.1f} ms against a {_slo:g} ms guardrail.",
+                "use dynamic or immediate scheduling, reduce batch size, or relax the deadline only if product requirements allow",
+            ),
+            v2_10_failure_card(
+                _static_waste_failure,
+                "Padding waste - static batch leaves capacity idle",
+                f"Static padding waste is {_batching.padding_waste_pct:.1f}% for avg={_avg:,} and max={_max:,}.",
+                "bucket by length, use dynamic batching, or use continuous batching when volume justifies it",
+            ),
+            mo.hstack([
+                v2_10_metric_card("Winner", v2_10_schedule_label(_winner), "current workload", COLORS["GreenLine"]),
+                v2_10_metric_card("Speedup", f"{_batching.speedup:.1f}x", "continuous formula vs static", COLORS["OrangeLine"]),
+                v2_10_metric_card("Static waste", f"{_batching.padding_waste_pct:.1f}%", "1 - avg/max", COLORS["RedLine"] if _batching.padding_waste_pct > 50 else COLORS["BlueLine"]),
+                v2_10_metric_card("Tail estimate", f"{_winner_row['tail_ms']:.1f} ms", f"{_slo:g} ms SLO", COLORS["GreenLine"] if _winner_row["risk_pct"] == 0 else COLORS["RedLine"]),
+            ], justify="center", gap=1),
+            mo.ui.plotly(_fig),
+            v2_10_table_html(
+                ("Policy", "Throughput", "Waste", "Tail estimate", "Status"),
+                _table_rows,
+            ),
+            v2_10_reveal_card(
+                "Prediction vs actual",
+                v2_10_schedule_label(partC_prediction.value),
+                v2_10_schedule_label(_winner),
+                _prediction_detail,
+                "success" if partC_prediction.value == _winner else "warn",
+            ),
+            v2_10_math_peek(
+                "Math Peek / Source Model - batching under variance",
+                f"""
+```
+waste = 1 - avg_len / max_len
+TP_continuous = batch_size * (max_len / avg_len) * fill_factor
+```
 
-        items.append(mo.ui.plotly(_fig))
+The helper `batching_result()` computes padding waste, static throughput,
+continuous throughput, and speedup. The policy table adds a local tail/deadline
+estimate so continuous batching can lose when request variance is low, volume is
+low, or scheduler overhead violates the selected track's guardrail.
 
-        # Prediction reveal
-        if partC_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Continuous batching achieves 2-4x throughput improvement over static "
-                "batching when avg_len << max_len. At avg=4K, max=32K, padding waste is 87.5%. "
-                "Continuous batching eliminates this waste and immediately fills freed slots, "
-                "achieving ~3x higher effective throughput in this scenario."
-            ), kind="success"))
-        elif partC_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Too conservative.** 1.5x would be the case if avg_len is close to max_len "
-                "(e.g., 24K/32K). When avg_len is 4K vs max=32K, the 87.5% padding waste "
-                "means continuous batching achieves 3-4x improvement."
-            ), kind="warn"))
-        elif partC_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Too optimistic.** 10x would require avg_len to be <3% of max_len AND perfect "
-                "slot filling. In practice, continuous batching achieves 2-4x because slot "
-                "filling is not instantaneous and prefill compute is non-trivial."
-            ), kind="warn"))
-        elif partC_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Wrong.** Memory-bound workloads benefit greatly from batching optimizations. "
-                "Continuous batching increases the effective batch occupancy, which improves "
-                "memory bandwidth utilization (more requests share the same weight reads)."
-            ), kind="warn"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Governing equations -- continuous batching": mo.md("""
-        **Static Batching Throughput**
-
-        ```
-        TP_static = batch_size / T_max_request
-        ```
-
-        All requests padded to max_len. Waste = 1 - avg_len/max_len.
-
-        **Continuous Batching Throughput**
-
-        ```
-        TP_continuous = batch_size * (max_len / avg_len) * fill_factor
-        ```
-
-        - fill_factor = 0.7-0.9 (accounts for prefill overhead and scheduling gaps)
-        - Speedup = (max_len / avg_len) * fill_factor
-        - At avg=4K, max=32K: speedup = 8 * 0.85 = 6.8x theoretical, ~3x practical
-
-        **Why Practical < Theoretical**
-
-        - Prefill phase for new requests is compute-intensive
-        - Not all slots fill instantly (scheduling latency)
-        - State/cache management overhead
-            """)
-        }))
-
-        # Reflection
-        items.append(partC_reflection)
-        if partC_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
-        elif partC_reflection.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** Continuous batching is strictly better because: (1) no padding waste, "
-                "(2) freed slots are filled immediately with new requests, (3) the accelerator processes "
-                "real work instead of padding or idle time. This is why production serving systems use "
-                "continuous or iteration-level scheduling."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not the full picture.** Continuous batching is the standard because it "
-                "eliminates padding waste AND fills slots immediately. It works for all model "
-                "sizes and request length distributions."
-            ), kind="warn"))
-
+Current source values: avg={_avg:,}, max={_max:,}, batch={_batch}, fill_factor={_fill:.2f}.
+""",
+            ),
+            partC_checkpoint,
+        ])
+        if partC_checkpoint.value == "conditional":
+            items.append(mo.callout(mo.md("Checkpoint saved: batching policy is workload- and SLO-dependent."), kind="success"))
+        elif partC_checkpoint.value is not None:
+            items.append(mo.callout(mo.md("The production rule is conditional: use the simplest policy that satisfies SLO and recovers enough capacity."), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # PART D: FLEET DESIGN CHALLENGE
-    # ═════════════════════════════════════════════════════════════════════════
-
     def build_part_d():
-        items = []
+        items = [
+            v2_10_part_banner(
+                "D",
+                "Serving Design Challenge",
+                "12-15 min",
+                "A serving policy ships only when memory, latency, quality, power or cost, and routing guardrails pass together.",
+                COLORS["RedLine"],
+            ),
+            v2_10_stakeholder_card(
+                "Release review chair",
+                f"{v2_10_variant.stakeholder}: choose one policy for {v2_10_inference.label}. It must meet target demand, {v2_10_variant.guardrail_metric}, memory, quality, and recurring-cost guardrails.",
+                COLORS["RedLine"],
+                COLORS["RedLL"],
+            ),
+            mo.md("""
+The design review is not looking for the cheapest single number or the fastest
+single number. It is looking for a feasible policy:
 
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['RedLine']}; background: {COLORS['RedLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['RedLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; VP of AI Infrastructure
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "{v2_10_variant.stakeholder}: we need to meet
-                {v2_10_inference.demand_qps:g} events/s under {v2_10_inference.slo_ms:g} ms.
-                Which precision, scheduling, and serving-unit count minimizes recurring cost
-                without violating {v2_10_variant.guardrail_metric}?"
-            </div>
-        </div>
-        """))
-
-        # Concept framing
-        items.append(mo.md(f"""
-    Inference-plan design jointly optimizes three levers:
-    1. **Precision**: smaller weights free memory for more live state/cache slots.
-    2. **Scheduling**: continuous batching or duty-cycle scheduling improves effective throughput.
-    3. **Serving units**: replicas, devices per replica, or local schedules set recurring cost.
-
-    For **{v2_10_profile.label}**, the objective is:
-
-    ```
-    minimize recurring {v2_10_inference.cost_label}
-    subject to demand >= {v2_10_inference.demand_qps:g} events/s
-               guardrail = {v2_10_variant.guardrail_metric}
-    ```
-        """))
-
-        # Prediction lock
-        items.append(partD_prediction)
+`memory_ok and slo_ok and quality_ok and cost_ok`
+"""),
+            partD_prediction,
+        ]
         if partD_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part D instruments."), kind="warn"))
+            items.append(mo.callout(mo.md("Select your release-review prediction to unlock Part D."), kind="warn"))
             return mo.vstack(items)
 
-        # Controls
-        items.append(mo.md("### Fleet Design Optimizer"))
-        items.append(mo.hstack([
-            mo.vstack([d1_target_qps, d1_quant]),
-            mo.vstack([d1_batching, d1_gpus_per_replica]),
-        ], justify="center", gap=2))
-
-        _target = d1_target_qps.value
-        _bytes_per_elem = d1_quant.value
-        _batch_mult = d1_batching.value
-        _devices = d1_gpus_per_replica.value
-
+        _target = partD_target_qps.value
+        _precision = partD_precision.value
+        _policy = partD_schedule.value
+        _devices = partD_devices.value
+        _multiplier = v2_10_policy_multiplier(v2_10_inference.track_id, _policy)
         _plan = serving_plan(
             v2_10_inference,
             v2_10_model,
             target_qps=_target,
-            precision_bytes=_bytes_per_elem,
-            batching_multiplier=_batch_mult,
+            precision_bytes=_precision,
+            batching_multiplier=_multiplier,
             devices_per_replica=_devices,
             context_tokens=v2_10_inference.context_tokens,
         )
-        _state_for_plan = state_capacity(
+        _state = state_capacity(
             v2_10_inference,
             v2_10_model,
             context_tokens=v2_10_inference.context_tokens,
-            precision_bytes=_bytes_per_elem,
+            precision_bytes=_precision,
             devices_per_replica=_devices,
         )
-        _total_hbm = _state_for_plan.total_memory_gb
-        _weight_gb = _state_for_plan.weight_gb
-        _available_gb = _state_for_plan.available_gb
-        _kv_per_req_gb = _state_for_plan.state_per_request_gb
-        _max_batch = _plan.max_batch
-        _per_replica_qps = _plan.per_replica_qps
-        _replicas_needed = _plan.replicas_needed
-        _total_gpus = _plan.total_devices
-        _daily_cost = _plan.daily_cost
-        _naive_daily = _plan.baseline_daily_cost
-        _savings_pct = _plan.savings_pct
-        _oom = _plan.oom
+        _capacity = max(1e-9, _plan.replicas_needed * _plan.per_replica_qps)
+        _utilization = min(0.999, _target / _capacity)
+        _p99_ms = v2_10_serving_latency_ms(v2_10_inference.track_id, v2_10_inference.slo_ms, _policy, _utilization, _plan.oom)
+        _memory_ok = not _plan.oom
+        _slo_ok = _p99_ms <= v2_10_inference.slo_ms
+        _quality_ok = not (_precision == 0.5 and v2_10_inference.track_id == "robotaxi")
+        _cost_ok = _plan.daily_cost <= _plan.baseline_daily_cost * 1.05
+        _binding = v2_10_binding_constraint(_memory_ok, _slo_ok, _cost_ok, _quality_ok)
+        _slo_margin = v2_10_inference.slo_ms - _p99_ms if math.isfinite(_p99_ms) else -math.inf
 
-        # Chart: cost comparison across configurations
-        _configs = ["Baseline\nStatic", "Continuous\nSame Precision", "Low Precision\nContinuous", "Your Config"]
-        _same_precision = serving_plan(
-            v2_10_inference,
-            v2_10_model,
-            target_qps=_target,
-            precision_bytes=float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
-            batching_multiplier=_batch_mult,
-            devices_per_replica=_devices,
-            context_tokens=v2_10_inference.context_tokens,
-        )
-        _low_precision = serving_plan(
-            v2_10_inference,
-            v2_10_model,
-            target_qps=_target,
-            precision_bytes=0.5,
-            batching_multiplier=max(1.0, _batch_mult),
-            devices_per_replica=_devices,
-            context_tokens=v2_10_inference.context_tokens,
-        )
-        _costs = [
-            _naive_daily,
-            _same_precision.daily_cost,
-            _low_precision.daily_cost,
-            _daily_cost,
+        def _candidate(label, precision, policy, devices, note):
+            multiplier = v2_10_policy_multiplier(v2_10_inference.track_id, policy)
+            plan = serving_plan(
+                v2_10_inference,
+                v2_10_model,
+                target_qps=_target,
+                precision_bytes=precision,
+                batching_multiplier=multiplier,
+                devices_per_replica=devices,
+                context_tokens=v2_10_inference.context_tokens,
+            )
+            capacity = max(1e-9, plan.replicas_needed * plan.per_replica_qps)
+            util = min(0.999, _target / capacity)
+            p99 = v2_10_serving_latency_ms(v2_10_inference.track_id, v2_10_inference.slo_ms, policy, util, plan.oom)
+            memory_ok = not plan.oom
+            slo_ok = p99 <= v2_10_inference.slo_ms
+            quality_ok = not (precision == 0.5 and v2_10_inference.track_id == "robotaxi")
+            cost_ok = plan.daily_cost <= plan.baseline_daily_cost * 1.05
+            binding = v2_10_binding_constraint(memory_ok, slo_ok, cost_ok, quality_ok)
+            return {
+                "label": label,
+                "precision": precision,
+                "policy": policy,
+                "devices": devices,
+                "plan": plan,
+                "p99": p99,
+                "memory_ok": memory_ok,
+                "slo_ok": slo_ok,
+                "quality_ok": quality_ok,
+                "cost_ok": cost_ok,
+                "binding": binding,
+                "note": note,
+            }
+
+        _candidates = [
+            _candidate("A) Overprovisioned FP16 static", 2.0, "static", max(v2_10_inference.default_devices_per_replica * 2, 2), "usually safe but pays for excess capacity"),
+            _candidate("B) Single-unit FP16 long-context", 2.0, "static", 1, "primary cloud-fleet memory failure case"),
+            _candidate("C) Minimal static schedule", 0.5, "static", max(1, v2_10_inference.default_devices_per_replica), "cheap shape that risks deadline or quality"),
+            _candidate("D) Guardrail-balanced policy", _precision, _policy, _devices, "your selected release knobs"),
         ]
-        _bar_colors_d = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"], COLORS["BlueLine"]]
-
-        _fig = go.Figure()
-        for _i, (_name, _cost) in enumerate(zip(_configs, _costs)):
-            _fig.add_trace(go.Bar(
-                x=[_name], y=[_cost / 1000],
-                marker_color=_bar_colors_d[_i],
-                text=[f"${_cost/1000:.0f}K"],
-                textposition="auto",
-                showlegend=False,
-                hovertemplate=f"%{{x}}: %{{y:.1f}}K {v2_10_inference.cost_unit}/day<extra></extra>",
+        _candidate_rows = []
+        for candidate in _candidates:
+            status = "PASS" if all((candidate["memory_ok"], candidate["slo_ok"], candidate["quality_ok"], candidate["cost_ok"])) else f"BLOCKED: {candidate['binding']}"
+            color = COLORS["GreenLine"] if status == "PASS" else COLORS["RedLine"]
+            p99_text = "OOM" if not math.isfinite(candidate["p99"]) else f"{candidate['p99']:.1f} ms"
+            _candidate_rows.append((
+                candidate["label"],
+                f"{v2_10_precision_label(candidate['precision'])}, {v2_10_schedule_label(candidate['policy'])}, {candidate['devices']} device(s)",
+                f"{candidate['plan'].replicas_needed}",
+                v2_10_fmt_currency(candidate["plan"].daily_cost, v2_10_inference.cost_unit),
+                p99_text,
+                f"<span style='color:{color}; font-weight:800;'>{status}</span><br><span style='color:{COLORS['TextMuted']};'>{candidate['note']}</span>",
             ))
+
+        _costs = [candidate["plan"].daily_cost for candidate in _candidates]
+        _names = [candidate["label"].split(") ", 1)[0] for candidate in _candidates]
+        _colors = [COLORS["OrangeLine"], COLORS["RedLine"], COLORS["RedLine"], COLORS["BlueLine"]]
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=_names,
+            y=[cost / 1000 for cost in _costs],
+            marker_color=_colors,
+            text=[f"{cost / 1000:.1f}K" for cost in _costs],
+            textposition="auto",
+            hovertemplate="Policy %{x}: %{y:.2f}K/day<extra></extra>",
+        ))
         _fig.update_layout(
-            height=300,
-            xaxis=dict(title="Configuration"),
-            yaxis=dict(title=f"Daily Cost (K {v2_10_inference.cost_unit})"),
-            margin=dict(t=30, b=70, l=70, r=20),
+            height=310,
+            xaxis=dict(title="Policy candidate"),
+            yaxis=dict(title=f"Daily cost (K {v2_10_inference.cost_unit})"),
+            margin=dict(t=30, b=55, l=70, r=20),
         )
         apply_plotly_theme(_fig)
 
-        _cost_color = COLORS["GreenLine"] if _savings_pct > 50 else (COLORS["OrangeLine"] if _savings_pct > 20 else COLORS["RedLine"])
+        _prediction_actual = "best feasible" if all((_memory_ok, _slo_ok, _quality_ok, _cost_ok)) else f"blocked by {_binding}"
+        _prediction_detail = "The release policy must pass every guardrail, not just cost or throughput."
 
-        if _oom:
-            items.append(mo.Html(f"""
-            <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
-                        border-radius:10px; padding:14px 18px; margin:10px 0;">
-                <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
-                    OOM &mdash; Cannot Fit Any Request
-                </div>
-                <div style="font-size:0.85rem; color:#7f1d1d;">
-                    Weights ({_weight_gb:.3g} GB) + one {_state_for_plan.state_kind}
-                    ({_kv_per_req_gb:.3g} GB) exceed {_total_hbm:.3g} GB memory.
-                    Increase devices, use stronger quantization, or change the serving policy.
-                </div>
-            </div>
-            """))
+        items.extend([
+            mo.md("### Tune the release policy"),
+            mo.hstack([
+                mo.vstack([partD_target_qps, partD_precision]),
+                mo.vstack([partD_schedule, partD_devices, partD_routing]),
+            ], justify="center", gap=2),
+            v2_10_failure_card(
+                not _memory_ok,
+                "OOM - memory guardrail failed",
+                f"Weights plus one {_state.state_kind} require more than {_state.total_memory_gb:.3g} GB.",
+                "lower precision, add devices per serving unit, shorten context, or pick a smaller model",
+            ),
+            v2_10_failure_card(
+                not _slo_ok,
+                "SLA/deadline violation",
+                f"Estimated p99 is {'OOM' if not math.isfinite(_p99_ms) else f'{_p99_ms:.1f} ms'} against {v2_10_inference.slo_ms:g} ms.",
+                "reduce utilization, change scheduling, add reserve capacity, or route priority traffic differently",
+            ),
+            v2_10_failure_card(
+                not _cost_ok,
+                "Cost/power guardrail violation",
+                f"Daily recurring cost is {v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit)} versus baseline {v2_10_fmt_currency(_plan.baseline_daily_cost, v2_10_inference.cost_unit)}.",
+                "improve per-unit throughput, right-size replicas, or revisit the policy target",
+            ),
+            mo.hstack([
+                v2_10_metric_card("Replicas", str(_plan.replicas_needed), f"{_plan.total_devices} total devices", COLORS["BlueLine"]),
+                v2_10_metric_card("Daily cost", v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit), f"{_plan.savings_pct:.0f}% vs baseline", COLORS["GreenLine"] if _cost_ok else COLORS["RedLine"]),
+                v2_10_metric_card("SLO margin", "OOM" if not math.isfinite(_slo_margin) else f"{_slo_margin:.1f} ms", f"{v2_10_inference.slo_ms:g} ms guardrail", COLORS["GreenLine"] if _slo_ok else COLORS["RedLine"]),
+                v2_10_metric_card("Binding", _binding, "release review", COLORS["GreenLine"] if _binding.startswith("none") else COLORS["RedLine"]),
+            ], justify="center", gap=1),
+            mo.ui.plotly(_fig),
+            v2_10_table_html(
+                ("Candidate", "Config", "Replicas", "Cost/day", "p99 estimate", "Guardrail status"),
+                _candidate_rows,
+            ),
+            v2_10_reveal_card(
+                "Prediction vs release review",
+                partD_prediction.value.replace("_", " "),
+                _prediction_actual,
+                _prediction_detail,
+                "success" if partD_prediction.value == "best_feasible" and _binding.startswith("none") else "warn",
+            ),
+            v2_10_math_peek(
+                "Math Peek / Source Model - serving policy feasibility",
+                f"""
+```
+feasible = memory_ok and slo_ok and quality_ok and cost_ok
+QPS_per_replica = max_batch * base_qps * batching_multiplier
+replicas_needed = ceil(target_qps / QPS_per_replica)
+daily_cost = replicas * devices_per_replica * cost_per_device_hour * 24
+```
 
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Fleet Design
-            </div>
-            <div>Weights: {_weight_gb:.3g} GB &mdash; Available memory: {_available_gb:.3g} GB &mdash; Max live slots: {_max_batch}</div>
-            <div>Per-replica QPS: {_per_replica_qps:.0f} &mdash; Replicas needed: {_replicas_needed}</div>
-            <div>Total devices: <strong>{_total_gpus}</strong> &mdash; Daily cost: <strong>{_daily_cost:,.2f} {v2_10_inference.cost_unit}</strong></div>
-            <div>Baseline daily cost: {_naive_daily:,.2f} {v2_10_inference.cost_unit}/day</div>
-            <div>Savings: <strong style="color:{_cost_color};">{_savings_pct:.0f}%</strong></div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Daily Cost</div>
-                <div style="font-size:2rem; font-weight:800; color:{_cost_color}; font-family:monospace;">{_daily_cost/1000:.1f}K</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Serving Units</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_replicas_needed}</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Savings</div>
-                <div style="font-size:2rem; font-weight:800; color:{_cost_color}; font-family:monospace;">{_savings_pct:.0f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">vs naive</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # Prediction reveal
-        if partD_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** INT4 + continuous batching achieves ~3x throughput per replica "
-                "in the cloud reference. In the selected track, the same principle holds: precision "
-                "frees state/cache memory and scheduling fills live slots more efficiently."
-            ), kind="success"))
-        elif partD_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**The most expensive option.** Brute force adds serving units without attacking the active bottleneck. "
-                "If memory and scheduling are binding, static scheduling wastes accelerator cycles on padding or idle slots."
-            ), kind="warn"))
-        elif partD_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Better than naive but still possibly suboptimal.** Higher precision leaves less room "
-                "for live state/cache. If memory is active, lower precision can increase serving-slot capacity."
-            ), kind="warn"))
-        elif partD_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Static batching loses most of the INT4 benefit.** INT4 frees memory for "
-                "larger batches, but static batching wastes those larger batches on padding. "
-                "INT4 + continuous batching is the winning combination."
-            ), kind="warn"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Governing equations -- inference fleet design": mo.md("""
-        **Fleet Cost Objective**
-
-        ```
-        minimize: serving_units * devices_per_unit * cost_per_device_or_event
-        subject to: replicas * QPS_per_replica >= target_QPS
-                    P99_latency <= SLO
-        ```
-
-        **Per-Replica Throughput**
-
-        ```
-        QPS_per_replica = max_batch * base_qps * batching_multiplier
-        max_batch = floor(available_memory / state_per_request)
-        available_memory = devices * memory_per_device - weight_memory
-        ```
-
-        **Quantization Impact**
-
-        INT4 vs FP16 weights: 4x memory reduction -> more live state/cache slots
-        -> 4x larger batch -> ~4x higher QPS per replica (if memory-bound)
-
-        Combined with 3x from continuous batching: ~12x total improvement.
-            """)
-        }))
-
-        # Reflection
-        items.append(partD_reflection)
-        if partD_reflection.value is None:
-            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
-        elif partD_reflection.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** The objective is minimizing total cost subject to QPS and latency "
-                "constraints. This is a constrained optimization: for each combination of "
-                "(precision, scheduling, devices_per_unit), compute the minimum serving units needed "
-                "to meet the QPS target, then pick the cheapest configuration that also meets "
-                "the latency SLO."
-            ), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not the right objective.** The correct objective is minimizing total fleet cost "
-                "(serving units x devices x recurring cost) subject to meeting both demand and the "
-                "latency SLO. This requires jointly optimizing quantization, batching, and "
-                "replica count."
-            ), kind="warn"))
-
+Source model: `serving_plan()` combines `state_capacity()` with track-specific
+QPS slots and recurring cost. The notebook adds local release-review indicators:
+SLO margin, quality guardrail, routing risk, and binding constraint.
+""",
+            ),
+            partD_checkpoint,
+        ])
+        if partD_checkpoint.value == "guardrails":
+            items.append(mo.callout(mo.md("Checkpoint saved: the objective is constrained cost minimization under all guardrails."), kind="success"))
+        elif partD_checkpoint.value is not None:
+            items.append(mo.callout(mo.md("A release design is feasible only when every guardrail passes simultaneously."), kind="warn"))
         return mo.vstack(items)
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # SYNTHESIS
-    # ═════════════════════════════════════════════════════════════════════════
-
     def build_synthesis():
+        _cost = cost_crossover(
+            setup_cost=v2_10_inference.setup_cost,
+            demand_qps=partA_qps.value,
+            cost_per_event=partA_cost_per_event.value,
+            optimization_pct=partA_optimization_pct.value,
+        )
+        _phase = v2_10_phase_amounts(
+            v2_10_inference,
+            partA_prefill_tokens.value,
+            partA_decode_tokens.value,
+            float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
+        )
+        _state = state_capacity(
+            v2_10_inference,
+            v2_10_model,
+            context_tokens=partB_context_tokens.value,
+            precision_bytes=partB_precision.value,
+            devices_per_replica=partB_devices.value,
+        )
+        _max_len = max(partC_max_len.value, partC_avg_len.value)
+        _batching = batching_result(
+            avg_len=partC_avg_len.value,
+            max_len=_max_len,
+            batch_size=partC_batch_size.value,
+            fill_factor=partC_fill_factor.value,
+        )
+        _rows, _winner = v2_10_scheduling_rows(
+            v2_10_inference.track_id,
+            partC_batch_size.value,
+            partC_avg_len.value,
+            _max_len,
+            partC_fill_factor.value,
+            partC_slo_ms.value,
+        )
+        _plan = serving_plan(
+            v2_10_inference,
+            v2_10_model,
+            target_qps=partD_target_qps.value,
+            precision_bytes=partD_precision.value,
+            batching_multiplier=v2_10_policy_multiplier(v2_10_inference.track_id, partD_schedule.value),
+            devices_per_replica=partD_devices.value,
+            context_tokens=v2_10_inference.context_tokens,
+        )
+        _capacity = max(1e-9, _plan.replicas_needed * _plan.per_replica_qps)
+        _utilization = min(0.999, partD_target_qps.value / _capacity)
+        _p99_ms = v2_10_serving_latency_ms(v2_10_inference.track_id, v2_10_inference.slo_ms, partD_schedule.value, _utilization, _plan.oom)
+        _memory_ok = not _plan.oom
+        _slo_ok = _p99_ms <= v2_10_inference.slo_ms
+        _quality_ok = not (partD_precision.value == 0.5 and v2_10_inference.track_id == "robotaxi")
+        _cost_ok = _plan.daily_cost <= _plan.baseline_daily_cost * 1.05
+        _binding = v2_10_binding_constraint(_memory_ok, _slo_ok, _cost_ok, _quality_ok)
+        _slo_margin = v2_10_inference.slo_ms - _p99_ms if math.isfinite(_p99_ms) else -math.inf
+        _rejected = v2_10_rejected_alternative(v2_10_inference.track_id, _binding)
+        _edge_implication = v2_10_edge_implication(v2_10_inference.track_id, _binding)
         return mo.vstack([
             mo.Html(f"""
-            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+            <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                        border-radius:8px; padding:24px 28px; margin:16px 0;">
+                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:12px;">
                     Key Takeaways
                 </div>
-                <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                    <div style="margin-bottom: 10px;">
-                        <strong>1. Recurring inference cost can exceed the one-time budget quickly.</strong>
-                        For {v2_10_profile.label}, the unit is {v2_10_inference.cost_unit} and the
-                        recurring metric is {v2_10_inference.cost_label}. Small per-event costs compound.
+                <div style="font-size:0.92rem; color:{COLORS['Text']}; line-height:1.75;">
+                    <div style="margin-bottom:10px;">
+                        <strong>1. Prefill/input and decode/output are different amount systems.</strong>
+                        Current settings bind on {v2_10_phase_label(_phase["binding_phase"])}:
+                        prefill/input is {v2_10_fmt_ms(_phase["prefill_ms"])}, decode/output is {v2_10_fmt_ms(_phase["decode_ms"])}.
                     </div>
-                    <div style="margin-bottom: 10px;">
-                        <strong>2. Live state/cache often binds concurrency before compute.</strong>
-                        The selected track's {v2_10_inference.state_kind} must fit beside model
-                        weights in {v2_10_inference.hardware_name} memory.
+                    <div style="margin-bottom:10px;">
+                        <strong>2. Recurring serving cost compounds.</strong>
+                        Current settings cross the setup budget after {v2_10_fmt_duration_days(_cost.crossover_days)};
+                        a {partA_optimization_pct.value}% recurring optimization saves {v2_10_fmt_currency(_cost.annual_savings, v2_10_inference.cost_unit)} per year.
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <strong>3. State/KV memory caps concurrency.</strong>
+                        {_state.state_kind} leaves {_state.max_concurrent} live session(s) at the selected context and precision.
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <strong>4. Batching policy is workload- and SLO-dependent.</strong>
+                        Static waste is {_batching.padding_waste_pct:.1f}%, continuous formula speedup is {_batching.speedup:.1f}x,
+                        and the current policy winner is {v2_10_schedule_label(_winner)}.
                     </div>
                     <div>
-                        <strong>3. Precision + continuous scheduling transforms the economics.</strong>
-                        Lower precision frees memory for live slots. Continuous scheduling fills freed
-                        slots immediately. Combined, they reduce recurring cost when they attack the active bottleneck.
+                        <strong>5. A serving policy ships only if every guardrail passes.</strong>
+                        The current release plan needs {_plan.replicas_needed} serving unit(s) and costs
+                        {v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit)} per day.
                     </div>
                 </div>
             </div>
             """),
             mo.Html(f"""
-            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+            <div style="background:white; border:1px solid {COLORS['Border']};
+                        border-radius:8px; padding:22px 26px; margin:8px 0 16px 0;">
+                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['RedLine']};
+                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:10px;">
+                    Inference Deployment Memo
+                </div>
+                <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
+                    <div><strong>Selected policy:</strong> {v2_10_precision_label(partD_precision.value)} with {v2_10_schedule_label(partD_schedule.value)},
+                    {partD_devices.value} device(s) per serving unit, {partD_routing.value}, and {_plan.replicas_needed} serving unit(s).</div>
+                    <div><strong>Binding amount:</strong> {_binding}; SLO margin is {"not feasible" if not math.isfinite(_slo_margin) else f"{_slo_margin:.1f} ms"}.</div>
+                    <div><strong>Rejected alternative:</strong> {_rejected}</div>
+                    <div><strong>V2-11 edge implication:</strong> {_edge_implication}</div>
+                </div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div style="display:flex; gap:16px; margin:8px 0 16px 0; flex-wrap:wrap;">
+                <div style="flex:1; min-width:280px; background:white;
+                            border:1px solid {COLORS['Border']}; border-radius:8px; padding:20px 24px;">
+                    <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
+                                text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
                         What's Next
                     </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab V2-11: Edge Intelligence</strong> &mdash; The next deployment lab asks
-                        what should remain local, what can be offloaded, and how privacy, battery,
-                        and feedback loops change the serving architecture.
+                    <div style="font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.6;">
+                        <strong>Lab V2-11: Edge Intelligence</strong> asks what changes when the same inference problem
+                        moves outward to devices, intermittent connectivity, privacy, battery, and local feedback loops.
                     </div>
                 </div>
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                <div style="flex:1; min-width:280px; background:white;
+                            border:1px solid {COLORS['Border']}; border-radius:8px; padding:20px 24px;">
+                    <div style="font-size:0.7rem; font-weight:700; color:{COLORS['GreenLine']};
+                                text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
                         Textbook &amp; TinyTorch
                     </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the Inference at Scale chapter for the full state/cache derivation,
-                        continuous batching mechanics, and fleet design principles.<br/>
-                        <strong>Build:</strong> TinyTorch inference module &mdash; implement state/cache
-                        management and continuous batching in <code>tinytorch/src/inference/</code>.
+                    <div style="font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.6;">
+                        <strong>Read:</strong> the Inference at Scale sections on state/KV cache, scheduling, and serving economics.<br/>
+                        <strong>Build:</strong> TinyTorch inference exercises on cache/state management and request scheduling.
                     </div>
                 </div>
             </div>
             """),
             mo.accordion({
                 "Self-Assessment": mo.md("""
-1. For the selected track, when does recurring inference cost exceed the one-time budget?
-2. How many concurrent requests fit before state/cache memory becomes the wall?
-3. Why does INT4 weight quantization increase serving throughput, even though it does not speed up compute?
-4. What is the throughput advantage of continuous batching over static batching, and why?
-
-*If you cannot answer all four from memory, revisit Parts A and B.*
+1. When does recurring serving cost exceed setup cost for your selected track?
+2. Which term caps concurrency: weights, runtime state/KV cache, or devices?
+3. Why can continuous batching lose when variance, volume, or deadline pressure changes?
+4. Which guardrail is binding in your final serving policy?
 """)
             }),
         ])
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # COMPOSE TABS
-    # ═════════════════════════════════════════════════════════════════════════
-
     tabs = mo.ui.tabs({
-        "Part A -- The Serving Cost Inversion": build_part_a(),
-        "Part B -- The KV Cache Wall": build_part_b(),
-        "Part C -- Continuous Batching": build_part_c(),
-        "Part D -- Fleet Design Challenge": build_part_d(),
+        "Part A -- Cost Inversion": build_part_a(),
+        "Part B -- State/KV Wall": build_part_b(),
+        "Part C -- Batching Variance": build_part_c(),
+        "Part D -- Design Challenge": build_part_d(),
         "Synthesis": build_synthesis(),
     })
     tabs
     return
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: LEDGER_HUD
-# ═══════════════════════════════════════════════════════════════════════════════
+
+# ============================================================================
+# ZONE D: LEDGER HUD AND REPORT
+# ============================================================================
 
 @app.cell(hide_code=True)
-def _(mo, DecisionLog):
+def _(DecisionLog):
     decision_input, decision_ui = DecisionLog()
     return (decision_input, decision_ui)
 
+
 @app.cell(hide_code=True)
-def _(COLORS, partA_prediction, partB_prediction, partC_prediction, partD_prediction,
-      partA_reflection, partB_reflection, partC_reflection, partD_reflection,
-      ledger, mo, decision_input, decision_ui, v2_10_inference, v2_10_profile, v2_10_variant):
-    ledger.save(
-        chapter=10,
-        design={
-            "lab": "inference_economy",
-            "track_id": v2_10_profile.track_id,
-            "scenario_id": v2_10_variant.scenario_id,
-            "hardware_ref": v2_10_inference.hardware_ref,
-            "model_ref": v2_10_inference.model_ref,
-            "partA_prediction": partA_prediction.value or "no_selection",
-            "partA_correct": partA_prediction.value == "C",
-            "partA_reflection": partA_reflection.value or "no_selection",
-            "partB_prediction": partB_prediction.value or "no_selection",
-            "partB_correct": partB_prediction.value == "D",
-            "partB_reflection": partB_reflection.value or "no_selection",
-            "partC_prediction": partC_prediction.value or "no_selection",
-            "partC_correct": partC_prediction.value == "B",
-            "partC_reflection": partC_reflection.value or "no_selection",
-            "partD_prediction": partD_prediction.value or "no_selection",
-            "partD_correct": partD_prediction.value == "B",
-            "partD_reflection": partD_reflection.value or "no_selection",
-            "student_justification": str(decision_input.value),
-        },
+def _(
+    COLORS,
+    v2_10_binding_constraint,
+    v2_10_edge_implication,
+    v2_10_fmt_currency,
+    v2_10_policy_multiplier,
+    v2_10_phase_amounts,
+    v2_10_phase_label,
+    v2_10_precision_label,
+    v2_10_rejected_alternative,
+    v2_10_serving_latency_ms,
+    batching_result,
+    cost_crossover,
+    decision_input,
+    decision_ui,
+    ledger,
+    math,
+    mo,
+    partA_checkpoint,
+    partA_cost_per_event,
+    partA_decode_tokens,
+    partA_optimization_pct,
+    partA_phase_prediction,
+    partA_prefill_tokens,
+    partA_prediction,
+    partA_qps,
+    partB_checkpoint,
+    partB_context_tokens,
+    partB_devices,
+    partB_precision,
+    partB_prediction,
+    partC_avg_len,
+    partC_batch_size,
+    partC_checkpoint,
+    partC_fill_factor,
+    partC_max_len,
+    partC_prediction,
+    partD_checkpoint,
+    partD_devices,
+    partD_precision,
+    partD_prediction,
+    partD_routing,
+    partD_schedule,
+    partD_target_qps,
+    serving_plan,
+    state_capacity,
+    v2_10_inference,
+    v2_10_model,
+    v2_10_profile,
+    v2_10_variant,
+):
+    _cost = cost_crossover(
+        setup_cost=v2_10_inference.setup_cost,
+        demand_qps=partA_qps.value,
+        cost_per_event=partA_cost_per_event.value,
+        optimization_pct=partA_optimization_pct.value,
     )
+    _phase = v2_10_phase_amounts(
+        v2_10_inference,
+        partA_prefill_tokens.value,
+        partA_decode_tokens.value,
+        float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
+    )
+    _state = state_capacity(
+        v2_10_inference,
+        v2_10_model,
+        context_tokens=partB_context_tokens.value,
+        precision_bytes=partB_precision.value,
+        devices_per_replica=partB_devices.value,
+    )
+    _max_len = max(partC_max_len.value, partC_avg_len.value)
+    _batching = batching_result(
+        avg_len=partC_avg_len.value,
+        max_len=_max_len,
+        batch_size=partC_batch_size.value,
+        fill_factor=partC_fill_factor.value,
+    )
+    _plan = serving_plan(
+        v2_10_inference,
+        v2_10_model,
+        target_qps=partD_target_qps.value,
+        precision_bytes=partD_precision.value,
+        batching_multiplier=v2_10_policy_multiplier(v2_10_inference.track_id, partD_schedule.value),
+        devices_per_replica=partD_devices.value,
+        context_tokens=v2_10_inference.context_tokens,
+    )
+    _capacity = max(1e-9, _plan.replicas_needed * _plan.per_replica_qps)
+    _utilization = min(0.999, partD_target_qps.value / _capacity)
+    _p99_ms = v2_10_serving_latency_ms(v2_10_inference.track_id, v2_10_inference.slo_ms, partD_schedule.value, _utilization, _plan.oom)
+    _memory_ok = not _plan.oom
+    _slo_ok = _p99_ms <= v2_10_inference.slo_ms
+    _quality_ok = not (partD_precision.value == 0.5 and v2_10_inference.track_id == "robotaxi")
+    _cost_ok = _plan.daily_cost <= _plan.baseline_daily_cost * 1.05
+    _binding = v2_10_binding_constraint(_memory_ok, _slo_ok, _cost_ok, _quality_ok)
+    _slo_margin = v2_10_inference.slo_ms - _p99_ms if math.isfinite(_p99_ms) else -math.inf
+    _rejected = v2_10_rejected_alternative(v2_10_inference.track_id, _binding)
+    _edge_implication = v2_10_edge_implication(v2_10_inference.track_id, _binding)
 
-    _a1_ok = partA_prediction.value == "C"
-    _a2_ok = partB_prediction.value == "D"
-    _tier = "Optimal" if (_a1_ok and _a2_ok) else ("Partial" if (_a1_ok or _a2_ok) else "Developing")
-    _tier_color = COLORS["GreenLine"] if _tier == "Optimal" else (COLORS["OrangeLine"] if _tier == "Partial" else COLORS["TextMuted"])
+    _complete = all(
+        widget.value is not None
+        for widget in (
+            partA_prediction,
+            partA_phase_prediction,
+            partA_checkpoint,
+            partB_prediction,
+            partB_checkpoint,
+            partC_prediction,
+            partC_checkpoint,
+            partD_prediction,
+            partD_checkpoint,
+        )
+    )
+    _residual_risk = (
+        "Validate teaching estimates with production traces: real token distributions, "
+        "thermal/power replay, p99 load tests, quality canaries, routing behavior, and current pricing."
+    )
+    _ledger_design = {
+        "track_id": v2_10_profile.track_id,
+        "scenario_id": v2_10_variant.scenario_id,
+        "partA_predicted_crossover": partA_prediction.value or "no_selection",
+        "partA_actual_crossover_days": round(_cost.crossover_days, 3),
+        "partA_phase_prediction": partA_phase_prediction.value or "no_selection",
+        "partA_binding_phase": _phase["binding_phase"],
+        "partA_binding_phase_label": v2_10_phase_label(_phase["binding_phase"]),
+        "partA_prefill_tokens": partA_prefill_tokens.value,
+        "partA_decode_tokens": partA_decode_tokens.value,
+        "partA_prefill_ms": round(_phase["prefill_ms"], 3),
+        "partA_decode_ms": round(_phase["decode_ms"], 3),
+        "partB_max_concurrent": _state.max_concurrent,
+        "partB_context_tokens": partB_context_tokens.value,
+        "partB_precision_bytes": float(partB_precision.value),
+        "partB_oom": bool(_state.oom),
+        "partC_scheduling_policy": partC_prediction.value or "no_selection",
+        "partC_speedup": round(_batching.speedup, 3),
+        "partC_padding_waste_pct": round(_batching.padding_waste_pct, 3),
+        "partD_selected_precision": v2_10_precision_label(partD_precision.value),
+        "partD_selected_policy": partD_schedule.value,
+        "partD_selected_routing": partD_routing.value,
+        "partD_replicas_needed": _plan.replicas_needed,
+        "partD_cost_per_day": round(_plan.daily_cost, 6),
+        "partD_slo_margin_ms": round(_slo_margin, 3) if math.isfinite(_slo_margin) else "not_feasible",
+        "partD_binding_constraint": _binding,
+        "partD_rejected_alternative": _rejected,
+        "v2_11_edge_implication": _edge_implication,
+        "residual_risk": _residual_risk,
+        "student_justification": str(decision_input.value),
+    }
+    if _complete:
+        ledger.save(chapter=10, design=_ledger_design)
 
+    _status = "SAVED" if _complete else "INCOMPLETE"
+    _status_color = COLORS["GreenLine"] if _complete else COLORS["OrangeLine"]
     decision_ui
     mo.Html(f"""
     <div class="lab-hud">
         <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 10</span></div>
-        <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_10 &middot; Inference at Scale</span></div>
         <div><span class="hud-label">TRACK</span> <span class="hud-value">{v2_10_profile.label}</span></div>
-        <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
+        <div><span class="hud-label">CROSSOVER</span> <span class="hud-value">{_cost.crossover_days:.1f} days</span></div>
+        <div><span class="hud-label">MAX CONCURRENCY</span> <span class="hud-value">{_state.max_concurrent}</span></div>
+        <div><span class="hud-label">POLICY</span> <span class="hud-value">{partD_schedule.value}</span></div>
+        <div><span class="hud-label">STATUS</span> <span style="color:{_status_color}; font-family:var(--font-mono);">{_status}</span></div>
     </div>
     """)
     return
 
 
-# ─── DOWNLOADABLE TRACK REPORT ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    a1_cost_query,
-    a1_optimization,
-    a1_qps,
-    a2_context_len,
-    a2_n_gpus,
-    a2_precision,
+    v2_10_binding_constraint,
+    v2_10_edge_implication,
+    v2_10_fmt_currency,
+    v2_10_policy_multiplier,
+    v2_10_phase_amounts,
+    v2_10_phase_label,
+    v2_10_precision_label,
+    v2_10_rejected_alternative,
+    v2_10_schedule_label,
+    v2_10_serving_latency_ms,
     batching_result,
     build_lab_report,
-    c1_avg_len,
-    c1_batch_size,
-    c1_max_len,
     cost_crossover,
-    d1_batching,
-    d1_gpus_per_replica,
-    d1_quant,
-    d1_target_qps,
+    decision_input,
+    math,
     mo,
+    partA_checkpoint,
+    partA_cost_per_event,
+    partA_decode_tokens,
+    partA_optimization_pct,
+    partA_phase_prediction,
+    partA_prefill_tokens,
     partA_prediction,
-    partA_reflection,
+    partA_qps,
+    partB_checkpoint,
+    partB_context_tokens,
+    partB_devices,
+    partB_precision,
     partB_prediction,
-    partB_reflection,
+    partC_avg_len,
+    partC_batch_size,
+    partC_checkpoint,
+    partC_fill_factor,
+    partC_max_len,
     partC_prediction,
-    partC_reflection,
+    partD_checkpoint,
+    partD_devices,
+    partD_precision,
     partD_prediction,
-    partD_reflection,
+    partD_routing,
+    partD_schedule,
+    partD_target_qps,
     report_export_panel,
     serving_plan,
     state_capacity,
@@ -1599,124 +2043,145 @@ def _(
 ):
     _cost = cost_crossover(
         setup_cost=v2_10_inference.setup_cost,
-        demand_qps=a1_qps.value,
-        cost_per_event=a1_cost_query.value,
-        optimization_pct=a1_optimization.value,
+        demand_qps=partA_qps.value,
+        cost_per_event=partA_cost_per_event.value,
+        optimization_pct=partA_optimization_pct.value,
+    )
+    _phase = v2_10_phase_amounts(
+        v2_10_inference,
+        partA_prefill_tokens.value,
+        partA_decode_tokens.value,
+        float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
     )
     _state = state_capacity(
         v2_10_inference,
         v2_10_model,
-        context_tokens=a2_context_len.value,
-        precision_bytes=a2_precision.value,
-        devices_per_replica=a2_n_gpus.value,
+        context_tokens=partB_context_tokens.value,
+        precision_bytes=partB_precision.value,
+        devices_per_replica=partB_devices.value,
     )
+    _max_len = max(partC_max_len.value, partC_avg_len.value)
     _batching = batching_result(
-        avg_len=c1_avg_len.value,
-        max_len=c1_max_len.value,
-        batch_size=c1_batch_size.value,
-        fill_factor=v2_10_inference.batching_fill_factor,
+        avg_len=partC_avg_len.value,
+        max_len=_max_len,
+        batch_size=partC_batch_size.value,
+        fill_factor=partC_fill_factor.value,
     )
     _plan = serving_plan(
         v2_10_inference,
         v2_10_model,
-        target_qps=d1_target_qps.value,
-        precision_bytes=d1_quant.value,
-        batching_multiplier=d1_batching.value,
-        devices_per_replica=d1_gpus_per_replica.value,
+        target_qps=partD_target_qps.value,
+        precision_bytes=partD_precision.value,
+        batching_multiplier=v2_10_policy_multiplier(v2_10_inference.track_id, partD_schedule.value),
+        devices_per_replica=partD_devices.value,
         context_tokens=v2_10_inference.context_tokens,
     )
+    _capacity = max(1e-9, _plan.replicas_needed * _plan.per_replica_qps)
+    _utilization = min(0.999, partD_target_qps.value / _capacity)
+    _p99_ms = v2_10_serving_latency_ms(v2_10_inference.track_id, v2_10_inference.slo_ms, partD_schedule.value, _utilization, _plan.oom)
+    _memory_ok = not _plan.oom
+    _slo_ok = _p99_ms <= v2_10_inference.slo_ms
+    _quality_ok = not (partD_precision.value == 0.5 and v2_10_inference.track_id == "robotaxi")
+    _cost_ok = _plan.daily_cost <= _plan.baseline_daily_cost * 1.05
+    _binding = v2_10_binding_constraint(_memory_ok, _slo_ok, _cost_ok, _quality_ok)
+    _slo_margin = v2_10_inference.slo_ms - _p99_ms if math.isfinite(_p99_ms) else -math.inf
+    _rejected = v2_10_rejected_alternative(v2_10_inference.track_id, _binding)
+    _edge_implication = v2_10_edge_implication(v2_10_inference.track_id, _binding)
 
     _incomplete = []
-    if partA_prediction.value is None:
-        _incomplete.append("Part A cost inversion prediction")
-    if partA_reflection.value is None:
-        _incomplete.append("Part A cost-control reflection")
-    if partB_prediction.value is None:
-        _incomplete.append("Part B state/cache prediction")
-    if partB_reflection.value is None:
-        _incomplete.append("Part B capacity reflection")
-    if partC_prediction.value is None:
-        _incomplete.append("Part C batching prediction")
-    if partC_reflection.value is None:
-        _incomplete.append("Part C batching reflection")
-    if partD_prediction.value is None:
-        _incomplete.append("Part D serving-plan prediction")
-    if partD_reflection.value is None:
-        _incomplete.append("Part D objective reflection")
+    for label, widget in (
+        ("Part A cost inversion prediction", partA_prediction),
+        ("Part A prefill/decode phase prediction", partA_phase_prediction),
+        ("Part A checkpoint", partA_checkpoint),
+        ("Part B state/KV prediction", partB_prediction),
+        ("Part B checkpoint", partB_checkpoint),
+        ("Part C scheduling prediction", partC_prediction),
+        ("Part C checkpoint", partC_checkpoint),
+        ("Part D policy prediction", partD_prediction),
+        ("Part D checkpoint", partD_checkpoint),
+    ):
+        if widget.value is None:
+            _incomplete.append(label)
 
     _report = build_lab_report(
         v2_10_metadata,
         track=v2_10_profile.label,
         scenario=v2_10_variant.workload_summary,
         learning_objectives=(
-            "Quantify when recurring inference cost exceeds the one-time setup or training budget.",
-            "Compute the selected track's state/cache memory wall and explain the binding constraint.",
-            "Choose a serving or local-inference plan using precision, batching, and serving-unit tradeoffs.",
+            "Separate prefill/input work from decode/output work before sizing the service.",
+            "Quantify when recurring serving cost exceeds setup or training cost.",
+            "Compute the selected track's state/KV or runtime-state memory wall.",
+            "Compare scheduling policies under request variance and SLO pressure.",
+            "Choose a release policy under memory, latency, quality, and cost guardrails.",
         ),
         predictions={
-            "cost_inversion": partA_prediction.value,
-            "cost_control": partA_reflection.value,
-            "state_cache_wall": partB_prediction.value,
-            "capacity_lever": partB_reflection.value,
-            "batching_speedup": partC_prediction.value,
-            "batching_reason": partC_reflection.value,
-            "serving_plan": partD_prediction.value,
-            "fleet_objective": partD_reflection.value,
+            "partA_predicted_crossover": partA_prediction.value,
+            "partA_predicted_phase": partA_phase_prediction.value,
+            "partB_predicted_capacity": partB_prediction.value,
+            "partC_predicted_policy": partC_prediction.value,
+            "partD_predicted_release_policy": partD_prediction.value,
         },
         knob_settings={
-            "demand_qps": a1_qps.value,
-            "cost_per_event": a1_cost_query.value,
-            "optimization_pct": a1_optimization.value,
-            "context_tokens": a2_context_len.value,
-            "devices_per_serving_unit": a2_n_gpus.value,
-            "precision_bytes": a2_precision.value,
-            "avg_length": c1_avg_len.value,
-            "max_length": c1_max_len.value,
-            "batch_size": c1_batch_size.value,
-            "target_qps": d1_target_qps.value,
-            "plan_precision_bytes": d1_quant.value,
-            "plan_batching_multiplier": d1_batching.value,
-            "plan_devices_per_unit": d1_gpus_per_replica.value,
+            "demand_qps": partA_qps.value,
+            "cost_per_event": partA_cost_per_event.value,
+            "optimization_pct": partA_optimization_pct.value,
+            "prefill_tokens": partA_prefill_tokens.value,
+            "decode_tokens": partA_decode_tokens.value,
+            "context_tokens": partB_context_tokens.value,
+            "precision_bytes_partB": partB_precision.value,
+            "avg_len": partC_avg_len.value,
+            "max_len": _max_len,
+            "batch_size": partC_batch_size.value,
+            "fill_factor": partC_fill_factor.value,
+            "release_precision": v2_10_precision_label(partD_precision.value),
+            "release_policy": v2_10_schedule_label(partD_schedule.value),
+            "release_devices": partD_devices.value,
+            "release_routing": partD_routing.value,
         },
         evidence_summary={
-            "hardware_ref": v2_10_inference.hardware_ref,
-            "model_ref": v2_10_inference.model_ref,
-            "cost_unit": v2_10_inference.cost_unit,
-            "daily_cost": round(_cost.daily_cost, 6),
-            "crossover_weeks": round(_cost.crossover_weeks, 3),
-            "state_kind": _state.state_kind,
-            "state_per_request_gb": round(_state.state_per_request_gb, 6),
+            "actual_crossover_days": round(_cost.crossover_days, 3),
+            "annual_savings": v2_10_fmt_currency(_cost.annual_savings, v2_10_inference.cost_unit),
+            "binding_phase": v2_10_phase_label(_phase["binding_phase"]),
+            "prefill_ms": round(_phase["prefill_ms"], 3),
+            "decode_ms": round(_phase["decode_ms"], 3),
             "max_concurrent": _state.max_concurrent,
-            "batching_speedup": round(_batching.speedup, 3),
-            "plan_replicas_or_units": _plan.replicas_needed,
-            "plan_total_devices": _plan.total_devices,
-            "plan_daily_cost": round(_plan.daily_cost, 6),
-            "plan_savings_pct": round(_plan.savings_pct, 3),
+            "state_per_request_gb": round(_state.state_per_request_gb, 6),
+            "padding_waste_pct": round(_batching.padding_waste_pct, 3),
+            "continuous_speedup": round(_batching.speedup, 3),
+            "replicas_needed": _plan.replicas_needed,
+            "daily_cost": v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit),
+            "slo_margin_ms": round(_slo_margin, 3) if math.isfinite(_slo_margin) else "not_feasible",
+            "binding_constraint": _binding,
+            "rejected_alternative": _rejected,
         },
-        final_decision=(
-            f"Use {v2_10_variant.assumptions.get('serving_policy', v2_10_profile.label)} "
-            f"only if it meets {v2_10_variant.guardrail_metric} at the computed recurring cost."
-        ),
+        final_decision={
+            "selected_precision": v2_10_precision_label(partD_precision.value),
+            "selected_policy": partD_schedule.value,
+            "selected_routing": partD_routing.value,
+            "replicas_needed": _plan.replicas_needed,
+            "cost_per_day": round(_plan.daily_cost, 6),
+            "binding_constraint": _binding,
+            "rejected_alternative": _rejected,
+            "v2_11_edge_implication": _edge_implication,
+        },
         big_takeaways=(
-            "Inference economy is recurring cost, not only a training bill.",
-            "Live state/cache memory determines concurrency before compute often does.",
-            "Precision and continuous scheduling improve economics only when they attack the active bottleneck.",
+            "Prefill/input and decode/output are different amount systems.",
+            "Recurring serving cost compounds.",
+            "State/KV memory caps concurrency.",
+            "Batching policy is workload- and SLO-dependent.",
+            "A serving policy ships only if all guardrails pass.",
         ),
         reflections={
-            "cost_inversion": (
-                f"The selected settings cross the one-time budget after {_cost.crossover_weeks:.1f} weeks."
-            ),
-            "state_wall": (
-                f"{v2_10_inference.state_kind} allows {_state.max_concurrent} live requests per serving unit."
-            ),
-            "serving_plan": (
-                f"The plan uses {_plan.total_devices} devices and costs {_plan.daily_cost:.2f} "
-                f"{v2_10_inference.cost_unit}/day."
-            ),
+            "cost_inversion_checkpoint": partA_checkpoint.value,
+            "phase_amount_prediction": partA_phase_prediction.value,
+            "state_wall_checkpoint": partB_checkpoint.value,
+            "batching_checkpoint": partC_checkpoint.value,
+            "release_checkpoint": partD_checkpoint.value,
+            "student_justification": str(decision_input.value),
         },
         residual_risk=(
-            "These are source-traced teaching estimates. Validate with profiler traces, workload distributions, "
-            "thermal behavior, p99 latency, quality regression, and real pricing or battery measurements."
+            "Validate teaching estimates with production traces: real token distributions, thermal/power replay, "
+            "p99 load tests, quality canaries, routing behavior, and current pricing."
         ),
         source_trace={
             "track_id": v2_10_profile.track_id,
@@ -1724,10 +2189,10 @@ def _(
             "hardware_ref": v2_10_variant.hardware_ref,
             "model_ref": v2_10_variant.model_ref,
             "shared_helper": "mlsysbook_labs.inference",
+            "helper_apis": ("cost_crossover", "state_capacity", "batching_result", "serving_plan"),
             "source_policy": v2_10_profile.source_policy,
         },
         result_snapshot={
-            "inference_profile": v2_10_inference,
             "cost_crossover": _cost,
             "state_capacity": _state,
             "batching": _batching,
@@ -1740,7 +2205,7 @@ def _(
         mo.md("## Download Report"),
         mo.callout(
             mo.md(
-                "This V2-10 report is generated locally from the selected track, MLSysIM hardware/model refs, "
+                "This report is generated locally from the selected track, MLSysIM hardware/model refs, "
                 "and shared `mlsysbook_labs.inference` calculations."
             ),
             kind="info",
@@ -1748,6 +2213,7 @@ def _(
         report_export_panel(_report),
     ])
     return
+
 
 if __name__ == "__main__":
     app.run()

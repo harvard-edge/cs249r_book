@@ -11,19 +11,19 @@ app = marimo.App(width="full")
 # They are here to understand that where a model runs
 # determines whether it can run at all.
 #
-# Four sections:
-#   1. What this curriculum means
-#   2. What tracks are available
-#   3. How every later lab is structured
-#   4. Track selection and local report
+# Four concept modules:
+#   Part A. Deployed behavior, not isolated models
+#   Part B. Track as operating envelope
+#   Part C. Repeated case -> prediction -> manipulation -> evidence -> decision -> report ritual
+#   Part D. Ledger continuity and local report handoff
 # No physics instruments (introduced in Lab 01+).
 # No prediction locks in anger (students haven't read Chapter 1 yet).
 # Progressive disclosure: each check gates the next concept.
 #
 # Concepts covered (all from pre-reading context, no chapter required):
 #   1. ML systems labs are about deployed behavior, not isolated models.
-#   2. A track is a recurring learning lens, not a career choice.
-#   3. Later labs repeat a case -> guess -> evidence -> decision -> report loop.
+#   2. A track is an operating envelope, not a career choice.
+#   3. Later labs repeat a case -> prediction -> manipulation -> evidence -> decision -> report loop.
 #   4. The report unlocks only after the orientation and track choice are complete.
 #
 # Design Ledger: initialized with deployment context at completion.
@@ -103,15 +103,56 @@ def _(LabMetadata):
     )
     lab_learning_objectives = (
         "Explain what an ML systems lab is trying to teach.",
-        "Compare the four canonical tracks and choose one recurring learning lens.",
-        "Recognize the repeated lab rhythm: case, guess, controls, evidence, decision, and report.",
+        "Compare the four canonical tracks and choose one recurring operating envelope.",
+        "Recognize the repeated lab rhythm: case, prediction, manipulation, evidence, decision, and report.",
     )
     lab_big_takeaways = (
         "The same model idea becomes a different systems problem on 📱 iPhone, 💍 Oura Ring, 🚕 RoboTaxi, and ☁️ Cloud Fleet.",
-        "Track selection changes hardware facts, constraints, metrics, stakeholder pressure, and report framing.",
+        "Track selection changes hardware facts, constraints, metrics, stakeholder pressure, failure modes, and report framing.",
         "Later labs build on this track choice, but each lab will introduce only the new concept it needs.",
     )
     return lab_big_takeaways, lab_learning_objectives, lab_metadata
+
+@app.cell
+def _():
+    def v1_00_track_story(track_id):
+        stories = {
+            "iphone": {
+                "persona": "UX director",
+                "stakeholder_question": "Can this run locally without making the phone hot, slow, or privacy-invasive?",
+                "first_bottleneck": "thermal envelope",
+                "likely_failure": "thermal throttle, battery drain, or sluggish interactive UX",
+                "report_frame": "local-device readiness memo: responsiveness, privacy, battery, and sustained comfort",
+                "amount_reasoning": "milliseconds and joules must fit a handheld user experience",
+            },
+            "oura_ring": {
+                "persona": "hardware lead",
+                "stakeholder_question": "Can the sensing window, model, buffers, and OTA package fit inside a tiny wearable budget?",
+                "first_bottleneck": "SRAM",
+                "likely_failure": "SRAM or flash overflow, duty-cycle violation, or radio wakeup budget miss",
+                "report_frame": "firmware fit memo: memory, update size, sensing cadence, and battery life",
+                "amount_reasoning": "bytes and microjoules decide whether the feature can stay always on",
+            },
+            "robotaxi": {
+                "persona": "safety director",
+                "stakeholder_question": "Can perception meet the deadline and protect rare-event safety margins?",
+                "first_bottleneck": "tail latency",
+                "likely_failure": "p99/p999 deadline miss, safety-margin miss, or unsupported fallback path",
+                "report_frame": "safety evidence memo: worst-case latency, rare-event recall, and fallback plan",
+                "amount_reasoning": "tail milliseconds and missed detections become safety evidence",
+            },
+            "cloud_fleet": {
+                "persona": "CTO",
+                "stakeholder_question": "Can the service satisfy demand without wasting capacity, money, or carbon budget?",
+                "first_bottleneck": "utilization",
+                "likely_failure": "SLO breach, queue growth, negative ROI, or carbon budget miss",
+                "report_frame": "fleet operations memo: SLA, throughput, utilization, cost/request, and carbon",
+                "amount_reasoning": "requests, dollars, utilization points, and carbon turn scale into an operating constraint",
+            },
+        }
+        return stories[track_id]
+
+    return (v1_00_track_story,)
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell
@@ -234,10 +275,11 @@ def _(COLORS, lab_learning_objectives, mo):
                 Lab Map
             </div>
             <div style="font-size: 0.86rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <strong>Part A:</strong> what ML systems means &middot;
-                <strong>Part B:</strong> your track options &middot;
-                <strong>Part C:</strong> the recurring lab interface &middot;
-                <strong>Synthesis:</strong> choose a track, review takeaways, and unlock the local report.
+                <strong>Part A:</strong> deployed behavior, not isolated models &middot;
+                <strong>Part B:</strong> track as operating envelope &middot;
+                <strong>Part C:</strong> case, prediction, manipulation, evidence, decision, report &middot;
+                <strong>Part D:</strong> ledger/report continuity &middot;
+                <strong>Synthesis:</strong> explain how your track shapes later amount-system reasoning.
             </div>
         </div>
 
@@ -270,14 +312,16 @@ def _(mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## What Does This Lab Sequence Mean?
+        ## Part A - Deployed Behavior, Not Isolated Models
+
+        **Scenario.** A model demo works in a notebook. Your lab lead asks whether
+        it is ready to become a deployed ML system. The first mistake is to answer
+        using only the model score.
 
         These labs are not a second textbook and they are not a quiz bank. They are a
-        repeated way to practice systems thinking around machine learning.
-
-        Each lab gives you a small situation, a few choices to make, some evidence to
-        inspect, and a short report to download at the end. The technical ideas get
-        more specific over time, but the page structure stays familiar.
+        repeated way to practice systems thinking around machine learning: make a
+        prediction, inspect deployed evidence, name the constraint, and write the
+        decision you would defend.
         """),
         mo.Html("""
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;">
@@ -304,9 +348,22 @@ def _(mo):
         </div>
         """),
         mo.md("""
-        Lab 00 only orients you to that pattern. Lab 01 is where the first real
-        technical idea begins.
+        **Consequence.** Notebook success is not deployment success. The chapter's
+        opening claim is that ML systems have a physics: learned behavior must move
+        through memory, consume energy, meet latency windows, and survive a real
+        operating context.
+
+        Lab 00 only orients you to that pattern. Lab 01 is where the first technical
+        diagnosis begins.
         """),
+        mo.accordion({
+            "Reading connection": mo.md("""
+            Chapter 1 frames ML systems as data-shaped behavior running under
+            physical constraint. Part A turns that claim into the first lab habit:
+            do not stop at the model; ask what deployed behavior the system must
+            prove.
+            """),
+        }),
     ])
     return
 
@@ -321,7 +378,7 @@ def _(mo):
             "C)  Practice a repeated workflow for making evidence-backed systems decisions": "C",
             "D)  Choose a permanent career specialization": "D",
         },
-        label="""**Orientation check.** What are these labs mainly trying to help you practice?""",
+        label="""**Part A prediction.** What are these labs mainly trying to help you practice?""",
     )
     return (check1,)
 
@@ -347,8 +404,9 @@ def _(check1, mo):
                 "before an ML idea can become a reliable system."
             ),
             "C": (
-                "**Correct.** You will repeatedly read a situation, make a guess, inspect "
-                "evidence, decide what you would defend, and download a short report."
+                "**Correct.** You will repeatedly read a situation, make a prediction, "
+                "manipulate controls, inspect evidence, decide what you would defend, "
+                "and download a short report."
             ),
             "D": (
                 "**Not quite.** A track is only a learning lens. You can understand all four "
@@ -375,11 +433,17 @@ def _(check1, mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## What Is A Track?
+        ## Part B - A Track Is An Operating Envelope
 
-        A track is the context you carry through the labs. It changes the story,
-        the device, the stakeholder, the primary metric, and the guardrails.
-        It does **not** change the chapter concept everyone is learning.
+        **Scenario.** Four students study the same MLSys concept, but each one has
+        to defend the result to a different stakeholder. The answer should not sound
+        the same for a phone app, a wearable firmware update, a safety-critical
+        vehicle, and a cloud service.
+
+        A track is the operating envelope you carry through the labs. It changes
+        the story, device, stakeholder, primary metrics, guardrails, likely failure
+        mode, and report framing. It does **not** change the chapter concept
+        everyone is learning.
 
         You can think of it as four students solving the same kind of problem
         under four different sets of constraints:
@@ -429,8 +493,9 @@ def _(check1, mo):
         </div>
         """),
         mo.md("""
-        The track choice is there to make the lab feel concrete. It is not a
-        hidden prerequisite and it is not a career sorting mechanism.
+        **Consequence.** If a track only changes the label, it is not doing useful
+        work. The track should change what constraint pushes back when the same
+        idea is deployed.
         """),
     ])
     return
@@ -483,7 +548,7 @@ def _(
 
     if check2empty():
         _check2_prompt = mo.vstack([
-            mo.md("""**Orientation check.** When you choose a track, which parts of
+            mo.md("""**Part B prediction.** When you choose a track, which parts of
         later labs should change automatically?"""),
 
             mo.md("""Select **all** that should change because of the track:"""),
@@ -565,7 +630,7 @@ def _(
     # Keep feedback in the same answer box so students know where a click
     # produced its explanation.
     _items = [
-        mo.md("""**Orientation check.** When you choose a track, which parts of
+        mo.md("""**Part B prediction.** When you choose a track, which parts of
     later labs should change automatically?"""),
         mo.md("""Select **all** that should change because of the track:"""),
         model_size,
@@ -603,7 +668,7 @@ def _(
 # ─── CONCEPT 3: THE DEPLOYMENT REGIMES ────────────────────────────────────────
 
 @app.cell
-def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label):
+def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label, v1_00_track_story):
     mo.stop(check1.value is None or check2empty())
 
     _color_by_track = {
@@ -615,6 +680,7 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label):
     _cards = ""
     for _profile in CANONICAL_TRACKS:
         _color = _color_by_track.get(_profile.track_id, "#6366f1")
+        _story = v1_00_track_story(_profile.track_id)
         _constraints = ", ".join(_profile.dominant_constraints)
         _metrics = ", ".join(_profile.primary_metrics)
         _guardrails = ", ".join(_profile.guardrail_metrics)
@@ -632,9 +698,12 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label):
                 <div style="background: {_color}12; border-radius: 8px; padding: 8px 12px;
                             font-size: 0.78rem; color: #334155; line-height: 1.55;">
                     <strong>Your role:</strong> {_profile.stakeholder}<br/>
+                    <strong>Stakeholder asks:</strong> {_story['stakeholder_question']}<br/>
                     <strong>Primary metrics:</strong> {_metrics}<br/>
                     <strong>Guardrails:</strong> {_guardrails}<br/>
-                    <strong>Dominant constraints:</strong> {_constraints}
+                    <strong>Dominant constraints:</strong> {_constraints}<br/>
+                    <strong>Likely failure:</strong> {_story['likely_failure']}<br/>
+                    <strong>Report frame:</strong> {_story['report_frame']}
                 </div>
             </div>
         """
@@ -645,8 +714,9 @@ def _(CANONICAL_TRACKS, check1, check2empty, mo, track_display_label):
         ## The Four Canonical Tracks
 
         The course supports four canonical tracks. You will choose one as your
-        recurring point of view. Later labs will change the story, metrics, and
-        decisions automatically from that choice while keeping the core concept shared.
+        recurring operating envelope. Later labs will change the story, stakeholder,
+        constraints, metrics, failure mode, and report frame from that choice while
+        keeping the core concept shared.
         """),
         mo.Html(f"""
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 16px 0;">
@@ -672,12 +742,12 @@ def _(check1, check2empty, mo):
 
     check3 = mo.ui.radio(
         options={
-            "A)  Read the case, guess first, explore evidence, decide, then report": "A",
+            "A)  Read the case, predict first, manipulate controls, inspect evidence, decide, then report": "A",
             "B)  Skip the case and tune controls until the answer looks right": "B",
             "C)  Download a report before making the required decisions": "C",
             "D)  Treat the track as a separate topic from the lab": "D",
         },
-        label="""**Orientation check.** What workflow should you expect to repeat in later labs?""",
+        label="""**Part C prediction.** What workflow should you expect to repeat in later labs?""",
     )
     return (check3,)
 
@@ -727,7 +797,7 @@ def _(check1, check2empty, check3, mo):
 # ZONE C: INTERFACE ORIENTATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# _act_why: "Before Lab 01, students should recognize the recurring case -> guess -> evidence -> decision rhythm without advanced terminology."
+# _act_why: "Before Lab 01, students should recognize the recurring case -> prediction -> manipulation -> evidence -> decision rhythm without advanced terminology."
 
 # ─── INTERFACE ORIENTATION INTRO ───────────────────────────────────────────────
 
@@ -738,11 +808,15 @@ def _(check1, check2empty, check3, mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## How Every Lab in This Curriculum Is Structured
+        ## Part C - The Repeated Lab Ritual
 
-        Starting from Lab 01, every lab follows the same simple rhythm:
-        read a short case, make a prediction, change a few controls, inspect
-        the evidence, and write the decision you would defend.
+        **Scenario.** A later lab opens with a stakeholder case and a system that
+        is not yet defensible. You do not start by tuning randomly. You first make
+        a structured prediction, then use the controls to create evidence.
+
+        Starting from Lab 01, every lab follows the same rhythm: read a case,
+        make a prediction, manipulate a small number of controls, inspect the
+        evidence, choose a decision, and write the report you would defend.
 
         Before you begin Lab 01, spend two minutes with the tour below. The goal
         is only to recognize the pattern. The technical vocabulary arrives later,
@@ -752,9 +826,22 @@ def _(check1, check2empty, check3, mo):
     return
 
 @app.cell
+def _(check1, check2empty, check3, mo):
+    mo.stop(check1.value is None or check2empty() or check3.value is None)
+
+    v1_00_evidence_slider = mo.ui.slider(
+        start=0,
+        stop=100,
+        step=5,
+        value=55,
+        label="Evidence strength:",
+    )
+    return (v1_00_evidence_slider,)
+
+@app.cell
 def _(
     COLORS, check2empty, mo, check1,
-    check3,
+    check3, v1_00_evidence_slider,
 ):
     mo.stop(check1.value is None or check2empty() or check3.value is None)
 
@@ -777,11 +864,11 @@ def _(
         <div style="background:#f0fdf4; border:1.5px solid #bbf7d0; border-radius:10px;
                     padding:16px; border-top:4px solid #16a34a;">
             <div style="font-weight:800; color:#14532d; font-size:0.9rem; margin-bottom:6px;">
-                2 · Make A Guess
+                2 · Make A Prediction
             </div>
             <div style="color:#166534; font-size:0.83rem; line-height:1.55;">
                 Before looking at the result, you record what you think will
-                happen. A guess is not graded as a trick question; it gives you
+                happen. A prediction is not graded as a trick question; it gives you
                 something concrete to compare against the evidence.
             </div>
         </div>
@@ -813,13 +900,30 @@ def _(
     </div>
     """
 
+    _evidence_value = v1_00_evidence_slider.value
+    if _evidence_value < 35:
+        _evidence_label = "weak"
+        _constraint_status = "unproven"
+        _decision_status = "do not report yet"
+        _status_color = COLORS["RedLine"]
+    elif _evidence_value < 70:
+        _evidence_label = "medium"
+        _constraint_status = "partly checked"
+        _decision_status = "needs rationale"
+        _status_color = COLORS["OrangeLine"]
+    else:
+        _evidence_label = "strong"
+        _constraint_status = "ready to defend"
+        _decision_status = "report-ready"
+        _status_color = COLORS["GreenLine"]
+
     # ── LIVE COMPONENT TOUR via mo.ui.tabs ────────────────────────────
     _tab_overview = mo.vstack([
         mo.md("""
         **Lab rhythm** — later labs repeat the same learning loop.
 
         The technical topic changes from lab to lab, but the student move stays
-        familiar: read the case, make a guess, move the controls, inspect the
+        familiar: read the case, make a prediction, move the controls, inspect the
         evidence, decide, and explain.
         """),
         mo.Html(_zone_html),
@@ -831,14 +935,14 @@ def _(
 
     _tab_levers = mo.vstack([
         mo.md("""
-        **Controls change evidence.** A radio button that asks for your guess only
+        **Controls change evidence.** A radio button that asks for your prediction only
         records your expectation. Sliders and dropdowns are the controls that
         change plots, tables, and status cards.
         """),
         mo.hstack([
             mo.vstack([
                 mo.md("**Example control**"),
-                mo.ui.slider(start=0, stop=100, step=5, value=55, label="Evidence strength:"),
+                v1_00_evidence_slider,
             ], gap=1),
             mo.Html(f"""
             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;
@@ -846,25 +950,26 @@ def _(
                 <div style="font-size:0.7rem; font-weight:700; color:#94a3b8;
                             text-transform:uppercase; margin-bottom:8px;">Evidence Preview</div>
                 <div style="font-size:0.82rem; color:#475569; line-height:1.8;">
-                    Current evidence: <strong style="color:{COLORS['BlueLine']}">medium</strong><br/>
-                    Track constraint: <strong style="color:{COLORS['GreenLine']}">protected</strong><br/>
-                    Decision status: <strong style="color:{COLORS['OrangeLine']}">needs rationale</strong>
+                    Current evidence: <strong style="color:{_status_color}">{_evidence_label}</strong><br/>
+                    Track constraint: <strong style="color:{_status_color}">{_constraint_status}</strong><br/>
+                    Decision status: <strong style="color:{_status_color}">{_decision_status}</strong>
                 </div>
                 <div style="margin-top:10px; font-size:0.72rem; color:#94a3b8; font-style:italic;">
-                    In later labs, real plots and<br/>tables update as you move controls.
+                    In later labs, real plots and tables update as you move controls.
+                    Here the slider only previews how evidence gates decisions.
                 </div>
             </div>
             """),
         ], gap=2, justify="start"),
         mo.callout(
-            mo.md("Use guesses to learn from surprise. Use controls to create the evidence you will reason from."),
+            mo.md("Use predictions to learn from surprise. Use controls to create the evidence you will reason from."),
             kind="warn",
         ),
     ])
 
     _tab_prediction = mo.vstack([
         mo.md("""
-        **Guess first, then test.**
+        **Predict first, then test.**
 
         Many labs ask for an initial answer before you move a control. That
         answer is a learning checkpoint. It should not make the chart jump.
@@ -877,7 +982,7 @@ def _(
             </div>
             <div style="color:#1e293b; font-size:0.9rem; line-height:1.6; margin-bottom:14px;">
                 <strong>Scenario:</strong> The system is missing its target.<br/><br/>
-                <strong>Guess:</strong> What do you think is the most likely reason?
+                <strong>Prediction:</strong> What do you think is the most likely reason?
             </div>
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
                 <div style="background:#ecfdf5; border:1px solid #86efac;
@@ -931,7 +1036,7 @@ def _(
     _tour_tabs = mo.ui.tabs({
         "Lab Rhythm":       _tab_overview,
         "Controls":         _tab_levers,
-        "Guess First":      _tab_prediction,
+        "Predict First":    _tab_prediction,
         "Optional Details": _tab_mathpeek,
     })
 
@@ -943,7 +1048,7 @@ def _(
             <div style="font-size:1.3rem;">✅</div>
             <div style="font-size:0.87rem; color:#94a3b8; line-height:1.6;">
                 <strong style="color:#e2e8f0;">Interface orientation complete.</strong>
-                You now know the repeated loop: case, guess, controls, evidence,
+                You now know the repeated loop: case, prediction, manipulation, evidence,
                 decision, and report. Later labs add technical ideas gradually
                 inside that same structure.
             </div>
@@ -968,16 +1073,21 @@ def _(check1, check2empty, check3, mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
-        ## Choose Your Track
+        ## Part D - Choose An Operating Envelope For The Ledger
 
         You have now seen what a track does. For the rest of Volume I, you will
         carry one deployment context as your primary learning lens. Every student
         learns the same concepts; the track changes the concrete story and evidence.
 
+        **Scenario.** Future labs need to know which stakeholder and operating
+        envelope to load before they can choose defaults. This is why Lab 00 saves
+        the track in the local Design Ledger instead of treating it as a temporary
+        page setting.
+
         **This is not a career choice.** It is a way to keep the examples coherent
-        from lab to lab. Later labs will read this choice from the
-        local Design Ledger and adapt narrative, device assumptions, metrics,
-        guardrails, and report framing automatically.
+        from lab to lab. Later labs will read this choice from the local Design
+        Ledger and adapt narrative, device assumptions, metrics, guardrails,
+        failure modes, and report framing automatically.
         """),
     ])
     return
@@ -1017,8 +1127,10 @@ def _(check1, check2empty, check3, context_selector, mo):
 
 @app.cell(hide_code=True)
 def _(DecisionLog):
-    decision_input, decision_ui = DecisionLog()
-    return (decision_ui,)
+    decision_input, decision_ui = DecisionLog(
+        placeholder="I chose this operating envelope because its recurring constraint will force me to reason about..."
+    )
+    return decision_input, decision_ui
 
 @app.cell
 def _(
@@ -1028,6 +1140,7 @@ def _(
     check2value_list,
     check3,
     context_selector,
+    decision_input,
     decision_ui,
     get_track_profile,
     lab_metadata,
@@ -1036,6 +1149,7 @@ def _(
     track_display_label,
     track_context,
     track_arc_context,
+    v1_00_track_story,
 ):
     mo.stop(
         check1.value is None
@@ -1046,6 +1160,7 @@ def _(
 
     _track_id = context_selector.value
     _track_profile = get_track_profile(_track_id)
+    _story = v1_00_track_story(_track_id)
     _contexts = {
         "cloud_fleet": {
             "color":     COLORS["BlueLine"],
@@ -1126,6 +1241,7 @@ def _(
     }
 
     _t = _contexts[_track_id]
+    _rationale = decision_input.value or ""
 
     # Persist to Design Ledger
     ledger.save(track=_track_id, chapter=0, design={
@@ -1143,6 +1259,13 @@ def _(
         "track_change_selections": check2value_list(),
         "lab_workflow_answer": check3.value,
         "lab_workflow_correct": check3.value == "A",
+        "chapter_lab_invariant": "MLSys labs teach deployed behavior under operating envelopes.",
+        "stakeholder": _track_profile.stakeholder,
+        "stakeholder_question": _story["stakeholder_question"],
+        "first_bottleneck_prediction": _story["first_bottleneck"],
+        "likely_failure_mode": _story["likely_failure"],
+        "report_frame": _story["report_frame"],
+        "track_rationale": _rationale,
     })
 
     _arc_rows = "".join([
@@ -1197,6 +1320,12 @@ def _(
                 <strong style="color:{_t['color']};">Arch Nemesis:</strong>
                 <span style="color:#334155;"> {", ".join(_track_profile.dominant_constraints)}</span>
             </div>
+            <div style="background:{_t['bg']}; border-radius:10px; padding:12px 14px;
+                        font-size:0.84rem; color:#334155; line-height:1.6; margin-bottom:18px;">
+                <strong>First bottleneck to watch:</strong> {_story['first_bottleneck']}<br/>
+                <strong>Likely failure:</strong> {_story['likely_failure']}<br/>
+                <strong>Report frame:</strong> {_story['report_frame']}
+            </div>
             <div style="font-size:0.75rem; font-weight:700; text-transform:uppercase;
                         letter-spacing:0.07em; color:#94a3b8; margin-bottom:8px;">
                 Your 14-Lab Arc
@@ -1241,19 +1370,20 @@ def _(COLORS, check1, check2empty, check3, context_selector, mo):
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
-                    <strong>1. These labs practice a workflow, not just answers.</strong>
-                    You will read a case, make a guess, inspect evidence, choose a defensible
-                    decision, and download a short report.
+                    <strong>1. These labs practice deployed-behavior reasoning.</strong>
+                    You will read a case, make a prediction, manipulate controls,
+                    inspect evidence, choose a defensible decision, and download a short report.
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>2. A track gives the work a concrete point of view.</strong>
+                    <strong>2. A track is an operating envelope.</strong>
                     iPhone, Oura Ring, RoboTaxi, and Cloud Fleet change the story,
-                    device assumptions, metrics, guardrails, and report framing.
+                    stakeholder, device assumptions, constraints, metrics, failure modes,
+                    guardrails, and report framing.
                 </div>
                 <div>
-                    <strong>3. The core lesson stays shared across tracks.</strong>
-                    Your track changes how the lesson is materialized, but every student
-                    is learning the same chapter concept.
+                    <strong>3. The ledger makes decisions cumulative.</strong>
+                    The selected track becomes the default context future labs use when
+                    they ask which amount, budget, or failure mode is binding.
                 </div>
             </div>
         </div>
@@ -1304,9 +1434,11 @@ def _(COLORS, check1, check2empty, check3, context_selector, mo):
 
     2. Why is a model that works in a notebook not automatically a deployed ML system?
 
-    3. What is the recurring order of work in later labs: what do you read, what do you guess, what controls do you move, what evidence do you inspect, and what do you report?
+    3. What is the recurring order of work in later labs: what case do you read, what prediction do you make, what controls do you manipulate, what evidence do you inspect, what decision do you defend, and what report do you produce?
 
-    *If you cannot answer all three from memory, revisit the track cards and interface orientation.*
+    4. How will your selected track change the meaning of later quantities such as latency, energy, memory, cost, utilization, or carbon?
+
+    *If you cannot answer all four from memory, revisit the track cards and interface orientation.*
     """)
         }),
     ])
@@ -1320,12 +1452,14 @@ def _(
     check2value_list,
     check3,
     context_selector,
+    decision_input,
     get_track_profile,
     lab_big_takeaways,
     lab_learning_objectives,
     lab_metadata,
     mo,
     report_export_panel,
+    v1_00_track_story,
 ):
     mo.stop(
         check1.value is None
@@ -1337,6 +1471,7 @@ def _(
 
     _track_id = context_selector.value
     _profile = get_track_profile(_track_id)
+    _story = v1_00_track_story(_track_id)
     _selected = f"{_profile.label} ({_profile.category})"
     _report = build_lab_report(
         lab_metadata,
@@ -1347,18 +1482,26 @@ def _(
             "orientation_goal": check1.value,
             "track_specific_elements": ", ".join(check2value_list()),
             "recurring_lab_workflow": check3.value,
+            "track_implied_first_bottleneck": _story["first_bottleneck"],
         },
         evidence_summary={
             "selected_track": _selected,
             "hardware_ref": _profile.hardware_ref,
             "system_ref": _profile.system_ref or "single-device profile",
             "dominant_constraints": ", ".join(_profile.dominant_constraints),
+            "likely_failure_mode": _story["likely_failure"],
+            "report_frame": _story["report_frame"],
+            "amount_reasoning": _story["amount_reasoning"],
         },
-        final_decision=f"Use {_profile.label} as the student's canonical track for subsequent labs.",
+        final_decision=(
+            f"Use {_profile.label} as the student's canonical track for subsequent labs, "
+            f"watching {_story['first_bottleneck']} as the first recurring bottleneck."
+        ),
         big_takeaways=lab_big_takeaways,
         reflections={
-            "orientation": "Later labs use the same case, guess, controls, evidence, decision, and report rhythm.",
+            "orientation": "Later labs use the same case, prediction, manipulation, evidence, decision, and report rhythm.",
             "track_choice": f"{_profile.label} changes the scenario and constraints while preserving the shared concept.",
+            "track_rationale": decision_input.value or "No written rationale entered.",
             "report_readiness": "The report unlocks only after the orientation checks, synthesis, and track choice are complete.",
         },
         residual_risk=(
@@ -1371,6 +1514,7 @@ def _(
             "system_ref": _profile.system_ref or "single-device profile",
             "source_policy": _profile.source_policy,
             "report_builder": "mlsysbook_labs.build_lab_report",
+            "orientation_story_source": "labs/vol1/lab_00_introduction.py::v1_00_track_story",
         },
         result_snapshot={
             "track_id": _profile.track_id,
@@ -1379,6 +1523,9 @@ def _(
             "system_ref": _profile.system_ref,
             "orientation_goal_correct": check1.value == "C",
             "lab_workflow_correct": check3.value == "A",
+            "first_bottleneck_prediction": _story["first_bottleneck"],
+            "likely_failure_mode": _story["likely_failure"],
+            "report_frame": _story["report_frame"],
         },
     )
 

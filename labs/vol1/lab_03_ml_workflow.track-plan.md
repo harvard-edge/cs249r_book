@@ -1,172 +1,245 @@
 # V1-03 Track Plan: Constraint Tax
 
-## Purpose
+## Chapter Invariant
 
-This lab teaches that deployment constraints propagate backward into data, training, validation, release, and monitoring. Late discovery of a constraint creates rework and risk.
+Deployment constraints propagate backward through the ML workflow. If a team
+discovers the deployment constraint late, the fix does not stay at deployment:
+it reopens data assumptions, model choices, validation evidence, release
+readiness, and monitoring thresholds. Late discovery therefore creates rework,
+risk, and weaker evidence.
 
-## Shared Pedagogy
+## Reading Map
 
-- Students trace how one deployment constraint changes the whole workflow.
-- They compare iteration speed against confidence and risk.
-- They choose a workflow policy for the selected track.
+| Lab module | Chapter anchor | Claim used in the lab |
+|---|---|---|
+| Opening | ML Lifecycle; Lifecycle Stages | The workflow is a loop of Data-Algorithm-Machine decisions, not a linear checklist. |
+| Part A | Six core lifecycle stages; Stage Interface Specification | Each stage has contracts whose outputs harden assumptions for later stages. |
+| Part B | The iteration tax; Constraint Propagation Principle | Late discoveries compound because each downstream stage built on the wrong assumption. |
+| Part C | Evaluation and Validation; Offline and online evaluation; Deployment readiness | Validation gates trade slower iteration for stronger evidence under production conditions. |
+| Part D | Systems Thinking; Fallacies and Pitfalls | A release policy is a design decision about when evidence can block the system. |
+| Synthesis | Summary and Takeaways | Workflow carries constraints through time and must name the residual blind spot. |
 
-## Lab Flow
+## Concept Inventory
 
-### Opening - Constraint Propagation Brief
+Accepted concepts:
 
-Common narrative:
-- A team discovers a deployment constraint after the model is already trained.
-- The student must redesign the workflow so the constraint is tested earlier.
+| Concept | Reason accepted | Module |
+|---|---|---|
+| Constraint propagation across lifecycle stages | It is the chapter invariant and creates immediate consequence for every track. | A |
+| Iteration tax from late discovery | It turns the propagation principle into a measurable cost. | B |
+| Evaluation gate confidence-speed trade-off | It explains why teams cannot only optimize for fast iteration. | C |
+| Workflow policy as system design | It turns observations into a durable release and rollback decision. | D |
+| Residual blind spot | It prevents the policy from pretending that evidence eliminates all risk. | Synthesis |
 
-Track realization:
-- iPhone: thermal and battery tests must happen before feature freeze.
-- Oura Ring: SRAM/flash and battery tests must happen before data collection assumptions harden.
-- RoboTaxi: p99 and rare-event validation must happen before road-test expansion.
-- Cloud Fleet: cost, load, and utilization tests must happen before launch.
+Rejected or deferred concepts:
 
-### Part A - Constraint Propagation
-
-Common pattern:
-- Show workflow stages and highlight where the selected track's constraint first appears.
-- Let students move validation earlier or later and see rework cost.
-
-Track realization:
-- iPhone highlights device profiling, thermal soak tests, and privacy review.
-- Oura Ring highlights memory budgeting, OTA packaging, and battery simulation.
-- RoboTaxi highlights scenario coverage, latency gates, and safety signoff.
-- Cloud Fleet highlights load testing, capacity planning, and cost review.
-
-### Part B - Iteration Frontier
-
-Common pattern:
-- Sliders control validation depth, automation, data size, and hardware realism.
-- Plot iteration time versus residual deployment risk.
-
-Track realization:
-- iPhone balances fast simulator iteration against physical-device confidence.
-- Oura Ring balances tiny-device realism against slow embedded test cycles.
-- RoboTaxi balances scenario replay breadth against safety-critical validation time.
-- Cloud Fleet balances staging load fidelity against cost and launch speed.
-
-### Part C - Workflow Policy
-
-Common pattern:
-- Student chooses release gates, validation cadence, retraining triggers, and rollback rules.
-- The decision card records cost and residual blind spot.
-
-Track realization:
-- iPhone policy includes thermal/battery gate and app privacy checks.
-- Oura Ring policy includes memory/OTA gate and battery-life regression tests.
-- RoboTaxi policy includes p99, rare-event, and safety-case gates.
-- Cloud Fleet policy includes load, cost, and SLO gates.
-
-## Implementation Requirements
-
-- Add per-track workflow stage labels and failure costs.
-- Store workflow policy as structured ledger data.
-- Avoid hardcoded hardware thresholds in the notebook; pull device facts from the selected profile.
-
-## Ledger And Report
-
-Save:
-- constraint discovered
-- stage where it was tested
-- chosen validation/release policy
-- iteration cost and residual risk
-
-Report target:
-- A workflow policy memo showing how the selected track changes the cost of late discovery.
-
-## Detailed Planning Addendum
-
-This addendum upgrades the coverage plan into an implementation-ready plan following the V1-10 pilot format.
-
-### Planning Focus
-
-Primary concept:
-- workflow cost of discovering constraints late.
-
-Minimum classroom demo:
-- move the deployment gate earlier and show reduced rework for iPhone thermal testing or RoboTaxi safety latency.
-
-Completion path:
-- trace one constraint through workflow stages, compare iteration/risk frontier, choose validation and release policy.
-
-## Instructor Assignment Modes
-
-Default mode:
-- Individual choice. Students use the canonical track selected in Lab 00 and submit one report for that track.
-
-Alternative modes:
-- Assigned track teams. Instructor assigns tracks to teams and compares how the same pedagogy changes across systems.
-- Lecture demo. Instructor demonstrates two contrasting tracks, then students complete their own track asynchronously.
-- Capstone mode. Students must keep the same track across the volume so ledger decisions accumulate coherently.
-
-Track lock:
-- Implementation should eventually allow instructor-locked tracks through URL/query/config, while defaulting to the ledger-selected track.
-
-## Expected Track Outcomes
-
-| Track | Expected outcome |
+| Concept | Reason rejected for this lab |
 |---|---|
-| iPhone | Adds early device profiling, thermal/battery gate, and privacy review to the workflow. |
-| Oura Ring | Adds memory/OTA/battery checks before model and data assumptions harden. |
-| RoboTaxi | Adds rare-event validation, p99 replay, and safety signoff before field rollout. |
-| Cloud Fleet | Adds load/cost/SLO gates before launch and retraining decisions. |
+| Full CRISP-DM history | Important context but not a decision with a manipulable consequence here. |
+| Data scientist time-allocation survey | Useful motivation, but it does not drive the selected track policy. |
+| Complete DR screening case study | The lab uses the chapter's principle but keeps the track storyline aligned to the student's selected system. |
+| Data versioning tool catalog | Deferred to Data Engineering and ML Ops labs. |
+| Detailed regulatory validation | Included only as a gate/blind-spot idea where the selected track needs it. |
+| Full iron-law derivation | Used as a Math Peek source model, not expanded into a separate module. |
 
-## Common Misconceptions
+## Concept Modules
 
-- Workflow is project management rather than system design.
-- Validation can wait until the end.
-- Fast iteration is always better.
-- Release policy is independent of deployment constraints.
+### Part A - Concept Module: Constraints Propagate Through The Workflow
 
-## Data And Solver Contracts
+- Chapter claim: deployment constraints reshape data, model, validation,
+  release, and monitoring decisions.
+- Student prior: "We can validate the deployment constraint near release."
+- Productive failure: the selected track's constraint is moved late and the
+  table shows every hardened stage that now has to be revisited.
+- Scenario beat: the track stakeholder must decide where to first test the
+  deployment constraint.
+- Prediction beat: predict whether the constraint should be tested before data
+  and model assumptions harden, during model design, during release, or after
+  launch.
+- Manipulation beat: move the discovery stage across the six track-specific
+  workflow stages.
+- Evidence beat: stage table shows which assumptions harden and which gate
+  should block progress.
+- Consequence beat: a late stage marks a reversible failure state because the
+  workflow has built artifacts on an invalid assumption.
+- Math/source beat: Math Peek ties the stage map to the iron law of workflow:
+  deployment limits on latency, hardware, or cost reshape data volume, model
+  operations, and efficiency.
+- Checkpoint beat: choose the earliest gate that should block the track.
+- Ledger output: selected track, constraint name, predicted gate timing,
+  discovery stage.
 
-Needed inputs:
-- `track_id`
-- `constraint_type`
-- `validation_stage`
-- `automation_level`
-- `release_policy`
+### Part B - Concept Module: Late Discovery Creates A Measurable Iteration Tax
 
-Needed outputs:
-- `rework_cost`
-- `iteration_time`
-- `residual_deployment_risk`
-- `workflow_policy`
+- Chapter claim: correction cost grows roughly as `base * 2^(stage - 1)` when a
+  constraint is found later in the lifecycle.
+- Student prior: "Late validation is annoying but mostly a schedule slip."
+- Productive failure: the bar chart shows stage 5 or stage 6 discovery costing
+  many times the recommended gate.
+- Scenario beat: the team asks whether it can absorb the late discovery or must
+  change workflow.
+- Prediction beat: predict the cost shape: constant, linear, exponential, or
+  mostly documentation overhead.
+- Manipulation beat: slide the discovery stage and compare current rework to
+  the recommended gate.
+- Evidence beat: rework chart and table show multiplier, person-days, avoidable
+  rework, and artifacts to rebuild.
+- Consequence beat: if discovery is after the recommended gate, the failure
+  banner names the avoidable rework and affected artifacts.
+- Math/source beat: Math Peek uses the constraint propagation cost formula and
+  the chapter's stage-5 16x / stage-6 32x framing.
+- Checkpoint beat: decide whether to pay the tax, move the gate earlier, or cut
+  scope until the constraint is known.
+- Ledger output: cost multiplier, avoidable rework days, artifacts to rebuild.
 
-Preferred result objects:
-- A typed result object for the main computation.
-- `ConstraintBudget` or equivalent bottleneck report.
-- A report snapshot object that can be serialized into the Design Ledger.
+### Part C - Concept Module: Evaluation Gates Trade Speed For Confidence
 
-## Single Source Of Truth Requirements
+- Chapter claim: validation must test the full deployment constraint surface,
+  but realism, data scale, and gate depth make each iteration slower.
+- Student prior: "The fastest workflow is best as long as model metrics look
+  good."
+- Productive failure: shallow gates keep iteration time low but leave residual
+  deployment risk above the derived risk budget.
+- Scenario beat: the stakeholder must set a validation mix before feature
+  freeze, OTA packaging, road-test expansion, or launch.
+- Prediction beat: predict the current bottleneck among validation depth,
+  automation, hardware realism, and data scale.
+- Manipulation beat: tune validation depth, automation, hardware realism, and
+  data-scale coverage.
+- Evidence beat: frontier chart plots iteration days against residual risk,
+  with a current point and a budget boundary.
+- Consequence beat: the notebook distinguishes "fast but blind" from "slow but
+  confident" and names the bottleneck dimension.
+- Math/source beat: Math Peek exposes the source model used by
+  `iteration_frontier`: confidence rises with validation depth, realism, data
+  scale, and automation; residual risk falls toward a floor.
+- Checkpoint beat: choose the evaluation stance: ship faster, add realism, add
+  automation, or reduce scope.
+- Ledger output: knob settings, iteration days, confidence, residual risk,
+  bottleneck.
 
-- Hardware facts must come from MLSysIM hardware registries.
-- Model facts must come from MLSysIM model registries.
-- Reused equations and solvers must live in MLSysIM physics/solver APIs.
-- Track identity must come from the `mlsysbook_labs` track profile registry.
-- Scenario thresholds, stakeholder text, and guardrails must live in typed lab variant metadata, not scattered notebook constants.
-- Any new needed device, model, workload, infrastructure, or solver fact should be added to MLSysIM first and referenced by the lab.
+### Part D - Concept Module: Workflow Policy Is System Design
 
-## Accessibility And Fallback Requirements
+- Chapter claim: a workflow policy is the system-level rule for when evidence
+  can block release; it is not project paperwork.
+- Student prior: "The policy records what the team already decided."
+- Productive failure: the gate comparison table shows that a late gate saves
+  early effort but leaves the highest rework and weakest evidence.
+- Scenario beat: the stakeholder must write the release rule the team will use
+  for the selected track.
+- Prediction beat: predict whether the non-negotiable policy gate should be the
+  early contract gate, a mid-workflow validation gate, or the release gate.
+- Manipulation beat: select the workflow gate, release policy, and rollback
+  rule.
+- Evidence beat: policy table compares gate stage, rework at gate, validation
+  focus, residual risk, release policy, and rollback rule.
+- Consequence beat: selecting a late gate triggers a boundary warning because
+  the policy lets weak evidence survive too long.
+- Math/source beat: Math Peek treats policy as a system tuple:
+  `gate timing + evidence requirement + rollout + rollback + blind spot`.
+- Checkpoint beat: decide the policy and name the residual blind spot.
+- Ledger output: selected gate, release policy, rollback rule, policy summary,
+  blind spot.
 
-- Every plot that drives a decision must have a table fallback with exact values.
-- Color cannot be the only indicator of feasibility, failure, or dominance.
-- Failure boundaries must state value, limit, unit, and mitigation in text.
-- Controls required for completion must be keyboard usable and visible without opening advanced drawers.
-- The exported report must contain the decision evidence even if the visual is not inspected.
+### Synthesis - Concept Module: Release Memo With Residual Blind Spot
 
-## Rubric Sketch
+- Chapter claim: workflow carries constraints through time.
+- Student prior: "A passed gate means the system is safe."
+- Student action: record a release memo for the selected track that includes the
+  release policy, evidence numbers, and the residual blind spot.
+- Evidence: final report and Design Ledger snapshot include track, constraint,
+  discovery stage, avoidable rework, iteration days, residual risk, policy, and
+  blind spot.
+- Carry-forward: later labs can read the selected track and workflow gate as
+  assumptions for data, compression, serving, and operations decisions.
 
-- Workflow identifies where constraint should be tested.
-- Policy balances speed and confidence.
-- Release gate is track-specific.
-- Residual blind spot is explicit.
+## Track Narratives
 
-## Continuous Improvement Notes
+| Track | Stakeholder | Coherent storyline | Expected gate |
+|---|---|---|---|
+| iPhone | Mobile product engineer | A mobile feature clears simulator tests, then fails thermal soak, battery drain, and privacy review after feature freeze. | Thermal/battery profiling and privacy checks before feature freeze. |
+| Oura Ring | Wearable firmware engineer | A classifier works offline, but the signal window, firmware image, OTA payload, and battery duty cycle conflict after assumptions harden. | SRAM, flash, OTA, and battery checks before data/model assumptions harden. |
+| RoboTaxi | Autonomous vehicle platform engineer | Average perception metrics pass, but p99 latency and rare construction-zone scenarios fail before road-test expansion. | p99, rare-event replay, and safety signoff before road-test expansion. |
+| Cloud Fleet | Fleet service owner | Offline quality is ready, but staging exposes p99 SLA misses, cost/request overrun, and bad utilization after launch commitments. | Load, cost, utilization, and SLO gates before launch. |
 
-- When implementation reveals a better modality, data contract, or track assumption, update this plan and `labs/LAB_IMPLEMENTATION_NOTES.md`.
-- If any notebook-local constant is introduced during implementation, stop and decide whether it belongs in MLSysIM or typed lab variant metadata.
-- If a track feels artificial for this lab, document the constrained interpretation rather than forcing fake behavior.
+Track specificity requirements:
+
+- Persona changes in every track.
+- Stage names come from the V1-03 track profile.
+- Constraint name, failure story, gate options, release policies, rollback
+  rules, and blind spots come from the V1-03 variant metadata.
+- Metrics and evidence names are track-specific through `primary_metric`,
+  `guardrail_metric`, and workflow profile fields.
+
+## Mechanics Plan
+
+| Module | Student action | Mechanics | Why this mechanic fits |
+|---|---|---|---|
+| Opening | Select track and read the workflow brief | Track selector, context cards, workflow map | Establishes persona and selected deployment constraint. |
+| A | Predict and move where the constraint appears | Radio prediction, discovery-stage slider, stage table | Makes propagation visible across lifecycle stages. |
+| B | Measure late-discovery tax | Radio prediction, discovery-stage slider, bar chart, artifacts table | Forces boundary finding around the recommended gate. |
+| C | Tune confidence versus speed | Radio prediction, four sliders, frontier chart, risk budget badge | Makes evaluation realism an explicit trade-off. |
+| D | Choose policy | Radio prediction, gate/release/rollback dropdowns, comparison table | Turns evidence into a system rule. |
+| Synthesis | Save memo | Text area, report card, Design Ledger save, export panel | Produces carry-forward evidence. |
+
+Failure states:
+
+- A: discovery after the recommended gate warns that assumptions already hardened.
+- B: late discovery shows avoidable rework and artifacts to rebuild.
+- C: residual risk above the derived budget marks the gate as fast but blind.
+- D: selected gate after the recommended stage marks the policy as late-evidence
+  debt.
+
+## Evidence And Ledger Plan
+
+Evidence produced:
+
+- Prediction-vs-actual feedback for gate timing, cost shape, validation
+  bottleneck, and policy gate.
+- Stage table showing propagation through data, model, validation, release, and
+  monitoring.
+- Rework chart/table showing multiplier and avoidable person-days.
+- Frontier chart/table showing iteration days, confidence, residual risk, and
+  bottleneck.
+- Gate policy table showing validation focus and blind spot for each option.
+- Final release memo with residual blind spot.
+
+Ledger fields:
+
+- `track_id`, `scenario_id`, `hardware_ref`, `model_ref`
+- `gate_prediction`, `tax_prediction`, `frontier_prediction`,
+  `policy_prediction`
+- `constraint_name`, `discovery_stage`, `selected_gate_id`
+- `avoidable_rework_days`, `iteration_days`, `confidence_pct`,
+  `residual_risk_pct`, `risk_budget_pct`
+- `release_policy`, `rollback_rule`, `policy_summary`, `blind_spot`
+
+## Implementation Notes
+
+- Use existing helpers: `workflow_track_profile`, `constraint_tax`,
+  `iteration_frontier`, and `workflow_policy`.
+- Keep new support notebook-local and prefix helper names with `v1_03_`.
+- Preserve WASM bootstrap, track selector, source trace, report export, and
+  Design Ledger save patterns.
+- Do not add shared MLSysIM or `mlsysbook_labs` abstractions in this wave.
+- Use profile/variant metadata for track facts. Notebook-local constants are
+  limited to presentation logic and derived risk-budget display.
+
+## Depth Audit
+
+| Module | Concept clarity | Activity depth | Track specificity | Mechanics fit | Evidence quality | Traceability | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Part A | 3 | 3 | 3 | 3 | 2 | 3 | Pass |
+| Part B | 3 | 3 | 3 | 3 | 3 | 3 | Pass |
+| Part C | 3 | 3 | 3 | 3 | 3 | 3 | Pass |
+| Part D | 3 | 3 | 3 | 3 | 3 | 3 | Pass |
+| Synthesis | 3 | 2 | 3 | 2 | 3 | 3 | Pass |
+
+Depth gate checklist:
+
+- Each A-D module has scenario, structured prediction, manipulation, evidence,
+  consequence, Math Peek/source model, and checkpoint.
+- At least one reversible failure state exists in every module.
+- Synthesis ties all modules back to the chapter invariant.
+- No dimension falls below 2.
+- At least three dimensions score 3 for every A-D module.

@@ -30,6 +30,112 @@ Follow-up:
 
 ## Notes
 
+### 2026-06-13 - Final Full Playwright UX Audit And Worktree Classification
+
+Lab:
+- All Volume I and Volume II labs.
+- Static planning/catalog pages: `lab-plan-dashboard.html` and `lab-modality-catalog.html`.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `labs/tools/interaction_lab_smoke.py`
+- All migrated lab notebooks and `.track-plan.md` files under `labs/vol1` and `labs/vol2`.
+
+What changed:
+- Re-ran the full Playwright-driven Marimo UX audit across all 34 notebooks in four parallel batches.
+- The smoke harness started a Marimo server for each notebook, loaded it in Chromium, scrolled the page, switched canonical tracks, clicked visible tabs, clicked safe radio options, checked page and console errors, checked stale output, measured horizontal overflow/offscreen elements, and wrote screenshots plus JSON reports.
+- Visually inspected representative screenshots for V1-02, V1-10, V2-05, V2-17, and the modality catalog.
+- Classified MLSysBook worktrees before merge/retirement:
+  - Protected dev checkout: `/Users/VJ/GitHub/MLSysBook`.
+  - Lab integration worktree: `/Users/VJ/GitHub/MLSysBook-labs`.
+  - Lab pilot worktrees: `/Users/VJ/GitHub/MLSysBook-lab-v1-02`, `/Users/VJ/GitHub/MLSysBook-lab-v1-10`, `/Users/VJ/GitHub/MLSysBook-lab-v2-10`.
+  - Unrelated worktrees left untouched: autolayout, betterbib, cover-assets, cover-labels, readthrough-fixes, and vol3-sketch.
+- Compared the three pilot notebooks against the integrated lab branch. The integrated notebooks supersede the pilots: V1-02 adds prediction/consequence scaffolding, V1-10 adds the deeper distillation storyline, and V2-10 adds phase accounting, rejected-alternative logic, and edge carry-forward.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM APIs were required.
+- Direct source-of-truth audit resolved all catalog variants through MLSysIM-backed references: 136 hardware refs, 136 model refs, 34 system refs, and 17 fleet-profile refs with zero resolution failures.
+
+Notebook-local constants removed:
+- None in this final audit pass. The pass verified behavior and merge readiness.
+
+Reusable component or modality improved:
+- `interaction_lab_smoke.py` now handles Lab 00 orientation copy variants, final-body readiness, generic non-track Marimo radio clicks, and fallback part-text slicing for shared-renderer labs.
+- V2-08 prediction labels were normalized to A/B/C style so the UX smoke can safely exercise them.
+
+Plan updates needed in other labs:
+- Keep `LAB_PART_STORYLINE_DEPTH_BLUEPRINT_2026_06_13.md` as the detailed per-lab concept/part plan.
+- Keep `LAB_INTERACTION_DEVICE_CATALOG.md` and `LAB_REALIZATION_MODALITY_CATALOG.md` as the implementation catalog for controls, plots, evidence devices, and report artifacts.
+- Future work should move more notebook-local formulas into typed storyline metadata and MLSysIM solvers where reuse appears.
+
+Tests or checks run:
+- Playwright/Marimo batch G1, V1-00 through V1-08: 9/9 notebooks passed and 2/2 HTML pages passed.
+- Playwright/Marimo batch G2, V1-09 through V1-16: 8/8 notebooks passed and 2/2 HTML pages passed.
+- Playwright/Marimo batch G3, V2-01 through V2-09: 9/9 notebooks passed and 2/2 HTML pages passed.
+- Playwright/Marimo batch G4, V2-10 through V2-17: 8/8 notebooks passed and 2/2 HTML pages passed.
+- Aggregate Playwright result: 34/34 notebooks passed; dashboard/catalog passed; no page errors, console errors, stale output, horizontal overflow, offscreen elements, or overflowing fields reported.
+- Screenshots written under `/tmp/mlsysbook-interaction-smoke-final-g1`, `g2`, `g3`, and `g4`.
+- Full lab tests from the prior final audit: `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q --tb=short` -> 1569 passed, 80 skipped, 123 xfailed.
+- `git diff --check` -> passed.
+
+Follow-up:
+- Merge `codex/labs` into the protected `dev` checkout only after committing this final audited state and reconciling current `dev`.
+- Retire only the lab integration/pilot worktrees after verifying exact absolute paths and confirming the protected `/Users/VJ/GitHub/MLSysBook` checkout is not targeted.
+
+### 2026-06-13 - Parallel Concept-Module Pilot Implementation
+
+Lab:
+- V1-02 ML Systems
+- V1-10 Model Compression
+- V2-10 Inference
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_02_ml_systems.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/vol2/lab_10_inference.py`
+
+What changed:
+- Ran the first parallel concept-module implementation wave from private AIConfigs packets.
+- Converted V1-02 from a linear deployment-envelope lab into four tabbed concept modules plus synthesis: Physics Before Preference, Iron Law And The Bottleneck, Operating Envelope And First Wall, and Placement And Hybrid Design Review.
+- Reworked V1-10 so the main learning path is solver-backed by `CompressionModel.candidate()` and `CompressionModel.sweep()`, with modules for feasibility, precision cliff/calibration, sparsity/distillation, and recipe release gate.
+- Reworked V2-10 around serving cost inversion, state/KV cache wall, batching under variance, and serving design challenge. Removed the overclaim that continuous batching is universally better and fixed the throughput/waste formula consistency.
+- Kept implementation changes notebook-local for this pilot wave; no shared renderer or broad registry refactor was introduced.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required for this wave.
+- V1-10 continues to rely on `CompressionModel` for sourced compression candidates. Dense-student distillation remains a validation-backed recommendation/fallback rather than fabricated solver physics.
+
+Notebook-local constants removed:
+- V1-10 removed several direct H100/iPhone/Jetson/model constant bindings from the setup cell and routes track/model/hardware facts through MLSysIM refs and typed lab variants.
+
+Reusable component or modality improved:
+- Established a working implementation pattern for concept modules using notebook-local reveal cards, failure cards, Math Peek/source accordions, report export, and ledger fields.
+- Browser smoke caught a Marimo runtime scoping issue in V2-10 where underscore-prefixed helpers were treated as cell-private. The fix is to expose cross-cell notebook helpers with stable public `v2_10_*` names.
+
+Plan updates needed in other labs:
+- Future parallel waves should use frozen concept packets before launching implementation agents.
+- Shared helpers can be extracted after one or two more pilots confirm the stable card/reveal/failure/report pattern.
+- Avoid underscore-prefixed helper names for functions that must cross Marimo cells.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_02_ml_systems.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py` -> passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_deployment_helpers.py labs/tests/test_inference_helpers.py labs/tests/test_track_profiles.py labs/tests/test_lab_variants.py labs/tests/test_report_contract.py labs/tests/test_ui_helpers.py labs/tests/test_track_arcs.py -q` -> 52 passed.
+- `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_compression_candidates.py -q` -> 3 passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_static.py -q --tb=short` -> 803 passed, 4 skipped, 17 xfailed.
+- `python3 -m marimo check labs/vol1/lab_02_ml_systems.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py` -> passed.
+- `PYTHONPATH=labs:mlsysim python3 labs/tools/interaction_lab_smoke.py --labs labs/vol1/lab_02_ml_systems.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py --output-dir labs/dist/interaction-smoke-pilots-2026-06-13-rerun --max-tabs 8 --max-radios 8` -> 3/3 labs and 2/2 HTML pages passed.
+
+Follow-up:
+- Review the three pilot notebooks manually for narrative polish and source trace wording.
+- Decide whether to extract the repeated reveal/failure/report card helpers into `mlsysbook_labs.ui` after the next wave.
+- Launch the next parallel wave only after creating frozen concept packets with file ownership boundaries.
+
 ### 2026-06-13 - Dev Merge, Runtime Audit, And Depth Expansion Plan
 
 Lab:

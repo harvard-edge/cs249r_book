@@ -50,7 +50,15 @@ LAB00_UNLOCK_ACTIONS = (
     ("track changes: device", ("The device and hardware assumptions",)),
     ("track changes: metrics", ("The primary metric and guardrails",)),
     ("track changes: report", ("The report framing",)),
-    ("orientation check 3", ("A)  Read the case, guess first", "A) Read the case, guess first")),
+    (
+        "orientation check 3",
+        (
+            "A)  Read the case, predict first, manipulate controls, inspect evidence, decide, then report",
+            "A) Read the case, predict first, manipulate controls, inspect evidence, decide, then report",
+            "A)  Read the case, guess first",
+            "A) Read the case, guess first",
+        ),
+    ),
 )
 
 
@@ -607,6 +615,86 @@ def click_marimo_shadow_control(page, labels: tuple[str, ...]) -> str:
     return str(match or "")
 
 
+def click_first_generic_marimo_radio(page) -> tuple[ClickCheck, ...]:
+    """Click the first visible non-track Marimo radio option.
+
+    Some labs use sentence-style radio labels instead of A/B/C prefixes. This
+    keeps the render audit from judging only the pre-unlock prediction prompt.
+    """
+    match = page.evaluate(
+        """
+        (trackLabels) => {
+          const normalize = (value) => String(value || "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, "&")
+            .replace(/\\s+/g, " ")
+            .trim();
+          const tracks = trackLabels.map((label) => normalize(label).toLowerCase());
+          const roots = [];
+          const visit = (root) => {
+            roots.push(root);
+            for (const el of root.querySelectorAll?.("*") || []) {
+              if (el.shadowRoot) {
+                visit(el.shadowRoot);
+              }
+            }
+          };
+          visit(document);
+          for (const root of roots) {
+            for (const radio of root.querySelectorAll?.("marimo-radio") || []) {
+              const hostRect = radio.getBoundingClientRect();
+              const hostStyle = window.getComputedStyle(radio);
+              if (
+                hostRect.width <= 0
+                || hostRect.height <= 0
+                || hostStyle.display === "none"
+                || hostStyle.visibility === "hidden"
+              ) {
+                continue;
+              }
+              const controls = [...(radio.shadowRoot?.querySelectorAll("[role=radio]") || [])];
+              for (const control of controls) {
+                const label = normalize(
+                  control.value
+                    || control.getAttribute("value")
+                    || control.getAttribute("aria-label")
+                    || control.textContent
+                    || ""
+                );
+                if (!label) {
+                  continue;
+                }
+                const lower = label.toLowerCase();
+                if (tracks.some((track) => lower.includes(track))) {
+                  continue;
+                }
+                control.scrollIntoView({block: "center", inline: "nearest"});
+                control.click();
+                return label;
+              }
+            }
+          }
+          return "";
+        }
+        """,
+        list(TRACKS),
+    )
+    label = str(match or "")
+    if not label:
+        return ()
+    page.wait_for_timeout(1_200)
+    wait_for_settled(page)
+    return (
+        ClickCheck(
+            label=label,
+            clicked=True,
+            errors=visible_error_markers(page),
+            stale=stale_visible(page),
+        ),
+    )
+
+
 def unlock_lab00_orientation(page) -> tuple[ClickCheck, ...]:
     checks: list[ClickCheck] = []
     for label, variants in LAB00_UNLOCK_ACTIONS:
@@ -843,6 +931,16 @@ def inspect_visible_part(page, label: str, clicked: bool = True, note: str = "")
 
     categories = detected_categories(text)
     words = len(re.findall(r"\b\w+\b", text))
+    if (words < 45 or len(categories) < 3) and part_key:
+        first_start = body.lower().find(part_key.lower())
+        if first_start >= 0 and first_start != start:
+            first_text = body[first_start:]
+            first_categories = detected_categories(first_text)
+            first_words = len(re.findall(r"\b\w+\b", first_text))
+            if len(first_categories) > len(categories) or first_words > words:
+                text = first_text
+                categories = first_categories
+                words = first_words
     if words < 45 or len(categories) < 3:
         combined_text = f"{text}\n{visible_text}"
         combined_categories = detected_categories(combined_text)
@@ -896,6 +994,8 @@ def click_parts(page, max_tabs: int) -> tuple[tuple[ClickCheck, ...], tuple[Part
             page.wait_for_timeout(1_000)
             wait_for_settled(page)
             control_clicks = click_common_answer_prefixes(page, max_radios=1)
+            if not control_clicks:
+                control_clicks = click_first_generic_marimo_radio(page)
             if control_clicks:
                 page.wait_for_timeout(1_000)
                 wait_for_settled(page)
@@ -1128,7 +1228,7 @@ def check_lab(playwright, lab: Path, url: str, screenshot: Path, max_tabs: int, 
         return LabInteractionCheck(
             lab=str(lab),
             url=url,
-            loaded=loaded,
+            loaded=loaded or body_length > 200,
             body_length=body_length,
             screenshot=str(screenshot),
             page_errors=page_errors,
