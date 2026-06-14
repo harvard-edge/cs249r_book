@@ -27,7 +27,7 @@ INTERCONNECT_MAP = {
     "INFINIBAND_NDR_BW": "Systems.Fabrics.InfiniBand_NDR.bandwidth",
     "INFINIBAND_XDR_BW": "Systems.Fabrics.InfiniBand_XDR.bandwidth",
     "INFINIBAND_GXDR_BW": "Systems.Fabrics.InfiniBand_GXDR.bandwidth",
-    "H100_FLOPS_FP32_CUDA": 'Hardware.Cloud.H100.compute.precision_flops["fp32_cuda"]',
+    "H100_FLOPS_FP32_CUDA": 'Hardware.Cloud.H100.compute.precision_flops["fp32"]',
     "CPU_FLOPS_FP32": "Hardware.Cloud.ReferenceCPU.compute.peak_flops",
     "H100_L2_CACHE": "Hardware.Cloud.H100.memory.l2_cache",
     "TPUV5P_L2_SRAM": "Hardware.Cloud.TPUv5p.memory.l2_cache",

@@ -34,7 +34,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-INLINE_PY = re.compile(r"`\{python\}\s+([A-Za-z_][\w.]*)`")
+INLINE_PY = re.compile(r"`\{python\}\s+([A-Za-z_][\w.]*)(?:\[[^\]`]+\])*`")
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
 FENCE_RE = re.compile(r"^([ \t]*)```+\s*\{python\}\s*$")
@@ -119,6 +119,27 @@ def _kwargs(call: ast.Call) -> dict:
     return kwargs
 
 
+def _formatter_call_from_value(node: ast.AST) -> ast.Call | None:
+    """Return the formatter call that owns an exported value, when unambiguous."""
+    if isinstance(node, ast.Call):
+        fname = _call_name(node)
+        return node if fname and fname.startswith("fmt") else None
+
+    if isinstance(node, (ast.List, ast.Tuple, ast.ListComp, ast.GeneratorExp)):
+        calls = [
+            sub for sub in ast.walk(node)
+            if isinstance(sub, ast.Call)
+            and (fname := _call_name(sub))
+            and fname.startswith("fmt")
+        ]
+        if not calls:
+            return None
+        sig = {(_call_name(call), tuple(sorted(_kwargs(call).items()))) for call in calls}
+        return calls[0] if len(sig) == 1 else None
+
+    return None
+
+
 def build_formatter_map(cells_text: str) -> dict:
     """{name -> (formatter, {kwarg: literal})} from `x = fmt_KIND(...)`.
 
@@ -144,9 +165,11 @@ def build_formatter_map(cells_text: str) -> dict:
         return best[0] + "." if best else ""
 
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        call = node.value
+        call = _formatter_call_from_value(node.value)
+        if call is None:
+            continue
         fname = _call_name(call)
         if not fname or not fname.startswith("fmt"):
             continue
@@ -178,9 +201,11 @@ def build_formatter_records(text: str) -> dict[str, tuple[str, dict, int, str]]:
             return best[0] + "." if best else ""
 
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                 continue
-            call = node.value
+            call = _formatter_call_from_value(node.value)
+            if call is None:
+                continue
             fname = _call_name(call)
             if not fname or not fname.startswith("fmt"):
                 continue
@@ -215,6 +240,7 @@ _PP_RE = re.compile(r"^\s*(percentage points?|pp)\b", re.IGNORECASE)
 _SCALE_RE = re.compile(r"^\s*(K|M|B|T|million|billion|thousand|trillion)\b")
 _MULT_AFTER_RE = re.compile(r"^\s*(\$\\times\$|\\times|×|x\b)")
 _COMPACT_MULT_AFTER_RE = re.compile(r"^(\$\\times\$|\\times|×|x\b)")
+_CAPTION_ATTRS = ("fig-cap=", "tbl-cap=", "fig-alt=", "tbl-alt=", "alt=", "title=")
 
 # The "N× <device>" hardware-count idiom (e.g. "8× H100", "4× A100 node",
 # "`{python} node_gpus_str`× H100 GPUs") is a count of accelerators, not a
@@ -228,6 +254,28 @@ _HW_AFTER_MULT_RE = re.compile(
     r"L4|L40S?|T4|MI\d{3}X?|TPU\w*|GPUs?|accelerators?)\b",
     re.IGNORECASE,
 )
+
+
+def _percent_style_default(fname: str) -> str:
+    if fname == "fmt_percent":
+        return "number"
+    if fname in {"fmt_percent_range", "fmt_pp"}:
+        return "prose"
+    return "number"
+
+
+def _usage_context(line: str) -> str:
+    """Classify the manuscript context of an inline Python ref."""
+    stripped = line.strip()
+    if stripped.startswith(":") or any(attr in stripped for attr in _CAPTION_ATTRS):
+        return "caption"
+    if stripped.startswith("|") or ("|" in stripped and stripped.count("|") >= 2):
+        return "table"
+    return "prose"
+
+
+def _is_percent_family(fname: str) -> bool:
+    return fname in {"fmt_percent", "fmt_percent_range", "fmt_pp"}
 
 
 def check_file(path: Path) -> list[Violation]:
@@ -272,7 +320,7 @@ def check_file(path: Path) -> list[Violation]:
                     f"for the export, or add spaces around the glyph if this is "
                     f"an arithmetic product."))
             elif fname in {"fmt_percent", "fmt_percent_range"}:
-                style = kwargs.get("style") or "number"
+                style = kwargs.get("style") or _percent_style_default(fname)
                 if style in ("prose", "symbol") and _PERCENT_RE.match(after):
                     out.append(Violation("percent_dup", rel, lineno, ref,
                         f"{fname}(style={style!r}) already carries the glyph; "
@@ -296,6 +344,20 @@ def check_file(path: Path) -> list[Violation]:
                     out.append(Violation("mult_double_glyph", rel, lineno, ref,
                         f"{fname} already carries the times glyph; prose repeats a "
                         f"times glyph after the ref: …{after.strip()[:12]!r}"))
+
+            if _is_percent_family(fname):
+                style = kwargs.get("style") or _percent_style_default(fname)
+                context = _usage_context(line)
+                if context == "table" and style == "prose":
+                    out.append(Violation("percent_prose_in_table", rel, lineno, ref,
+                        f"{fname}(style='prose') renders a word-form percentage in a "
+                        "table row. Use style='symbol' for table cells, or split the "
+                        "output into table and prose variables if the value is used in both lanes."))
+                elif context in {"prose", "caption"} and style == "symbol":
+                    out.append(Violation("percent_symbol_in_prose", rel, lineno, ref,
+                        f"{fname}(style='symbol') renders a compact percentage glyph in "
+                        f"{context}. Use style='prose' for prose/captions, or split the "
+                        "output into table and prose variables if the value is used in both lanes."))
     return out
 
 

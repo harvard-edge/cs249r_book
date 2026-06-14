@@ -13,12 +13,18 @@ engine: jupyter
 
 :::
 
+::: {.content-visible when-format="pdf"}
 \noindent
-![](images/png/cover_compute_infrastructure_blueprint.png){fig-alt="Layered compute infrastructure cutaway from accelerator chip and HBM to server nodes, racks, power delivery, and cooling loops."}
+![](images/png/cover_compute_infrastructure_blueprint_print.png){fig-alt="Layered compute infrastructure cutaway from accelerator chip and HBM to server nodes, racks, power delivery, and cooling loops."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_compute_infrastructure_blueprint.webp){fig-alt="Layered compute infrastructure cutaway from accelerator chip and HBM to server nodes, racks, power delivery, and cooling loops."}
+:::
 
 :::
 
-## Purpose {.unnumbered}
+## Purpose {.unnumbered .unlisted}
 
 \begin{marginfigure}
 \mlfleetstack{100}{40}{15}{10}{10}{0}{0}{0}
@@ -1646,7 +1652,7 @@ class TensorCoreTdpRecap:
     _h100 = Hardware.Cloud.H100
     _fp16_tc = _h100.compute.peak_flops
     _fp8_tc = _h100.compute.precision_flops["fp8"]
-    _fp32_cuda = _h100.compute.precision_flops["fp32_cuda"]
+    _fp32_cuda = _h100.compute.precision_flops["fp32"]
     _tc_vs_cuda = (_fp16_tc / _fp32_cuda).to("").magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -1774,7 +1780,7 @@ class H100TdpWallRecap:
 
 Every floating-point operation dissipates energy as heat. Dense Tensor Core activity during large matrix multiplications drives heat proportional to the switching activity of billions of transistors. The Thermal Design Power (TDP)\index{TDP}[^fn-tdp-thermal] of an accelerator is the maximum sustained heat dissipation that the cooling system must handle, and it has become the single most consequential specification in fleet design. At dense fleet scale, this creates the power wall\index{Power Wall}: the point where facility power delivery and heat removal, not available arithmetic units, determine how much compute can be installed and sustained.
 
-This is the thermodynamic limit (Principle \ref{pri-thermodynamic-limit}) in action: the bottleneck of the modern AI data center is not FLOP/s, but Watts per square foot. When a rack generates 100 kW of heat, air cooling fails. The physical design of the fleet is dictated by the ability to move heat away from silicon. The closely related power density wall (Principle \ref{pri-power-density-wall}) makes the consequence concrete: liquid cooling becomes a facility requirement, not an option, for large-scale training clusters.
+This is the thermodynamic limit (principle \ref{pri-thermodynamic-limit}) in action: the bottleneck of the modern AI data center is not FLOP/s, but Watts per square foot. When a rack generates 100 kW of heat, air cooling fails. The physical design of the fleet is dictated by the ability to move heat away from silicon. The closely related power density wall (principle \ref{pri-power-density-wall}) makes the consequence concrete: liquid cooling becomes a facility requirement, not an option, for large-scale training clusters.
 
 [^fn-tdp-thermal]: **TDP (Thermal Design Power)**\index{TDP!thermal constraint}: Often misunderstood as "power consumption," TDP specifies the maximum sustained thermal load (in watts) that the cooling solution must remove. Accelerators can briefly exceed their sustained power target during transient workloads before firmware throttles back toward the configured limit, which forces rack-level VRM and cooling designs to provision for worst-case, not average, power draw.
 
@@ -2292,20 +2298,23 @@ Aggregating accelerators solves the capacity problem only if the interconnect be
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_qty, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
 class H100NvlinkNodeRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB / second, precision=0, commas=False)
+    nvlink_per_dir_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, GB / second, precision=0, commas=False)
+    _nvlink_ib_gap = (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to_base_units().magnitude
+    nvlink_ib_gap_mult_str = fmt_multiple(_nvlink_ib_gap, precision=0, commas=False)
 ```
 
 ::: {#dfn-compute-infrastructure-node .callout-definition title="Node"}
 
 ***Node***\index{Node!definition} is the ML training cluster's physical server chassis that aggregates multiple accelerators (typically 8) through a high-speed intra-node interconnect (NVLink or ICI), creating the fundamental boundary between high-bandwidth local communication and the order-of-magnitude slower inter-node network fabric.
 
-1.  **Significance (quantitative)**: The NVLink bandwidth within a DGX H100 node reaches `{python} H100NvlinkNodeRecap.nvlink_gb_per_s_str` bidirectional, while inter-node InfiniBand NDR provides 50 GB/s, an 18$\times$ gap that constrains where each parallelism strategy can run. Tensor parallelism, which AllReduces every layer's output, must stay within the node; pipeline parallelism, which transfers only stage-boundary activations, can span nodes over InfiniBand. The node is also the primary failure domain: a single node failure in a bulk synchronous parallel (BSP) training job, where workers advance in lockstep at step barriers, idles the entire cluster until recovery.
+1.  **Significance (quantitative)**: The NVLink bandwidth within a DGX H100 node reaches `{python} H100NvlinkNodeRecap.nvlink_gb_per_s_str` bidirectional, or `{python} H100NvlinkNodeRecap.nvlink_per_dir_gb_per_s_str` per direction, while inter-node InfiniBand NDR provides 50 GB/s, a `{python} H100NvlinkNodeRecap.nvlink_ib_gap_mult_str` per-direction gap that constrains where each parallelism strategy can run. Tensor parallelism, which AllReduces every layer's output, must stay within the node; pipeline parallelism, which transfers only stage-boundary activations, can span nodes over InfiniBand. The node is also the primary failure domain: a single node failure in a bulk synchronous parallel (BSP) training job, where workers advance in lockstep at step barriers, idles the entire cluster until recovery.
 2.  **Distinction**: Unlike a single accelerator (which provides fast HBM bandwidth but limited capacity), a node aggregates 8$\times$ the HBM capacity and 8$\times$ the compute of a single chip -- enough to place large FP16 weight shards (8 $\times$ 80 GB = 640 GB on DGX H100), but not enough to keep the full Adam training state in HBM.
 3.  **Common pitfall**: A frequent misconception is that nodes in a distributed training job operate independently. In BSP training, all nodes are synchronously coupled at every step barrier: a performance degradation on one node (from thermal throttling, a faulty NIC, or a slow storage read) stalls the entire cluster and drops overall MFU for the duration of that step.
 
@@ -3128,15 +3137,22 @@ class InterconnectCommMath:
 
     gradient_buffer = 1 * GB
     gradient_buffer_value = gradient_buffer.to(GB).magnitude
-    _nvlink_bw_val = Hardware.Cloud.H100.nvlink.bandwidth.to(GB / second).magnitude
-    _ib_bw_gbs_val = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(GB / second).magnitude
+    # One-way deliverable rate: NVLink per-direction (450 GB/s), not the 900 GB/s
+    # bidirectional datasheet total; moving a buffer one way uses half the link,
+    # so this matches the staircase notebook and the inter-node InfiniBand rate.
+    _nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
+    _ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    _nvlink_bw_val = _nvlink_bw.to(GB / second).magnitude
+    _ib_bw_gbs_val = _ib_bw.to(GB / second).magnitude
+    _t_intra_ms = (gradient_buffer / _nvlink_bw).to(millisecond).magnitude
+    _t_inter_ms = (gradient_buffer / _ib_bw).to(millisecond).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     t_intra_math = fmt_math(
-        f"T_{{\\text{{intra}}}} = {gradient_buffer_value}\\text{{ GB}} / {_nvlink_bw_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{1.1 \\text{{ ms}}}}"
+        f"T_{{\\text{{intra}}}} = {gradient_buffer_value}\\text{{ GB}} / {_nvlink_bw_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{{_t_intra_ms:.1f} \\text{{ ms}}}}"
     )
     t_inter_math = fmt_math(
-        f"T_{{\\text{{inter}}}} = {gradient_buffer_value}\\text{{ GB}} / {_ib_bw_gbs_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{20 \\text{{ ms}}}}"
+        f"T_{{\\text{{inter}}}} = {gradient_buffer_value}\\text{{ GB}} / {_ib_bw_gbs_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{{_t_inter_ms:.0f} \\text{{ ms}}}}"
     )
     gradient_buffer_gb_str = fmt_memory(gradient_buffer, unit=GB, precision=0, commas=False)
 ```
@@ -3172,7 +3188,7 @@ class BandwidthHierarchyPodRecap:
 2. **Inter-Node (InfiniBand NDR)**: Bandwidth = `{python} BandwidthHierarchyPodRecap.ib_bw_gb_per_s_str`.
    `{python} InterconnectCommMath.t_inter_math`
 
-**Systems insight**: Crossing the node boundary increases communication time by approximately 18$\times$. In a training loop where gradient synchronization happens at every step, this penalty would stall the accelerators for the majority of each iteration, reducing utilization to well below 50 percent. This is why training frameworks use tensor parallelism within the node (fast NVLink) and data parallelism across nodes (tolerant of slower InfiniBand).
+**Systems insight**: Crossing the node boundary increases communication time by approximately `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str`. In a training loop where gradient synchronization happens at every step, this penalty would stall the accelerators for the majority of each iteration, reducing utilization to well below 50 percent. This is why training frameworks use tensor parallelism within the node (fast NVLink) and data parallelism across nodes (tolerant of slower InfiniBand).
 
 :::
 
@@ -4043,7 +4059,7 @@ The practical method transfers beyond this particular model. Identify the bindin
 
 * **The generality tax**: Accelerators achieve 10--100$\times$ higher throughput than CPUs by dedicating silicon area to matrix arithmetic rather than branch prediction and out-of-order execution. The trade-off is reduced flexibility. Each step along the spectrum from GPU to TPU to custom ASIC reclaims more die area for arithmetic.
 * **Memory wall diagnosis starts with roofline**: For single-request LLM inference, memory bandwidth\index{Memory Wall!dominance} determines latency because arithmetic completes in microseconds while data transfer takes milliseconds. The ridge point ($I_{\text{ridge}}$ = peak FLOP/s divided by memory BW) separates memory-bound LLM decode ($I \approx 1$) from compute-bound training ($I > 2{,}000$).
-* **Bandwidth hierarchy dictates parallelism**: The 18$\times$ bandwidth cliff between NVLink and InfiniBand\index{Bandwidth Hierarchy!parallelism placement} confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
+* **Bandwidth hierarchy dictates parallelism**: The `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str` per-direction bandwidth cliff between NVLink and InfiniBand\index{Bandwidth Hierarchy!parallelism placement} confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
 * **Peak vs. sustained**: Model FLOPs Utilization (MFU)\index{MFU!sustained vs. peak} of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.
 * **Facility efficiency is part of the computer**: Liquid cooling can deliver 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. At pod scale, network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 * **Failure at scale**: A 10,000-GPU cluster\index{Failure!at scale} experiences roughly one GPU failure every five hours. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
@@ -4055,7 +4071,7 @@ For most of computing history, the computer was the chip. This chapter marks whe
 
 ::: {.callout-chapter-connection title="From silicon to wires"}
 
-We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them. The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed an 18$\times$ cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
+We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them. The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed a `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str` cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
 
 :::
 

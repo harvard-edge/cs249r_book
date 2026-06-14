@@ -1,6 +1,6 @@
 # Chapter HTML audit ledger
 
-Updated: 2026-06-07T14:12:26.026429+00:00
+Updated: 2026-06-13T18:30:39.131325+00:00
 
 Registry migration chapter verification: build HTML → raw HTML scan → LEGO/prose/registry checks.
 
@@ -11,27 +11,27 @@ Registry migration chapter verification: build HTML → raw HTML scan → LEGO/p
 | vol1 | appendix_dam | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 0.0 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | appendix_data | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.8 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | appendix_machine | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 8.0 | OK — build + HTML clean + LEGO/registry consistent |
-| vol1 | benchmarking | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 20.0 | OK — build + HTML clean + LEGO/registry consistent |
+| vol1 | benchmarking | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 21.0 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | conclusion | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 6.7 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | data_engineering | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 0.0 | OK — build + HTML clean + LEGO/registry consistent |
-| vol1 | data_selection | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 18.0 | OK — build + HTML clean + LEGO/registry consistent |
+| vol1 | data_selection | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 17.2 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | frameworks | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 18.3 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | hw_acceleration | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 18.4 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | introduction | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 13.3 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | ml_ops | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 19.8 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | ml_systems | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 17.0 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | ml_workflow | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 10.6 | OK — build + HTML clean + LEGO/registry consistent |
-| vol1 | model_compression | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 40.5 | OK — build + HTML clean + LEGO/registry consistent |
+| vol1 | model_compression | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 42.0 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | model_serving | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 12.6 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | nn_architectures | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 20.7 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | nn_computation | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 24.6 | OK — build + HTML clean + LEGO/registry consistent |
-| vol1 | responsible_engr | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 11.9 | OK — build + HTML clean + LEGO/registry consistent |
+| vol1 | responsible_engr | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 12.4 | OK — build + HTML clean + LEGO/registry consistent |
 | vol1 | training | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 23.1 | OK — build + HTML clean + LEGO/registry consistent |
 | vol2 | appendix_assumptions | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.7 | OK — build + HTML clean + LEGO/registry consistent |
 | vol2 | appendix_c3 | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.5 | OK — build + HTML clean + LEGO/registry consistent |
 | vol2 | appendix_communication | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.5 | OK — build + HTML clean + LEGO/registry consistent |
 | vol2 | appendix_dam | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.3 | OK — build + HTML clean + LEGO/registry consistent |
-| vol2 | appendix_fleet | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.8 | OK — build + HTML clean + LEGO/registry consistent |
+| vol2 | appendix_fleet | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.4 | OK — build + HTML clean + LEGO/registry consistent |
 | vol2 | appendix_inference | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.4 | OK — build + HTML clean + LEGO/registry consistent |
 | vol2 | appendix_reliability | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.8 | OK — build + HTML clean + LEGO/registry consistent |
 | vol2 | collective_communication | **pass** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 8.3 | OK — build + HTML clean + LEGO/registry consistent |
