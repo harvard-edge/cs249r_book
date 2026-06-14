@@ -250,13 +250,13 @@ A useful mental model frames these distributed strategies as loop transformation
 
 Whichever loop a strategy unrolls, distributed training[^fn-distbelief-distributed] spreads the workload across machines that must coordinate to train a single model. Coordination here means keeping every model shard or replica on a compatible training step. Basic barriers can keep a small research run ordered, but long-running training jobs also need timeout, checkpoint, and recovery mechanisms so one failed worker does not waste days of compute. @Sec-fault-tolerance-reliability examines those reliability engineering challenges in depth.
 
-[^fn-distbelief-distributed]: **Distributed Training**: Google's DistBelief\index{DistBelief!distributed training} (2012) was the first framework to train neural networks across thousands of machines, but its parameter server architecture created bandwidth bottlenecks at central nodes. This limitation drove the shift to decentralized AllReduce patterns in successors like Horovod and PyTorch DistributedDataParallel (DDP), where replicated data-parallel workers synchronize gradients at cost $2(N-1)/N$ per worker rather than concentrating traffic at a single server.
+[^fn-distbelief-distributed]: **Distributed Training**: Google's DistBelief\index{DistBelief!distributed training} (2012) was an early framework for training neural networks across thousands of machines, but its parameter server architecture created bandwidth bottlenecks at central nodes. This limitation drove the shift to decentralized AllReduce patterns in successors like Horovod and PyTorch DistributedDataParallel (DDP), where replicated data-parallel workers synchronize gradients at cost $2(N-1)/N$ per worker rather than concentrating traffic at a single server [@dean2012large; @sergeev2018horovod; @li2020pytorch; @patarasuk2009].
 
 Each rung of the scaling path inherits the previous one's challenges. Single-GPU training needs only local memory management and forward/backward passes. Scaling to multiple GPUs within a node adds high-bandwidth communication, handled through NVLink[^fn-nvlink-intranode] or PCIe with NCCL[^fn-nccl-topology] optimization while preserving single-machine fault tolerance and scheduling.
 
 [^fn-nvlink-intranode]: **NVLink**\index{NVLink!distributed training}: NVIDIA's point-to-point GPU interconnect delivers `{python} DistTrainNvlinkIntro.nvlink_a100_gb_per_s_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_gb_per_s_str` bidirectional bandwidth, roughly `{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_low_mult_str`--`{python} DistTrainNvlinkIntro.nvlink_hdr_ratio_high_mult_str` InfiniBand HDR per port. This bandwidth gap is why tensor parallelism, which requires AllReduce on every layer, is confined to intra-node communication, while pipeline and data parallelism tolerate the slower inter-node fabric.
 
-[^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**\index{NCCL!topology}: Released in 2015, NCCL automatically selects ring, tree, or hierarchical AllReduce algorithms based on detected hardware topology: NVLink within nodes, InfiniBand across nodes. This topology-aware routing is critical because a naive single-ring AllReduce across 128 nodes would force all traffic through the slowest inter-node link, collapsing bandwidth utilization to under 30 percent.
+[^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**\index{NCCL!topology}: NCCL provides topology-aware inter-GPU collective communication primitives, including AllReduce, across PCIe, NVLink, InfiniBand, and IP networks. Current NCCL deployments expose ring, tree, and related algorithm families through runtime selection and tuning controls, so training frameworks can avoid naive mappings that route all traffic through the slowest inter-node path [@jeaugey2017nccl; @nvidiaNcclUserGuide].
 
 The leap to multi-node training adds network communication overhead, fault tolerance requirements, and cluster orchestration. Because each stage compounds the previous one's bottlenecks, single-GPU performance must be optimized before scaling out, so inefficiency does not multiply across the fleet.
 
@@ -561,7 +561,7 @@ The baseline model, Bulk Synchronous Parallel (BSP)[^fn-bsp] [@valiant1990], req
 
 BSP provides strong guarantees where every worker sees identical parameter values at each step, ensuring mathematical equivalence to single-device training. The cost is that the slowest worker determines iteration time, creating the straggler\index{Straggler!synchronization delay} problem.
 
-Stale Synchronous Parallel\index{Stale Synchronous Parallel!bounded staleness} (SSP) relaxes this constraint by allowing workers to proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee, often configured with small values such as $s=2$--$5$, provides a middle ground between BSP's strong consistency and fully asynchronous approaches.
+Stale Synchronous Parallel\index{Stale Synchronous Parallel!bounded staleness} (SSP) relaxes this constraint by allowing workers to proceed up to $s$ iterations ahead of the slowest worker before blocking. This bounds staleness while reducing synchronization delays. SSP requires careful learning rate tuning since workers compute gradients on slightly different parameter versions. The bounded staleness guarantee provides a middle ground between BSP's strong consistency and fully asynchronous approaches [@ho2013more].
 
 Asynchronous SGD\index{Asynchronous SGD!staleness penalty} eliminates synchronization barriers entirely as workers update parameters independently. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. The operational guarantee determines how much convergence risk the system accepts; @sec-distributed-training-systems-systems-staleness-impact-bsp-vs-ssp-vs-asp-e153 develops the convergence rates, the staleness penalty, and the compensation techniques each model requires.
 
@@ -611,7 +611,7 @@ The cycle of splitting data, computing gradients, synchronizing results, and upd
 
 ### Trade-offs: The communication wall {#sec-distributed-training-systems-systems-data-parallelism-tradeoffs}
 
-Data parallelism is a common starting strategy for a reason: it scales throughput linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the communication-computation ratio [@xu2021].
+Data parallelism is a common starting strategy for a reason: it scales throughput linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the communication-computation ratio: once gradient exchange dominates useful computation, more workers mainly add synchronization work [@ben-nun2019].
 
 Data parallelism offers three principal advantages. First, throughput scales linearly for compute-bound models: scaling ResNet-50 on ImageNet from 1 to 256 GPUs yields near-linear speedup because the gradient exchange is small relative to the compute time. Second, the model architecture remains unchanged; the framework wraps the model in a data-parallel container that intercepts backward-pass hooks to trigger gradient synchronization automatically. Third, utilization remains high because, unlike model parallelism, there are no pipeline bubbles—all GPUs work on the forward and backward pass simultaneously.
 
@@ -1415,7 +1415,7 @@ However, the theorem assumes perfect synchronization (BSP). When workers proceed
 
 ### Staleness impact: BSP vs. SSP vs. ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-vs-ssp-vs-asp-e153}
 
-The operational guarantees of BSP, SSP, and ASP established in @sec-distributed-training-systems-systems-synchronization-models-396f have a precise convergence cost, which this section quantifies. The staleness parameter $\tau_{\text{stale}}$ quantifies how many iterations behind a gradient may be when applied to parameters, and it is the variable that ties throughput to solution quality.
+The operational guarantees of BSP, SSP, and ASP established in @sec-distributed-training-systems-systems-synchronization-models-396f have a convergence cost, which this section sketches with stylized smooth-objective bounds. The staleness parameter $\tau_{\text{stale}}$ quantifies how many iterations behind a gradient may be when applied to parameters, and it is the variable that ties throughput to solution quality [@ho2013more; @dutta2018slow].
 
 ::: {#dfn-distributed-training-gradient-staleness .callout-definition title="Gradient staleness"}
 
@@ -1431,15 +1431,15 @@ The convergence behavior differs across these models in ways that directly affec
 
 In Bulk Synchronous Parallel (BSP, $\tau_{\text{stale}} = 0$), all workers compute gradients on the same parameter version, then synchronize via barrier before updating. This guarantees mathematical equivalence to single-device training with larger batch size, an optimal convergence rate of $\mathcal{O}(1/\sqrt{NbK})$, and no hyperparameter adjustment beyond batch size scaling.
 
-Stale Synchronous Parallel (SSP, $\tau_{\text{stale}} \leq s$) relaxes the barrier by allowing workers to proceed up to $s$ iterations ahead of the slowest worker. The convergence rate degrades to:
+Stale Synchronous Parallel (SSP, $\tau_{\text{stale}} \leq s$) relaxes the barrier by allowing workers to proceed up to $s$ iterations ahead of the slowest worker. In a stylized bound, the convergence rate gains an additive delay term:
 
 $$
 \mathbb{E}[\mathcal{L}(\theta_K)] - \mathcal{L}^{\star} \leq \mathcal{O}\left(\frac{1}{\sqrt{NbK}}\right) + \mathcal{O}\left(\frac{s^2 \eta^2 L_s^2}{Nb}\right)
 $$
 
-The second term represents the **staleness penalty**\index{Staleness Penalty}. For bounded staleness $s$, this penalty can be controlled by reducing the learning rate: $\eta' = \eta / \sqrt{1 + s}$. Deployments may choose $s \in \{2, 4, 8\}$, accepting convergence degradation for throughput improvement on heterogeneous clusters.
+The second term represents the **staleness penalty**\index{Staleness Penalty}. For bounded staleness $s$, this penalty is controlled by keeping delay small and retuning the learning rate. Deployments that choose bounded staleness accept convergence degradation for throughput improvement on heterogeneous clusters.
 
-Asynchronous SGD (ASP, $\tau_{\text{stale}} = \infty$) eliminates waiting entirely: workers update parameters immediately. While this maximizes throughput, convergence degrades:
+Asynchronous SGD (ASP, $\tau_{\text{stale}} = \infty$) eliminates waiting entirely: workers update parameters immediately. While this maximizes throughput, the same teaching model shows a larger delay-dependent term:
 
 $$
 \mathbb{E}[\mathcal{L}(\theta_K)] - \mathcal{L}^{\star} \leq \mathcal{O}\left(\frac{1}{\sqrt{K}}\right) + \mathcal{O}\left(\bar{\tau}_{\text{stale}}^2 \eta^2 L_s^2\right)
@@ -1471,7 +1471,7 @@ $$
 \eta_{\text{large}} = k \cdot \eta_{\text{base}}
 $$
 
-This rule is justified by approximating one large-batch step at learning rate $k\eta$ as $k$ consecutive small-batch steps each at learning rate $\eta$. With batch size $kB$, the gradient variance decreases by factor $k$, so the larger step is well-conditioned; the approximation holds when parameters do not move much during those $k$ small-batch steps. The linear scaling rule works well for moderate batch sizes (up to 8K--16K for ImageNet, up to 32K for BERT) but @goyal2017accurate demonstrated that applying it without warmup causes training instability for large batches. A **warmup period**\index{Learning Rate Warmup} that increases the learning rate linearly from $\eta_{\text{base}}$ to $k \cdot \eta_{\text{base}}$ over the first $W$ iterations (typically 5 epochs for ImageNet or 10K steps for language models) lets the model reach a region of the loss landscape where large learning rates are stable:
+This rule is justified by approximating one large-batch step at learning rate $k\eta$ as $k$ consecutive small-batch steps each at learning rate $\eta$. With batch size $kB$, the gradient variance decreases by factor $k$, so the larger step is well-conditioned; the approximation holds when parameters do not move much during those $k$ small-batch steps. The rule is empirical rather than universal: Goyal et al. validated it for ResNet-50/ImageNet at global batch size 8,192 with gradual warmup, while LARS and LAMB extend large-batch recipes through layer-wise adaptation for ImageNet and BERT-style pretraining [@goyal2017accurate; @you2017large; @you2020large]. A **warmup period**\index{Learning Rate Warmup} that increases the learning rate linearly from $\eta_{\text{base}}$ to $k \cdot \eta_{\text{base}}$ over the first $W$ iterations lets the model reach a region of the loss landscape where large learning rates are stable:
 
 $$
 \eta_t = \eta_{\text{base}} + \frac{t}{W}(k \cdot \eta_{\text{base}} - \eta_{\text{base}}) \quad \text{for } t < W
@@ -1501,7 +1501,7 @@ A fundamental property of distributed training is that adding more workers stops
 
 ::: {#dfn-distributed-training-critical-batch-size .callout-definition title="Critical batch size"}
 
-***Critical Batch Size***\index{Critical Batch Size!definition} $(B^{*})$ is the distributed-training batch size at which the gradient noise scale equals the gradient signal scale.
+***Critical Batch Size***\index{Critical Batch Size!definition} $(B^{*})$ is the distributed-training batch size at which the gradient noise scale is large enough that further batch growth yields diminishing returns in sample efficiency [@mccandlish2018empirical; @Shallue2019measuring].
 
 1.  **Significance (quantitative)**: It marks the transition point for parallel scaling efficiency. Below $B^{*}$, increasing the batch size linearly improves the convergence per step. Above $B^{*}$, larger batches yield diminishing returns, requiring proportionally more samples $(D)$ to reach the same loss.
 2.  **Distinction**: Unlike the memory-limited batch size (determined by memory capacity and activation footprint), the critical batch size is an algorithmic property of the model and dataset.
@@ -1509,7 +1509,7 @@ A fundamental property of distributed training is that adding more workers stops
 
 :::
 
-The critical batch size can be estimated as:
+The gradient-noise-scale proxy for the critical batch size can be estimated as:
 
 $$
 B^{*} \approx \frac{\text{tr}(\Sigma)}{\|\nabla \mathcal{L}(\theta)\|^2}
@@ -1517,11 +1517,11 @@ $$
 
 where $\text{tr}(\Sigma)$ is the trace of the gradient covariance matrix (total gradient variance) and $\|\nabla \mathcal{L}(\theta)\|^2$ is the squared gradient norm (signal strength). Intuitively, $B^{*}$ is the batch size at which averaging reduces gradient variance to the level of the true gradient magnitude.
 
-Empirical critical batch sizes vary by task and scale over three orders of magnitude:
+Published large-batch regimes illustrate the scale rather than providing fixed thresholds:
 
-- **ImageNet ResNet-50**: $B^{*} \approx 8,000 - 16,000$
-- **BERT-Large pretraining**: $B^{*} \approx 32,000 - 65,000$
-- **GPT-3 scale models**: $B^{*} \approx 1,000,000 - 4,000,000$
+- **ImageNet ResNet-50**: Goyal et al. stabilized global batch 8,192 with warmup; LARS extends ImageNet large-batch training further in some settings [@goyal2017accurate; @you2017large].
+- **BERT-Large pretraining**: LAMB reports BERT training at 32K--64K batch sizes with layer-wise adaptive updates [@you2020large].
+- **Other domains**: McCandlish et al. show useful batch-size limits ranging from tens of thousands in ImageNet-like settings to millions in reinforcement-learning workloads, so new frontier-language-model thresholds should be measured rather than copied [@mccandlish2018empirical].
 
 The scaling law regime exhibits three distinct behaviors:
 
@@ -1923,7 +1923,7 @@ class MemoryWallAnalysis:
 
 Model parallelism addresses this limitation by distributing the model architecture itself across devices, but the placement decision is where to cut the model. Layer-based splitting assigns devices to sequential layer groups, such as layers 1--4 on one device and layers 5--8 on the next. Channel-based splitting divides the channels within a layer, such as 512 channels on one device and the remaining channels on another. Transformer architectures add attention-head splitting, where separate devices own different heads. Each cut changes a different cost: layer cuts save memory but serialize the pipeline, while channel and head cuts expose more parallel work but require faster intra-layer communication.
 
-These cuts enable the large-scale cases that exceed a single device for different reasons. GPT-3, with `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters, relies on model parallelism for training. Vision transformers processing high-resolution $16k{\times}16k$ pixel images use model parallelism to manage activation and memory constraints. Mixture-of-Experts architectures use this approach to distribute their conditional computation paths across hardware.
+These cuts enable the large-scale cases that exceed a single device for different reasons. GPT-3, with `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters, relies on model parallelism for training. Vision transformers processing high-resolution $16k{\times}16k$ pixel images use model parallelism to manage activation and memory constraints. Mixture-of-Experts architectures use this approach to distribute their conditional computation paths across hardware [@shazeer2017outrageously; @lepikhin2021gshard; @fedus2022switch].
 
 Device coordination proceeds in three phases. In the forward pass, data flows sequentially through model segments on different devices. The backward pass propagates gradients in reverse order through these segments. During parameter updates, each device modifies only its assigned portion of the model. The coordination ensures mathematical equivalence to training on a single device while enabling models that exceed individual device memory capacities. The cost is sequential dependency between stages: while one device computes its forward pass, downstream devices sit idle, creating the pipeline bubble that dominates utilization analysis for model-parallel systems.
 
@@ -2221,9 +2221,9 @@ A ring AllReduce transfers approximately $2(t-1)/t \times M_{\text{act}}$ bytes 
 
 Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because the same split that reduces memory also reduces the computation available to hide communication. As the tensor-parallel degree grows, per-GPU work falls while collective latency and aggregate traffic rise; per-GPU ring AllReduce bytes approach 2$\times$ the activation tensor size rather than growing linearly without bound, but the smaller local matrix multiply leaves less useful work to cover that exchange. Once NVLink bandwidth saturates, adding another tensor-parallel shard mainly exposes more synchronization rather than more throughput.
 
-Published systems such as Llama 3 405B use TP=8 within NVLink-connected H100 nodes [@dubey2024llama3], and similar node-local tensor parallelism is a common design pattern for large LLM training [@jiang2024megascale].
+Published systems such as Llama 3 405B use TP=8 within NVLink-connected H100 nodes [@dubey2024llama], and similar node-local tensor parallelism is a common design pattern for large LLM training [@jiang2024megascale].
 
-The same partitioning idea can apply to sequence length as well as matrix dimensions. While standard tensor parallelism tiles computation across the HBM-NVLink boundary within a node, **Ring Attention**\index{Ring Attention} partitions the attention state across GPUs rather than forcing every device to hold the full prefix. This becomes relevant for sequences that exceed a single GPU's memory, such as million-token context windows. Each GPU owns a block of queries $Q$ and circulates the key/value ($K$/$V$) blocks around a ring, computing attention against the block currently resident in memory and then forwarding that block to its neighbor.
+The same partitioning idea can apply to sequence length as well as matrix dimensions. While standard tensor parallelism tiles computation across the HBM-NVLink boundary within a node, **Ring Attention**\index{Ring Attention} partitions the attention state across GPUs rather than forcing every device to hold the full prefix [@liu2023ringAttention]. This becomes relevant for sequences that exceed a single GPU's memory, such as million-token context windows. Each GPU owns a block of queries $Q$ and circulates the key/value ($K$/$V$) blocks around a ring, computing attention against the block currently resident in memory and then forwarding that block to its neighbor.
 
 The algorithm proceeds in $N - 1$ communication rounds (where $N$ is the number of GPUs). In each round, each GPU computes attention between its local $Q$ block and the currently resident $K$/$V$ block, sends that $K$/$V$ block to its ring neighbor, and receives the next block from its other neighbor. The implementation overlaps this exchange with computation: while GPU $i$ computes attention using $K_j$/$V_j$, it simultaneously receives $K_{j+1}$/$V_{j+1}$ from the ring.
 
@@ -2353,7 +2353,7 @@ The advantages come at the cost of three fundamental limitations. Pipeline bubbl
 
 Numerical precision is itself a distribution lever: halving the bytes per value halves the gradient and activation payloads that the AllReduce and tensor-parallel collectives move, shrinking the $T_{\text{comm}}(N)$ term that dominates step time at scale. FP8 exploits this lever by reducing the numerical precision of computation while trying to preserve enough range for stable optimization.
 
-FP8 matters to distributed training when its narrower formats reduce communication without destabilizing optimization. Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. FP8-capable accelerators such as the NVIDIA H100 add support for 8-bit floating point (FP8), offering two formats optimized for different phases of training.
+FP8 matters to distributed training when its narrower formats reduce communication without destabilizing optimization. Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. FP8-capable accelerators such as the NVIDIA H100 add support for 8-bit floating point (FP8), offering two formats optimized for different phases of training [@micikevicius2022fp8].
 
 The choice between the two FP8 formats is therefore not an instruction-set detail; it decides which tensors can be narrowed without breaking the optimizer. E4M3 (4-bit exponent, 3-bit mantissa) provides a range of approximately $\pm 448$ with moderate precision, making it suitable for *weights and activations* in the forward pass where values cluster in predictable distributions. E5M2 (5-bit exponent, 2-bit mantissa) provides a much larger range of approximately $\pm 57344$ but coarser precision, which is why it is used for *gradients* that can span many orders of magnitude during backpropagation. Using E4M3 for gradients would cause frequent overflow and underflow, while E5M2 captures the full gradient distribution at the cost of slightly noisier updates.
 
@@ -2371,7 +2371,7 @@ Read @tbl-precision-formats as a distribution constraint map: each row changes t
 
 As @tbl-precision-formats summarizes, the critical engineering challenge in FP8 training is *dynamic scaling*. FP8's narrow dynamic range means that a fixed scale factor will cause either overflow or underflow. Per-tensor scaling multiplies each tensor by a scale factor before casting to FP8, then divides by that factor after the FP8 computation. The scale factor is adjusted dynamically, typically by tracking the running maximum absolute value of each tensor and choosing a scale that maps this maximum to near the FP8 maximum representable value.
 
-The three-precision approach (FP32 master weights, FP8 general matrix multiply (GEMM) operations, FP16 accumulation) can achieve near-FP16 training quality while improving effective throughput on FP8-capable hardware for suitable workloads. The energy implications are equally significant: if FP8 operations consume roughly half the energy per operation, they provide approximately 2$\times$ better operations per joule for compute-bound workloads. The throughput gain is the performance expression of that same efficiency gain, not an additional multiplicative factor.
+The three-precision approach (FP32 master weights, FP8 general matrix multiply (GEMM) operations, FP16 accumulation) can achieve near-FP16 training quality while improving effective throughput on FP8-capable hardware for suitable workloads. The systems implication is concrete but hardware-dependent: FP8 halves the bytes moved relative to FP16/BF16 tensors, while operation throughput and energy gains depend on the accelerator implementation. The throughput gain is therefore a performance expression of narrower movement and hardware support, not an additional multiplicative factor.
 
 For distributed training, FP8 earns its place only when smaller payloads reduce communication while dynamic scaling protects convergence. It changes the payload size, not the parallelization axis. If precision reduction is still insufficient, the system must decide how data, tensor, and pipeline parallelism map onto the hardware hierarchy.
 
@@ -2711,7 +2711,7 @@ Verify your understanding of how parallelism strategies combine:
 
 The MFU values need a historical utilization baseline to show how published systems approached 50 percent utilization. @Fig-mfu-progression traces the evolution of Model FLOPs Utilization\index{Model FLOPs Utilization!distributed training} across published training systems from 2020 to 2024. The progression from GPT-3's 21 percent MFU to PaLM's 46 percent MFU reflects not improvements in raw hardware speed but advances in the parallelism strategies, communication overlap techniques, and scheduling optimizations discussed throughout this chapter. The plateau near 40--46 percent reveals that the theoretical ceiling imposed by communication overhead, pipeline bubbles, and memory management remains formidable even in highly optimized hybrid-parallel systems. Notably, Meta's Llama 3 training at 16,384 H100 GPUs achieved slightly lower MFU (41 percent) than the same model at 8,192 GPUs (43 percent), confirming that the scaling tax described in @sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f is not merely theoretical but measurable in large published runs.
 
-::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU Progression**: Model FLOPs Utilization across published training systems, ordered chronologically. MFU doubled from 21 percent (GPT-3, 2020) to 46 percent (PaLM, 2022) through advances in hybrid parallelism and communication overlap, then plateaued near 40--45 percent for large-scale runs. The Llama 3 data points illustrate the scaling tax: MFU drops from 43 percent at 8,192 GPUs to 41 percent at 16,384 GPUs as communication overhead grows with cluster size. Data sources: @chowdhery2022palm, @dubey2024llama3." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent."}
+::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU Progression**: Model FLOPs Utilization across published training systems, ordered chronologically. MFU doubled from 21 percent (GPT-3, 2020) to 46 percent (PaLM, 2022) through advances in hybrid parallelism and communication overlap, then plateaued near 40--45 percent for large-scale runs. The Llama 3 data points illustrate the scaling tax: MFU drops from 43 percent at 8,192 GPUs to 41 percent at 16,384 GPUs as communication overhead grows with cluster size. Data sources: @chowdhery2022palm, @dubey2024llama." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent."}
 
 ```{python}
 #| echo: false
@@ -2876,7 +2876,7 @@ class DistTrainH100Capacity:
 
 ### The multi-model coordination problem {#sec-distributed-training-rlhf-coordination}
 
-Standard pretraining involves one model, one loss function, and one gradient stream. RLHF alignment, by contrast, orchestrates a system of models that interact during every training step. In the Proximal Policy Optimization\index{Proximal Policy Optimization!model asymmetry} (PPO) formulation [@ouyang2022instructgpt], four distinct models must operate in concert:
+Standard pretraining involves one model, one loss function, and one gradient stream. RLHF alignment, by contrast, orchestrates a system of models that interact during every training step. In Proximal Policy Optimization\index{Proximal Policy Optimization!model asymmetry} (PPO) [@schulman2017proximal], as used in InstructGPT-style RLHF systems [@ouyang2022instructgpt], four distinct models must operate in concert:
 
 1. The **policy model**\index{Policy Model} (the model being aligned) requires full training state: parameters, gradients, optimizer moments, and activations. For a `{python} DistTrainH100Capacity.policy_params_b_str` parameter model in mixed precision with Adam, this consumes approximately `{python} DistTrainH100Capacity.policy_params_b_str` $\times$ (`{python} DistTrainH100Capacity.bytes_weights_str` $+$ `{python} DistTrainH100Capacity.bytes_grad_str` $+$ `{python} DistTrainH100Capacity.bytes_adam_str`) = `{python} DistTrainH100Capacity.policy_train_gb_str` of memory—the same budget as standard pretraining.
 
@@ -3186,11 +3186,11 @@ A team achieves 50 percent MFU on a single node, scales to 1,024 GPUs, and expec
 
 Engineers tune hyperparameters on 8-GPU workstations then deploy to 256-GPU clusters expecting identical behavior. At scale, convergence patterns change fundamentally. The most critical hyperparameter is learning rate: as @sec-distributed-training-systems-systems-data-parallelism-6132 explains, batch size increases proportionally with GPU count in data parallelism, requiring learning rate adjustments. The "linear scaling rule"[^fn-linear-scaling] [@goyal2017accurate] suggests $\eta_{\text{large}} = \eta_{\text{base}} \times (B_{\text{large}}/B_{\text{base}})$, but this relationship holds only within bounds. As models scale, they eventually encounter the critical batch size[^fn-critical-batch-size], where adding more data per step yields diminishing returns in convergence.
 
-[^fn-critical-batch-size]: **Critical Batch Size**\index{Critical Batch Size!convergence limit}: Concept introduced by OpenAI (2018), representing the point where gradient noise no longer provides a meaningful regularization signal. For GPT-3, the critical batch size is approximately 1--4 million tokens. Scaling beyond this point improves throughput but does not reduce the number of optimization steps needed to reach target accuracy, collapsing the scaling efficiency $(\eta_{\text{scaling}})$.
+[^fn-critical-batch-size]: **Critical Batch Size**\index{Critical Batch Size!convergence limit}: The gradient-noise-scale view introduced by McCandlish et al. treats the largest useful batch size as a measurable statistic that varies by domain, model, optimizer, and training phase [@mccandlish2018empirical]. Scaling beyond that measured point improves hardware throughput but does not proportionally reduce the number of optimization steps needed to reach target quality, collapsing the scaling efficiency $(\eta_{\text{scaling}})$.
 
-[^fn-linear-scaling]: **Linear Scaling Rule**\index{Linear Scaling Rule!convergence}: Established by @goyal2017accurate at Facebook AI Research, who trained ResNet-50 on ImageNet in one hour across 256 GPUs with a batch size of 8,192 while matching single-GPU accuracy. The rule -- multiply learning rate by $k$ when batch size increases by $k$ -- works because larger batches reduce gradient variance by $k$, requiring proportionally larger steps to maintain update magnitude. The rule fails above the critical batch size (8K--32K for vision, up to 4M for LLMs), where gradient noise drops below the signal floor and additional parallelism yields diminishing convergence returns.
+[^fn-linear-scaling]: **Linear Scaling Rule**\index{Linear Scaling Rule!convergence}: Established by @goyal2017accurate at Facebook AI Research, who trained ResNet-50 on ImageNet in one hour across 256 GPUs with a batch size of 8,192 while matching small-batch accuracy. The rule -- multiply learning rate by $k$ when batch size increases by $k$ -- works only while the large-batch approximation remains valid. Above the workload's measured critical-batch-size regime, gradient noise drops below the useful signal scale and additional parallelism yields diminishing convergence returns [@mccandlish2018empirical; @Shallue2019measuring].
 
-Beyond the critical batch size (model and dataset dependent, often 8K to 32K for vision models), this relationship breaks down. A team training ResNet-50 on ImageNet with batch size 256 and learning rate 0.1 achieves 76.2 percent top-1 accuracy. Scaling to 1024 GPUs with batch size 32K and learning rate 12.8 (following linear scaling) produces 74.8 percent accuracy and slower convergence due to gradient noise reduction. Warmup schedules, weight decay adjustment, and careful momentum tuning recover most lost accuracy, but require systematic experimentation at target scale. Organizations that skip these scaling studies waste thousands of GPU-hours on suboptimal runs.
+Beyond the critical batch size, this relationship breaks down in a model-, data-, and optimizer-dependent way. A team that takes a small-cluster learning rate, multiplies it mechanically with GPU count, and jumps directly to a much larger global batch may see lower final quality or slower sample efficiency even though hardware throughput improved. Warmup schedules, weight decay adjustment, layer-wise optimizers such as LARS/LAMB, and careful momentum tuning can recover accuracy in some regimes, but require systematic experimentation at target scale. Organizations that skip these scaling studies waste thousands of GPU-hours on suboptimal runs.
 
 **Pitfall**: *Adding GPUs to data-parallel jobs without modeling communication.*
 

@@ -56,12 +56,14 @@ temporarily as standalone CLIs, but Binder-owned behavior should live in
 - `math --scope multiplier-style` -> `cli/checks/math_multiplier_style.py`
 - `code --scope lego-dead-code` -> `cli/checks/lego_dead_code.py`
 - `bib mechanical` -> `cli/core/bib_mechanical.py`
+- `bib hygiene/style` -> `cli/checks/bib_lint.py`
 - `clean artifacts` -> `cli/core/artifacts.py`
 
-**Still transitional:** `bib --scope hygiene` (importlib -> `bib_lint.py`),
-`bib update` (reviewed betterbib helper), several table/image scopes, spelling
-scopes, and `audit.checks.*` adapters. These work correctly through Binder but
-should move into `cli/checks/` or `cli/core/` over time.
+**Still transitional:** `bib update` (reviewed betterbib helper), several
+table/image scopes, spelling scopes, and `audit.checks.*` adapters. Bib
+publication scopes such as `bib --scope hygiene`, `bib --scope style`,
+`bib --scope integrity`, `bib --scope orphans`, and `bib --scope key-content`
+run through Binder and emit `ValidationIssue` records directly.
 
 ## Script Ownership Rules
 
@@ -168,6 +170,31 @@ All validation lives in `validate.py`. Each check belongs to a **group** and has
 `./binder check` (no args) prints the full group catalogue. Scopes marked with `*` are `default=False` — opt-in only, reachable via `--scope` or `--all-scopes`. Per-group help (`./binder check <group> help`) prints the same catalogue with one row per scope, plus the runner method name and a one-line note.
 
 The authoritative list is the `GROUPS` dict in `book/cli/commands/validate.py`. That dict is the only place a new scope needs to be wired; pre-commit, CI, and ad-hoc invocations all read from it.
+
+#### Bibliography checks
+
+Bibliography publication gates belong under `./binder check bib`, not under
+table/prose/image hooks and not in standalone scripts. The curated bib set runs:
+
+- `hygiene`: §5 BibTeX schema and MIT Press field hygiene.
+- `style`: baseline-ratcheted metadata warnings/info, including suspicious
+  title case, initials-only authors, missing journal volumes, acronym-only
+  venues, and non-canonical publishers.
+- `integrity`: every book citation resolves in the bibliography used for that
+  volume; cross-volume leaks fail even if the key exists elsewhere.
+
+Opt-in bib cleanup scopes are:
+
+- `orphans`: unused volume BibTeX entries; each finding says remove, cite, or
+  document as canonical background.
+- `key-content`: citekey author/year drift; each finding says whether to rename
+  the key/update citations or correct the entry body/year.
+
+The pre-commit hook triggers on `book/quarto/contents/**/*.qmd` and `.bib`
+changes because citation integrity depends on both prose and bibliography
+source. `hygiene` and `style` use reviewed baselines under `book/tools/` so
+known debt is documented but new debt fails. Use `./binder check bib --json`
+for LLM-actionable output.
 
 #### Default vs. opt-in: the contract
 

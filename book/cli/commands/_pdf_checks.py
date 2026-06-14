@@ -1,9 +1,10 @@
 """PDF post-build verification used by `binder build pdf` and `binder check pdf`.
 
 Scans rendered PDF text (via ``pdftotext``) for defects Quarto/LuaLaTeX can
-emit without failing the render: unresolved cross-refs (``?@sec-foo``),
-undefined LaTeX references (``Figure ??``), leaked Python tracebacks, and
-matplotlib/Python ``UserWarning`` text that escaped into the rendered output.
+emit without failing the render: unresolved cross-refs (``?@sec-foo``), literal
+unrendered cross-refs (``@sec-foo``), undefined LaTeX references
+(``Figure ??``), leaked Python tracebacks, and matplotlib/Python
+``UserWarning`` text that escaped into the rendered output.
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ PDF_BY_VOLUME = {
     "vol2": "Machine-Learning-Systems-Vol2.pdf",
 }
 
-RESIDUAL_XREF = re.compile(r"\?@((?:sec|fig|tbl|eq|lst)-[\w.-]+)")
+XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|alg)"
+RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
+BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
 LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
 PYTHON_LEAK = re.compile(
     r"(?:Traceback \(most recent call last\)|"
@@ -106,6 +109,16 @@ def scan_pdf_text(pdf_path: Path) -> list[PdfIssue]:
             PdfIssue(
                 code="unresolved-crossref",
                 message=f"?@{slug} appears in PDF text (Quarto cross-ref did not resolve)",
+                count=count,
+            )
+        )
+
+    bare_xref_counts = Counter(m.group(1) for m in BARE_XREF.finditer(body))
+    for slug, count in sorted(bare_xref_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="literal-crossref",
+                message=f"@{slug} appears in PDF text (Quarto cross-ref rendered literally)",
                 count=count,
             )
         )
@@ -325,8 +338,13 @@ def verify_volume_pdf(
         ),
         PdfCheckItem(
             "unresolved-crossref",
-            "No ?@sec/fig/tbl/eq/lst literals in PDF text",
+            "No ?@sec/fig/tbl/eq/lst/alg literals in PDF text",
             not any(i.code == "unresolved-crossref" for i in issues),
+        ),
+        PdfCheckItem(
+            "literal-crossref",
+            "No bare @sec/fig/tbl/eq/lst/alg literals in PDF text",
+            not any(i.code == "literal-crossref" for i in issues),
         ),
         PdfCheckItem(
             "undefined-latex-ref",

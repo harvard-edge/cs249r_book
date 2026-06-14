@@ -7,7 +7,7 @@ Subcommands:
     clean    — Remove unused entries from .bib files
     update   — Run betterbib sync-preserve on .bib files (fetch metadata, keep citekeys stable)
     sync     — Clean then update (full pipeline)
-    normalize — Full-tree: same 3 steps as pre-commit (mechanical → tidy → bib_lint check)
+    normalize — Full-tree: same 3 steps as pre-commit (mechanical → tidy → binder bib check)
 """
 
 import argparse
@@ -56,8 +56,8 @@ class BibCommand:
         )
         parser.add_argument("files", nargs="*", help=".bib file(s) for mechanical fixes")
         parser.add_argument("--path", default=None, help="File or directory")
-        parser.add_argument("--vol1", action="store_true", help="Volume I only")
-        parser.add_argument("--vol2", action="store_true", help="Volume II only")
+        parser.add_argument("--vol1", action="store_true", help="Legacy alias for the shared book bibliography")
+        parser.add_argument("--vol2", action="store_true", help="Legacy alias for the shared book bibliography")
         parser.add_argument(
             "--dry-run",
             action="store_true",
@@ -132,20 +132,20 @@ class BibCommand:
         table.add_row("sync", "Clean then update (full pipeline)")
         table.add_row(
             "normalize",
-            "§5 mechanical fixes + bibtex-tidy + bib_lint (aligns with pre-commit)",
+            "§5 mechanical fixes + bibtex-tidy + binder check bib",
         )
         console.print(Panel(table, title="binder bib <subcommand>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
-        console.print("  [cyan]./binder bib list --vol1[/cyan]")
+        console.print("  [cyan]./binder bib list --path book/quarto/contents/references.bib[/cyan]")
         console.print("  [cyan]./binder bib mechanical refs.bib[/cyan]")
-        console.print("  [cyan]./binder bib clean --vol1 --dry-run[/cyan]")
-        console.print("  [cyan]./binder bib update --vol1[/cyan]")
-        console.print("  [cyan]./binder bib sync --vol1[/cyan]")
+        console.print("  [cyan]./binder bib clean --dry-run[/cyan]")
+        console.print("  [cyan]./binder bib update --path book/quarto/contents/references.bib[/cyan]")
+        console.print("  [cyan]./binder bib sync --dry-run[/cyan]")
         console.print(
             "  [cyan]./book/binder bib normalize[/cyan]   "
             "# all git-tracked .bib (run from repo root)"
         )
-        console.print("  [cyan]./book/binder bib normalize --vol1[/cyan]   # vol1 .bib only")
+        console.print("  [cyan]./book/binder bib normalize --path book/quarto/contents/references.bib[/cyan]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -157,10 +157,8 @@ class BibCommand:
             p = Path(path_arg)
             return p if p.is_absolute() else Path.cwd() / p
         base = self.config_manager.book_dir / "contents"
-        if vol1:
-            return base / "vol1"
-        if vol2:
-            return base / "vol2"
+        if vol1 or vol2:
+            return base
         return base
 
     # ------------------------------------------------------------------
@@ -324,7 +322,7 @@ class BibCommand:
                 "[yellow]⚠ Narrow scope:[/yellow] Only citations from QMD files "
                 f"under [cyan]{self._relative(root)}[/cyan] are visible.\n"
                 "  Entries cited by other chapters may appear unused. "
-                "Use [cyan]--vol1[/cyan] or [cyan]--vol2[/cyan] for safe cleaning.\n"
+                "Use the full [cyan]book/quarto/contents[/cyan] tree for safe cleaning.\n"
             )
 
         console.print(
@@ -397,7 +395,7 @@ class BibCommand:
         bib_path.write_text(cleaned.strip() + "\n", encoding="utf-8")
 
     # ------------------------------------------------------------------
-    # Normalize (mechanical fixes + pre-commit tidy + bib_lint check)
+    # Normalize (mechanical fixes + pre-commit tidy + binder check bib)
     # ------------------------------------------------------------------
 
     def _run_normalize(self, scoped: bool, root: Path) -> bool:
@@ -447,25 +445,28 @@ class BibCommand:
                 )
                 return False
 
-        blpy = repo / "book" / "tools" / "bib_lint.py"
+        binder = repo / "book" / "binder"
+        check_cmd = [sys.executable, str(binder), "check", "bib"]
+        if scoped:
+            check_cmd.extend(["--path", str(root)])
         console.print(
             "\n[bold]Step 3/3:[/bold] "
-            "[cyan]python3 book/tools/bib_lint.py --all --check[/cyan] "
-            "(same [bold]error[/bold] bar as the pre-commit [cyan]bib-lint[/cyan] hook)…\n"
+            "[cyan]./book/binder check bib[/cyan] "
+            "(same curated gate as the pre-commit [cyan]book-check-bib[/cyan] hook)…\n"
         )
         p2 = subprocess.run(
-            [sys.executable, str(blpy), "--all", "--check"],
+            check_cmd,
             cwd=str(repo),
         )
         if p2.returncode != 0:
             console.print(
-                "\n[red]bib_lint reported new errors. Fix or baseline per "
-                "book/tools/bib_lint_baseline.json.[/red]"
+                "\n[red]binder check bib reported new issues. Fix them or update "
+                "the appropriate reviewed baseline after accepting the debt.[/red]"
             )
         else:
             console.print(
-                "\n[green]Bib files match the tidy + hygiene checks "
-                "used in pre-commit (warnings are OK).[/green]"
+                "\n[green]Bib files match the tidy + curated bib checks "
+                "used in pre-commit.[/green]"
             )
         return p2.returncode == 0
 

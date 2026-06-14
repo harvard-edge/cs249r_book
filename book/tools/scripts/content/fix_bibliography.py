@@ -5,8 +5,8 @@ Adds publisher fields to @inproceedings and journal fields to @article
 entries based on known venue mappings.
 
 Usage:
-    python3 fix_bibliography.py --dry-run book/quarto/contents/vol1/backmatter/references.bib
-    python3 fix_bibliography.py book/quarto/contents/vol1/backmatter/references.bib
+    python3 fix_bibliography.py --dry-run book/quarto/contents/references.bib
+    python3 fix_bibliography.py book/quarto/contents/references.bib
 """
 import argparse
 import re

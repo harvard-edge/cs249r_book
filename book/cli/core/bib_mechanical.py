@@ -13,7 +13,7 @@ BOOK_DIR = Path(__file__).resolve().parents[2]
 if str(BOOK_DIR) not in sys.path:
     sys.path.insert(0, str(BOOK_DIR))
 
-from tools.bib_lint import (  # noqa: E402
+from cli.checks.bib_lint import (  # noqa: E402
     JOURNAL_ABBREV_PATTERNS,
     Field,
     format_entry,

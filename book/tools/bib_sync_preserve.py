@@ -40,17 +40,16 @@ if str(BOOK) not in sys.path:
     sys.path.insert(0, str(BOOK))
 
 from cli.core.bib_mechanical import apply_mechanical_fixes_to_file  # noqa: E402
-from tools.bib_lint import parse_bib  # noqa: E402
-from tools.bib_lint import format_entry  # noqa: E402
-from tools.bib_lint import validate_entry  # noqa: E402
+from cli.checks.bib_lint import parse_bib  # noqa: E402
+from cli.checks.bib_lint import format_entry  # noqa: E402
+from cli.checks.bib_lint import validate_entry  # noqa: E402
 
 
 TEXT_EXTS = {".qmd", ".tex", ".md", ".markdown", ".mkd"}
 CITE_KEY_CHARS = r"A-Za-z0-9_.:\-"
 VOLUME_CHUNK_SIZE = 40
 CHUNKED_BIBS = {
-    "book/quarto/contents/vol1/backmatter/references.bib",
-    "book/quarto/contents/vol2/backmatter/references.bib",
+    "book/quarto/contents/references.bib",
 }
 
 
@@ -572,9 +571,9 @@ def _run_bib_mechanical_fix(bib_path: Path) -> None:
 
 
 def _run_bib_lint_check(bib_path: Path) -> subprocess.CompletedProcess[str]:
-    script = REPO / "book" / "tools" / "bib_lint.py"
+    binder = REPO / "book" / "binder"
     return subprocess.run(
-        [sys.executable, str(script), str(bib_path), "--check"],
+        [sys.executable, str(binder), "check", "bib", "--path", str(bib_path), "--json"],
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -683,7 +682,8 @@ def sync_one(bib_path: Path, dry_run: bool = False) -> bool:
         lint = _run_bib_lint_check(bib_path)
         if lint.returncode != 0:
             raise RuntimeError(
-                "bib_lint failed:\n" + (lint.stderr.strip() or lint.stdout.strip() or "(no output)")
+                "binder check bib failed:\n"
+                + (lint.stderr.strip() or lint.stdout.strip() or "(no output)")
             )
     except Exception as exc:
         _rollback(backups)

@@ -131,7 +131,7 @@ The first signal is memory exhaustion, which occurs when model parameters, key-v
 
 [^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**\index{HBM3!bandwidth}: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tb_per_s_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation one major variable in inference cost-per-token.
 
-[^fn-dlrm-scale]: **DLRM (Deep Learning Recommendation Model)**\index{DLRM!scale}: Meta's 2019 reference architecture separates dense features—GPU-bound multilayer perceptrons (MLPs)—from sparse features (CPU-bound embedding lookups), creating a hybrid serving topology. Embedding tables can exceed 100 TB, making DLRM memory-capacity-bound rather than compute-bound and forcing distribution strategies fundamentally different from LLM model parallelism.
+[^fn-dlrm-scale]: **DLRM (Deep Learning Recommendation Model)**\index{DLRM!scale}: Meta's 2019 reference architecture separates dense features -- GPU-bound multilayer perceptrons (MLPs) -- from sparse features (CPU-bound embedding lookups), creating a hybrid serving topology [@naumov2019deep]. Production recommendation characterizations show why this structure matters for serving: embedding-heavy recommendation models create memory-access and capacity constraints that differ from dense CNN, RNN, or LLM inference [@gupta2020architectural].
 
 Beyond memory constraints, throughput limitations\index{Distributed Inference!throughput constraint} emerge when request volume exceeds single-machine capacity even with optimal batching. Consider a recommendation system serving 100,000 queries per second with a 10 ms latency budget. If single-machine throughput peaks at 10,000 QPS, no amount of optimization on that machine can satisfy demand. Horizontal scaling across multiple replicas becomes mandatory.
 
@@ -573,21 +573,21 @@ plt.close()
 
 ### The inference landscape: Beyond LLMs {#sec-inference-scale-inference-landscape-beyond-llms-9560}
 
-A common misconception frames inference at scale as synonymous with LLM serving. Large language models present distinctive challenges and attract attention, but they are only one part of production inference volume. Appropriate technique selection requires understanding the full inference landscape. In large consumer platforms, recommendation and ranking workloads\index{Recommendation System!request volume} can account for most inference requests; vision and image processing\index{Vision Models!request volume}, NLP and LLM workloads\index{LLM!request volume}, fraud detection, ads, and other classification tasks fill out the remainder. @Tbl-inference-landscape breaks down these model types, request volumes, and optimization challenges.
+A common misconception frames inference at scale as synonymous with LLM serving. Large language models present distinctive challenges and attract attention, but they are only one part of production inference. Appropriate technique selection requires understanding the full inference landscape. In large consumer platforms, recommendation and ranking workloads\index{Recommendation System!inference demand} can dominate AI inference cycles and capacity, even though they are not the only user-visible model class [@gupta2020architectural; @hazelwood2018]. Vision and image processing\index{Vision Models!inference demand}, NLP and LLM workloads\index{LLM!inference demand}, fraud detection, ads, and other classification tasks fill out the remainder. @Tbl-inference-landscape breaks down these model types qualitatively by serving pressure and optimization challenge.
 
-Recommendation systems often dominate high-volume consumer inference because they serve predictions for every user interaction. Every page load, scroll, or click triggers inference. A user browsing an e-commerce site might generate 100 recommendation requests in a single session. In contrast, LLM queries typically require explicit user action and occur less frequently.
+Recommendation systems often dominate high-volume consumer inference because they serve predictions for many user interactions. Every page load, scroll, or click can trigger ranking or retrieval inference. A user browsing an e-commerce site might generate many recommendation requests in a single session. In contrast, LLM queries typically require explicit user action and occur less frequently.
 
-The distribution has direct implications for technique selection. Recommendation systems have driven important production inference innovations: dynamic batching, embedding sharding, feature store architectures, and low-latency serving were all developed primarily for recommendation workloads. LLM-specific techniques like continuous batching and KV cache management address a narrower slice of production inference.
+The distribution has direct implications for technique selection. Recommendation systems have driven important production inference innovations: dynamic batching, embedding sharding, feature store architectures, and low-latency serving were all developed primarily for recommendation workloads [@naumov2019deep; @gupta2020architectural]. LLM-specific techniques like continuous batching and KV cache management address a different slice of production inference. Text-to-image systems such as DALL-E provide one multimodal model example [@ramesh2021zero], but multimodal serving volume and latency targets remain product-specific.
 
-| **Model Type**                   | **Request Volume** | **Latency Target** | **Key Challenge** |
-|:---------------------------------|:------------------:|:------------------:|:-----------------:|
-| **Recommendation**               | Very high (80–90%) |   &lt;10 ms P99    |  Embedding lookup |
-| **Vision (CNN)**                 |  Moderate (5–10%)  |     20–100 ms      |  Batch efficiency |
-| **LLM**                          |    Lower (1–5%)    |     100 ms–10s     |  Memory bandwidth |
-| **Speech/Audio**                 |       Lower        |     Real-time      | Sequential decode |
-| **Multimodal [@ramesh2021zero]** |      Growing       |       Varies       |  Cross-modal sync |
+| **Model Type**               |       **Serving Pressure**      | **Latency Target** |    **Key Challenge**     |
+|:-----------------------------|:-------------------------------:|:------------------:|:------------------------:|
+| **Recommendation/ranking**   | Very high in consumer platforms |   &lt;10 ms P99    |     Embedding lookup     |
+| **Vision (CNN)**             |        Workload-dependent       |     20--100 ms     |     Batch efficiency     |
+| **LLM**                      |      High cost per request      |    100 ms--10s     |     Memory bandwidth     |
+| **Speech/Audio**             |          Stream-driven          |     Real-time      |    Sequential decode     |
+| **Multimodal/text-to-image** |  Emerging and product-specific  |       Varies       | Cross-modal coordination |
 
-: **Production Inference Landscape**: Different model types have different volume, latency requirements, and optimization challenges. Technique selection must match the specific workload. {#tbl-inference-landscape}
+: **Production Inference Landscape**: Different model types create different serving pressure, latency requirements, and optimization challenges. The table is a qualitative workload map rather than a universal traffic-share distribution. Technique selection must match the specific workload. {#tbl-inference-landscape}
 
 ### The serving hierarchy {#sec-inference-scale-serving-hierarchy-fe8c}
 
@@ -732,7 +732,7 @@ Processing multiple requests together amortizes fixed costs (model loading, kern
 
 At scale, batching becomes more complex because different model architectures have distinct batching requirements. A strategy optimal for vision models may be catastrophic for LLMs, and techniques developed for recommendation systems may not apply to either.
 
-In large consumer platforms, recommendation systems can constitute the majority of inference requests, with vision, language, ranking, fraud, ads, and other classification workloads sharing the remainder. Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners may frequently encounter recommendation workloads first.
+In large consumer platforms, recommendation systems can constitute the majority of AI inference cycles or capacity pressure, with vision, language, ranking, fraud, ads, and other classification workloads sharing the remainder [@gupta2020architectural; @hazelwood2018]. Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners may frequently encounter recommendation workloads first.
 
 The taxonomy that follows matches batching strategies to model characteristics, providing quantitative analysis of when each approach applies and what performance to expect.
 
@@ -2214,7 +2214,7 @@ Under PagedAttention (Virtual Memory), the manager assigns a guest just 1 room. 
 
 :::
 
-PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts to KV cache management. Instead of contiguous allocation\index{Memory Allocation!contiguous}, the KV cache is divided into fixed-size pages (typically 16--256 tokens), and sequences are allocated pages on demand.
+PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts to KV cache management. Instead of contiguous allocation\index{Memory Allocation!contiguous}, the KV cache is divided into fixed-size pages, using 16-token blocks in the default vLLM configuration, and sequences are allocated pages on demand.
 
 @Fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
 
@@ -2852,7 +2852,7 @@ The dichotomy creates a scheduling challenge: prefill operations are long-runnin
 
 **Chunked prefill**\index{Chunked Prefill!latency}[^fn-chunked-prefill-latency] addresses this by breaking long prompts into fixed-size chunks that interleave with decode operations:
 
-[^fn-chunked-prefill-latency]: **Chunked Prefill**: Without chunking, a 32K-token prompt blocks decode for 5--30 seconds while prefill completes, violating inter-token latency SLOs for all concurrent users. Chunking divides the prompt into 256--1024 token segments processed between decode iterations, bounding worst-case decode stall at the cost of slightly longer total prefill time. The trade-off is a classic latency-vs.-throughput decision: interactive applications favor small chunks; batch workloads favor large ones.
+[^fn-chunked-prefill-latency]: **Chunked Prefill**: Without chunking, a long prompt can block decode while prefill completes, violating inter-token latency SLOs for concurrent users. Chunking divides the prompt into smaller work units processed between decode iterations, bounding decode stalls at the cost of slightly longer total prefill time. The trade-off is a classic latency-vs.-throughput decision: interactive applications favor smaller chunks; batch workloads can favor larger ones.
 
 $$\text{Chunk latency} = \frac{\text{Chunk size}}{\text{Prefill throughput}}$$
 
@@ -2865,27 +2865,27 @@ Prefill-decode disaggregation takes this separation further by running prefill a
 
 Independent scaling follows directly: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache (often megabytes of data) must be migrated to a decode node within the inter-token latency budget, typically under 10 ms. InfiniBand's low-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation, a displacement of overhead that trades communication bandwidth for specialized prefill and decode hardware.
 
-The Sarathi system formalizes chunked prefill into a practical scheduling algorithm that bounds decode latency regardless of incoming prompt length.
+The Sarathi-Serve system formalizes chunked prefill into a practical scheduling algorithm that limits decode stalls from long prompts.
 
 ::: {#exmp-inference-sarathi-chunked-prefill-implementation .callout-example title="Sarathi: Chunked prefill implementation"}
 
-The Sarathi system [@agrawal2025] implements chunked prefill with the following design:
+The Sarathi-Serve system [@agrawal2024sarathi] implements chunked prefills with stall-free scheduling:
 
-**Chunk sizing**\index{Chunked Prefill!chunk sizing}: Chunks are sized to complete in approximately the same time as one decode iteration (typically 10–50 ms). For a prefill throughput of 10,000 tokens/second, a 20 ms chunk processes 200 tokens.
+**Chunk sizing**\index{Chunked Prefill!chunk sizing}: Chunks are sized so prefill work can be interleaved with decode iterations. For example, if a deployment targets a 20 ms scheduling quantum and observes 10,000 prefill tokens/second, one chunk would process about 200 tokens. The right chunk size is workload- and hardware-dependent.
 
 **Interleaving schedule**\index{Chunked Prefill!interleaving schedule}: Each GPU iteration processes either:
 
 - One prefill chunk for a new request, OR
 - One decode step for all active sequences
 
-The schedule ensures decode latency remains bounded regardless of incoming prompt lengths.
+The schedule reduces decode stalls caused by long incoming prompts.
 
-**KV cache transfer**\index{KV Cache!transfer}: When prefill completes, the generated KV cache transfers to decode slots. With NVLink, this transfer adds <1 ms for typical prompt lengths.
+**KV-cache handoff**\index{KV Cache!handoff}: When a prefill chunk completes, the scheduler has enough KV state to continue the request through later decode work. In disaggregated prefill/decode systems, any physical KV-cache transfer is a separate networking and placement budget rather than a guarantee supplied by Sarathi-Serve itself.
 
 **Performance impact**:
 
-- Without chunking: Long prompts cause decode latency spikes of 100 ms+
-- With chunking: Decode latency bounded to 30 ms P99 regardless of prompt length
+- Without chunking: long prompts can create decode latency spikes for other active requests.
+- With chunking: prefill work is broken into bounded units, so decode iterations can continue to make progress while long prompts enter the system.
 
 **Systems insight**: Chunked prefill turns a long prompt from one blocking request into bounded work units that can coexist with decode traffic.
 
@@ -5871,7 +5871,7 @@ A DevOps team applies their standard web-server load balancing rules to a new fl
 
 **Fallacy**: *Inference at scale is synonymous with LLM serving.*
 
-The misconception, reinforced by LLM-centric discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems can constitute the majority of production inference at large consumer platforms, with vision, language, fraud, ads, and other models comprising the remainder. A practitioner who only understands continuous batching and KV cache management is unprepared for the feature-parallel batching and embedding sharding that dominate high-volume recommendation inference. Technique selection must match the actual workload.
+The misconception, reinforced by LLM-centric discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. In large consumer platforms, recommendation systems can constitute the majority of AI inference cycles or capacity pressure, with vision, language, fraud, ads, and other models comprising the remainder [@gupta2020architectural; @hazelwood2018]. A practitioner who only understands continuous batching and KV cache management is unprepared for the feature-parallel batching and embedding sharding that dominate high-volume recommendation inference. Technique selection must match the actual workload.
 
 **Pitfall**: *Using training infrastructure for production serving.*
 

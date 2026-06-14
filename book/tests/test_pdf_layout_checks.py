@@ -17,6 +17,7 @@ from book.cli.commands._pdf_checks import (
     PdfValidationResult,
     format_checklist,
     scan_build_log,
+    scan_pdf_text,
 )
 from book.cli.commands.layout import LayoutCommand
 from book.cli.commands.layout import PageReport
@@ -112,6 +113,40 @@ def test_checklist_renders_warning_section():
     assert "Warnings (non-blocking):" in out
     assert "⚠" in out
     assert "Issues:" not in out  # no error-level issues
+
+
+def test_pdf_text_scan_flags_bare_crossrefs(monkeypatch, tmp_path):
+    pdf = tmp_path / "artifact.pdf"
+    pdf.write_bytes(b"%PDF placeholder")
+    monkeypatch.setattr(
+        "book.cli.commands._pdf_checks._pdftotext",
+        lambda _: (
+            "Adversarial training is covered in @sec-robust-ai. "
+            "Decorators like @staticmethod, emails like a@b.com, and "
+            "explanatory @citekey text are not Quarto cross-refs."
+        ),
+    )
+
+    issues = scan_pdf_text(pdf)
+
+    literal = [i for i in issues if i.code == "literal-crossref"]
+    assert len(literal) == 1
+    assert "@sec-robust-ai" in literal[0].message
+    assert not [i for i in issues if i.code == "unresolved-crossref"]
+
+
+def test_pdf_text_scan_flags_question_mark_crossrefs_once(monkeypatch, tmp_path):
+    pdf = tmp_path / "artifact.pdf"
+    pdf.write_bytes(b"%PDF placeholder")
+    monkeypatch.setattr(
+        "book.cli.commands._pdf_checks._pdftotext",
+        lambda _: "Broken output shows ?@tbl-defense-selection-framework.",
+    )
+
+    issues = scan_pdf_text(pdf)
+
+    assert len([i for i in issues if i.code == "unresolved-crossref"]) == 1
+    assert not [i for i in issues if i.code == "literal-crossref"]
 
 
 # --------------------------------------------------------------------------

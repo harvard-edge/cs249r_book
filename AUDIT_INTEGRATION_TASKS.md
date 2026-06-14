@@ -775,7 +775,7 @@ Tasks advanced in this batch:
 
 Focused checks run before commit:
 
-- `./book/binder check bib --path book/quarto/contents/vol1/backmatter/references.bib`
+- `./book/binder check bib --path book/quarto/contents/references.bib`
 - `./book/binder check refs --scope inline --path book/quarto/contents/vol1/backmatter/appendix_machine.qmd`
 - `./book/binder check footnotes --path book/quarto/contents/vol1/backmatter/appendix_machine.qmd`
 - XML parse of all five touched SVGs.
