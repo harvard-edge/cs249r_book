@@ -411,6 +411,14 @@ class ValidateCommand:
             # key-content fails on dev (legacy keys grandfathered).
             # Was never wired to pre-commit; default=False preserves status quo.
             Scope("key-content", "_run_bib_key_content", default=False),
+            # key-year: ERRORS-ONLY subset of key-content (key year vs entry year,
+            # >1yr gap = silent citation corruption). Gated at pre-commit; the
+            # surname WARNINGS (intentional project-name keys) stay opt-in above.
+            Scope("key-year", "_run_bib_key_year",
+                  note="key year must match entry year (errors-only; pre-commit gate)"),
+            # duplicate-keys: two entries sharing a citekey -> ambiguous citation.
+            Scope("duplicate-keys", "_run_bib_duplicate_keys",
+                  note="every citekey must be unique across the bibliography"),
         ],
         "footnotes": [
             Scope(
@@ -8983,9 +8991,12 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_bib_key_content(self, root: Path) -> ValidationRunResult:
+    def _run_bib_key_content(self, root: Path, errors_only: bool = False) -> ValidationRunResult:
         """Verify bib key surname/year tokens match the entry's actual
-        author and year fields.
+        author and year fields. With errors_only=True, emit only the
+        year-mismatch ERRORs (skip surname-mismatch WARNINGs) so the
+        key-year scope can gate pre-commit without the intentional
+        project-name-key warnings blocking every commit.
 
         The bib **key** is a contract: `surname[firstauthor]year[topicword]`.
         When the key drifts from the entry body, citing the key in prose
@@ -9158,7 +9169,7 @@ class ValidateCommand:
 
                 surnames = author_list_surnames(author)
 
-                if surnames:
+                if surnames and not errors_only:
                     # Bidirectional prefix match: tolerates both
                     # `boroumandasplos2018` (key longer than surname,
                     # appended venue) AND `hebert2018multicalibration`
@@ -9229,6 +9240,72 @@ class ValidateCommand:
         return ValidationRunResult(
             name="bib-key-content",
             description="Bib key prefix must match author surname + year (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_key_year(self, root: Path) -> ValidationRunResult:
+        """Errors-only subset of key-content: key year vs entry year (>1yr gap).
+        Pre-commit gate for the silent-citation-corruption class; the
+        surname-mismatch warnings stay in the opt-in key-content scope."""
+        res = self._run_bib_key_content(root, errors_only=True)
+        return ValidationRunResult(
+            name="bib-key-year",
+            description="Bib key year must match entry year (errors-only gate, §5)",
+            files_checked=res.files_checked,
+            issues=res.issues,
+            elapsed_ms=res.elapsed_ms,
+        )
+
+    def _run_bib_duplicate_keys(self, root: Path) -> ValidationRunResult:
+        """Every citekey must be unique. Two entries sharing a key make every
+        `[@key]` citation resolve to whichever entry the parser keeps — silent
+        ambiguity that no other check catches (bibtex-tidy only warns)."""
+        t0 = time.time()
+        bib_files = self._bib_files(root)
+        issues: List[ValidationIssue] = []
+        header_re = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = self._relative_file(bib_path)
+            except ValueError:
+                rel = str(bib_path)
+            seen: Dict[str, int] = {}
+            for hm in header_re.finditer(text):
+                etype = hm.group(1).lower()
+                if etype in ("comment", "string", "preamble"):
+                    continue
+                key = hm.group(2)
+                line_no = text[:hm.start()].count("\n") + 1
+                if key in seen:
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=line_no,
+                        code="bib_duplicate_key",
+                        message=(
+                            f"Duplicate citekey @{key} (first defined at line "
+                            f"{seen[key]}). Every [@{key}] citation resolves "
+                            f"ambiguously to one of the two entries. Rename one "
+                            f"key to be unique and update its citations."
+                        ),
+                        severity="error",
+                        context=f"@{etype}{{{key},",
+                        suggestion=(
+                            f"Give the second entry a distinct key (e.g. @{key}b "
+                            f"or @{key}web) and repoint the prose cites that "
+                            f"belong to it."
+                        ),
+                    ))
+                else:
+                    seen[key] = line_no
+        return ValidationRunResult(
+            name="bib-duplicate-keys",
+            description="Every citekey must be unique across the bibliography",
             files_checked=len(bib_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
