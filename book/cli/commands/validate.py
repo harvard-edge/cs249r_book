@@ -419,6 +419,10 @@ class ValidateCommand:
             # duplicate-keys: two entries sharing a citekey -> ambiguous citation.
             Scope("duplicate-keys", "_run_bib_duplicate_keys",
                   note="every citekey must be unique across the bibliography"),
+            # links: every doi/url field must resolve (MIT Press "confirm all
+            # URLs"). Network-bound -> opt-in, not a pre-commit gate.
+            Scope("links", "_run_bib_links", default=False,
+                  note="DOI/URL liveness: every locator resolves (network; opt-in)"),
         ],
         "footnotes": [
             Scope(
@@ -9306,6 +9310,104 @@ class ValidateCommand:
         return ValidationRunResult(
             name="bib-duplicate-keys",
             description="Every citekey must be unique across the bibliography",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_links(self, root: Path) -> ValidationRunResult:
+        """DOI/URL liveness for the shared bibliography (MIT Press: confirm all
+        URLs). Network-bound and opt-in. 404/410/DNS = error (dead locator);
+        403/401 = warning (bot-block, ambiguous); 2xx/3xx = pass. DOIs are
+        checked via https://doi.org/<doi>."""
+        import ssl, urllib.request, urllib.error, urllib.parse
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        t0 = time.time()
+        ua = "MLSysBook-binder-bibcheck/1.0 (mailto:jvijay@gmail.com)"
+        ctx = ssl.create_default_context()
+        field_re = re.compile(r"\b(doi|url)\s*=\s*\{([^{}]*)\}", re.I)
+        header_re = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
+
+        def resolve(u):
+            for method in ("HEAD", "GET"):
+                try:
+                    r = urllib.request.urlopen(urllib.request.Request(
+                        u, method=method, headers={"User-Agent": ua}), timeout=25, context=ctx)
+                    return r.status, None
+                except urllib.error.HTTPError as e:
+                    if e.code in (403, 401, 405, 400, 501) and method == "HEAD":
+                        continue
+                    return e.code, None
+                except Exception as e:
+                    if method == "GET":
+                        return None, type(e).__name__
+            return None, "error"
+
+        # collect (key, line, kind, target_url) for the shared book bib only
+        targets = []
+        shared = root / "book" / "quarto" / "contents" / "references.bib"
+        bib_files = [shared] if shared.exists() else self._bib_files(root)
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = self._relative_file(bib_path)
+            except ValueError:
+                rel = str(bib_path)
+            # map each entry's char span to (key, line)
+            entries = [(m.group(2), text[:m.start()].count("\n") + 1, m.start())
+                       for m in header_re.finditer(text)]
+            for fm in field_re.finditer(text):
+                kind = fm.group(1).lower()
+                val = fm.group(2).strip()
+                if not val:
+                    continue
+                url = ("https://doi.org/" + re.sub(r"^https?://(dx\.)?doi\.org/", "", val, flags=re.I)
+                       if kind == "doi" else val)
+                pos = fm.start()
+                key, line = "?", text[:pos].count("\n") + 1
+                for k, ln, st in entries:
+                    if st <= pos:
+                        key, line = k, ln
+                    else:
+                        break
+                targets.append((rel, key, line, kind, url))
+
+        issues: List[ValidationIssue] = []
+        def check(t):
+            rel, key, line, kind, url = t
+            st, err = resolve(url)
+            return (rel, key, line, kind, url, st, err)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for fut in as_completed({ex.submit(check, t): t for t in targets}):
+                rel, key, line, kind, url, st, err = fut.result()
+                # Only a definitive HTTP 404/410 is "dead" (error). A timeout,
+                # DNS failure, 5xx, or 403/401 means "could not confirm" — a
+                # warning to check by hand, not proof the locator is dead.
+                if st in (404, 410):
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_dead_locator",
+                        message=(f"@{key} {kind} is dead ({st}): {url[:90]}"),
+                        severity="error", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Replace with a resolving DOI/URL or the canonical source page."))
+                elif st in (403, 401):
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_locator_forbidden",
+                        message=(f"@{key} {kind} returned {st} (bot-block; verify by hand): {url[:80]}"),
+                        severity="warning", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Likely a real page that blocks automated requests; confirm in a browser."))
+                elif err is not None or st is None or st >= 500:
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_locator_unconfirmed",
+                        message=(f"@{key} {kind} could not be confirmed ({err or st}): {url[:80]}"),
+                        severity="warning", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Timeout/DNS/5xx — slow or transient; confirm in a browser."))
+        issues.sort(key=lambda i: (i.file, i.line))
+        return ValidationRunResult(
+            name="bib-links",
+            description="DOI/URL liveness (MIT Press: confirm all URLs)",
             files_checked=len(bib_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
