@@ -24,7 +24,7 @@ from .reset import ModuleResetCommand
 from .test import ModuleTestCommand
 from ...core.exceptions import ModuleNotFoundError
 from ...core import auth
-from ...core.submission import SubmissionHandler
+from ...core.submission import SubmissionHandler, auto_sync_after_completion
 from ...core.modules import (
     get_module_mapping,
     get_module_name,
@@ -839,28 +839,20 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def _trigger_submission(self):
-        """Asks the user to submit their progress if they are logged in.
+        """Offer to sync progress after a module completes.
 
-        In CI mode (non-interactive), skips the prompt entirely.
+        Delegates the whole "should we sync, and should we prompt" decision to
+        the shared :func:`auto_sync_after_completion` helper so module, milestone,
+        and login paths stay consistent. In particular, this no longer skips the
+        sync on a non-TTY shell (Git Bash / IDE terminals) -- that silent skip
+        was the cause of dashboards never updating (#1849).
         """
-        # Skip interactive prompts in CI/non-interactive mode
-        # Check for common CI environment indicators
-        if os.environ.get('CI') or os.environ.get('GITHUB_ACTIONS') or not sys.stdin.isatty():
-            return
-
         self.console.print()  # Add a blank line for spacing
-
-        if auth.is_logged_in():
-            should_submit = Confirm.ask(
-                "[bold yellow]Would you like to sync your progress with the TinyTorch website?[/bold yellow]",
-                default=True
-            )
-            if should_submit:
-                handler = SubmissionHandler(self.config, self.console)
-                total_modules = len(get_module_mapping())
-                handler.sync_progress(total_modules=total_modules)
-        else:
-            self.console.print("[dim]💡 Run 'tito login' to enable automatic progress syncing![/dim]")
+        auto_sync_after_completion(
+            self.config,
+            self.console,
+            total_modules=len(get_module_mapping()),
+        )
 
 
     def run_module_tests(self, module_name: str, verbose: bool = True) -> int:

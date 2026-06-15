@@ -1519,47 +1519,22 @@ class MilestoneCommand(BaseCommand):
             pass
 
     def _offer_progress_sync(self, milestone_id: str, milestone_name: str) -> None:
+        """Offer to sync progress after milestone completion.
+
+        Delegates to the shared :func:`auto_sync_after_completion` helper so the
+        CI / interactivity / logged-in rules match the module-completion path.
+        Crucially, this no longer skips the sync on a non-TTY shell (Git Bash /
+        IDE terminals) -- that silent skip left progress unsynced (#1849).
         """
-        Offer to sync progress after milestone completion.
-        Uses the centralized SubmissionHandler for all progress syncing.
-        """
-        from ..core import auth
-        from ..core.submission import SubmissionHandler
-        from rich.prompt import Confirm
+        from ..core.submission import auto_sync_after_completion
 
-        console = self.console
-
-        # Check if user is logged in
-        if auth.is_logged_in():
-            console.print()
-            # Only prompt in interactive terminal (skip in CI/pipes)
-            import sys
-            if sys.stdin.isatty() and sys.stdout.isatty():
-                try:
-                    should_sync = Confirm.ask(
-                        f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
-                        default=True
-                    )
-                except EOFError:
-                    # Non-interactive mode - skip sync prompt
-                    should_sync = False
-            else:
-                # Non-interactive mode (CI, pipes, etc.) - skip sync
-                should_sync = False
-
-            if should_sync:
-                try:
-                    # Use the centralized SubmissionHandler
-                    handler = SubmissionHandler(self.config, console)
-
-                    # Sync progress (includes modules and milestones)
-                    # The handler reads from both progress.json and .tito/milestones.json
-                    handler.sync_progress()
-
-                    console.print(f"[green]✅ Milestone {milestone_id} synced to your profile![/green]")
-                except Exception as e:
-                    console.print(f"[yellow]⚠️ Could not sync: {e}[/yellow]")
-                    console.print("[dim]Your progress is saved locally and will sync next time.[/dim]")
-        else:
-            console.print()
-            console.print("[dim]💡 Run 'tito login' to sync your achievements to the leaderboard![/dim]")
+        self.console.print()
+        try:
+            auto_sync_after_completion(
+                self.config,
+                self.console,
+                prompt="Sync this achievement to your profile?",
+            )
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Could not sync: {e}[/yellow]")
+            self.console.print("[dim]Your progress is saved locally and will sync next time.[/dim]")
