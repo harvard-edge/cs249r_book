@@ -13,6 +13,8 @@ from .base import BaseCommand
 from .login import LoginCommand, LogoutCommand
 from ..core import auth
 from ..core.browser import open_url
+from ..core.modules import get_module_mapping
+from ..core.submission import SubmissionHandler
 
 # Community URLs
 URL_COMMUNITY_MAP = "https://mlsysbook.ai/tinytorch/community/community.html"
@@ -70,6 +72,12 @@ class CommunityCommand(BaseCommand):
             help='Open global community map'
         )
 
+        # Sync command
+        subparsers.add_parser(
+            'sync',
+            help='Upload your local progress to the TinyTorch website'
+        )
+
     def _show_status(self) -> int:
         """Show detailed auth status display."""
         is_logged_in = auth.is_logged_in()
@@ -102,10 +110,25 @@ class CommunityCommand(BaseCommand):
             ))
         return 0
 
+    def _sync(self) -> int:
+        """Upload local progress on demand.
+
+        This is the explicit recovery path: a student who completed modules
+        before logging in, or whose automatic sync was skipped, can run
+        'tito community sync' to push their current progress.json at any time.
+        """
+        if not auth.is_logged_in():
+            self.console.print("[yellow]You are not logged in.[/yellow] Run [bold green]tito login[/bold green] first, then sync.")
+            return 1
+
+        handler = SubmissionHandler(self.config, self.console)
+        result = handler.sync_progress(total_modules=len(get_module_mapping()))
+        return 0 if result.ok else 1
+
     def run(self, args: Namespace) -> int:
         """Execute community command."""
         if not args.community_command:
-            self.console.print("[yellow]Please specify a community command: login, logout, profile, status, map[/yellow]")
+            self.console.print("[yellow]Please specify a community command: login, logout, profile, status, sync, map[/yellow]")
             return 1
 
         if args.community_command == 'login':
@@ -122,6 +145,8 @@ class CommunityCommand(BaseCommand):
             return 0
         elif args.community_command == 'status':
             return self._show_status()
+        elif args.community_command == 'sync':
+            return self._sync()
         else:
             self.console.print(f"[red]❌ Unknown community command: {args.community_command}[/red]")
             return 1
