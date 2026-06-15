@@ -9050,6 +9050,17 @@ class ValidateCommand:
             "agency", "bureau", "commission", "service", "services",
         }
 
+        # Standards/specification keys are `body + standard-number + year +
+        # topic` (e.g. iso140402006lca, isoiec420012023ai, ieee8021ar2018), so
+        # the surname-year convention regex grabs the *standard number* as the
+        # "year" (iso14040 -> "1404"). These are not personal surname-year keys;
+        # skip them entirely. (added 2026-06-15 after the references.bib
+        # validation pass false-flagged the ISO/IEC/IEEE standards entries.)
+        STANDARDS_KEY_PREFIXES = {
+            "iso", "iec", "isoiec", "ieee", "ansi", "etsi", "itu", "ituT",
+            "rfc", "nist", "jedec", "gsma", "omg", "din", "fips", "w3c", "ietf",
+        }
+
         def author_list_surnames(author_field: str) -> List[str]:
             if not author_field:
                 return []
@@ -9130,6 +9141,11 @@ class ValidateCommand:
                     continue
                 key_surname = cm.group(1)
                 key_year = cm.group(2)
+
+                # Standards/spec keys are not surname-year keys (the regex
+                # mis-reads the standard number as a year). Skip them.
+                if key_surname in STANDARDS_KEY_PREFIXES:
+                    continue
 
                 fields: Dict[str, str] = {}
                 for fm in field_re.finditer(body):
