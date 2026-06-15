@@ -9335,7 +9335,10 @@ class ValidateCommand:
                         u, method=method, headers={"User-Agent": ua}), timeout=25, context=ctx)
                     return r.status, None
                 except urllib.error.HTTPError as e:
-                    if e.code in (403, 401, 405, 400, 501) and method == "HEAD":
+                    # Many servers (and doi.org for some DataCite DOIs, e.g.
+                    # NIST) answer HEAD with 404/403/405 but GET with 200.
+                    # Retry GET before trusting a HEAD failure.
+                    if e.code in (403, 401, 405, 400, 404, 410, 501) and method == "HEAD":
                         continue
                     return e.code, None
                 except Exception as e:
