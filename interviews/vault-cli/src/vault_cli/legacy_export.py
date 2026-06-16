@@ -18,10 +18,9 @@ from __future__ import annotations
 import json
 from datetime import UTC
 from pathlib import Path
-
-from vault_cli.book_refs import BookRefResolver
 from typing import Any
 
+from vault_cli.book_refs import BookRefResolver
 from vault_cli.loader import LoadedQuestion
 from vault_cli.policy import filter_questions, load_policy
 
