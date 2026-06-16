@@ -97,7 +97,7 @@ class DevExportCommand(BaseCommand):
         cwd = Path.cwd()
         is_tinytorch_root = (
             (cwd / "tinytorch" / "__init__.py").exists() or  # Running from repo root
-            (cwd / "src").exists() and (cwd / "settings.ini").exists()  # Already in tinytorch/
+            (cwd / "src").exists() and (cwd / "pyproject.toml").exists()  # Already in tinytorch/
         )
         if not is_tinytorch_root:
             console.print(Panel(
@@ -107,7 +107,7 @@ class DevExportCommand(BaseCommand):
                 "[dim]  ├── src/[/dim]\n"
                 "[dim]  ├── tinytorch/      ← package exports here[/dim]\n"
                 "[dim]  │   └── __init__.py[/dim]\n"
-                "[dim]  └── settings.ini[/dim]",
+                "[dim]  └── pyproject.toml[/dim]",
                 title="Wrong Directory", border_style="red"
             ))
             return 1
@@ -255,8 +255,7 @@ class DevExportCommand(BaseCommand):
     def _run_nbdev_export(self, notebook_paths: list, console) -> int:
         """Run nbdev_export on the given notebooks using Python API directly.
         
-        Uses nbdev.export.nb_export() instead of subprocess to ensure
-        settings.ini is read correctly regardless of environment.
+        Uses nbdev.export.nb_export() directly (more reliable than subprocess).
         """
         from nbdev.export import nb_export
         success_count = 0
