@@ -264,13 +264,7 @@ Each rung of the scaling path inherits the previous one's challenges. Single-GPU
 
 [^fn-nccl-topology]: **NCCL (NVIDIA Collective Communications Library)**\index{NCCL!topology}: NCCL provides topology-aware inter-GPU collective communication primitives, including AllReduce, across PCIe, NVLink, InfiniBand, and IP networks. Current NCCL deployments expose ring, tree, and related algorithm families through runtime selection and tuning controls, so training frameworks can avoid naive mappings that route all traffic through the slowest inter-node path [@jeaugey2017nccl; @nvidiaNcclUserGuide].
 
-The leap to multi-node training adds network communication overhead, fault tolerance requirements, and cluster orchestration. Because each stage compounds the previous one's bottlenecks, single-GPU performance must be optimized before scaling out, so inefficiency does not multiply across the fleet.
-
-::: {#psp-distributed-training-distributed-training-complexity .callout-perspective title="Distributed training complexity"}
-
-Although distributed-training frameworks abstract away much of the complexity through sharded data parallelism and communication libraries, implementing distributed training efficiently remains a significant engineering challenge. Large deployments require careful network configuration (InfiniBand tuning, topology-aware routing), infrastructure management through cluster schedulers, and debugging of nonlocal issues such as synchronization hangs and communication bottlenecks.
-
-:::
+The leap to multi-node training adds network communication overhead, fault tolerance requirements, and cluster orchestration. Because each stage compounds the previous one's bottlenecks, single-GPU performance must be optimized before scaling out, so inefficiency does not multiply across the fleet. Although frameworks abstract away much of this through sharded data parallelism and communication libraries, implementing distributed training efficiently still demands careful network configuration (InfiniBand tuning, topology-aware routing), infrastructure management through cluster schedulers, and debugging of nonlocal issues such as synchronization hangs and communication bottlenecks.
 
 Despite this complexity, the core workflow is mechanically straightforward; the engineering challenge is making it fast and reliable at scale. The recurring cost is the gradient synchronization that aggregates results across devices, an overhead that compounds as systems scale, as @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488 quantifies.
 
@@ -984,18 +978,7 @@ ZeRO-2 additionally shards gradients. Instead of AllReduce, which leaves full gr
 
 ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded. This achieves maximum memory efficiency at the cost of additional communication that FSDP introduces relative to standard DDP.
 
-::: {#nbk-distributed-training-fsdp-communication-analysis .callout-notebook title="FSDP communication analysis"}
-
-FSDP introduces communication on the critical path that DDP avoids:
-
-- **Forward pass**: AllGather to reconstruct parameters ($M_{\text{layer}}$ bytes for each layer)
-- **Backward pass**: If parameters are resharded after the forward pass, a second AllGather reconstructs them for backward computation ($M_{\text{layer}}$ bytes), followed by ReduceScatter for gradients ($M_{\text{layer}}$ bytes).
-
-For a model with $N_L$ layers, full-shard FSDP with resharding performs about $3N_L$ collective operations per training step vs. 1 AllReduce for DDP. However, FSDP enables overlapping: while layer $i$ computes, layer $i+1$ can prefetch parameters.
-
-Total FSDP communication volume: approximately $3M_{\text{state}}$ bytes (vs. $2M_{\text{state}}$ for DDP AllReduce), but spread across more operations with overlap opportunities.
-
-:::
+This sharding places communication on the critical path that DDP avoids. The forward pass needs an AllGather to reconstruct each layer's parameters ($M_{\text{layer}}$ bytes); the backward pass needs a second AllGather to reconstruct them when parameters are resharded after the forward pass ($M_{\text{layer}}$ bytes), followed by a ReduceScatter for gradients ($M_{\text{layer}}$ bytes). For a model with $N_L$ layers, full-shard FSDP with resharding therefore performs about $3N_L$ collective operations per training step against the single AllReduce that DDP needs, raising total communication volume to roughly $3M_{\text{state}}$ bytes versus $2M_{\text{state}}$ for DDP. The collectives are spread across more operations with overlap opportunities, however: while layer $i$ computes, layer $i+1$ can prefetch its parameters.
 
 The choice between FSDP and DDP depends on model size and memory constraints. When the model fits in GPU memory with room for activations, DDP usually wins because it avoids the repeated AllGather work. As memory pressure rises, ZeRO-2 becomes attractive because it shards gradients and optimizer state while leaving parameters replicated; once parameters themselves exceed single-GPU memory, ZeRO-3/FSDP becomes necessary even though it puts AllGather on the critical path. For training 70B+ models on `{python} DistTrainA100Memory.a100_mem_gb_str`, FSDP typically has to combine with tensor parallelism rather than replace it.
 
