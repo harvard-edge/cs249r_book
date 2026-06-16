@@ -1389,10 +1389,12 @@ class SumBackward(Function):
         tensor, = self.saved_tensors
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # For axis-reduced sums, expand grad_output back along the summed
-            # axis before broadcasting, so each row/column gets its own gradient.
+            # Expand dims one at a time in sorted order so each insertion is
+            # relative to the correct growing shape (safe for tuple axes).
             if self.axis is not None and not self.keepdims:
-                grad_output = np.expand_dims(grad_output, axis=self.axis)
+                axes = (self.axis,) if isinstance(self.axis, int) else tuple(sorted(self.axis))
+                for ax in axes:
+                    grad_output = np.expand_dims(grad_output, axis=ax)
             return np.ones_like(tensor.data) * grad_output,
         return None,
         ### END SOLUTION
