@@ -43,8 +43,19 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ show }}>
       {children}
-      {/* Toast container */}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+      {/* Toast container.
+          Polite live region so screen readers announce toasts (badge unlocks,
+          streaks, success messages) as they appear. aria-atomic="false" means
+          only the newly-inserted toast is read, not the whole stack re-read on
+          every change. The container is always mounted; toasts are inserted as
+          children, which is the reliable way for additions to be announced. */}
+      <div
+        role="region"
+        aria-label="Notifications"
+        aria-live="polite"
+        aria-atomic="false"
+        className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm"
+      >
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div
@@ -70,10 +81,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => dismiss(toast.id)}
+                aria-label="Dismiss notification"
                 className="text-textTertiary hover:text-textPrimary transition-colors shrink-0"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               </button>
             </motion.div>
           ))}
