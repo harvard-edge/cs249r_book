@@ -999,13 +999,7 @@ class ResNetServingSpectrum:
     tiny_energy_mj_str = fmt_energy(tiny_energy, unit=mJ, precision=0, commas=False)
 ```
 
-::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
-
 The same ResNet-50 architecture requires dramatically different serving strategies across deployment contexts. @Tbl-resnet-serving-spectrum compares the three tiers side by side: cloud serving runs the full FP16 engine at millisecond latency on a data center GPU; mobile serving compresses to INT8 and dispatches to an NPU at a fraction of the energy; TinyML cannot run ResNet-50 at all and instead serves a downsized MobileNetV2 in kilobytes of SRAM.
-
-**Systems insight**: The "same model" claim is misleading: each deployment requires different optimization and often different architectures entirely. TinyML serving cannot use ResNet-50; it requires architectures designed for the constraints from the start.
-
-:::
 
 | **Dimension**           |                                  **`{python} ResNetServingSpectrum.cloud_name_str`**                                   |                                       **`{python} ResNetServingSpectrum.mobile_name_str`**                                       |                                                    **`{python} ResNetServingSpectrum.tiny_name_str`**                                                    |
 |:------------------------|:----------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------:|
@@ -1016,6 +1010,12 @@ The same ResNet-50 architecture requires dramatically different serving strategi
 | **Energy/inference**    |                                                           —                                                            | `{python} ResNetServingSpectrum.mobile_energy_npu_mj_str` (NPU), `{python} ResNetServingSpectrum.mobile_energy_cpu_mj_str` (CPU) |                                                   `{python} ResNetServingSpectrum.tiny_energy_mj_str`                                                    |
 
 : **ResNet-50 Across the Serving Spectrum**: Side-by-side comparison of cloud, mobile, and TinyML serving for the same target architecture, showing how the model format, latency, throughput, memory footprint, and energy budget shift by three to four orders of magnitude across deployment contexts. {#tbl-resnet-serving-spectrum tbl-colwidths="[20,26,27,27]"}
+
+::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
+
+**Systems insight**: The "same model" claim is misleading: each row of @tbl-resnet-serving-spectrum is a different optimization, and often a different architecture entirely. The cloud and mobile tiers share the ResNet-50 graph but diverge in precision, runtime, and memory by three to four orders of magnitude; the TinyML tier cannot run ResNet-50 at all and substitutes an architecture designed for the constraints from the start. Treating these as one model hides the work that makes each deployment possible.
+
+:::
 
 ### The load balancer layer {#sec-model-serving-load-balancer-layer-9c4d}
 
@@ -3345,16 +3345,18 @@ where $B_{\text{p99}}$ is the 99th percentile batch size. For $\lambda_{\text{ar
 
 The p99 latency is `{python} SloViolationCalc.p99_ratio_mult_str` the mean, reflecting both wait time variance and batch size variance. Systems that provision based on mean latency will experience SLO violations.
 
-::: {#psp-model-serving-practitioners-perspective-latency-throughput-trade-off .callout-perspective title="Practitioner's perspective: The latency-throughput trade-off"}
+::: {#psp-model-serving-practitioners-perspective-latency-throughput-trade-off .callout-perspective title="The latency-throughput trade-off"}
 
-In systems engineering interviews and architecture reviews, the most common pitfall is discussing "inference speed" without specifying batch size.
+A single "inference speed" number is undefined until the batch size is named, because batch size selects which regime, and which bottleneck, the system operates in.
 
-*   **Batch-1 regime**: Optimized for latency. Relevant for real-time interaction (for example, typing helpers, robotics). The bottleneck is usually Python overhead or memory bandwidth.
-*   **Batch-32 regime**: Optimized for throughput. Relevant for offline processing or high-traffic services. The bottleneck is usually compute (FLOP/s).
+*   **Batch-1 regime**: Latency-bound. The request path is dominated by Python overhead and memory bandwidth, since each request loads the weights for a single input. This regime governs real-time interaction such as typing helpers and robotics.
+*   **Batch-N regime**: Throughput-bound. Amortizing the weight load across a full batch shifts the bottleneck to compute (FLOP/s). This regime governs offline processing and high-traffic services.
 
-*The professional response*: When asked "how fast is this model?", always clarify: "Are we optimizing for single-stream latency (Batch 1) or maximum throughput (Batch N)?" This distinction demonstrates systems maturity.
+The two regimes optimize opposite quantities, so a model that is "fast" at batch 1 may be far from peak throughput, and vice versa. Any latency or throughput figure must therefore specify whether it was measured at single-stream latency (batch 1) or maximum throughput (batch N).
 
 :::
+
+The same batch-size dependence drives how the serving system shapes its batches in the first place, which the next adaptive-window analysis makes concrete.
 
 #### Adaptive batching windows {#sec-model-serving-adaptive-batching-windows-c404}
 
@@ -3714,11 +3716,7 @@ class TrafficAdaptiveBatchingCalc:
 
 #### Streaming traffic (correlated arrivals) {#sec-model-serving-streaming-traffic-correlated-arrivals-32b6}
 
-Autonomous vehicles\index{Streaming Traffic!sensor synchronization}, video analytics, and robotics systems receive inputs from multiple synchronized sensors. A six-camera timeline makes the synchronization deadline concrete.
-
-::: {#nbk-model-serving-multi-camera-autonomous-vehicle-serving .callout-notebook title="Multi-camera autonomous vehicle serving"}
-
-Consider a vehicle with six cameras capturing at 30 FPS, requiring spatial fusion. @Tbl-model-serving-multicamera-timeline traces the per-event timeline for one synchronized frame set:
+Autonomous vehicles\index{Streaming Traffic!sensor synchronization}, video analytics, and robotics systems receive inputs from multiple synchronized sensors. A six-camera timeline makes the synchronization deadline concrete. @Tbl-model-serving-multicamera-timeline traces the per-event timeline for one synchronized frame set on a vehicle with six cameras capturing at 30 FPS and requiring spatial fusion.
 
 ```{=latex}
 \begingroup
@@ -3741,14 +3739,16 @@ Consider a vehicle with six cameras capturing at 30 FPS, requiring spatial fusio
 \endgroup
 ```
 
-*Key constraints*:
+::: {#nbk-model-serving-multi-camera-autonomous-vehicle-serving .callout-notebook title="Multi-camera autonomous vehicle serving"}
+
+The timeline in @tbl-model-serving-multicamera-timeline fixes the serving problem through a set of hard constraints rather than the statistical arrival rates that govern Poisson traffic:
 
 - Hard deadline: 33 ms per frame set (real-time requirement)
 - Batch size: Fixed at six (one per camera)
 - Synchronization budget: 12 ms of 33 ms total (36 percent for jitter tolerance)
 - Timeout policy: If camera frame not received by $T + 20$ ms, use previous frame
 
-Unlike Poisson traffic where dynamic batching optimizes throughput, streaming traffic requires synchronization policies that handle sensor jitter while meeting hard deadlines.
+**Systems insight**: Unlike Poisson traffic where dynamic batching optimizes throughput, streaming traffic fixes both batch size and deadline externally, so the serving system must spend its budget on synchronization policies that handle sensor jitter while still meeting the hard deadline.
 
 :::
 
