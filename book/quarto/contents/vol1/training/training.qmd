@@ -346,20 +346,19 @@ Not all training workloads are compute bound. Recommendation models like Deep Le
 
 Training systems occupy a critical position in the machine learning pipeline: they consume prepared data from upstream engineering (@sec-data-engineering) and produce trained model artifacts that later systems must deploy and monitor. Data quality directly impacts training stability, while training efficiency determines iteration velocity during model development. The same pressure appears at three scales. At data scale, petabyte datasets require efficient I/O pipelines and distributed storage. At model scale, billion-parameter models force the system to decide whether to replicate the model across batches with data parallelism\index{Distributed Training!data parallelism}[^fn-training-data-parallelism] or split the model across devices with model parallelism\index{Distributed Training!model parallelism}[^fn-training-model-parallelism]. At infrastructure scale, coordinating thousands of accelerators introduces communication overhead that can dominate training time. These challenges are why the workflow contracts from @sec-ml-workflow matter during training: orchestration decisions shape both scientific iteration and systems cost.
 
+[^fn-training-data-parallelism]: **Data Parallelism**: Replicates the full model on every device, splitting only the data. Each device computes gradients independently, then an AllReduce operation synchronizes them---adding communication volume proportional to model size at every step. This synchronization tax limits scaling efficiency: doubling accelerators rarely halves training time once communication becomes the bottleneck. \index{Data Parallelism!communication overhead}
+
+[^fn-training-model-parallelism]: **Model Parallelism**: Partitions the model's layers across devices when it exceeds single-device memory. Activations must transfer between devices at every partition boundary, and naive partitioning creates "pipeline bubbles" where downstream devices idle while waiting. Microbatch pipelining, as in GPipe and PipeDream, recovers much of this lost efficiency [@huang2019gpipe; @narayanan2019]. \index{Model Parallelism!pipeline bubbles}
+
 GPT-2's `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` WebText corpus sits at the lower end of this data scale spectrum. Frontier models consume datasets that are two to three orders of magnitude larger, and the physics of data movement shifts qualitatively across that range. At the low end, the entire dataset fits in memory and the $D_{\text{vol}}/\text{BW}$ term in the iron law is negligible; at the high end, sustained I/O throughput becomes the binding constraint, requiring dedicated prefetch workers, zero-copy transfer paths, and distributed storage backends to keep accelerators from starving between batches.
 
 ::: {#psp-training-10-gb-10-tb-scale-factor .callout-perspective title="The 10 GB to 10 TB scale factor"}
 
--   **Memory-resident regime** (10 GB): The entire dataset often fits in system RAM. Data loading is a one-time "startup cost," and the disk bandwidth $(\text{BW})$ does not matter after the first few seconds.
--   **Streaming regime** (10 TB): Data becomes a continuous, high-pressure stream. The system can no longer "load" the data; it must orchestrate its movement. The $D_{\text{vol}}$ term shifts from a storage bottleneck to a networking and I/O bottleneck, requiring zero-copy paths and multi-worker prefetching just to keep the accelerator from starving.
+In the memory-resident regime around 10 GB, the entire dataset often fits in system RAM. Data loading is a one-time startup cost, and disk bandwidth $(\text{BW})$ stops mattering after the first few seconds. In the streaming regime around 10 TB, the data becomes a continuous, high-pressure stream that the system can no longer simply load; it must orchestrate its movement. The $D_{\text{vol}}$ term shifts from a storage bottleneck to a networking and I/O bottleneck, requiring zero-copy paths and multi-worker prefetching just to keep the accelerator from starving.
 
-Scale changes more than the amount of data; it transforms the system's physics.
+Scale therefore changes more than the amount of data; it transforms the system's physics.
 
 :::
-
-[^fn-training-data-parallelism]: **Data Parallelism**: Replicates the full model on every device, splitting only the data. Each device computes gradients independently, then an AllReduce operation synchronizes them---adding communication volume proportional to model size at every step. This synchronization tax limits scaling efficiency: doubling accelerators rarely halves training time once communication becomes the bottleneck. \index{Data Parallelism!communication overhead}
-
-[^fn-training-model-parallelism]: **Model Parallelism**: Partitions the model's layers across devices when it exceeds single-device memory. Activations must transfer between devices at every partition boundary, and naive partitioning creates "pipeline bubbles" where downstream devices idle while waiting. Microbatch pipelining, as in GPipe and PipeDream, recovers much of this lost efficiency [@huang2019gpipe; @narayanan2019]. \index{Model Parallelism!pipeline bubbles}
 
 These scaling challenges translate into concrete workflow requirements. Training workflows consist of interdependent stages---data preprocessing, forward and backward passes, and parameter updates---extending the neural network concepts from @sec-neural-computation. System constraints often dictate performance limits: accelerators with high compute-to-bandwidth ratios are frequently bottlenecked by memory bandwidth, where data movement between memory hierarchies is slower than the computations themselves [@patterson2017hardware]. In distributed setups, synchronization across devices introduces additional latency, with interconnect performance\index{InfiniBand!interconnect performance}\index{NVLink!training interconnect} (NVLink, InfiniBand) critically affecting throughput[^fn-transformer-training].
 
@@ -751,28 +750,17 @@ Our GPT-2 Lighthouse Model illustrates these trade-offs through its use of GELU,
 # │ Goal:    Bridge class-level values to module-level exports
 ```
 
-::: {#nbk-training-gpt-2-gelu-activation-function .callout-notebook title="GPT-2 GELU activation function"}
+::: {#psp-training-gpt-2-gelu-activation-function .callout-perspective title="The GELU activation choice"}
 
-Beyond the foundational activation functions covered in @sec-neural-computation (Sigmoid, Tanh, ReLU), modern architectures increasingly adopt smoother alternatives. GPT-2 uses a GELU activation\index{GELU!Gaussian Error Linear Unit} [@radford2019language], the Gaussian Error Linear Unit introduced by @hendrycks2016gaussian and often implemented with the common tanh-based approximation from that formulation. The exact mathematical definition is:
+Beyond the foundational activation functions covered in @sec-neural-computation (Sigmoid, Tanh, ReLU), modern architectures increasingly adopt smoother alternatives. GPT-2 uses a GELU activation\index{GELU!Gaussian Error Linear Unit} [@radford2019language], the Gaussian Error Linear Unit introduced by @hendrycks2016gaussian and often implemented with the common tanh-based approximation from that formulation. Its exact definition is:
 $$
 \text{GELU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]
 $$
 where $\Phi(x)$ is the cumulative distribution function of the standard normal distribution.
 
-**Problem**: Why does GPT-2 use a GELU activation?
+GELU earns its place in language modeling for reasons that are statistical rather than systems-driven. Its smoother response yields better-behaved gradients than ReLU and reduces the dying-neuron problem, its probabilistic gating acts like a built-in stochastic regularizer that drops inputs in proportion to their magnitude, and it consistently lowers perplexity on language tasks. The smoothness that helps optimization, however, is exactly what makes it more expensive to evaluate.
 
-- Smoother gradients than ReLU, reducing the dying neuron problem
-- Stochastic regularization effect: acts like dropout by probabilistically dropping inputs
-- Better empirical performance on language modeling tasks
-
-**System Performance Trade-off**
-
-- Computational cost: ~`{python} ActivationBenchmarks.gelu_cost_factor_range_mult_str` more expensive than ReLU (requires erf function evaluation)
-- Memory: Same as ReLU (element-wise operation)
-- Training time impact: For GPT-2's `{python} ActivationBenchmarks.gpt2_layers_str`, GELU adds ~`{python} ActivationBenchmarks.gelu_overhead_pct_min_str` to `{python} ActivationBenchmarks.gelu_overhead_pct_max_str` to total forward pass time
-- Justified by results: The improved model quality (lower perplexity) offsets the computational overhead
-
-Frameworks implement fast approximation of GELU using optimized formulas (@lst-gelu-approx). This approximation reduces computational cost to approximately `{python} ActivationBenchmarks.gelu_approx_cost_factor_mult_str` ReLU while maintaining GELU's benefits, demonstrating *how* production systems balance mathematical properties with implementation efficiency.
+The system cost is real but bounded. Evaluating the erf function makes GELU roughly `{python} ActivationBenchmarks.gelu_cost_factor_range_mult_str` more expensive than ReLU in raw arithmetic, while memory traffic is identical because both remain element-wise operations. Spread across GPT-2's `{python} ActivationBenchmarks.gpt2_layers_str`, that arithmetic premium adds only about `{python} ActivationBenchmarks.gelu_overhead_pct_min_str` to `{python} ActivationBenchmarks.gelu_overhead_pct_max_str` to total forward-pass time, a price the lower perplexity comfortably offsets. Frameworks shrink it further with the fast tanh approximation (@lst-gelu-approx), which cuts the cost to approximately `{python} ActivationBenchmarks.gelu_approx_cost_factor_mult_str` ReLU while preserving GELU's behavior. The activation choice is decided by model quality, not by compute budget, because the budget barely moves.
 
 :::
 
