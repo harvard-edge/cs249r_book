@@ -486,14 +486,23 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     min_val = float(np.min(data))
     max_val = float(np.max(data))
 
-    # Step 2: Handle edge case (constant tensor).
-    # All elements have the same value, so there is no range to map.
-    # We still need dequantize(quantize(c)) ≈ c, so we encode every element
-    # as q=0 and set zero_point so that (0 - zero_point) * scale = c.
-    # With scale=1.0 that means zero_point = -round(c), clamped to INT8 range.
+    # Step 2: Constant tensor -- all elements equal c, no range to map.
+    # Encode every element as q=0; choose scale and zero_point so that
+    # (0 - zero_point) * scale = c. For |c| > 127 we can't use scale=1.0
+    # because zero_point = -c would exceed the INT8 range and be clamped,
+    # corrupting dequantization. Instead set zero_point to +-1 and compute
+    # scale = |c| so the identity holds without any clamping.
     if abs(max_val - min_val) < EPSILON:
-        scale = 1.0
-        zero_point = int(np.clip(np.round(-min_val), INT8_MIN_VALUE, INT8_MAX_VALUE))
+        c = min_val
+        if abs(c) < EPSILON:
+            scale = 1.0
+            zero_point = 0
+        elif abs(c) <= INT8_MAX_VALUE:
+            scale = 1.0
+            zero_point = int(np.round(-c))
+        else:
+            zero_point = -1 if c > 0 else 1
+            scale = -c / (-zero_point)
         quantized_data = np.zeros_like(data, dtype=np.int8)
         return Tensor(quantized_data), scale, zero_point
 
