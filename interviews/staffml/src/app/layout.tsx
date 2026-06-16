@@ -6,6 +6,8 @@ import AnnouncementBar from "@/components/AnnouncementBar";
 import MaybeFooter from "@/components/MaybeFooter";
 import Providers from "@/components/Providers";
 import VersionDriftToast from "@/components/VersionDriftToast";
+import CommandPalette from "@/components/CommandPalette";
+import KeyboardShortcutsOverlay from "@/components/KeyboardShortcutsOverlay";
 import { QUESTION_COUNT_DISPLAY } from "@/lib/corpus";
 
 export const metadata: Metadata = {
@@ -100,6 +102,12 @@ export default function RootLayout({
           <main className="flex-1 flex flex-col">{children}</main>
           <MaybeFooter />
           <VersionDriftToast />
+          {/* Global overlays: command palette (Cmd/Ctrl+K, navbar search icon)
+              and the keyboard-shortcuts cheat sheet (?). Mounted once here so
+              they're reachable from every route. CommandPalette must live
+              inside Providers — it reads the vault via useVault(). */}
+          <CommandPalette />
+          <KeyboardShortcutsOverlay />
         </Providers>
       </body>
     </html>
