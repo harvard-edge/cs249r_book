@@ -1344,7 +1344,6 @@ class FusionSpeedup:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     python_dispatch = Ops.RuntimeOverheads.PythonDispatch
     kernel_launch = Ops.RuntimeOverheads.KernelLaunch
-    memory_access = Ops.RuntimeOverheads.TinyMemoryAccess
 
     eager_ops = 2
     fused_ops = 1
@@ -1367,7 +1366,6 @@ class FusionSpeedup:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     python_dispatch_us_str = fmt_time(python_dispatch, microsecond, precision=0, commas=False)
     kernel_launch_only_us_str = fmt_time(kernel_launch, microsecond, precision=0, commas=False)
-    memory_access_us_str = fmt_time(memory_access, microsecond, precision=0, commas=False)
     kernel_launch_us_str = fmt_time(launch_overhead, microsecond, precision=0, commas=False)
 
     eager_overhead_str = fmt_time(eager_total_overhead, microsecond, precision=0, commas=False)
@@ -1382,13 +1380,7 @@ class FusionSpeedup:
 ::: {#nbk-frameworks-physics-software-overhead .callout-notebook title="The physics of software overhead"}
 
 **Iron law connection**:
-The latency term $(L_{\text{lat}})$ in the iron law is dominated by software overhead: dispatching instructions from Python to the GPU.
-
-**Constants of latency**:
-
-*   **Python dispatch**: ~`{python} FusionSpeedup.python_dispatch_us_str` per operation.
-*   **Kernel launch**: ~`{python} FusionSpeedup.kernel_launch_only_us_str` per operation.
-*   **Memory access (VRAM)**: ~`{python} FusionSpeedup.memory_access_us_str`.
+The latency term $(L_{\text{lat}})$ in the iron law is dominated by software overhead: dispatching instructions from Python to the GPU. Each operation pays a Python dispatch cost of ~`{python} FusionSpeedup.python_dispatch_us_str` plus a kernel launch cost of ~`{python} FusionSpeedup.kernel_launch_only_us_str`, which together set the per-launch overhead the math below applies.
 
 **Scenario one: Eager Mode (The "Tiny Op" Trap)**
 Consider a simple activation block: `y = relu(x + bias)`.
@@ -1414,7 +1406,7 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 *   **Total memory traffic**: 2N bytes (`{python} FusionSpeedup.bw_efficiency_mult_str` bandwidth efficiency).
 
 **Systems insight**:
-Compilation is not magic; it is *overhead amortization*. For small, element-wise operations such as LayerNorm, Gaussian Error Linear Unit (GELU), and Add, overhead often exceeds compute time by 10--100$\times$. Fusing them is the only way to use the hardware effectively.
+Fusion wins on two fronts at once. Collapsing two launches into one halves the per-op dispatch overhead, and keeping the intermediate result in registers cuts memory traffic from $4N$ to $2N$ bytes. The bandwidth saving is the durable gain: for small, element-wise operations such as LayerNorm, Gaussian Error Linear Unit (GELU), and Add, the round-trip to memory between kernels, not the arithmetic, is what starves the hardware.
 
 :::
 
@@ -1636,11 +1628,7 @@ class CompilationBenchmark:
 
 : **Training and Inference Throughput**: Representative throughput comparison across execution modes for common model architectures on NVIDIA A100 GPU with batch size 32. The table values imply torch.compile speedups of `{python} CompilationBenchmark.torch_compile_speedup_range_mult_str` over eager mode, while TensorRT implies `{python} CompilationBenchmark.tensorrt_speedup_range_mult_str` speedups but requires longer compilation and is inference only. Compile times vary based on model complexity and optimization level. {#tbl-training-benchmark tbl-colwidths="[20,20,20,20,20]"}
 
-These throughput differences across execution modes raise a practical question—which framework execution strategy best serves each workload archetype.
-
-::: {#lhs-frameworks-framework-strategy-by-archetype .callout-lighthouse title="Framework strategy by archetype"}
-
-The optimal framework execution strategy depends on which iron law term dominates the workload. @Tbl-framework-archetype-strategy aligns each archetype to its recommended execution strategy.
+These throughput differences across execution modes raise a practical question—which framework execution strategy best serves each workload archetype. The optimal strategy depends on which iron law term dominates the workload, and @tbl-framework-archetype-strategy aligns each recurring archetype to its recommended execution strategy.
 
 | **Archetype**                 | **Dominant iron law Term**                                                 | **Optimal Framework Strategy**           | **Rationale**                                                                                                                                                         |
 |:------------------------------|:---------------------------------------------------------------------------|:-----------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1651,7 +1639,11 @@ The optimal framework execution strategy depends on which iron law term dominate
 
 : **Framework execution strategy by workload**: Recommended execution strategy for each workload archetype, aligned to the dominant iron law term. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
 
-**Systems insight**: Compilation benefits scale with how much of the workload is optimizable. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees `{python} CompilationBenchmark.resnet_tensorrt_speedup_mult_str` speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
+::: {#lhs-frameworks-framework-strategy-by-archetype .callout-lighthouse title="Framework strategy by archetype"}
+
+The four recurring archetypes in @tbl-framework-archetype-strategy trace one principle across the framework: compilation benefits scale with how much of the workload is optimizable.
+
+**Systems insight**: Compute Beasts (@tbl-training-benchmark: ResNet-50 sees `{python} CompilationBenchmark.resnet_tensorrt_speedup_mult_str` speedup from TensorRT) benefit most because their dense kernels expose the most surface for layout selection, precision lowering, and fusion. Sparse Scatter workloads such as DLRM gain little because their bottleneck, irregular embedding lookups, leaves almost nothing for the compiler to optimize.
 
 :::
 
