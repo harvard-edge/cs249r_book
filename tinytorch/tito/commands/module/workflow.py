@@ -566,26 +566,26 @@ class ModuleWorkflowCommand(BaseCommand):
         self.console.print()
 
         success = True
-        unit_test_count = 0
         integration_test_count = 0
 
-        # Step 1: Run UNIT tests (test source files, don't need exported package)
+        # Step 1: Check notebook syntax before attempting export.
+        # _run_inline_unit_tests runs src/ (instructor reference), not the student
+        # notebook, so it cannot validate student work. Syntax-check the actual
+        # notebook instead so a SyntaxError surfaces here rather than as a cryptic
+        # nbdev export failure.
         if not skip_tests:
             self.console.print("[bold]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold]")
             self.console.print()
-            self.console.print("[bold cyan] Step 1/4: Running Unit Tests[/bold cyan]")
+            self.console.print("[bold cyan] Step 1/4: Checking Notebook Syntax[/bold cyan]")
             self.console.print()
 
-            unit_result = self._run_inline_unit_tests(module_name, verbose=True)
-            unit_test_count = unit_result['passed']
-
-            if unit_result['failed'] > 0:
-                self.console.print()
-                self.console.print(f"[red]   ❌ Unit tests failed for {module_name}[/red]")
-                self.console.print("   💡 Fix the issues and try again")
+            syntax_error = self._check_notebook_syntax(module_name)
+            if syntax_error:
+                self.console.print(f"[red]   ❌ {syntax_error}[/red]")
+                self.console.print("   💡 Fix the syntax error in your notebook and try again")
                 return 1
 
-            self.console.print(f"   ✅ Unit tests: {unit_result['passed']}/{unit_result['passed']} passed")
+            self.console.print(f"   ✅ Notebook syntax OK")
 
         # Step 2: Export to package (BEFORE integration tests, since they need the export)
         if not skip_export:
@@ -775,10 +775,10 @@ class ModuleWorkflowCommand(BaseCommand):
         Core logic extracted from complete_module for use in batch operations.
         Returns 0 on success, 1 on failure.
         """
-        # Run unit tests
+        # Check notebook syntax before export
         if not skip_tests:
-            unit_result = self._run_inline_unit_tests(module_name, verbose=False)
-            if unit_result['failed'] > 0:
+            syntax_error = self._check_notebook_syntax(module_name)
+            if syntax_error:
                 return 1
 
         # Export to package
@@ -885,6 +885,39 @@ class ModuleWorkflowCommand(BaseCommand):
             self.console.print()
 
         return 0
+
+    def _check_notebook_syntax(self, module_name: str) -> Optional[str]:
+        """Compile every code cell in the student notebook and return the first SyntaxError.
+
+        Returns an error string on failure, None on success or if notebook not found.
+        """
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_path = Path.cwd() / "modules" / module_name / f"{short_name}.ipynb"
+
+        if not notebook_path.exists():
+            return None
+
+        try:
+            import json
+            nb = json.loads(notebook_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            return f"Could not read notebook: {e}"
+
+        for i, cell in enumerate(nb.get("cells", [])):
+            if cell.get("cell_type") != "code":
+                continue
+            source = "".join(cell.get("source", []))
+            if not source.strip():
+                continue
+            try:
+                compile(source, f"{short_name}.ipynb cell {i+1}", "exec")
+            except SyntaxError as e:
+                return (
+                    f"SyntaxError in {short_name}.ipynb cell {i+1}, "
+                    f"line {e.lineno}: {e.msg}\n"
+                    f"  {(e.text or '').rstrip()}"
+                )
+        return None
 
     def _run_inline_unit_tests(self, module_name: str, verbose: bool) -> Dict[str, int]:
         """Run inline unit tests and parse output for detailed display."""
