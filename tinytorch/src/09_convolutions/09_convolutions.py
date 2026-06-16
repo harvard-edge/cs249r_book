@@ -608,8 +608,6 @@ class Conv2d:
 
         HINT: Convert kernel_size to tuple if it's an integer
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -1350,8 +1348,6 @@ class MaxPool2d:
 
         HINT: Default stride equals kernel_size for non-overlapping windows
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         # Handle kernel_size as int or tuple
         if isinstance(kernel_size, int):
@@ -1697,8 +1693,6 @@ class AvgPool2d:
         2. Set stride to kernel_size if not provided
         3. Store padding parameter
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         # Handle kernel_size as int or tuple
         if isinstance(kernel_size, int):
