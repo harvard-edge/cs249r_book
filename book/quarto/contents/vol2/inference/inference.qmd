@@ -2270,14 +2270,14 @@ def paged_attention(Q, page_table, physical_blocks, block_size):
 
 **Systems insight**: The throughput impact\index{PagedAttention!throughput impact} of gather operations is small compared to the memory savings; @tbl-inference-pagedattention-throughput shows the 2.5--4$\times$ throughput improvement coming from fitting more concurrent sequences in the same memory.
 
-:::
-
 | **Approach**       | **KV Cache Pool Utilization** | **Throughput (relative)** |
 |:-------------------|:-----------------------------:|:-------------------------:|
 | **Contiguous**     |             30-40%            |   1.0$\times$ (baseline)  |
 | **PagedAttention** |              95%+             |       2.5--4$\times$      |
 
 : **PagedAttention vs. Contiguous KV Cache**: KV cache pool utilization and relative serving throughput for contiguous allocation against PagedAttention. {#tbl-inference-pagedattention-throughput}
+
+:::
 
 ### Prefix caching {#sec-inference-scale-prefix-caching-8e8b}
 
@@ -2455,8 +2455,6 @@ class PrefixCachingAnalysis:
 
 **Systems insight**: Prefix caching pays off when the prefix hit rate\index{Prefix Caching!hit rate} is high because many requests share a long prefix. @Tbl-inference-prefix-caching-workloads contrasts hit rates and memory savings across workloads, showing where the technique changes serving capacity and where it does not.
 
-:::
-
 | **Workload**                     | **Prefix Hit Rate** | **Memory Savings** |
 |:---------------------------------|:-------------------:|:------------------:|
 | **Chatbot (same system prompt)** |         95%+        |       70-80%       |
@@ -2464,6 +2462,8 @@ class PrefixCachingAnalysis:
 | **General API (diverse)**        |       20--40%       |      10--30%       |
 
 : **Prefix Caching Effectiveness by Workload**: Typical prefix hit rates and resulting KV-cache memory savings for chatbot, document-QA, and general API workloads, showing where prefix caching pays off and where it does not. {#tbl-inference-prefix-caching-workloads}
+
+:::
 
 ### KV cache compression and architectural optimization {#sec-inference-scale-kv-cache-compression-943a}
 
@@ -3152,6 +3152,16 @@ Consider serving Llama-70B with the following configuration: [@touvron2023llama2
 
 @Tbl-inference-tp8-layer-breakdown decomposes the per-layer cost of 8-way tensor parallelism on 8$\times$ H100 (NVLink interconnect) into compute and AllReduce phases, exposing the realized 6.9$\times$ speedup as compute scaling minus a small communication tax.
 
+| **Component**             |               **Sequential (1 GPU)**              |                    **8-way TP**                   |                   **Speedup**                    |
+|:--------------------------|:-------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------:|
+| **Attention compute**     |      `{python} TpSpeedupCalc.att_seq_ms_str`      |       `{python} TpSpeedupCalc.att_tp_ms_str`      |  `{python} TpSpeedupCalc.att_speedup_mult_str`   |
+| **AllReduce (attention)** |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
+| **Feed-forward compute**  |       `{python} TpSpeedupCalc.ff_seq_ms_str`      |       `{python} TpSpeedupCalc.ff_tp_ms_str`       |   `{python} TpSpeedupCalc.ff_speedup_mult_str`   |
+| **AllReduce (FF)**        |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
+| **Total per layer**       | **`{python} TpSpeedupCalc.seq_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp8_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp_speedup_mult_str`** |
+
+: **8-Way Tensor Parallelism Per-Layer Breakdown**: Sequential vs. 8-way tensor-parallel timings for attention, feed-forward, and AllReduce phases of one Llama-70B transformer layer, decomposing the realized 6.9$\times$ speedup into compute scaling and communication tax. {#tbl-inference-tp8-layer-breakdown}
+
 **Layer-stack estimate** (`{python} TpSpeedupCalc.n_layers_str` layers on the same prefill workload):
 
 - Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` for the full prefill pass
@@ -3167,16 +3177,6 @@ The `{python} TpSpeedupCalc.tp_speedup_mult_str` speedup (vs. theoretical `{pyth
 **Systems insight**: Tensor parallelism buys latency by spending communication. It works for Llama-70B only because the interconnect keeps the collective tax small relative to the compute saved by sharding.
 
 :::
-
-| **Component**             |               **Sequential (1 GPU)**              |                    **8-way TP**                   |                   **Speedup**                    |
-|:--------------------------|:-------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------:|
-| **Attention compute**     |      `{python} TpSpeedupCalc.att_seq_ms_str`      |       `{python} TpSpeedupCalc.att_tp_ms_str`      |  `{python} TpSpeedupCalc.att_speedup_mult_str`   |
-| **AllReduce (attention)** |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
-| **Feed-forward compute**  |       `{python} TpSpeedupCalc.ff_seq_ms_str`      |       `{python} TpSpeedupCalc.ff_tp_ms_str`       |   `{python} TpSpeedupCalc.ff_speedup_mult_str`   |
-| **AllReduce (FF)**        |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
-| **Total per layer**       | **`{python} TpSpeedupCalc.seq_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp8_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp_speedup_mult_str`** |
-
-: **8-Way Tensor Parallelism Per-Layer Breakdown**: Sequential vs. 8-way tensor-parallel timings for attention, feed-forward, and AllReduce phases of one Llama-70B transformer layer, decomposing the realized 6.9$\times$ speedup into compute scaling and communication tax. {#tbl-inference-tp8-layer-breakdown}
 
 ### Pipeline parallelism for inference {#sec-inference-scale-pipeline-parallelism-inference-7ee3}
 
@@ -3479,8 +3479,6 @@ Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer w
 
 **Systems insight**: Routing imbalance directly erodes GPU utilization and throughput across the eight experts; @tbl-inference-moe-load-balancing quantifies the degradation\index{Load Balancing!metrics}. Production systems monitor routing statistics and may retrain or fine-tune gating to improve balance.
 
-:::
-
 | **Routing Distribution**     | **GPU Utilization** | **Throughput Impact** |
 |:-----------------------------|:-------------------:|:---------------------:|
 | **Perfectly balanced**       |         100%        |        Baseline       |
@@ -3488,6 +3486,8 @@ Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer w
 | **Severe imbalance (50%)**   |         67%         |          -33%         |
 
 : **MoE Routing Load Balance vs. Throughput**: GPU utilization and throughput impact as routing imbalance grows across the eight experts of a Mixtral-8x7B MoE layer with 4-way expert parallelism. {#tbl-inference-moe-load-balancing}
+
+:::
 
 Expert parallelism represents the peak of model sharding complexity, requiring tight integration between the model architecture, the routing algorithm, and the physical interconnect topology. The next section examines how recommendation systems use similar sharding techniques for massive embedding tables.
 
@@ -4264,10 +4264,6 @@ async def startup():
 
 The three probe tiers each balance fast outage detection against GPU-resident probing cost; @tbl-inference-health-check-cadences fixes interval, timeout, and failure-threshold values for liveness, readiness, and deep-health probes\index{Health Check!timeout configuration}. Deep health checks run least often because they consume GPU resources.
 
-**Systems lesson**: A serving process being alive is not the same as a model replica being ready. GPU memory, warm-up state, and model-output validity must be part of the health contract.
-
-:::
-
 | **Check Type**  | **Interval** | **Timeout** | **Failure Threshold** |
 |:----------------|:------------:|:-----------:|:---------------------:|
 | **Liveness**    |     10s      |      5s     |       3 failures      |
@@ -4275,6 +4271,10 @@ The three probe tiers each balance fast outage detection against GPU-resident pr
 | **Deep health** |     30s      |     10s     |       1 failure       |
 
 : **GPU Inference Health-Check Cadences**: Liveness, readiness, and deep-health probe intervals, timeouts, and failure thresholds for GPU inference servers, balancing fast outage detection against the cost of GPU-resident probes. {#tbl-inference-health-check-cadences tbl-colwidths="[30,18,18,34]"}
+
+**Systems lesson**: A serving process being alive is not the same as a model replica being ready. GPU memory, warm-up state, and model-output validity must be part of the health contract.
+
+:::
 
 ### Quantitative analysis: Load balancing impact {#sec-inference-scale-quantitative-analysis-load-balancing-impact-34d1}
 
@@ -4361,8 +4361,6 @@ Consider a scenario where one server becomes slow (thermal throttling):
 
 **Systems lesson**: For GPU inference\index{Inference!configuration for gpu}, the canonical thresholds and recovery settings appear in @tbl-inference-circuit-breaker-gpu. Circuit breakers preserve partial capacity by stopping retries from amplifying one slow replica into a system-wide overload.
 
-:::
-
 | **Parameter**          |                                  **Value**                                  | **Rationale**                         |
 |:-----------------------|:---------------------------------------------------------------------------:|:--------------------------------------|
 | **Error threshold**    |     `{python} CircuitBreakerServingProfile.error_threshold_pct_tbl_str`     | GPU OOM failures are serious          |
@@ -4371,6 +4369,8 @@ Consider a scenario where one server becomes slow (thermal throttling):
 | **Half-open requests** |     `{python} CircuitBreakerServingProfile.half_open_requests_count_str`    | Careful testing before full reopening |
 
 : **Circuit-Breaker Settings for GPU Inference**: Error and latency thresholds, open duration, and half-open probe count chosen so that a single throttling GPU is isolated quickly without prematurely failing healthy nodes. {#tbl-inference-circuit-breaker-gpu}
+
+:::
 
 Efficient routing assumes that our inference servers own the underlying hardware. In enterprise environments, however, our critical production models are often running on the exact same physical clusters as experimental models and developer endpoints. To prevent a rogue developer query from crashing our flagship service, we must enforce strict multi-tenancy and resource isolation.
 

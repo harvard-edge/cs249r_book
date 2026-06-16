@@ -496,8 +496,6 @@ When evaluating hardware or software based on vendor-reported benchmarks, check 
 
 @Tbl-benchmarking-vendor-claims translates common marketing phrases into the technical caveats behind each.
 
-:::
-
 | **Vendor Claim**               | **What It Often Means**                                            |
 |:-------------------------------|:-------------------------------------------------------------------|
 | **"Up to 10,000 images/sec"**  | Peak throughput at maximum batch size, INT8, without preprocessing |
@@ -506,6 +504,8 @@ When evaluating hardware or software based on vendor-reported benchmarks, check 
 | **"Optimized for AI"**         | May only accelerate specific operations or precisions              |
 
 : **Decoding Vendor Benchmark Claims**: Four common marketing phrases and the technical caveats that determine whether a claim describes end-to-end performance, a narrow accelerator measurement, or an unsupported efficiency comparison. {#tbl-benchmarking-vendor-claims}
+
+:::
 
 The decision rule is to reject any benchmark claim whose workload boundary, precision, and excluded costs cannot be reconstructed. A headline throughput or latency number becomes useful only after the engineer can map it to the actual model, batch shape, data movement, sustained operating point, and power envelope.
 
@@ -2221,25 +2221,12 @@ class ScalingEfficiencyCalc:
 For **strong scaling** (fixed problem size, more processors), let $T(1)$ be the training time on a single GPU, $T(N_{\text{GPU}})$ the training time on $N_{\text{GPU}}$ GPUs, and $N_{\text{GPU}}$ the GPU count. @Eq-scaling-efficiency defines efficiency:
 $$\text{Eff}_{\text{scaling}} = \frac{T(1)}{N_{\text{GPU}} \times T(N_{\text{GPU}})} \times 100\%$$ {#eq-scaling-efficiency}
 
-```{=latex}
-\tcbbreak
-```
-
 **Step 2**: Calculate efficiency.
 `{python} ScalingEfficiencyCalc.scaling_eq_str` = `{python} ScalingEfficiencyCalc.t1_raw_str`/`{python} ScalingEfficiencyCalc.eff_denom_str` = `{python} ScalingEfficiencyCalc.eff_str`
 
 With perfect scaling, `{python} ScalingEfficiencyCalc.n_gpus_str` would complete in `{python} ScalingEfficiencyCalc.ideal_hours_str` (`{python} ScalingEfficiencyCalc.t1_hours_str`/`{python} ScalingEfficiencyCalc.n_gpus_str`). The actual `{python} ScalingEfficiencyCalc.tn_hours_str` represents `{python} ScalingEfficiencyCalc.eff_str` efficiency.
 
 **Step 3**: Account for the efficiency loss. @Tbl-benchmarking-scaling-efficiency-loss decomposes the "missing" `{python} ScalingEfficiencyCalc.loss_str` into measurable overhead categories—gradient synchronization, memory copy, load imbalance, and batch-size effects—each measurable through a distinct profiling signal.
-
-**Step 4**: The systems insight.
-<!-- lego-ok-block: typical strong-scaling efficiency ranges at different GPU counts -->
-Scaling efficiency decreases as $N_{\text{GPU}}$ grows because communication overhead scales with GPU count while per-GPU compute shrinks. In this worked example, eight GPUs reach 75 percent efficiency; at larger scales, the same arithmetic makes clear why sophisticated communication and input-pipeline optimization become necessary.
-
-MLPerf reports both raw performance and scaling efficiency for this reason: a system achieving 2$\times$ throughput at 50 percent efficiency may be worse than 1.5$\times$ throughput at 90 percent efficiency, depending on cost constraints.
-<!-- end lego-ok-block -->
-
-:::
 
 | **Source**                   | **Example Contribution** | **Measurement**                     |
 |:-----------------------------|:------------------------:|:------------------------------------|
@@ -2249,6 +2236,15 @@ MLPerf reports both raw performance and scaling efficiency for this reason: a sy
 | **Batch size effects**       |           2-5%           | Larger batches converge differently |
 
 : **Scaling Efficiency Loss Sources**: Illustrative decomposition of the missing efficiency budget into measurable overhead categories and the corresponding measurement signal used to attribute each loss. Actual percentages depend on model, interconnect, storage, batch schedule, and framework implementation. {#tbl-benchmarking-scaling-efficiency-loss}
+
+**Step 4**: The systems insight.
+<!-- lego-ok-block: typical strong-scaling efficiency ranges at different GPU counts -->
+Scaling efficiency decreases as $N_{\text{GPU}}$ grows because communication overhead scales with GPU count while per-GPU compute shrinks. In this worked example, eight GPUs reach 75 percent efficiency; at larger scales, the same arithmetic makes clear why sophisticated communication and input-pipeline optimization become necessary.
+
+MLPerf reports both raw performance and scaling efficiency for this reason: a system achieving 2$\times$ throughput at 50 percent efficiency may be worse than 1.5$\times$ throughput at 90 percent efficiency, depending on cost constraints.
+<!-- end lego-ok-block -->
+
+:::
 
 #### Resource utilization {#sec-benchmarking-resource-utilization-336b}
 
@@ -3973,14 +3969,6 @@ Returning to our MobileNetV2 lighthouse example, consider a complete validation 
 
 Notice in @tbl-benchmarking-mobilenet-int8-validation that aggregate accuracy barely changes after INT8 quantization to `{python} MobileNetINT8Calc.mv2_size_int8_mb_str`, but calibration error and edge-case accuracy tell a different story. The INT8 model's ECE of `{python} MobileNetINT8Calc.mv2_ece_int8_str` lands in the borderline band: confidence scores are becoming unreliable for automated decision thresholds.
 
-**Edge-case definition**: Images with >`{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, <`{python} MobileNetINT8Calc.edge_lux_str` lighting, or >`{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
-
-**What this reveals**: Average-case accuracy looks acceptable (`{python} MobileNetINT8Calc.mv2_acc_drop_str` drop), but calibration degraded significantly and edge-case accuracy dropped `{python} MobileNetINT8Calc.mv2_edge_drop_str`. If the deployment context uses confidence thresholds (for example, "only act if confidence > `{python} MobileNetINT8Calc.confidence_threshold_pct_str`") or encounters many edge cases (unusual lighting, partial occlusions), INT8 MobileNetV2 may fail despite passing aggregate benchmarks.
-
-**Fix**: Apply temperature scaling\index{Temperature Scaling!calibration restoration} post-hoc to restore calibration [@guo2017calibration]. Temperature scaling learns a single scalar $T_{\text{cal}}$ to divide logits before softmax: $\text{softmax}(z_i/T_{\text{cal}})$. In parallel, add edge-case examples to the test set to monitor that specific failure mode continuously.
-
-:::
-
 | **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                                |
 |:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------------------------------------------|
 | **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_tbl_str` drop; below 1 percentage-point threshold) |
@@ -3989,6 +3977,14 @@ Notice in @tbl-benchmarking-mobilenet-int8-validation that aggregate accuracy ba
 | **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | ⚠ (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_tbl_str`)                                 |
 
 : **MobileNetV2 INT8 Postcompression Metrics**: FP32 vs. INT8 comparison across top-1 and top-5 accuracy, calibration error, and edge-case accuracy, revealing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[25,25,25,25]"}
+
+**Edge-case definition**: Images with >`{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, <`{python} MobileNetINT8Calc.edge_lux_str` lighting, or >`{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
+
+**What this reveals**: Average-case accuracy looks acceptable (`{python} MobileNetINT8Calc.mv2_acc_drop_str` drop), but calibration degraded significantly and edge-case accuracy dropped `{python} MobileNetINT8Calc.mv2_edge_drop_str`. If the deployment context uses confidence thresholds (for example, "only act if confidence > `{python} MobileNetINT8Calc.confidence_threshold_pct_str`") or encounters many edge cases (unusual lighting, partial occlusions), INT8 MobileNetV2 may fail despite passing aggregate benchmarks.
+
+**Fix**: Apply temperature scaling\index{Temperature Scaling!calibration restoration} post-hoc to restore calibration [@guo2017calibration]. Temperature scaling learns a single scalar $T_{\text{cal}}$ to divide logits before softmax: $\text{softmax}(z_i/T_{\text{cal}})$. In parallel, add edge-case examples to the test set to monitor that specific failure mode continuously.
+
+:::
 
 The Lottery Ticket Hypothesis\index{Lottery Ticket Hypothesis!compression trade-off} (@sec-model-compression-lottery-ticket-hypothesis-1b3d) provides concrete benchmarking data illustrating what Pareto-efficient compression looks like. Through iterative pruning, @frankle2019lottery found sparse subnetworks ("winning tickets") in fully connected and convolutional networks that could match the original network's test accuracy when trained in isolation.
 
