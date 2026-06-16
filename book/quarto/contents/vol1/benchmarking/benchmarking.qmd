@@ -135,13 +135,7 @@ MobileNetV2 (introduced in @sec-network-architectures-lighthouse-roster-model-bi
 2. **Hardware acceleration** (@sec-hardware-acceleration): the illustrative EdgeTPU scenario\index{Edge TPU!inference latency} uses `{python} MobileNetLighthouseSetup.edgetpu_latency_ms_str` inference vs. `{python} MobileNetLighthouseSetup.cpu_latency_ms_str` on CPU
 3. **Benchmarking validation**: Verify the pipeline delivers in practice
 
-The same example also previews three validation checks:
-
-- **Observation**: EdgeTPU latency must be measured separately from preprocessing and data transfer overhead.
-- **Model quality**: INT8 quantization must preserve accuracy, including edge cases with unusual lighting.
-- **Data**: Performance must hold on real-world smartphone images, not just ImageNet test images.
-
-The sections that follow address one dimension of this validation stack at a time, building toward a systematic methodology for answering these questions for any optimization pipeline.
+The sections that follow address one dimension of this validation stack at a time, building toward a systematic methodology that isolates EdgeTPU latency from preprocessing and data transfer overhead, confirms INT8 quantization preserves accuracy on edge cases such as unusual lighting, and checks that performance holds on real-world smartphone images rather than only ImageNet test images.
 
 :::
 
@@ -2805,9 +2799,7 @@ These standardized evaluations provide invaluable comparisons, but the cost of c
 
 ::: {#psp-benchmarking-cost-comprehensive-benchmarking .callout-perspective title="The cost of comprehensive benchmarking"}
 
-While benchmarking is essential for ML system development, it comes with substantial costs that limit participation to well-resourced organizations. Submitting to MLPerf can require dedicated engineering effort, hardware access, tuning, validation, and careful documentation across the relevant configurations. The cost depends heavily on workload and scope, but it is high enough that smaller organizations often rely on published submissions rather than running a full formal submission themselves.
-
-The cost barrier explains why MLPerf submissions are dominated by major technology companies and hardware vendors, while smaller organizations rely on published results rather than conducting their own comprehensive evaluations. The high barrier to entry motivates the need for more lightweight, internal benchmarking practices that organizations can use to make informed decisions without the expense of full-scale standardized benchmarking.
+Submitting to MLPerf can require dedicated engineering effort, hardware access, tuning, validation, and careful documentation across the relevant configurations. The cost depends heavily on workload and scope, but it is high enough that submissions are dominated by major technology companies and hardware vendors, while smaller organizations rely on published results rather than conducting their own comprehensive evaluations. That barrier motivates the need for more lightweight, internal benchmarking practices that organizations can use to make informed decisions without the expense of full-scale standardized benchmarking.
 
 :::
 
@@ -3898,6 +3890,8 @@ Model compression (@sec-model-compression) trades model capacity for efficiency.
 
 Different compression techniques fail in different ways. Quantization (reducing numerical precision) can preserve average-case performance while changing calibration or behavior near decision boundaries [@jacob2018; @guo2017calibration]. Pruning (removing weights or structures) can lose capacity for rare features, potentially fine for common cases but risky for tail scenarios [@han2015deep; @gale2019state]. Distillation (training smaller models to mimic larger ones) can match top-line accuracy while changing softer properties such as confidence and calibration [@hinton2015distilling]. Validation must probe these specific failure modes, not just measure aggregate accuracy.
 
+Calibration is the failure mode aggregate accuracy hides most completely, and expected calibration error (ECE) is the metric that exposes it. ECE measures whether predicted confidence matches actual accuracy: when a model reports a prediction as 90 percent confident, it should be correct 90 percent of the time. Three thresholds govern interpretation. An $\text{ECE} < 0.05$ is well-calibrated, with confidence scores reliable for threshold-based decisions; an $\text{ECE}$ between 0.05 and 0.10 is moderately calibrated, where confidence scores should be used with caution; and an $\text{ECE} > 0.10$ is poorly calibrated, where confidence scores are unreliable. Compression can leave top-1 accuracy intact while pushing ECE across these thresholds, which is why a compression protocol measures it directly.
+
 Acceptable degradation depends on deployment context. A 2 percent accuracy drop might be acceptable for a recommendation system (users tolerate imperfect suggestions) but unacceptable for medical diagnosis (each error has significant consequences). Define accuracy thresholds before compression, then validate against them. The MobileNetV2 lighthouse makes the complete INT8 validation protocol concrete.
 
 ```{python}
@@ -3934,7 +3928,6 @@ class MobileNetINT8Calc:
     ece_int8 = 0.089
     edge_fp32 = 68.2
     edge_int8 = 61.4
-    ece_example_confidence_pct = 90
     edge_occlusion_pct = 50
     edge_lux = 100
     edge_rotation_deg = 30
@@ -3965,7 +3958,6 @@ class MobileNetINT8Calc:
     mv2_edge_int8_str = fmt_percent(edge_int8 / 100, precision=1, commas=False, style='symbol')
     mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
     mv2_edge_drop_tbl_str = fmt_pp(edge_drop, precision=1, commas=False, style="symbol")
-    ece_example_confidence_pct_str = fmt_percent(ece_example_confidence_pct / 100, precision=0, commas=False, style='prose')
     edge_occlusion_pct_str = fmt_percent(edge_occlusion_pct / 100, precision=0, commas=False, style='prose')
     edge_lux_str = fmt_illuminance(edge_lux * ureg.lux, precision=0, commas=False)
     edge_rotation_deg_str = fmt(edge_rotation_deg, precision=0, commas=False)
@@ -3979,15 +3971,7 @@ Returning to our MobileNetV2 lighthouse example, consider a complete validation 
 
 **Precompression baseline**: MobileNetV2 achieves `{python} MobileNetINT8Calc.mv2_acc_fp32_prose_str` top-1 accuracy on ImageNet at `{python} MobileNetINT8Calc.mv2_params_m_str` parameters (`{python} MobileNetINT8Calc.mv2_size_fp32_mb_str` FP32).
 
-Notice in @tbl-benchmarking-mobilenet-int8-validation that aggregate accuracy barely changes after INT8 quantization to `{python} MobileNetINT8Calc.mv2_size_int8_mb_str`, but calibration error and edge-case accuracy tell a different story.
-
-**Understanding ECE (expected calibration error)**: ECE measures whether predicted confidence matches actual accuracy. When a model predicts "`{python} MobileNetINT8Calc.ece_example_confidence_pct_str` confident," it should be correct `{python} MobileNetINT8Calc.ece_example_confidence_pct_str` of the time. Three thresholds govern interpretation:
-
-- $\text{ECE} < 0.05$: Well-calibrated; confidence scores are reliable for threshold-based decisions
-- $0.05 < \text{ECE} < 0.10$: Moderate calibration; use confidence scores with caution
-- $\text{ECE} > 0.10$: Poorly calibrated; confidence scores are unreliable
-
-The INT8 model's ECE of `{python} MobileNetINT8Calc.mv2_ece_int8_str` indicates borderline calibration: confidence scores are becoming unreliable for automated decision thresholds.
+Notice in @tbl-benchmarking-mobilenet-int8-validation that aggregate accuracy barely changes after INT8 quantization to `{python} MobileNetINT8Calc.mv2_size_int8_mb_str`, but calibration error and edge-case accuracy tell a different story. The INT8 model's ECE of `{python} MobileNetINT8Calc.mv2_ece_int8_str` lands in the borderline band: confidence scores are becoming unreliable for automated decision thresholds.
 
 **Edge-case definition**: Images with >`{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, <`{python} MobileNetINT8Calc.edge_lux_str` lighting, or >`{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
 
