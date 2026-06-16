@@ -567,8 +567,9 @@ class Conv2dBackward(Function):
         else:
             grad_input = grad_input_padded
 
-        # Return gradients as numpy arrays (autograd system handles storage)
-        # Following TinyTorch protocol: return (grad_input, grad_weight, grad_bias)
+        # Tuple length must match saved_tensors: (x, weight) or (x, weight, bias).
+        if self.bias is None:
+            return grad_input, grad_weight
         return grad_input, grad_weight, grad_bias
 
 #| export
