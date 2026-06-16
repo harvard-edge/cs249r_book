@@ -4852,7 +4852,7 @@ class ThroughputCeilingCalc:
 
 The throughput ceiling converts an abstract compute requirement into a concrete hardware utilization percentage. A real-world deployment adds physical constraints the ceiling alone does not capture.
 
-::: {#exmp-nn-architectures-real-time-wildlife-monitoring .callout-example title="Real-time wildlife monitoring"}
+#### Worked example: Real-time wildlife monitoring {#sec-network-architectures-worked-wildlife-monitoring}
 
 ```{python}
 #| echo: false
@@ -4984,18 +4984,17 @@ class WildlifeModelSizing:
     width_mult_str = fmt_multiple(width_mult, precision=2, commas=False)
 ```
 
-**Problem**: Design an ML system to identify wildlife species from camera trap images in a national park. The system must process images locally (no cloud connectivity), operate on battery power for six months, and achieve `{python} WildlifeModelSizing.accuracy_target_pct_str` accuracy on `{python} WildlifeModelSizing.species_count_str` target species.
+The task is to design an ML system that identifies wildlife species from camera trap images in a national park. The system must process images locally with no cloud connectivity, operate on battery power for six months, and achieve `{python} WildlifeModelSizing.accuracy_target_pct_str` accuracy on `{python} WildlifeModelSizing.species_count_str` target species. The decision process below walks through five steps: characterizing the data, analyzing the constraints, evaluating candidate architectures, validating against hardware limits, and assessing deployment risk.
 
-**Step 1**: Data characterization.
-The input is spatial data (images from camera traps, typically $1920{\times}1080$ resolution, downsampled to $224{\times}224$ for processing). The task requires recognizing visual patterns (fur textures, body shapes, distinctive markings) that are:
+The first step is data characterization. The input is spatial data (images from camera traps, typically $1920{\times}1080$ resolution, downsampled to $224{\times}224$ for processing). The task requires recognizing visual patterns (fur textures, body shapes, distinctive markings) that are:
 
 - **Spatially local**: Species identification relies on local features (ear shape, stripe patterns)
 - **Translation invariant**: A deer in the top-left is still a deer in the bottom-right
 - **Hierarchical**: Low-level edges combine into textures, then body parts, then whole animals
 
-**Approach**: CNN (matches spatial locality and translation invariance)
+These three properties (spatial locality, translation invariance, and hierarchical structure) point directly to a CNN, whose inductive bias matches them.
 
-**Step 2**: Constraint analysis. @Tbl-nn-architectures-wildlife-constraints catalogs the five deployment constraints and the architectural choices each forces:
+Constraint analysis comes next. @Tbl-nn-architectures-wildlife-constraints catalogs the five deployment constraints and the architectural choices each forces:
 
 ```{=latex}
 \begin{minipage}{\linewidth}
@@ -5012,8 +5011,7 @@ The input is spatial data (images from camera traps, typically $1920{\times}1080
 
 : **Wildlife monitoring constraints**: Five deployment constraints and the architectural choices they force for the camera-trap scenario. Each row eliminates a class of solutions: no connectivity rules out the cloud, the 2 W power envelope rules out GPUs, and the 100 MB memory budget forces aggressive lower-precision storage before any model search begins. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[16,33,51]"}
 
-**Step 3**: Architecture evaluation using lighthouse benchmarks.
-Compare candidates against our Lighthouse models:
+With the constraints fixed, the third step evaluates candidate architectures against the chapter's lighthouse models:
 
 - **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` params, `{python} WildlifeModelSizing.resnet_gflop_str`): Too compute- and power-heavy for this device. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` FP32, it is also marginal against the `{python} WildlifeModelSizing.model_budget_mb_str` model budget before lower-precision weights, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
 - **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` params, `{python} WildlifeModelSizing.mnv1_mflop_str`): Promising. It needs `{python} WildlifeModelSizing.mnv1_fp32_mb_str` at FP32, or `{python} WildlifeModelSizing.mnv1_int8_mb_str` when each weight is stored as an 8-bit integer (INT8). Its depthwise separable convolutions are power-efficient.
@@ -5023,28 +5021,19 @@ Compare candidates against our Lighthouse models:
 \end{minipage}
 ```
 
-**Result**: MobileNetV2 variant with width multiplier 0.75
+This points to a MobileNetV2 variant with width multiplier 0.75 as the chosen model. It carries ~`{python} WildlifeModelSizing.mnv2_params_str` (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights) and costs ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$. It offers sufficient capacity for the 50-class problem, fits the memory budget with margin, and its depthwise separable convolutions are power-efficient.
 
-- **Parameters**: ~`{python} WildlifeModelSizing.mnv2_params_str` (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights)
-- **FLOPs**: ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$
-- **Rationale**: Sufficient capacity for 50-class problem; fits memory budget with margin; depthwise separable convolutions are power-efficient
-
-**Step 4**: Systems validation.
-
-**Memory check**:
+The fourth step validates that choice against the hardware. The memory budget checks out:
 $$
 \text{`{python} WildlifeModelSizing.memory_check_math`}
 $$
 
-**Compute check**: Target device:
-ARM Cortex-A53 @ 1.2 GHz with NEON SIMD (~`{python} WildlifeModelSizing.edge_int8_gops_str` INT8)
+The compute budget holds on the target device, an ARM Cortex-A53 at 1.2 GHz with NEON SIMD (~`{python} WildlifeModelSizing.edge_int8_gops_str` INT8):
 `{python} WildlifeModelSizing.compute_check_math`
 
-**Power check**:
-Estimated inference power: ~`{python} WildlifeModelSizing.inference_power_mw_str` for `{python} WildlifeModelSizing.compute_latency_ms_str` = `{python} WildlifeModelSizing.energy_mj_str` per inference
-At `{python} WildlifeModelSizing.inferences_per_day_str`: `{python} WildlifeModelSizing.energy_j_str`/day → negligible vs. sleep power budget $\checkmark$
+Power is the final check. Estimated inference power is ~`{python} WildlifeModelSizing.inference_power_mw_str` for `{python} WildlifeModelSizing.compute_latency_ms_str`, or `{python} WildlifeModelSizing.energy_mj_str` per inference. At `{python} WildlifeModelSizing.inferences_per_day_str`, that is `{python} WildlifeModelSizing.energy_j_str`/day, negligible against the sleep power budget $\checkmark$.
 
-**Step 5**: Risk assessment. @Tbl-nn-architectures-wildlife-risks pairs the top accuracy, thermal, and species-coverage risks with the engineering mitigation chosen for each:
+The fifth step is risk assessment. @Tbl-nn-architectures-wildlife-risks pairs the top accuracy, thermal, and species-coverage risks with the engineering mitigation chosen for each:
 
 | **Risk**                             | **Mitigation**                                                                   |
 |:-------------------------------------|:---------------------------------------------------------------------------------|
@@ -5054,11 +5043,9 @@ At `{python} WildlifeModelSizing.inferences_per_day_str`: `{python} WildlifeMode
 
 : **Wildlife camera deployment risks**: Top accuracy, thermal, and species-coverage risks for the MobileNetV2 deployment, paired with the engineering mitigation chosen for each. {#tbl-nn-architectures-wildlife-risks}
 
-**Resolution**: MobileNetV2 (`{python} WildlifeModelSizing.width_mult_str` width) with INT8 weight storage, deployed on Cortex-A53 system on chip (SoC) with `{python} WildlifeModelSizing.edge_ram_mb_str` RAM.
+The resolution is therefore MobileNetV2 (`{python} WildlifeModelSizing.width_mult_str` width) with INT8 weight storage, deployed on a Cortex-A53 system on chip (SoC) with `{python} WildlifeModelSizing.edge_ram_mb_str` RAM.
 
-**Systems insight**: This architecture achieves the accuracy target while operating within the 2 W power envelope, processing images in about `{python} WildlifeModelSizing.compute_latency_ms_str` under the stated throughput assumption, and leaving sufficient memory headroom for system operations. The decision was driven by matching the CNN inductive bias to spatial data characteristics, then validating against hardware constraints using quantitative analysis.
-
-:::
+The systems insight is that this architecture meets the accuracy target while operating within the 2 W power envelope, processing images in about `{python} WildlifeModelSizing.compute_latency_ms_str` under the stated throughput assumption and leaving sufficient memory headroom for system operations. The decision was driven by matching the CNN inductive bias to the spatial data characteristics, then validating against hardware constraints with quantitative analysis.
 
 This worked example demonstrates the systematic approach that transforms architectural knowledge into practical engineering decisions. Yet even with systematic methodology, practitioners routinely make costly mistakes because architecture selection involves counterintuitive trade-offs. A model with fewer FLOPs can run slower on certain hardware. A more expressive architecture can deliver worse accuracy on problems that do not match its inductive bias. An architecture that performs beautifully in the lab can likewise fail catastrophically when deployed to production hardware with different memory hierarchies. The most common errors are catalogued next, each grounded in the systems principles developed throughout this chapter.
 
