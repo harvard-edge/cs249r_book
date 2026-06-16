@@ -651,6 +651,13 @@ class Tensor:
             for i, dim in enumerate(new_shape):
                 if i != unknown_idx:
                     known_size *= dim
+            if self.size % known_size != 0:
+                raise ValueError(
+                    f"Cannot infer -1 dimension: {self.size} elements is not "
+                    f"divisible by the known dimensions product {known_size}\n"
+                    f"  ❌ {self.size} % {known_size} = {self.size % known_size}\n"
+                    f"  💡 The -1 dimension must be a whole number"
+                )
             unknown_dim = self.size // known_size
             new_shape = list(new_shape)
             new_shape[unknown_idx] = unknown_dim
