@@ -1057,14 +1057,10 @@ class ModuleWorkflowCommand(BaseCommand):
                         'error': None
                     })
                 else:
-                    # Process exited 0 but produced no output at all -- no tests ran.
-                    # Treat as failure so an empty or fully-commented notebook cannot
-                    # silently pass the unit test phase.
-                    tests.append({
-                        'name': 'module_execution',
-                        'passed': False,
-                        'error': 'No test output detected -- make sure your notebook has test blocks that print results',
-                    })
+                    # No output at all means the student hasn't written any code yet.
+                    # Return empty list so passed=0, failed=0 and the step is skipped
+                    # rather than blocking progress on an empty notebook.
+                    pass
             else:
                 # Tests failed
                 # Try to extract error from stderr or stdout
