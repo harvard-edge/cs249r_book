@@ -701,7 +701,7 @@ class Dropout(Layer):
         """
         ### BEGIN SOLUTION
         keep_prob = 1.0 - self.p
-        binary_mask = (np.random.random(shape) < keep_prob).astype(np.float32)
+        binary_mask = (rng.random(shape) < keep_prob).astype(np.float32)
         scale = 1.0 / keep_prob
         return Tensor(binary_mask * scale)
         ### END SOLUTION
