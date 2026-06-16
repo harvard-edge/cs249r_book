@@ -1091,13 +1091,13 @@ The autoregressive bottleneck (principle \ref{pri-autoregressive-bottleneck}) go
 
 :::
 
-The same idea is easier to see as slot reuse over time.
+Decoupling batch membership from iteration boundaries is, concretely, reusing a freed slot the moment a request exits rather than waiting for the whole batch to drain.
 
 ::: {#psp-inference-analogy-restaurant-kitchen .callout-perspective title="Analogy: The restaurant kitchen"}
 
 Imagine a restaurant where a waiter seats a table of four (a batch of 4 requests). In static batching, if three diners finish their meals in 20 minutes, but the fourth takes an hour, the waiter refuses to seat anyone else at those three empty chairs until the entire table is clear. The kitchen (the GPU) sits mostly idle while the last diner eats.
 
-In continuous batching, the restaurant operates like a sushi bar. The moment one diner finishes and leaves, the host immediately seats a new customer in that empty stool. The kitchen is constantly preparing food at maximum capacity, regardless of how long any individual diner takes to eat.
+In continuous batching, the restaurant operates like a sushi bar. The moment one diner finishes and leaves, the host immediately seats a new customer in that empty stool. Mapping back to the system, a diner leaving is a request reaching its stop token and exiting at an iteration boundary, and the freed stool is the KV-cache slot the scheduler hands to a waiting request on the very next decode step, keeping the bandwidth-bound GPU saturated rather than idling on a single slow sequence.
 
 :::
 
@@ -2776,7 +2776,7 @@ Max concurrent sequences = KV pool size / (avg_seq_length * per_token_cache)
 
 That budget determines how many sequences can coexist before the scheduler must choose between rejection, preemption, or paging. When the cache is full, LRU eviction removes the sequence with the oldest access, size-based eviction frees the longest sequence first, and priority-based eviction protects paid-tier or latency-critical requests. Continuous batching then turns eviction into a scheduling decision: a high-priority request that cannot fit triggers victim selection, swaps the victim's KV cache to CPU memory, allocates GPU memory to the new request, and restores the victim later if its service-level objective still permits the delay.
 
-::: {#nbk-inference-kv-cache-memory-hierarchy .callout-notebook title="KV cache memory hierarchy"}
+::: {#exmp-inference-kv-cache-memory-hierarchy .callout-example title="KV cache memory hierarchy"}
 
 Production systems manage KV-cache memory pressure across the three-tier hierarchy in @tbl-inference-kv-cache-memory-hierarchy, paging from GPU HBM down to CPU DRAM and NVMe SSD as the active working set exceeds each tier's capacity:
 
@@ -2809,9 +2809,11 @@ async def swap_to_gpu(sequence_id):
 - GPU+CPU swapping: 500 concurrent sequences (10$\times$)
 - Average swap latency: 3 ms (acceptable for nonurgent requests)
 
+**Systems insight**: Treating CPU DRAM and NVMe as overflow tiers behind HBM raises concurrency by an order of magnitude at the cost of millisecond swap latency, so paging is a throughput lever for non-urgent traffic but not a substitute for HBM capacity on the latency-critical path.
+
 :::
 
-Swapping expands capacity by an order of magnitude, but the underlying problem remains: a single GPU must handle both the compute-heavy prompt processing and the bandwidth-heavy token generation. Separating those phases onto different hardware pools eliminates this mismatch entirely.
+The mismatch swapping papers over remains structural: a single GPU must handle both the compute-heavy prompt processing and the bandwidth-heavy token generation. Separating those phases onto different hardware pools eliminates this mismatch entirely.
 
 ### Disaggregated serving: Splitting the workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
 
@@ -2846,9 +2848,9 @@ The decode phase, by contrast, generates output tokens one at a time. Each token
 
 Because decode is bandwidth-bound, hardware that shrinks the bytes moved per token attacks that phase's binding constraint directly.
 
-::: {#lhs-inference-blackwell-fp4-inference-frontier .callout-lighthouse title="Archetype A (GPT-4/Llama-3): The FP4 inference frontier"}
+::: {#psp-inference-fp4-decode-bandwidth .callout-perspective title="FP4 as a bandwidth lever for decode"}
 
-For the Archetype A LLM serving workload, the Blackwell (B200) architecture introduces native **FP4 support**\index{FP4 Support}, making 4-bit inference a first-class hardware target rather than a framework-specific workaround. Because decode is often bandwidth-bound, shrinking weights and cache entries can raise token throughput and concurrent sequence capacity without increasing clock speed. The exact cost-per-token gain depends on model architecture, kernel maturity, batch shape, and the fraction of time spent in prefill versus decode, so production systems should validate FP4 with workload-specific benchmarks rather than assuming a fixed multiplier.
+The durable point is that decode is bandwidth-bound, so any technique that shrinks the bytes moved per token attacks the binding constraint; native hardware support for narrow formats is the current manifestation of that lever. The Blackwell (B200) architecture introduces native **FP4 support**\index{FP4 Support}, making 4-bit inference a first-class hardware target rather than a framework-specific workaround. Halving weight and KV-cache bytes relative to FP8 raises token throughput and concurrent-sequence capacity without increasing clock speed, which is what loosens the decode-pool sizing in a disaggregated deployment. The product is point-in-time, and the exact cost-per-token gain depends on model architecture, kernel maturity, batch shape, and the fraction of time spent in prefill versus decode, so production systems should validate FP4 with workload-specific benchmarks rather than assuming a fixed multiplier.
 
 :::
 
