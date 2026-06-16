@@ -942,17 +942,35 @@ class ModuleWorkflowCommand(BaseCommand):
             'returncode': result.returncode
         }
 
+    def _find_integration_test_file(self, module_name: str) -> Optional[Path]:
+        """Find the progressive integration test file for a module.
+
+        The runner used to look only for test_progressive_integration.py, which
+        does not exist in any module. The actual files follow the pattern
+        test_NN_<name>_progressive.py (e.g. test_01_tensor_progressive.py).
+        This method finds that file so integration tests actually run.
+        """
+        test_dir = Path.cwd() / "tests" / module_name
+        if not test_dir.exists():
+            return None
+        module_num = module_name.split("_")[0]
+        for candidate in sorted(test_dir.glob("*.py")):
+            name = candidate.name
+            if name.startswith(f"test_{module_num}_") and name.endswith("_progressive.py"):
+                return candidate
+        for candidate in sorted(test_dir.glob("test_*_progressive.py")):
+            return candidate
+        return None
+
     def _run_integration_tests(self, module_name: str, verbose: bool) -> Dict[str, int]:
         """Run progressive integration tests using pytest."""
         project_root = Path.cwd()
 
-        # Find integration test file
-        integration_test_file = project_root / "tests" / module_name / "test_progressive_integration.py"
+        integration_test_file = self._find_integration_test_file(module_name)
 
-        if not integration_test_file.exists():
-            # No integration tests for this module yet
+        if not integration_test_file:
             if verbose:
-                self.console.print(f"   [dim yellow]No integration tests found: {integration_test_file}[/dim yellow]")
+                self.console.print(f"   [dim yellow]No integration tests found for {module_name}[/dim yellow]")
             return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
 
         # Run pytest with verbose output
@@ -1032,12 +1050,20 @@ class ModuleWorkflowCommand(BaseCommand):
         # If no explicit test markers found, infer from return code
         if not tests:
             if returncode == 0:
-                # Tests passed (or no tests)
                 if stdout.strip() or stderr.strip():
                     tests.append({
                         'name': 'module_execution',
                         'passed': True,
                         'error': None
+                    })
+                else:
+                    # Process exited 0 but produced no output at all -- no tests ran.
+                    # Treat as failure so an empty or fully-commented notebook cannot
+                    # silently pass the unit test phase.
+                    tests.append({
+                        'name': 'module_execution',
+                        'passed': False,
+                        'error': 'No test output detected -- make sure your notebook has test blocks that print results',
                     })
             else:
                 # Tests failed
