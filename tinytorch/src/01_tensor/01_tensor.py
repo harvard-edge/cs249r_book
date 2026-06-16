@@ -1395,10 +1395,19 @@ def test_unit_shape_manipulation():
     vector_t = vector.transpose()
     assert np.array_equal(vector.data, vector_t.data)
 
-    # Test specific dimension transpose
-    tensor_3d = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])  # (2, 2, 2)
-    swapped = tensor_3d.transpose(0, 2)  # Swap first and last dimensions
-    assert swapped.shape == (2, 2, 2)  # Same shape but data rearranged
+    # Non-symmetric shape so a wrong axis swap produces the wrong shape and data.
+    tensor_3d = Tensor(np.arange(24).reshape(2, 3, 4))  # (2, 3, 4)
+    swapped = tensor_3d.transpose(0, 2)  # (4, 3, 2)
+    assert swapped.shape == (4, 3, 2), (
+        f"transpose(0, 2) on (2,3,4) should give (4,3,2), got {swapped.shape}"
+    )
+    for i in range(2):
+        for j in range(3):
+            for k in range(4):
+                assert swapped.data[k, j, i] == tensor_3d.data[i, j, k], (
+                    f"Data mismatch at [{k},{j},{i}]: expected {tensor_3d.data[i,j,k]}, "
+                    f"got {swapped.data[k,j,i]}"
+                )
 
     # Test common reshape pattern (flatten multi-dimensional data)
     batch_images = Tensor(rng.random((2, 3, 4)))  # (batch=2, height=3, width=4)
