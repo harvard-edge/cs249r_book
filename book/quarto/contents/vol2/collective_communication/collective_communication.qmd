@@ -1861,7 +1861,7 @@ $$\frac{1}{K}\sum_{t=1}^{K} v_t \to \frac{1}{K}\sum_{t=1}^{K} g_t$$
 
 The long-run average of transmitted gradients equals the long-run average of true gradients. No gradient information is permanently lost; it is merely delayed. Small gradients that are repeatedly dropped eventually accumulate in $e_t$ until they exceed the compression threshold and get transmitted.
 
-The telescoping property of compression error across time is why error feedback can transform a biased compressor into a convergent training method. Theoretical analyses show convergence guarantees for sparsified SGD with memory and for EF-SGD with broad compression operators under their stated assumptions [@stich2018sparsified; @karimireddy2019error]. A short trace shows how error feedback preserves gradient information that naive compression would lose:
+The telescoping property of compression error across time is why error feedback can transform a biased compressor into a convergent training method. Theoretical analyses show convergence guarantees for sparsified SGD with memory and for EF-SGD with broad compression operators under their stated assumptions [@stich2018sparsified; @karimireddy2019error]. A short trace shows how error feedback preserves gradient information that naive compression would lose. @Tbl-error-feedback-naive runs the trace for a greedy compressor with no residual path, transmitting only values $\geq 0.5$:
 
 ```{python}
 #| echo: false
@@ -1943,12 +1943,6 @@ class ErrorFeedbackTrace:
     cv1_str, cv2_str, cv3_str, cv4_str, cv5_str = [_ef_int(c) for c in cum_v_running]
 ```
 
-::: {#nbk-collective-communication-error-feedback-mechanism .callout-notebook title="Error feedback mechanism"}
-
-**Problem**: A single parameter receives small gradients (all below 0.5) over five training steps. A greedy compressor transmits only values $\geq 0.5$ (rounding to nearest integer: values in $[0, 0.5) \to 0$, values in $[0.5, 1.5) \to 1$, etc.). After five steps, how much gradient information does naive compression lose, and how does an error-feedback accumulator recover it?
-
-**Without Error Feedback** (Naive Compression, @tbl-error-feedback-naive):
-
 | **Step** |       **True Gradient $g_t$**        |           **Transmitted $v_t$**           |          **Cumulative Transmitted**         |          **Cumulative True**          |
 |:---------|:------------------------------------:|:-----------------------------------------:|:-------------------------------------------:|:-------------------------------------:|
 | 1        | `{python} ErrorFeedbackTrace.g1_str` | `{python} ErrorFeedbackTrace.naive_v_str` | `{python} ErrorFeedbackTrace.naive_cum_str` | `{python} ErrorFeedbackTrace.ct1_str` |
@@ -1959,9 +1953,24 @@ class ErrorFeedbackTrace:
 
 : **Naive compression trace (no error feedback)**: Five-step worked trace showing how a greedy 1-bit quantizer transmits zero whenever individual gradients fall below the threshold. {#tbl-error-feedback-naive}
 
-**Naive compression outcome**: After 5 steps, the system has transmitted `{python} ErrorFeedbackTrace.naive_str` but the true cumulative gradient is `{python} ErrorFeedbackTrace.true_str`. The parameter never updates, and `{python} ErrorFeedbackTrace.naive_loss_pct_str` of gradient information is lost.
+The error-feedback trace in @tbl-error-feedback runs the same sequence with a residual accumulator $e_t$ that re-injects the discarded remainder into the next step. The notebook below works through both traces to show that the deferred information is conserved rather than lost.
 
-**With Error Feedback** (@tbl-error-feedback):
+::: {#nbk-collective-communication-error-feedback-mechanism .callout-notebook title="Error feedback mechanism"}
+
+**Problem**: A single parameter receives small gradients (all below 0.5) over five training steps. A greedy compressor transmits only values $\geq 0.5$ (rounding to nearest integer: values in $[0, 0.5) \to 0$, values in $[0.5, 1.5) \to 1$, etc.). After five steps, how much gradient information does naive compression lose, and how does an error-feedback accumulator recover it?
+
+**Naive compression outcome**: In @tbl-error-feedback-naive, after 5 steps the system has transmitted `{python} ErrorFeedbackTrace.naive_str` but the true cumulative gradient is `{python} ErrorFeedbackTrace.true_str`. The parameter never updates, and `{python} ErrorFeedbackTrace.naive_loss_pct_str` of gradient information is lost.
+
+**Error-feedback outcome**: In @tbl-error-feedback, the accumulator $e_t$ telescopes the residual across steps. After 5 steps, the system has transmitted `{python} ErrorFeedbackTrace.cum_str` with a remaining error of `{python} ErrorFeedbackTrace.error_str`. The true cumulative is `{python} ErrorFeedbackTrace.true_str`, so transmitted $+$ error = `{python} ErrorFeedbackTrace.conservation_str` = `{python} ErrorFeedbackTrace.true_str` ✓
+
+**Systems insight**:
+
+1. **No information is lost**: The sum (transmitted + error buffer) always equals the cumulative true gradient.
+2. **Small gradients accumulate**: Individual gradients of 0.3–0.4 were too small to transmit alone, but they accumulated until crossing the threshold.
+3. **Error oscillates around zero**: The error buffer $e_t$ does not grow unboundedly; it oscillates as gradients are "paid back" through transmission.
+4. **Convergence preserved**: Over time, the model receives approximately the correct total gradient, with some delay.
+
+:::
 
 | **Step** |              **$g_t$**               |              **$e_t$**               |            **$g_t + e_t$**             |              **$v_t$**               |   **$e_{t+1} = (g_t + e_t) - v_t$**   |           **Cumulative $v$**          |
 |:---------|:------------------------------------:|:------------------------------------:|:--------------------------------------:|:------------------------------------:|:-------------------------------------:|:-------------------------------------:|
@@ -1972,17 +1981,6 @@ class ErrorFeedbackTrace:
 | 5        | `{python} ErrorFeedbackTrace.g5_str` | `{python} ErrorFeedbackTrace.e5_str` | `{python} ErrorFeedbackTrace.gpe5_str` | `{python} ErrorFeedbackTrace.v5_str` | `{python} ErrorFeedbackTrace.en5_str` | `{python} ErrorFeedbackTrace.cv5_str` |
 
 : **Error-feedback compression trace**: Same five-step sequence under error-feedback compression. {#tbl-error-feedback}
-
-**Result**: After 5 steps, the system has transmitted `{python} ErrorFeedbackTrace.cum_str` with a remaining error of `{python} ErrorFeedbackTrace.error_str`. The true cumulative is `{python} ErrorFeedbackTrace.true_str`, so transmitted $+$ error = `{python} ErrorFeedbackTrace.conservation_str` = `{python} ErrorFeedbackTrace.true_str` ✓
-
-**Systems insight**:
-
-1. **No information is lost**: The sum (transmitted + error buffer) always equals the cumulative true gradient.
-2. **Small gradients accumulate**: Individual gradients of 0.3–0.4 were too small to transmit alone, but they accumulated until crossing the threshold.
-3. **Error oscillates around zero**: The error buffer $e_t$ does not grow unboundedly; it oscillates as gradients are "paid back" through transmission.
-4. **Convergence preserved**: Over time, the model receives approximately the correct total gradient, with some delay.
-
-:::
 
 ### 1-bit Adam: Compression-aware optimization {#sec-communication-1bit-adam}
 
