@@ -595,6 +595,12 @@ class ModuleWorkflowCommand(BaseCommand):
             self.console.print("[bold cyan] Step 2/4: Exporting to TinyTorch Package[/bold cyan]")
             self.console.print()
 
+            syntax_error = self._check_notebook_syntax(module_name)
+            if syntax_error:
+                self.console.print(f"[red]   ❌ Syntax error in your notebook -- fix it before exporting[/red]")
+                self.console.print(f"      [dim red]{syntax_error}[/dim red]")
+                return 1
+
             export_result = self.export_module(module_name)
             if export_result != 0:
                 self.console.print(f"[red]   ❌ Export failed for {module_name}[/red]")
@@ -783,6 +789,8 @@ class ModuleWorkflowCommand(BaseCommand):
 
         # Export to package
         if not skip_export:
+            if self._check_notebook_syntax(module_name):
+                return 1
             export_result = self.export_module(module_name)
             if export_result != 0:
                 return 1
@@ -941,6 +949,46 @@ class ModuleWorkflowCommand(BaseCommand):
             'tests': tests_run,
             'returncode': result.returncode
         }
+
+    def _check_notebook_syntax(self, module_name: str) -> Optional[str]:
+        """Compile every code cell in the student's notebook and return the first SyntaxError.
+
+        Unit tests run against src/ (instructor source), so a syntax error the
+        student introduced in their notebook goes undetected until export silently
+        writes broken code into tinytorch/core/ and the next module fails on import.
+        This check catches the error at the notebook level before export runs.
+
+        Returns an error string on failure, None on success.
+        """
+        import ast
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_path = Path.cwd() / "modules" / module_name / f"{short_name}.ipynb"
+
+        if not notebook_path.exists():
+            return None
+
+        try:
+            import json
+            nb = json.loads(notebook_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            return f"Could not read notebook: {e}"
+
+        cells = nb.get("cells", [])
+        for i, cell in enumerate(cells):
+            if cell.get("cell_type") != "code":
+                continue
+            source = "".join(cell.get("source", []))
+            if not source.strip():
+                continue
+            try:
+                compile(source, f"{short_name}.ipynb cell {i+1}", "exec")
+            except SyntaxError as e:
+                return (
+                    f"SyntaxError in {short_name}.ipynb cell {i+1}, "
+                    f"line {e.lineno}: {e.msg}\n"
+                    f"  {(e.text or '').rstrip()}"
+                )
+        return None
 
     def _run_integration_tests(self, module_name: str, verbose: bool) -> Dict[str, int]:
         """Run progressive integration tests using pytest."""
