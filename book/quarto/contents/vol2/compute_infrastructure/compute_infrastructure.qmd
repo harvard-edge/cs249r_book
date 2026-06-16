@@ -172,7 +172,7 @@ The programming model distinction between GPUs and TPUs has practical implicatio
 
 **Context**: In 2013, Google engineers projected that if users spoke to their Android phones for just three minutes per day using voice search, the company would need to double its data center compute capacity to handle the inference load. The cost was prohibitive.
 
-**Observation**: Google's TPU analysis framed production neural-network inference as a dense-linear-algebra workload large enough that voice-search growth alone could have doubled serving capacity needs. This observation led directly to the TPU v1, a purpose-built inference accelerator with a $256{\times}256$ systolic array that could deliver 92 TOPS (INT8) within a 75 W power envelope. The first TPUs were deployed in 2015 and served production inference workloads including RankBrain and portions of Google Neural Machine Translation [@jouppi2017]; the AlphaGo match-play system is documented separately [@silver2016].
+**Insight**: Google's TPU analysis framed production neural-network inference as a dense-linear-algebra workload large enough that voice-search growth alone could have doubled serving capacity needs. This finding led directly to the TPU v1, a purpose-built inference accelerator with a $256{\times}256$ systolic array that could deliver 92 TOPS (INT8) within a 75 W power envelope. The first TPUs were deployed in 2015 and served production inference workloads including RankBrain and portions of Google Neural Machine Translation [@jouppi2017]; the AlphaGo match-play system is documented separately [@silver2016].
 
 **Systems lesson**: Specialization became economically justified because the workload was stable, massive, and dominated by one operation class. The TPU story is a generality-tax case, not merely a faster-chip story.
 
@@ -1004,11 +1004,6 @@ class TokenLatencyScenario:
     t_mem_math = fmt_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{t_mem.to(millisecond).magnitude:.1f} \\text{{ ms}}}}")
 ```
 
-::: {#nbk-token-latency .callout-notebook title="The physics of token latency"}
-
-**Problem**: Generating one token from Llama-3 70B (`{python} TokenLatencyScenario.weight_gb_str` of FP16 weights) requires both arithmetic and a full weight load from HBM. Assuming capacity has been solved (by sharding, a higher-capacity device, or quantization), which dominates the per-token time on an H100: compute or memory transfer?
-
-1. **Compute Time**\index{Latency!compute time}: Each token requires $2 \times 70 \times 10^9 = 1.4 \times 10^{11}$ floating-point operations. At `{python} TokenLatencyScenario.h100_fp16_tflop_per_s_str` of FP16/BF16 Tensor Core peak throughput, the arithmetic takes `{python} TokenLatencyScenario.t_comp_math`.
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_qty
@@ -1019,6 +1014,12 @@ class MemoryBandwidthLatencyRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
 ```
+
+::: {#nbk-token-latency .callout-notebook title="The physics of token latency"}
+
+**Problem**: Generating one token from Llama-3 70B (`{python} TokenLatencyScenario.weight_gb_str` of FP16 weights) requires both arithmetic and a full weight load from HBM. Assuming capacity has been solved (by sharding, a higher-capacity device, or quantization), which dominates the per-token time on an H100: compute or memory transfer?
+
+1. **Compute Time**\index{Latency!compute time}: Each token requires $2 \times 70 \times 10^9 = 1.4 \times 10^{11}$ floating-point operations. At `{python} TokenLatencyScenario.h100_fp16_tflop_per_s_str` of FP16/BF16 Tensor Core peak throughput, the arithmetic takes `{python} TokenLatencyScenario.t_comp_math`.
 
 2. **Memory Time**\index{Latency!memory time}:
 
@@ -1633,10 +1634,6 @@ XLA compilation for TPUs must decompose the computation into sequences of matrix
 
 The hardware dictates the software abstraction, which in turn shapes what architectures are practical to experiment with. This coupling between hardware and software is a defining characteristic of ML infrastructure and explains why hardware selection has downstream effects on research velocity and model design flexibility.
 
-::: {#dfn-compute-infrastructure-tensor-core .callout-definition title="Tensor core"}
-
-***Tensor Core***\index{Tensor Core!definition} is a specialized ML accelerator hardware unit that performs a fused matrix-multiply-accumulate (MMA) operation $\mathbf{Y} = \mathbf{A} \times \mathbf{B} + \mathbf{C}$ on small tiles (for example, $16{\times}8{\times}16$ in BF16) as a single hardware instruction, delivering dramatically higher throughput than general-purpose CUDA cores by trading programmability for fixed-function matrix arithmetic.
-
 ```{python}
 #| echo: false
 from mlsysim import Hardware
@@ -1657,6 +1654,10 @@ class TensorCoreTdpRecap:
     tc_vs_cuda_ratio_mult_str = fmt_multiple(_tc_vs_cuda, precision=1, commas=False)
     h100_fp32_cuda_tflop_per_s_str = fmt_flop_rate(_fp32_cuda, unit=TFLOPs / second, precision=0, commas=False)
 ```
+
+::: {#dfn-compute-infrastructure-tensor-core .callout-definition title="Tensor core"}
+
+***Tensor Core***\index{Tensor Core!definition} is a specialized ML accelerator hardware unit that performs a fused matrix-multiply-accumulate (MMA) operation $\mathbf{Y} = \mathbf{A} \times \mathbf{B} + \mathbf{C}$ on small tiles (for example, $16{\times}8{\times}16$ in BF16) as a single hardware instruction, delivering dramatically higher throughput than general-purpose CUDA cores by trading programmability for fixed-function matrix arithmetic.
 
 1.  **Significance (quantitative)**: Tensor Cores provide the bulk of the H100's `{python} TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str` FP16/BF16 peak (and ~`{python} TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str` at FP8)—roughly `{python} TensorCoreTdpRecap.tc_vs_cuda_ratio_mult_str` the ~`{python} TensorCoreTdpRecap.h100_fp32_cuda_tflop_per_s_str` delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
 2.  **Distinction**: Unlike general-purpose CUDA cores (which execute one floating-point operation per clock per lane in a SIMT pipeline), Tensor Cores execute 512 multiply-accumulate operations per clock per warp on matrix tiles—trading the arbitrary per-element programmability of CUDA cores for the specific throughput of matrix arithmetic.
