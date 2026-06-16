@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from datetime import UTC
 from pathlib import Path
+
+from vault_cli.book_refs import BookRefResolver
 from typing import Any
 
 from vault_cli.loader import LoadedQuestion
@@ -74,6 +76,7 @@ def _adapt(
     lq: LoadedQuestion,
     chain_index: dict[str, dict[str, int]],
     chain_tier_index: dict[str, dict[str, str]],
+    book_refs: BookRefResolver,
 ) -> dict[str, Any]:
     """YAML question → legacy-JSON item in the shape corpus.ts expects."""
     q = lq.question
@@ -145,6 +148,14 @@ def _adapt(
             "date": str(q.human_reviewed.date) if q.human_reviewed.date else None,
         }
 
+    # Recommended-reading pointer back into the textbook, derived from the
+    # question's topic via schema/topic_chapter_map.yaml. Top-level (not under
+    # details) so it survives into the summary bundle and renders synchronously
+    # — _to_summary only strips scenario + details. Omitted for unmapped topics.
+    refs = book_refs.refs_for_topic(q.topic)
+    if refs:
+        legacy["book_refs"] = refs
+
     return legacy
 
 
@@ -191,8 +202,9 @@ def _build_legacy_items(
 
     chain_index = _build_chain_index(vault_dir)
     chain_tier_index = _build_chain_tier_index(vault_dir)
+    book_refs = BookRefResolver(vault_dir)
     items_sorted = sorted(items, key=lambda lq: lq.id)
-    return [_adapt(lq, chain_index, chain_tier_index) for lq in items_sorted]
+    return [_adapt(lq, chain_index, chain_tier_index, book_refs) for lq in items_sorted]
 
 
 def select_release_items(
