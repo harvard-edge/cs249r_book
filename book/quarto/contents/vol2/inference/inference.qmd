@@ -125,9 +125,7 @@ Distributed inference systems must solve problems that do not exist at single-ma
 
 [^fn-load-balancing-inference]: **Load Balancing (Inference)**\index{Load Balancing!inference}: GPU inference requests range from 10 ms to 30+ seconds with high variance, unlike web requests that complete in uniform milliseconds. This variance invalidates round-robin and random assignment, forcing queue-depth-aware routing strategies that add monitoring overhead but prevent tail-latency blowups across heterogeneous GPU fleets.
 
-The economics of inference at scale differ fundamentally from training economics. Training costs are dominated by compute time and can be amortized over the lifetime of the resulting model. Inference costs are directly tied to user traffic and revenue. An e-commerce recommendation system might serve millions of requests per second during peak shopping periods, with each request contributing directly to potential revenue. The cost of overprovisioning during quiet periods or underprovisioning during peaks translates immediately to business impact. Inference efficiency becomes a first-order concern in ways that training efficiency rarely achieves.
-
-Building such a service requires three linked decisions: when distribution becomes necessary, how the architecture preserves latency bounds under varying load, and how resource utilization stays high enough that serving cost does not erode the value the model creates.
+The economics of inference at scale differ fundamentally from training economics. Training costs are dominated by compute time and can be amortized over the lifetime of the resulting model. Inference costs are directly tied to user traffic and revenue. An e-commerce recommendation system might serve millions of requests per second during peak shopping periods, with each request contributing directly to potential revenue. The cost of overprovisioning during quiet periods or underprovisioning during peaks translates immediately to business impact. Inference efficiency becomes a first-order concern in ways that training efficiency rarely achieves. Building such a service requires three linked decisions: when distribution becomes necessary, how the architecture preserves latency bounds under varying load, and how resource utilization stays high enough that serving cost does not erode the value the model creates.
 
 ### When single-machine serving is insufficient {#sec-inference-scale-singlemachine-serving-insufficient-3f13}
 
@@ -691,9 +689,7 @@ Disaggregated serving separates the prefill phase (processing the input prompt, 
 
 ### Stateful vs. stateless: The scaling divide {#sec-inference-scale-triton-inference-server-f0ba}
 
-A serving system's statefulness determines whether horizontal scaling is trivial or requires careful engineering.
-
-Vision models and embedding lookups are typically stateless: any replica can serve any request because no per-session state persists between requests. Horizontal scaling is straightforward -- add replicas behind a load balancer -- and failure recovery is instant because the load balancer simply routes to a healthy replica.
+A serving system's statefulness determines whether horizontal scaling is trivial or requires careful engineering. Vision models and embedding lookups are typically stateless: any replica can serve any request because no per-session state persists between requests. Horizontal scaling is straightforward -- add replicas behind a load balancer -- and failure recovery is instant because the load balancer simply routes to a healthy replica.
 
 LLM serving\index{Inference!stateful serving} with KV cache is inherently stateful: the cache accumulated during a conversation creates replica-specific state that cannot be reconstructed without re-running the entire conversation history through prefill. This statefulness has cascading implications for system design. Load balancing requires sticky routing to direct subsequent requests in a conversation to the same replica. Autoscaling down requires draining active sessions, which can take minutes for long conversations. Failure recovery is expensive: when a stateful replica crashes, users either experience the latency of regenerating context (seconds) or lose conversation state entirely.
 
@@ -734,9 +730,7 @@ Processing multiple requests together amortizes fixed costs (model loading, kern
 
 At scale, batching becomes more complex because different model architectures have distinct batching requirements. A strategy optimal for vision models may be catastrophic for LLMs, and techniques developed for recommendation systems may not apply to either.
 
-In large consumer platforms, recommendation systems can constitute the majority of AI inference cycles or capacity pressure, with vision, language, ranking, fraud, ads, and other classification workloads sharing the remainder [@gupta2020architectural; @hazelwood2018]. Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners may frequently encounter recommendation workloads first.
-
-The taxonomy that follows matches batching strategies to model characteristics, providing quantitative analysis of when each approach applies and what performance to expect.
+In large consumer platforms, recommendation systems can constitute the majority of AI inference cycles or capacity pressure, with vision, language, ranking, fraud, ads, and other classification workloads sharing the remainder [@gupta2020architectural; @hazelwood2018]. Despite this distribution, we present batching strategies in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This pedagogical ordering builds understanding progressively, even though practitioners may frequently encounter recommendation workloads first. The taxonomy that follows matches batching strategies to model characteristics, providing quantitative analysis of when each approach applies and what performance to expect.
 
 ### Why batching differs across model types {#sec-inference-scale-batching-differs-across-model-types-2026}
 
@@ -1069,9 +1063,7 @@ The three choices in @tbl-dynamic-batching-resnet50-policy differ only in how mu
 
 :::
 
-At scale with multiple replicas, batch formation can occur either at individual replicas or at a centralized batching layer. Replica-local batching has each replica independently form batches from its assigned traffic. This approach is simpler to implement but may result in uneven batch sizes across replicas when load is imbalanced. Centralized batching uses a batching service to collect requests and dispatch formed batches to replicas. This achieves more uniform batch sizes but adds a centralization bottleneck and additional network hop.
-
-Production systems typically use replica-local batching with load balancing that ensures roughly equal traffic distribution, achieving the benefits of centralized batching without the complexity.
+At scale with multiple replicas, batch formation can occur either at individual replicas or at a centralized batching layer. Replica-local batching has each replica independently form batches from its assigned traffic. This approach is simpler to implement but may result in uneven batch sizes across replicas when load is imbalanced. Centralized batching uses a batching service to collect requests and dispatch formed batches to replicas. This achieves more uniform batch sizes but adds a centralization bottleneck and additional network hop. Production systems typically use replica-local batching with load balancing that ensures roughly equal traffic distribution, achieving the benefits of centralized batching without the complexity.
 
 ### Continuous batching for LLM inference {#sec-inference-scale-continuous-batching-llm-inference-f8e6}
 
@@ -1105,9 +1097,7 @@ Consider a batch of 8 sequences. If one sequence completes after 10 tokens while
 
 $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 
-For realistic output length distributions with high variance, wasted compute can exceed 50 percent.
-
-Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. @Algo-continuous-batching-decode-scheduler states the scheduler as a decode loop: completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. This technique is central to the throughput-latency trade-off that defines large-scale LLM serving---Archetype A workloads (GPT-4/Llama-3, @sec-vol2-introduction-archetypes) would be economically unviable without it, because their memory-bandwidth-bound decode phase leaves compute cores idle waiting for weights to load, and only by interleaving unrelated requests can the bandwidth be saturated.
+For realistic output length distributions with high variance, wasted compute can exceed 50 percent. Continuous batching (also called iteration-level batching) decouples batch membership from iteration boundaries. @Algo-continuous-batching-decode-scheduler states the scheduler as a decode loop: completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. This technique is central to the throughput-latency trade-off that defines large-scale LLM serving---Archetype A workloads (GPT-4/Llama-3, @sec-vol2-introduction-archetypes) would be economically unviable without it, because their memory-bandwidth-bound decode phase leaves compute cores idle waiting for weights to load, and only by interleaving unrelated requests can the bandwidth be saturated.
 
 ```pseudocode
 #| label: algo-continuous-batching-decode-scheduler
@@ -1635,9 +1625,7 @@ Recommendation systems expose the same scheduling principle under a different bo
 
 4. **Ranking head**\index{Ranking Head}: Produce final scores
 
-The sparse embedding lookup often dominates latency and determines batching strategy.
-
-Feature-parallel batching processes different feature types in parallel rather than batching entire requests:
+The sparse embedding lookup often dominates latency and determines batching strategy. Feature-parallel batching processes different feature types in parallel rather than batching entire requests:
 
 ```
 Request 1: [user_id_1, item_ids_1, context_1]
@@ -2214,9 +2202,7 @@ Under PagedAttention (Virtual Memory), the manager assigns a guest just 1 room. 
 
 :::
 
-PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts to KV cache management. Instead of contiguous allocation\index{Memory Allocation!contiguous}, the KV cache is divided into fixed-size pages, using 16-token blocks in the default vLLM configuration, and sequences are allocated pages on demand.
-
-@Fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
+PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts to KV cache management. Instead of contiguous allocation\index{Memory Allocation!contiguous}, the KV cache is divided into fixed-size pages, using 16-token blocks in the default vLLM configuration, and sequences are allocated pages on demand. @Fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
 
 ::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: Top left: internal fragmentation wastes memory by preallocating for the maximum sequence length. Top right: external fragmentation leaves unusable memory gaps. Bottom: PagedAttention solves this by mapping contiguous logical pages of a sequence to noncontiguous physical memory blocks via a block table, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="A three-part diagram on memory fragmentation. Top panels show internal and external fragmentation. The bottom panel shows the PagedAttention solution using a block table to map logical pages to scattered physical blocks, eliminating waste."}
 ![](images/svg/kv-cache-fragmentation.svg)
@@ -2542,9 +2528,7 @@ A single request's KV cache alone consumes a substantial fraction of the H100's 
 
 #### KV cache quantization {#sec-inference-scale-kv-quantization}
 
-Reducing the size of cached values through lower precision provides direct memory savings.
-
-Weight-only quantization (GPTQ, AWQ) reduces weight precision while keeping activations in high precision. While effective for storage, this does not reduce the KV cache. **KV cache quantization**\index{KV Cache!quantization} explicitly targets the activations, storing cached keys and values in INT8, FP8, or even INT4.
+Reducing the size of cached values through lower precision provides direct memory savings. Weight-only quantization (GPTQ, AWQ) reduces weight precision while keeping activations in high precision. While effective for storage, this does not reduce the KV cache. **KV cache quantization**\index{KV Cache!quantization} explicitly targets the activations, storing cached keys and values in INT8, FP8, or even INT4.
 
 Compressing the KV cache to INT4 reduces it to approximately `{python} KVCacheCalc.kv_int4_gb_str` per request, a `{python} KVCacheCalc.kv_compression_mult_str` reduction. This freed memory directly translates into larger batch sizes and higher serving throughput. KV cache values exhibit different distributions than model weights: KIVI observes channel-wise outliers in keys and uses per-channel key quantization, while values lack the same channel-wise pattern and are quantized per-token.
 
@@ -3413,9 +3397,7 @@ Expert parallelism distributes experts across devices, with each device hosting 
 
 :::
 
-The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all (*different data to different devices* based on routing).
-
-This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
+The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all (*different data to different devices* based on routing). This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
 
 1.  **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
 2.  **Capacity factor**\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
@@ -4509,9 +4491,7 @@ Enabling per-tenant quotas contains the impact to the offending tenant alone (@t
 
 ### Resource quotas and fair sharing {#sec-inference-scale-resource-quotas-fair-sharing-006c}
 
-Resource quotas\index{Resource Quotas} limit what each tenant can consume, preventing any single tenant from monopolizing shared resources.
-
-Hard quotas turn shared serving into admission control: the system checks concurrency, KV-cache memory, and request rate before admitting each request. @Lst-resource-quotas uses those three gates so a tenant can be throttled at the scarce resource boundary instead of degrading the whole batch.
+Resource quotas\index{Resource Quotas} limit what each tenant can consume, preventing any single tenant from monopolizing shared resources. Hard quotas turn shared serving into admission control: the system checks concurrency, KV-cache memory, and request rate before admitting each request. @Lst-resource-quotas uses those three gates so a tenant can be throttled at the scarce resource boundary instead of degrading the whole batch.
 
 ::: {#lst-resource-quotas lst-cap="**Resource Quotas**: Admission control that enforces per-tenant limits on concurrency, KV cache memory, and request rate."}
 
